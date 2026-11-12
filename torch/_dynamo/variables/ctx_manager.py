@@ -34,7 +34,7 @@ from torch._logging import warning_once
 
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
-from ..exc import unimplemented
+from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from ..utils import _get_error_on_graph_break, _set_error_on_graph_break
@@ -1076,6 +1076,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(
+        tx: "InstructionTranslatorBase",
         func: torch.amp.autocast_mode.autocast,
         args: Sequence[Any],
         kwargs: dict[str, Any],
@@ -1090,8 +1091,10 @@ class AutocastModeVariable(ContextWrappingVariable):
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
         ]:
-            signature = inspect.signature(func)
-            bound_args = signature.bind(*args, **kwargs)
+            try:
+                bound_args = inspect.signature(func).bind(*args, **kwargs)
+            except TypeError as e:
+                raise_observed_exception(TypeError, tx, args=list(e.args))
             bound_args.apply_defaults()
             arguments = dict(bound_args.arguments)
             arguments["device_type"] = torch._C._get_privateuse1_backend_name()

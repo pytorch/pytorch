@@ -9,12 +9,15 @@ from unittest import mock
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import EagerAndRecordGraphs
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 BACKEND = torch._C._get_privateuse1_backend_name()
 
 
 class TestPrivateUse1Autocast(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -157,6 +160,41 @@ class TestPrivateUse1Autocast(TestCase):
                         backend, (BACKEND, torch.bfloat16, False, False)
                     )
 
+    def test_invalid_wrapper_arguments_raise_observed_type_error(self):
+        class BackendAutocast(torch.amp.autocast_mode.autocast):
+            _dynamo_autocast_passthrough = True
+
+            def __init__(self, dtype=None, enabled=True, cache_enabled=None):
+                super().__init__(
+                    BACKEND,
+                    dtype=dtype,
+                    enabled=enabled,
+                    cache_enabled=cache_enabled,
+                )
+
+        with mock.patch.object(
+            self.device_module.amp, "autocast", BackendAutocast, create=True
+        ):
+            for args, kwargs in [
+                ((), {"device_type": "cpu"}),
+                ((None, True, None, False), {}),
+                ((None,), {"dtype": torch.float16}),
+            ]:
+                with self.subTest(args=args, kwargs=kwargs):
+                    torch._dynamo.reset()
+
+                    def fn(x):
+                        try:
+                            with getattr(torch, BACKEND).amp.autocast(*args, **kwargs):
+                                return x + 1
+                        except TypeError:
+                            return x - 1
+
+                    x = torch.zeros(4)
+                    self.assertEqual(fn(x), x - 1)
+                    compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                    self.assertEqual(compiled_fn(x), x - 1)
+
     def test_omitted_defaults_remain_deferred(self):
         class DeferredDefaultsAutocast(torch.amp.autocast_mode.autocast):
             _dynamo_autocast_passthrough = True
@@ -281,10 +319,13 @@ class TestPrivateUse1Autocast(TestCase):
         class ReplacementAutocast(RegisteredAutocast):
             pass
 
-        autocast = RegisteredAutocast
+        class Sub(RegisteredAutocast):
+            pass
 
         def fn(x):
-            autocast_cls = typing.Annotated[autocast, "metadata"].__origin__
+            # Sub is not registered, so only SourcelessBuilder sees the
+            # registered class (via __bases__ of a sourceless origin).
+            autocast_cls = typing.Annotated[Sub, "metadata"].__origin__.__bases__[0]
             with autocast_cls():
                 return x + 1
 

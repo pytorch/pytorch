@@ -878,7 +878,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             or self.is_privateuse1_autocast
         ):
             # pyrefly: ignore [bad-argument-type]
-            return AutocastModeVariable.create(self.value, args, kwargs)
+            return AutocastModeVariable.create(tx, self.value, args, kwargs)
         elif self.value in (
             torch.profiler.record_function,
             torch.autograd.profiler.record_function,
