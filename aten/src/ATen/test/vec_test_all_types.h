@@ -16,6 +16,7 @@
 #include <math.h>
 #include <float.h>
 #include <algorithm>
+#include <bit>
 
 #if defined(CPU_CAPABILITY_AVX512)
 #define CACHE_LINE 64
@@ -73,6 +74,10 @@ struct OpMathType {
 };
 template <>
 struct OpMathType<c10::Half> {
+  using type = float;
+};
+template <>
+struct OpMathType<c10::BFloat16> {
   using type = float;
 };
 
@@ -1389,20 +1394,94 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 }
 
 
-template <typename T>
-std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
-    PreventFma noFma;
-    using op_math_t = typename OpMathType<T>::type;
-    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
-    return static_cast<T>(noFma.add(ab, op_math_t(c)));
+// MSVC defines TEST_AGAINST_DEFAULT for AVX builds too, whose fused ops are
+// still the AVX ones.
+#if defined(TEST_AGAINST_DEFAULT) && !defined(CPU_CAPABILITY_AVX2) && \
+    !defined(CPU_CAPABILITY_AVX512)
+inline constexpr bool kTestAgainstDefault = true;
+#else
+inline constexpr bool kTestAgainstDefault = false;
+#endif
+#if defined(CPU_CAPABILITY_VSX)
+inline constexpr bool kVsx = true;
+#else
+inline constexpr bool kVsx = false;
+#endif
+#if defined(CPU_CAPABILITY_ZVECTOR)
+inline constexpr bool kZvector = true;
+#else
+inline constexpr bool kZvector = false;
+#endif
+// Half fused ops that round once in fp16: AVX512-FP16 and NEON fp16 FMA.
+#if (defined(CPU_CAPABILITY_AVX512) && defined(__AVX512FP16__)) ||   \
+    (defined(__aarch64__) && !defined(C10_MOBILE) &&                 \
+     !defined(CPU_CAPABILITY_SVE256) &&                              \
+     defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC))
+inline constexpr bool kNativeFp16Fma = true;
+#else
+inline constexpr bool kNativeFp16Fma = false;
+#endif
+
+// Rounds a * b + c to Half once. For Half inputs the double FMA never lands on
+// an fp16 rounding tie unless the exact value does, and rounding it to odd in
+// float keeps the final rounding to Half correct.
+inline c10::Half fma_round_once(double a, double b, double c) {
+    const double d = std::fma(a, b, c);
+    float f = static_cast<float>(d);
+    if (static_cast<double>(f) != d && (std::bit_cast<uint32_t>(f) & 1) == 0) {
+        f = std::nextafter(f, d > f ? std::numeric_limits<float>::infinity()
+                                    : -std::numeric_limits<float>::infinity());
+    }
+    return static_cast<c10::Half>(f);
 }
 
-template <typename T>
-std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
-    PreventFma noFma;
-    using op_math_t = typename OpMathType<T>::type;
-    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
-    return static_cast<T>(noFma.sub(ab, op_math_t(c)));
+// Computes (neg_ab ? -1 : 1) * a * b + (neg_c ? -1 : 1) * c, rounding the way
+// Vectorized<T> does. VSX and ZVECTOR lack reduced-float specializations, so
+// vec_base.h rounds the product to T; they also lack fused float ops, except
+// for ZVECTOR's fmadd.
+template <bool neg_ab, bool neg_c, bool zvector_fused, typename T>
+T local_fused(T a, T b, T c) {
+    if constexpr (kNativeFp16Fma && std::is_same_v<T, c10::Half>) {
+        const double x = static_cast<double>(a), z = static_cast<double>(c);
+        return fma_round_once(neg_ab ? -x : x, static_cast<double>(b), neg_c ? -z : z);
+    } else if constexpr (kTestAgainstDefault ||
+                         ((kVsx || kZvector) && c10::is_reduced_floating_point_v<T>)) {
+        T ab = a * b;
+        if constexpr (neg_ab) ab = -ab;
+        return neg_c ? ab - c : ab + c;
+    } else {
+        using op_math_t = typename OpMathType<T>::type;
+        auto x = static_cast<op_math_t>(a);
+        auto y = static_cast<op_math_t>(b);
+        auto z = static_cast<op_math_t>(c);
+        if constexpr (neg_ab) x = -x;
+        if constexpr (neg_c) z = -z;
+        if constexpr (kVsx || (kZvector && !zvector_fused)) {
+            return static_cast<T>(PreventFma{}.add(x * y, z));
+        } else {
+            return static_cast<T>(std::fma(x, y, z));
+        }
+    }
+}
+
+template <typename T> requires (!is_complex<T>::value)
+T local_fmadd(T a, T b, T c) {
+    return local_fused<false, false, true>(a, b, c);
+}
+
+template <typename T> requires (!is_complex<T>::value)
+T local_fmsub(T a, T b, T c) {
+    return local_fused<false, true, false>(a, b, c);
+}
+
+template <typename T> requires (!is_complex<T>::value)
+T local_fnmadd(T a, T b, T c) {
+    return local_fused<true, false, false>(a, b, c);
+}
+
+template <typename T> requires (!is_complex<T>::value)
+T local_fnmsub(T a, T b, T c) {
+    return local_fused<true, true, false>(a, b, c);
 }
 
 template <typename T>
