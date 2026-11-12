@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import ast
 import contextlib
 import io
 import json
@@ -24,10 +25,13 @@ from torch._C._profiler import (
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor import config
 from torch._inductor.debug import (
+    alias_kernel_provenance,
     create_kernel_information_json,
     create_mapping_pre_post_grad_nodes,
     create_node_mapping_kernel_to_post_grad,
     get_kernel_information_jsons,
+    innermost_module_fqn,
+    owning_module_fqns,
     reset_inductor_kernel_provenance_debug_handle,
     reset_provenance_globals,
     set_kernel_post_grad_provenance_tracing,
@@ -37,7 +41,11 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch._inductor.virtualized import V
 from torch.autograd import _disable_profiler, _enable_profiler, _prepare_profiler
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_MACOS,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
@@ -1147,6 +1155,10 @@ class TestProvenanceTracingStackTraces(TestCase):
                 "custom_backend.mm:4": ["File test.py, line 40"],
                 "aoti_torch_cuda_add_out:5": ["File test.py, line 50"],
             }
+            debug_mod._inductor_kernel_module_fqn = {
+                "triton_poi_fused_add_mul_0:1": ["block.fc"],
+                "aoti_torch_cuda_mm_out:2": ["block.fc", "block.ln"],
+            }
             debug_mod._inductor_post_to_pre_grad_nodes = {
                 "postToPre": {
                     "add": ["add_1"],
@@ -1200,6 +1212,31 @@ class TestProvenanceTracingStackTraces(TestCase):
 
             k5 = result["aoti_torch_cuda_add_out:5"]
             self.assertIsNone(k5["extern_semantic_key"])
+
+            # A fused kernel can span origins naming different modules; a
+            # kernel absent from the global gets the default, not a missing key.
+            self.assertEqual(k1["module_fqns"], ["block.fc"])
+            self.assertEqual(k2["module_fqns"], ["block.fc", "block.ln"])
+            self.assertEqual(k3["module_fqns"], [])
+
+    def test_alias_kernel_provenance_copies_module_and_weight_fqns(self):
+        import torch._inductor.debug as debug_mod
+
+        with reset_provenance_globals():
+            debug_mod._inductor_kernel_module_fqn = {"orig:1": ["block.fc"]}
+            debug_mod._inductor_kernel_weight_fqn = {"orig:1": ["block.fc.weight"]}
+
+            alias_kernel_provenance("orig:1", "alias:1")
+            self.assertEqual(
+                debug_mod._inductor_kernel_module_fqn["alias:1"], ["block.fc"]
+            )
+            self.assertEqual(
+                debug_mod._inductor_kernel_weight_fqn["alias:1"], ["block.fc.weight"]
+            )
+
+            # A kernel with no recorded FQN must not gain an empty entry.
+            alias_kernel_provenance("absent:1", "absent_alias:1")
+            self.assertNotIn("absent_alias:1", debug_mod._inductor_kernel_module_fqn)
 
     def test_extern_semantic_key_extracted_from_origin_node_meta(self):
         """extern_semantic_key stamped on origin_node.meta (e.g. by the FP8
@@ -1497,6 +1534,286 @@ copy_tests(
     TestProvenanceTracingKernelContextGpu,
     GPU_TYPE,
 )
+
+
+class TestProvenanceTracingModuleFqn(TestCase):
+    """Per-kernel `nn.Module` FQN. `pre_grad_nodes` covers the forward only;
+    reading the stack off the node resolves the backward too."""
+
+    def _node(self, **meta):
+        graph = torch.fx.Graph()
+        node = graph.placeholder("x")
+        node.meta.update(meta)
+        return node
+
+    def _stack(self, fqn):
+        return {"a": (fqn, torch.nn.Linear)}
+
+    def _fqn(self, name):
+        return innermost_module_fqn(self._node(nn_module_stack=self._stack(name)))
+
+    def test_only_the_self_frame_root_is_dropped(self):
+        for name, expected in (
+            # `L['self']` is the compiled module itself: it names no component,
+            # and dropping it is what makes these join with export's FQNs.
+            ("L['self'].block.fc", "block.fc"),
+            ("L['self']", None),
+            # `._modules['x']` is already rewritten to `.x` by dynamo, but the
+            # subscripted form still reaches here from older graphs.
+            ("L['self'].layers.0.attn", "layers.0.attn"),
+            ("L['self']._modules['layers']['0']", "layers.0"),
+            # Any other root is a frame variable that is not the model root.
+            # It is kept, because dropping it merges distinct modules.
+            ("L['mod'].block", "mod.block"),
+            ('G["model"].block.fc', "model.block.fc"),
+            ("G['model']", "model"),
+            # Export form: no frame root to drop.
+            ("block.fc", "block.fc"),
+            ("", None),
+        ):
+            self.assertEqual(self._fqn(name), expected, name)
+
+    def test_sibling_modules_in_one_frame_stay_distinct(self):
+        """A compiled `def f(enc, dec, x)` names each submodule off its own
+        frame variable; collapsing the root would make both of these `fc`."""
+        self.assertEqual(self._fqn("L['enc'].fc"), "enc.fc")
+        self.assertEqual(self._fqn("L['dec'].fc"), "dec.fc")
+
+    def test_clean_stack_name_contract(self):
+        """`_clean_stack_name` is shared with `make_graph_view`, so pin it
+        directly rather than only through `innermost_module_fqn`, which maps
+        the root's empty name to None and hides it."""
+        from torch._inductor.fx_passes.graph_view import _clean_stack_name
+
+        for name, expected in (
+            # The docstring example, unchanged.
+            (
+                "L['self']._modules['layers']['0']._modules['attention']",
+                "layers.0.attention",
+            ),
+            # Only the root is empty; every other name keeps its full path.
+            ("L['self']", ""),
+            ("L['self'].block.fc", "block.fc"),
+            ("L['enc'].fc", "enc.fc"),
+            ('G["model"].block', "model.block"),
+            ("L['self']._modules_cache.0", "_modules_cache.0"),
+            ("block.fc", "block.fc"),
+            ("", ""),
+        ):
+            self.assertEqual(_clean_stack_name(name), expected, name)
+
+    def test_innermost_entry_wins(self):
+        node = self._node(
+            nn_module_stack={
+                "a": ("L['self'].block", torch.nn.Module),
+                "b": ("L['self'].block.fc", torch.nn.Linear),
+            }
+        )
+        self.assertEqual(innermost_module_fqn(node), "block.fc")
+
+    def test_backward_node_uses_the_forward_stack(self):
+        node = self._node(fwd_nn_module_stack=self._stack("L['self'].block.fc"))
+        self.assertEqual(innermost_module_fqn(node), "block.fc")
+
+    def test_node_under_no_module(self):
+        self.assertIsNone(innermost_module_fqn(self._node()))
+
+    def test_a_missing_or_non_mapping_stack_yields_none(self):
+        for stack in ("", {}, None, []):
+            self.assertIsNone(
+                innermost_module_fqn(self._node(nn_module_stack=stack)), stack
+            )
+
+    def test_origins_are_collected_and_deduped(self):
+        nodes = [
+            self._node(nn_module_stack=self._stack(f"L['self'].{fqn}"))
+            for fqn in ("block.fc", "block.ln", "block.fc")
+        ]
+        # Plus one owned by nothing, which must not contribute an empty id.
+        nodes.append(self._node())
+        self.assertEqual(list(owning_module_fqns(nodes)), ["block.fc", "block.ln"])
+
+    @torch._inductor.config.patch(
+        {
+            "trace.provenance_tracking_level": 1,
+            "trace.provenance_tracking_to_timeline": True,
+        }
+    )
+    def test_forward_and_backward_kernels_both_carry_an_fqn(self):
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                return torch.nn.functional.relu(self.fc(x))
+
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = Inner()
+                # A ModuleList so the indexed form is exercised for real
+                # rather than assumed from reading dynamo's source rewrite.
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(16, 16) for _ in range(2)]
+                )
+
+            def forward(self, x):
+                x = self.block(x)
+                for layer in self.layers:
+                    x = layer(x)
+                return (x * 2.0).sum()
+
+        # `reset_provenance_globals` deliberately leaves this global alone, and
+        # `compile_fx` writes a key only when it is absent while
+        # `torch._dynamo.reset()` restarts compile ids. Without clearing it, a
+        # pre-existing entry would be read back here as this run's, and this
+        # run's entries would carry over into later tests.
+        kernel_information_jsons = get_kernel_information_jsons()
+        previous = dict(kernel_information_jsons)
+        kernel_information_jsons.clear()
+        try:
+            torch._dynamo.reset()
+            model = Outer()
+            x = torch.randn(8, 16, requires_grad=True)
+            with reset_provenance_globals():
+                torch.compile(model, backend="inductor")(x).backward()
+                per_graph = dict(kernel_information_jsons)
+        finally:
+            kernel_information_jsons.clear()
+            kernel_information_jsons.update(previous)
+
+        # The key is `str((region, is_backward))`; read the flag rather than
+        # matching on the rendered string.
+        kernels: dict[bool, dict[str, list[str]]] = {False: {}, True: {}}
+        for key, records in per_graph.items():
+            is_backward = ast.literal_eval(key)[1]
+            for name, record in records.items():
+                kernels[is_backward][name] = record["module_fqns"]
+        self.assertTrue(kernels[False], f"no forward graph in {list(per_graph)}")
+        self.assertTrue(kernels[True], f"no backward graph in {list(per_graph)}")
+
+        # `block` is `Inner` itself, which owns the functional relu called
+        # directly in its forward; the rest are its submodules.
+        modules = {"block", "block.fc", "layers.0", "layers.1"}
+        for is_backward, by_kernel in kernels.items():
+            direction = "backward" if is_backward else "forward"
+            owned = {name: fqns for name, fqns in by_kernel.items() if fqns}
+            self.assertTrue(owned, f"no module_fqns on any {direction} kernel")
+            # `block.fc`, not `L['self'].block.fc`: no frame root may survive,
+            # and nothing may be named that is not a module of this model.
+            self.assertEqual(
+                {fqn for fqns in owned.values() for fqn in fqns} - modules,
+                set(),
+                f"{direction}: {owned}",
+            )
+
+        # Per kernel, not pooled across the direction: each Linear's addmm must
+        # name exactly its own module. Tagging every kernel with every module,
+        # or ignoring the extern `origin_node`-over-`origins` preference, fails
+        # here but would pass a pooled check.
+        addmm = {
+            name: fqns
+            for name, fqns in kernels[False].items()
+            if name.startswith("extern_kernels.addmm")
+        }
+        self.assertEqual(
+            sorted(addmm.values()),
+            [["block.fc"], ["layers.0"], ["layers.1"]],
+            addmm,
+        )
+
+        # `(x * 2.0).sum()` is written directly in `Outer.forward`, so it is
+        # owned by the compiled module itself, which names no component.
+        self.assertTrue(
+            [fqns for fqns in kernels[False].values() if fqns == []],
+            f"expected a root-owned forward kernel: {kernels[False]}",
+        )
+
+    @requires_gpu_and_triton
+    @config.patch({"trace.provenance_tracking_level": 1, "force_disable_caches": True})
+    @parametrize("constant_folding", [False, True])
+    def test_aoti_weight_fqns_name_the_owning_module(self, constant_folding):
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(64, 128)
+                self.fc2 = torch.nn.Linear(128, 32)
+                self.register_buffer("scale", torch.full((32,), 2.0))
+
+            def forward(self, x):
+                # A tensor created in forward is lifted to `_tensor_constant0`.
+                offset = torch.tensor([float(i) for i in range(32)], device=x.device)
+                y = self.fc2(torch.relu(self.fc1(x)) * 2.0) * self.scale
+                return (y + offset).sigmoid()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = Block()
+
+            def forward(self, x):
+                return self.block(x)
+
+        model = Model().to(GPU_TYPE)
+        inputs = (torch.randn(16, 64, device=GPU_TYPE),)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ep = torch.export.export(model, inputs, strict=False)
+            pt2_file = os.path.join(temp_dir, "model.pt2")
+            with config.patch(
+                {"aot_inductor.use_runtime_constant_folding": constant_folding}
+            ):
+                torch._inductor.aoti_compile_and_package(ep, package_path=pt2_file)
+            with zipfile.ZipFile(pt2_file) as zf:
+                name = next(
+                    n for n in zf.namelist() if n.endswith("/kernel_information.json")
+                )
+                kernel_info = json.loads(zf.read(name))
+
+        weight_owner = {
+            fqn: data["module_fqns"]
+            for data in kernel_info.values()
+            for fqn in data["weight_fqns"]
+        }
+        # Only the model's own parameters and buffers, never lifted or folded
+        # constants.
+        self.assertLessEqual(weight_owner.keys(), model.state_dict().keys())
+        self.assertEqual(weight_owner["block.scale"], ["block", "block.fc2"])
+        # Folding pre-transposes the GEMM weights into folded constants.
+        if not constant_folding:
+            for layer in ("block.fc1", "block.fc2"):
+                self.assertEqual(weight_owner[f"{layer}.weight"], [layer])
+
+    @config.patch(
+        {
+            "freezing": True,
+            "trace.provenance_tracking_level": 1,
+            "trace.provenance_tracking_to_timeline": True,
+            "force_disable_caches": True,
+        }
+    )
+    def test_frozen_params_are_not_reported_as_weight_fqns(self):
+        # Freezing renames parameters to `_frozen_paramN`, which name nothing
+        # in the model.
+        model = torch.nn.Sequential(torch.nn.Linear(16, 16), torch.nn.ReLU())
+        kernel_information_jsons = get_kernel_information_jsons()
+        previous = dict(kernel_information_jsons)
+        kernel_information_jsons.clear()
+        try:
+            torch._dynamo.reset()
+            with torch.no_grad(), reset_provenance_globals():
+                torch.compile(model)(torch.randn(8, 16))
+                per_graph = dict(kernel_information_jsons)
+        finally:
+            kernel_information_jsons.clear()
+            kernel_information_jsons.update(previous)
+
+        records = [r for records in per_graph.values() for r in records.values()]
+        self.assertTrue(records)
+        self.assertEqual([r["weight_fqns"] for r in records if r["weight_fqns"]], [])
+
+
+instantiate_parametrized_tests(TestProvenanceTracingModuleFqn)
 
 
 if __name__ == "__main__":
