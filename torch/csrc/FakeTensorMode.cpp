@@ -49,23 +49,17 @@ struct PyCppFakeTensorMode {
   PyObject* weakreflist;
 };
 
-static PyObject* new_cpp_fake_tensor_mode(
-    PyTypeObject* type,
-    const std::shared_ptr<c10::FakeTensorMode>& mode = nullptr) {
-  auto* self = reinterpret_cast<PyCppFakeTensorMode*>(type->tp_alloc(type, 0));
-  if (self == nullptr) {
-    return nullptr;
-  }
-  new (&self->mode) std::shared_ptr<c10::FakeTensorMode>(mode);
-  self->weakreflist = nullptr;
-  return reinterpret_cast<PyObject*>(self);
-}
-
 static PyObject* cpp_fake_tensor_mode_new(
     PyTypeObject* type,
     PyObject*,
     PyObject*) {
-  return new_cpp_fake_tensor_mode(type);
+  auto* self = reinterpret_cast<PyCppFakeTensorMode*>(type->tp_alloc(type, 0));
+  if (self == nullptr) {
+    return nullptr;
+  }
+  new (&self->mode) std::shared_ptr<c10::FakeTensorMode>();
+  self->weakreflist = nullptr;
+  return reinterpret_cast<PyObject*>(self);
 }
 
 static void cpp_fake_tensor_mode_dealloc(PyObject* obj) {
@@ -77,18 +71,14 @@ static void cpp_fake_tensor_mode_dealloc(PyObject* obj) {
   Py_TYPE(obj)->tp_free(obj);
 }
 
-static void check_cpp_fake_tensor_mode_type(PyObject* obj) {
+std::shared_ptr<c10::FakeTensorMode> getCppFakeTensorMode(py::handle py_mode) {
   TORCH_CHECK_TYPE(
-      Py_TYPE(obj) ==
+      Py_TYPE(py_mode.ptr()) ==
           reinterpret_cast<PyTypeObject*>(
               get_cpp_fake_tensor_mode_class().ptr()),
       "Expected a CppFakeTensorMode (not a subclass, nor a bare ",
       "_CppFakeTensorMode), got ",
-      Py_TYPE(obj)->tp_name);
-}
-
-std::shared_ptr<c10::FakeTensorMode> getCppFakeTensorMode(py::handle py_mode) {
-  check_cpp_fake_tensor_mode_type(py_mode.ptr());
+      Py_TYPE(py_mode.ptr())->tp_name);
   auto& mode = reinterpret_cast<PyCppFakeTensorMode*>(py_mode.ptr())->mode;
   TORCH_CHECK(mode != nullptr, "CppFakeTensorMode is not initialized");
   return mode;
@@ -115,7 +105,13 @@ static int cpp_fake_tensor_mode_init(
     return -1;
   }
   TORCH_CHECK(converter != Py_None, "Expected a FakeTensorConverter");
-  check_cpp_fake_tensor_mode_type(obj);
+  TORCH_CHECK_TYPE(
+      Py_TYPE(obj) ==
+          reinterpret_cast<PyTypeObject*>(
+              get_cpp_fake_tensor_mode_class().ptr()),
+      "Expected a CppFakeTensorMode (not a subclass, nor a bare ",
+      "_CppFakeTensorMode), got ",
+      Py_TYPE(obj)->tp_name);
   auto* self = reinterpret_cast<PyCppFakeTensorMode*>(obj);
   TORCH_CHECK(
       self->mode == nullptr, "CppFakeTensorMode is already initialized");
@@ -233,7 +229,7 @@ static PyGetSetDef mode_properties[] = {
      nullptr},
     {nullptr}};
 
-static PyTypeObject PyCppFakeTensorModeType = {
+PyTypeObject PyCppFakeTensorModeType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._CppFakeTensorMode", /* tp_name */
     sizeof(PyCppFakeTensorMode), /* tp_basicsize */
@@ -274,14 +270,6 @@ static PyTypeObject PyCppFakeTensorModeType = {
     cpp_fake_tensor_mode_new, /* tp_new */
 };
 
-void initCppFakeTensorMode(PyObject* module) {
-  TORCH_CHECK_PYTHON(PyModule_AddType(module, &PyCppFakeTensorModeType) >= 0);
-}
-
-bool isCppFakeTensorMode(py::handle obj) {
-  return PyObject_TypeCheck(obj.ptr(), &PyCppFakeTensorModeType);
-}
-
 py::object getCppFakeTensorModePyObj(
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
   if (mode == nullptr) {
@@ -302,12 +290,14 @@ py::object getCppFakeTensorModePyObj(
     }
   }
   // The object is gone; see Note [C++ FakeTensorMode Python object lifetime].
-  auto py_mode = py::reinterpret_steal<py::object>(new_cpp_fake_tensor_mode(
+  auto py_mode = py::reinterpret_steal<py::object>(cpp_fake_tensor_mode_new(
       reinterpret_cast<PyTypeObject*>(get_cpp_fake_tensor_mode_class().ptr()),
-      mode));
+      nullptr,
+      nullptr));
   if (!py_mode) {
     throw py::error_already_set();
   }
+  reinterpret_cast<PyCppFakeTensorMode*>(py_mode.ptr())->mode = mode;
   // SafePyObject owns the weakref with interpreter-safe lifetime management,
   // and the shared_ptr owns the SafePyObject.
   PyObject* weakref = PyWeakref_NewRef(py_mode.ptr(), nullptr);

@@ -3058,7 +3058,9 @@ Call this whenever a new thread is created in order to propagate values from
         torch::utils::fake_tensor_to_list(t));
   });
 
-  torch::fake_tensor::initCppFakeTensorMode(module);
+  TORCH_CHECK_PYTHON(
+      PyModule_AddType(module, &torch::fake_tensor::PyCppFakeTensorModeType) >=
+      0);
 
   // The C++ counterpart of Python's FakeTensorConverter.from_meta_and_device.
   // It takes no pytype or dispatch_keys: a C++ fake is always a plain Tensor
