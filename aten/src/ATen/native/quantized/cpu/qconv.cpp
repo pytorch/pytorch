@@ -1282,7 +1282,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     const std::vector<float> accum_scale = std::vector<float>(1, 1.0/sum_scale);
     const std::vector<int32_t> accum_zero_points = std::vector<int32_t>(1, sum_zero_point);
     // Set the dst scale and zero point with the value of accum.
-    // The true scale and zero point is stored in std::vector<float>(scale_size, inv_output_scale) and dst_zero_points.
+    // The true scale and zero point are passed below as the dst scales (1/output_scale) and dst_zero_points.
     dst.set_scale(accum_scale);
     dst.set_zero_point(accum_zero_points);
   } else if (kReluFused) {
@@ -1866,7 +1866,7 @@ static at::Tensor _quantized_convolution_onednn(
     const std::vector<float> accum_ideep_scale = std::vector<float>(1, 1.0/accum_scale);
     const std::vector<int32_t> accum_ideep_zero_points = std::vector<int32_t>(1, accum_zero_point);
     // Set the dst scale and zero point with the value of accum.
-    // The true scale and zero point is stored in std::vector<float>(scale_size, output_scale) and dst_zero_points.
+    // The true scale and zero point are passed below as the dst scales (1/output_scale) and dst_zero_points.
     dst.set_scale(accum_ideep_scale);
     dst.set_zero_point(accum_ideep_zero_points);
   }
