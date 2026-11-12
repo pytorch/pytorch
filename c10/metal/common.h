@@ -1,6 +1,8 @@
 #pragma once
 // Set of global constants that could be shareable between CPU and Metal code
 
+#include <c10/util/IntegerDivider.h>
+
 #ifdef __METAL__
 #include <c10/metal/float8.h>
 #include <metal_array>
@@ -46,10 +48,15 @@
   _(UInt32, 28, uint32_t)              \
   _(UInt64, 29, uint64_t)
 
+#define C10_METAL_SERIAL_SUFFIX_false ""
+#define C10_METAL_SERIAL_SUFFIX_true "_serial"
+#define C10_METAL_SERIAL_SUFFIX(SERIAL) C10_METAL_SERIAL_SUFFIX_##SERIAL
+
 namespace c10 {
 namespace metal {
 C10_METAL_CONSTEXPR unsigned max_ndim = 16;
 C10_METAL_CONSTEXPR unsigned simdgroup_size = 32;
+C10_METAL_CONSTEXPR unsigned max_threadgroup_size = 1024;
 // Number of elements each thread processes in dense elementwise kernels.
 // Reading/writing a small array of values per thread improves memory-level
 // parallelism vs. a one-element-per-thread kernel.
@@ -85,6 +92,14 @@ using complex = ::c10::complex<T>;
 using half = ::c10::Half;
 using bfloat = ::c10::BFloat16;
 #endif
+
+// Per-dim divisor for the strided kernels. The box pads c10::IntDivider
+// (12 bytes) to a 16-byte stride, which measured ~4% faster than the natural
+// 12-byte stride; Metal has no struct inheritance, hence the member.
+struct alignas(16) DimDivider {
+  ::c10::IntDivider<uint32_t> d;
+};
+static_assert(sizeof(DimDivider) == 16, "16-byte stride");
 
 namespace detail {
 template <typename T>

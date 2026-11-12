@@ -23,10 +23,6 @@ static constexpr bool cuda_arch_list_has(int lo, int hi) {
 #endif
 }
 
-static constexpr bool cuda_arch_list_has_major(int major) {
-  return cuda_arch_list_has(major * 100, (major + 1) * 100);
-}
-
 [[noreturn]] inline void cutlass_arch_not_built(const char* op) {
   TORCH_CHECK(
       false,
