@@ -56,6 +56,8 @@ struct convolution_forward_params {
       nullptr;
 };
 
+} // namespace
+
 // Ported from ideep::conv_deconv_utils::prepare_parameters.
 // Common logic to prepare parameters for conv/deconv
 // quantization version
@@ -372,6 +374,8 @@ void prepare_parameters(
       ? dst.get_desc()
       : ideep::tensor::desc(dst_dims, dst_data_type);
 }
+
+namespace {
 
 // Ported from ideep::convolution_forward::get_primitive_desc. On x86 the
 // descriptor comes from ideep's primitive cache, shared with ideep's own

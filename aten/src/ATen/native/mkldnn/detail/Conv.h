@@ -9,6 +9,64 @@
 
 namespace at::native::mkldnn {
 
+// Ported from ideep::conv_deconv_utils::prepare_parameters (shared with
+// detail/Deconv.cpp).
+// Common logic to prepare parameters for conv/deconv.
+// non-quantization version
+void prepare_parameters(
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    const dnnl::memory::dims& dst_dims,
+    const ideep::tensor& dst,
+    const dnnl::memory::dims& dilates,
+    int groups,
+    const ideep::attr_t& attr,
+    bool with_bias,
+    bool is_deconv,
+    ideep::tensor& weight_grouped, /* Output */
+    dnnl::memory::dims& dil_compatible, /* Output */
+    ideep::attr_t& op_attr, /* Output */
+    ideep::attr_t& src_attr, /* Output */
+    ideep::attr_t& weights_attr, /* Output */
+    ideep::attr_t& bias_attr, /* Output */
+    ideep::tensor::desc& src_desc, /* Output */
+    ideep::tensor::desc& weights_desc, /* Output */
+    ideep::tensor::desc& bias_desc, /* Output */
+    ideep::tensor::desc& dst_desc /* Output */);
+
+// Ported from ideep::conv_deconv_utils::prepare_parameters (shared with
+// detail/Deconv.cpp).
+// Common logic to prepare parameters for conv/deconv
+// quantization version
+void prepare_parameters(
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    const dnnl::memory::dims& dst_dims,
+    const ideep::tensor& dst,
+    const dnnl::memory::dims& dilates,
+    int groups,
+    const std::vector<float>& src_scales,
+    const std::vector<float>& weights_scales,
+    const std::vector<float>& dst_scales,
+    const std::vector<int32_t>& src_zero_points,
+    const std::vector<int32_t>& dst_zero_points,
+    const ideep::attr_t& attr,
+    const ideep::lowp_kind alowp_kind,
+    bool with_bias,
+    bool is_deconv,
+    ideep::tensor& weight_grouped, /* Output */
+    dnnl::memory::dims& dil_compatible, /* Output */
+    ideep::attr_t& op_attr, /* Output */
+    ideep::attr_t& src_attr, /* Output */
+    ideep::attr_t& weights_attr, /* Output */
+    ideep::attr_t& bias_attr, /* Output */
+    ideep::tensor::desc& src_desc, /* Output */
+    ideep::tensor::desc& weights_desc, /* Output */
+    ideep::tensor::desc& bias_desc, /* Output */
+    ideep::tensor::desc& dst_desc /* Output */);
+
 // Ported from ideep::convolution_forward::compute_v2 (with bias).
 // DEPRECATED
 // 2-in-1 compute (prepare & compute) with bias
