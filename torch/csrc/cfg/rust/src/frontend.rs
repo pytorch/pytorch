@@ -1072,6 +1072,23 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     for n in names_tuple.iter() {
         consts.push(unsafe { PyObj::from_borrowed(n.as_ptr()) });
     }
+    // A compiled function has no Python frame, so what looks at the frame of
+    // its caller would see the wrong one.
+    let names: Vec<String> = names_tuple.extract()?;
+    for name in ["locals", "globals", "vars", "dir", "eval", "exec", "_getframe", "currentframe"] {
+        if names.iter().any(|n| n == name) {
+            return unsupported(format!("{}() needs a Python frame of its own", name));
+        }
+    }
+    // super() without arguments finds its class and instance in the frame;
+    // only the form the compiler turns into LOAD_SUPER_ATTR is supported.
+    if let Some(index) = names.iter().position(|n| n == "super") {
+        let loads = instrs.iter().filter(|i| i.op == Bc::LoadGlobal && (i.arg >> 1) as usize == index).count();
+        let attrs = instrs.iter().filter(|i| i.op == Bc::LoadSuperAttr).count();
+        if loads != attrs {
+            return unsupported("super() needs a Python frame of its own");
+        }
+    }
     let varnames_tuple = code.getattr("co_varnames")?;
     let varnames_tuple = varnames_tuple.downcast::<PyTuple>()?;
     let mut varnames: Vec<String> = varnames_tuple.extract()?;
