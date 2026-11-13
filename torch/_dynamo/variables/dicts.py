@@ -1061,9 +1061,15 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     tp_getset = {"__dict__": GetSet(_get_instance_dict, unmodeled_setter)}
 
     def reduce_ex(
-        self, tx: "InstructionTranslatorBase", protocol: int
-    ) -> VariableTracker:
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
         from .iter import OrderedDictItemsIterator
+
+        if type(self) is not OrderedDictVariable or not self.is_python_constant():
+            return None
 
         effects = tx.output.side_effects
         # A pending write to another input dictionary could alias self.__dict__
@@ -1095,7 +1101,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
             tx.output.guard_on_key_order.add(self.source)
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
-        reduced = self.as_python_constant().__reduce_ex__(protocol)
+        reduced = self.as_python_constant().__reduce_ex__(args[0].as_python_constant())
         return variables.TupleVariable(
             [VariableTracker.build(tx, item) for item in reduced[:-1]]
             + [OrderedDictItemsIterator.create(self.items)]
@@ -1152,6 +1158,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
+        "__reduce_ex__": Method(reduce_ex),
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
     }
