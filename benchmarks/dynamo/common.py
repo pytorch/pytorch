@@ -89,7 +89,7 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 _D = TypeVar("_D", bound=dict[str, Any])
 _T = TypeVar("_T")
@@ -574,6 +574,10 @@ def synchronize():
     pass
 
 
+def artifact_safe_name(name):
+    return name.replace("/", "_").replace("\\", "_")
+
+
 def summarize_graph_break(filename):
     """
     Sorts and de-dupes the graphs breaks on the reason string. Note that this
@@ -630,6 +634,10 @@ def print_summary_table(data, print_dataframe=False):
                 print(col.ljust(width), f"{data[col].mean():.3f}")
             elif col in ("compilation_latency"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} seconds")
+            elif col in ("abs_latency", "eager_latency"):
+                print(col.ljust(width), f"mean={data[col].mean():.3f} ms")
+            elif col == "input_tokens_per_second":
+                print(col.ljust(width), f"mean={data[col].mean():.3f} tokens/s")
             elif col in ("compression_ratio"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f}x")
             elif col in ("accuracy"):
@@ -664,7 +672,9 @@ def timed(
     return_result=False,
     collect_outputs=False,
     batch_size=None,
+    setup_fn=None,
 ):
+    # setup_fn prepares each independent request outside the measured interval.
     use_xla = tensor_is_on_xla(example_inputs)
     synchronize()
 
@@ -712,6 +722,9 @@ def timed(
         # Put this call inside the loop to reset the seed for each iteration.
         # Don't include reset_rng_state() to correctly measure timing
         reset_rng_state(use_xla)
+        if setup_fn is not None:
+            setup_fn(model, example_inputs)
+            synchronize()
         t_iter_begin = time.perf_counter()
         result = model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
 
@@ -726,15 +739,18 @@ def timed(
             # we need the mark step to send the optimizer graph out for
             # compilation.
             xm.mark_step()
+        if setup_fn is not None:
+            synchronize()
         t_iter_end = time.perf_counter()
         time_total += t_iter_end - t_iter_begin
 
-    t_0 = time.perf_counter()
-    if use_xla:
-        xm.wait_device_ops()
-    synchronize()
-    t_1 = time.perf_counter()
-    time_total += t_1 - t_0
+    if setup_fn is None:
+        t_0 = time.perf_counter()
+        if use_xla:
+            xm.wait_device_ops()
+        synchronize()
+        t_1 = time.perf_counter()
+        time_total += t_1 - t_0
     return (time_total, result) if return_result else time_total
 
 
@@ -936,7 +952,7 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
                 )
 
     if args.export_profiler_trace:
-        name = args.profiler_trace_name + "_" + model.name
+        name = args.profiler_trace_name + "_" + artifact_safe_name(model.name)
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
         name += ".json"
@@ -951,7 +967,8 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
         np.save(
-            f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
+            f"{output_filename[:-4]}-raw_timings-"
+            f"{artifact_safe_name(current_name)}-{current_device}.npy",
             timings,
         )
 
@@ -1076,9 +1093,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     elif args.aot_precompile:
         frozen_model_iter_fn = aot_precompile(model, example_inputs)
     else:
-        if kwargs["hf_llm"]:
-            # If it's an llm, we want to optimize model.forward, and use
-            # the generate function
+        if kwargs["compile_forward"]:
+            # Compile the forward, keeping generation and cache setup outside it.
             model.forward = torch._dynamo.run(model.forward)
             frozen_model_iter_fn = model_iter_fn
         else:
@@ -1105,6 +1121,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                 times=times,
                 collect_outputs=args.collect_outputs,
                 batch_size=kwargs.get("batch_size"),
+                setup_fn=kwargs.get("setup_fn"),
             )
 
         # call mark_step between the 2 calls to make the comparison fair.
@@ -1117,6 +1134,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             return_result=True,
             times=times,
             collect_outputs=args.collect_outputs,
+            setup_fn=kwargs.get("setup_fn"),
         )
 
     # Collect profiler trace in a separate run so that profiler overhead
@@ -1135,6 +1153,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=False,
                     times=times,
                     collect_outputs=False,
+                    setup_fn=kwargs.get("setup_fn"),
                 )
             with maybe_mark_profile(p=p, mark="actual"):
                 timed(
@@ -1144,9 +1163,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=False,
                     times=times,
                     collect_outputs=False,
+                    setup_fn=kwargs.get("setup_fn"),
                 )
 
-        name = args.profiler_trace_name + "_" + model.name
+        name = args.profiler_trace_name + "_" + artifact_safe_name(model.name)
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
         if args.export_perfdoctor and trace_handler:
@@ -1160,7 +1180,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
         np.save(
-            f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
+            f"{output_filename[:-4]}-raw_timings-"
+            f"{artifact_safe_name(current_name)}-{current_device}.npy",
             timings,
         )
 
@@ -1213,6 +1234,14 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
             row.append(v)
+    if kwargs.get("report_eager_latency", False):
+        headers.append("eager_latency")
+        row.append(median[0] * 1000)
+    request_tokens = kwargs.get("request_tokens")
+    if request_tokens is not None:
+        for column, tokens in request_tokens.items():
+            headers.append(column)
+            row.append(times * tokens / median[1])
     write_outputs(
         output_filename,
         headers,
@@ -1793,6 +1822,7 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
     finally:
         if should_snapshot_memory:
             try:
+                suffix = artifact_safe_name(suffix)
                 torch.cuda.memory._dump_snapshot(
                     os.path.join(
                         torch._dynamo.config.base_dir,
@@ -1803,6 +1833,19 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
                 log.exception("Failed to save memory snapshot")
 
             torch.cuda.memory._record_memory_history(enabled=None)
+
+
+@dataclasses.dataclass(frozen=True)
+class BenchmarkWorkload:
+    iter_fn: Callable
+    # Per-request setup stays outside the compiled and timed iteration.
+    setup_fn: Callable | None = None
+    compile_forward: bool = False
+    report_eager_latency: bool = False
+    request_tokens: dict[str, int] | None = None
+    # Performance warmup; measured iterations determine compilation latency.
+    measure_iters: int = 5
+    stabilization_iters: int = 0
 
 
 class BenchmarkRunner:
@@ -2019,6 +2062,18 @@ class BenchmarkRunner:
     def get_accuracy_check_runs(self, name):
         return 1
 
+    def validate_args(self, args):
+        if args.hf_inference_mode == "prefill":
+            raise ValueError(
+                "--hf-inference-mode=prefill requires the huggingface suite"
+            )
+        if args.prompt_length is not None:
+            raise ValueError("--prompt-length requires the huggingface suite")
+
+    def get_workload(self, example_inputs, *, is_performance=False):
+        # Suites may retain a different accuracy workload, such as forward vs generate.
+        return BenchmarkWorkload(self.model_iter_fn)
+
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
             for device in args.devices:
@@ -2075,9 +2130,12 @@ class BenchmarkRunner:
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
+        workload = self.get_workload(example_inputs)
         with self.pick_grad(name, self.args.training):
             try:
-                self.model_iter_fn(model, example_inputs)
+                if workload.setup_fn is not None:
+                    workload.setup_fn(model, example_inputs)
+                workload.iter_fn(model, example_inputs)
             except Exception as e:
                 raise RuntimeError("Eager run failed") from e
 
@@ -2112,11 +2170,13 @@ class BenchmarkRunner:
             batch_size = self.decay_batch_exp(batch_size)
         return 1
 
-    def run_n_iterations(self, mod, inputs, model_iter_fn):
-        n = self.args.iterations
-        for _ in range(n - 1):
-            model_iter_fn(mod, inputs, collect_outputs=False)
-        return model_iter_fn(mod, inputs, collect_outputs=True)
+    def run_n_iterations(self, mod, inputs, model_iter_fn, *, setup_fn=None):
+        n = max(self.args.iterations, 1)
+        for i in range(n):
+            if setup_fn is not None:
+                setup_fn(mod, inputs)
+            result = model_iter_fn(mod, inputs, collect_outputs=i == n - 1)
+        return result
 
     @torch._disable_dynamo(recursive=True)
     def optimizer_zero_grad(self, mod):
@@ -2254,6 +2314,8 @@ class BenchmarkRunner:
         1) Collect the outputs with fp64 datatype. This is useful for error checking.
         2) Checks if eager itself has variations.
         """
+        workload = self.get_workload(example_inputs)
+        model_iter_fn = workload.iter_fn
         start_stats = get_dynamo_stats()
 
         def record_status(accuracy_status, dynamo_start_stats):
@@ -2290,7 +2352,7 @@ class BenchmarkRunner:
                 )
                 self.init_optimizer(name, current_device, model_fp64.parameters())
                 fp64_outputs = self.run_n_iterations(
-                    model_fp64, inputs_fp64, self.model_iter_fn
+                    model_fp64, inputs_fp64, model_iter_fn, setup_fn=workload.setup_fn
                 )
                 fp64_outputs = tree_map(
                     lambda x: x.to(torch.float64)
@@ -2326,7 +2388,10 @@ class BenchmarkRunner:
                     model_copy = self.deepcopy_and_maybe_parallelize(model)
                     self.init_optimizer(name, current_device, model_copy.parameters())
                     correct_result = self.run_n_iterations(
-                        model_copy, clone_inputs(example_inputs), self.model_iter_fn
+                        model_copy,
+                        clone_inputs(example_inputs),
+                        model_iter_fn,
+                        setup_fn=workload.setup_fn,
                     )
             except Exception as e:
                 accuracy_status = (
@@ -2348,7 +2413,10 @@ class BenchmarkRunner:
                     model_copy = self.deepcopy_and_maybe_parallelize(model)
                     self.init_optimizer(name, current_device, model_copy.parameters())
                     correct_rerun_result = self.run_n_iterations(
-                        model_copy, clone_inputs(example_inputs), self.model_iter_fn
+                        model_copy,
+                        clone_inputs(example_inputs),
+                        model_iter_fn,
+                        setup_fn=workload.setup_fn,
                     )
             except Exception as e:
                 accuracy_status = (
@@ -2425,9 +2493,16 @@ class BenchmarkRunner:
                                 model_copy, example_inputs
                             )
                     else:
-                        optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                        if workload.compile_forward:
+                            model_copy.forward = optimize_ctx(model_copy.forward)
+                            optimized_model_iter_fn = model_iter_fn
+                        else:
+                            optimized_model_iter_fn = optimize_ctx(model_iter_fn)
                         new_result = self.run_n_iterations(
-                            model_copy, example_inputs, optimized_model_iter_fn
+                            model_copy,
+                            example_inputs,
+                            optimized_model_iter_fn,
+                            setup_fn=workload.setup_fn,
                         )
                 except Exception as e:
                     log.exception("")
@@ -2947,18 +3022,15 @@ class BenchmarkRunner:
         tag=None,
         batch_size=None,
     ):
-        measure_iters = 5
-        stabilization_iters = 0
-        if getattr(self, "hf_llm", False):
-            # If we're benchmarking an llm, we want to use the generate function
-            self.model_iter_fn = self.generate
-            measure_iters = 1
-            stabilization_iters = 4
+        workload = self.get_workload(example_inputs, is_performance=True)
+        model_iter_fn, setup_fn = workload.iter_fn, workload.setup_fn
+        measure_iters = workload.measure_iters
+        stabilization_iters = workload.stabilization_iters
 
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
                 return experiment(
-                    self.model_iter_fn, *self.maybe_cast(model, example_inputs)
+                    model_iter_fn, *self.maybe_cast(model, example_inputs)
                 )
 
         def warmup(
@@ -2973,13 +3045,25 @@ class BenchmarkRunner:
                     empty_gpu_cache(current_device)
                 elif current_device == "hpu":
                     torch.hpu.reset_peak_memory_stats()
-                t0 = time.perf_counter()
-                for _ in range(measure_iters):
-                    fn(model, example_inputs)
-                t1 = time.perf_counter()
-                latency = t1 - t0
+                if setup_fn is None:
+                    t0 = time.perf_counter()
+                    for _ in range(measure_iters):
+                        fn(model, example_inputs)
+                    latency = time.perf_counter() - t0
+                else:
+                    latency = timed(
+                        model,
+                        fn,
+                        example_inputs,
+                        times=measure_iters,
+                        setup_fn=setup_fn,
+                    )
                 for _ in range(stabilization_iters):
+                    if setup_fn is not None:
+                        setup_fn(model, example_inputs)
                     fn(model, example_inputs)
+                if setup_fn is not None:
+                    synchronize()
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
                 elif current_device == "hpu":
@@ -3027,7 +3111,7 @@ class BenchmarkRunner:
                     self.init_optimizer(name, current_device, eager_model.parameters())
                     try:
                         eager_latency, eager_peak_mem, _ = warmup(
-                            self.model_iter_fn,
+                            model_iter_fn,
                             eager_model,
                             example_inputs,
                             "eager",
@@ -3035,7 +3119,7 @@ class BenchmarkRunner:
                         )
                         if self.args.use_warm_peak_memory:
                             _, eager_peak_mem, _ = warmup(
-                                self.model_iter_fn,
+                                model_iter_fn,
                                 eager_model,
                                 example_inputs,
                                 "eager",
@@ -3062,13 +3146,12 @@ class BenchmarkRunner:
             ):
                 optimized_model_iter_fn = optimize_ctx
             else:
-                if getattr(self, "hf_llm", False):
-                    # If it's an llm, we want to optimize model.forward, and use
-                    # the generate function
+                if workload.compile_forward:
+                    # Keep generation and cache setup outside the compiled forward.
                     model.forward = optimize_ctx(model.forward)
-                    optimized_model_iter_fn = self.model_iter_fn
+                    optimized_model_iter_fn = model_iter_fn
                 else:
-                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                    optimized_model_iter_fn = optimize_ctx(model_iter_fn)
 
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
@@ -3151,12 +3234,16 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
-            experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
+            experiment_kwargs["compile_forward"] = workload.compile_forward
+            experiment_kwargs["report_eager_latency"] = workload.report_eager_latency
+            if setup_fn is not None:
+                experiment_kwargs["setup_fn"] = setup_fn
+            request_tokens = workload.request_tokens
+            if request_tokens is not None:
+                experiment_kwargs["request_tokens"] = request_tokens
 
             results.append(
-                experiment(
-                    self.model_iter_fn, model, example_inputs, **experiment_kwargs
-                )
+                experiment(model_iter_fn, model, example_inputs, **experiment_kwargs)
             )
             return " ".join(map(str, results))
 
@@ -3407,6 +3494,17 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--batch-size", "--batch_size", type=int, help="batch size for benchmarking"
+    )
+    parser.add_argument(
+        "--hf-inference-mode",
+        choices=("generate", "prefill"),
+        default="generate",
+        help="Inference workload for registered Hugging Face generation models.",
+    )
+    parser.add_argument(
+        "--prompt-length",
+        type=int,
+        help="Uniform prompt length for Hugging Face prefill benchmarks (default: 1000).",
     )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
@@ -3941,6 +4039,12 @@ def parse_args(args=None):
         "--inference", action="store_true", help="Performs inference"
     )
     parsed = parser.parse_args(args)
+    if parsed.inductor:
+        parsed.backend = "inductor"
+    elif parsed.optimus:
+        parsed.backend = "optimus"
+    elif parsed.quantization:
+        parsed.backend = "torchao"
     if parsed.batch_invariant and not parsed.accuracy:
         parser.error("--batch-invariant requires --accuracy")
     if parsed.dashboard and parsed.performance:
@@ -3994,6 +4098,7 @@ def main(runner, original_dir=None, args=None):
     if original_dir:
         os.chdir(original_dir)
     args = parse_args() if not args else parse_args(args)
+    runner.validate_args(args)
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
 
@@ -4285,20 +4390,6 @@ def run(runner, args, original_dir=None):
     args.exclude = args.exclude or [r"^$"]
     args.exclude_exact = args.exclude_exact or []
 
-    if args.inductor:
-        if args.backend is not None:
-            raise AssertionError(f"--inductor conflicts with --backend={args.backend}")
-        args.backend = "inductor"
-    if args.optimus:
-        if args.backend is not None:
-            raise AssertionError(f"--optimus conflicts with --backend={args.backend}")
-        args.backend = "optimus"
-    if args.quantization:
-        if args.backend is not None:
-            raise AssertionError(
-                f"--quantization conflicts with --backend={args.backend}"
-            )
-        args.backend = "torchao"
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
@@ -4701,6 +4792,9 @@ def run(runner, args, original_dir=None):
 
     if args.output:
         output_filename = args.output
+    elif args.hf_inference_mode == "prefill" and output_filename:
+        stem, ext = os.path.splitext(output_filename)
+        output_filename = f"{stem}_prefill{ext}"
 
     if output_filename:
         if args.output_directory:
@@ -4743,6 +4837,8 @@ def run(runner, args, original_dir=None):
                 args.profiler_trace_name = "inductor"
             else:
                 args.profiler_trace_name = "profile"
+            if args.hf_inference_mode == "prefill":
+                args.profiler_trace_name += "_prefill"
         else:
             args.profiler_trace_name = args.profiler_trace_name
 
@@ -4930,8 +5026,14 @@ def run(runner, args, original_dir=None):
                     )
 
             if args.log_operator_inputs:
+                workload = runner.get_workload(example_inputs)
                 log_operator_inputs(
-                    model, example_inputs, runner.model_iter_fn, name, args
+                    model,
+                    example_inputs,
+                    workload.iter_fn,
+                    name,
+                    args,
+                    setup_fn=workload.setup_fn,
                 )
                 continue
 
@@ -5011,9 +5113,13 @@ def run(runner, args, original_dir=None):
         print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
 
 
-def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
+def log_operator_inputs(
+    model, example_inputs, model_iter_fn, name, args, *, setup_fn=None
+):
     mode = "training" if args.training else "eval"
-    output = os.path.join(os.path.dirname(args.output), f"{name}_{mode}.txt")
+    output = os.path.join(
+        os.path.dirname(args.output), f"{artifact_safe_name(name)}_{mode}.txt"
+    )
 
     # TODO - add option for coalescing inputs over multiple runs
     if os.path.exists(output):
@@ -5034,12 +5140,16 @@ def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
         example_inputs_fake = copy.deepcopy(example_inputs)
     try:
         with fake_tensor_mode, operator_mode:
+            if setup_fn is not None:
+                setup_fn(model_fake, example_inputs_fake)
             model_iter_fn(model_fake, example_inputs_fake, collect_outputs=False)
     except Exception as e:
         print(f"{name} failed to run with fake tensors, trying real. Exception: {e}")
         operator_mode = OperatorInputsMode()
         try:
             with operator_mode:
+                if setup_fn is not None:
+                    setup_fn(model, example_inputs)
                 model_iter_fn(model, example_inputs, collect_outputs=False)
         except Exception as e2:
             print(f"{name} failed to run with real. Exception: {e2}")
