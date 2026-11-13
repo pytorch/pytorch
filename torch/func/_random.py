@@ -655,7 +655,7 @@ def bits(
 
 
 def dropout(
-    key: torch.Tensor, input: torch.Tensor, p: float = 0.5, training: bool = True
+    key: torch.Tensor, input: torch.Tensor, *, p: float = 0.5, training: bool = True
 ) -> torch.Tensor:
     r"""Randomly zero elements of ``input`` with probability ``p`` using a PRNG key.
 
