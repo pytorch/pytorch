@@ -6996,6 +6996,110 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
                 torch.clamp_min(x, info.max + 1)
 
+    @skipIfTorchInductor(
+        "Inductor does not lower zero-dimensional Tensor bound range checks; "
+        "https://github.com/pytorch/pytorch/issues/198071"
+    )
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32)
+    def test_clamp_zero_dim_tensor_out_of_range_bounds(self, device, dtype):
+        info = torch.iinfo(dtype)
+        x = torch.tensor([info.min, 0, info.max], device=device, dtype=dtype)
+        low = torch.tensor(info.min - 1, dtype=torch.int64, device=device)
+        high = torch.tensor(info.max + 1, dtype=torch.int64, device=device)
+
+        self.assertEqual(torch.clamp(x, min=low), x)
+        self.assertEqual(torch.clamp_min(x, low), x)
+        self.assertEqual(torch.clamp_max(x, high), x)
+        self.assertEqual(torch.clamp(x, max=high), x)
+        self.assertEqual(torch.clamp(x, min=low, max=high), x)
+        self.assertEqual(torch.clip(x, min=low, max=high), x)
+        self.assertEqual(torch.clamp(x, min=low, max=torch.zeros_like(x)), x.clamp(max=0))
+        self.assertEqual(torch.clamp(x, min=torch.zeros_like(x), max=high), x.clamp(min=0))
+        with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+            torch.clamp(x, min=high)
+        with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+            torch.clamp_min(x, high)
+        with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+            torch.clamp(x, max=low)
+        with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+            torch.clamp_max(x, low)
+
+    @skipIfTorchInductor(
+        "Inductor clamp lowering wraps out-of-range integral bounds; "
+        "https://github.com/pytorch/pytorch/issues/198071"
+    )
+    @parametrize("op", ["clamp", "clip", "clamp_min", "clamp_max"])
+    @parametrize("mode", ["functional", "out", "inplace"])
+    def test_clamp_zero_dim_tensor_bound_variants(self, device, op, mode):
+        x = torch.tensor([-100, 0, 100], dtype=torch.int8, device=device)
+        is_lower = op != "clamp_max"
+        bound = torch.tensor(-1000 if is_lower else 1000, device=device)
+        kwargs = {"min" if is_lower else "max": bound}
+        if mode == "inplace":
+            actual = getattr(x.clone(), op + "_")(**kwargs)
+        elif mode == "out":
+            out = torch.empty_like(x)
+            actual = getattr(torch, op)(x, out=out, **kwargs)
+            self.assertIs(actual, out)
+        else:
+            actual = getattr(torch, op)(x, **kwargs)
+        self.assertEqual(actual, x)
+
+    def test_clamp_zero_dim_tensor_bound_promotion(self, device):
+        x = torch.tensor([-100, 100], dtype=torch.int8, device=device)
+        self.assertEqual(
+            torch.clamp_min(x, torch.tensor(1000., device=device)),
+            torch.full((2,), 1000., device=device),
+        )
+        self.assertEqual(
+            torch.clamp(x, min=torch.tensor(1000, device=device),
+                        max=torch.tensor([2000, 2000], device=device)),
+            torch.tensor([1000, 1000], device=device),
+        )
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA graphs required")
+    @dtypes(torch.float16, torch.float32)
+    def test_clamp_zero_dim_tensor_bound_cuda_graph(self, device, dtype):
+        x = torch.tensor([-1., 1.], device=device)
+        bound = torch.tensor(0., dtype=dtype, device=device)
+        expected = torch.clamp_min(x, bound)
+        graph = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            torch.clamp_min(x, bound)
+            with torch.cuda.graph(graph):
+                actual = torch.clamp_min(x, bound)
+        torch.cuda.current_stream().wait_stream(stream)
+        graph.replay()
+        self.assertEqual(actual, expected)
+
+    def test_clamp_zero_dim_tensor_bound_gradient(self, device):
+        x = torch.tensor([-1., 1.], device=device, requires_grad=True)
+        bound = torch.tensor(0., dtype=torch.float64, device=device, requires_grad=True)
+        torch.clamp_min(x, bound).sum().backward()
+        self.assertEqual(x.grad, torch.tensor([0., 1.], device=device))
+        self.assertEqual(bound.grad, torch.ones((), dtype=torch.float64, device=device))
+
+    def test_clamp_zero_dim_integer_bound_half_overflow(self, device):
+        x = torch.ones(2, dtype=torch.float16, device=device)
+        bound = torch.tensor(100000, device=device)
+        with self.assertRaisesRegex(RuntimeError, "overflow"):
+            torch.clamp_min(x, bound)
+        with self.assertRaisesRegex(RuntimeError, "overflow"):
+            torch.clamp_max(x, -bound)
+
+    @dtypes(torch.float16, torch.float32)
+    def test_clamp_zero_dim_tensor_floating_bound_overflow(self, device, dtype):
+        x = torch.ones(2, dtype=dtype, device=device)
+        bound = torch.tensor(float(torch.finfo(dtype).max) * 2,
+                             dtype=torch.float64, device=device)
+        with self.assertRaisesRegex(RuntimeError, "overflow"):
+            torch.clamp_min(x, bound)
+        with self.assertRaisesRegex(RuntimeError, "overflow"):
+            torch.clamp_max(x, -bound)
+
     # FIXME: move to indexing test suite
     def test_index_add(self, device):
         for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
