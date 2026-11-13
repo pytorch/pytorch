@@ -266,7 +266,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
                 sel_bin = 0
                 elems_above = 0
 
-                for b in range_constexpr(_N_HIST_BINS):
+                for b in range(_N_HIST_BINS):
                     bin_idx = _N_HIST_BINS - 1 - b
                     count = s_hist[bin_idx]
                     if found == 0:
