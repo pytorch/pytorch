@@ -2260,7 +2260,7 @@ def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     base = get_type_mro_no_user_code(klass)[idx]
     if not idx and base is klass:
         return klass_source
-    return GetItemSource(TypeMROSource(klass_source), idx)
+    return GetItemSource(TypeMROSource(klass_source, raw=True), idx)
 
 
 def guard_mro_absent(
@@ -2269,19 +2269,21 @@ def guard_mro_absent(
     klass_source: Source,
     name: str,
     stop: int,
+    *,
+    raw: bool = False,
 ) -> None:
     """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[:stop]``."""
     guards_context = tx.output.tracing_context.guards_context
     if guards_context.skip_install or is_from_skip_guard_source(klass_source):
         return
     for idx in range(stop):
-        absent_key = (id(klass), idx, name)
+        absent_key = (id(klass), idx, name, raw)
         if absent_key in tx.output.guarded_mro_absent_keys:
             continue
         install_guard(
-            TypeDictSource(_mro_entry_source(klass, klass_source, idx)).make_guard(
-                partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
-            )
+            TypeDictSource(
+                _mro_entry_source(klass, klass_source, idx), raw=raw
+            ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
         )
         tx.output.guarded_mro_absent_keys.add(absent_key)
 
@@ -2323,7 +2325,7 @@ def mro_attr_source(
 
         # Guard the classes we walked past, so the owner stays the owner if one
         # of them later gains *name*.
-        guard_mro_absent(tx, klass, klass_source, name, idx)
+        guard_mro_absent(tx, klass, klass_source, name, idx, raw=True)
 
         # Reuse the source when the same owner is reached again for the same
         # name, even from a differently-sourced object, so it does not collect
@@ -2336,7 +2338,7 @@ def mro_attr_source(
             return cached
 
         source = DictGetItemSource(
-            TypeDictSource(_mro_entry_source(klass, klass_source, idx)), name
+            TypeDictSource(_mro_entry_source(klass, klass_source, idx), raw=True), name
         )
         tx.output.mro_source_cache[cache_key] = source
         return source
