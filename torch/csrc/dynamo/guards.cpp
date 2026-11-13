@@ -2994,9 +2994,8 @@ class AUTOGRAD_SAVED_TENSORS_HOOKS : public LeafGuard {
  * second invocation, it compares the saved value with the new value and
  * returns True if they do not alias.
  *
- * We have to be careful about resetting in case the other guards fail and we
- * have some state in the relational guard. This is done by virtual method
- * reset_state(). This is called by the RootGuardManager before it exits.
+ * RootGuardManager calls reset_state() before every exit, including success,
+ * rejection and exceptions, so a later check starts with no retained state.
  *
  */
 class RelationalGuard : public LeafGuard {
@@ -3010,14 +3009,90 @@ class RelationalGuard : public LeafGuard {
             std::move(verbose_code_parts),
             std::move(user_stack)) {}
 
-  // reset the relational guard state on guard failure. This is called by the
-  // guard manager.
+  // Reset per-check state after success, rejection, or an exception.
   virtual void reset_state() = 0;
+
+  // Stateful guards can opt into clone-local state without changing explicit
+  // filters.
+  virtual std::shared_ptr<RelationalGuard> clone(RootGuardManager* root) {
+    return nullptr;
+  }
+
+  virtual const void* group_identity() const {
+    return this;
+  }
 };
 
-/**
- * Checks that object x is object y.
- */
+// Shared state for one ordered receiver-alias pattern.
+struct ObjectAliasPatternState {
+  explicit ObjectAliasPatternState(size_t size) : representatives(size) {
+    classes.reserve(size);
+  }
+
+  bool check(PyObject* value, size_t alias) {
+    dirty = true;
+    if (representatives[alias]) {
+      return representatives[alias].ptr() == value;
+    }
+    if (!classes.emplace(value, alias).second) {
+      return false;
+    }
+    // Accessors can return temporary objects; keep them alive until reset.
+    representatives[alias] = py::reinterpret_borrow<py::object>(value);
+    return true;
+  }
+
+  void reset() {
+    if (!dirty) {
+      return;
+    }
+    classes.clear();
+    for (auto& value : representatives) {
+      value = py::object();
+    }
+    dirty = false;
+  }
+
+  std::vector<py::object> representatives;
+  ska::flat_hash_map<PyObject*, size_t> classes;
+  bool dirty = false;
+};
+
+class OBJECT_ALIAS_PATTERN : public RelationalGuard {
+ public:
+  OBJECT_ALIAS_PATTERN(
+      RootGuardManager* root,
+      std::shared_ptr<ObjectAliasPatternState> state,
+      size_t alias,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _state(std::move(state)),
+        _alias(alias) {}
+
+  bool check_nopybind(PyObject* value) override {
+    return _state->check(value, _alias);
+  }
+
+  void reset_state() final {
+    _state->reset();
+  }
+
+  std::shared_ptr<RelationalGuard> clone(RootGuardManager* root) override;
+
+  const void* group_identity() const override {
+    return _state.get();
+  }
+
+ private:
+  std::shared_ptr<ObjectAliasPatternState> _state;
+  size_t _alias;
+};
+
+/** Checks that object x is object y. */
 class OBJECT_ALIASING : public RelationalGuard {
  public:
   OBJECT_ALIASING(
@@ -3129,6 +3204,10 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
     _checker->reset(_overlapping);
   }
 
+  const void* group_identity() const override {
+    return _checker.get();
+  }
+
  private:
   // Flag that indicates which kind of tensor this guard is collecting:
   //   1. Possibly overlapping tensors; or
@@ -3218,6 +3297,10 @@ class STORAGE_OVERLAP_PARTITION : public RelationalGuard {
 
   void reset_state() final {
     _checker->reset(_input_index);
+  }
+
+  const void* group_identity() const override {
+    return _checker.get();
   }
 
  private:
@@ -3668,6 +3751,7 @@ GuardManager* clone_guard_manager(
     GuardManager* from,
     RootGuardManager* root,
     const py::function& clone_filter_fn);
+
 void add_relational_guard_resetter_to_cloned_root(
     RootGuardManager* root,
     std::shared_ptr<RelationalGuard> guard);
@@ -4047,12 +4131,18 @@ class GuardManager {
       GuardManager* cloned_mgr,
       const py::function& clone_filter_fn) {
     for (const auto& guard : _leaf_guards) {
-      cloned_mgr->_leaf_guards.emplace_back(guard);
-      if (std::dynamic_pointer_cast<ORDERED_DICT_ORDER_MATCH>(guard)) {
-        cloned_mgr->add_dict_tag_replay_guard(guard);
+      auto cloned_guard = guard;
+      if (auto relational = std::dynamic_pointer_cast<RelationalGuard>(guard)) {
+        if (auto copy = relational->clone(cloned_root)) {
+          cloned_guard = std::move(copy);
+        }
+      }
+      cloned_mgr->_leaf_guards.emplace_back(cloned_guard);
+      if (std::dynamic_pointer_cast<ORDERED_DICT_ORDER_MATCH>(cloned_guard)) {
+        cloned_mgr->add_dict_tag_replay_guard(cloned_guard);
       }
       if (std::shared_ptr<RelationalGuard> relational_guard =
-              std::dynamic_pointer_cast<RelationalGuard>(guard)) {
+              std::dynamic_pointer_cast<RelationalGuard>(cloned_guard)) {
         // Cloned roots do not own the dedicated NO_TENSOR_ALIASING replay
         // guard. Preserve only the classification needed to prevent ordinary
         // dict-tag skips from omitting an unoptimized relational guard.
@@ -4822,17 +4912,16 @@ GuardAccessor::GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
  As the ownership goes, the model is exactly same as before. We have unique_ptr
  for GuardAccessor and GuardManagers. So, any state required for the accessors
  and managers is copied over using constructors and clone_visitor functions.
- The main thing to notice is leaf guards. The leaf guards are represented using
- shared_ptr, and they are shared (not cloned) with the cloned managers.
-
- So for leaf guard state to be released, both the original and cloned managers
- have to be destructed.
+ Leaf guards normally share ownership with cloned managers. A relational guard
+ may override clone() to keep its mutable state local to the cloned root; all
+ participants of that guard share the same new state. The root's temporary
+ construction map is cleared before the clone is returned.
 */
 
 /**
  * RootGuardManager is the root of the guard tree. This is primarily
  * constructed to hold the relational guard pointers so that we can reset the
- * state of those guards on guard failure. All the other important
+ * state of those guards after each check. All the other important
  * implementation is in GuardManager class.
  */
 
@@ -4858,6 +4947,17 @@ class RootGuardManager : public GuardManager {
 
   std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard() {
     return _no_tensor_aliasing_guard;
+  }
+
+  template <typename State, typename Factory>
+  std::shared_ptr<State> clone_relational_state(
+      const std::shared_ptr<State>& state,
+      Factory factory) {
+    auto [it, inserted] = _relational_state_clones.try_emplace(state.get());
+    if (inserted) {
+      it->second = factory();
+    }
+    return std::static_pointer_cast<State>(it->second);
   }
 
   // Adds the relational guard resetter
@@ -4886,6 +4986,9 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
+    auto reset_relational_guards =
+        c10::make_scope_exit([this] { _reset_relational_guard_state(); });
+
     // Clean up dict pointer recording for tag safe roots
     reset_dict_tag_recording_variables();
 
@@ -4897,7 +5000,6 @@ class RootGuardManager : public GuardManager {
     CurrentDeviceIndexCacheScope current_device_index_cache_scope;
 
     if (!GuardManager::check_leaf_guards_nopybind(value)) {
-      _reset_relational_guard_state();
       return false;
     }
 
@@ -4917,19 +5019,16 @@ class RootGuardManager : public GuardManager {
     });
 
     if (!GuardManager::check_accessors_nopybind(value)) {
-      _reset_relational_guard_state();
       return false;
     }
 
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
-        _reset_relational_guard_state();
         return false;
       }
     }
 
-    _reset_relational_guard_state();
     return true;
   }
 
@@ -4951,6 +5050,9 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
+    auto reset_relational_guards =
+        c10::make_scope_exit([this] { _reset_relational_guard_state(); });
+
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
       LocalState state;
@@ -4968,7 +5070,6 @@ class RootGuardManager : public GuardManager {
             value, num_guards_executed);
 
     if (!debug_info_leaf.result) {
-      _reset_relational_guard_state();
       return debug_info_leaf;
     }
 
@@ -4985,7 +5086,6 @@ class RootGuardManager : public GuardManager {
             value, num_guards_executed);
 
     if (!debug_info_accessors.result) {
-      _reset_relational_guard_state();
       return debug_info_accessors;
     }
 
@@ -4995,7 +5095,6 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
-        _reset_relational_guard_state();
         return GuardDebugInfo(
             false,
             tmp_debug_info.verbose_code_parts,
@@ -5003,7 +5102,6 @@ class RootGuardManager : public GuardManager {
             tmp_debug_info.user_stack);
       }
     }
-    _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
 
@@ -5032,6 +5130,10 @@ class RootGuardManager : public GuardManager {
     cloned_root->_local_state = _local_state;
     cloned_root->_init_local_state = _init_local_state;
     cloned_root->_compile_on_one_rank = _compile_on_one_rank;
+    auto clear_clone_states =
+        c10::make_scope_exit([cloned = cloned_root.get()] {
+          cloned->_relational_state_clones.clear();
+        });
     clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
@@ -5059,7 +5161,7 @@ class RootGuardManager : public GuardManager {
   // }
 
  private:
-  // Reset the state of all the relational guards on failure.
+  // Reset the state of all relational guards after every exit.
   void _reset_relational_guard_state() {
     for (auto& guard : _relational_guard_resetters) {
       guard->reset_state();
@@ -5142,10 +5244,12 @@ class RootGuardManager : public GuardManager {
   // See set_compile_on_one_rank.
   bool _compile_on_one_rank = false;
 
-  // All the relational guards under this guard manager. We only use these
-  // when the guard evaluates to False. This ensures that guard state is reset
-  // on guard failure so that next invocation is clean.
+  // All relational guards under this manager reset after every check so the
+  // next invocation starts without receivers from the preceding invocation.
   std::vector<std::shared_ptr<RelationalGuard>> _relational_guard_resetters;
+  // Used only while constructing one clone, never during guard evaluation.
+  std::unordered_map<const void*, std::shared_ptr<void>>
+      _relational_state_clones;
 
   // These guards are lambda guards, i.e., the guards that lack C++
   // implementation. For simplicity, we add these guards at the root. They
@@ -5535,6 +5639,21 @@ GuardManager* clone_guard_manager(
     RootGuardManager* cloned_root,
     const py::function& clone_filter_fn) {
   return from->clone(cloned_root, clone_filter_fn);
+}
+
+std::shared_ptr<RelationalGuard> OBJECT_ALIAS_PATTERN::clone(
+    RootGuardManager* root) {
+  return std::make_shared<OBJECT_ALIAS_PATTERN>(
+      root,
+      root->clone_relational_state(
+          _state,
+          [&] {
+            return std::make_shared<ObjectAliasPatternState>(
+                _state->representatives.size());
+          }),
+      _alias,
+      verbose_code_parts(),
+      get_user_stack());
 }
 
 void add_relational_guard_resetter_to_cloned_root(
@@ -7875,6 +7994,33 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   py::object _accessor_fn;
 };
 
+void install_object_alias_pattern_guard(
+    const std::vector<GuardManager*>& managers,
+    const std::vector<size_t>& aliases,
+    py::object verbose_code_parts,
+    py::object user_stack) {
+  TORCH_CHECK(
+      !managers.empty() && managers.size() == aliases.size(),
+      "Alias guard managers and labels must be nonempty and have the same length");
+  auto* root = managers[0]->get_root();
+  // Validate the complete pattern before attaching any participant.
+  for (size_t i = 0; i < managers.size(); ++i) {
+    TORCH_CHECK(
+        managers[i]->get_root() == root,
+        "Alias guard managers must share a root");
+    TORCH_CHECK(
+        aliases[i] <= i && aliases[aliases[i]] == aliases[i],
+        "Alias guard labels must identify each class's first participant");
+  }
+  auto state = std::make_shared<ObjectAliasPatternState>(managers.size());
+  for (size_t i = 0; i < managers.size(); ++i) {
+    auto guard = std::make_shared<OBJECT_ALIAS_PATTERN>(
+        root, state, aliases[i], verbose_code_parts, user_stack);
+    root->add_relational_guard_resetter(guard);
+    managers[i]->add_permitted_leaf_guard(std::move(guard));
+  }
+}
+
 void install_object_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -8499,7 +8645,10 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__call__", &TENSOR_MATCH::check);
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<RelationalGuard, LeafGuard, std::shared_ptr<RelationalGuard>>(
-      py_m, "RelationalGuard");
+      py_m, "RelationalGuard")
+      .def("get_group_id", [](const RelationalGuard& guard) {
+        return reinterpret_cast<uintptr_t>(guard.group_identity());
+      });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       OBJECT_ALIASING,
@@ -8515,6 +8664,12 @@ PyObject* torch_c_dynamo_guards_init() {
       STORAGE_OVERLAPPING,
       RelationalGuard,
       std::shared_ptr<STORAGE_OVERLAPPING>>(py_m, "STORAGE_OVERLAPPING");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      STORAGE_OVERLAP_PARTITION,
+      RelationalGuard,
+      std::shared_ptr<STORAGE_OVERLAP_PARTITION>>(
+      py_m, "STORAGE_OVERLAP_PARTITION");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       SYMBOLIC_SHAPE_GUARD,
@@ -9646,6 +9801,12 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("guard_manager_enum"),
           py::return_value_policy::reference);
 
+  py::class_<
+      OBJECT_ALIAS_PATTERN,
+      RelationalGuard,
+      std::shared_ptr<OBJECT_ALIAS_PATTERN>>(py_m, "OBJECT_ALIAS_PATTERN");
+  py_m.def(
+      "install_object_alias_pattern_guard", install_object_alias_pattern_guard);
   py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
