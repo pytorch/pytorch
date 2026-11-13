@@ -422,15 +422,13 @@ def _check_symint(
             min_val, max_val = _convert_range_to_int(
                 range_constraints[symint.node.expr]
             )
-            # NOTE: we allow dimensions to be 0/1 at runtime
-            if min_val > 2:
-                if arg < min_val:
-                    path = get_keystr(keypath)
-                    if i is not None:
-                        path += f".shape[{i}]"
-                    raise RuntimeError(
-                        f"Expected input at {path} to be >= {min_val}, but got {arg}",
-                    )
+            if arg < min_val:
+                path = get_keystr(keypath)
+                if i is not None:
+                    path += f".shape[{i}]"
+                raise RuntimeError(
+                    f"Expected input at {path} to be >= {min_val}, but got {arg}",
+                )
             if max_val < math.inf:
                 if arg > max_val:
                     path = get_keystr(keypath)
