@@ -6916,9 +6916,9 @@
   variants: method, function
   dispatch:
     CPU, MPS: zero_
-    XPU: zero_xpu_
     CUDA: zero_cuda_
     Meta: zero_meta_
+    XPU: zero_xpu_
     SparseCPU, SparseCUDA, SparseMPS, SparseMeta, SparseXPU: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
