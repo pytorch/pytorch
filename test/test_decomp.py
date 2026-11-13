@@ -773,6 +773,69 @@ class TestDecomp(TestCase):
             # they're checking aten decomps at the torch_dispatch level
             self.assertEqual(decomp_out, non_decomp_out)
 
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.int64, torch.int8, torch.uint8)
+    @parametrize("n_dim", [2, 3])
+    @parametrize("batched", [False, True])
+    @parametrize("pattern", ["minimum", "mixed", "finite"])
+    @parametrize("kernel, stride, padding, dilation, ceil_mode", [
+        (3, 1, 1, 1, False),
+        (3, 2, 1, 1, True),
+        (2, 2, 1, 2, True),
+        (3, 2, 0, 1, True),
+        (3, 1, 0, 1, False),
+    ])
+    def test_max_pool_padding_indices(
+        self, device, dtype, n_dim, batched, pattern, kernel, stride, padding, dilation, ceil_mode
+    ):
+        minimum = float("-inf") if dtype.is_floating_point else torch.iinfo(dtype).min
+        fill = 3 if pattern == "finite" else minimum
+        shape = ((2, 2) if batched else (2,)) + (4,) * n_dim
+        inp = torch.full(shape, fill, dtype=dtype, device=device)
+        if pattern == "mixed":
+            inp[(...,) + (2,) * n_dim] = 7
+        inp.requires_grad_(dtype.is_floating_point)
+        decomposition = getattr(torch._decomp.decompositions, f"max_pool{n_dim}d_with_indices")
+        values, indices = decomposition(
+            inp, [kernel] * n_dim, [stride] * n_dim, [padding] * n_dim, [dilation] * n_dim, ceil_mode,
+        )
+        expected_values, expected_indices = getattr(torch.nn.functional, f"max_pool{n_dim}d")(
+            inp, kernel, stride, padding, dilation, ceil_mode, return_indices=True,
+        )
+        self.assertEqual(values, expected_values)
+        self.assertEqual(indices, expected_indices)
+        self.assertTrue((indices >= 0).all())
+        self.assertTrue((indices < 4 ** n_dim).all())
+        if dtype.is_floating_point:
+            actual_grad = torch.autograd.grad(values.sum(), inp)[0]
+            expected_grad = torch.autograd.grad(expected_values.sum(), inp)[0]
+            self.assertEqual(actual_grad, expected_grad)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("n_dim", [2, 3])
+    def test_max_pool_padding_nan(self, device, dtype, n_dim):
+        inp = torch.full((1, 1) + (4,) * n_dim, float("-inf"), dtype=dtype, device=device)
+        inp[(...,) + (2,) * n_dim] = float("nan")
+        actual = getattr(torch._decomp.decompositions, f"max_pool{n_dim}d_with_indices")(
+            inp, [3] * n_dim, [1] * n_dim, [1] * n_dim,
+        )
+        expected = getattr(torch.nn.functional, f"max_pool{n_dim}d")(inp, 3, 1, 1, return_indices=True)
+        self.assertEqual(actual, expected, equal_nan=True)
+
+    @onlyCPU
+    @parametrize("n_dim", [2, 3])
+    def test_max_pool_padding_unpool(self, device, n_dim):
+        inp = torch.full((1, 1) + (3,) * n_dim, float("-inf"), device=device)
+        actual = getattr(torch._decomp.decompositions, f"max_pool{n_dim}d_with_indices")(
+            inp, [3] * n_dim, [1] * n_dim, [1] * n_dim,
+        )
+        expected = getattr(torch.nn.functional, f"max_pool{n_dim}d")(inp, 3, 1, 1, return_indices=True)
+        self.assertEqual(actual[1], expected[1])
+        unpool = getattr(torch.nn.functional, f"max_unpool{n_dim}d")
+        self.assertEqual(unpool(*actual, 3, 1, 1, output_size=inp.shape),
+                         unpool(*expected, 3, 1, 1, output_size=inp.shape))
+
     def test_batch_norm_unflatten_weight_bias(self, device):
         # https://github.com/pytorch/pytorch/issues/100970
         shape = (1, 3, 2, 2)
