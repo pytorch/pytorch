@@ -385,6 +385,7 @@ requires-python = ">=3.11"
 license = "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib"
 license-files = [
     "LICENSE",
+    "aten/src/ATen/native/mkldnn/detail/LICENSE.ideep",
     "third_party/FP16/LICENSE",
     "third_party/FXdiv/LICENSE",
     "third_party/NVTX/LICENSE.txt",

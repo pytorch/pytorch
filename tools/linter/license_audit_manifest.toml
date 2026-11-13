@@ -127,6 +127,7 @@ paths = [
 [[spdx]]
 expression = 'MIT'
 paths = [
+  'aten/src/ATen/native/mkldnn/detail/LICENSE.ideep',
   'third_party/FP16/LICENSE',
   'third_party/FXdiv/LICENSE',
   'third_party/VulkanMemoryAllocator/LICENSE.txt',
