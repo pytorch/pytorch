@@ -48,6 +48,11 @@ pub struct Options {
     pub unroll: bool,
     /// Compile the Python functions that compiled code calls.
     pub callees: bool,
+    /// Take the registered shortcuts through library code (see shortcuts.rs).
+    pub shortcuts: bool,
+    /// Time each callee both compiled and interpreted, and leave it to the
+    /// interpreter if that is where it runs faster.
+    pub demote: bool,
 }
 
 impl Default for Options {
@@ -62,12 +67,18 @@ impl Default for Options {
             inline: true,
             unroll: true,
             callees: true,
+            shortcuts: true,
+            demote: true,
         }
     }
 }
 
 pub struct BlockState {
     pub versions: Vec<Arc<BlockCode>>,
+    /// Versions that were replaced. They are kept: an activation further up
+    /// the stack may still be running one, and the block loop holds plain
+    /// pointers to the code it runs. At most `max_respecializations` exist.
+    pub retired: Vec<Arc<BlockCode>>,
     pub slots: Vec<Option<Arc<SiteSlot>>>,
     /// Why an instruction that made dispatcher calls did not become a site.
     pub reasons: Vec<Option<String>>,
@@ -105,6 +116,57 @@ impl LoadCache {
     const EMPTY: LoadCache =
         LoadCache { owner: null_mut(), version: u64::MAX, builtins_version: u64::MAX, value: null_mut() };
 }
+
+/// What the block loop needs to enter a block whose choice of code no
+/// longer depends on anything: the code (null while the block still has to
+/// be looked at), whether it is a specialized version, and how often it was
+/// entered this way. Only touched with the GIL held.
+#[derive(Clone, Copy)]
+struct Settled {
+    code: *const BlockCode,
+    specialized: bool,
+    entries: u64,
+}
+
+struct SettledBlocks {
+    blocks: Vec<std::cell::Cell<Settled>>,
+    calls: std::cell::Cell<u64>,
+    trial: std::cell::Cell<Trial>,
+}
+
+/// Whether a callee is worth running compiled is measured, not assumed: the
+/// generic tier is slower than the interpreter on plain Python, so a callee
+/// without much tensor work can lose more than it gains. After some calls to
+/// warm up, calls alternate between the compiled form and the interpreter
+/// and are timed, and the faster of the two (by their best times) is what
+/// the callee is from then on. A sample only counts if no other callee was
+/// still being measured during it, so callees settle from the leaves up.
+#[derive(Clone, Copy)]
+struct Trial {
+    phase: u8,
+    calls: u32,
+    compiled_best: u64,
+    compiled_samples: u8,
+    interpreted_best: u64,
+    interpreted_samples: u8,
+}
+
+const TRIAL_WARMUP: u8 = 0;
+const TRIAL_SAMPLING: u8 = 1;
+const TRIAL_COMPILED: u8 = 2;
+const TRIAL_DEMOTED: u8 = 3;
+const TRIAL_WARMUP_CALLS: u32 = 12;
+const TRIAL_SAMPLES: u8 = 10;
+/// A callee whose measurement never gets quiet enough stays compiled.
+const TRIAL_MAX_CALLS: u32 = 400;
+/// How much faster the interpreter has to be: 1/32, about 3%.
+const TRIAL_MARGIN_SHIFT: u32 = 5;
+
+static TRIAL_EVENTS: AtomicU64 = AtomicU64::new(0);
+static TRIAL_DRAW: AtomicU64 = AtomicU64::new(0x9E37_79B9_7F4A_7C15);
+
+unsafe impl Send for SettledBlocks {}
+unsafe impl Sync for SettledBlocks {}
 
 /// Per-name caches; only touched with the GIL held.
 struct LoadCaches(Vec<std::cell::Cell<LoadCache>>);
@@ -152,6 +214,11 @@ pub struct Callees {
     /// made from the same code shares the entry, and its closure and
     /// defaults are read from it at each call.
     entries: Shared<HashMap<(usize, usize), Callee>>,
+    /// What a call finds without hashing: per slot, the code object and
+    /// globals of the last function looked up there, and its compiled form
+    /// (INTERPRETED if the frontend turned it down). The entries own what
+    /// the pointers refer to.
+    recent: Vec<std::cell::Cell<(usize, usize, *const Compiled)>>,
     /// Code objects the frontend does not support, by address: their
     /// functions run in the interpreter.
     interpreted: Shared<HashMap<usize, PyObj>>,
@@ -162,12 +229,16 @@ unsafe impl Send for Callees {}
 unsafe impl Sync for Callees {}
 
 const MAX_CALLEES: usize = 4096;
+const RECENT_CALLEES: usize = 256;
+/// Stands for "runs in the interpreter" in the recent-callee slots.
+const INTERPRETED: *const Compiled = 1 as *const Compiled;
 
 impl Callees {
     pub fn new(table: OpcodeTable) -> Callees {
         Callees {
             table,
             entries: Shared::new(HashMap::new()),
+            recent: (0..RECENT_CALLEES).map(|_| std::cell::Cell::new((0, 0, std::ptr::null()))).collect(),
             interpreted: Shared::new(HashMap::new()),
             call_name: unsafe {
                 PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__call__".as_ptr()))
@@ -197,12 +268,82 @@ impl Callees {
         (compiled, interpreted)
     }
 
+    /// Qualified names of the compiled functions that were measured to run
+    /// faster in the interpreter and were left to it.
+    pub fn demoted(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .entries
+            .borrow()
+            .values()
+            .filter(|c| c.compiled.settled.trial.get().phase == TRIAL_DEMOTED)
+            .map(|c| unsafe {
+                let name = ffi::PyObject_GetAttrString(c.code.as_ptr(), c"co_qualname".as_ptr());
+                if name.is_null() {
+                    ffi::PyErr_Clear();
+                    return "?".to_string();
+                }
+                let text = pyffi::str_to_string(name);
+                ffi::Py_DECREF(name);
+                text
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
     /// Drops everything compiled so far, which also breaks the reference
     /// cycle between this table and what it compiled.
     pub fn clear(&self) {
+        for slot in &self.recent {
+            slot.set((0, 0, std::ptr::null()));
+        }
         let dropped = std::mem::take(&mut *self.entries.borrow_mut());
         drop(dropped);
         self.interpreted.borrow_mut().clear();
+    }
+}
+
+/// The positional arguments of a call, wherever the caller has them: the
+/// object a method is bound to, if there is one, and then `n` values.
+#[derive(Clone, Copy)]
+struct Args {
+    receiver: Obj,
+    items: *const Obj,
+    n: usize,
+}
+
+impl Args {
+    unsafe fn tuple(receiver: Obj, tuple: Obj) -> Args {
+        let items = std::ptr::addr_of!((*(tuple as *mut ffi::PyTupleObject)).ob_item) as *const Obj;
+        Args { receiver, items, n: ffi::PyTuple_GET_SIZE(tuple) as usize }
+    }
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.n + !self.receiver.is_null() as usize
+    }
+
+    #[inline(always)]
+    unsafe fn get(&self, i: usize) -> Obj {
+        if self.receiver.is_null() {
+            *self.items.add(i)
+        } else if i == 0 {
+            self.receiver
+        } else {
+            *self.items.add(i - 1)
+        }
+    }
+
+    /// A new tuple of the arguments from index `from` on.
+    unsafe fn slice(&self, from: usize) -> Obj {
+        let n = self.len();
+        let tuple = ffi::PyTuple_New(n.saturating_sub(from) as isize);
+        if !tuple.is_null() {
+            for i in from..n {
+                ffi::PyTuple_SET_ITEM(tuple, (i - from) as isize, new_ref(self.get(i)));
+            }
+        }
+        tuple
     }
 }
 
@@ -590,6 +731,7 @@ pub struct Compiled {
     pub func: Function,
     pub analysis: Analysis,
     pub generic: Vec<Arc<BlockCode>>,
+    settled: SettledBlocks,
     pub state: Shared<State>,
     pub options: Options,
     pub pipeline: Arc<Pipeline>,
@@ -801,6 +943,7 @@ impl Compiled {
             .iter()
             .map(|block| BlockState {
                 versions: Vec::new(),
+                retired: Vec::new(),
                 slots: vec![None; block.insts.len()],
                 reasons: vec![None; block.insts.len()],
                 capture_attempts: vec![0; block.insts.len()],
@@ -857,6 +1000,18 @@ impl Compiled {
                 .collect(),
             func,
             analysis,
+            settled: SettledBlocks {
+                blocks: (0..generic.len()).map(|_| std::cell::Cell::new(Settled { code: std::ptr::null(), specialized: false, entries: 0 })).collect(),
+                calls: std::cell::Cell::new(0),
+                trial: std::cell::Cell::new(Trial {
+                    phase: TRIAL_WARMUP,
+                    calls: 0,
+                    compiled_best: u64::MAX,
+                    compiled_samples: 0,
+                    interpreted_best: u64::MAX,
+                    interpreted_samples: 0,
+                }),
+            },
             generic,
             state: Shared::new(state),
             options,
@@ -871,17 +1026,17 @@ impl Compiled {
     // Calling convention
     // ------------------------------------------------------------------
 
-    unsafe fn bind_args(&self, regs: &mut [Obj], function: Obj, args: Obj, kwargs: Obj) -> Result<(), ()> {
+    unsafe fn bind_args(&self, regs: &mut [Obj], function: Obj, args: &Args, kwargs: Obj) -> Result<(), ()> {
         let f = &self.func;
-        let nargs = ffi::PyTuple_GET_SIZE(args) as usize;
+        let nargs = args.len();
         let argcount = f.argcount;
         let nkw = if kwargs.is_null() { 0 } else { ffi::PyDict_Size(kwargs) as usize };
         for i in 0..nargs.min(argcount) {
-            regs[f.params[i] as usize] = new_ref(ffi::PyTuple_GET_ITEM(args, i as isize));
+            regs[f.params[i] as usize] = new_ref(args.get(i));
         }
         let mut next = argcount + f.kwonlyargcount;
         if f.has_varargs {
-            let rest = ffi::PyTuple_GetSlice(args, argcount.min(nargs) as isize, nargs as isize);
+            let rest = args.slice(argcount.min(nargs));
             if rest.is_null() {
                 return Err(());
             }
@@ -1028,26 +1183,37 @@ impl Compiled {
     /// `args` is a tuple, `kwargs` a dict or null. Returns a new reference,
     /// or null with a Python error set.
     pub unsafe fn call(&self, function: Obj, args: Obj, kwargs: Obj) -> Obj {
-        // A compiled function counts against the limit on Python calls,
-        // like the function it was compiled from. Unlike a Python call it
-        // also uses native stack, about 2 kB a level, and the limit on C
-        // calls that Py_EnterRecursiveCall enforces (10000) is beyond what
-        // the stack holds of that: so the stack itself is checked too.
-        let depth = DEPTH.with(|d| {
-            d.set(d.get() + 1);
-            d.get()
-        });
-        // Where compiled functions have frames, pushing one counts the call
-        // in the interpreter's own counter.
-        let too_deep = !capi::has_frames() && depth > ffi::Py_GetRecursionLimit() as usize;
-        let here = std::ptr::addr_of!(depth) as usize;
-        if too_deep || here < STACK_FLOOR.with(|floor| *floor) {
-            DEPTH.with(|d| d.set(d.get() - 1));
-            set_error(ffi::PyExc_RecursionError, "maximum recursion depth exceeded".to_string());
-            return null_mut();
+        self.enter(function, Args::tuple(null_mut(), args), kwargs)
+    }
+
+    /// `call` with the positional arguments wherever the caller has them.
+    unsafe fn enter(&self, function: Obj, args: Args, kwargs: Obj) -> Obj {
+        // Unlike a call the interpreter makes, this one uses native stack,
+        // about 2 kB a level, so the stack itself is checked. Where compiled
+        // functions have frames, pushing one counts the call against the
+        // recursion limit in the interpreter's own counter; elsewhere the VM
+        // counts, and Py_EnterRecursiveCall counts the C call.
+        let framed = capi::has_frames();
+        let here = std::ptr::addr_of!(framed) as usize;
+        let mut too_deep = here < STACK_FLOOR.with(|floor| *floor);
+        if !framed && !too_deep {
+            let depth = DEPTH.with(|d| {
+                d.set(d.get() + 1);
+                d.get()
+            });
+            too_deep = depth > ffi::Py_GetRecursionLimit() as usize;
+            if !too_deep
+                && ffi::Py_EnterRecursiveCall(c" while calling a cfg-compiled function".as_ptr()) != 0
+            {
+                DEPTH.with(|d| d.set(d.get() - 1));
+                return null_mut();
+            }
+            if too_deep {
+                DEPTH.with(|d| d.set(d.get() - 1));
+            }
         }
-        if ffi::Py_EnterRecursiveCall(c" while calling a cfg-compiled function".as_ptr()) != 0 {
-            DEPTH.with(|d| d.set(d.get() - 1));
+        if too_deep {
+            set_error(ffi::PyExc_RecursionError, "maximum recursion depth exceeded".to_string());
             return null_mut();
         }
         // One register past the values holds the function for the length of
@@ -1055,7 +1221,7 @@ impl Compiled {
         let nregs = self.func.nvalues as usize + 1;
         let mut regs = self.frames.borrow_mut().pop().unwrap_or_else(|| vec![null_mut(); nregs]);
         regs[nregs - 1] = new_ref(function);
-        let result = match self.bind_args(&mut regs, function, args, kwargs) {
+        let result = match self.bind_args(&mut regs, function, &args, kwargs) {
             Ok(()) => match Frame::push(function) {
                 Ok(frame) => {
                     let result = self.exec(&mut regs, frame);
@@ -1093,15 +1259,24 @@ impl Compiled {
             // the call down before it runs anything, in its own words.
             Err(()) => {
                 ffi::PyErr_Clear();
-                ffi::PyObject_Call(function, args, kwargs)
+                let all = args.slice(0);
+                if all.is_null() {
+                    null_mut()
+                } else {
+                    let result = ffi::PyObject_Call(function, all, kwargs);
+                    ffi::Py_DECREF(all);
+                    result
+                }
             }
         };
         for r in regs.iter_mut() {
             capi::release(std::mem::replace(r, null_mut()));
         }
         self.frames.borrow_mut().push(regs);
-        ffi::Py_LeaveRecursiveCall();
-        DEPTH.with(|d| d.set(d.get() - 1));
+        if !framed {
+            ffi::Py_LeaveRecursiveCall();
+            DEPTH.with(|d| d.set(d.get() - 1));
+        }
         result
     }
 
@@ -1200,22 +1375,30 @@ impl Compiled {
             (kw, ffi::PyTuple_GET_SIZE(kw) as usize)
         };
         let npos = args.len() - nkw;
-        if let Some((compiled, func, receiver)) = self.compiled_callee(callee) {
-            return self.call_compiled(&compiled, func, receiver, &buf[1..args.len() + 1], kw);
+        let interpreted = || {
+            ffi::PyObject_Vectorcall(
+                callee,
+                buf.as_ptr().add(1),
+                npos | ffi::PY_VECTORCALL_ARGUMENTS_OFFSET,
+                kw,
+            )
+        };
+        match self.compiled_callee(callee) {
+            Some((compiled, func, receiver)) => self.tiered(
+                compiled,
+                func,
+                || self.call_compiled(&*compiled, func, receiver, &buf[1..args.len() + 1], kw),
+                interpreted,
+            ),
+            None => interpreted(),
         }
-        ffi::PyObject_Vectorcall(
-            callee,
-            buf.as_ptr().add(1),
-            npos | ffi::PY_VECTORCALL_ARGUMENTS_OFFSET,
-            kw,
-        )
     }
 
     /// The compiled form of what calling `callee` runs, if it is a Python
     /// function the frontend supports, with that function and the object it
     /// is bound to (null for a plain function): a function, a bound method,
     /// or an instance of a class whose `__call__` is a Python function.
-    unsafe fn compiled_callee(&self, callee: Obj) -> Option<(Arc<Compiled>, Obj, Obj)> {
+    unsafe fn compiled_callee(&self, callee: Obj) -> Option<(*const Compiled, Obj, Obj)> {
         if !self.options.callees {
             return None;
         }
@@ -1228,7 +1411,15 @@ impl Compiled {
             if ffi::PyType_HasFeature(ty, ffi::Py_TPFLAGS_HEAPTYPE) == 0 || ffi::PyType_Check(callee) != 0 {
                 return None;
             }
-            (pyffi::_PyType_Lookup(ty, self.callees.call_name.as_ptr()), callee)
+            let call = pyffi::_PyType_Lookup(ty, self.callees.call_name.as_ptr());
+            // What the call comes down to, if a shortcut says so: for a
+            // module without hooks, its forward.
+            let target = if self.options.shortcuts && !call.is_null() {
+                crate::shortcuts::call_target(callee, ty, call)
+            } else {
+                null_mut()
+            };
+            (if target.is_null() { call } else { target }, callee)
         };
         if func.is_null() || ffi::PyFunction_Check(func) == 0 {
             return None;
@@ -1236,13 +1427,27 @@ impl Compiled {
         self.compiled_function(func).map(|compiled| (compiled, func, receiver))
     }
 
-    unsafe fn compiled_function(&self, func: Obj) -> Option<Arc<Compiled>> {
+    unsafe fn compiled_function(&self, func: Obj) -> Option<*const Compiled> {
         let callees = &self.callees;
         let code = ffi::PyFunction_GetCode(func);
         let globals = ffi::PyFunction_GetGlobals(func);
+        let slot = callees.recent.get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
+        let (recent_code, recent_globals, recent) = slot.get();
+        if recent_code == code as usize && recent_globals == globals as usize {
+            return if recent == INTERPRETED { None } else { Some(recent) };
+        }
+        let found = self
+            .compiled_function_slow(func, code, globals)
+            .filter(|compiled| (**compiled).settled.trial.get().phase != TRIAL_DEMOTED);
+        slot.set((code as usize, globals as usize, found.unwrap_or(INTERPRETED)));
+        found
+    }
+
+    unsafe fn compiled_function_slow(&self, func: Obj, code: Obj, globals: Obj) -> Option<*const Compiled> {
+        let callees = &self.callees;
         let key = (code as usize, globals as usize);
         if let Some(c) = callees.entries.borrow().get(&key) {
-            return Some(c.compiled.clone());
+            return Some(Arc::as_ptr(&c.compiled));
         }
         if callees.interpreted.borrow().contains_key(&(code as usize))
             || callees.entries.borrow().len() >= MAX_CALLEES
@@ -1259,15 +1464,16 @@ impl Compiled {
                     self.pipeline.clone(),
                     callees.clone(),
                 ));
+                let pointer = Arc::as_ptr(&compiled);
                 callees.entries.borrow_mut().insert(
                     key,
                     Callee {
                         code: PyObj::from_borrowed(code),
                         _globals: PyObj::from_borrowed(globals),
-                        compiled: compiled.clone(),
+                        compiled,
                     },
                 );
-                Some(compiled)
+                Some(pointer)
             }
             // Unsupported by the frontend: the interpreter runs it.
             Err(_) => {
@@ -1275,6 +1481,126 @@ impl Compiled {
                 None
             }
         }
+    }
+
+    /// `call` for the function that was handed to torch.cfg_compile, which
+    /// is measured against the interpreter as its callees are.
+    pub unsafe fn call_measured(&self, function: Obj, args: Obj, kwargs: Obj) -> Obj {
+        let phase = self.settled.trial.get().phase;
+        if phase == TRIAL_COMPILED || !self.options.demote {
+            return self.call(function, args, kwargs);
+        }
+        if phase == TRIAL_DEMOTED {
+            return ffi::PyObject_Call(function, args, kwargs);
+        }
+        self.trial_call(
+            self,
+            null_mut(),
+            || self.call(function, args, kwargs),
+            || ffi::PyObject_Call(function, args, kwargs),
+        )
+    }
+
+    /// Whether this function was measured to run faster in the interpreter
+    /// and is left to it.
+    pub fn is_demoted(&self) -> bool {
+        self.settled.trial.get().phase == TRIAL_DEMOTED
+    }
+
+    /// Calls a callee either compiled or through the interpreter, whichever
+    /// the measurement of the two has shown to be faster; while that is
+    /// still open, this call is part of the measurement.
+    #[inline(always)]
+    unsafe fn tiered(
+        &self,
+        compiled: *const Compiled,
+        func: Obj,
+        run_compiled: impl FnOnce() -> Obj,
+        run_interpreted: impl FnOnce() -> Obj,
+    ) -> Obj {
+        let slot = &(*compiled).settled.trial;
+        if slot.get().phase == TRIAL_COMPILED || !self.options.demote {
+            return run_compiled();
+        }
+        self.trial_call(compiled, func, run_compiled, run_interpreted)
+    }
+
+    #[inline(never)]
+    unsafe fn trial_call(
+        &self,
+        compiled: *const Compiled,
+        func: Obj,
+        run_compiled: impl FnOnce() -> Obj,
+        run_interpreted: impl FnOnce() -> Obj,
+    ) -> Obj {
+        let slot = &(*compiled).settled.trial;
+        let mut trial = slot.get();
+        if trial.phase == TRIAL_DEMOTED {
+            return run_interpreted();
+        }
+        trial.calls += 1;
+        slot.set(trial);
+        let events = TRIAL_EVENTS.fetch_add(1, Ordering::Relaxed) + 1;
+        if trial.phase == TRIAL_WARMUP {
+            if trial.calls >= TRIAL_WARMUP_CALLS {
+                slot.set(Trial { phase: TRIAL_SAMPLING, ..trial });
+            }
+            return run_compiled();
+        }
+        // Which of the two a call measures is drawn, not alternated: calls
+        // often come in a pattern (two layers of a model, one after the
+        // other), and alternating would give each side one half of it.
+        let as_compiled = if trial.compiled_samples >= TRIAL_SAMPLES {
+            false
+        } else if trial.interpreted_samples >= TRIAL_SAMPLES {
+            true
+        } else {
+            let mut state = TRIAL_DRAW.load(Ordering::Relaxed);
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            TRIAL_DRAW.store(state, Ordering::Relaxed);
+            state & 1 == 0
+        };
+        let start = std::time::Instant::now();
+        let result = if as_compiled { run_compiled() } else { run_interpreted() };
+        let elapsed = start.elapsed().as_nanos() as u64;
+        // The callee may have called itself: what is in the slot now counts.
+        let mut trial = slot.get();
+        if trial.phase != TRIAL_SAMPLING {
+            return result;
+        }
+        if !result.is_null() && TRIAL_EVENTS.load(Ordering::Relaxed) == events {
+            if as_compiled {
+                trial.compiled_best = trial.compiled_best.min(elapsed);
+                trial.compiled_samples += 1;
+            } else {
+                trial.interpreted_best = trial.interpreted_best.min(elapsed);
+                trial.interpreted_samples += 1;
+            }
+        }
+        if trial.compiled_samples >= TRIAL_SAMPLES && trial.interpreted_samples >= TRIAL_SAMPLES {
+            let margin = trial.interpreted_best >> TRIAL_MARGIN_SHIFT;
+            if trial.interpreted_best + margin < trial.compiled_best {
+                trial.phase = TRIAL_DEMOTED;
+                if !func.is_null() {
+                    // Calls stop finding the compiled form.
+                    let code = ffi::PyFunction_GetCode(func);
+                    let globals = ffi::PyFunction_GetGlobals(func);
+                    let recent = self
+                        .callees
+                        .recent
+                        .get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
+                    recent.set((code as usize, globals as usize, INTERPRETED));
+                }
+            } else {
+                trial.phase = TRIAL_COMPILED;
+            }
+        } else if trial.calls >= TRIAL_MAX_CALLS {
+            trial.phase = TRIAL_COMPILED;
+        }
+        slot.set(trial);
+        result
     }
 
     /// Calls a compiled callee with arguments in the vectorcall layout.
@@ -1288,32 +1614,20 @@ impl Compiled {
     ) -> Obj {
         let nkw = if kwnames.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(kwnames) as usize };
         let npos = args.len() - nkw;
-        let bound = !receiver.is_null() as usize;
-        let tuple = ffi::PyTuple_New((npos + bound) as isize);
-        if tuple.is_null() {
-            return null_mut();
+        let positional = Args { receiver, items: args.as_ptr(), n: npos };
+        if nkw == 0 {
+            return compiled.enter(func, positional, null_mut());
         }
-        if bound == 1 {
-            ffi::PyTuple_SET_ITEM(tuple, 0, new_ref(receiver));
-        }
-        for (i, arg) in args[..npos].iter().enumerate() {
-            ffi::PyTuple_SET_ITEM(tuple, (i + bound) as isize, new_ref(*arg));
-        }
-        let mut kwargs = null_mut();
-        if nkw > 0 {
-            kwargs = ffi::PyDict_New();
-            for i in 0..nkw {
-                let name = ffi::PyTuple_GET_ITEM(kwnames, i as isize);
-                if kwargs.is_null() || ffi::PyDict_SetItem(kwargs, name, args[npos + i]) < 0 {
-                    ffi::Py_DECREF(tuple);
-                    xdecref(kwargs);
-                    return null_mut();
-                }
+        let kwargs = ffi::PyDict_New();
+        for i in 0..nkw {
+            let name = ffi::PyTuple_GET_ITEM(kwnames, i as isize);
+            if kwargs.is_null() || ffi::PyDict_SetItem(kwargs, name, args[npos + i]) < 0 {
+                xdecref(kwargs);
+                return null_mut();
             }
         }
-        let result = compiled.call(func, tuple, kwargs);
-        ffi::Py_DECREF(tuple);
-        xdecref(kwargs);
+        let result = compiled.enter(func, positional, kwargs);
+        ffi::Py_DECREF(kwargs);
         result
     }
 
@@ -1615,7 +1929,17 @@ impl Compiled {
                         }
                     }
                 }
-                checked(ffi::PyObject_GetAttr(obj, f.consts[*name as usize].as_ptr()))
+                let name = f.consts[*name as usize].as_ptr();
+                if self.options.shortcuts {
+                    let found = crate::shortcuts::load_attr(obj, name);
+                    if !found.is_null() {
+                        return Ok(found);
+                    }
+                    if !ffi::PyErr_Occurred().is_null() {
+                        return Err(());
+                    }
+                }
+                checked(ffi::PyObject_GetAttr(obj, name))
             }
             Op::StoreAttr { obj, name, val } => status(ffi::PyObject_SetAttr(
                 self.obj(regs, *obj),
@@ -1997,28 +2321,54 @@ impl Compiled {
                     (kw, ffi::PyTuple_GET_SIZE(kw) as usize)
                 };
                 let mut method: Obj = null_mut();
-                let unbound =
-                    pyffi::_PyObject_GetMethod(buf[0], f.consts[*name as usize].as_ptr(), &mut method);
+                let attr = f.consts[*name as usize].as_ptr();
+                if self.options.shortcuts {
+                    method = crate::shortcuts::load_attr(buf[0], attr);
+                    if method.is_null() && !ffi::PyErr_Occurred().is_null() {
+                        return Err(());
+                    }
+                }
+                // Found through a shortcut, it is the attribute, bound.
+                let unbound = if method.is_null() {
+                    pyffi::_PyObject_GetMethod(buf[0], attr, &mut method)
+                } else {
+                    0
+                };
                 if method.is_null() {
                     return Err(());
                 }
                 // A method takes the receiver as its first argument; any
                 // other attribute is called on its own.
                 let (first, receiver) = if unbound == 1 { (0, buf[0]) } else { (1, null_mut()) };
-                let r = match (ffi::PyFunction_Check(method) != 0)
-                    .then(|| self.compiled_function(method))
-                    .flatten()
-                    .filter(|_| self.options.callees && unbound == 1)
-                {
-                    Some(compiled) => {
-                        self.call_compiled(&compiled, method, receiver, &buf[1..args.len() + 1], kw)
-                    }
-                    None => ffi::PyObject_Vectorcall(
+                // A function found on the type runs compiled, bound to the
+                // receiver; anything else that was found is called as any
+                // callee is, which finds what it comes down to.
+                let compiled = if !self.options.callees {
+                    None
+                } else if unbound == 1 {
+                    (ffi::PyFunction_Check(method) != 0)
+                        .then(|| self.compiled_function(method))
+                        .flatten()
+                        .map(|compiled| (compiled, method, receiver))
+                } else {
+                    self.compiled_callee(method)
+                };
+                let interpreted = || {
+                    ffi::PyObject_Vectorcall(
                         method,
                         buf.as_ptr().add(first),
                         args.len() + 1 - first - nkw,
                         kw,
+                    )
+                };
+                let r = match compiled {
+                    Some((compiled, func, bound_to)) => self.tiered(
+                        compiled,
+                        func,
+                        || self.call_compiled(&*compiled, func, bound_to, &buf[1..args.len() + 1], kw),
+                        interpreted,
                     ),
+                    None => interpreted(),
                 };
                 ffi::Py_DECREF(method);
                 checked(r)
@@ -2048,25 +2398,15 @@ impl Compiled {
                 let kwargs = if *kwargs == NONE { null_mut() } else { self.obj(regs, *kwargs) };
                 let callee = self.obj(regs, *callee);
                 let plain_kwargs = kwargs.is_null() || ffi::PyDict_CheckExact(kwargs) != 0;
+                let interpreted = || ffi::PyObject_Call(callee, tuple, kwargs);
                 let r = match self.compiled_callee(callee).filter(|_| plain_kwargs) {
-                    Some((compiled, func, receiver)) if receiver.is_null() => compiled.call(func, tuple, kwargs),
-                    Some((compiled, func, receiver)) => {
-                        // The receiver goes in front of the positional arguments.
-                        let n = ffi::PyTuple_GET_SIZE(tuple);
-                        let bound = ffi::PyTuple_New(n + 1);
-                        if bound.is_null() {
-                            ffi::Py_DECREF(tuple);
-                            return Err(());
-                        }
-                        ffi::PyTuple_SET_ITEM(bound, 0, new_ref(receiver));
-                        for i in 0..n {
-                            ffi::PyTuple_SET_ITEM(bound, i + 1, new_ref(ffi::PyTuple_GET_ITEM(tuple, i)));
-                        }
-                        let r = compiled.call(func, bound, kwargs);
-                        ffi::Py_DECREF(bound);
-                        r
-                    }
-                    None => ffi::PyObject_Call(callee, tuple, kwargs),
+                    Some((compiled, func, receiver)) => self.tiered(
+                        compiled,
+                        func,
+                        || (*compiled).enter(func, Args::tuple(receiver, tuple), kwargs),
+                        interpreted,
+                    ),
+                    None => interpreted(),
                 };
                 ffi::Py_DECREF(tuple);
                 checked(r)
@@ -2466,22 +2806,40 @@ impl Compiled {
         }
     }
 
-    unsafe fn select(
-        &self,
-        b: usize,
-        regs: &[Obj],
-        api: Option<&TcfgApi>,
-    ) -> (Arc<BlockCode>, Mode) {
+    #[inline(always)]
+    unsafe fn select(&self, b: usize, regs: &[Obj], api: Option<&TcfgApi>) -> (*const BlockCode, Mode) {
+        let slot = self.settled.blocks.get_unchecked(b);
+        let settled = slot.get();
+        if !settled.code.is_null() {
+            slot.set(Settled { entries: settled.entries + 1, ..settled });
+            return (settled.code, if settled.specialized { Mode::Spec } else { Mode::Generic });
+        }
+        self.select_slow(b, regs, api)
+    }
+
+    unsafe fn select_slow(&self, b: usize, regs: &[Obj], api: Option<&TcfgApi>) -> (*const BlockCode, Mode) {
+        let generic = Arc::as_ptr(self.generic.get_unchecked(b));
+        let settle = |code: *const BlockCode, specialized: bool| {
+            self.settled.blocks.get_unchecked(b).set(Settled { code, specialized, entries: 0 });
+        };
         if !self.options.specialize || api.is_none() {
-            return (self.generic[b].clone(), Mode::Generic);
+            settle(generic, false);
+            return (generic, Mode::Generic);
         }
         let mut st = self.state.borrow_mut();
         let bs = &mut st.blocks[b];
         bs.execs += 1;
+        // One version that is entered unconditionally, or none and no more
+        // attempts at one: from now on there is nothing to decide.
+        if bs.versions.len() == 1 && bs.versions[0].entry_guards.is_empty() {
+            settle(Arc::as_ptr(&bs.versions[0]), true);
+        } else if bs.versions.is_empty() && bs.respec_left == 0 {
+            settle(generic, false);
+        }
         for version in &bs.versions {
             if version.entry_guards.iter().all(|g| Self::guard_holds(g, regs, api)) {
                 bs.spec_execs += 1;
-                return (version.clone(), Mode::Spec);
+                return (Arc::as_ptr(version), Mode::Spec);
             }
         }
         if !bs.versions.is_empty() {
@@ -2495,7 +2853,19 @@ impl Compiled {
                 st.obs[v as usize].observe(reg(regs, v));
             }
         }
-        (self.generic[b].clone(), mode)
+        (generic, mode)
+    }
+
+    /// How often block `b` was entered, and how often in a specialized
+    /// version, counting the entries that did not go through the state.
+    pub fn block_entries(&self, b: usize, bs: &BlockState) -> (u64, u64) {
+        let settled = self.settled.blocks[b].get();
+        let specialized = if settled.specialized { settled.entries } else { 0 };
+        (bs.execs + settled.entries, bs.spec_execs + specialized)
+    }
+
+    pub fn calls(&self) -> u64 {
+        self.settled.calls.get()
     }
 
     /// Called when a block finished a run in the profiling tier: runs the
@@ -2529,16 +2899,19 @@ impl Compiled {
             }
         };
         let mut st = self.state.borrow_mut();
+        let unsettled = Settled { code: std::ptr::null(), ..self.settled.blocks[b].get() };
+        self.settled.blocks[b].set(unsettled);
         match outcome {
             Ok(Some(code)) => {
                 let guarded = !code.entry_guards.is_empty()
                     || code.insts.iter().any(|i| matches!(i.op, Op::Guard(_)));
                 let bs = &mut st.blocks[b];
                 bs.versions.insert(0, Arc::new(code));
-                bs.versions.truncate(self.options.max_versions);
-                if !guarded {
-                    // Nothing can send this version back to profiling.
-                    bs.versions.truncate(1);
+                // Nothing can send an unguarded version back to profiling.
+                let keep = if guarded { self.options.max_versions } else { 1 };
+                if bs.versions.len() > keep {
+                    let replaced = bs.versions.split_off(keep);
+                    bs.retired.extend(replaced);
                 }
             }
             Ok(None) => st.blocks[b].respec_left = 0,
@@ -2569,7 +2942,7 @@ impl Compiled {
         let api = capi::api();
         let func = &self.func;
         if self.options.specialize {
-            self.state.borrow_mut().calls += 1;
+            self.settled.calls.set(self.settled.calls.get() + 1);
         }
         let mut cur: usize = 0;
         let mut pred: usize = usize::MAX;
@@ -2633,7 +3006,7 @@ impl Compiled {
             let next: usize = loop {
                 let mut resume: Option<usize> = None;
                 {
-                    let code_ref: &BlockCode = &code;
+                    let code_ref: &BlockCode = &*code;
                     let insts = &code_ref.insts;
                     while pc < insts.len() {
                         let inst = insts.get_unchecked(pc);
@@ -2770,7 +3143,7 @@ impl Compiled {
                 st.blocks[cur].deopts += 1;
                 mode = if st.blocks[cur].respec_left > 0 { Mode::Profile } else { Mode::Generic };
                 drop(st);
-                code = self.generic[cur].clone();
+                code = Arc::as_ptr(self.generic.get_unchecked(cur));
                 pc = resume.unwrap();
             };
             pred = cur;
