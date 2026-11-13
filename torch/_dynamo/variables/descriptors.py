@@ -675,12 +675,18 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
 
     def key_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         filtered = _method_identity_guards_filtered(tx)
+        tracker = tx.output.builtin_method_keys
+        tracker.track(tx, unguarded=self.value is None or filtered)
         if self.value is not None:
             return hash(self.value), filtered
         obj = self.obj.realize()
+        if obj.source is not None:
+            receiver = tracker.add_receiver(tx, obj.source)
+            return hash(_bind_builtin_method(self.descriptor, receiver)), True
         if self.has_fresh_container_receiver():
             # Internal bucket; equality still distinguishes C functions.
             return id(obj), True
+        # Constant receivers may alias inputs but cannot join a source guard.
         return self.tp_hash_impl(tx)
 
     def call_getattr_fallback(
