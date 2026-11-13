@@ -1707,6 +1707,32 @@ class TestCfgCallees(TestCase):
             sys.setrecursionlimit(limit)
         self.assertEqual(compiled(100), 100)
 
+    def test_bad_arguments_raise_what_the_interpreter_raises(self):
+        def sig(a, b, /, c, d=4, *, e, f=6):
+            return a, b, c, d, e, f
+
+        def call(args, kwargs):
+            return sig(*args, **kwargs)
+
+        calls = (
+            ((1, 2, 3), {"e": 5}),
+            ((1, 2), {}),
+            ((), {}),
+            ((1, 2, 3, 4, 5), {"e": 1}),
+            ((1, 2), {"c": 3, "e": 5, "g": 1}),
+            ((1,), {"b": 2, "c": 3, "e": 5}),
+            ((1, 2, 3), {}),
+            ((1, 2, 3), {"e": 5, "c": 4}),
+        )
+        compiled = torch.cfg_compile(sig, fallback=False)
+        compiled_caller = torch.cfg_compile(call, fallback=False)
+        for args, kwargs in calls:
+            expected = call_outcome(sig, *args, **kwargs)
+            self.assertEqual(call_outcome(compiled, *args, **kwargs), expected)
+            self.assertEqual(call_outcome(compiled_caller, args, kwargs), expected)
+        message = "sig() missing 3 required positional arguments: 'a', 'b', and 'c'"
+        self.assertTrue(call_outcome(compiled)[1].endswith(message))
+
     def test_callees_off(self):
         def f(obj, x):
             return obj.twice(x)
@@ -2053,6 +2079,25 @@ class TestCfgWith(TestCase):
                     except ValueError as e:
                         outcomes.append((str(e), log))
                 self.assertEqual(outcomes[0], outcomes[1])
+
+    def test_object_that_is_not_a_context_manager(self):
+        class NoExit:
+            def __enter__(self):
+                return self
+
+        class NoEnter:
+            def __exit__(self, *args):
+                return False
+
+        def f(manager):
+            with manager:
+                return 1
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        for manager in (NoExit(), NoEnter(), 3):
+            self.assertEqual(call_outcome(compiled, manager), call_outcome(f, manager))
+        missed = "'NoExit' object does not support the context manager protocol (missed __exit__ method)"
+        self.assertEqual(call_outcome(compiled, NoExit()), (TypeError, missed))
 
     def test_no_grad_block(self):
         def f(x):
