@@ -1229,7 +1229,7 @@ class TestFakeTensorUpdater(TestCase):
         self.assertTrue(view.meta["val"].is_neg())
         self._check_graph(gm, inputs, -inputs[0].view(-1))
 
-    def test_targeted_metadata_refresh_falls_back_before_lowering(self):
+    def test_targeted_metadata_refresh_stops_before_unchanged_lowering(self):
         def f(x):
             return x.clone().neg()
 
@@ -1247,7 +1247,7 @@ class TestFakeTensorUpdater(TestCase):
         with V.set_fake_mode(detect_fake_mode([root.meta["val"]])):
             updated = updater.incremental_update_from_nodes([root])
 
-        self.assertEqual(set(updated), set(gm.graph.nodes))
+        self.assertEqual(set(updated), {root})
         self.assertIs(lowering.meta["val"], original_lowering_metadata)
         self.assertEqual(get_node_storage(root), get_node_storage(root.args[0]))
 
@@ -1444,6 +1444,32 @@ class TestFakeTensorUpdater(TestCase):
             self.assertRaisesRegex(RuntimeError, "cannot recompute metadata"),
         ):
             updater.incremental_update_from_nodes([root])
+
+    def test_targeted_metadata_refresh_ignores_unrelated_subgraph(self):
+        def f(x, pred):
+            value = x.sin().view(-1)
+            branch = torch.ops.higher_order.cond(
+                pred, lambda x: (x.cos(),), lambda x: (x.neg(),), (x,)
+            )
+            return value, branch
+
+        inputs = (torch.randn(2, 2), torch.tensor(True))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        updater = FakeTensorUpdater(gm)
+        root = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
+        view = next(n for n in root.users if n.target is aten.view.default)
+        self.assertTrue(updater.subgraph_updaters)
+        root.target = aten.cos.default
+
+        with V.set_fake_mode(detect_fake_mode([root.meta["val"]])):
+            updated = updater.incremental_update_from_nodes([root])
+
+        self.assertEqual(set(updated), {root, view})
+        self._check_graph(
+            gm,
+            inputs,
+            (inputs[0].cos().view(-1), (inputs[0].cos(),)),
+        )
 
     def test_targeted_metadata_refresh_subgraph_fallback(self):
         def f(x, pred):
