@@ -50,10 +50,16 @@ from torch.onnx._internal.exporter._torchlib.ops import (
     core as core_ops,
     embedding as embedding_ops,
     factories as factories_ops,
+    fft as fft_ops,
     linalg as linalg_ops,
+    neural as neural_ops,
     nn as nn_ops,
+    normalization as normalization_ops,
+    prims as prims_ops,
     residual as residual_ops,
     sequences as sequences_ops,
+    special as special_ops,
+    vision as vision_ops,
 )
 from torch.testing._internal import common_dtype, common_methods_invocations
 from torch.testing._internal.opinfo import (
@@ -2722,6 +2728,791 @@ _NN_DTYPES_3 = (
 _NN_DTYPES_4 = (torch.complex64, torch.complex128)
 
 # Source dtype eligibility is numerical test metadata, not exporter dispatch.
+TESTED_TORCHLIB_OPS += (
+    (
+        TorchLibOpInfo(
+            "nn.functional.celu",
+            neural_ops.aten_celu,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.cross_entropy",
+            # use cross_entropy as test case instead of cross_entropy_loss (not in OPS_DB)
+            neural_ops.aten_cross_entropy_loss,
+            tolerance={torch.float16: (1e-2, 1e-2)},
+            input_wrangler=_cross_entropy_input_wrangler,
+            supported_dtypes=_NN_DTYPES_0,
+        ).xfail(
+            matcher=lambda sample: (
+                len(sample.args) < 1
+                or (
+                    isinstance(sample.args[0], torch.Tensor)
+                    and sample.args[0].dtype != torch.int64
+                )
+            ),
+            reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[target] as int type",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.elu",
+            neural_ops.aten_elu,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.hardsigmoid",
+            neural_ops.aten_hardsigmoid,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.hardswish",
+            neural_ops.aten_hardswish,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.hardtanh",
+            neural_ops.aten_hardtanh,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.leaky_relu",
+            neural_ops.aten_leaky_relu,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.logsigmoid",
+            neural_ops.aten_log_sigmoid,
+            tolerance={torch.float32: (3.7e-5, 1.8e-4), torch.float16: (8e-2, 4e-4)},
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.mish",
+            neural_ops.aten_mish,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.nll_loss",
+            neural_ops.aten_nll_loss,
+            input_wrangler=_nll_loss_input_wrangler,
+            tolerance={torch.float16: (5e-2, 1e-2)},
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.pad",
+            neural_ops.aten_pad,
+            supported_dtypes=_NN_DTYPES_2,
+        )
+        .skip(
+            variant_name="circular",
+            reason="fixme: ORT does not support the circular mode",
+        )
+        .skip(
+            variant_name="replicate_negative",
+            reason="fixme: The implementation for negative paddings is not correct",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.reflection_pad1d",
+            neural_ops.aten_reflection_pad1d,
+            supported_dtypes=_NN_DTYPES_0,
+        ).xfail(
+            dtypes=(torch.int64,),
+            reason="Torch not implement reflection_pad1d for int64.",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.reflection_pad2d",
+            neural_ops.aten_reflection_pad2d,
+            input_wrangler=_reflection_pad2d_input_wrangler,
+            supported_dtypes=_NN_DTYPES_2,
+        ).skip(
+            matcher=lambda sample: not (
+                len(sample.args) > 1 and sample.args[1] == "reflect"
+            ),
+            reason="this Aten overload need args[1] == 'reflect' for pad mode",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.relu",
+            neural_ops.aten_relu,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.relu6",
+            neural_ops.aten_relu6,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.replication_pad1d",
+            neural_ops.aten_replication_pad1d,
+            supported_dtypes=_NN_DTYPES_2,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.replication_pad2d",
+            neural_ops.aten_replication_pad2d,
+            input_wrangler=_replication_pad2d_input_wrangler,
+            supported_dtypes=_NN_DTYPES_2,
+        )
+        .skip(
+            matcher=lambda sample: not (
+                len(sample.args) > 1 and sample.args[1] == "replicate"
+            ),
+            reason="this Aten overload need args[1] == 'replicate' for pad mode",
+        )
+        .skip(
+            variant_name="replicate_negative",
+            reason="fixme: The implementation for negative paddings is not correct. Potentially an ORT issue",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.replication_pad3d",
+            neural_ops.aten_replication_pad3d,
+            input_wrangler=_replication_pad3d_input_wrangler,
+            supported_dtypes=_NN_DTYPES_2,
+        ).skip(
+            matcher=lambda sample: (
+                not (
+                    len(sample.args) > 1
+                    and sample.args[1] == "replicate"
+                    and len(sample.input.shape) == 5
+                )
+            ),
+            reason="this Aten overload need args[1] == 'replicate' for pad mode, and 3D tensor",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.mse_loss",
+            neural_ops.aten_mse_loss,
+            input_wrangler=_mse_loss_input_wrangler,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.silu",
+            neural_ops.aten_silu,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.softplus",
+            neural_ops.aten_softplus,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.col2im",
+            neural_ops.aten_col2im,
+            supported_dtypes=_NN_DTYPES_1,
+        ).xfail(
+            dtypes=(torch.float16,),
+            reason="fixme: Tensor-likes are not close. https://github.com/microsoft/onnxruntime/issues/16007",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.convolution",
+            normalization_ops.aten_convolution,
+            tolerance={torch.float32: (2e-4, 9e-4)},
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "group_norm_op18",
+            neural_ops.aten_group_norm,
+            tolerance={torch.float16: (1e-2, 7e-3)},
+            supported_dtypes=_NN_DTYPES_0,
+        ).xfail(
+            matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
+            reason="Using op.InstanceNormalization to simulate GroupNorm, which does not support 0-dim input",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.layer_norm",
+            normalization_ops.aten_layer_norm,
+            tolerance={torch.float32: (3.7e-5, 1.8e-4)},
+            supported_dtypes=_NN_DTYPES_1,
+        )
+        .xfail(
+            dtypes=(torch.int64,),
+            reason="fixme: ORT `LayerNormKernelImpl` not implemented for int64",
+        )
+        .skip(
+            matcher=lambda sample: sample.input.shape[-1] <= 1,
+            reason="fixme: onnxruntime fail when no reduction is needed",
+        )
+        .skip(
+            dtypes=(torch.float32 if sys.platform != "linux" else torch.complex64,),
+            reason="fixme: test is unstable on macosx, windows",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            # Custom from extra_opinfo
+            "ops.aten.max_pool1d",
+            neural_ops.aten_max_pool1d,
+            supported_dtypes=_NN_DTYPES_3,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            # Custom from extra_opinfo
+            "ops.aten.max_pool2d",
+            neural_ops.aten_max_pool2d,
+            supported_dtypes=_NN_DTYPES_3,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.max_pool3d",  # Custom from extra_opinfo
+            neural_ops.aten_max_pool3d,
+            supported_dtypes=_NN_DTYPES_3,
+        ).xfail(
+            variant_name="empty_strides",
+            reason="fixme: 'shape' do not match: torch.Size([2, 3, 4, 3]) != torch.Size([2, 3, 4, 2]). https://github.com/microsoft/onnxscript/issues/975",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "native_batch_norm",
+            normalization_ops.aten_native_batch_norm,
+            tolerance={torch.float16: (1e-2, 7e-3)},
+            supported_dtypes=_NN_DTYPES_0,
+        )
+        .skip(
+            device_type="cpu",
+            matcher=lambda sample: sample.args[-3] is False,
+            reason="native_batch_norm outputs different shapes on CPU and CUDA when training is False. Our implematation is based on that for CUDA",
+        )
+        .skip(
+            device_type="cpu",
+            dtypes=(torch.float16,),
+            reason="native_batch_norm outputs different dtypes on CPU and CUDA. Our implematation is based on that for CUDA",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._native_batch_norm_legit",
+            normalization_ops.aten_native_batch_norm,
+            tolerance={torch.float16: (1e-2, 7e-3)},
+            supported_dtypes=_NN_DTYPES_0,
+        ).skip(
+            device_type="cpu",
+            matcher=lambda sample: sample.kwargs.get("training") is False,
+            reason="native_batch_norm outputs different shapes on CPU and CUDA when training is False. Our implematation is based on that for CUDA",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._native_batch_norm_legit.no_stats",
+            normalization_ops.aten__native_batch_norm_no_stats,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._native_batch_norm_legit_functional",
+            normalization_ops.aten__native_batch_norm_legit_functional,
+            tolerance={torch.float16: (1e-2, 7e-3)},
+            supported_dtypes=_NN_DTYPES_0,
+        ).skip(
+            device_type="cpu",
+            matcher=lambda sample: sample.kwargs.get("training") is False,
+            reason="native_batch_norm outputs different results on CPU and CUDA when training is False. Our implematation is based on that for CUDA",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.native_group_norm",
+            normalization_ops.aten_native_group_norm,
+            tolerance={torch.float16: (1e-2, 7e-3)},
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "native_layer_norm",
+            normalization_ops.aten_native_layer_norm,
+            tolerance={torch.float32: (3.7e-5, 1.8e-4), torch.float16: (1e-1, 7e-4)},
+            supported_dtypes=_NN_DTYPES_1,
+        )
+        .skip(
+            dtypes=(torch.float32,),
+            matcher=lambda sample: sample.input.shape[-1] <= 1,
+            # enabled_if=ops_test_common.IS_MACOS,
+            reason="fixme: result mismatch. https://github.com/microsoft/onnxruntime/issues/20676",
+        )
+        .skip(
+            dtypes=(torch.float16,),
+            device_type="cpu",
+            reason="native_layer_norm outputs different dtypes on CPU and CUDA. Our implematation is based on that for CUDA",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.avg_pool1d",
+            neural_ops.aten_avg_pool1d,
+            input_wrangler=_avg_pool_input_wrangler,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+        .xfail(
+            matcher=lambda sample: (
+                (len(sample.args) > 5 and sample.args[5] is not None)
+                or (sample.kwargs.get("divisor_override") is not None)
+            ),
+            reason="ONNX doesn't support divisor_override argument",
+        )
+        .xfail(
+            matcher=lambda sample: (
+                (sample.kwargs.get("ceil_mode") is True)
+                and (
+                    sample.kwargs.get("count_include_pad") is True
+                    or sample.input.shape[2]
+                    % (
+                        sample.args[0][0]
+                        if isinstance(sample.args[0], tuple)
+                        else sample.args[0]
+                    )
+                    != 0
+                )
+            ),
+            reason="fixme: ORT doesn't match PyTorch when ceil_mode=True until opset 19",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.avg_pool2d",
+            neural_ops.aten_avg_pool2d,
+            input_wrangler=_avg_pool_input_wrangler,
+            supported_dtypes=_NN_DTYPES_0,
+        ).xfail(
+            matcher=lambda sample: (
+                (len(sample.args) > 5 and sample.args[5] is not None)
+                or (sample.kwargs.get("divisor_override") is not None)
+            ),
+            reason="ONNX doesn't support divisor_override argument",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.avg_pool3d",
+            neural_ops.aten_avg_pool3d,
+            input_wrangler=_avg_pool_input_wrangler,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+        .xfail(
+            matcher=lambda sample: (
+                (len(sample.args) > 5 and sample.args[5] is not None)
+                or (sample.kwargs.get("divisor_override") is not None)
+            ),
+            reason="ONNX doesn't support divisor_override argument",
+        )
+        .xfail(
+            matcher=lambda sample: sample.kwargs.get("ceil_mode") is True,
+            reason="fixme(after opset19): ORT doesn't match PyTorch when ceil_mode=True until opset 19",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.conv1d",
+            normalization_ops.aten_conv1d,
+            supported_dtypes=_NN_DTYPES_0,
+        ).xfail(
+            matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
+            reason="String padding is not accepted by aten::conv1d",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.conv1d",
+            normalization_ops.aten_conv1d_complex,
+            complex=True,
+            tolerance={torch.complex64: (2e-5, 3e-5)},
+            supported_dtypes=_NN_DTYPES_4,
+        ).xfail(
+            matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
+            reason="String padding is not accepted by aten::conv1d",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.conv2d",
+            normalization_ops.aten_conv2d,
+            tolerance={torch.float32: (2e-5, 3e-5)},
+            supported_dtypes=_NN_DTYPES_0,
+        ).xfail(
+            matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
+            reason="String padding is not accepted by aten::conv2d",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.conv2d",
+            normalization_ops.aten_conv2d_complex,
+            complex=True,
+            tolerance={torch.complex64: (4e-5, 6e-5)},
+            supported_dtypes=_NN_DTYPES_4,
+        ).xfail(
+            matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
+            reason="String padding is not accepted by aten::conv2d",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.instance_norm",
+            normalization_ops.aten_instance_norm,
+            tolerance={torch.float16: (1e-2, 1e-3)},
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.conv3d",
+            normalization_ops.aten_conv3d,
+            tolerance={torch.float32: (3.7e-5, 1.8e-4)},
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.conv3d",
+            normalization_ops.aten_conv3d_complex,
+            complex=True,
+            tolerance={torch.complex64: (1e-4, 5e-4)},
+            supported_dtypes=_NN_DTYPES_4,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.gelu",
+            neural_ops.aten_gelu,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.glu",
+            neural_ops.aten_glu,
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.linear",
+            neural_ops.aten_linear,
+            tolerance={torch.float16: (1e-2, 1e-3)},
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.linear.1d_weight",
+            neural_ops.aten_linear,
+            tolerance={torch.float16: (1e-2, 1e-3)},
+            supported_dtypes=_NN_DTYPES_0,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.unfold",
+            neural_ops.aten_im2col,
+            input_wrangler=_im2col_input_wrangler,
+            supported_dtypes=_NN_DTYPES_1,
+        ).xfail(
+            matcher=lambda sample: (
+                any(dim == 0 for dim in sample.input.shape) or not sample.input.shape
+            ),
+            reason="fixme: Logic not implemented for size 0 inputs in op.Reshape",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.max_pool1d",
+            neural_ops.aten_max_pool1d,
+            input_wrangler=_max_pool_input_wrangler,
+            supported_dtypes=_NN_DTYPES_3,
+        ).skip(
+            matcher=lambda sample: sample.kwargs.get("return_indices") is True,
+            reason="this aten overload assume return_indices=False",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.max_pool1d_with_indices",
+            neural_ops.aten_max_pool1d_with_indices,
+            input_wrangler=_max_pool_input_wrangler,
+            supported_dtypes=_NN_DTYPES_3,
+        ).skip(
+            matcher=lambda sample: sample.kwargs.get("return_indices") is False,
+            reason="this aten overload assume return_indices=True",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.max_pool2d",
+            neural_ops.aten_max_pool2d,
+            input_wrangler=_max_pool_input_wrangler,
+            supported_dtypes=_NN_DTYPES_3,
+        ).skip(
+            matcher=lambda sample: sample.kwargs.get("return_indices") is True,
+            reason="this aten overload assume return_indices=False",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.max_pool2d_with_indices",
+            neural_ops.aten_max_pool2d_with_indices,
+            input_wrangler=_max_pool_input_wrangler,
+            supported_dtypes=_NN_DTYPES_3,
+        ).skip(
+            matcher=lambda sample: sample.kwargs.get("return_indices") is False,
+            reason="this aten overload assume return_indices=True",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.max_pool3d",
+            neural_ops.aten_max_pool3d,
+            input_wrangler=_max_pool_input_wrangler,
+            supported_dtypes=_NN_DTYPES_3,
+        )
+        .skip(
+            matcher=lambda sample: (
+                sample.kwargs.get("ceil_mode") is True
+                and sample.kwargs.get("padding") == 1
+            ),
+            reason="FIXME: After https://github.com/microsoft/onnxruntime/issues/15446 is fixed",
+        )
+        .skip(
+            matcher=lambda sample: sample.kwargs.get("return_indices") is True,
+            reason="this aten overload assume return_indices=False",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.max_pool3d_with_indices",
+            neural_ops.aten_max_pool3d_with_indices,
+            input_wrangler=_max_pool_input_wrangler,
+            supported_dtypes=_NN_DTYPES_3,
+        )
+        .skip(
+            matcher=lambda sample: (
+                sample.kwargs.get("ceil_mode") is True
+                and sample.kwargs.get("padding") == 1
+            ),
+            reason="FIXME: After https://github.com/microsoft/onnxruntime/issues/15446 is fixed",
+        )
+        .skip(
+            matcher=lambda sample: sample.kwargs.get("return_indices") is False,
+            reason="this aten overload assume return_indices=True",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.scaled_dot_product_attention",
+            neural_ops.aten_scaled_dot_product_attention,
+            tolerance={torch.float32: (3e-4, 1.5e-5)},
+            supported_dtypes=_NN_DTYPES_0,
+        )
+        .skip(
+            matcher=lambda sample: sample.kwargs.get("dropout_p") != 0.0,
+            reason="dropout is random so the results do not match",
+        )
+        .xfail(
+            dtypes=(torch.float16,),
+            reason="fixme: ORT failed. https://github.com/microsoft/onnxruntime/issues/16438",
+            test_class_name="TestOutputConsistencyFullGraph",
+        )
+        .xfail(
+            matcher=lambda sample: (
+                len(sample.input.shape) != 4
+                or len(sample.args[0].shape) != 4
+                or len(sample.args[1].shape) != 4
+            ),
+            reason="torch sdpa is expected to pass in 4d q, k, and v.",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_bilinear2d.default",
+            neural_ops.aten_upsample_bilinear2d,
+            supported_dtypes=_NN_DTYPES_1,
+        ).xfail(
+            matcher=lambda sample: (
+                sample.args[1] is False and sample.kwargs.get("scales_h") is not None
+            ),
+            reason="fixme: align_corners=False output mismatch when scales are provided",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._upsample_bilinear2d_aa",
+            neural_ops.aten__upsample_bilinear2d_aa,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+        .xfail(
+            matcher=lambda sample: sample.args[1] is True,
+            reason="fixme: align_corners=True diverges between PyTorch AA kernel and ONNX Resize antialias",
+        )
+        .xfail(
+            matcher=lambda sample: (
+                sample.args[1] is False and sample.kwargs.get("scales_h") is not None
+            ),
+            reason="fixme: align_corners=False output mismatch when scales are provided",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_bilinear2d.vec",
+            neural_ops.aten_upsample_bilinear2d_vec,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_bicubic2d.default",
+            neural_ops.aten_upsample_bicubic2d,
+            supported_dtypes=_NN_DTYPES_1,
+        ).xfail(
+            matcher=lambda sample: (
+                sample.args[1] is False and sample.kwargs.get("scales_h") is not None
+            ),
+            reason="fixme: align_corners=False output mismatch when scales are provided",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._upsample_bicubic2d_aa",
+            neural_ops.aten__upsample_bicubic2d_aa,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+        .xfail(
+            matcher=lambda sample: sample.args[1] is True,
+            reason="fixme: align_corners=True diverges between PyTorch AA kernel and ONNX Resize antialias",
+        )
+        .xfail(
+            matcher=lambda sample: (
+                sample.args[1] is False and sample.kwargs.get("scales_h") is not None
+            ),
+            reason="fixme: align_corners=False output mismatch when scales are provided",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_bicubic2d.vec",
+            neural_ops.aten_upsample_bicubic2d_vec,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_linear1d",
+            neural_ops.aten_upsample_linear1d,
+            supported_dtypes=_NN_DTYPES_1,
+        ).xfail(
+            matcher=lambda sample: (
+                sample.args[1] is False and sample.kwargs.get("scales") is not None
+            ),
+            reason="fixme: align_corners=False output mismatch when scales are provided",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_linear1d.vec",
+            neural_ops.aten_upsample_linear1d_vec,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_nearest1d",
+            neural_ops.aten_upsample_nearest1d,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_nearest1d.vec",
+            neural_ops.aten_upsample_nearestnd_vec,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_nearest2d",
+            neural_ops.aten_upsample_nearest2d,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_nearest2d.vec",
+            neural_ops.aten_upsample_nearestnd_vec,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_nearest3d",
+            neural_ops.aten_upsample_nearest3d,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_nearest3d.vec",
+            neural_ops.aten_upsample_nearestnd_vec,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_trilinear3d.default",
+            neural_ops.aten_upsample_trilinear3d,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.upsample_trilinear3d.vec",
+            neural_ops.aten_upsample_trilinear3d_vec,
+            supported_dtypes=_NN_DTYPES_1,
+        )
+    ),
+)
 
 ops_test_common.duplicate_opinfo(
     OPS_DB, "nn.functional.group_norm", ("group_norm_op18",)
@@ -2729,6 +3520,298 @@ ops_test_common.duplicate_opinfo(
 
 
 # Source dtype eligibility is numerical test metadata, not exporter dispatch.
+TESTED_TORCHLIB_OPS += (
+    (
+        TorchLibOpInfo(
+            "ops.aten._fft_c2c",  # Custom from extra_opinfo
+            fft_ops.aten__fft_c2c,
+            tolerance={torch.complex64: (3e-3, 1.8e-4)},
+            complex=True,
+            supported_dtypes=(
+                torch.complex64,
+                torch.complex128,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._fft_c2r",  # Custom from extra_opinfo
+            fft_ops.aten__fft_c2r,
+            tolerance={torch.complex64: (3e-3, 1.8e-4)},
+            complex=True,
+            supported_dtypes=(
+                torch.complex64,
+                torch.complex128,
+            ),
+        ).xfail(
+            matcher=lambda sample: True,
+            reason="Requires ONNX with IRFFT support (onesided=True, inverse=True)",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._fft_r2c",  # Custom from extra_opinfo
+            fft_ops.aten__fft_r2c,
+            tolerance={torch.float64: (2e-6, 2e-6), torch.float32: (3e-2, 3e-4)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "erf",
+            special_ops.aten_special_erf,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "erfc",
+            special_ops.aten_special_erfc,
+            tolerance={torch.float16: (5e-1, 2e-4)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "expm1",
+            special_ops.aten_special_expm1,
+            tolerance={torch.float16: (1e-2, 2e-4)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "special.erfcx",
+            special_ops.aten_special_erfcx,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).xfail(
+            reason="fixme: The implementation is numerically unstable: https://github.com/microsoft/onnxscript/issues/1223"
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "linalg.det",
+            linalg_ops.aten_linalg_det,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "linalg.vector_norm",
+            linalg_ops.aten_linalg_vector_norm,
+            tolerance={torch.float16: (2e-3, 2e-3)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).skip(
+            matcher=lambda sample: sample.kwargs.get("ord") == 6,
+            dtypes=(torch.float16,),
+            reason="ORT returns a more accurate value for float16 with ord=6 (expected=Inf, actual=9.48).",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "log_softmax",
+            special_ops.aten_special_log_softmax,
+            tolerance={torch.float32: (3.7e-5, 1.8e-4), torch.float16: (4e-4, 6e-3)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+        .xfail(
+            dtypes=(torch.float16,),
+            reason="fixme: ORT failed. https://github.com/microsoft/onnxruntime/issues/16438",
+            test_class_name="TestOutputConsistencyFullGraph",
+        )
+        .xfail(
+            variant_name="with_dtype",
+            dtypes=(torch.float16,),
+            reason="fixme: ORT failed. https://github.com/microsoft/onnxruntime/issues/16438",
+            test_class_name="TestOutputConsistencyFullGraph",
+        )
+        .skip(
+            matcher=lambda sample: len(sample.input.shape) == 0,
+            reason="fixme: LogSoftMax does not support empty tensor as input",
+        )
+        .skip(
+            variant_name="with_dtype",
+            matcher=lambda sample: len(sample.input.shape) == 0,
+            reason="fixme: LogSoftMax does not support empty tensor as input",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "sinc",
+            special_ops.aten_special_sinc,
+            tolerance={torch.float16: (1e-2, 6e-4)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "xlogy",
+            special_ops.aten_special_xlogy,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._scaled_dot_product_flash_attention",
+            neural_ops.aten__scaled_dot_product_flash_attention,
+            tolerance={torch.float32: (3e-4, 1.5e-5)},
+            # Output[0] is OK, but other outputs just have the same shape with zero values
+            nondeterministic=True,
+            compare_shape_only_for_output=(1, 2, 3, 4, 5, 6, 7, 8),
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).skip(
+            device_type="cpu",
+            reason="_scaled_dot_product_flash_attention only supports CUDA",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._scaled_dot_product_efficient_attention",
+            neural_ops.aten__scaled_dot_product_efficient_attention,
+            tolerance={torch.float32: (3e-4, 1.5e-5)},
+            # Output[0] is OK, but other outputs just have the same shape with zero values
+            nondeterministic=True,
+            compare_shape_only_for_output=(1, 2, 3),
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).skip(
+            enabled_if=not torch.cuda.is_available(),
+            reason="_scaled_dot_product_efficient_attention only supports CUDA",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.prims.broadcast_in_dim.default",
+            prims_ops.prims_broadcast_in_dim,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.prims.var.default",
+            prims_ops.prims_var,
+            tolerance={torch.float16: (1e-3, 5e-2)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "torchvision.ops.nms",
+            vision_ops.torchvision_nms,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "torchvision.ops.roi_align",
+            vision_ops.torchvision_roi_align,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "torchvision.ops.roi_pool",
+            vision_ops.torchvision_roi_pool,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+)
 
 ops_test_common.duplicate_opinfo(OPS_DB, "all", ("all_dim", "all_dims"))
 ops_test_common.duplicate_opinfo(OPS_DB, "any", ("any_dim", "any_dims"))
