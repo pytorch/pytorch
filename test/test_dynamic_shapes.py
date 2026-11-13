@@ -4410,6 +4410,39 @@ class TestGuardsExpressions(TestCase):
 
         self.assertEqual(cnt.frame_count, 2)
 
+    @skipIfTorchDynamo("Test uses torch.compile")
+    def test_view_into_chunks_no_recompile_on_single_chunk(self):
+        # The stride of the n // C dim already matches, so the contiguity check
+        # must not guard on n // C != 1.
+        C, D = 16, 8
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x):
+            return x.view(x.shape[0] // C, C, D).sin()
+
+        for n in (2 * C, C):
+            x = torch.randn(n, D)
+            torch._dynamo.mark_dynamic(x, 0)
+            self.assertEqual(f(x), x.view(n // C, C, D).sin())
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_is_contiguous_or_false_size_one_guard(self):
+        # Guard on size == 1 only when the stride does not already match.
+        def check(n, sizes_strides):
+            shape_env = ShapeEnv()
+            chunks = create_symint(shape_env, n) // 16
+            sizes, strides = sizes_strides(chunks)
+            result = torch._C._is_contiguous_or_false(sizes, strides)
+            return result, [str(g[0]) for g in shape_env.guards]
+
+        matching = check(32, lambda c: ((c, 16, 8), (128, 8, 1)))
+        self.assertExpectedInline(str(matching), """(True, [])""")
+        bad_stride = check(32, lambda c: ((c, 8), (7, 1)))
+        self.assertExpectedInline(str(bad_stride), """(False, ['Ne((s97//16), 1)'])""")
+        size_one = check(16, lambda c: ((c, 8), (7, 1)))
+        self.assertExpectedInline(str(size_one), """(True, ['Eq((s97//16), 1)'])""")
+
     def test_remove_symbols_without_guarding(self):
         from torch._functorch.partitioners import _remove_symbols_without_guarding
 
