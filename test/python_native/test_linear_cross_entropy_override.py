@@ -77,6 +77,12 @@ def _loss_and_grads(input, linear_weight, target, linear_bias=None, **kwargs):
 
 
 @unittest.skipIf(not TEST_CUDA, "the overrides are registered on CUDA")
+@unittest.skipIf(
+    not cu.runtime_available()
+    or cu.check_native_jit_disabled()
+    or not cu._version_is_ok(),
+    "CuTeDSL runtime unavailable, disabled, or at an unsupported version",
+)
 class TestLinearCrossEntropyOverride(TestCase):
     @contextlib.contextmanager
     def _assert_kernel_path(self):
@@ -105,21 +111,6 @@ class TestLinearCrossEntropyOverride(TestCase):
         self.assertEqual(grad_weight, want_weight, atol=atol, rtol=0)
         self.assertEqual(grad_bias, want_bias, atol=atol, rtol=0)
         self.assertEqual(loss, want_loss, rtol=4 * torch.finfo(dtype).eps, atol=0)
-
-    def setUp(self):
-        super().setUp()
-        # The version check belongs here too: `cu.register_op_override` drops
-        # every registration when the installed CuTeDSL is not known-good, so
-        # these tests would look for overrides that were never installed and
-        # fail where they should skip.
-        if (
-            not cu.runtime_available()
-            or cu.check_native_jit_disabled()
-            or not cu._version_is_ok()
-        ):
-            self.skipTest(
-                "CuTeDSL runtime unavailable, disabled, or at an unsupported version"
-            )
 
     def _cutedsl_nodes(self, op_symbol):
         key = ("torch_nn", op_symbol, "CUDA")
