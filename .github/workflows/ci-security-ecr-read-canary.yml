@@ -1,0 +1,67 @@
+# Owner(s): ["module: ci"]
+# Temporary authorized audit. Never merge. No registry writes or credential output.
+name: CI security ECR read canary
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-security-ecr-read-canary.yml
+      - .github/scripts/ci_arc_ecr_probe.py
+      - .github/scripts/test_ci_arc_ecr_probe.py
+    types: [opened, synchronize, reopened]
+  push:
+    tags: [ciflow/inductor-cu126/204870]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+jobs:
+  exact-read:
+    if: github.repository == 'pytorch/pytorch' && ((github.event_name == 'pull_request' && github.event.pull_request.number == 204870 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.ref == 'ci-ecr-read-20261113') || (github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/204870'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CANARY_PR_NUMBER: ${{ github.event.pull_request.number }}
+      CANARY_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      CANARY_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      CANARY_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      AWS_EC2_METADATA_DISABLED: 'true'
+      AWS_CONFIG_FILE: /dev/null
+      AWS_SHARED_CREDENTIALS_FILE: /dev/null
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Offline exact-request controls
+        run: python3 -I .github/scripts/test_ci_arc_ecr_probe.py
+      - name: Reject alternate providers and detect ordinary OIDC
+        id: provider
+        run: |
+          python3 -I .github/scripts/ci_arc_ecr_probe.py --preflight
+          for name in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; do
+            printf '%s=\n' "$name" >> "$GITHUB_ENV"
+          done
+      - name: Assume exact ordinary CI role
+        id: credentials
+        if: steps.provider.outputs.oidc_requestable == 'true'
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          role-session-name: ci-ecr-read-${{ github.run_id }}
+          role-duration-seconds: 900
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+          unset-current-credentials: true
+          allowed-account-ids: '308535385114'
+          disable-retry: true
+      - name: Read exact CI repository metadata
+        if: steps.provider.outputs.oidc_requestable == 'true' && steps.credentials.outcome == 'success'
+        run: python3 -I .github/scripts/ci_arc_ecr_probe.py
+      - name: Record unavailable role
+        if: steps.credentials.outcome != 'success'
+        run: echo 'arc_assumed=false'
