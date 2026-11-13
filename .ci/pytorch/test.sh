@@ -845,6 +845,8 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_on_gpu_device1 --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_gpu_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_load_package_multiple_gpus --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_aot_cudagraphs_rejects_uncapturable_models --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_aot_cudagraphs_rejects_multi_device_model --verbose
   # CUDA graph capture on a second GPU: the test_shim tests whose names end in
   # MultiGpu, which skip or check only device 0 on single-GPU runners.
   /usr/bin/env LD_LIBRARY_PATH="${TORCH_LIB_DIR}" "${BUILD_BIN_DIR}/test_shim" \
