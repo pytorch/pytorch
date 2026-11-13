@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
@@ -623,9 +624,10 @@ void fakeFallback(
     torch::jit::push(*stack, std::move(result));
     return;
   }
-  // Mirror FakeTensor._find_common_device. Probe without resolving conflicts
-  // for op_implementations, which may choose devices themselves. Resolve only
-  // when wrapping a Meta output, so kernel errors take precedence.
+  // Mirror FakeTensor._find_common_device, with the device preference captured
+  // at mode construction. Probe without resolving conflicts for
+  // op_implementations, which may choose devices themselves. Resolve only when
+  // wrapping a Meta output, so kernel errors take precedence.
   const bool cpu_zero_dim_defers = schema.name() != "aten::nextafter" ||
       !schema.overload_name().empty();
   const bool allows_cpu = schema.name() == "aten::_foreach_copy" &&
@@ -662,13 +664,24 @@ void fakeFallback(
       if (!resolve) {
         return std::nullopt;
       }
-      const auto resolved =
-          (*c10::impl::getGlobalPyInterpreter())
-              ->_resolve_device_conflict(op, *common_device, input_device);
-      if (resolved == input_device) {
-        common_device = input_device;
-        common_is_cpu_zero_dim = is_cpu_zero_dim;
+      if (mode->prefer_device_type_.has_value()) {
+        const auto& preferred = *mode->prefer_device_type_;
+        const bool common_has_preferred =
+            c10::DeviceTypeName(common_device->type(), /*lower_case=*/true)
+                .find(preferred) != std::string::npos;
+        const bool input_has_preferred =
+            c10::DeviceTypeName(input_device.type(), /*lower_case=*/true)
+                .find(preferred) != std::string::npos;
+        if (common_has_preferred != input_has_preferred) {
+          if (input_has_preferred) {
+            common_device = input_device;
+            common_is_cpu_zero_dim = is_cpu_zero_dim;
+          }
+          continue;
+        }
       }
+      (*c10::impl::getGlobalPyInterpreter())
+          ->fake_raise_device_mismatch(op, *common_device, input_device);
     }
     return common_device;
   };
