@@ -42,16 +42,25 @@ def _get_request_headers() -> dict[str, str]:
     }
 
 
+# Quota waits must end by this: GitHub's window is an hour, so a later reset time
+# is bogus, and however many requests hit the limit the script waits an hour at most.
+_QUOTA_WAIT_DEADLINE = time.time() + 3600
+
+
 def _github_get(url: str) -> requests.Response:
     # The GITHUB_TOKEN quota is shared by every job in the repository and runs out
     # at peak hours. This runs after the workflow, and ROCm jobs leave their test
-    # reports only in GitHub artifacts, so wait for the quota to reset (at most an
-    # hour) rather than lose them.
+    # reports only in GitHub artifacts, so wait for the quota to reset rather than
+    # lose them.
     response = requests.get(url, headers=_get_request_headers())
-    remaining = response.headers.get("X-RateLimit-Remaining")
-    if response.status_code in (403, 429) and remaining == "0":
-        reset = int(response.headers.get("X-RateLimit-Reset", "0"))
-        wait = max(reset - time.time(), 0) + 5
+    reset = response.headers.get("X-RateLimit-Reset", "")
+    if (
+        response.status_code in (403, 429)
+        and response.headers.get("X-RateLimit-Remaining") == "0"
+        and reset.isdecimal()
+        and int(reset) + 5 <= _QUOTA_WAIT_DEADLINE
+    ):
+        wait = max(int(reset) - time.time(), 0) + 5
         print(f"GitHub API quota used up, waiting {wait:.0f}s for it to reset")
         time.sleep(wait)
         response = requests.get(url, headers=_get_request_headers())

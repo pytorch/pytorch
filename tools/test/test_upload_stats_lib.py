@@ -316,6 +316,14 @@ class TestGithubGet(unittest.TestCase):
         forbidden = {"X-RateLimit-Remaining": "4999"}
         self.assertEqual(self._get(_response(403, forbidden)), (403, []))
 
+    def test_ignores_a_malformed_reset(self) -> None:
+        malformed = {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "soon"}
+        self.assertEqual(self._get(_response(403, malformed)), (403, []))
+
+    def test_ignores_a_reset_past_the_deadline(self) -> None:
+        bogus = {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "9999999999"}
+        self.assertEqual(self._get(_response(403, bogus)), (403, []))
+
 
 if __name__ == "__main__":
     unittest.main()
