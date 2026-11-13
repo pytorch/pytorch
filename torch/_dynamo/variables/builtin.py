@@ -2869,9 +2869,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                 explanation=f"Dynamo doesn't have a rule to determine the type of argument {arg}",
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
-        if isinstance(arg, variables.NNModuleHooksDictVariable) and arg.source:
+        if isinstance(arg, variables.NNModuleHooksDictVariable):
             # Explicit isinstance observes the registry type, unlike internal slot dispatch.
-            install_guard(arg.source.make_guard(GuardBuilder.TYPE_MATCH))
+            arg._guard_type()
         isinstance_type = isinstance_type_var.as_python_constant()
         # An AsyncCollectiveTensor (ACT) input's tensor-class guard is relaxed
         # (see VariableBuilder.wrap_tensor): the cache entry does not discriminate
@@ -3586,7 +3586,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return DictBuiltinVariable.construct_dict(tx, *args, **kwargs)
+        return DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
     def fromkeys(
         self,
@@ -3598,20 +3598,17 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         check_positional(tx, "fromkeys", len(args), 1, 2)
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
-            if isinstance(args[0], ConstDictVariable):
-                args[0].install_dict_order_guard(tx)
-            else:
-                args[0].install_set_order_guard(tx)
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
             storage = (
                 args[0].materialize_keys()
                 if isinstance(args[0], ConstDictVariable)
                 else args[0].items
             )
-            result = ConstDictVariable({}, mutation_type=ValueMutationNew())
-            result.items = dict.fromkeys(storage, value)
-            return result
-        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args)
+            return ConstDictVariable(
+                dict.fromkeys(storage, value),
+                mutation_type=ValueMutationNew(),
+            )
+        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args, **kwargs)
 
     tp_methods = {
         "fromkeys": Method(fromkeys),
@@ -3646,39 +3643,16 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if name == "__new__":
             return self.tp_new_impl(tx, args, kwargs)
 
-        if args and isinstance(args[0], ConstDictVariable):
-            args[0].check_base_dict_mutation(tx, name)
         resolved_fn = getattr(dict, name, None)
-        if isinstance(resolved_fn, types.WrapperDescriptorType):
-            if not args:
-                from .builder import VariableBuilder
-
-                wrapper = VariableBuilder.create_internal_wrapper_descriptor(
-                    resolved_fn, self
-                )
-                return wrapper.call_function(tx, args, kwargs)
-            if not issubclass(args[0].python_type(), resolved_fn.__objclass__):
-                raise_type_error(
-                    tx,
-                    f"descriptor '{name}' requires a 'dict' object "
-                    f"but received a '{args[0].python_type_name()}'",
-                )
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
-            if name in (
-                *_RICH_CMP_DUNDERS,
-                "__repr__",
-                "__iter__",
-                "__len__",
-                "__or__",
-                "__ror__",
-            ):
+            if name in (*_RICH_CMP_DUNDERS, "__repr__", "__iter__"):
                 if not isinstance(obj, ConstDictVariable):
                     unimplemented(
                         gb_type="Unsupported builtin dictionary storage operation",
                         context=f"dict.{name} on {obj.python_type_name()}",
                         explanation="Dynamo cannot yet preserve builtin dictionary storage for this operation.",
-                        hints=[],
+                        hints=[*graph_break_hints.SUPPORTABLE],
                     )
                 # Explicit dict slots bypass OrderedDict's linked-order behavior.
                 slotdef = obj.lookup_slotdefs(name)
@@ -3694,15 +3668,19 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         return super().call_method(tx, name, args, kwargs)
 
     @staticmethod
-    def construct_dict(
+    def call_custom_dict(
         tx: "InstructionTranslatorBase",
+        user_cls: type,
         /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
-    ) -> ConstDictVariable:
-        result = ConstDictVariable({}, mutation_type=ValueMutationNew())
-        result.tp_init_impl(tx, list(args), kwargs)
-        return result
+    ) -> VariableTracker:
+        args_list = list(args)
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.construct_dict),
+            [VariableTracker.build(tx, user_cls), *args_list],
+            kwargs,
+        )
 
     @staticmethod
     def call_custom_dict_fromkeys(
@@ -3710,11 +3688,12 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         user_cls: VariableTracker,
         /,
         *args: VariableTracker,
+        **kwargs: VariableTracker,
     ) -> VariableTracker:
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.dict_fromkeys),
             [user_cls, *args],
-            {},
+            kwargs,
         )
 
 
@@ -3880,23 +3859,10 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
             ]
         if len(args) != 2 or kwargs:
             raise_observed_exception(TypeError, tx)
+        from .object_protocol import generic_hasattr
+
         obj, attr = args
-        if not attr.is_python_constant():
-            raise_observed_exception(TypeError, tx)
-        attr_name = attr.as_python_constant()
-        if not isinstance(attr_name, str):
-            raise_type_error(
-                tx, f"attribute name must be string, not '{attr.python_type_name()}'"
-            )
-        result = obj.call_obj_hasattr(tx, attr_name)
-        if result is None:
-            unimplemented(
-                gb_type="hasattr() on unsupported type",
-                context=f"hasattr({obj}, {attr})",
-                explanation=f"hasattr() is not supported on type {obj.python_type_name()}",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return result
+        return generic_hasattr(tx, obj, attr)
 
 
 class SetAttrBuiltinVariable(BaseBuiltinVariable):

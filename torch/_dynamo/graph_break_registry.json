@@ -1,14 +1,4 @@
 {
-  "GB2484": [
-    {
-      "Gb_type": "Dictionary merge after iteration slot mutation",
-      "Context": "dict_merge: {other}",
-      "Explanation": "Dynamo cannot merge a dictionary after changing its type's __iter__.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0000": [
     {
       "Gb_type": "All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
@@ -365,6 +355,18 @@
       "Context": "typestr(value)",
       "Explanation": "Import result is not a Python module.",
       "Hints": []
+    }
+  ],
+  "GB1108": [
+    {
+      "Gb_type": "Descriptor mutation on a constant-source object",
+      "Context": "name={name_str}, class_source={self.cls_source.name}",
+      "Explanation": "Dynamo cannot guard the class metadata used to resolve a descriptor mutation on an object returned by a constant-result function.",
+      "Hints": [
+        "Pass the object as an input instead of returning it from a function ",
+        "marked with `torch._dynamo.assume_constant_result`.",
+        "Move the descriptor mutation outside the compiled region."
+      ]
     }
   ],
   "GB1273": [
@@ -1964,6 +1966,16 @@
       ]
     }
   ],
+  "GB9322": [
+    {
+      "Gb_type": "bytearray.join() with unsupported item type",
+      "Context": "bytearray.join() item: {item}",
+      "Explanation": "Dynamo only supports joining bytes and bytearray items, got {item.python_type_name()}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4778": [
     {
       "Gb_type": "nested function with non-constructible closure in output",
@@ -2587,6 +2599,16 @@
       "Context": "str(error)",
       "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
       "Hints": [
+        "Snapshots are not implemented on Python 3.16+. On older free-threaded ",
+        "Python, empty OrderedDicts remain supported; nonempty ones require ",
+        "Python 3.14.1+. Keep unsupported inputs outside fullgraph capture."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported OrderedDict snapshot runtime",
+      "Context": "str(error)",
+      "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
+      "Hints": [
         "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+."
       ]
     }
@@ -2694,6 +2716,15 @@
     }
   ],
   "GB0150": [
+    {
+      "Gb_type": "Unsupported hasattr call",
+      "Context": "generic_hasattr {obj} {name}",
+      "Explanation": "Dynamo does not know how to trace the function `{obj.debug_repr()}`",
+      "Hints": [
+        "Avoid calling `hasattr({obj.__class__.__name__}, {name})` in your code.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Unsupported hasattr call",
       "Context": "call_obj_hasattr {self} {name}",
@@ -2939,16 +2970,6 @@
       "Explanation": "This VariableTracker does not implement python_type(), which is required for object protocol operations.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
-      ]
-    }
-  ],
-  "GB8943": [
-    {
-      "Gb_type": "Unsupported dictionary storage",
-      "Context": "str(type(other))",
-      "Explanation": "Dynamo cannot access this dictionary's stored keys and values.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -5046,6 +5067,26 @@
       ]
     }
   ],
+  "GB1208": [
+    {
+      "Gb_type": "Unsupported generator frame f_back",
+      "Context": "{state}",
+      "Explanation": "f_back is only modeled for created or suspended generators.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0949": [
+    {
+      "Gb_type": "Unsupported generator frame attribute",
+      "Context": "frame.{name}",
+      "Explanation": "Dynamo does not model the frame attribute {name}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB1392": [
     {
       "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",
@@ -6953,6 +6994,14 @@
       "Gb_type": "Unsupported builtin dictionary storage operation",
       "Context": "dict.{name} on {obj.python_type_name()}",
       "Explanation": "Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported builtin dictionary storage operation",
+      "Context": "dict.{name} on {obj.python_type_name()}",
+      "Explanation": "Dynamo cannot yet preserve builtin dictionary storage for this operation.",
       "Hints": []
     }
   ],
@@ -7373,26 +7422,6 @@
       "Gb_type": "Unsupported dictionary view owner",
       "Context": "dict_vt.python_type_name()",
       "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB0580": [
-    {
-      "Gb_type": "Dictionary mutated during iteration",
-      "Context": "str(error)",
-      "Explanation": "Dynamo cannot trace dictionary iteration that changes its keys.",
-      "Hints": [
-        "Avoid changing dictionary keys during iteration."
-      ]
-    }
-  ],
-  "GB4061": [
-    {
-      "Gb_type": "Unsupported OrderedDict union result",
-      "Context": "new.python_type_name()",
-      "Explanation": "Dynamo cannot yet update a non-dictionary returned by an OrderedDict subclass constructor.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

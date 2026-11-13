@@ -11,33 +11,33 @@ import abc
 import collections
 import contextlib
 import enum
+import functools
+import inspect
 import operator
 import sys
 import types
 import typing
 from collections.abc import Callable, Generator
 from functools import lru_cache, partial
-from typing import cast, NoReturn, TYPE_CHECKING
+from typing import NoReturn, TYPE_CHECKING
 
 import torch
 from torch._C._dynamo import (
     get_type_slots,
-    get_type_tp_name,
     has_slot,
-    is_generic_getattr,
     PyMappingSlots,
     PyNumberSlots,
     PySequenceSlots,
     PyTypeSlots,
 )
 from torch._guards import TracingContext
-from torch._library.fake_class_registry import FakeScriptObject
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
     ObservedTypeError,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     UnhandledDescriptorError,
@@ -2548,9 +2548,7 @@ def object_generic_getattr(
       4. Non-data descriptor -> invoke tp_descr_get
       5. Plain class variable -> wrap in VT
       6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
-      7. AttributeError only for an immutable runtime type with generic lookup,
-         no instance dictionary, and no __getattr__; otherwise defer to the
-         tracker's fallback, which may guard mutable class attributes.
+      7. AttributeError
     """
     from .user_defined import is_data_descriptor
 
@@ -2608,36 +2606,20 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Step 7: Confirm the runtime type before handling absence directly.
-    # Mutable classes still need guards for later class writes.
-    modeled_type = obj._cpython_type
-    modeled_types = modeled_type if isinstance(modeled_type, tuple) else (modeled_type,)
+    # Step 7: Attribute not found. With generic tp_getattro, no instance
+    # __dict__ and no __getattr__, the MRO walk was the whole lookup, so this
+    # is CPython's AttributeError; otherwise signal the caller to fall back.
+    from .user_defined import _safe_c_slots
+
     if (
-        type_is_immutable(py_type)
-        and not py_type.__dictoffset__
-        and is_generic_getattr(py_type)
+        py_type.__dictoffset__ == 0
+        and py_type.__getattribute__ in _safe_c_slots()
         and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
     ):
-        try:
-            actual_type_matches = (
-                type(tx.output.resolve_source_value(obj.source)) is py_type
-                if obj.source
-                else any(py_type is candidate for candidate in modeled_types)
-            )
-        except (NameError, KeyError, AttributeError, NotImplementedError):
-            # Some sources require guard helpers unavailable to source evaluation.
-            actual_type_matches = False
-        if actual_type_matches:
-            raise_observed_exception(
-                AttributeError,
-                tx,
-                args=[
-                    f"'{get_type_tp_name(py_type)}' object has no attribute '{name}'"
-                ],
-                kwargs={"name": ConstantVariable.create(name), "obj": obj},
-            )
-
-    # Attribute absence was not proven -- signal to the caller to fall back.
+        raise_attribute_error(
+            tx,
+            f"'{py_type.__name__}' object has no attribute '{name}'",
+        )
     raise _UnhandledDescriptorError(
         f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
     )
@@ -2660,29 +2642,6 @@ def generic_getattr(
     # NOTE [Tensor "grad" and "_grad" attr]
     if obj.is_tensor() and name == "_grad":
         name = "grad"
-
-    # Opaque fake wrappers have a different class from the runtime source.
-    fake_opaque = (
-        isinstance(obj, variables.UserDefinedObjectVariable)
-        and type(obj.value) is FakeScriptObject
-    )
-    if (
-        default is not _NO_DEFAULT
-        and not fake_opaque
-        and isinstance(obj, variables.UserDefinedObjectVariable)
-        and obj.cls_source is not None
-    ):
-        # Protect both adding a hook and rebinding an existing mutable owner.
-        lookup_source = mro_attr_source(
-            tx, obj.python_type(), obj.cls_source, "__getattribute__"
-        )
-        owner = next(
-            cls
-            for cls, namespace in iter_mro_static_dicts(obj.python_type())
-            if "__getattribute__" in namespace
-        )
-        if lookup_source is not None and not type_is_immutable(owner):
-            install_guard(lookup_source.make_guard(GuardBuilder.ID_MATCH))
 
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
@@ -2707,35 +2666,10 @@ def generic_getattr(
             ):
                 return value
 
-    # A user descriptor must run once; hasattr followed by getattr runs it twice.
-    if (
-        default is not _NO_DEFAULT
-        and not fake_opaque
-        and isinstance(obj, variables.UserDefinedObjectVariable)
-        and not isinstance(obj.lookup_class_mro_attr(name), types.MemberDescriptorType)
-        and (
-            obj.lookup_class_mro_attr("__dict__") is NO_SUCH_SUBOBJ
-            or isinstance(
-                obj.lookup_class_mro_attr("__dict__"), types.GetSetDescriptorType
-            )
-        )
-    ):
-        try:
-            return generic_getattr(tx, obj, name)
-        except ObservedAttributeError:
-            handle_observed_exception(tx)
-            obj.guard_attribute_absence(tx, name)
-            return cast(VariableTracker, default)
-
     # Handle default for getattr(obj, name, default).
     if default is not _NO_DEFAULT:
-        hasattr_var = obj.call_obj_hasattr(tx, name)
-        if not hasattr_var.is_constant_match(True, False):
-            raise AssertionError(
-                f"hasattr_var must be a constant True or False, got {hasattr_var}"
-            )
-        if not hasattr_var.as_python_constant():
-            return cast(VariableTracker, default)
+        if not generic_hasattr_str(tx, obj, name):
+            return default  # type: ignore[return-value]
 
     # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
     # tp_getattro so a tp_getattro_impl override need not repeat the consult.
@@ -2753,3 +2687,95 @@ def generic_getattr(
         raise
     except NotImplementedError:
         return variables.GetAttrVariable(obj, name, source=source)
+
+
+def generic_hasattr(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: VariableTracker,
+) -> ConstantVariable:
+    """Dynamo's PyObject_HasAttr: validate the name, then delegate.
+
+    https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1414
+    """
+    if not issubclass(name.python_type(), str):
+        raise_type_error(
+            tx, f"attribute name must be string, not '{name.python_type_name()}'"
+        )
+    attr_name = name.as_python_constant()
+    return ConstantVariable.create(generic_hasattr_str(tx, obj, attr_name))
+
+
+def generic_hasattr_str(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+) -> bool:
+    """Dynamo's PyObject_GetOptionalAttrString: call tp_getattro, suppress AttributeError.
+
+    CPython has no tp_hasattr slot. hasattr() is PyObject_GetOptionalAttr over
+    tp_getattro, so it cannot disagree with getattr();
+    https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1321
+    """
+    if type(obj).call_obj_hasattr is not VariableTracker.call_obj_hasattr:
+        try:
+            return obj.call_obj_hasattr(tx, name).as_python_constant()
+        except NotImplementedError:
+            pass
+
+    try:
+        # generic_getattr, not tp_getattro_impl, so pending in-frame stores
+        # and tp_getset/tp_members resolve the same way getattr() sees them.
+        # A typed GetAttrVariable is built only after a real getattr found the
+        # value, so it proves the attribute exists; an untyped one is a
+        # deferred read and no evidence, so fall through to the graph break.
+        # A lazy VT wraps a real value, and realizing it would install guards
+        # on a value hasattr never reads.
+        value = generic_getattr(tx, obj, name)
+        if (
+            isinstance(value, variables.LazyVariableTracker)
+            or not isinstance(value, variables.GetAttrVariable)
+            or value.py_type is not None
+        ):
+            # A lazy read installs no guards, so HASATTR keeps a True answer
+            # valid. Skip it when only a user __getattr__ found the name:
+            # HASATTR runs the real hasattr() when guards are built, which would
+            # call that __getattr__, and it may mutate the object
+            # (tempfile._TemporaryFileWrapper caches into __dict__). The traced
+            # __getattr__ already guarded its own reads.
+            found_by_user_getattr = (
+                isinstance(obj, variables.UserDefinedObjectVariable)
+                and isinstance(obj._check_for_getattr(), types.FunctionType)
+                and inspect.getattr_static(obj.value, name, NO_SUCH_SUBOBJ)
+                is NO_SUCH_SUBOBJ
+            )
+            if obj.source and not found_by_user_getattr:
+                install_guard(
+                    obj.source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
+            return True
+    except ObservedAttributeError:
+        tx.exn_vt_stack.clear_current_exception()
+        # No CPython analogue. A False answer rests on the attribute staying
+        # absent, and nothing else guards that.
+        if obj.source:
+            install_guard(
+                obj.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
+        return False
+    except NotImplementedError:
+        pass
+
+    unimplemented(
+        gb_type="Unsupported hasattr call",
+        context=f"generic_hasattr {obj} {name}",
+        explanation=f"Dynamo does not know how to trace the function `{obj.debug_repr()}`",
+        hints=[
+            f"Avoid calling `hasattr({obj.__class__.__name__}, {name})` in your code.",
+            *graph_break_hints.SUPPORTABLE,
+        ],
+    )

@@ -311,11 +311,8 @@ def check_for_mutation(
     inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> str | None:
-    # Only the CUDA graph tree manager calls this, for a function registered with
-    # it (e.g. by compile_fx.cudagraphify with triton.cudagraph_trees on, or the
-    # dynamo cudagraphs backend). Such a wrapper is built once, so the tree rule
-    # applies whatever the flag says now: static inputs and tensors a CUDA graph
-    # recorded may mutate.
+    # Only the tree manager calls this, and tree wrappers allow mutation of static
+    # inputs and cudagraph-recorded tensors regardless of triton.cudagraph_trees.
     mutation_indices = [
         idx
         for idx in func.mutated_input_idxs

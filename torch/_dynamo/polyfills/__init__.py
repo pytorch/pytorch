@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 import sys as py_sys
 import types
+from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ge, gt, le, lt, ne
@@ -360,6 +361,25 @@ def list_cmp(
     return op(left_len, right_len)
 
 
+def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
+    # dict_equal reads the C struct (ma_used, dk_entries, _Py_dict_lookup), so
+    # every access below goes through the unbound dict methods -- a dict
+    # subclass overriding __len__ / keys / __getitem__ must not be consulted.
+    # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
+    if (dict.__len__(d) != dict.__len__(other)) or (dict.keys(d) != dict.keys(other)):
+        return False
+
+    # CPython's dict_equal uses PyObject_RichCompareBool for value
+    # comparison, which has an identity shortcut (if v is w, eq is True).
+    # This matters for NaN: {k: nan} == {k: nan} is True when same nan.
+    for k, v in dict.items(d):
+        ov = dict.__getitem__(other, k)
+        if v is not ov and v != ov:
+            return False
+
+    return True
+
+
 def dictview_richcompare(
     op: Callable[[Any, Any], bool], self: Iterable[T], other: Iterable[T]
 ) -> bool:
@@ -461,61 +481,63 @@ def instantiate_user_defined_class_object(
     return obj
 
 
-def odict_update(
-    self: Any,
-    data: Any = (),
+def mutable_mapping_update(
+    self,
+    data: Mapping[T, U] | Iterable[tuple[T, U]] = (),
     /,
     **kwargs: Any,
 ) -> None:
-    # CPython's mutablemapping_update_arg in Objects/odictobject.c snapshots
-    # exact dicts, but dispatches keys/__getitem__ and destination __setitem__.
-    missing = object()
-    if type(data) is dict:
-        data = list(data.items())
+    if isinstance(data, Mapping):
+        # Merge standard mapping with PyMapping_Items
+        for key, value in data.items():
+            self[key] = value
+    # FIXME: Enabling the `elif`-branch below needs too many `tp_getattro_impl` changes.
+    #   >>> class Foo:
+    #   ...     def __init__(self):
+    #   ...         self.keys = lambda: ['a', 'b', 'c']  # not required to be a method
+    #   ...
+    #   ...     def __getitem__(self, key):
+    #   ...         return 0
+    #   ...
+    #   >>> dict(Foo())
+    #   {'a': 0, 'b': 0, 'c': 0}
+    #
+    # > This is a rare case, so we comment it out for now.
+    #
+    # elif hasattr(data, "keys"):
+    #     # Merge mapping-like object with PyMapping_Keys + PyObject_GetItem
+    #     for key in data.keys():
+    #         self[key] = data[key]
     else:
-        keys: Any = getattr(data, "keys", missing)
-        if keys is missing:
-            items: Any = getattr(data, "items", missing)
-            if items is not missing:
-                data = items()
-        else:
-            for key in keys():
-                self[key] = data[key]
-            data = ()
-    for pair in data:
-        if (type(pair) is tuple or type(pair) is list) and len(pair) == 2:
-            self[pair[0]] = pair[1]
-            continue
-        # CPython's mutablemapping_add_pairs consumes at most three items per pair.
-        pair = iter(pair)
-        key = next(pair, missing)
-        if key is missing:
-            raise ValueError("need more than 0 values to unpack")
-        value = next(pair, missing)
-        if value is missing:
-            raise ValueError("need more than 1 value to unpack")
-        if next(pair, missing) is not missing:
-            raise ValueError("too many values to unpack (expected 2)")
-        self[key] = value
-    for key, value in kwargs.items():
-        self[key] = value
+        if not isinstance(data, Iterable):
+            raise TypeError(f"{type(data).__name__!r} object is not iterable")
+        # Likely a sequence of pairs
+        for key, value in data:
+            self[key] = value
+
+    if kwargs:
+        for key, value in kwargs.items():
+            self[key] = value
 
 
-def dict_fromkeys(
-    cls: Callable[..., C], iterable: Iterable[T], value: U | None = None, /
-) -> C:
+# Used with something like dict(obj)
+def construct_dict(
+    cls: type[T],
+    data: Mapping[object, object] | Iterable[tuple[object, object]] = (),
+    /,
+    **kwargs: Any,
+) -> T:
+    self = cls.__new__(cls)
+    mutable_mapping_update(self, data, **kwargs)
+    return self
+
+
+def dict_fromkeys(cls: Any, /, iterable: Iterable[Any], value: Any = None) -> Any:
     # Mirrors the subclass path in CPython's _PyDict_FromKeys.
-    result: Any = cls()
+    result = cls()
     for key in iterable:
         result[key] = value
     return result
-
-
-# OrderedDict.fromkeys allows keyword arguments
-def odict_fromkeys(
-    cls: Callable[..., C], /, iterable: Iterable[T], value: U | None = None
-) -> C:
-    return dict_fromkeys(cls, iterable, value)
 
 
 def foreach_map_fn(*args: Any) -> Any:

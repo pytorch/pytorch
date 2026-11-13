@@ -17,7 +17,7 @@ import inspect
 import itertools
 import operator
 import sys
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
@@ -321,13 +321,6 @@ class IteratorVariable(VariableTracker):
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        if name == "__iter__" or name == "__next__":
-            return variables.ConstantVariable.create(True)
-        return super().call_obj_hasattr(tx, name)
-
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         """Iterators are their own iterator."""
         return self
@@ -416,8 +409,6 @@ class ChainVariable(IteratorVariable):
 
 
 class RepeatIteratorVariable(IteratorVariable):
-    _cpython_type = itertools.repeat
-
     # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c
     # repeat carries a `cnt` count: -1 means unbounded; CPython's repeat_new
     # clamps a user-supplied negative `times` to 0. We model that with `times`
@@ -504,8 +495,6 @@ class RepeatIteratorVariable(IteratorVariable):
 
 
 class CountIteratorVariable(IteratorVariable):
-    _cpython_type = itertools.count
-
     # advance_count tracks how many next() calls were made during tracing,
     # used by side_effects.py to replay them on the real iterator post-execution.
     _nonvar_fields = {
@@ -1053,6 +1042,3 @@ class DictItemsIterator(DictViewIterator):
 class SetIterator(DictViewIterator):
     _cpython_type = type(iter(set()))
     view_type = "keys"
-
-    def python_type(self) -> type:
-        return cast(type, self._cpython_type)

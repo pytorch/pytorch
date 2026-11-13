@@ -98,8 +98,6 @@ from .user_defined import (
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
-    from .constant import ConstantVariable
-
 
 def _build_hooks_dict(
     hooks: dict[Any, Any],
@@ -414,16 +412,6 @@ class NNModuleVariable(VariableTracker):
                 )
             )
         return result
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        mod = tx.output.get_submodule(self.module_key)
-        result = hasattr(mod, name)
-        install_guard(
-            self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
-        )
-        return VariableTracker.build(tx, result)
 
     def is_training(self, tx: "InstructionTranslatorBase") -> bool:
         mod = tx.output.get_submodule(self.module_key)
@@ -1638,11 +1626,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> VariableTracker | None:
         dict_vt = self.tp_getattro_impl(tx, field)
         if isinstance(dict_vt, variables.ConstDictVariable):
-            result = dict_vt.maybe_getitem_const(name_vt)
-            if result is None:
-                # Successful lookups guard the sourced value; misses need a presence guard.
-                dict_vt.install_dict_contains_guard(tx, HashableTracker(name_vt))
-            return result
+            return dict_vt.maybe_getitem_const(name_vt)
         return None
 
     def tp_getattro_impl(
@@ -1818,9 +1802,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         name_vt = SourcelessBuilder.create(tx, name)
         out = self.getattr_helper(tx, "_parameters", name_vt)
         if out is None:
-            out = self.getattr_helper(tx, "_buffers", name_vt)
-        if out is None:
             out = self.getattr_helper(tx, "_modules", name_vt)
+        if out is None:
+            out = self.getattr_helper(tx, "_buffers", name_vt)
         if out is None:
             raise_observed_exception(
                 AttributeError,

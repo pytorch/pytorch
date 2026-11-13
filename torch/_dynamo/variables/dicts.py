@@ -24,7 +24,7 @@ import sys
 import types
 import weakref
 from collections.abc import Callable, Iterator
-from typing import Any, cast, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
 from torch._guards import TracingContext
@@ -39,11 +39,9 @@ from ..bytecode_transformation import (
 )
 from ..exc import (
     handle_observed_exception,
-    ObservedException,
     ObservedTypeError,
     raise_observed_exception,
     raise_type_error,
-    TorchDynamoException,
     unimplemented,
     Unsupported,
 )
@@ -64,14 +62,10 @@ from ..utils import (
     dict_items,
     dict_keys,
     dict_values,
-    get_type_mro_no_user_code,
     istype,
-    iter_mro_static_dicts,
-    lazily_unpack,
     odict_items,
     odict_keys,
     odict_values,
-    specialize_symnode,
     tracked_repr,
     unpack_iterable,
 )
@@ -99,18 +93,15 @@ from .hashable import (
 )
 from .object_protocol import (
     _is_method_type,
-    generic_getattr,
     generic_getitem,
-    generic_getiter,
+    generic_hasattr_str,
     generic_is_true,
     generic_richcompare_bool,
     generic_setitem,
     generic_str,
-    mro_attr_source,
     mro_lookup,
     pysequence_contains,
     repr_guard,
-    type_is_immutable,
 )
 
 
@@ -122,24 +113,10 @@ if TYPE_CHECKING:
     from .functions import UserFunctionVariable
 
 
-_FAST_DICT_KEY_TYPES = (str, int, bool, bytes, type(None))
-
 # [Adding a new supported class within the keys of ConstDictVariable]
 # - Implement tp_hash_impl(self, tx) on the VariableTracker subclass (or rely on the
 #   base class default which uses get_real_python_backed_value())
 # - Implement tp_richcompare_impl() for key equality
-
-
-def _is_fast_dict_key(key: VariableTracker) -> bool:
-    # Type identity avoids user metaclass hash and equality callbacks.
-    key = key.unwrap()
-    if isinstance(key, variables.LazyVariableTracker):
-        key_type = key.peek_type()
-    elif type(key) is ConstantVariable:
-        key_type = type(key.value)
-    else:
-        return False
-    return any(key_type is kind for kind in _FAST_DICT_KEY_TYPES)
 
 
 def _get_literal_key(key: VariableTracker) -> Any:
@@ -175,78 +152,6 @@ def pydict_checkexact(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     return obj.python_type() is dict
 
 
-# Mirror PyODict_CheckExact in Include/cpython/odictobject.h.
-def pyodict_checkexact(obj: VariableTracker) -> TypeIs["OrderedDictVariable"]:
-    return obj.python_type() is collections.OrderedDict
-
-
-def _unpack_dict_update_pair(
-    tx: "InstructionTranslatorBase", item: VariableTracker, index: int
-) -> list[VariableTracker]:
-    try:
-        item = item.realize()
-        if istype(item, (variables.ListVariable, variables.TupleVariable)):
-            return unpack_iterable(tx, item)
-        try:
-            iterator = generic_getiter(tx, item)
-        except ObservedException:
-            error = tx.exn_vt_stack.get_raised_exception()
-            if not issubclass(error.python_type(), TypeError):
-                raise
-            handle_observed_exception(tx)
-            raise_type_error(tx, "object is not iterable")
-        return unpack_iterable(tx, iterator)
-    except ObservedException:
-        error = tx.exn_vt_stack.get_raised_exception()
-        if not issubclass(error.python_type(), TypeError):
-            raise
-        handle_observed_exception(tx)
-        context = f"dictionary update sequence element #{index} to a sequence"
-        if sys.version_info < (3, 14):
-            raise_type_error(tx, f"cannot convert {context}")
-        # CPython 3.14+ preserves the iterator error and appends its context as a note.
-        try:
-            notes = generic_getattr(tx, error, "__notes__", variables.DeletedVariable())
-            if isinstance(notes, variables.DeletedVariable):
-                notes = variables.ListVariable([], mutation_type=ValueMutationNew())
-                error.call_method(
-                    tx, "__setattr__", [ConstantVariable.create("__notes__"), notes], {}
-                )
-            if not isinstance(notes, variables.ListVariable):
-                raise_type_error(tx, "Cannot add note: __notes__ is not a list")
-            variables.ListVariable.list_append(
-                notes, tx, [ConstantVariable.create(f"Cannot convert {context}")], {}
-            )
-        except ObservedException:
-            tx.exn_vt_stack.get_raised_exception().set_context(error)
-            raise
-        tx.do_raise(error, None)
-
-
-_T = TypeVar("_T")
-
-
-def _iter_detecting_mutation(iterator: Iterator[_T]) -> Iterator[_T]:
-    while True:
-        try:
-            item = next(iterator)
-        except StopIteration:
-            return
-        except TorchDynamoException:
-            # User-exception sentinels and graph breaks also inherit RuntimeError;
-            # propagate them before handling iterator mutation errors.
-            raise
-        except RuntimeError as error:
-            unimplemented(
-                gb_type="Dictionary mutated during iteration",
-                context=str(error),
-                explanation="Dynamo cannot trace dictionary iteration that changes its keys.",
-                hints=["Avoid changing dictionary keys during iteration."],
-            )
-        # Keep user code outside the handler so its exceptions propagate.
-        yield item
-
-
 def _is_set_or_dictview(obj: VariableTracker) -> bool:
     """PyAnySet_Check(other) || PyDictViewSet_Check(other)"""
     try:
@@ -254,6 +159,16 @@ def _is_set_or_dictview(obj: VariableTracker) -> bool:
     except NotImplementedError:
         return False
     return issubclass(t, (set, frozenset, dict_keys, dict_items))
+
+
+def _check_ordered_dict_allocation(obj: VariableTracker) -> None:
+    if obj.python_type() is not collections.OrderedDict:
+        unimplemented(
+            gb_type="OrderedDict subclass allocation",
+            context="OrderedDict subclass",
+            explanation="Dynamo cannot trace allocating operations on OrderedDict subclasses.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
 
 class ConstDictVariable(VariableTracker):  # noqa: RVT001
@@ -824,7 +739,15 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return self.dict_update_common(tx, args, kwargs, method_name="dict")
+        from . import DictBuiltinVariable
+
+        temp_dict_vt = cast(
+            ConstDictVariable,
+            DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs),
+        )
+        tx.output.side_effects.mutation(self)
+        self._update_items(temp_dict_vt.items)
+        return ConstantVariable.create(None)
 
     # NB - Both key and value are LazyVariableTrackers in the beginning. So,
     # we have to insert guards when a dict method is accessed. For this to be
@@ -843,9 +766,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker | None:
         # A dict-family descriptor selects its declaring type, even on an OrderedDict.
         name = descriptor.__name__
-        if descriptor.__objclass__ is dict:
-            self.check_base_dict_mutation(tx, name)
-        if name not in ("keys", "values", "items", "__reversed__", "copy"):
+        if name not in ("keys", "values", "items", "__reversed__"):
             return None
         owner = descriptor.__objclass__
         if owner is dict:
@@ -905,11 +826,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.install_dict_order_guard(tx)
-        result = ConstDictVariable({}, mutation_type=ValueMutationNew())
-        if self.items:
-            # `PyDict_Copy` falls back to `PyDict_Merge` when `tp_iter` differs.
-            result.dict_merge(tx, self)
-        return result
+        return self._new_dict(self.materialize_keys().copy())
 
     def dict_get(
         self,
@@ -1028,128 +945,45 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        return self.dict_update_common(tx, args, kwargs)
-
-    def dict_update_common(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-        *,
-        method_name: str = "update",
-    ) -> VariableTracker:
-        check_positional(tx, method_name, len(args), 0, 1)
+        # Mirrors CPython PyDict_Merge: if arg has keys(), iterate keys and
+        # __getitem__; else treat arg as iterable of (key, value) pairs.
+        # kwargs are always merged on top.
+        # ref: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/dictobject.c#L3571
         self.install_dict_keys_match_guard()
+        check_positional(tx, "update", len(args), 0, 1)
         if args or kwargs:
             tx.output.side_effects.mutation(self)
         if args:
-            self.dict_update_arg(tx, args[0])
-        if kwargs:
-            items = {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
-            self.dict_merge(tx, ConstDictVariable(items))
-        return ConstantVariable.create(None)
-
-    def dict_update_arg(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker
-    ) -> None:
-        # Probe subclass keys before dict_merge considers its raw-storage fast path.
-        if (
-            pydict_checkexact(other)
-            or other.call_obj_hasattr(tx, "keys").as_python_constant()
-        ):
-            self.dict_merge(tx, other)
-        else:
-            # Mutable iterables must retain live iteration across key hashes.
-            pairs = lazily_unpack(
-                tx, other, allow_fast_path=self._can_fast_merge(other)
-            )
-            for idx, item in enumerate(pairs):
-                pair = _unpack_dict_update_pair(tx, item, idx)
-                if len(pair) != 2:
-                    raise_observed_exception(
-                        ValueError,
-                        tx,
-                        args=[
-                            "dictionary update sequence element "
-                            f"#{idx} has length {len(pair)}; 2 is required"
-                        ],
-                    )
-                key = self._lookup_key(tx, pair[0])
-                self._store_item(key, pair[1])
-
-    def _can_fast_merge(self, other: VariableTracker) -> bool:
-        other = other.realize()
-        seqs = (variables.ListVariable, variables.TupleVariable)
-        exact = pydict_checkexact(self) or pyodict_checkexact(self)
-        # Dict's pair consumer is valid for mutable inner pairs; OrderedDict's differs.
-        if pydict_checkexact(self) and type(other) is variables.TupleVariable:
-            return True
-        if (
-            exact
-            and istype(other, seqs)
-            and (not self.items or type(other) is variables.TupleVariable)
-        ):
-            for pair in other.items:
-                pair = pair.realize()
-                if self.items and type(pair) is not variables.TupleVariable:
-                    return False
-                if not istype(pair, seqs) or len(pair.items) != 2:
-                    return False
-                if not _is_fast_dict_key(pair.items[0]):
-                    return False
-            return True
-        # Exact containers can rehash keys; this shortcut requires scalar keys.
-        return (
-            exact
-            and isinstance(other, ConstDictVariable)
-            and (pydict_checkexact(other) or pyodict_checkexact(other))
-            and all(_is_fast_dict_key(key.vt) for key in other.items)
-        )
-
-    def dict_merge(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker
-    ) -> None:
-        # dict_merge copies dict_iter storage; other mappings dispatch keys/getitem.
-        if isinstance(other, ConstDictVariable):
-            side_effects = tx.output.side_effects
-            if any(
-                cls in side_effects
-                and side_effects.has_pending_mutation_of_attr(
-                    side_effects[cls], "__iter__"
-                )
-                for cls in get_type_mro_no_user_code(other.python_type())
-            ):
-                unimplemented(
-                    gb_type="Dictionary merge after iteration slot mutation",
-                    context=f"dict_merge: {other}",
-                    explanation="Dynamo cannot merge a dictionary after changing its type's __iter__.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            if (
-                isinstance(other, variables.UserDefinedObjectVariable)
-                and other.cls_source
-            ):
-                source = mro_attr_source(
-                    tx, other.python_type(), other.cls_source, "__iter__"
-                )
-                owner = next(
-                    owner
-                    for owner, namespace in iter_mro_static_dicts(other.python_type())
-                    if "__iter__" in namespace
-                )
-                if source is not None and not type_is_immutable(owner):
-                    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            if mro_lookup(
-                other.python_type(), "__iter__"
-            ) is dict.__iter__ or self._can_fast_merge(other):
+            other = args[0]
+            if isinstance(other, ConstDictVariable):
+                # NB - Guard on all the keys of the other dict to ensure
+                # correctness.
                 other.install_dict_order_guard(tx)
                 self._update_items(other.materialize_keys())
-                return
-        keys = generic_getattr(tx, other, "keys").call_function(tx, [], {})
-        for key in unpack_iterable(tx, keys):
-            value = generic_getitem(tx, other, key)
-            hashed = self._lookup_key(tx, key)
-            self._store_item(hashed, value)
+            elif isinstance(
+                other,
+                (variables.UserDefinedObjectVariable, MappingProxyVariable),
+            ) and generic_hasattr_str(tx, other, "keys"):
+                keys = other.call_method(tx, "keys", [], {})
+                for key in unpack_iterable(tx, keys):
+                    value = generic_getitem(tx, other, key)
+                    self._store_item(HashableTracker(key), value)
+            else:
+                for idx, item in enumerate(unpack_iterable(tx, other)):
+                    pair = unpack_iterable(tx, item)
+                    if len(pair) != 2:
+                        raise_observed_exception(
+                            ValueError,
+                            tx,
+                            args=[
+                                "dictionary update sequence element "
+                                f"#{idx} has length {len(pair)}; 2 is required"
+                            ],
+                        )
+                    self._store_item(HashableTracker(pair[0]), pair[1])
+        for k, v in kwargs.items():
+            self._store_item(HashableTracker(VariableTracker.build(tx, k)), v)
+        return ConstantVariable.create(None)
 
     def dict_setdefault(
         self,
@@ -1291,31 +1125,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         self.install_dict_keys_match_guard()
         return VariableTracker.build(tx, len(self.items))
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        # dict not allow setting arbitrary attributes.  OrderedDict and
-        # defaultdict allow arbitrary setattr, but not deletion of default attrs
-        cls = self.python_type()
-        if any(
-            cls is t for t in (dict, collections.OrderedDict, collections.defaultdict)
-        ):
-            if hasattr(cls, name):
-                return ConstantVariable.create(True)
-            if cls is dict:
-                return ConstantVariable.create(False)
-
-        msg = f"hasattr on {cls} is not supported"
-        unimplemented(
-            gb_type="unsupported hasattr operation",
-            context=f"Class {cls}",
-            explanation=msg,
-            hints=[
-                "Consider using a regular dictionary instead",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
     def clone(self, **kwargs: Any) -> VariableTracker:
         self.install_dict_keys_match_guard()
         return super().clone(**kwargs)
@@ -1327,56 +1136,27 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def tp_richcompare_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
-        try:
-            if op not in ("__eq__", "__ne__") or not pydict_check(other):
-                return ConstantVariable.create(NotImplemented)
-        except NotImplementedError:
-            # Internal trackers such as ComptimeVariable may not expose a Python type.
+        # dict_richcompare: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
+        # Only supports eq/ne; returns NotImplemented for ordering.
+        from .builder import SourcelessBuilder
+
+        if op not in ("__eq__", "__ne__"):
             return ConstantVariable.create(NotImplemented)
-        if self is other:
-            # Keys and values match by identity; avoid guarding nn.Module hook IDs.
-            return ConstantVariable.create(op == "__eq__")
+        # Unwrap UserDefinedDictVariable to its base ConstDictVariable.
+        # This is correct because CPython's dict_equal operates on the
+        # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
+        # -- it never calls __getitem__ or __len__ on dict subclasses.
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
         if not isinstance(other, ConstDictVariable):
-            unimplemented(
-                gb_type="Unsupported dictionary storage",
-                context=str(type(other)),
-                explanation="Dynamo cannot access this dictionary's stored keys and values.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        for mapping in (self, other):
-            mapping.install_dict_keys_match_guard()
-        if len(self.items) != len(other.items):
-            return ConstantVariable.create(op == "__ne__")
-        if self.source:
-            # Value comparisons can have order-dependent side effects.
-            tx.output.guard_on_key_order.add(self.source)
-        guard_key_collisions(self.items, other.items)
-        # CPython's dict_equal walks storage order even for OrderedDict.
-        items = (
-            dict.items(self.items)
-            if isinstance(self.items, dict)
-            else self.items.items()
+            return ConstantVariable.create(NotImplemented)
+        eq_result = SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
+            tx, [self, other], {}
         )
-        for key, value in _iter_detecting_mutation(iter(items)):
-            # Native equality reuses each key's insertion-time hash.
-            other_value = other.items.get(key)
-            if other_value is None or isinstance(
-                other_value, variables.DeletedVariable
-            ):
-                # Keep the missing-key hint without repeating key comparisons.
-                other.install_dict_contains_guard(tx, key, key_present=False)
-                return ConstantVariable.create(op == "__ne__")
-            equal = generic_richcompare_bool(
-                tx, value.realize(), other_value.realize(), "__eq__"
-            )
-            if not specialize_symnode(generic_is_true(tx, equal)).as_python_constant():
-                return ConstantVariable.create(op == "__ne__")
-        return ConstantVariable.create(op == "__eq__")
+        if op == "__ne__":
+            return VariableTracker.build(tx, not eq_result.as_python_constant())
+        return eq_result
 
     def tp_getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         # DictGuardManager does not support getattr_manager for plain dicts,
@@ -1412,75 +1192,6 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         ):
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
-    def tp_init_impl(
-        self: ConstDictVariable,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if len(args) > 1:
-            # CPython corrected the plural in 3.13.8 (gh-138517).
-            suffix = "s" if sys.version_info < (3, 13, 8) else ""
-            raise_type_error(
-                tx, f"expected at most 1 argument{suffix}, got {len(args)}"
-            )
-        return OrderedDictVariable.odict_update(self, tx, args, kwargs)
-
-    def odict_update(
-        self: VariableTracker,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if len(args) > 1:
-            raise_type_error(
-                tx, f"update() takes at most 1 positional argument ({len(args)} given)"
-            )
-        # String subclasses can observe interleaved hashing and insertion.
-        fast_keywords = all(type(key) is str for key in kwargs)
-        exact_mutable = pyodict_checkexact(self) and fast_keywords and self.is_mutable()
-        if exact_mutable and (not args or self._can_fast_merge(args[0])):
-            if args and not isinstance(args[0], ConstDictVariable):
-                return ConstDictVariable.dict_update_common(self, tx, args, kwargs)
-            self.install_dict_keys_match_guard()
-            if args or kwargs:
-                tx.output.side_effects.mutation(self)
-            if args:
-                source = cast(ConstDictVariable, args[0])
-                source.install_dict_order_guard(tx)
-                self._update_items(source.materialize_keys())
-            if kwargs:
-                self._update_items(
-                    {
-                        HashableTracker(VariableTracker.build(tx, key)): value
-                        for key, value in kwargs.items()
-                    }
-                )
-            return ConstantVariable.create(None)
-        if exact_mutable and args:
-            source = args[0].realize()
-            if (
-                type(source) is variables.ZipVariable
-                and len(source.iterable.items) == 2
-            ):
-                # zip produces pairs; keep iteration live across key hash callbacks.
-                for pair in lazily_unpack(tx, source, allow_fast_path=False):
-                    key, value = cast(variables.TupleVariable, pair).items
-                    generic_setitem(tx, self, key, value)
-                if kwargs:
-                    OrderedDictVariable.odict_update(self, tx, [], kwargs)
-                return ConstantVariable.create(None)
-        return tx.inline_user_function_return(
-            VariableTracker.build(tx, polyfills.odict_update), [self, *args], kwargs
-        )
-
-    def nb_inplace_or_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker
-    ) -> VariableTracker:
-        # odict_inplace_or uses mutablemapping_update_arg, including __setitem__.
-        self.odict_update(tx, [other], {})
-        return self
-
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictIterator
 
@@ -1490,46 +1201,20 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
-        result = ConstDictVariable.tp_richcompare_impl(self, tx, other, op)
+        result = super().tp_richcompare_impl(tx, other, op)
         if (
             op not in ("__eq__", "__ne__")
-            or self is other
             or not isinstance(other, OrderedDictVariable)
+            or result.as_python_constant() == (op == "__ne__")
         ):
             return result
-        # Distinct hook dictionaries need key guards even when dict equality
-        # fails: replacing their IDs can make them equal on the next call.
-        for mapping in (self, other):
-            if mapping.source:
-                install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
-        if result.as_python_constant() == (op == "__ne__"):
-            return result
-        # CPython's odict_richcompare checks key order only after dict equality.
-        # Lagging iterators detect mutations even after the last pair or a false
-        # comparison. Identity-only iteration avoids tracing internal key lookups.
-        mutation_checks = tuple(
-            _iter_detecting_mutation(
-                HashableTracker.iter_keys_by_identity(iter(mapping.items))
-            )
-            for mapping in (self, other)
-        )
-        pairs = zip(
-            HashableTracker.iter_keys_by_identity(self.items),
-            HashableTracker.iter_keys_by_identity(other.items),
-        )
-        for left, right in _iter_detecting_mutation(pairs):
-            equal = generic_richcompare_bool(tx, left.vt, right.vt, "__eq__")
-            is_equal = specialize_symnode(
-                generic_is_true(tx, equal)
-            ).as_python_constant()
-            for iterator in mutation_checks:
-                next(iterator)
-            if not is_equal:
-                return ConstantVariable.create(op == "__ne__")
-        # Value comparisons can change either size before key comparison starts.
-        return ConstantVariable.create(
-            (len(self.items) == len(other.items)) == (op == "__eq__")
-        )
+        # OrderedDict compares key order only after dict equality succeeds.
+        # Keep this outside dict.__eq__, whose descriptor ignores linked order.
+        self.install_dict_order_guard(tx)
+        other.install_dict_order_guard(tx)
+        left = variables.TupleVariable([key.vt for key in self.items])
+        right = variables.TupleVariable([key.vt for key in other.items])
+        return generic_richcompare_bool(tx, left, right, op)
 
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
@@ -1631,31 +1316,12 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.install_dict_order_guard(tx)
-        if not pyodict_checkexact(self):
-            # odict_copy calls the subclass constructor, then its get/setitem hooks.
-            cls = VariableTracker.build(tx, type).call_function(tx, [self], {})
-            result = cls.call_function(tx, [], {})
-            # CPython's _odict_FOREACH walks nodes without comparing keys.
-            for key in _iter_detecting_mutation(
-                HashableTracker.iter_keys_by_identity(self.items)
-            ):
-                value = generic_getitem(tx, self, key.vt)
-                generic_setitem(tx, result, key.vt, value)
-            return result
-        if self._can_fast_merge(self):
-            return self._new_dict(self.items.copy())
-        result = self._new_dict({})
-        # Exact odict_copy hashes lookups, but inserts using the stored hashes.
-        for key in _iter_detecting_mutation(
-            HashableTracker.iter_keys_by_identity(self.items)
-        ):
-            result.items[key] = generic_getitem(tx, self, key.vt)
-        return result
+        _check_ordered_dict_allocation(self)
+        return ConstDictVariable.dict_copy(self, tx, args, kwargs)
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
         "copy": Method(dict_copy),
-        "update": Method(odict_update),
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
         "keys": Method(dict_keys),
@@ -1709,21 +1375,17 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     ) -> VariableTracker:
         # OrderedDict.__or__/__ror__ preserve the OrderedDict type, unlike
         # dict.__or__ which returns a plain dict for a subclass operand.
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c#L896-L923
-        if not pydict_check(other):
+        # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L327-L339
+        if not issubclass(other.python_type(), dict):
             return ConstantVariable.create(NotImplemented)
-        # odict_or calls the subclass constructor, then bypasses copy/update overrides.
         left, right = (other, self) if reverse else (self, other)
         owner = (
             left if issubclass(left.python_type(), collections.OrderedDict) else self
         )
-        if owner.python_type() is collections.OrderedDict:
-            new = OrderedDictVariable({}, mutation_type=ValueMutationNew())
-            OrderedDictVariable.tp_init_impl(new, tx, [left], {})
-        else:
-            cls = VariableTracker.build(tx, type).call_function(tx, [owner], {})
-            new = cls.call_function(tx, [left], {})
-        OrderedDictVariable.odict_update(new, tx, [right], {})
+        _check_ordered_dict_allocation(owner)
+        new = OrderedDictVariable({}, mutation_type=ValueMutationNew())
+        ConstDictVariable.dict_update(new, tx, [left], {})
+        ConstDictVariable.dict_update(new, tx, [right], {})
         return new
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -1891,13 +1553,6 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
         from .object_protocol import generic_richcompare
 
         return generic_richcompare(tx, self.dv_dict, other, op)
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is types.MappingProxyType:
-            return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
-        return super().call_obj_hasattr(tx, name)
 
 
 class NNModuleHooksDictVariable(ConstDictVariable):
@@ -2153,15 +1808,6 @@ class DictViewVariable(VariableTracker):
         codegen.add_push_null(load_method)
         codegen(self.dv_dict)
         codegen.extend_output(create_call_function(1, False))
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.kv is None:
-            raise AssertionError("kv must not be None for call_obj_hasattr")
-        return ConstantVariable.create(
-            mro_lookup(self.python_type(), name) is not NO_SUCH_SUBOBJ
-        )
 
     # dictview_mapping getset returns a read-only mappingproxy of the underlying
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
