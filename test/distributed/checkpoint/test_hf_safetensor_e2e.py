@@ -7,6 +7,9 @@ import os
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
+from torch.distributed.checkpoint._consolidate_hf_safetensors import (
+    consolidate_safetensors_files_on_every_rank,
+)
 from torch.distributed.checkpoint.quantized_hf_storage import (
     QuantizedHuggingFaceStorageReader,
 )
@@ -96,6 +99,83 @@ class TestSingleRankSaveLoad(TestCase):
         )
         self.assertTrue(
             torch.equal(state_dict_loaded["weight_t"], weight.transpose(1, 2))
+        )
+
+    @with_temp_dir
+    def test_save_consolidated_skips_unsaved_mapping_entries(self) -> None:
+        try:
+            from safetensors.torch import load_file
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+
+        weight = torch.rand(4, 4)
+        with self.assertWarnsRegex(
+            UserWarning, r"^Skipping 2 tensor\(s\) .*: mtp\.bias, mtp\.weight\. "
+        ):
+            dist_cp.save(
+                state_dict={"weight": weight},
+                storage_writer=dist_cp.HuggingFaceStorageWriter(
+                    path=CHECKPOINT_DIR,
+                    fqn_to_index_mapping={"weight": 1, "mtp.weight": 1, "mtp.bias": 2},
+                    save_distributed=True,
+                    enable_consolidation=True,
+                ),
+            )
+
+        loaded = load_file(CHECKPOINT_DIR + "/model-00001-of-00002.safetensors")
+        self.assertEqual(loaded, {"weight": weight})
+        self.assertEqual(
+            load_file(CHECKPOINT_DIR + "/model-00002-of-00002.safetensors"), {}
+        )
+        with open(CHECKPOINT_DIR + "/model.safetensors.index.json") as f:
+            self.assertEqual(
+                json.load(f),
+                {
+                    "metadata": {"total_size": 64},
+                    "weight_map": {"weight": "model-00001-of-00002.safetensors"},
+                },
+            )
+
+    @with_temp_dir
+    def test_consolidate_on_every_rank_skips_unsaved_mapping_entries(self) -> None:
+        try:
+            from safetensors.torch import load_file
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+        sharded_dir = CHECKPOINT_DIR + "/sharded"
+
+        weight = torch.rand(4, 4)
+        dist_cp.save(
+            state_dict={"weight": weight},
+            storage_writer=dist_cp.HuggingFaceStorageWriter(
+                path=sharded_dir, save_distributed=True
+            ),
+        )
+        # Every input header has a __metadata__ key, which is not a tensor
+        fqn_to_index_mapping = {
+            "weight": 1,
+            "mtp.weight": 1,
+            "mtp.bias": 2,
+            "__metadata__": 2,
+        }
+        with self.assertWarnsRegex(
+            UserWarning,
+            r"^Skipping 3 tensor\(s\) .*: __metadata__, mtp\.bias, mtp\.weight\. ",
+        ):
+            consolidate_safetensors_files_on_every_rank(
+                sharded_dir, CHECKPOINT_DIR, fqn_to_index_mapping=fqn_to_index_mapping
+            )
+
+        loaded = load_file(CHECKPOINT_DIR + "/model-00001-of-00002.safetensors")
+        self.assertEqual(loaded, {"weight": weight})
+        self.assertEqual(
+            load_file(CHECKPOINT_DIR + "/model-00002-of-00002.safetensors"), {}
         )
 
     @with_temp_dir
@@ -452,6 +532,39 @@ class TestSingleRankSaveLoad(TestCase):
             self.assertTrue(
                 torch.equal(state_dict[fqn].view(torch.uint8), t.view(torch.uint8))
             )
+
+    @with_temp_dir
+    def test_gpt_oss_mxfp4_loading(self) -> None:
+        """GPT-OSS MXFP4 _blocks load in full, not just the first G values per row."""
+        try:
+            import safetensors  # noqa: F401
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        # GPT-OSS _blocks [experts, rows, groups, 16] and _scales [experts, rows,
+        # groups] hold the same bytes as compressed-tensors MXFP4.
+        experts, rows, cols = 2, 3, 128
+        packed, scale, expected = random_compressed_tensors_mxfp4(experts * rows, cols)
+        fqn = "model.layers.0.mlp.experts.down_proj"
+        save_hf_checkpoint(
+            self.temp_dir,
+            {
+                "model.safetensors": {
+                    f"{fqn}_blocks": packed.reshape(experts, rows, cols // 32, 16),
+                    f"{fqn}_scales": scale.reshape(experts, rows, cols // 32),
+                }
+            },
+        )
+
+        state_dict = {f"{fqn}_blocks": torch.zeros(experts, rows, cols)}
+        dist_cp.load(
+            state_dict=state_dict,
+            storage_reader=QuantizedHuggingFaceStorageReader(path=self.temp_dir),
+        )
+        torch.testing.assert_close(
+            state_dict[f"{fqn}_blocks"], expected.reshape(experts, rows, cols)
+        )
 
 
 class TestCompressedTensorsMXFP4ShardedLoad(DTensorTestBase):

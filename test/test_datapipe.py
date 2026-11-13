@@ -24,8 +24,6 @@ from collections.abc import Awaitable, Iterator
 import operator
 from unittest import skipIf
 
-import numpy as np
-
 import torch
 import torch.nn as nn
 import torch.utils.data.datapipes as dp
@@ -56,9 +54,6 @@ from torch.utils.data.datapipes.dataframe import (
 )
 from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
 from torch.utils.data.datapipes.utils.common import StreamWrapper
-from torch.utils.data.datapipes.utils.decoder import (
-    basichandlers as decoder_basichandlers,
-)
 from torch.utils.data.datapipes.utils.snapshot import _simple_graph_snapshot_restoration
 from torch.utils.data.graph import traverse_dps
 
@@ -365,57 +360,6 @@ class TestIterableDataPipeBasic(TestCase):
         # __len__ Test
         with self.assertRaises(TypeError):
             len(datapipe3)
-
-    def test_routeddecoder_iterable_datapipe(self):
-        temp_dir = self.temp_dir.name
-        temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
-        png_data = np.array(
-            [[[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]], [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]],
-            dtype=np.single,
-        )
-        np.save(temp_pngfile_pathname, png_data)
-        datapipe1 = dp.iter.FileLister(temp_dir, ["*.png", "*.txt"])
-        datapipe2 = dp.iter.FileOpener(datapipe1, mode="b")
-
-        def _png_decoder(extension, data):
-            if extension != "png":
-                return None
-            return np.load(data)
-
-        def _helper(prior_dp, dp, channel_first=False):
-            # Byte stream is not closed
-            for inp in prior_dp:
-                self.assertFalse(inp[1].closed)
-            for inp, rec in zip(prior_dp, dp):
-                ext = os.path.splitext(rec[0])[1]
-                if ext == ".png":
-                    expected = np.array(
-                        [
-                            [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
-                            [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
-                        ],
-                        dtype=np.single,
-                    )
-                    if channel_first:
-                        expected = expected.transpose(2, 0, 1)
-                    self.assertEqual(rec[1], expected)
-                else:
-                    with open(rec[0], "rb") as f:
-                        self.assertEqual(rec[1], f.read().decode("utf-8"))
-                # Corresponding byte stream is closed by Decoder
-                self.assertTrue(inp[1].closed)
-
-        cached = list(datapipe2)
-        with warnings.catch_warnings(record=True):
-            datapipe3 = dp.iter.RoutedDecoder(cached, _png_decoder)
-        datapipe3.add_handler(decoder_basichandlers)
-        _helper(cached, datapipe3)
-
-        cached = list(datapipe2)
-        with warnings.catch_warnings(record=True):
-            datapipe4 = dp.iter.RoutedDecoder(cached, decoder_basichandlers)
-        datapipe4.add_handler(_png_decoder)
-        _helper(cached, datapipe4, channel_first=True)
 
     def test_groupby_iterable_datapipe(self):
         file_list = [

@@ -446,6 +446,54 @@ class TestCalculateShards(unittest.TestCase):
         self.assertEqual([test.num_shards for test in tests], [1, 1])
         self.assertEqual([test.get_time() for test in tests], list(test_times.values()))
 
+    def test_xdist_workers_divide_file_time(self) -> None:
+        test_times: dict[str, float] = {
+            "xdist_test": THRESHOLD * 3,
+            "plain_test": THRESHOLD * 3,
+        }
+        shards = calculate_shards(
+            2,
+            [TestRun(t) for t in test_times],
+            test_times,
+            gen_class_times(test_times),
+            xdist_workers=lambda test: 3 if test == "xdist_test" else 1,
+        )
+
+        tests = sorted(
+            (test for _, shard in shards for test in shard),
+            key=lambda test: (test.name, test.shard),
+        )
+        self.assertEqual(
+            tests,
+            [
+                ShardedTest("plain_test", 1, 3, THRESHOLD),
+                ShardedTest("plain_test", 2, 3, THRESHOLD),
+                ShardedTest("plain_test", 3, 3, THRESHOLD),
+                ShardedTest("xdist_test", 1, 1, THRESHOLD),
+            ],
+        )
+        self.assertEqual(sorted(time for time, _ in shards), [THRESHOLD * 2] * 2)
+
+    def test_xdist_workers_split_divided_time_in_test_order(self) -> None:
+        # run_test.py shards its main batch with sort_by_time=False, and splits a
+        # serial xdist file by its divided time.
+        test_times: dict[str, float] = {"xdist_test": THRESHOLD * 7}
+        shards = calculate_shards(
+            3,
+            [TestRun("xdist_test")],
+            test_times,
+            gen_class_times(test_times),
+            must_serial=lambda _: True,
+            sort_by_time=False,
+            xdist_workers=lambda _: 3,
+        )
+
+        piece_time = THRESHOLD * 7 / 3 / 3
+        self.assertEqual(
+            [shard for _, shard in shards],
+            [[ShardedTest("xdist_test", i, 3, piece_time)] for i in (1, 2, 3)],
+        )
+
     def test_zero_tests(self) -> None:
         self.assertListEqual([(0.0, []), (0.0, [])], calculate_shards(2, [], {}, None))
 
