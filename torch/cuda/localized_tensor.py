@@ -25,6 +25,7 @@ not need them.
 
 from __future__ import annotations
 
+import os
 import warnings
 from typing import Any, NamedTuple, TYPE_CHECKING
 
@@ -94,6 +95,14 @@ class _LocalizationContext:
         self.green_contexts = green_contexts
         self.mempools = mempools
         self.device = device
+        from torch.cuda.memory import LocalizedAllocator, MemPool
+
+        # Weight lifetimes are independent of cudagraph allocator checkpoints.
+        with torch.cuda.device(device):
+            self.weight_pools = [
+                MemPool(LocalizedAllocator(i, device=device).allocator())
+                for i in range(n)
+            ]
 
     @property
     def num_partitions(self) -> int:
@@ -649,7 +658,7 @@ def _localize_tensor(
     # read from.
     slices = list(torch.tensor_split(tensor, num_partitions, dim=0))
     halves: list[torch.Tensor] = []
-    for slice_, pool in zip(slices, ctx.mempools):
+    for slice_, pool in zip(slices, ctx.weight_pools):
         with torch.cuda.use_mem_pool(pool, device=device):
             half = torch.empty_like(slice_)
         # Fill under no_grad so the copy does not make the half a non-leaf
@@ -706,7 +715,7 @@ def localize(
     num_partitions: int | None = None,
     mark_static_halves: bool = True,
 ) -> nn.Module:
-    """Localize every localizable layer in ``module``'s tree (recursive, in place).
+    r"""Localize every localizable layer in ``module``'s tree (recursive, in place).
 
     A layer is localizable when its type was registered as some op's
     ``module_type`` via :func:`_register_localizable_op`; out of the box that
@@ -742,6 +751,14 @@ def localize(
     Localization targets inference: any live ``.grad`` on a swapped
     parameter is cleared, and the fork/join is not set up to backprop
     through the split, so localized modules should not be trained.
+
+    .. note::
+        cuBLAS workspace caching is unsupported. Set
+        ``TORCH_CUBLAS_WORKSPACE_CACHE=0`` before starting the process.
+        Changing this environment variable while the process is running is
+        unsupported.
+        Custom localizable ops must not retain temporary allocations made
+        inside their per-branch execution pools after the call returns.
 
     Args:
         module: the module (or model) to walk.  Mutated in place.
@@ -780,6 +797,12 @@ def localize(
             "halves that the fork/join does not backprop through. Wrap the "
             "call, and the forward passes that use the localized module, in "
             "torch.inference_mode()."
+        )
+
+    if os.environ.get("TORCH_CUBLAS_WORKSPACE_CACHE") == "1":
+        raise RuntimeError(
+            "torch.cuda.localize() does not support cuBLAS workspace caching. "
+            "Set TORCH_CUBLAS_WORKSPACE_CACHE=0 before starting the process."
         )
 
     _register_default_localizable_ops()
