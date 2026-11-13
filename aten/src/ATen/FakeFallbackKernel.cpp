@@ -62,7 +62,6 @@
 // So that ops do not give results Python's FakeTensorMode would not, it raises
 // NotImplementedError where Python runs something other than these,
 // apart from the known divergences in the TODOs below:
-//  - handlers that allocate unbacked sizes;
 //  - ops run under the Python dispatcher, whose Python-dispatcher-only Meta
 //    registrations do not run here;
 //  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors), or Any;
@@ -261,7 +260,9 @@ bool _is_tensor_constructor(const c10::FunctionSchema& schema) {
 }
 
 bool has_op_impl_predicate(const c10::OperatorHandle& op) {
-  return _is_tensor_constructor(op.schema()) ||
+  return op.hasTag(at::Tag::dynamic_output_shape) ||
+      op.hasTag(at::Tag::data_dependent_output) ||
+      _is_tensor_constructor(op.schema()) ||
       (op.operator_name().name.starts_with("aten::_foreach_") &&
        op.hasComputedKernelForDispatchKey(c10::DispatchKey::Meta));
 }
@@ -745,24 +746,6 @@ void fakeFallback(
       (*c10::impl::getGlobalPyInterpreter())
           ->run_fake_impl(op, stack, mode, /*real=*/nullptr)) {
     return;
-  }
-  // Integer indexing works without unbacked sizes; bool indexing calls nonzero.
-  const bool is_index_tensor =
-      schema.name() == "aten::index" && schema.overload_name() == "Tensor";
-  const bool has_repeat_interleave_output_size =
-      schema.name() == "aten::repeat_interleave" &&
-      schema.overload_name() == "Tensor" &&
-      ((*stack)[arguments_begin + 1].isInt() ||
-       (*stack)[arguments_begin + 1].isSymInt());
-  const bool allocates_unbacked = schema.name() == "aten::_spdiags" ||
-      schema.name() == "aten::_pack_padded_sequence" ||
-      (schema.name() == "aten::_padded_dense_to_jagged_forward" &&
-       (*stack)[arguments_begin + 2].isNone());
-  if (allocates_unbacked ||
-      (!is_index_tensor && !has_repeat_interleave_output_size &&
-       (op.hasTag(at::Tag::dynamic_output_shape) ||
-        op.hasTag(at::Tag::data_dependent_output)))) {
-    unsupported(op, "ops with data-dependent outputs");
   }
   // Constructors finalize their own output devices.
   const auto common_device = input_devices.empty()
