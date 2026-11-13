@@ -50,6 +50,10 @@ C10_METAL_CONSTEXPR uint32_t kMatmulStagedMinK = 512;
 // Apple10 is faster on the unstaged tiles under this many bytes of a half or
 // bfloat W, and on tiles of kMatmulBlock rows above kMatmulBlock / 2 rows.
 C10_METAL_CONSTEXPR uint32_t kMatmulStagedMinBytesApple10 = 1 << 24;
+// matmul_outer: K = 1 is an outer product that is bound by the writes of
+// out. A thread writes kMatmulOuterBytes of a row, a threadgroup a run of it.
+C10_METAL_CONSTEXPR uint32_t kMatmulOuterBytes = 16;
+C10_METAL_CONSTEXPR uint32_t kMatmulOuterThreads = 512;
 // Complex products with M, K and N up to this are faster on the naive
 // kernels than as a real GEMM.
 C10_METAL_CONSTEXPR uint32_t kMatmulComplexNaiveMaxDim = 16;
