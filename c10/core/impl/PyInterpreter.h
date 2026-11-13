@@ -306,12 +306,14 @@ struct C10_API PyInterpreterVTable {
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       PyObject* real) const = 0;
-  // Needs an active mode. Non-fake Meta outputs are converted to fakes on
-  // common_device; this is the only callback that converts its outputs. See
-  // Note [C++ fake op_impl outputs] in torch/csrc/PyInterpreter.cpp.
+  // Takes the fallback's mode, which is uninstalled while handlers run.
+  // Non-fake Meta outputs are converted to fakes on common_device.
+  // Constructors finalize their own output devices.
+  // See Note [C++ fake op_impl outputs] in torch/csrc/PyInterpreter.cpp.
   virtual bool fake_try_op_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
       c10::Device common_device) const = 0;
   // Python callback for prims handling: runs the prims op's Python
   // prim_meta_impl, if it defines one.

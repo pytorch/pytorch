@@ -27,7 +27,7 @@ namespace at::impl {
 //               torch._subclasses.fake_impls.op_implementations_dict, via
 //               register_op_impl / _deregister_op_impl, except aten::alias.
 //               (Predicate-based op_impls are not mirrored here;
-//               cppFakeNotImplemented re-implements the built-in predicates.)
+//               FakeFallbackKernel.cpp re-implements the built-in predicates.)
 //   - PrimMeta: prims ops that define a prim_meta_impl, via torch._prims
 //   - PythonCIA: Python CompositeImplicitAutograd overrides, via mutations of
 //                OpOverload.py_kernels
@@ -87,24 +87,5 @@ inline bool fakeDispatchCategoriesHave(
     FakeDispatchCategory category) {
   return categories & fakeDispatchCategoryBit(category);
 }
-
-// Temporary rejection check for ops that still require Python fake handling.
-// TODO: Delete this check as the corresponding C++ fake functionality lands.
-//
-// Whether op is in OpImpl, CustomOpImpl, PrimMeta or PythonCIA, or matches a
-// built-in fake_impls.py predicate (constructors, the dynamic_output_shape and
-// data_dependent_output tags, and aten::_foreach_ ops with a Meta kernel).
-// Defined in FakeFallbackKernel.cpp.
-//
-// This queries registry membership and predicates, not _dispatch_impl's full
-// decision: an earlier path may take precedence, or an op_impl may decline.
-// Callers must separately account for input-dependent Decomp/StaticShapeDecomp
-// selection, Meta registrations, symbolic get_fast_op_impls() paths, and
-// torch._dynamo.config._custom_ops_profile kernels. Runtime additions/removals
-// of callable op_implementations predicates are not mirrored; the predicates
-// defined in fake_impls.py must be kept in sync with this implementation.
-// alias's op_impl is deliberately absent from OpImpl: the C++ fake fallback
-// preserves its recorded dispatch keys when running its C++ Meta kernel.
-TORCH_API bool cppFakeNotImplemented(const c10::OperatorHandle& op);
 
 } // namespace at::impl
