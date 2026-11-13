@@ -28,8 +28,8 @@ namespace at::impl {
 //               (Predicate-based op_impls are not mirrored here;
 //               cppFakeNotImplemented re-implements the built-in predicates.)
 //   - PrimMeta: prims ops that define a prim_meta_impl, via torch._prims
-//   - PythonCIA: Python CompositeImplicitAutograd overrides, via
-//                OpOverload.py_impl
+//   - PythonCIA: Python CompositeImplicitAutograd overrides, via mutations of
+//                OpOverload.py_kernels
 //   - StaticShapeDecomp: default static-shape decomposition eligibility,
 //                initialized after torch._meta_registrations imports finish,
 //                then updated by register_decomposition /

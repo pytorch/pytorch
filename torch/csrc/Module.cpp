@@ -2781,6 +2781,13 @@ PyObject* initModule() {
         "_fake_dispatch_register_python_cia",
         add_for(FakeDispatchCategory::PythonCIA));
     py_module.def(
+        "_fake_dispatch_deregister_python_cia",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::PythonCIA,
+              c10::OperatorName(name, overload));
+        });
+    py_module.def(
         "_fake_dispatch_register_custom_op_impl",
         add_for(FakeDispatchCategory::CustomOpImpl));
     py_module.def(
