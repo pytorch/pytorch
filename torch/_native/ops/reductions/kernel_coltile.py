@@ -129,6 +129,8 @@ class OrderedColConfig(NamedTuple):
 # kernel_general._reduce routes columns here only on its _ORDERED_COL_CCS, and
 # _reduce_col_tile hands off here only on _B200_CCS (b200_ragged_c4095_ordered) and
 # (10, 7); entries for other architectures serve direct reduce_ordered_col calls alone.
+# Keys are trait types, so variants (NormOps p, WelfordOps var, std and return_mean)
+# share an entry; a measured entry must hold for all of them.
 # There are no (10, 0) entries: B200 split views (from _reduce or direct
 # reduce_ordered_col calls) take select_ordered_col_config's fallback,
 # OrderedColConfig(0, tile_columns=WARP, full_tiles=...), which its B200 full-tile rules
@@ -250,14 +252,15 @@ def select_ordered_col_config(
         )
     elif sm107 and full_tiles and rows is not None:
         # select_col_config hands SM107 views off at 256, 1024 or 4096 columns only.
-        # Bands of shapes rather than measured anchors: direct reduce_ordered_col calls
-        # can reach unmeasured views, such as bf16 65536 x 1024 or fp32 at 256 columns
-        # and 32 or 128 MiB.
+        # The 65536 x 1024 rule ignores dtype, so direct reduce_ordered_col calls can
+        # reach the unmeasured bf16 view.
         if rows == 65536 and columns == 1024 and nfields != 2:
             cfg = cfg._replace(tile_columns=16, full_tiles=True)
         elif column_anchor:
             cfg = cfg._replace(full_tiles=True)
         elif 32768 <= rows <= 131072 and columns == 256:
+            # A band of shapes rather than measured anchors: direct reduce_ordered_col
+            # calls can reach unmeasured views, such as fp32 at 32 or 128 MiB.
             # min_blocks: 0 for one-output WelfordOps (var or std, any correction), else
             # 16, or 8 for bf16, which never rejects 256 columns (partials * 256 >= 32 * 8).
             # bf16 hand-offs here are 16 MiB WelfordOps or 64 MiB views with 16 partials;

@@ -641,7 +641,8 @@ def _ragged_rows_ok(
     N: int,
     alignment: int,
     trait: Any,
-    acc_bits: int = 32,
+    *,
+    acc_bits: int,
 ) -> bool:
     """Whether odd-width rows take the B200 ragged-vector row kernel."""
     min_n = _ragged_row_min_n(trait)
@@ -694,7 +695,7 @@ def _try_fast_row(
         return rt.reduce_row_tile(
             trait, trait_key, x, out_dtypes, nouts=nouts, order="inner_tree"
         )
-    if _ragged_rows_ok(cc, x.dtype, N, alignment, trait, acc_bits):
+    if _ragged_rows_ok(cc, x.dtype, N, alignment, trait, acc_bits=acc_bits):
         return rt.reduce_row_tile(
             trait,
             trait_key,

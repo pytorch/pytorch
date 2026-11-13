@@ -607,7 +607,8 @@ class TestColTileHost(TestCase):
             tile.TileReduce(welford, cutlass.Float32, "col", 1024, col_group=4)
 
     def test_column_groups_share_unroll_variants(self):
-        # The grouped fold ignores unroll, so configs differing only in it share a plan.
+        # TileReduce runs the grouped prefix at unroll 1, so configs differing only in
+        # unroll share a plan.
         op = (T.WelfordOps(acc=cutlass.Float32), cutlass.Float32, "col", 1024)
         kw = dict(vec=1, col_group=4)
         sigs = {tile.TileReduce(*op, **kw, unroll=u).cache_sig for u in (2, 8)}
@@ -1461,18 +1462,25 @@ class TestOrderedColDevice(TestCase):
             ("var0", torch.bfloat16, 32768, 256, 16),
             ("argmaxi32", torch.float32, 65536, 256, 16),
             ("var0", torch.bfloat16, 8192, 1024, 16),
-            # The 2 GiB C = 4096 view select_col_config hands off.
-            ("argmaxi32", torch.bfloat16, 262144, 4096, 32),
         ],
         name_fn=lambda key, dt, r, c, w: f"{key}_{str(dt)[6:]}_{r}x{c}",
     )
-    @largeTensorTest("4GB", device="cuda")
     def test_sm107_mappings_match_the_indexed_tree(
         self, device, key, dtype, rows, cols, width
     ):
         """Run SM107's ordered mappings, forced by cc on any device, bitwise equal to the
         indexed tree."""
         x = torch.randn(rows, cols, device=device, dtype=dtype)
+        self._assert_sm107_mapping(x, key, width)
+
+    @largeTensorTest("4GB", device="cuda")
+    def test_sm107_2gib_mapping_matches_the_indexed_tree(self, device):
+        """Run the 2 GiB C = 4096 view select_col_config hands off, as above."""
+        x = torch.randn(262144, 4096, device=device, dtype=torch.bfloat16)
+        self._assert_sm107_mapping(x, "argmaxi32", 32)
+
+    def _assert_sm107_mapping(self, x, key, width):
+        (rows, cols), dtype = x.shape, x.dtype
         if key == "var0":
             trait, outputs = T.WelfordOps(correction=0), [dtype]
         else:
