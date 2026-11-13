@@ -374,10 +374,13 @@ class TestSumCuteDSLOverride(TestCase):
     def test_declined_calls_reach_the_reduction_overrides(self):
         """sum.dim_IntList calls this family declines fall through to the CuTeDSL
         reduction overrides, which record one replay entry, rather than to ATen."""
-        from torch._native.ops.reductions import kernel_general as kg, overrides as ov
+        from test_reductions_cutedsl import _overrides_inactive
 
-        if torch.cuda.get_device_capability()[0] not in ov._ARCH_MAJORS:
-            self.skipTest("the reduction overrides serve SM100-family only")
+        from torch._native.ops.reductions import kernel_general as kg
+
+        reason = _overrides_inactive()
+        if reason is not None:
+            self.skipTest(reason)
         x = self._make_order_sensitive_input(128, 8192, torch.float32)
         self.assertFalse(cutedsl_impl._cond(x, [0, 1]))
         kg._REPLAYS.clear()

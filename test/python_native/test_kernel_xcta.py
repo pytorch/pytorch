@@ -54,7 +54,7 @@ class TestKernelXcta(TestCase):
         before = (set(kernel_xcta._GEOM), set(kernel_xcta._PLAN))
         # One GPU has no other device, so pretend another one is current.
         other = x.get_device() + 1
-        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+        with mock.patch.object(torch._C, "_cuda_getDevice", return_value=other):
             with self.assertRaisesRegex(AssertionError, "is current"):
                 kernel_xcta.reduce_row_xcta(trait, "bydevice", x, torch.float32)
         self.assertEqual((set(kernel_xcta._GEOM), set(kernel_xcta._PLAN)), before)
