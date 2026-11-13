@@ -2478,14 +2478,43 @@ test_vec256() {
   # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing vec256 instructions"
-    mkdir -p test/test-reports/vec256
     pushd build/bin
-    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
+    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
+    # The CPU's capability, not an ATEN_CPU_CAPABILITY override.
+    cpu_capability=$(env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability().replace(' ', ''))")
+    # Unlike most tests, deliberately run every binary and report their failures
+    # at the end, so that one CI run shows the failures of all capabilities (few
+    # contributors can run them all locally), and fail if none ran, so that these
+    # tests can't silently stop running.
+    ran=0
+    failed=""
     for vec256_exec in $vec256_tests
     do
-      $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
+      # Only run the capabilities that dispatch can pick on this CPU: the others
+      # would hit illegal instructions, or for SVE, assume another vector length.
+      capability=${vec256_exec#./vec_test_all_types_}
+      if [[ "$capability" != DEFAULT && "$capability" != "$cpu_capability" &&
+            ! ( "$capability" == AVX2 && "$cpu_capability" == AVX512 ) ]]; then
+        echo "Skipping $vec256_exec: PyTorch uses $cpu_capability"
+        continue
+      fi
+      # Find libc10 in the installed torch, as the build tree's RPATH doesn't
+      # point to it where jobs run from a copy of the workspace (XPU). Each
+      # capability reports to its own directory, which test stats key on.
+      if ! LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH:-}" $vec256_exec --gtest_output=xml:../../test/test-reports/vec256_"$capability"/"$vec256_exec".xml; then
+        failed="$failed $vec256_exec"
+      fi
+      ran=$((ran + 1))
     done
     popd
+    if [[ "$ran" == 0 ]]; then
+      echo "No vec_test_all_types binary ran"
+      return 1
+    fi
+    if [[ -n "$failed" ]]; then
+      echo "Failed vec_test_all_types binaries:$failed"
+      return 1
+    fi
     assert_git_not_dirty
   fi
 }
@@ -2895,6 +2924,7 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 1
   test_aten
+  test_vec256
   test_libtorch 1
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin

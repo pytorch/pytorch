@@ -1264,17 +1264,42 @@ inline Vectorized<T> fmadd(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     const Vectorized<T>& c) {
-  return a * b + c;
+  if constexpr (is_reduced_floating_point_v<T>) {
+    // Compute in float, where the product of two reduced floating-point
+    // values is exact (for BFloat16, unless it overflows or underflows),
+    // rather than round the product to T before adding.
+    __at_align__ T va[Vectorized<T>::size()];
+    __at_align__ T vb[Vectorized<T>::size()];
+    __at_align__ T vc[Vectorized<T>::size()];
+    a.store(va);
+    b.store(vb);
+    c.store(vc);
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      va[i] = static_cast<T>(
+          static_cast<float>(va[i]) * static_cast<float>(vb[i]) +
+          static_cast<float>(vc[i]));
+    }
+    return Vectorized<T>::loadu(va);
+  } else {
+    return a * b + c;
+  }
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmadd)
+
+// For reduced floating-point types, the other fused operations call fmadd with
+// (exactly) negated operands, so that they share its specializations.
 
 template <typename T>
 inline Vectorized<T> fnmadd(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     const Vectorized<T>& c) {
-  return -(a * b) + c;
+  if constexpr (is_reduced_floating_point_v<T>) {
+    return fmadd(a.neg(), b, c);
+  } else {
+    return -(a * b) + c;
+  }
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fnmadd)
@@ -1284,7 +1309,11 @@ inline Vectorized<T> fmsub(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     const Vectorized<T>& c) {
-  return a * b - c;
+  if constexpr (is_reduced_floating_point_v<T>) {
+    return fmadd(a, b, c.neg());
+  } else {
+    return a * b - c;
+  }
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmsub)
@@ -1294,7 +1323,11 @@ inline Vectorized<T> fnmsub(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     const Vectorized<T>& c) {
-  return -(a * b) - c;
+  if constexpr (is_reduced_floating_point_v<T>) {
+    return fmadd(a.neg(), b, c.neg());
+  } else {
+    return -(a * b) - c;
+  }
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fnmsub)
