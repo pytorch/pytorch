@@ -4656,7 +4656,15 @@ def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
     elif dtype == torch.bfloat16 and torch.xpu.is_available():
         return True
     else:
-        return dtype in (torch.int64, torch.bool)
+        # Triton's tl.atomic_add does not support 8/16-bit integers (#202878).
+        return dtype in (
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.uint16,
+            torch.int64,
+            torch.bool,
+        )
 
 
 def use_scatter_fallback(
