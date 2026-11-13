@@ -105,6 +105,30 @@ class TestNativeRegistration(TestCase):
         gc.collect()
         self.assertTrue(all(reference() is None for reference in references))
 
+    def test_symbolic_declared_output_shapes(self):
+        class Symbolic(torch.nn.Module):
+            def forward(self, x):
+                return torch.onnx.ops.symbolic(
+                    "test::DeclaredOutput", (x,), dtype=dtype, shape=x.shape
+                )
+
+        for dtype in (torch.float32, torch.complex64):
+            with self.subTest(dtype=dtype):
+                program = torch.onnx.export(
+                    Symbolic(),
+                    (torch.ones(3),),
+                    opset_version=18,
+                    optimize=False,
+                    verbose=False,
+                )
+                self.assertEqual(list(program.model.graph.outputs[0].shape), [3])
+                self.assertEqual(
+                    program.model.graph.outputs[0].dtype,
+                    ir.DataType.FLOAT
+                    if dtype == torch.float32
+                    else ir.DataType.COMPLEX64,
+                )
+
     def test_pooling_gelu_native_export(self):
         class PoolGelu(torch.nn.Module):
             def forward(self, x):

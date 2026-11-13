@@ -7,48 +7,44 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
-from onnxscript.onnx_opset import opset18 as op
+import onnx_ir as ir
 
 import torch
-from torch.onnx._internal.exporter._torchlib._tensor_typing import (
-    BOOL,
-    FLOAT,
-    IntType,
-    TensorType,
-    TTensor,
-)
-from torch.onnx._internal.exporter._torchlib._torchlib_registry import (
-    _legacy_onnx_impl as onnx_impl,
-)
+from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
 
-@onnx_impl(torch.sym_float, trace_only=True)
-def sym_float(self: TensorType) -> FLOAT:
+if TYPE_CHECKING:
+    from torch.onnx._internal.exporter._ir_builder import TranslationContext
+
+
+@onnx_impl(torch.sym_float)
+def sym_float(op: TranslationContext, self: ir.Value) -> ir.Value:
     """sym_float(SymInt self) -> SymFloat"""
-    return op.Cast(self, to=FLOAT.dtype)
+    return op.Cast(self, to=ir.DataType.FLOAT)
 
 
-@onnx_impl(torch.sym_max, trace_only=True)
-def sym_max(x: IntType, y: IntType) -> IntType:
+@onnx_impl(torch.sym_max)
+def sym_max(op: TranslationContext, x: ir.Value, y: ir.Value) -> ir.Value:
     """sym_max(SymInt x, SymInt y) -> SymInt"""
     return op.Max(x, y)
 
 
-@onnx_impl(torch.sym_min, trace_only=True)
-def sym_min(x: IntType, y: IntType) -> IntType:
+@onnx_impl(torch.sym_min)
+def sym_min(op: TranslationContext, x: ir.Value, y: ir.Value) -> ir.Value:
     """sym_min(SymInt x, SymInt y) -> SymInt"""
     return op.Min(x, y)
 
 
-@onnx_impl(torch.sym_not, trace_only=True)
-def sym_not(self: BOOL) -> BOOL:
+@onnx_impl(torch.sym_not)
+def sym_not(op: TranslationContext, self: ir.Value) -> ir.Value:
     """sym_not(SymBool self) -> SymBool"""
     return op.Not(self)
 
 
-@onnx_impl(torch.sym_sum, trace_only=True)
-def sym_sum(args: Sequence[IntType]) -> IntType:
+@onnx_impl(torch.sym_sum)
+def sym_sum(op: TranslationContext, args: Sequence[ir.Value]) -> ir.Value:
     """sym_sum(SymInt[] args) -> SymInt"""
     if len(args) == 0:
         return op.Constant(value_int=0)
@@ -60,7 +56,7 @@ def sym_sum(args: Sequence[IntType]) -> IntType:
     return result
 
 
-@onnx_impl(torch.sym_ite, trace_only=True)
-def sym_ite(b: BOOL, t: TTensor, f: TTensor) -> TTensor:
+@onnx_impl(torch.sym_ite)
+def sym_ite(op: TranslationContext, b: ir.Value, t: ir.Value, f: ir.Value) -> ir.Value:
     """sym_ite(SymBool b, Tensor t, Tensor f) -> Tensor"""
     return op.Where(b, t, f)
