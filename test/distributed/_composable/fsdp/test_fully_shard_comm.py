@@ -70,6 +70,7 @@ from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MUL
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
 )
 from torch.testing._internal.common_distributed import (
@@ -606,8 +607,7 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
         # source alignment changes from chunk to chunk. Each chunk of the
         # low-precision input spans several cast blocks, and its last chunk is
         # one row, i.e. `width` elements, short. The (8, 1000) input with 5
-        # chunks has a last chunk that is all padding. test_chunk_cat_float_out
-        # in test_shape_ops.py covers the input with several units per thread.
+        # chunks has a last chunk that is all padding.
         for dtype, num_chunks in itertools.product(
             (torch.bfloat16, torch.float16), (3, 5)
         ):
@@ -629,6 +629,21 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
                 torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, num_chunks, out=out)
                 msg = f"{dtype} {num_chunks} {dst_offset} {tuple(low_precision.shape)}"
                 self.assertEqual(out, expected, atol=0, rtol=0, msg=msg)
+
+    @onlyCUDA
+    @largeTensorTest("1GB")
+    def test_numerics_cast_several_units_per_thread(self, device):
+        # 50M bf16 elements are enough for each thread to cast 4 units on GPUs
+        # with up to 304 SMs. The fp32 input makes every chunk unaligned.
+        num_chunks = 3
+        tensors = [
+            torch.randn(num_chunks, device=device),
+            torch.randn(3 * 4194304 - 1, 4, device=device, dtype=torch.bfloat16),
+        ]
+        expected = torch._chunk_cat([t.float() for t in tensors], 0, num_chunks)
+        out = torch.full_like(expected, float("nan"))
+        torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, num_chunks, out=out)
+        self.assertEqual(out, expected, atol=0, rtol=0)
 
     def test_numerics_with_leading_dims(self, device):
         bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
