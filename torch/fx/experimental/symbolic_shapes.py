@@ -4824,7 +4824,7 @@ class ShapeEnv:
             self.frozen = old_frozen
             self._error_on_new_guards = old_error
 
-    def _get_key(self) -> tuple[int, int, int, int, int]:
+    def _get_key(self) -> tuple[int, int, int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -4835,6 +4835,7 @@ class ShapeEnv:
             self.num_deferred_runtime_asserts,
             len(self.real_tensor_prop_unbacked_vals),
             self._var_to_range_version_counter,
+            len(self.guards),
         )
 
     def _update_version_counter(self) -> None:
@@ -9057,6 +9058,8 @@ class ShapeEnv:
                     )
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
+                    # The new axioms change what cached static evaluations decide.
+                    self._update_version_counter()
             else:
                 self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 
