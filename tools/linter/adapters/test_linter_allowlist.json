@@ -105,7 +105,6 @@
   "test/distributed/fsdp/test_fsdp_comm_hooks.py",
   "test/distributed/fsdp/test_fsdp_core.py",
   "test/distributed/fsdp/test_fsdp_dtensor_state_dict.py",
-  "test/distributed/fsdp/test_fsdp_exec_order.py",
   "test/distributed/fsdp/test_fsdp_fine_tune.py",
   "test/distributed/fsdp/test_fsdp_flatten_params.py",
   "test/distributed/fsdp/test_fsdp_grad_acc.py",
