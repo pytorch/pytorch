@@ -128,6 +128,7 @@ from ..pgo import (
     auto_unset,
     FrameStateSizeEntry,
     InferStride,
+    merge_into_code_state_entry,
     process_automatic_dynamic,
 )
 from ..side_effects import SideEffects
@@ -5301,8 +5302,11 @@ def _automatic_dynamic(
             mark_size = [auto_unset] * e.dim()
             # pyrefly: ignore [unsupported-operation]
             mark_size[i] = auto_dynamic
-            # pyrefly: ignore [bad-argument-type]
-            frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
+            merge_into_code_state_entry(
+                frame_state_entry,
+                # pyrefly: ignore [bad-argument-type]
+                FrameStateSizeEntry.make_size(size=mark_size),
+            )
 
         # NB: both static and dynamic have precedence over
         automatic_dynamic_size = (

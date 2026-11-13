@@ -3,8 +3,10 @@
 import contextlib
 import importlib.util
 import os
+import pickle
 import re
 import tempfile
+from unittest import mock
 
 import torch._dynamo.config
 import torch._dynamo.test_case
@@ -19,6 +21,9 @@ from torch._dynamo.testing import (
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.utils import clear_caches, fresh_cache
 from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS
+
+
+_PGO_TEST_MODE = "double"
 
 
 class PgoTest(torch._dynamo.test_case.TestCase):
@@ -358,6 +363,81 @@ class PgoTest(torch._dynamo.test_case.TestCase):
                     mock_cache.global_stats.dynamo_pgo, mock_cache.Stats(4, 1, 2)
                 )
 
+    @torch._dynamo.config.patch(
+        automatic_dynamic_remote_pgo=True, automatic_dynamic_local_pgo=False
+    )
+    def test_remote_put_skips_unchanged_state(self):
+        global _PGO_TEST_MODE
+        cnts = CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            return x * 2 if _PGO_TEST_MODE == "double" else x * 3
+
+        with mock_cache.PatchCaches():
+            _PGO_TEST_MODE = "double"
+            f(torch.randn(2, 3))
+            # Recompiles on the global string guard, which leaves the code state unchanged.
+            _PGO_TEST_MODE = "triple"
+            f(torch.randn(2, 3))
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(mock_cache.global_stats.dynamo_pgo.num_put, 1)
+
+            f(torch.randn(2, 4))
+            self.assertEqual(cnts.frame_count, 3)
+            self.assertEqual(mock_cache.global_stats.dynamo_pgo.num_put, 2)
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_remote_pgo=True, automatic_dynamic_local_pgo=False
+    )
+    def test_remote_put_writes_mark_dynamic_change(self):
+        cnts = CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            return x * 2
+
+        with mock_cache.PatchCaches():
+            f(torch.randn(2, 3))
+            self.assertEqual(mock_cache.global_stats.dynamo_pgo.num_put, 1)
+
+            # Same shape, so only mark_dynamic changes the stored entry.
+            x = torch.randn(2, 3)
+            torch._dynamo.mark_dynamic(x, 0)
+            f(x)
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(mock_cache.global_stats.dynamo_pgo.num_put, 2)
+
+            self.reset()
+            cnts.clear()
+
+            # The written profile starts dim 0 dynamic.
+            f(torch.randn(2, 3))
+            f(torch.randn(5, 3))
+            self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(automatic_dynamic_remote_pgo=True)
+    def test_put_code_state_pickles_once_per_write(self):
+        cnts = CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            return x * 2
+
+        with (
+            mock_cache.PatchCaches(),
+            torch.compiler.config.patch(pgo_extra_write_key="sticky"),
+            mock.patch.object(pickle, "dumps", wraps=pickle.dumps) as dumps,
+        ):
+            f(torch.randn(2, 3))
+            f(torch.randn(2, 4))
+            self.assertEqual(cnts.frame_count, 2)
+            # Two writes, each to the local file, the job key and the sticky key.
+            self.assertEqual(mock_cache.global_stats.dynamo_pgo.num_put, 4)
+            code_state = torch._dynamo.pgo.get_code_state()
+            pickles = [c for c in dumps.call_args_list if c.args[0] is code_state]
+            self.assertEqual(len(pickles), 2)
+
     # Test that if the same file appears in two different paths for two different compilations PGO still works.
     def test_different_file_paths_local_pgo(self):
         content = """
@@ -475,6 +555,37 @@ def run(cnt):
                 self.assertEqual(cnts.frame_count, 1)
                 f(t(2, 2), t(2, 4))
                 self.assertEqual(cnts.frame_count, 2)
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_remote_pgo=True, automatic_dynamic_local_pgo=False
+    )
+    def test_sticky_pgo_read_copies_to_job_key(self):
+        cnts = CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            return x * 2
+
+        with mock_cache.PatchCaches():
+            with torch.compiler.config.patch(job_id="a", pgo_extra_write_key="sticky"):
+                f(torch.randn(2, 3))
+                f(torch.randn(2, 4))
+                self.assertEqual(cnts.frame_count, 2)
+
+            # Warm start from the sticky key; these compiles add nothing new.
+            self.reset()
+            cnts.clear()
+            with torch.compiler.config.patch(job_id="b", pgo_extra_read_key="sticky"):
+                f(torch.randn(2, 5))
+                self.assertEqual(cnts.frame_count, 1)
+
+            # A retry of job "b" without the sticky key still starts dynamic.
+            self.reset()
+            cnts.clear()
+            with torch.compiler.config.patch(job_id="b"):
+                f(torch.randn(2, 6))
+                f(torch.randn(2, 7))
+                self.assertEqual(cnts.frame_count, 1)
 
     def test_factory_created_functions_separate_pgo_state(self):
         cc_backend = CompileCounterWithBackend(backend="aot_eager")
