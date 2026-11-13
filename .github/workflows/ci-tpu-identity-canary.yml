@@ -1,0 +1,31 @@
+# Owner(s): ["module: ci"]
+name: CI TPU identity canary
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/scripts/ci_tpu_identity.py
+      - .github/scripts/test_ci_tpu_identity.py
+      - .github/workflows/ci-tpu-identity-canary.yml
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+jobs:
+  own-instance:
+    if: github.repository == 'pytorch/pytorch' && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.ref == 'd4l3k/ci-tpu-identity'
+    runs-on: linux.google.tpuv7x.1
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/scripts/ci_tpu_identity.py
+      - name: Inspect only this assigned TPU instance
+        env:
+          AUDIT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/ci_tpu_identity.py
