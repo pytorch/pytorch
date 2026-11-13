@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [mt-l-x86iavx512-2-4, lf-l-x86iavx512-2-4]
+        runner: [mt-l-x86iavx512-8-64, lf-l-x86iavx512-8-64]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 8
     container:
