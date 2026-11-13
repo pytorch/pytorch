@@ -54,6 +54,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
+    decorateIf,
     expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1549,6 +1550,130 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
                 tracer.graph.output(out_proxy.node)
                 gm = fx.GraphModule(tracer.root, tracer.graph)
                 self.assertEqual(gm(2, 3, 4), expected)
+                # Every rebuilt node must target sym_op itself: Inductor only
+                # lowers the real sym operators, so a helper wrapper as a node
+                # target fails with "is not an OpOverload".
+                targets = {n.target for n in gm.graph.nodes if n.op == "call_function"}
+                self.assertEqual(targets, {sym_op})
+
+    def test_build_proxy_untracked_symint_no_cycle(self):
+        """
+        A SymInt computed with proxy tracing disabled (as DTensor sharding
+        propagation does) is untracked, so make_fx resolves it through its
+        sympy symbol. A traced op computed from it that simplifies to that same
+        symbol, directly (sym_max(y, 1)) or through another such op
+        (sym_max(y, 1) // 1), becomes the symbol's provider, so forcing its lazy
+        proxy (thunkified, as under AOTAutograd) must not resolve y back to
+        itself and recurse forever.
+        """
+        from torch.fx.experimental.proxy_tensor import (
+            disable_proxy_modes_tracing,
+            maybe_enable_thunkify,
+        )
+
+        def make_f(size_fn):
+            def f(x):
+                with maybe_enable_thunkify():
+                    with disable_proxy_modes_tracing():
+                        y = x.shape[0] * 2 // 2
+                    return x.new_zeros(size_fn(y))
+
+            return f
+
+        for name, size_fn in [
+            ("direct", lambda y: torch.sym_max(y, 1)),
+            ("indirect", lambda y: torch.sym_max(y, 1) // 1),
+        ]:
+            with self.subTest(name):
+                gm = make_fx(make_f(size_fn), tracing_mode="symbolic")(torch.randn(4))
+                self.assertEqual(gm(torch.randn(5)).shape, (5,))
+
+    def test_build_proxy_untracked_symint_no_cross_symbol_cycle(self):
+        """
+        p == s1 is computed from an untracked a == s0 and q == s0 from an
+        untracked b == s1, so each becomes the provider of the symbol the other
+        resolves. Forcing q (through the untracked m == s0) forces p, whose
+        lookup of s0 must skip q and use x's size instead of recursing.
+        """
+        from torch.fx.experimental.proxy_tensor import (
+            disable_proxy_modes_tracing,
+            maybe_enable_thunkify,
+        )
+
+        def f(x, y):
+            with maybe_enable_thunkify():
+                with disable_proxy_modes_tracing():
+                    a = x.shape[0] * 5 // 5
+                    b = y.shape[0] * 5 // 5
+                    m = x.shape[0] * 9 // 9
+                p = y.shape[0] * a // a
+                q = x.shape[0] * b // b
+                return x.new_zeros(m) + y.sum()
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(4), torch.randn(3))
+        self.assertEqual(gm(torch.randn(6), torch.randn(2)).shape, (6,))
+
+    def test_build_proxy_untracked_symint_cycle_error(self):
+        """
+        half == s0 is computed from an untracked w == 2*s0 and becomes the s0
+        provider, so rebuilding w binds it to 2 * half. Forcing w then forces
+        half, whose operand is w: a cycle through symnode_tracker that the
+        sympy_expr_tracker lookup never sees. It must raise a clear error
+        instead of recursing forever.
+        """
+        from torch.fx.experimental.proxy_tensor import (
+            disable_proxy_modes_tracing,
+            maybe_enable_thunkify,
+        )
+
+        def f(x):
+            with maybe_enable_thunkify():
+                with disable_proxy_modes_tracing():
+                    w = x.shape[0] * 2
+                half = w // 2
+                return x.new_zeros(w), x.new_zeros(half)
+
+        with self.assertRaisesRegex(RuntimeError, "Cycle while computing the proxy"):
+            make_fx(f, tracing_mode="symbolic")(torch.randn(4))
+
+    def test_build_proxy_untracked_symint_no_tangent_dependency(self):
+        """
+        AOTAutograd tracks the tangent placeholders before the forward runs, so
+        a tangent's size can become the sympy_expr_tracker entry for s0. A later
+        traced op that simplifies to s0 (n below) must still replace that entry,
+        so the untracked m resolves to a forward value rather than the tangent.
+        That holds when n is computed from tracked sizes, and when one of its
+        inputs is untracked but resolves a different symbol (s1).
+        This uses aot_function because under torch.compile the SymInt graph
+        input for s0 hides the tangent's size.
+        """
+        from functorch.compile import aot_function, nop
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+
+        def make_f(make_n):
+            def f(x, w):
+                with disable_proxy_modes_tracing():
+                    a = w.shape[0] * 5 // 5
+                    m = x.shape[0] * 5 // 5
+                n = make_n(x.shape[0], a)
+                z = x.new_zeros(m) + n
+                y = x.reshape(x.shape[0] * 2 // 2) * w.sum()
+                return z, y
+
+            return f
+
+        for name, make_n in [
+            ("tracked_inputs", lambda s0, s1: s0 * 3 // 3),
+            ("untracked_input", lambda s0, s1: s0 * s1 // s1),
+        ]:
+            with self.subTest(name):
+                f = make_f(make_n)
+                x = torch.randn(4, requires_grad=True)
+                w = torch.randn(5, requires_grad=True)
+                compiled = aot_function(
+                    f, fw_compiler=nop, bw_compiler=nop, dynamic=True
+                )
+                self.assertEqual(compiled(x, w), f(x, w))
 
     def test_build_proxy_for_pow(self):
         """
@@ -2274,7 +2399,14 @@ class TestSymNumberMagicMethods(TestCase):
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
-    @parametrize("fn", list(sym_node.magic_methods.keys()))
+    @parametrize(
+        "fn",
+        [
+            fn
+            for fn in sym_node.magic_methods
+            if fn in sym_node.bool_magic_methods and fn != "sym_ite"
+        ],
+    )
     def test_bool_method(self, fn):
         # sym_ite has its own tests
         if fn not in sym_node.bool_magic_methods or fn == "sym_ite":
@@ -2284,9 +2416,26 @@ class TestSymNumberMagicMethods(TestCase):
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
 
-    @parametrize("fn", list(sym_node.magic_methods.keys()))
-    @parametrize("first_type", ["int", "float"])
+    @parametrize(
+        "fn",
+        [
+            fn
+            for fn in sym_node.magic_methods
+            if fn not in sym_node.only_float_magic_methods
+            and fn not in sym_node.bool_magic_methods
+        ],
+    )
+    @parametrize("first_type", ["int"])
     @parametrize("second_type", ["int", "float"])
+    @decorateIf(
+        unittest.skip("Second argument is unused or only accepts integers"),
+        lambda p: p["second_type"] == "float"
+        and (
+            p["fn"] in sym_node.bitwise_ops
+            or p["fn"] in sym_node.unary_methods
+            or p["fn"] in ("mod", "round")
+        ),
+    )
     def test_method(self, fn, first_type, second_type):
         if first_type == "float":
             # TODO: Hmm, this looks like we skip all floats
@@ -5785,19 +5934,6 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         """Test narrow with unbacked start with cpp_wrapper"""
         self.test_narrow_unbacked_start()
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_narrow_with_tensor_start(self):
-        @torch.compile(backend="inductor", fullgraph=True)
-        def f(x, start, end):
-            return torch.narrow(x, 0, start, end)
-
-        x = torch.tensor(
-            [False], device="cuda:0" if torch.cuda.is_available() else "cpu"
-        )
-        start = torch.tensor(0)
-        res = f(x, start, 0)
-        self.assertEqual(res.shape, torch.Size([0]))
-
     @skipIfTorchDynamo("mark_unbacked not supported")
     def test_unbacked_norm_no_dde(self):
         def vector_norm(x):
@@ -7060,6 +7196,24 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         y = x[0:1, 0:1]  # y is a view, y._base is x
         result = fn(y)
         self.assertEqual(result.shape, (1, 1))
+
+
+class TestUnbackedOpsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_narrow_with_tensor_start(self, device):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f(x, start, end):
+            return torch.narrow(x, 0, start, end)
+
+        x = torch.tensor([False], device=device)
+        start = torch.tensor(0)
+        res = f(x, start, 0)
+        self.assertEqual(res.shape, torch.Size([0]))
+
+
+instantiate_device_type_tests(TestUnbackedOpsDevice, globals())
 
 
 instantiate_parametrized_tests(TestUnbacked)
