@@ -1479,6 +1479,9 @@ print(eval(f"bbmod.{name}.{path}") is code)
 import torch
 
 
+def identity_child_hook(module, args, output):
+    return output
+
 
 class Child(torch.nn.Module):
     def forward(self, x):
@@ -1486,6 +1489,7 @@ class Child(torch.nn.Module):
 
 
 CHILD = Child()
+CHILD.register_forward_hook(identity_child_hook)
 
 
 def fn(x):

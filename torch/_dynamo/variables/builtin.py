@@ -2676,14 +2676,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         # path (do-not-rehash-dict-keys).
         if isinstance(args[0], variables.ConstDictVariable):
             args[0].install_dict_order_guard(tx)
-        if isinstance(
+            items = list(args[0].materialize_keys())
+        elif isinstance(
             args[0],
             (
                 variables.SetVariable,
                 variables.FrozensetVariable,
                 variables.DictKeySetVariable,
                 variables.OrderedSetVariable,
-                variables.ConstDictVariable,
             ),
         ):
             items = list(args[0].items.keys())
@@ -2869,6 +2869,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                 explanation=f"Dynamo doesn't have a rule to determine the type of argument {arg}",
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
+        if isinstance(arg, variables.NNModuleHooksDictVariable):
+            # Explicit isinstance observes the registry type, unlike internal slot dispatch.
+            arg._guard_type()
         isinstance_type = isinstance_type_var.as_python_constant()
         # An AsyncCollectiveTensor (ACT) input's tensor-class guard is relaxed
         # (see VariableBuilder.wrap_tensor): the cache entry does not discriminate
@@ -3596,8 +3599,13 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
+            storage = (
+                args[0].materialize_keys()
+                if isinstance(args[0], ConstDictVariable)
+                else args[0].items
+            )
             return ConstDictVariable(
-                dict.fromkeys(args[0].items.keys(), value),  # type: ignore[arg-type]
+                dict.fromkeys(storage, value),
                 mutation_type=ValueMutationNew(),
             )
         return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args, **kwargs)
