@@ -8,18 +8,19 @@ higher-level API to automatically differentiate models split across several
 machines.
 
 ```{warning}
-APIs in the RPC package are stable and in maintenance mode.
-```
+`torch.distributed.rpc` is deprecated since 2.16 and will be removed in a future version.
+For new code, consider one of these alternatives:
 
-```{warning}
-CUDA support is a **beta** feature.
-Not all features of the RPC package are yet compatible with CUDA support and
-thus their use is discouraged. These unsupported features include: RRefs,
-JIT compatibility, dist autograd and dist optimizer, and profiling.
+- [Monarch](https://meta-pytorch.org/monarch/stable/generated/examples/getting_started.html)
+- [Ray](https://docs.ray.io/en/latest/ray-overview/getting-started.html)
+- [gRPC](https://grpc.io/docs/languages/python/quickstart/)
+
+There is no drop-in replacement for distributed autograd, `DistributedOptimizer`
+or RRef. Existing users should pin a PyTorch release that still includes it.
 ```
 
 ```{note}
-Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
+Please refer to [PyTorch Distributed Overview](https://docs.pytorch.org/tutorials/beginner/dist_overview.html)
 for a brief introduction to all features related to distributed training.
 ```
 
@@ -294,14 +295,3 @@ The distributed autograd design note covers the design of the RPC-based distribu
 The RRef design note covers the design of the {ref}`rref` (Remote REFerence) protocol used to refer to values on remote workers by the framework.
 
 -  {ref}`remote-reference-protocol`
-
-## Tutorials
-
-The RPC tutorials introduce users to the RPC framework, provide several example applications
-using {ref}`torch.distributed.rpc<distributed-rpc-framework>` APIs, and demonstrate how
-to use [the profiler](https://pytorch.org/docs/stable/autograd.html#profiler) to profile RPC-based workloads.
-
--  [Getting started with Distributed RPC Framework](https://pytorch.org/tutorials/intermediate/rpc_tutorial.html)
--  [Implementing a Parameter Server using Distributed RPC Framework](https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html)
--  [Combining Distributed DataParallel with Distributed RPC Framework](https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html) (covers **RemoteModule** as well)
--  [Implementing batch RPC processing](https://pytorch.org/tutorials/intermediate/rpc_async_execution.html)

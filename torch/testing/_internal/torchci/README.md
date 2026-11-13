@@ -48,8 +48,9 @@ open-ended string-to-string maps.
 | `device_count` | int | Visible devices of `accelerator`, honoring `CUDA_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES`; `0` for CPU |
 | `device_name` | string | The first visible device's name as its vendor reports it (`NVIDIA L4`, `AMD Instinct MI350X VF`, `Apple M2 Pro`, `Intel(R) Data Center GPU Max 1100`); empty with no device |
 
-`flags` maps the env var of every flag and setting registered with
-`include_in_repro` to its value as set, unparsed (`PYTORCH_CUDA_ALLOC_CONF` is
+`flags` maps the env var of every flag registered with `include_in_repro`, and
+every setting registered with `include_in_report` (which defaults to
+`include_in_repro`), to its value as set, unparsed (`PYTORCH_CUDA_ALLOC_CONF` is
 the allocator config string, such as `expandable_segments:True`), or `""` when
 unset. An unset flag that is on by default or implication is `"1"`.
 
