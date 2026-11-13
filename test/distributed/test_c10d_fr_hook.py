@@ -24,20 +24,16 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch._C._distributed_c10d import FlightRecorderHook
+from torch._C._distributed_c10d import BarrierOptions, FlightRecorderHook, WorkResult
 from torch.distributed.distributed_c10d import _world
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
-# CPU coverage of the hook comes from "fake" rather than gloo: gloo has its own
-# FlightRecorder integration, so the hook deliberately skips its ops and
-# recording nothing is all a gloo group can show. What is left to cover on CPU
-# is the null-start-event path, and "fake" exercises it through the same c10d
-# ops as any other backend.
 FR_HOOK_BACKENDS = [
     ("fake", "cpu"),
+    ("gloo", "cpu"),
     ("nccl2", "cuda"),
 ]
 
@@ -55,7 +51,9 @@ class AbstractFlightRecorderHookTest:
 
     def setUp(self):
         super().setUp()
-        os.environ["TORCH_FR_BUFFER_SIZE"] = "2000"
+        # The recorder reads the size once per process, at construction.
+        small = self._testMethodName == "test_buffer_wraparound"
+        os.environ["TORCH_FR_BUFFER_SIZE"] = "10" if small else "2000"
         # Spawned children do not re-run setUp, so they pick the dump prefix
         # out of the inherited environment rather than off self.
         self.tempdir = tempfile.TemporaryDirectory()
@@ -77,20 +75,21 @@ class AbstractFlightRecorderHookTest:
     def _dump_file_name(self):
         return os.environ["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
 
-    def _init_pg(self):
+    def _init_pg(self, enable_reconfigure=False):
         os.environ["LOCAL_RANK"] = str(self.rank)
         if self.device_type == "cuda":
             torch.cuda.set_device(self.rank)
         if self._communicates:
-            store = dist.FileStore(self.file_name, self.world_size)
+            self.store = dist.FileStore(self.file_name, self.world_size)
         else:
-            store = FakeStore()
+            self.store = FakeStore()
         dist.init_process_group(
             self.backend_name,
             world_size=self.world_size,
             rank=self.rank,
-            store=store,
+            store=self.store,
             timeout=timedelta(seconds=60),
+            enable_reconfigure=enable_reconfigure,
         )
         return dist.group.WORLD
 
@@ -118,30 +117,19 @@ class AbstractFlightRecorderHookTest:
         # _maybe_attach_flight_recorder skips a group whose every device is
         # served by a backend that either records itself or never
         # communicates, so "fake" has to be attached by hand.
-        return self.backend_name == "nccl2"
+        return self.backend_name != "fake"
 
     @property
     def _communicates(self):
         return self.backend_name != "fake"
 
-    @property
-    def _push_completion(self):
-        # Two tiers. A backend with completion hooks pushes real completion, so
-        # an entry is retired when its collective actually finished and reads
-        # "completed" with the backend's own duration. A backend without them
-        # ("fake") is retired by the post-hook, at issue: honest but degraded,
-        # since nothing will ever tell the hook the op finished.
-        return self.backend_name == "nccl2"
-
-    def _completed_state(self):
-        return "completed" if self._push_completion else "scheduled"
-
     def _await_retired(self, count=0, timeout=60.0):
-        # Completion arrives when the backend establishes it: on its watchdog,
-        # which ticks about once a second, or on the next collective through the
-        # same group. Nothing polls at dump time any more, so a dump taken the
-        # instant after cuda.synchronize() can be one tick early. Returns as soon
-        # as it can, which for the retire-at-issue tier is immediately.
+        # Completion arrives when the backend establishes it: at issue for
+        # fake; for gloo when its worker thread finishes the op (p2p only in
+        # wait()); for nccl2 on its watchdog, which ticks about once a second,
+        # or on the next collective through the same group. Nothing polls at dump
+        # time any more, so a dump taken the instant after cuda.synchronize()
+        # can be one tick early.
         deadline = time.time() + timeout
         while True:
             entries = self._hook_entries()
@@ -162,6 +150,22 @@ class AbstractFlightRecorderHookTest:
             return hook
         return FlightRecorderHook.attach(pg, dist.get_process_group_ranks(pg))
 
+    def _issue_after_callback(self, issue, key):
+        # A callback added to an already completed future runs at once, maybe
+        # while the hook's still runs on the thread that completed it. Rank 1
+        # issues only after rank 0 added its callback, so on rank 0 it runs
+        # after the hook's. Needs an initialized comm, or rank 0's issue blocks.
+        # "fake" completes at issue, on this thread, so needs no gate.
+        store = dist.distributed_c10d._get_default_store()
+        gate = self._communicates
+        if gate and self.rank != 0:
+            store.wait([key], timedelta(seconds=60))
+        work = issue()
+        done = work.get_future_result().then(lambda fut: fut.value())
+        if gate and self.rank == 0:
+            store.set(key, "1")
+        return work, done
+
     def test_records_and_retires_collectives(self):
         pg = self._init_pg()
         hook = self._fr_hook(pg)
@@ -179,20 +183,29 @@ class AbstractFlightRecorderHookTest:
         self.assertIn(self._name("all_reduce"), names)
         self.assertIn(self._name("broadcast"), names)
         self.assertIn(self._name("barrier"), names)
-        # Every entry is retired, on both tiers. Only a backend that pushes
-        # completion can also say the collective finished.
         for e in entries:
             self.assertTrue(e["retired"], msg=str(e))
-            self.assertEqual(e["state"], self._completed_state(), msg=str(e))
+            self.assertEqual(e["state"], "completed", msg=str(e))
+            # FakeProcessGroup ignores the init timeout.
+            if self.backend_name != "fake":
+                self.assertEqual(e["timeout_ms"], 60000, msg=str(e))
+        # Frames and pg_status as the pickle dump (torchfrtrace's input)
+        # reports them.
+        trace = pickle.loads(
+            torch._C._distributed_c10d._dump_fr_trace(backend=self.backend_name)
+        )
+        last = trace["entries"][-1]
+        self.assertIn("test_c10d_fr_hook.py", str(last["frames"]))
+        status = trace["pg_status"][str(last["pg_id"])]
+        self.assertEqual(status["last_enqueued_collective"], last["op_id"])
+        self.assertEqual(status["last_completed_collective"], last["op_id"])
         hook.remove()
 
-    def test_entry_state_from_pushed_completion(self):
-        # Tier one: the backend pushes completion from where its watchdog
-        # establishes it, so "completed" is reachable without the hook polling
-        # anything. See test_retires_at_issue_without_completion_hooks for the
-        # other tier.
-        if not self._push_completion:
-            self.skipTest("backend pushes no completion")
+    def test_entry_state_from_result_future(self):
+        # Tier one: the backend completes the Work's result future once it
+        # establishes completion, so "completed" is reachable without the hook
+        # polling anything. See
+        # FlightRecorderHookNoResultFutureTest for the other tier.
         self._init_pg()
         sub_pg = dist.new_group(list(range(self.world_size)))
         hook = self._fr_hook(sub_pg)
@@ -214,37 +227,11 @@ class AbstractFlightRecorderHookTest:
             self.assertGreater(e["time_discovered_started_ns"], 0, msg=str(e))
         hook.remove()
 
-    def test_retires_at_issue_without_completion_hooks(self):
-        # Tier two: a backend with no completion hook. The post-hook has to
-        # retire the entry itself, at issue, because nothing else ever will and
-        # an entry nothing retires is indistinguishable from a hang. What it must
-        # not do is claim a completion nobody observed, so the entry reads
-        # "scheduled" and carries no duration.
-        if self._push_completion:
-            self.skipTest("backend pushes completion")
-        pg = self._init_pg()
-        self.assertFalse(pg.supports_completion_hooks)
-        hook = self._fr_hook(pg)
-        before = len(self._hook_entries())
-
-        t = torch.ones(8, device=self.device)
-        for _ in range(3):
-            dist.all_reduce(t)
-
-        entries = self._hook_entries()[before:]
-        self.assertEqual(len(entries), 3)
-        for e in entries:
-            self.assertTrue(e["retired"], msg=str(e))
-            self.assertEqual(e["state"], "scheduled", msg=str(e))
-            self.assertEqual(e["time_discovered_completed_ns"], 0, msg=str(e))
-            self.assertNotIn("duration_ms", e, msg=str(e))
-        hook.remove()
-
     def test_duration_ms_absent_without_backend_timing(self):
         # duration_ms comes from the backend, which reports none unless it was
         # asked to time collectives. There is deliberately no host clock stand-in:
-        # the report arrives on a watchdog tick, so a wall clock would measure how
-        # late the push was, not the collective.
+        # the result is published on a watchdog tick, so a wall clock would
+        # measure how late it was published, not the collective.
         pg = self._init_pg()
         hook = self._fr_hook(pg)
         before = len(self._hook_entries())
@@ -258,7 +245,7 @@ class AbstractFlightRecorderHookTest:
         entries = self._await_retired(before + 3)[before:]
         self.assertEqual(len(entries), 3)
         for e in entries:
-            self.assertEqual(e["state"], self._completed_state(), msg=str(e))
+            self.assertEqual(e["state"], "completed", msg=str(e))
             self.assertNotIn("duration_ms", e, msg=str(e))
         hook.remove()
 
@@ -286,6 +273,43 @@ class AbstractFlightRecorderHookTest:
             self.assertGreater(e["duration_ms"], 0.0, msg=str(e))
             self.assertLess(e["duration_ms"], 60000.0, msg=str(e))
         hook.remove()
+
+    def test_timed_work_released_after_result(self):
+        # With timing on, the hook holds a Work until its result is published,
+        # to read its duration. It must not keep the outputs alive after that.
+        pg = self._init_pg()
+        if self.backend_name != "nccl2":
+            self.skipTest("backend cannot time collectives")
+        pg._enable_collectives_timing()
+        hook = self._fr_hook(pg)
+        try:
+            t = torch.ones(1024, device=self.device)
+            dist.all_reduce(t)
+            torch.cuda.synchronize()
+            base = torch.cuda.memory_allocated(self.device)
+
+            big = torch.ones(4 * 1024 * 1024, device=self.device)
+            nbytes = big.numel() * big.element_size()
+            before = len(self._hook_entries())
+            work, done = self._issue_after_callback(
+                lambda b=big: dist.all_reduce(b, async_op=True), "timed_work"
+            )
+            for _ in range(3):
+                dist.all_reduce(t)
+            done.wait()
+            # The hook did hold the Work: it read the duration.
+            e = self._hook_entries()[before]
+            # wait() drops the backend's own stash of the input.
+            work.wait()
+            del work, big, done
+            # The next collective releases what the hook held.
+            dist.all_reduce(t)
+            torch.cuda.synchronize()
+            if self.rank == 0:
+                self.assertIn("duration_ms", e, msg=str(e))
+                self.assertLess(torch.cuda.memory_allocated(self.device), base + nbytes)
+        finally:
+            hook.remove()
 
     def test_hung_collective_reads_not_completed(self):
         # The property the whole design exists for: a dump taken while a
@@ -323,7 +347,7 @@ class AbstractFlightRecorderHookTest:
             dist.all_reduce(t)
 
         torch.cuda.synchronize()
-        # Once it finishes, the backend pushes that too.
+        # Once it finishes, its result future reports that too.
         self.assertEqual(self._await_retired()[-1]["state"], "completed")
         hook.remove()
 
@@ -399,16 +423,20 @@ class AbstractFlightRecorderHookTest:
         # recv on the highest-ranked member.
         from torch.distributed.flight_recorder.components.types import Op
 
-        if self.backend_name != "fake":
-            # NCCL has no recvAnysource; only mpi, ucc and fake do.
+        if self.backend_name == "nccl2":
             self.skipTest("backend does not support recv_any_source")
         pg = self._init_pg()
         hook = self._fr_hook(pg)
         before = len(self._hook_entries())
 
+        t = torch.empty(4, device=self.device)
+        if self._communicates and self.rank == 0:
+            pg.send([t], 1, 0).wait()
+            hook.remove()
+            return
         # Not dist.recv(t, src=None): it asks the returned Work who the sender
         # was, which the fake backend cannot answer.
-        pg.recv_anysource([torch.empty(4, device=self.device)], 0).wait()
+        pg.recv_anysource([t], 0).wait()
 
         entries = self._hook_entries()[before:]
         self.assertEqual(len(entries), 1, msg=str(entries))
@@ -516,6 +544,42 @@ class AbstractFlightRecorderHookTest:
         self.assertEqual(allreduce[0]["input_dtypes"], ["Float"])
         hook.remove()
 
+    def test_coalesced_p2p_retires_from_batch_result(self):
+        # nccl2 returns a sentinel for each op in a coalesced p2p window. Its
+        # result future and duration are the batch's, so those entries read
+        # "completed" with the batch's duration_ms.
+        if self.backend_name != "nccl2":
+            self.skipTest("nccl2 coalesced p2p sentinel")
+        pg = self._init_pg()
+        pg._enable_collectives_timing()
+        hook = self._fr_hook(pg)
+        before = len(self._hook_entries())
+
+        peer = 1 - self.rank
+        send_t = torch.ones(4, device=self.device)
+        recv_t = torch.empty(4, device=self.device)
+        pg._start_coalescing(self.device)
+        try:
+            works = [dist.isend(send_t, peer), dist.irecv(recv_t, peer)]
+            # The batch can't complete inside the window, so these run after
+            # the hook's callbacks, added at issue.
+            done = [w.get_future_result().then(lambda f: f.value()) for w in works]
+        finally:
+            pg._end_coalescing(self.device)
+        for fut in done:
+            fut.wait()
+
+        entries = self._hook_entries()[before:]
+        p2p = [e for e in entries if e["is_p2p"]]
+        self.assertEqual(len(p2p), 2, msg=str(entries))
+        for e in p2p:
+            self.assertEqual(e["state"], "completed", msg=str(e))
+            self.assertGreater(e["time_discovered_completed_ns"], 0, msg=str(e))
+            self.assertIn("duration_ms", e, msg=str(e))
+            self.assertGreater(e["duration_ms"], 0.0, msg=str(e))
+        self.assertEqual(p2p[0]["duration_ms"], p2p[1]["duration_ms"])
+        hook.remove()
+
     def test_p2p_and_collective_seq_ids(self):
         pg = self._init_pg()
         hook = self._fr_hook(pg)
@@ -555,6 +619,67 @@ class AbstractFlightRecorderHookTest:
                 ]
             ),
         )
+        hook.remove()
+
+    def test_split_group_not_recorded(self):
+        pg = self._init_pg()
+        if not pg._get_backend(self.device).supports_splitting:
+            self.skipTest(f"{self.backend_name} does not support split_group")
+        hook = self._fr_hook(pg)
+        dist.all_reduce(torch.ones(4, device=self.device))
+        entries = self._hook_entries()
+        self.assertEqual(entries[-1]["profiling_name"], self._name("all_reduce"))
+
+        child = dist.split_group(split_ranks=[list(range(self.world_size))])
+        self.assertEqual(self._hook_entries()[len(entries) :], [])
+        dist.destroy_process_group(child)
+        hook.remove()
+
+    def test_reconfigure_restarts_seq_ids(self):
+        pg = self._init_pg(enable_reconfigure=True)
+        if not pg.supports_reconfigure:
+            self.skipTest(f"{self.backend_name} does not support reconfigure")
+        hook = self._fr_hook(pg)
+        t = torch.ones(4, device=self.device)
+        peer = 1 - self.rank
+
+        def ops():
+            dist.all_reduce(t)
+            if self.rank == 0:
+                dist.send(t, peer)
+            else:
+                dist.recv(t, peer)
+
+        def reconfigure(uuid):
+            self.store.set(
+                f"fr_handle_{uuid}_{self.rank}", dist._get_reconfigure_handle()
+            )
+            handles = [
+                self.store.get(f"fr_handle_{uuid}_{rank}").decode()
+                for rank in range(self.world_size)
+            ]
+            dist._reconfigure(uuid, handles, timeout=timedelta(seconds=60)).wait()
+
+        # A reconfigurable group runs no ops until its first reconfigure.
+        reconfigure(1)
+        ops()
+        # Reconfigure may revoke in-flight work.
+        if self.device_type == "cuda":
+            torch.cuda.synchronize()
+        before = len(self._hook_entries())
+        reconfigure(2)
+        ops()
+        if self.device_type == "cuda":
+            torch.cuda.synchronize()
+
+        # The reconfigure itself is not recorded, and the reconfigured group
+        # counts both sequences from one again.
+        entries = self._hook_entries()[before:]
+        self.assertEqual(len(entries), 2, msg=str(entries))
+        self.assertEqual(entries[0]["profiling_name"], self._name("all_reduce"))
+        self.assertEqual(entries[0]["collective_seq_id"], 1)
+        self.assertTrue(entries[1]["is_p2p"], msg=str(entries[1]))
+        self.assertEqual(entries[1]["p2p_seq_id"], 1)
         hook.remove()
 
     def test_entries_parse_with_trace_analyzer(self):
@@ -649,7 +774,7 @@ class AbstractFlightRecorderHookTest:
         )
 
         for e in entries:
-            self.assertEqual(e["state"], self._completed_state(), msg=str(e))
+            self.assertEqual(e["state"], "completed", msg=str(e))
         local = {
             "entries": entries,
             "pg_config": trace["pg_config"],
@@ -775,7 +900,7 @@ class AbstractFlightRecorderHookTest:
 
     def test_auto_attach_records_without_explicit_attach(self):
         # TORCH_FR_BUFFER_SIZE is set in setUp, so creating the group is all it
-        # takes for a backend that needs the hook (nccl2) to be traced.
+        # takes for a backend that needs the hook (gloo, nccl2) to be traced.
         pg = self._init_pg()
         self.assertEqual(pg in _world.pg_flight_recorder_hooks, self._auto_attached)
 
@@ -794,12 +919,12 @@ class AbstractFlightRecorderHookTest:
 
     def test_records_only_into_its_own_instance(self):
         # A collective produces exactly one entry, and it lands in the hooked
-        # backend's own recorder instance. Nothing reaches the default
-        # instance, which is the one ProcessGroupGloo records into.
+        # backend's own recorder instance. Only gloo's is the default instance,
+        # the one the dump APIs return when no backend is named.
         pg = self._init_pg()
         hook = self._fr_hook(pg)
         before = len(self._all_entries())
-        before_default = len(self._all_entries(backend="gloo"))
+        before_default = len(self._all_entries(backend=""))
 
         t = torch.ones(8, device=self.device)
         dist.all_reduce(t)
@@ -808,7 +933,10 @@ class AbstractFlightRecorderHookTest:
 
         names = [e["profiling_name"] for e in self._all_entries()[before:]]
         self.assertEqual(names, [self._name("all_reduce")])
-        self.assertEqual(len(self._all_entries(backend="gloo")), before_default)
+        self.assertEqual(
+            len(self._all_entries(backend="")) - before_default,
+            int(self.backend_name == "gloo"),
+        )
         hook.remove()
 
     def test_reset_fr_trace(self):
@@ -866,30 +994,6 @@ class AbstractFlightRecorderHookTest:
         # registered one.
         hook.remove()
 
-    def test_attach_without_completion_hook_support(self):
-        # Completion hooks are optional in the same way abort hooks are, and
-        # Backend's default registerCompletionHook throws rather than no-opping,
-        # so attach() must ask first. A backend without them still records; it
-        # only loses the ability to say a collective finished.
-        pg = self._init_pg()
-        backend = pg._get_backend(self.device)
-        self.assertEqual(pg.supports_completion_hooks, self._push_completion)
-        self.assertEqual(backend.supports_completion_hooks, self._push_completion)
-
-        before = len(self._hook_entries())
-        hook = self._fr_hook(pg)
-        t = torch.ones(4, device=self.device)
-        dist.all_reduce(t)
-        if self.device_type == "cuda":
-            torch.cuda.synchronize()
-        entries = self._await_retired(before + 1)[before:]
-        self.assertEqual(len(entries), 1)
-        self.assertTrue(entries[0]["retired"], msg=str(entries[0]))
-        # remove() must not throw either: unregisterCompletionHook throws on a
-        # backend that has none, so it may only be called if attach() registered
-        # one.
-        hook.remove()
-
     def test_profiling_name_carries_backend_name(self):
         # The comm_lib field must be the backend's own name, not a placeholder
         # and not ProcessGroup::getBackendName(), which answers "custom" for
@@ -937,8 +1041,8 @@ class AbstractFlightRecorderHookTest:
             # One output tensor for a world of two.
             dist.all_gather([torch.empty_like(t)], t)
 
-        # The backend validates before it records natively, so the only new
-        # entry is the hook's.
+        # The backend throws before returning a Work, so the only new entry is
+        # the pre-hook's.
         entries = self._all_entries()[before:]
         self.assertEqual(len(entries), 1, msg=str(entries))
         e = entries[0]
@@ -948,23 +1052,22 @@ class AbstractFlightRecorderHookTest:
         self.assertEqual(e["time_discovered_completed_ns"], 0, msg=str(e))
         hook.remove()
 
-    def test_completion_arriving_before_registration_still_retires(self):
+    def test_completion_before_post_hook_still_retires(self):
         # A Work and its op_id are only ever seen together in the post-hook, so
-        # a backend that establishes completion before that runs has nothing to
-        # hand the callback to. Dropping it retires nothing and the collective
-        # reads "scheduled" for ever -- the false hang this feature exists to
-        # rule out -- so the post-hook asks the Work whether it has already
-        # finished instead of waiting for a push that is not coming.
+        # that is where the callback is added, and a fast collective can finish
+        # before it runs. Its future is then already complete and the callback
+        # must run at once; otherwise the collective reads "scheduled" for ever
+        # -- the false hang this feature exists to rule out.
         #
         # Constructed, not raced. Post-hooks fire in hook_id order and the
         # flight recorder hook's ids start far above any hand-picked one, so
         # the hook below runs first and holds the window open. It waits on a
-        # sentinel collective issued behind the target on the same stream: the
-        # backend retires that queue in order, so once the sentinel's entry is
-        # retired the target's completion has already been pushed -- into a
+        # sentinel collective issued behind the target on the same stream, so
+        # once the sentinel's entry is retired the target has finished on the
+        # device too, and is_completed() publishes its result -- before a
         # post-hook that has not run yet, because it is waiting on this one.
-        if not self._push_completion:
-            self.skipTest("backend pushes no completion")
+        if self.backend_name != "nccl2":
+            self.skipTest("needs a device stream and collective timing")
         pg = self._init_pg()
         pg._enable_collectives_timing()
         hook = self._fr_hook(pg)
@@ -986,6 +1089,7 @@ class AbstractFlightRecorderHookTest:
                     if len(entries) > before + 1 and entries[before + 1]["retired"]:
                         break
                     time.sleep(0.05)
+                observed["target_done"] = args.work.is_completed()
                 entries = self._hook_entries()
                 observed["target"] = entries[before]
                 observed["sentinel"] = entries[before + 1]
@@ -999,11 +1103,12 @@ class AbstractFlightRecorderHookTest:
         finally:
             pg.unregister_post_hook(1)
 
-        # The completion really did arrive with no op_id to match it to: had the
-        # hook registered the Work first, the same push would have retired the
+        # The target really did finish before the hook saw its Work: had the
+        # callback been added first, the same completion would have retired the
         # entry before this snapshot was taken.
         sentinel = observed["sentinel"]
         self.assertTrue(sentinel["retired"], msg=str(sentinel))
+        self.assertTrue(observed["target_done"])
         target = observed["target"]
         self.assertFalse(target["retired"], msg=str(target))
         self.assertNotEqual(target["state"], "completed", msg=str(target))
@@ -1018,6 +1123,15 @@ class AbstractFlightRecorderHookTest:
         # The backend's own measurement is kept, not recomputed or dropped.
         self.assertIn("duration_ms", e, msg=str(e))
         self.assertGreater(e["duration_ms"], 0.0, msg=str(e))
+        # Retired out of order, the sentinel stays the last completed op.
+        trace = json.loads(
+            torch._C._distributed_c10d._dump_fr_trace_json(backend=self.backend_name)
+        )
+        sentinel = entries[1]
+        status = trace["pg_status"][str(sentinel["pg_id"])]
+        self.assertEqual(
+            int(status["last_completed_collective"]), sentinel["op_id"], msg=str(status)
+        )
         hook.remove()
 
     def test_no_recording_during_cuda_graph_capture(self):
@@ -1056,14 +1170,13 @@ class AbstractFlightRecorderHookTest:
         hook.remove()
 
     def test_no_recording_of_tensorless_op_during_capture(self):
-        # barrier() is the one op that reaches the hook with no tensors at all:
-        # Ops.cpp binds a dummy tensor to pick the dispatch key and does not
-        # forward it. The capture guard therefore has no device from the op
-        # itself and has to take one from the group. Reading "no device" as "not
-        # capturing" recorded the barrier, and the post-hook then asked its Work
-        # whether it had already completed -- a cudaEventQuery on a capturing
-        # stream, which invalidates the capture and surfaces from
-        # cudaStreamEndCapture as an unrelated cudaErrorStreamCaptureInvalidated.
+        # barrier() reaches the hook with no tensors, only the device type it
+        # was dispatched for, so the capture guard has to ask that type's
+        # current stream. Recording the barrier under capture made the
+        # post-hook ask its Work whether it had already completed -- a
+        # cudaEventQuery on a capturing stream, which invalidates the capture
+        # and surfaces from cudaStreamEndCapture as an unrelated
+        # cudaErrorStreamCaptureInvalidated.
         if self.device_type != "cuda":
             self.skipTest("capture test is CUDA only")
         pg = self._init_pg()
@@ -1083,13 +1196,40 @@ class AbstractFlightRecorderHookTest:
         torch.cuda.synchronize()
 
         self.assertEqual(self._hook_entries()[before:], [])
-        # ... and a tensorless op outside a capture is still recorded, so the
-        # guard is not simply refusing every op it cannot get a device from.
+        # ... and outside a capture it is still recorded.
         dist.barrier(device_ids=[self.rank])
         torch.cuda.synchronize()
         entries = self._await_retired(before + 1)[before:]
         self.assertEqual(len(entries), 1, msg=str(entries))
         self.assertEqual(entries[0]["profiling_name"], self._name("barrier"))
+        hook.remove()
+
+    def test_buffer_wraparound(self):
+        # TORCH_FR_BUFFER_SIZE is 10 here (see setUp).
+        pg = self._init_pg()
+        hook = self._fr_hook(pg)
+        t = torch.ones(3, 4, device=self.device)
+        for _ in range(11):
+            dist.all_reduce(t)
+        # A distinct shape, so a ring that dropped new entries would show.
+        last_t = torch.ones(5, 4, device=self.device)
+        _, done = self._issue_after_callback(
+            lambda: dist.all_reduce(last_t, async_op=True), "buffer_wraparound"
+        )
+        done.wait()
+
+        entries = self._hook_entries()
+        self.assertEqual(len(entries), 10)
+        self.assertEqual(
+            entries[-1]["collective_seq_id"] - entries[0]["collective_seq_id"], 9
+        )
+        self.assertEqual(entries[0]["input_sizes"], [[3, 4]])
+        last = entries[-1]
+        self.assertEqual(last["profiling_name"], self._name("all_reduce"))
+        self.assertEqual(last["input_sizes"], [[5, 4]])
+        if self.rank == 0:
+            self.assertTrue(last["retired"], msg=str(last))
+            self.assertEqual(last["state"], "completed", msg=str(last))
         hook.remove()
 
     def test_buffer_size_zero_attaches_nothing(self):
@@ -1141,87 +1281,122 @@ for backend_name, device_type in FR_HOOK_BACKENDS:
     )
 
 
-class FlightRecorderHookGlooTest(MultiProcessTestCase):
-    """The hook must leave a natively recording backend's ops alone.
+class _NoResultWork(dist.Work):
+    def wait(self, timeout=timedelta(0)):
+        return True
 
-    ProcessGroupGloo records in enqueue(), into the very instance the dump APIs
-    return by default. Recording gloo ops on top would put two entries with two
-    independent collective_seq_ids in the trace for every gloo collective.
-    """
 
-    @property
-    def world_size(self):
-        return 2
+class _NoResultBackend(dist.BackendBase):
+    def __init__(self, new_work=_NoResultWork, name="noresult"):
+        super().__init__(0, 1)
+        self._new_work = new_work
+        self._name = name
 
-    def setUp(self):
-        super().setUp()
-        os.environ["TORCH_FR_BUFFER_SIZE"] = "2000"
-        self._spawn_processes()
+    def getBackendName(self):
+        return self._name
 
-    def tearDown(self):
-        if dist.is_initialized():
-            dist.destroy_process_group()
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
+    def allreduce(self, tensors, opts):
+        return self._new_work()
 
-    def _init_pg(self):
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            "gloo",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-            timeout=timedelta(seconds=60),
+
+class FlightRecorderHookNoResultFutureTest(TestCase):
+    def test_retires_at_issue_without_result_future(self):
+        # Tier two: a Work with no result future. The post-hook has to retire
+        # the entry itself, at issue, because nothing else ever will and an
+        # entry nothing retires is indistinguishable from a hang. What it must
+        # not do is claim a completion nobody observed, so the entry reads
+        # "scheduled" and carries no duration. Other exceptions retire the same
+        # way.
+        calls = []
+
+        class RaisingWork(_NoResultWork):
+            def get_future_result(self):
+                calls.append(1)
+                raise RuntimeError("broken")
+
+        kinds = [_NoResultWork] * 3 + [RaisingWork]
+        pg = dist.ProcessGroup(FakeStore(), 0, 1)
+        pg._register_backend(
+            torch.device("cpu"),
+            dist.ProcessGroup.BackendType.CUSTOM,
+            _NoResultBackend(lambda: kinds.pop(0)()),
         )
-        return dist.group.WORLD
+        pg._set_default_backend(dist.ProcessGroup.BackendType.CUSTOM)
+        pg._set_group_name("noresult")
+        hook = FlightRecorderHook.attach(pg, [0])
 
-    @staticmethod
-    def _entries(**kwargs):
-        trace = json.loads(torch._C._distributed_c10d._dump_fr_trace_json(**kwargs))
-        return trace.get("entries", [])
+        def entries():
+            trace = torch._C._distributed_c10d._dump_fr_trace_json(backend="noresult")
+            return json.loads(trace).get("entries", [])
 
-    def test_pure_gloo_group_is_not_auto_attached(self):
-        # A hook there would record nothing, so do not pay for one.
-        pg = self._init_pg()
-        self.assertNotIn(pg, _world.pg_flight_recorder_hooks)
-
-    def test_gloo_collectives_recorded_exactly_once(self):
-        pg = self._init_pg()
-        hook = FlightRecorderHook.attach(pg)
-        before = len(self._entries())
-
+        before = len(entries())
         t = torch.ones(8)
-        dist.all_reduce(t)
-        dist.broadcast(t, src=0)
+        for _ in range(2):
+            pg.allreduce(t)
+        # Its Work reports no result future.
+        work = pg.allreduce(t)
+        with self.assertRaisesRegex(
+            NotImplementedError, "getFutureResult not implemented"
+        ):
+            work.get_future_result()
+        pg.allreduce(t).wait()
 
-        entries = self._entries()[before:]
-        self.assertEqual(
-            [e["profiling_name"] for e in entries],
-            ["gloo:all_reduce", "gloo:broadcast"],
-        )
-        # Only the hook fills duration_ms in; gloo's native recording retires
-        # with compute_duration=false and leaves the field out.
-        for e in entries:
+        self.assertEqual(len(calls), 1)
+
+        new = entries()[before:]
+        self.assertEqual(len(new), 4, msg=str(new))
+        for e in new:
+            self.assertTrue(e["retired"], msg=str(e))
+            self.assertEqual(e["state"], "scheduled", msg=str(e))
+            self.assertEqual(e["time_discovered_completed_ns"], 0, msg=str(e))
             self.assertNotIn("duration_ms", e, msg=str(e))
         hook.remove()
 
-    def test_default_dump_returns_the_gloo_instance(self):
-        pg = self._init_pg()
-        FlightRecorderHook.attach(pg)
-        dist.all_reduce(torch.ones(8))
 
-        default = pickle.loads(torch._C._distributed_c10d._dump_fr_trace())
-        named = pickle.loads(torch._C._distributed_c10d._dump_fr_trace(backend="gloo"))
-        self.assertEqual(
-            [e["profiling_name"] for e in default["entries"]],
-            [e["profiling_name"] for e in named["entries"]],
+class FlightRecorderHookPythonWorkTest(TestCase):
+    def test_python_work_retires_from_result(self):
+        # A get_future_result override's future is used as is: the op retires
+        # once it completes.
+        futs = []
+
+        class ResultWork(_NoResultWork):
+            def get_future_result(self):
+                futs.append(torch.futures.Future())
+                return futs[-1]
+
+        pg = dist.ProcessGroup(FakeStore(), 0, 1)
+        pg._register_backend(
+            torch.device("cpu"),
+            dist.ProcessGroup.BackendType.CUSTOM,
+            _NoResultBackend(ResultWork, name="pyresult"),
         )
-        self.assertIn(
-            "gloo:all_reduce", [e["profiling_name"] for e in named["entries"]]
-        )
+        pg._set_default_backend(dist.ProcessGroup.BackendType.CUSTOM)
+        pg._set_group_name("pyresult")
+        hook = FlightRecorderHook.attach(pg, [0])
+
+        def entries():
+            trace = torch._C._distributed_c10d._dump_fr_trace_json(backend="pyresult")
+            return json.loads(trace).get("entries", [])
+
+        before = len(entries())
+        pg.allreduce(torch.ones(8))
+        pg.allreduce(torch.ones(8))
+        new = entries()[before:]
+        self.assertEqual([e["retired"] for e in new], [False, False], msg=str(new))
+        futs[0].set_result(int(WorkResult.SUCCESS))
+
+        new = entries()[before:]
+        self.assertEqual([e["retired"] for e in new], [True, False], msg=str(new))
+        self.assertEqual(new[0]["state"], "completed", msg=str(new))
+
+        # A failed op stays un-retired.
+        futs[1].set_exception(RuntimeError("failed"))
+        with self.assertRaisesRegex(RuntimeError, "failed"):
+            futs[1].wait()
+        new = entries()[before:]
+        self.assertEqual([e["retired"] for e in new], [True, False], msg=str(new))
+        self.assertEqual(new[1]["state"], "scheduled", msg=str(new))
+        hook.remove()
 
 
 @unittest.skipIf(
@@ -1232,7 +1407,7 @@ class FlightRecorderHookGlooTest(MultiProcessTestCase):
     not dist.is_backend_available("nccl2"), "nccl2 backend is not available"
 )
 class FlightRecorderHookMixedBackendTest(MultiProcessTestCase):
-    """A group whose CPU half records itself and whose CUDA half does not."""
+    """A group served by two hooked backends."""
 
     @property
     def world_size(self):
@@ -1257,7 +1432,7 @@ class FlightRecorderHookMixedBackendTest(MultiProcessTestCase):
         trace = json.loads(torch._C._distributed_c10d._dump_fr_trace_json(**kwargs))
         return trace.get("entries", [])
 
-    def test_mixed_group_records_the_cuda_half_only(self):
+    def test_mixed_group_records_each_half_in_its_own_instance(self):
         torch.cuda.set_device(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
@@ -1268,8 +1443,6 @@ class FlightRecorderHookMixedBackendTest(MultiProcessTestCase):
             timeout=timedelta(seconds=60),
         )
         pg = dist.group.WORLD
-        # The whole-group skip used to lose the nccl2 half of a mixed group;
-        # the hook now filters per op, so it is attached again.
         self.assertIn(pg, _world.pg_flight_recorder_hooks)
 
         before_gloo = len(self._entries())
@@ -1278,8 +1451,7 @@ class FlightRecorderHookMixedBackendTest(MultiProcessTestCase):
         dist.all_reduce(torch.ones(16, device=f"cuda:{self.rank}"))
         torch.cuda.synchronize()
 
-        # The CPU collective is gloo's own entry, recorded once, and the CUDA
-        # one is the hook's, in nccl2's instance.
+        # Each collective is recorded once, in its backend's instance.
         gloo_entries = self._entries()[before_gloo:]
         self.assertEqual(
             [(e["profiling_name"], e["input_sizes"]) for e in gloo_entries],
@@ -1290,6 +1462,38 @@ class FlightRecorderHookMixedBackendTest(MultiProcessTestCase):
             [(e["profiling_name"], e["input_sizes"]) for e in nccl2_entries],
             [("nccl2:all_reduce", [[16]])],
         )
+
+    def test_mixed_group_barrier_recorded_by_dispatched_backend(self):
+        # barrier() reaches the hook with no tensors, so the device it was
+        # dispatched for, not the group's default backend, picks the instance.
+        torch.cuda.set_device(self.rank)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "cpu:gloo,cuda:nccl2",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timedelta(seconds=60),
+        )
+
+        before_gloo = len(self._entries())
+        before_nccl2 = len(self._entries(backend="nccl2"))
+        # The group is bound to this rank's GPU, so a plain barrier runs on
+        # nccl2.
+        dist.barrier()
+        torch.cuda.synchronize()
+        nccl2_entries = self._entries(backend="nccl2")[before_nccl2:]
+        self.assertEqual(
+            [e["profiling_name"] for e in nccl2_entries], ["nccl2:barrier"]
+        )
+        self.assertEqual(len(self._entries()), before_gloo)
+
+        opts = BarrierOptions()
+        opts.device = torch.device("cpu")
+        dist.group.WORLD.barrier(opts).wait()
+        gloo_entries = self._entries()[before_gloo:]
+        self.assertEqual([e["profiling_name"] for e in gloo_entries], ["gloo:barrier"])
+        self.assertEqual(len(self._entries(backend="nccl2")), before_nccl2 + 1)
 
     def test_two_hooked_backends_do_not_share_a_buffer(self):
         torch.cuda.set_device(self.rank)
@@ -1335,6 +1539,70 @@ class FlightRecorderHookMixedBackendTest(MultiProcessTestCase):
 
 @unittest.skipIf(
     not TEST_CUDA or torch.cuda.device_count() < 2,
+    "nccl-lazy tests require at least 2 GPUs",
+)
+@unittest.skipIf(
+    not dist.is_backend_available("nccl-lazy"), "nccl-lazy backend is not available"
+)
+class FlightRecorderHookLazyTest(MultiProcessTestCase):
+    """nccl-lazy wraps nccl2; the hook asks the wrapper whether ops are timed."""
+
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        os.environ["TORCH_FR_BUFFER_SIZE"] = "2000"
+        os.environ["TORCH_NCCL_ENABLE_TIMING"] = "1"
+        self._spawn_processes()
+
+    def tearDown(self):
+        os.environ.pop("TORCH_NCCL_ENABLE_TIMING", None)
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def test_duration_ms_from_primary_timing(self):
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl-lazy",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timedelta(seconds=60),
+        )
+        backend = dist.group.WORLD._get_backend(device)
+
+        # Initializes the comm, so rank 0's gated issue below doesn't block.
+        dist.all_reduce(torch.ones(1024, device=device))
+        # Rank 0 adds its callback before rank 1 issues, so it runs after the
+        # hook's.
+        if self.rank != 0:
+            store.wait(["primary_timing"], timedelta(seconds=60))
+        work = dist.all_reduce(torch.ones(1024, device=device), async_op=True)
+        done = work.get_future_result().then(lambda fut: fut.value())
+        if self.rank == 0:
+            store.set("primary_timing", "1")
+        done.wait()
+        if self.rank != 0:
+            return
+        trace = json.loads(
+            torch._C._distributed_c10d._dump_fr_trace_json(backend=backend.name())
+        )
+        e = trace["entries"][-1]
+        self.assertEqual(e["profiling_name"], "nccl-lazy:all_reduce", msg=str(e))
+        self.assertGreater(e.get("duration_ms", 0.0), 0.0, msg=str(e))
+
+
+@unittest.skipIf(
+    not TEST_CUDA or torch.cuda.device_count() < 2,
     "default nccl backend tests require at least 2 GPUs",
 )
 @unittest.skipIf(not dist.is_backend_available("nccl"), "nccl backend is not available")
@@ -1374,14 +1642,14 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         )
         return trace.get("entries", [])
 
-    def _init_nccl(self, use_nccl2):
+    def _init_nccl(self, use_nccl2, backend="nccl"):
         # Read once, where the backend is registered, which is the first time a
         # group asks for "nccl" -- so it has to be set before init.
         os.environ["TORCH_DIST_USE_NCCL2"] = use_nccl2
         torch.cuda.set_device(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            "nccl",
+            backend,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1421,6 +1689,34 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         native = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())
         names = [e["profiling_name"] for e in native.get("entries", [])]
         self.assertIn("nccl:all_reduce", names)
+
+    def test_gloo_half_of_stock_nccl_group_recorded_once(self):
+        pg, name = self._init_nccl("0", backend="cpu:gloo,cuda:nccl")
+        self.assertEqual(name, "nccl")
+        self.assertIn(pg, _world.pg_flight_recorder_hooks)
+
+        def native():
+            trace = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())
+            return trace.get("entries", [])
+
+        before_gloo = len(self._entries("gloo"))
+        before_nccl = len(self._entries("nccl"))
+        before_native = len(native())
+        dist.all_reduce(torch.ones(8))
+        dist.all_reduce(torch.ones(16, device=f"cuda:{self.rank}"))
+        dist.barrier()
+        torch.cuda.synchronize()
+        # The hook records the gloo half and leaves the CUDA half to stock
+        # ProcessGroupNCCL's own recording.
+        self.assertEqual(
+            [e["profiling_name"] for e in self._entries("gloo")[before_gloo:]],
+            ["gloo:all_reduce", "gloo:barrier"],
+        )
+        self.assertEqual(
+            [(e["profiling_name"], e["input_sizes"]) for e in native()[before_native:]],
+            [("nccl:all_reduce", [[16]])],
+        )
+        self.assertEqual(self._entries("nccl")[before_nccl:], [])
 
 
 if __name__ == "__main__":
