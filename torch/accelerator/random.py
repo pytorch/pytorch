@@ -71,6 +71,10 @@ def set_rng_state(new_state: Tensor, device: Device = None, /) -> None:
         On accelerators that support lazy initialization, applying the state may be deferred
         until the runtime is initialized. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
+    # Clone in case the state is applied later. Check the C++ flag since not every backend
+    # has a Python one. C++ initialized implies Python initialized, but not vice versa, so
+    # this may clone unnecessarily but never misses a needed clone. Backends without lazy
+    # init always report initialized, as the state is applied immediately.
     if not torch._C._accelerator_isInitialized():
         with torch._C._DisableFuncTorch():
             new_state = new_state.clone(memory_format=torch.contiguous_format)
@@ -109,14 +113,16 @@ def set_rng_state_all(new_states: Iterable[Tensor]) -> None:
 def manual_seed(seed: int) -> None:
     r"""Set the seed for generating random numbers for the current :ref:`accelerator<accelerators>`
     on the current device (see :func:`torch.accelerator.current_device_index`).
+    If :func:`torch.accelerator.current_accelerator` returns ``None``, this function may be a no-op.
 
     Args:
         seed (int): The desired seed.
 
     .. note::
-        On accelerators that support lazy initialization, the state is deferred
-        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, applying the seed may be deferred
+        until the runtime is initialized. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
+    seed = int(seed)
 
     def cb() -> None:
         idx = torch.accelerator.current_device_index()
@@ -128,14 +134,16 @@ def manual_seed(seed: int) -> None:
 
 def manual_seed_all(seed: int) -> None:
     r"""Set the seed for generating random numbers on all devices for the current :ref:`accelerator<accelerators>`.
+    If :func:`torch.accelerator.current_accelerator` returns ``None``, this function may be a no-op.
 
     Args:
         seed (int): The desired seed.
 
     .. note::
-        On accelerators that support lazy initialization, the state is deferred
-        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, applying the seed may be deferred
+        until the runtime is initialized. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
+    seed = int(seed)
 
     def cb() -> None:
         for device_index in range(torch.accelerator.device_count()):
@@ -148,10 +156,11 @@ def manual_seed_all(seed: int) -> None:
 def seed() -> None:
     r"""Set the seed for generating random numbers to a random number for the current :ref:`accelerator<accelerators>`
     on the current device (see :func:`torch.accelerator.current_device_index`).
+    If :func:`torch.accelerator.current_accelerator` returns ``None``, this function may be a no-op.
 
     .. note::
-        On accelerators that support lazy initialization, the state is deferred
-        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, applying the seed may be deferred
+        until the runtime is initialized. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
 
     def cb() -> None:
@@ -164,10 +173,11 @@ def seed() -> None:
 
 def seed_all() -> None:
     r"""Set the same random seed across all devices of the current :ref:`accelerator<accelerators>`.
+    If :func:`torch.accelerator.current_accelerator` returns ``None``, this function may be a no-op.
 
     .. note::
-        On accelerators that support lazy initialization, the state is deferred
-        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, applying the seed may be deferred
+        until the runtime is initialized. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
 
     def cb() -> None:
@@ -187,12 +197,8 @@ def seed_all() -> None:
 
 def get_rng_offset(device: Device = None, /) -> int:
     r"""Return the RNG offset of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
-    on the specified device.
-
-    The offset indicates how far the generator has advanced within its random
-    number sequence for the current seed. It is a companion to
-    :func:`torch.accelerator.random.initial_seed`: the seed selects the sequence, the offset selects the
-    position within it.
+    on the specified device. The offset is the position within the random number sequence selected by the seed
+    (see :func:`torch.accelerator.random.initial_seed`).
 
     Args:
         device (:class:`torch.device`, str, int, optional): The device to return the RNG offset of.
@@ -211,10 +217,9 @@ def get_rng_offset(device: Device = None, /) -> int:
 
 def set_rng_offset(offset: int, device: Device = None, /) -> None:
     r"""Set the RNG offset of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
-    on the specified device.
-
-    The offset selects the position within the random number sequence determined
-    by the current seed, without changing the seed itself.
+    on the specified device, without changing the seed.
+    If :func:`torch.accelerator.current_accelerator` returns ``None``, this function may be a no-op. If the current
+    :ref:`accelerator<accelerators>` doesn't support RNG offsets, this function may also be a no-op.
 
     Args:
         offset (int): The desired RNG offset.
@@ -222,8 +227,8 @@ def set_rng_offset(offset: int, device: Device = None, /) -> None:
             If not given, uses :func:`torch.accelerator.current_device_index` by default.
 
     .. note::
-        On accelerators that support lazy initialization, the state is deferred
-        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, applying the offset may be deferred
+        until the runtime is initialized. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
     device_index = _get_optional_device_index(device)
 
