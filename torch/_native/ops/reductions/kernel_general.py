@@ -44,6 +44,7 @@ class ReduceBlock:
         gidx_from: Literal["r", "flat", "chunk"] = "r",
         flat_tail: bool = False,
         ragged_chunk: bool = False,
+        rotate_chunks: bool = False,
         from_partials: bool = False,
         block: int = 128,
         order: Literal["linear", "inner_tree"] = "linear",
@@ -95,6 +96,7 @@ class ReduceBlock:
             gidx_from=gidx_from,
             flat_tail=flat_tail,
             ragged_chunk=ragged_chunk,
+            rotate_chunks=rotate_chunks,
             order=order,
             itree=itree,
         )
@@ -415,6 +417,8 @@ def _two_stage_general(
         in_base=int(x.storage_offset()),
         limit=count,
         ragged_chunk=True,
+        # Chunks of a broadcast (stride-0) run are copies of one another.
+        rotate_chunks=S == 0,
         gidx_from="chunk" if getattr(trait, "has_index", False) else "r",
         nouts=trait.nfields,
         final=False,
