@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
 )
+from torch.testing._internal.common_dtype import float8_types_and
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -28,14 +29,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 MODES = ("to_nearest_even", "toward_zero", "toward_positive", "toward_negative")
 
-FLOAT8_DTYPES = (
-    torch.float8_e4m3fn,
-    torch.float8_e5m2,
-    torch.float8_e4m3fnuz,
-    torch.float8_e5m2fnuz,
-    torch.float8_e8m0fnu,
-    torch.float8_e5m3fnu,
-)
+FLOAT8_DTYPES = tuple(float8_types_and(torch.float8_e8m0fnu, torch.float8_e5m3fnu))
 # These only represent magnitudes: the conversions round |x|.
 UNSIGNED_DTYPES = (torch.float8_e8m0fnu, torch.float8_e5m3fnu)
 # Powers of two only: ties round up, as there are no mantissa bits to be even.
@@ -254,8 +248,10 @@ class TestRoundedConversion(TestCase):
         )
         if bad.any():
             i = bad.view(torch.uint8).argmax().item()
+            x = inputs[i].item()
+            x = f"0x{x & 0xFFFFFFFF:08x}" if isinstance(x, int) else repr(x)
             self.fail(
-                f"{int(bad.sum())} mismatches, e.g. input {inputs[i].item()!r} -> "
+                f"{int(bad.sum())} mismatches, e.g. input {x} -> "
                 f"{actual[i].item()!r}, expected {expected[i].item()!r}"
             )
 
@@ -428,36 +424,44 @@ class TestRoundedConversion(TestCase):
             y = torch.full((n,), v, dtype=dtype, device=device)
             self.assertEqual(y.tolist(), [1 + eps] * n)
         if dtype is torch.bfloat16:
-            # All fill paths agree on integer Scalars (which still round
-            # through float) and complex Scalars.
-            for value in (2**24 + 2**16 + 1, complex(v, 0)):
-                ys = [
-                    torch.full((n,), value, dtype=dtype, device=device) for n in (1, 2)
-                ]
-                self.assertEqual(ys[0][0], ys[1][0])
+            # All fill paths agree on complex Scalars, and on integer Scalars up
+            # to 2**53, which still round through float.
+            for value, expected in (
+                (2**24 + 2**16 + 1, 2.0**24),
+                (complex(v, 0), 1 + eps),
+            ):
+                for n in (1, 2):
+                    y = torch.full((n,), value, dtype=dtype, device=device)
+                    self.assertEqual(y[0].item(), expected, atol=0, rtol=0)
         out = torch.zeros(1, dtype=dtype, device=device)
         self.assertEqual(torch.add(x, 0, out=out).item(), 1 + eps)
         out.zero_()
         torch.special.chebyshev_polynomial_t(x, 1, out=out)
         self.assertEqual(out.item(), 1 + eps)
 
-    def test_double_rounding_complex32(self, device):
-        v = 1 + 2**-11 + 2**-40
-        expected = complex(1 + 2**-10, -(1 + 2**-10))
+    @dtypes(torch.complex32, torch.bcomplex32)
+    def test_double_rounding_complex(self, device, dtype):
+        eps = torch.finfo(dtype.to_real()).eps
+        v = 1 + eps / 2 + 2**-40
+        expected = complex(1 + eps, -(1 + eps))
         z = torch.tensor([complex(v, -v)], dtype=torch.complex128, device=device)
-        self.assertEqual(z.to(torch.complex32).to(torch.complex128).item(), expected)
+        self.assertEqual(z.to(dtype).to(torch.complex128).item(), expected)
         x = torch.tensor([v], dtype=torch.float64, device=device)
-        w = x.to(torch.complex32).to(torch.complex128)
-        self.assertEqual(w.item(), complex(1 + 2**-10, 0))
-        w = torch.tensor([complex(v, -v)], dtype=torch.complex32, device=device)
+        w = x.to(dtype).to(torch.complex128)
+        self.assertEqual(w.item(), complex(1 + eps, 0))
+        w = torch.tensor([complex(v, -v)], dtype=dtype, device=device)
         self.assertEqual(w.to(torch.complex128).item(), expected)
         for n in (1, 2):
-            w = torch.full((n,), complex(v, -v), dtype=torch.complex32, device=device)
+            if dtype is torch.bcomplex32 and n > 1 and self.device_type == "cpu":
+                # The CPU fill of two or more elements has no BComplex32 kernel.
+                continue
+            w = torch.full((n,), complex(v, -v), dtype=dtype, device=device)
             self.assertEqual(w.to(torch.complex128).tolist(), [expected] * n)
-            # Every complex32 fill checks for overflow, like float16 fills of
-            # two or more elements and CUDA float16 fills.
-            with self.assertRaisesRegex(RuntimeError, "without overflow"):
-                torch.full((n,), complex(1e5, 0), dtype=torch.complex32, device=device)
+            if dtype is torch.complex32:
+                # Every complex32 fill checks for overflow, like float16 fills
+                # of two or more elements and CUDA float16 fills.
+                with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                    torch.full((n,), complex(1e5, 0), dtype=dtype, device=device)
 
     def test_signatures(self, device):
         x = torch.randn(4, 5, device=device)
@@ -538,6 +542,11 @@ class TestRoundedConversion(TestCase):
             x.to(device, round="toward_zero")
         with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):
             torch._to_dtype_rounded(x, torch.float32, "toward_zero")
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2), torch.randn(3)], device=device
+        )
+        with self.assertRaisesRegex(RuntimeError, "non-nested"):
+            nested.to(torch.float16, round="toward_zero")
         with self.assertRaisesRegex(ValueError, "rounding mode must be one of"):
             torch._to_dtype_rounded(x, torch.float16, "nearest")
         with self.assertRaisesRegex(RuntimeError, "expected out to have dtype"):
@@ -607,7 +616,15 @@ class TestRoundedConversion(TestCase):
     @serialTest()
     @largeTensorTest("6GB", device="cpu")
     @largeTensorTest("2GB")
-    def test_exhaustive_float32(self, device):
+    @dtypes(
+        torch.float16,
+        torch.bfloat16,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float8_e8m0fnu,
+        torch.float8_e5m3fnu,
+    )
+    def test_exhaustive_float32(self, device, dtype):
         # Every float32 input, comparing the accelerator (which uses hardware
         # instructions where available, and NVIDIA's emulations of some of
         # them, e.g. for e8m0 before sm_100) with the CPU's software conversion.
@@ -617,23 +634,15 @@ class TestRoundedConversion(TestCase):
         for start in range(-(1 << 31), 1 << 31, chunk):
             x = torch.arange(chunk, dtype=torch.int32).add_(start).view(torch.float32)
             x_dev = x.to(device)
-            for dst in (
-                torch.float16,
-                torch.bfloat16,
-                torch.float8_e4m3fn,
-                torch.float8_e5m2,
-                torch.float8_e8m0fnu,
-                torch.float8_e5m3fnu,
-            ):
-                for mode in MODES:
-                    with self.subTest(dst=dst, mode=mode):
-                        # The inputs as bits, which also tell NaNs apart.
-                        self.assertSameValues(
-                            x_dev.to(dst, round=mode),
-                            x.to(dst, round=mode),
-                            x.view(torch.int32),
-                            dtype=torch.float32,
-                        )
+            for mode in MODES:
+                with self.subTest(mode=mode):
+                    # The inputs as bits, which also tell NaNs apart.
+                    self.assertSameValues(
+                        x_dev.to(dtype, round=mode),
+                        x.to(dtype, round=mode),
+                        x.view(torch.int32),
+                        dtype=torch.float32,
+                    )
             del x_dev
 
     @onlyAccelerator
@@ -652,6 +661,14 @@ class TestRoundedConversion(TestCase):
             atol=0,
             rtol=0,
         )
+        for y in (
+            x.to(device, torch.float32, round="toward_positive", non_blocking=True),
+            x.to(device).to(
+                "cpu", torch.float32, round="toward_positive", non_blocking=True
+            ),
+        ):
+            torch.accelerator.synchronize()
+            self.assertEqual(y.cpu(), expected, atol=0, rtol=0)
 
 
 instantiate_device_type_tests(TestRoundedConversion, globals())
@@ -673,7 +690,12 @@ class TestRoundedConversionPython(TestCase):
         self.assertEqual(y.dtype, torch.float8_e8m0fnu)
         self.assertEqual(y.stride(), x.stride())
         with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):
-            x.to(torch.float64, round="toward_positive")
+            torch._to_dtype_rounded(x, torch.float64, "toward_positive")
+        # Like TensorIterator, out= gets the input's stride order when resized.
+        for t in (x, torch.empty(4, 3).t()):
+            out = torch.empty(0, dtype=torch.bfloat16, device=t.device)
+            torch._to_dtype_rounded(t, torch.bfloat16, "toward_zero", out=out)
+            self.assertEqual(out.stride(), t.stride())
         # Errors are checked in the same order as on real tensors.
         for t in (x, torch.empty(4, 3)):
             with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):

@@ -16,6 +16,12 @@
 // - Float8_e8m0fnu has no zero: values below the smallest power of two clamp
 //   to it, and ties of ToNearestEven round up (it has no mantissa bits to be
 //   even).
+// - Infinities become infinity or, for formats without infinity, the value
+//   that the default conversion produces on overflow, in every mode (toward
+//   zero too).
+// - NaN becomes the format's quiet NaN, with the source's sign for signed
+//   formats that have two (the fnuz formats' only NaN is 0x80): its bits
+//   (sign, payload) can differ from those of the default conversion's NaN.
 
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/BFloat16.h>
@@ -38,6 +44,7 @@
 HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 // The values are part of the ABI (e.g. of compiled extensions): do not reorder.
+// Other values are undefined.
 enum class RoundingMode : uint8_t {
   ToNearestEven = 0,
   TowardZero = 1,
@@ -67,7 +74,8 @@ template <>
 struct Saturates<Float8_e5m3fnu> : std::true_type {};
 
 // memcpy rather than std::bit_cast, which needs C++20 and, in device code,
-// nvcc's --expt-relaxed-constexpr.
+// nvcc's --expt-relaxed-constexpr (as does torch::headeronly::bit_cast, which
+// uses std::bit_cast when it is available).
 template <typename To, typename From>
 C10_HOST_DEVICE inline To bit_copy(const From& from) {
   static_assert(sizeof(To) == sizeof(From), "bit_copy needs equal sizes");
@@ -126,7 +134,8 @@ C10_HOST_DEVICE inline int leading_zeros(uint64_t x) {
 // rounding direction. Half and BFloat16 sources should be converted to float
 // first, which is exact.
 //
-// Src is float or double. Dst is float, Half, BFloat16 or a Float8 type:
+// Src is float or double. Dst is float (from double only), Half, BFloat16 or
+// a Float8 type:
 // formats are described by their std::numeric_limits (detail::LimitBits reads
 // the encodings of Dst's limits from their x member) and detail::Saturates.
 // Dst's finite magnitudes, in increasing order, must have consecutive encodings

@@ -185,7 +185,7 @@ convert_rounded_from_double(double x, c10::RoundingMode mode) {
     }
 #if !defined(USE_ROCM)
   } else if constexpr (std::is_same_v<dst_t, Half>) {
-    unsigned short bits;
+    unsigned short bits = 0;
     switch (mode) {
       case RoundingMode::ToNearestEven:
         asm("cvt.rn.f16.f64 %0, %1;" : "=h"(bits) : "d"(x));
@@ -203,7 +203,7 @@ convert_rounded_from_double(double x, c10::RoundingMode mode) {
     return Half(bits, Half::from_bits());
 #if __CUDA_ARCH__ >= 900
   } else if constexpr (std::is_same_v<dst_t, BFloat16>) {
-    unsigned short bits;
+    unsigned short bits = 0;
     switch (mode) {
       case RoundingMode::ToNearestEven:
         asm("cvt.rn.bf16.f64 %0, %1;" : "=h"(bits) : "d"(x));

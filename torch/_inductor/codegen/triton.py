@@ -1424,7 +1424,20 @@ class TritonOverrides(OpOverrides):
             # No requirements on min_elem_per_thread.
             return 0
 
-        if src_dtype is not None:
+        # Rounding float64 to float32 first, which is the compute type of
+        # float16 and bfloat16, would round twice, unlike eager (see below).
+        rounds_float64_once = (
+            src_dtype == torch.float64
+            and dtype in (torch.float16, torch.bfloat16, *TRITON_FLOAT8_DTYPES)
+            and (use_compute_types or dtype in (torch.float16, torch.bfloat16))
+            and V.graph.get_current_device_or_throw().type == "cuda"
+        )
+        # On CUDA, those float8 conversions do not use Triton's packed one.
+        if src_dtype is not None and not (
+            rounds_float64_once
+            and dtype in TRITON_FLOAT8_DTYPES
+            and torch.version.hip is None
+        ):
             # Both dtype and src_dtype are set. This is used by torch to(dtype=dtype).
             # It takes the maximum min_elem_per_thread if there are multiple fp8 conversions
             # in the same kernel.
@@ -1459,14 +1472,7 @@ class TritonOverrides(OpOverrides):
             # do not apply conversion to the intermediate type.
             return f"{x}.to(tl.int16).to(tl.uint8)"
 
-        if (
-            src_dtype == torch.float64
-            and dtype in (torch.float16, torch.bfloat16, *TRITON_FLOAT8_DTYPES)
-            and (use_compute_types or dtype in (torch.float16, torch.bfloat16))
-            and V.graph.get_current_device_or_throw().type == "cuda"
-        ):
-            # Rounding to float32 first, which is the compute type of float16
-            # and bfloat16, would round twice, unlike eager.
+        if rounds_float64_once:
             if torch.version.hip is not None:
                 # Rounding to odd instead, Triton's conversion then rounds
                 # once. Like on CUDA, the result is exact in dtype, also when
@@ -1531,14 +1537,21 @@ class TritonOverrides(OpOverrides):
         # combine functions of scans.
         device = V.graph.get_current_device_or_throw()
         cc = None
+        # sm_107's cvt.rz.satfinite float8 conversions, only if every target is
+        # sm_107.
+        rz = False
         if device.type == "cuda" and torch.version.hip is None:
             cc = DeviceProperties.create(device).cc
+            rz = cc == 107
             if config.aot_inductor.emit_multi_arch_kernel and config.cuda.arch:
-                # AOTI also compiles the kernel for this (lower) target.
+                # AOTI also compiles the kernel for this target.
                 from torch._inductor.codegen.cuda import compile_utils
 
-                target = compile_utils._aoti_cuda_target_arch()
-                cc = min(cc, compile_utils._cuda_arch_number(target))
+                target = compile_utils._cuda_arch_number(
+                    compile_utils._aoti_cuda_target_arch()
+                )
+                cc = min(cc, target)
+                rz = rz and target == 107
 
         out_type = triton_compute_type(dtype)
         suffix = {
@@ -1558,10 +1571,8 @@ class TritonOverrides(OpOverrides):
             # PTX rather than libdevice, which flushes subnormal results to zero
             # in Inductor's kernels.
             if dtype == torch.float32:
-                asm = f"cvt.{suffix}.f32.f64 $0, $1;"
-                return (
-                    f"tl.inline_asm_elementwise('{asm}', '=f,d', [{x}], "
-                    "dtype=tl.float32, is_pure=True, pack=1)"
+                return TritonOverrides.inline_asm_elementwise(
+                    x, asm=f"cvt.{suffix}.f32.f64 $0, $1;", constraints="=f,d"
                 )
             # Direct conversions, as in the eager kernel; cvt.*.bf16.f64 needs
             # sm_90.
@@ -1569,11 +1580,13 @@ class TritonOverrides(OpOverrides):
                 dtype == torch.float16 or (dtype == torch.bfloat16 and cc >= 90)
             ):
                 ptx_type = "f16" if dtype == torch.float16 else "bf16"
-                asm = f"cvt.{suffix}.{ptx_type}.f64 $0, $1;"
-                return (
-                    f"tl.inline_asm_elementwise('{asm}', '=h,d', [{x}], "
-                    f"dtype={triton_type(dtype)}, is_pure=True, pack=1).to({out_type})"
+                out = TritonOverrides.inline_asm_elementwise(
+                    x,
+                    asm=f"cvt.{suffix}.{ptx_type}.f64 $0, $1;",
+                    constraints="=h,d",
+                    dtype=dtype,
                 )
+                return f"{out}.to({out_type})"
             x = f"triton_helpers.round_float64_to_odd_float32({x})"
         else:
             # Exact for Half and BFloat16 inputs. Fused producers of float16 or
@@ -1585,10 +1598,9 @@ class TritonOverrides(OpOverrides):
             # The same instructions as the eager CUDA kernel, as inline PTX
             # so that Triton's own conversions cannot differ (e.g. under
             # flush-to-zero).
-            def asm_call(asm: str, triton_dtype: str) -> str:
-                return (
-                    f"tl.inline_asm_elementwise('{asm}', '=h,f', [{x}], "
-                    f"dtype={triton_dtype}, is_pure=True, pack=1)"
+            def asm_call(asm: str, asm_dtype: torch.dtype) -> str:
+                return TritonOverrides.inline_asm_elementwise(
+                    x, asm=asm, constraints="=h,f", dtype=asm_dtype
                 )
 
             # cvt.rn/rz.bf16.f32 need sm_80 and cvt.rp/rm.bf16.f32 sm_90.
@@ -1597,13 +1609,13 @@ class TritonOverrides(OpOverrides):
             ):
                 ptx_type = "f16" if dtype == torch.float16 else "bf16"
                 asm = f"cvt.{suffix}.{ptx_type}.f32 $0, $1;"
-                return f"{asm_call(asm, triton_type(dtype))}.to({out_type})"
+                return f"{asm_call(asm, dtype)}.to({out_type})"
             if dtype in (torch.float8_e4m3fn, torch.float8_e5m2) and cc >= 89:
                 e4m3 = dtype == torch.float8_e4m3fn
                 # sm_107 also has cvt.rz.satfinite.{e4m3x2,e5m2x2}.f32.
                 bits = (
                     f"triton_helpers.float32_to_float8_bits({x}, "
-                    f"{ROUNDING_MODES[rounding]}, {e4m3}, {cc == 107})"
+                    f"{ROUNDING_MODES[rounding]}, {e4m3}, {rz})"
                 )
                 return f"{bits}.to({triton_type(dtype)}, bitcast=True)"
             if (
@@ -1615,7 +1627,7 @@ class TritonOverrides(OpOverrides):
                 # unsigned, so toward_negative rounds toward zero.
                 ptx_rounding = "rp" if rounding == "toward_positive" else "rz"
                 asm = f"cvt.{ptx_rounding}.ue8m0x2.f32 $0, 0.0, $1;"
-                return f"{asm_call(asm, 'tl.uint16')}.to(tl.uint8)"
+                return f"{asm_call(asm, torch.uint16)}.to(tl.uint8)"
 
         params = ", ".join(map(str, ROUNDING_FORMATS[dtype]))
         bits = f"triton_helpers.round_float32_to_bits({x}, {ROUNDING_MODES[rounding]}, {params})"
