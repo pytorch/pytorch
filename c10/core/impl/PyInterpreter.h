@@ -7,6 +7,7 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/FunctionRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
 #include <memory>
@@ -16,6 +17,7 @@
 // Forward declarations
 
 namespace c10 {
+struct FakeTensorMode;
 struct IValue;
 class OperatorHandle;
 struct SafePyObject;
@@ -228,6 +230,14 @@ struct C10_API PyInterpreterVTable {
       uintptr_t event) const = 0;
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
+
+  // Runs step with mode entered through CppFakeTensorMode's __enter__/__exit__,
+  // including on exceptions. Keeps one Python thread state alive across both
+  // calls so threading.local entry records survive on native worker threads.
+  // Releases the GIL around step; entries inside step must be balanced.
+  virtual bool fake_run_with_mode_entered(
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
+      c10::function_ref<bool()> step) const = 0;
 
   // Note [C++ FakeTensor dispatch]
   // A fake tensor models a tensor on a logical device without allocating its
