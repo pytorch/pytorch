@@ -297,7 +297,7 @@ class FunctionPicklerBase(pickle.Pickler):
         # them: pruning buys nothing and, since _keep matches by id, would make
         # the rebuilt state depend on whether some unrelated guard happened to
         # register the interned value. The AOT pickler skips probing them.
-        # This includes str/bytes and torch.device, unlike utils.is_identity_singleton,
+        # This includes numeric/string literals and torch.device, unlike is_identity_singleton,
         # which requires shared identity rather than just safe serialization.
         if value is None or value is Ellipsis or value is NotImplemented:
             return True

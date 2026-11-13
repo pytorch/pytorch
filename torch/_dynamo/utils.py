@@ -3147,7 +3147,7 @@ def specialize_symnode(arg: Any) -> Any:
         arg = arg.realize()
 
     if isinstance(arg, SymNodeVariable):
-        return ConstantVariable.create(arg.evaluate_expr())
+        return ConstantVariable.create(arg.evaluate_expr(), source=arg.source)
     return arg
 
 

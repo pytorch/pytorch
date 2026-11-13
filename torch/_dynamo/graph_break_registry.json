@@ -357,6 +357,18 @@
       "Hints": []
     }
   ],
+  "GB1108": [
+    {
+      "Gb_type": "Descriptor mutation on a constant-source object",
+      "Context": "name={name_str}, class_source={self.cls_source.name}",
+      "Explanation": "Dynamo cannot guard the class metadata used to resolve a descriptor mutation on an object returned by a constant-result function.",
+      "Hints": [
+        "Pass the object as an input instead of returning it from a function ",
+        "marked with `torch._dynamo.assume_constant_result`.",
+        "Move the descriptor mutation outside the compiled region."
+      ]
+    }
+  ],
   "GB1273": [
     {
       "Gb_type": "Unsupported attribute assignment on traceback object",
@@ -1954,6 +1966,16 @@
       ]
     }
   ],
+  "GB9322": [
+    {
+      "Gb_type": "bytearray.join() with unsupported item type",
+      "Context": "bytearray.join() item: {item}",
+      "Explanation": "Dynamo only supports joining bytes and bytearray items, got {item.python_type_name()}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4778": [
     {
       "Gb_type": "nested function with non-constructible closure in output",
@@ -2358,6 +2380,16 @@
       ]
     }
   ],
+  "GB6295": [
+    {
+      "Gb_type": "OrderedDict mutation with user-defined hash or equality",
+      "Context": "OrderedDict.move_to_end",
+      "Explanation": "Dynamo cannot replay input OrderedDict moves without repeating user hash or equality callbacks.",
+      "Hints": [
+        "Construct the OrderedDict inside the compiled function."
+      ]
+    }
+  ],
   "GB0135": [
     {
       "Gb_type": "Unsupported attribute assignment on Exception object",
@@ -2577,6 +2609,16 @@
       "Context": "str(error)",
       "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
       "Hints": [
+        "Snapshots are not implemented on Python 3.16+. On older free-threaded ",
+        "Python, empty OrderedDicts remain supported; nonempty ones require ",
+        "Python 3.14.1+. Keep unsupported inputs outside fullgraph capture."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported OrderedDict snapshot runtime",
+      "Context": "str(error)",
+      "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
+      "Hints": [
         "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+."
       ]
     }
@@ -2684,6 +2726,15 @@
     }
   ],
   "GB0150": [
+    {
+      "Gb_type": "Unsupported hasattr call",
+      "Context": "generic_hasattr {obj} {name}",
+      "Explanation": "Dynamo does not know how to trace the function `{obj.debug_repr()}`",
+      "Hints": [
+        "Avoid calling `hasattr({obj.__class__.__name__}, {name})` in your code.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Unsupported hasattr call",
       "Context": "call_obj_hasattr {self} {name}",
@@ -5026,6 +5077,26 @@
       ]
     }
   ],
+  "GB1208": [
+    {
+      "Gb_type": "Unsupported generator frame f_back",
+      "Context": "{state}",
+      "Explanation": "f_back is only modeled for created or suspended generators.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0949": [
+    {
+      "Gb_type": "Unsupported generator frame attribute",
+      "Context": "frame.{name}",
+      "Explanation": "Dynamo does not model the frame attribute {name}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB1392": [
     {
       "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",
@@ -5643,14 +5714,6 @@
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
-    }
-  ],
-  "GB9996": [
-    {
-      "Gb_type": "Input OrderedDict linked-order mutation",
-      "Context": "OrderedDict.move_to_end",
-      "Explanation": "Dynamo does not yet replay linked order for input OrderedDicts.",
-      "Hints": []
     }
   ],
   "GB0297": [
@@ -6933,6 +6996,14 @@
       "Gb_type": "Unsupported builtin dictionary storage operation",
       "Context": "dict.{name} on {obj.python_type_name()}",
       "Explanation": "Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported builtin dictionary storage operation",
+      "Context": "dict.{name} on {obj.python_type_name()}",
+      "Explanation": "Dynamo cannot yet preserve builtin dictionary storage for this operation.",
       "Hints": []
     }
   ],
@@ -7038,6 +7109,16 @@
       "Explanation": "Cannot subscript typing construct {self.value} with a non-constant key.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8046": [
+    {
+      "Gb_type": "dict.popitem on OrderedDict",
+      "Context": "self.python_type().__name__",
+      "Explanation": "dict.popitem removes storage without updating OrderedDict links.",
+      "Hints": [
+        "Use OrderedDict.popitem to keep its linked order consistent."
       ]
     }
   ],
