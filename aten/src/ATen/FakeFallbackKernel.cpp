@@ -62,6 +62,11 @@
 // TODO: an op in torch._dynamo.config._custom_ops_profile runs its Meta kernel
 // here, where Python runs the profile's generic fake kernel.
 //
+// TODO: in-place output conversion changes raw Meta tensors retained by a
+// kernel and bypasses the converter's memo. On later calls they are existing
+// fakes, so a changed common device or a prior device override can cause a
+// mismatch where Python reuses a memoized wrapper.
+//
 // TODO: new outputs other than aliases do not require grad here, as they are
 // made below autograd, while Python's FakeTensor keeps the requires_grad a Meta
 // kernel set on its meta output.
@@ -373,9 +378,6 @@ void fakeFallback(
             interpreter->to_meta_tensor(mode, t.getIntrusivePtr()));
       });
 
-  // The op's tensor inputs, so output wrapping can tell an input returned as
-  // an output (by in-place and out= ops) from a new tensor
-  std::unordered_set<const c10::TensorImpl*> input_impls;
   // Input devices in argument order, paired with whether each is a CPU scalar.
   c10::SmallVector<std::pair<c10::Device, bool>, 4> input_devices;
   // The sparse inputs' Meta keys; Meta is added before redispatch.
@@ -411,7 +413,6 @@ void fakeFallback(
         if (mode->get_constant(impl) != nullptr) {
           unsupported(op, "constant inputs");
         }
-        input_impls.insert(impl);
         const auto fake_device = impl->fake_device();
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
         input_devices.emplace_back(
@@ -615,6 +616,7 @@ void fakeFallback(
   // Mark the original outputs fake, including tensors retained by a Meta
   // kernel. Unlike Python's wrapping, this also changes those retained tensors.
   std::optional<c10::Device> output_common_device;
+  std::unordered_set<const c10::TensorImpl*> converted_outputs;
   auto wrap_output = [&](const at::Tensor& t, bool is_alias) {
     if (!t.defined()) {
       return;
@@ -623,6 +625,10 @@ void fakeFallback(
       output_common_device = find_common_device(/*resolve=*/true);
     }
     auto* impl = t.unsafeGetTensorImpl();
+    // The same Meta tensor can occur several times in the return values.
+    if (converted_outputs.contains(impl)) {
+      return;
+    }
     if (t.is_fake() && impl->fake_tensor_mode() == mode) {
       // device() reports meta inside the kernel invocation scope.
       const auto fake_device = impl->fake_device();
@@ -632,25 +638,28 @@ void fakeFallback(
           *fake_device,
           ", expected ",
           *output_common_device);
-    }
-    // An input returned as an output (by in-place and out= ops, or an op that
-    // returns its input without an alias annotation) is kept as is, as Python
-    // does. Its stored fake device is read, as device() reports meta here.
-    if (input_impls.contains(impl)) {
-      TORCH_INTERNAL_ASSERT(impl->fake_device() == output_common_device);
+      if (output_dispatch_keys.has_value()) {
+        impl->set_fake_dispatch_keys(output_dispatch_keys);
+      }
       return;
     }
+    TORCH_CHECK(
+        !t.is_fake(),
+        "Meta kernel returned a fake tensor from another mode");
     if (!is_alias && t.requires_grad()) {
       // Backend kernels run below autograd, but a Meta kernel can copy
       // requires_grad from an input
       t.set_requires_grad(false);
     }
-    // A copy a Meta kernel made of a fake input inherited the input's fake
-    // state (see init_cpp_fake), where Python would see a plain meta tensor
+    // New views and shallow copies inside the kernel are plain Meta tensors.
     at::init_cpp_fake(
         impl, device_argument.value_or(*output_common_device), mode);
     impl->set_real_tensor(nullptr);
     impl->set_fake_dispatch_keys(output_dispatch_keys);
+    if (device_argument.has_value() &&
+        device_argument != output_common_device) {
+      converted_outputs.insert(impl);
+    }
   };
   const auto num_returns = schema.returns().size();
   const auto returns_begin = stack->size() - num_returns;
