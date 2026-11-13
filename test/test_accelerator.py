@@ -374,16 +374,26 @@ class TestAccelerator(TestCase):
     def test_random_generator_state(self):
         seeded_states = []
         for device_idx in range(torch.accelerator.device_count()):
-            generator = torch._C._accelerator_getDefaultGenerator(device_idx)
+            initial_seed = torch.accelerator.random.initial_seed(device_idx)
+            self.assertIsInstance(initial_seed, int)
             old_state = torch.accelerator.random.get_rng_state(device_idx)
             self.assertIsInstance(old_state, torch.Tensor)
-            generator.manual_seed(12345)
+            with torch.accelerator.device_index(device_idx):
+                torch.accelerator.random.manual_seed(12345)
             new_state = torch.accelerator.random.get_rng_state(device_idx)
             seeded_states.append(new_state)
             self.assertNotEqual(old_state, new_state)
             self.assertEqual(12345, torch.accelerator.random.initial_seed(device_idx))
             torch.accelerator.random.set_rng_state(old_state, device_idx)
             self.assertEqual(
+                old_state, torch.accelerator.random.get_rng_state(device_idx)
+            )
+            self.assertEqual(
+                initial_seed, torch.accelerator.random.initial_seed(device_idx)
+            )
+            with torch.accelerator.device_index(device_idx):
+                torch.accelerator.random.seed()
+            self.assertNotEqual(
                 old_state, torch.accelerator.random.get_rng_state(device_idx)
             )
         torch.accelerator.random.set_rng_state_all(seeded_states)
@@ -398,6 +408,18 @@ class TestAccelerator(TestCase):
             ValueError, "doesn't match the current accelerator"
         ):
             torch.accelerator.random.set_rng_state(seeded_states[0], "cpu")
+
+        torch.accelerator.random.manual_seed_all(54321)
+        count = torch.accelerator.device_count()
+        expected = torch.accelerator.random.get_rng_state(0)
+        self.assertEqual(torch.accelerator.random.get_rng_state_all(), [expected] * count)
+        torch.accelerator.random.seed_all()
+        for device_idx in range(count):
+            with torch.accelerator.device_index(device_idx):
+                self.assertNotEqual(54321, torch.accelerator.random.initial_seed())
+                torch.accelerator.random.set_rng_state(expected)
+                self.assertEqual(expected, torch.accelerator.random.get_rng_state())
+                self.assertEqual(54321, torch.accelerator.random.initial_seed())
 
 
 instantiate_device_type_tests(
