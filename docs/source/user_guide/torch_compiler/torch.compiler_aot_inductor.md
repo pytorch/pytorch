@@ -205,6 +205,8 @@ torch.compiler_aot_inductor_debugging_guide
 
 To enable runtime checks on inputs, set the environment variable `AOTI_RUNTIME_CHECK_INPUTS` to 1. This will raise a `RuntimeError` if the inputs to the compiled model differ in size, data type, or strides from those used during export.
 
+On ROCm, a compiled model copies its constants to the GPU through two pinned staging buffers (64 MiB each by default, set with `AOTI_COPY_STAGE_BUFFER_BYTES`) taken from PyTorch's pinned host memory cache. Without them, ROCm tries to pin the model library's read-only pages, which can make creating a model take tens of seconds on MI300X. Set the environment variable `AOTI_COPY_USE_PINNED_ASYNC` to 0 to turn this off, or to 1 to turn it on for CUDA. The default comes from the PyTorch version that compiled the package, because this code is built into the model's shared library.
+
 ## API Reference
 
 ```{eval-rst}
