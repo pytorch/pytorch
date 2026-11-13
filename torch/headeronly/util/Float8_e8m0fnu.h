@@ -169,7 +169,7 @@ class numeric_limits<c10::Float8_e8m0fnu> {
   static constexpr bool has_infinity = false;
   static constexpr bool has_quiet_NaN = true;
   static constexpr bool has_signaling_NaN = false;
-  static constexpr auto has_denorm = false;
+  static constexpr auto has_denorm = std::denorm_absent;
   static constexpr auto has_denorm_loss = false;
   static constexpr auto round_style = numeric_limits<float>::round_style;
   static constexpr bool is_iec559 = false;
@@ -211,6 +211,10 @@ class numeric_limits<c10::Float8_e8m0fnu> {
   }
   static constexpr c10::Float8_e8m0fnu quiet_NaN() {
     return c10::Float8_e8m0fnu(0b11111111, c10::Float8_e8m0fnu::from_bits());
+  }
+  static constexpr c10::Float8_e8m0fnu denorm_min() {
+    // no subnormals, so same as min(), as the standard requires
+    return c10::Float8_e8m0fnu(0b00000000, c10::Float8_e8m0fnu::from_bits());
   }
 };
 
