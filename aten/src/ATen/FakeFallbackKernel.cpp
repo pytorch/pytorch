@@ -325,9 +325,10 @@ void fakeFallback(
     c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
     c10::impl::InKernelInvocationGuard in_kernel;
     op.redispatchBoxed(
-        dispatchKeySet &
-            c10::DispatchKeySet(
-                c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Fake),
+        (dispatchKeySet &
+         c10::DispatchKeySet(
+             c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Fake))
+            .add(c10::DispatchKey::Meta),
         stack);
     return;
   }
@@ -340,20 +341,6 @@ void fakeFallback(
     }
   }
 
-  // Subclasses without a Python dispatch key still reach the native fallback.
-  for_each_tensor(
-      stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
-        if (!t.defined()) {
-          return;
-        }
-        const auto* impl = t.unsafeGetTensorImpl();
-        if (!impl->is_wrapped_number() &&
-            !(t.is_fake() && impl->fake_tensor_mode() == mode) &&
-            (*c10::impl::getGlobalPyInterpreter())
-                ->_check_for_subclass_arg(impl)) {
-          unsupported(op, "tensor subclass inputs");
-        }
-      });
   bool has_mode_fakes = false;
   const bool symbolic_sizes = std::any_of(
       stack->end() - num_arguments,
