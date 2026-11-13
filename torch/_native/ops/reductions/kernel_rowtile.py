@@ -486,6 +486,7 @@ def itree_plan(
 
     if N < 1:
         return None
+    arch = _itree_arch(device) if arch is None else arch
     kc = kchunk
     # Itemsize-only vec plus identity padding keeps the DAG independent of N divisibility.
     base_vec = tile.TRANSFER_ALIGNMENT // itemsize
@@ -507,7 +508,7 @@ def itree_plan(
             stage_rows=(
                 stage is not False
                 and N * itemsize >= _TMA_MIN_STRIDE
-                and (arch if arch is not None else _itree_arch(device)).stage_rows
+                and arch.stage_rows
             ),
         )
     prm = compute_inner_tree_params(N, M, vec)
@@ -533,17 +534,14 @@ def itree_plan(
             prm.effective_loads,
             _ITREE_THREAD_ELEMS if thread_elems is None else thread_elems,
         )
-        split_stage_rows = (
-            arch if arch is not None else _itree_arch(device)
-        ).split_stage_rows
         stage_rpb = (
-            math.gcd(prm.num_batches, split_stage_rows)
+            math.gcd(prm.num_batches, arch.split_stage_rows)
             if (
                 stage is not False
                 and not vec_linear
                 and itemsize <= 4
                 and last == prm.batch_total_elements
-                and split_stage_rows
+                and arch.split_stage_rows
             )
             else 0
         )
@@ -642,12 +640,15 @@ def trait_itree_plan(
     arch: _ItreeArch | None = None,
 ) -> _ItreePlan | None:
     """Retune ragged looped plans whose arithmetic or storage favors less fusion."""
+    if N < 1:
+        return None
+    arch = _itree_arch(device) if arch is None else arch
     plan = itree_plan(N, M, itemsize, stage=stage, device=device, arch=arch)
     if plan is None or plan.shape != "looped" or all(tm.exact for tm in plan.tms):
         return plan
     from . import traits as T
 
-    elems = (_itree_arch(device) if arch is None else arch).lowp_thread_elems
+    elems = arch.lowp_thread_elems
     if (
         not elems
         or N <= _ITREE_LOWP_MIN_N
@@ -1091,7 +1092,7 @@ def reduce_row_tile(
     isz = x.element_size()
     cfg = row_config(N, isz * 8)
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
-    # the measured optimum across 4/8/16/32.
+    # the measured optimum across 4/8/16/32. Single-field one-thread rows ignore it.
     if unroll is None:
         unroll = 16 if not ragged_vector and tile.vec_size(N, isz) == 1 else 4
     threads_per_row = (

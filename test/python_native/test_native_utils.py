@@ -142,7 +142,9 @@ class TestNativeUtils(TestCase):
         # torch.cuda.device(-1) is a no-op, so only the patches show the guard skipped it.
         x = torch.ones(2)
         with (
-            patch.object(torch.cuda, "current_device", side_effect=AssertionError),
+            patch.object(
+                torch._C, "_cuda_getDevice", side_effect=AssertionError, create=True
+            ),
             patch.object(torch.cuda, "device", side_effect=AssertionError),
         ):
             self.assertIs(cuda_device_guard(lambda t: t)(x), x)
