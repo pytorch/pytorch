@@ -231,14 +231,12 @@ def fork_rng(
                 f"{acc_type} reports that you have {num_devices} available devices, and "
                 f"you have used {_caller} without explicitly specifying which devices are being used. "
                 f"For safety, we initialize *every* {acc_type} device by default, which can "
-                f"be quite slow if you have a lot of {acc_type}s. If you know that you are only"
-                f" making use of a few {acc_type} devices, set the environment variable "
-                f"{acc_type}_VISIBLE_DEVICES or the '{_devices_kw}' keyword argument of {_caller} "
-                "with the set of devices you are actually using. For example, if you are using CPU only, "
-                f"set {acc_type}_VISIBLE_DEVICES= or devices=[]; if you are using device 0 only, "
-                f"set {acc_type}_VISIBLE_DEVICES=0 or devices=[0].  To initialize all devices "
-                f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
-                f"`range(torch.{acc_type}.device_count())`."
+                f"be quite slow if you have a lot of {acc_type} devices. If you know that you are only "
+                f"making use of a few devices, set the '{_devices_kw}' keyword argument of {_caller} "
+                "to the devices you are actually using (e.g. [] for CPU only, [0] for device 0 only), "
+                "or limit the visible devices via the backend's environment variable "
+                "(e.g. CUDA_VISIBLE_DEVICES for CUDA). To initialize all devices and suppress this "
+                f"warning, set '{_devices_kw}' to `range(torch.accelerator.device_count())`."
             )
             warnings.warn(message, stacklevel=2)
             _fork_rng_warned_already = True
