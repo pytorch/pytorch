@@ -94,7 +94,7 @@ def _check_cuda(result: int) -> None:
     raise RuntimeError(f"CUDA error: {error_message}")
 
 
-def _check_cuda_bindings(result: Any) -> Any:
+def _check_cuda_bindings(result: Any, *, msg: str = "CUDA error") -> Any:
     """Check a cuda.bindings (cuda-python) call result for errors.
 
     All cuda.bindings driver/runtime calls return ``(error, *outputs)``. This
@@ -128,7 +128,7 @@ def _check_cuda_bindings(result: Any) -> Any:
             err_str = "unknown error type"
         if isinstance(err_str, bytes):
             err_str = err_str.decode()
-        raise RuntimeError(f"CUDA error: {err} ({err_str})")
+        raise RuntimeError(f"{msg}: {err} ({err_str})")
 
     if len(out) == 0:
         return None

@@ -42,6 +42,8 @@ class TestTensorPreparation(TestCase):
     @dtypes(torch.float32)
     def test_read_only_preserves_cow(self, device: str, dtype: torch.dtype) -> None:
         x = torch.randn(4, 8, device=device, dtype=dtype)._lazy_clone()
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
         pointer = const_data_ptr(x)
         self.assertEqual(ConstTensorWrapper(x).data_ptr(), pointer)
         y = reshape_contiguous(x, (2, 16), alignment=16)

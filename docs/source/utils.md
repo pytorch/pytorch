@@ -17,6 +17,25 @@
     swap_tensors
 ```
 
+## Submodules
+
+```{toctree}
+:caption: torch.utils submodules
+:maxdepth: 1
+
+torch.utils.benchmark <utils/benchmark>
+torch.utils.checkpoint <utils/checkpoint>
+torch.utils.cpp_extension <utils/cpp_extension>
+torch.utils.data <utils/data>
+torch.utils.deterministic <utils/deterministic>
+torch.utils.jit <utils/jit>
+torch.utils.dlpack <utils/dlpack>
+torch.utils.mobile_optimizer <utils/mobile_optimizer>
+torch.utils.model_zoo <utils/model_zoo>
+torch.utils.tensorboard <utils/tensorboard>
+torch.utils.module_tracker <utils/module_tracker>
+```
+
 # torch.utils.backend_registration
 ```{eval-rst}
 .. currentmodule:: torch.utils.backend_registration
@@ -184,7 +203,6 @@ for tracking purposes -->
 .. py:module:: torch.utils.data.datapipes.iter.filelister
 .. py:module:: torch.utils.data.datapipes.iter.fileopener
 .. py:module:: torch.utils.data.datapipes.iter.grouping
-.. py:module:: torch.utils.data.datapipes.iter.routeddecoder
 .. py:module:: torch.utils.data.datapipes.iter.selecting
 .. py:module:: torch.utils.data.datapipes.iter.sharding
 .. py:module:: torch.utils.data.datapipes.iter.utils
@@ -193,7 +211,6 @@ for tracking purposes -->
 .. py:module:: torch.utils.data.datapipes.map.combining
 .. py:module:: torch.utils.data.datapipes.map.grouping
 .. py:module:: torch.utils.data.datapipes.map.utils
-.. py:module:: torch.utils.data.datapipes.utils.decoder
 .. py:module:: torch.utils.data.datapipes.utils.snapshot
 .. py:module:: torch.utils.data.dataset
 .. py:module:: torch.utils.data.distributed

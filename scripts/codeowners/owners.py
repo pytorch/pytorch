@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Map test files to CODEOWNERS module labels, else their review surface."""
+"""Map test files to header module labels, falling back to CODEOWNERS."""
 
 import json
 import subprocess
@@ -55,8 +55,22 @@ TEST_GLOBS = [
 ]
 
 
+def header_owners(path: Path) -> set[str]:
+    owners_prefix = "# Owner(s): "
+    with path.open(encoding="utf-8") as source:
+        for line in source:
+            if line.startswith(owners_prefix):
+                labels = json.loads(line.removeprefix(owners_prefix))
+                return {
+                    label.removeprefix("module: ")
+                    for label in labels
+                    if label.startswith("module: ")
+                } - IGNORED_OWNERS
+    return set()
+
+
 def collect_test_owners(repo: Path) -> dict[str, list[str]]:
-    """Map every tracked test file to CODEOWNERS module labels or its review surface."""
+    """Map tracked tests to header modules, CODEOWNERS modules, or review surfaces."""
     index = TaxonomyIndex(parse_patterns(repo / "CODEOWNERS")[0])
     test_globs = [compile_glob(test_glob) for test_glob in TEST_GLOBS]
     owners_by_file = {}
@@ -65,17 +79,18 @@ def collect_test_owners(repo: Path) -> dict[str, list[str]]:
             test_glob.fullmatch(path) for test_glob in test_globs
         ):
             continue
-        owners = set()
-        matches = index.matches(path)
-        if matches:
-            pattern = max(matches, key=pattern_specificity)
-            owners = {
-                label.removeprefix("module: ")
-                for label in pattern.labels
-                if label.startswith("module: ")
-            } - IGNORED_OWNERS
-            if not owners:
-                owners = {pattern.group}
+        owners = header_owners(repo / path)
+        if not owners:
+            matches = index.matches(path)
+            if matches:
+                pattern = max(matches, key=pattern_specificity)
+                owners = {
+                    label.removeprefix("module: ")
+                    for label in pattern.labels
+                    if label.startswith("module: ")
+                } - IGNORED_OWNERS
+                if not owners:
+                    owners = {pattern.group}
         owners_by_file[path] = sorted(owners)
     if not owners_by_file:
         raise ValueError(f"No test files found in {repo}")

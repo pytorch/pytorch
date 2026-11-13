@@ -22,7 +22,8 @@
 
 namespace c10::cuda::impl {
 
-struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
+struct C10_CUDA_API CUDAGuardImpl final
+    : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
 
   CUDAGuardImpl() = default;
@@ -59,9 +60,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(c10::cuda::SetDevice(d.index()));
   }
   void uncheckedSetDevice(Device d) const noexcept override {
-    // noexcept, but MaybeSetDevice() -> SetDevice() can throw via
-    // C10_CUDA_CHECK(cudaGetDevice) on a device carrying a sticky error, and
-    // the throw escapes while evaluating the argument, before
+    // noexcept, but MaybeSetDevice() can throw: on the CUDA-12 / ROCm path via
+    // hasPrimaryContext() (bad device index or a failed primary-context
+    // query), on the pre-CUDA-12 path via SetDevice() (TORCH_CHECK on the
+    // index, or C10_CUDA_CHECK(cudaGetDevice) on a device carrying a sticky
+    // error). The throw escapes while evaluating the argument, before
     // C10_CUDA_CHECK_WARN can demote it. Catch it so a device restore warns
     // instead of std::terminate.
     try {
@@ -116,7 +119,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_creation(
           c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
     }
@@ -126,23 +129,19 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const noexcept override {
     if (!event)
       return;
-    // noexcept: SetDevice() can throw on a device carrying a sticky error (see
-    // uncheckedSetDevice), and SetDevice(orig_device) can also throw via
-    // TORCH_CHECK(device >= 0) if the GetDevice above failed and left
-    // orig_device == -1. Guard the whole body so we warn instead of
-    // terminating.
+    // noexcept: the device guard may throw if switching to device_index fails
+    // (e.g. the device has a sticky error). Catch it and warn instead of
+    // terminating. In that case cudaEventDestroy is skipped and the event
+    // leaks, which is fine since it would most likely fail too.
     try {
+      c10::impl::InlineDeviceGuard<CUDAGuardImpl> guard(device_index);
       auto cuda_event = static_cast<cudaEvent_t>(event);
-      DeviceIndex orig_device{-1};
-      C10_CUDA_CHECK_WARN(c10::cuda::GetDevice(&orig_device));
-      C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(device_index));
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-      if (C10_UNLIKELY(interp)) {
+      if (interp) [[unlikely]] {
         (*interp)->trace_gpu_event_deletion(
             c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
       }
       C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
-      C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(orig_device));
     } catch (const std::exception& e) {
       TORCH_WARN("destroyEvent() ignoring error: ", e.what());
     } catch (...) {
@@ -178,7 +177,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // Makes the void* point to the (possibly just allocated) CUDA event
     *event = cuda_event;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_record(
           c10::kCUDA,
           reinterpret_cast<uintptr_t>(cuda_event),
@@ -197,7 +196,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         cuda_event,
         /*flags (must be zero)=*/0));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_wait(
           c10::kCUDA,
           reinterpret_cast<uintptr_t>(cuda_event),
@@ -237,12 +236,18 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return cuda_stream.is_capturing();
   }
 
+  uint64_t getStreamCaptureId(const Stream& stream) const override;
+
+  void waitStream(const Stream& waiter, const Stream& source) const override {
+    stream_wait_stream(CUDAStream(waiter), CUDAStream(source));
+  }
+
   void synchronizeEvent(void* event) const override {
     if (!event)
       return;
     cudaEvent_t cuda_event = static_cast<cudaEvent_t>(event);
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_synchronization(
           c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
     }
@@ -254,7 +259,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void synchronizeDevice(const c10::DeviceIndex device_index) const override {
     c10::impl::InlineDeviceGuard<CUDAGuardImpl> guard(device_index);
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
     }
     C10_CUDA_CHECK(cudaDeviceSynchronize());
