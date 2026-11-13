@@ -496,20 +496,27 @@ installed, `torch.sum`, `torch.mean`, `torch.amax`, `torch.amin` and `torch.prod
 `dim`) are overridden by default for float16, bfloat16 and float32 inputs. `sum`, `mean`
 and `prod` results can differ bitwise from ATen's, since the kernels accumulate in FP32 in
 a different reduction order; `amax` and `amin` results are equal in value, though the sign
-of zero and NaN payloads can differ. By default the Python `out=` overloads
+of zero and NaN payloads can differ. Full `prod()` and declined inputs (such as 0-d, empty
+or not 16-byte aligned ones) stay on ATen, as do the Python `out=` overloads
 (`sum.IntList_out`, `mean.out`, `mean.dtype_out`, `amax.out`, `amin.out` and
-`prod.int_out`), full `prod()` and declined inputs (such as 0-d, empty or not 16-byte
-aligned ones) stay on ATen, so `torch.sum(x, 1)` and `torch.sum(x, 1, out=o)` can differ
-bitwise; `aten::sum.out` routes through `sum.dim_IntList` and is served. Setting
-`PYTORCH_NATIVE_INNER_TREE` to any value but `""` or `0` puts served calls in inner-tree
-order, warning once per reason and running unordered where a layout cannot take it
-(`strict` raises instead); declined calls and the Python `out=` overloads go to ATen and
-ignore it. To keep ATen, pass the overload names `sum.dim_IntList`, `mean.dim`,
-`prod.dim_int`, `amax` and `amin` to `disable_operations`, or set
+`prod.int_out`) without native AOT (below), so `torch.sum(x, 1)` and
+`torch.sum(x, 1, out=o)` can differ bitwise; `aten::sum.out` routes through
+`sum.dim_IntList` and is served. Setting `PYTORCH_NATIVE_INNER_TREE` to any value but `""`
+or `0` puts served calls in inner-tree order, warning once per reason and running
+unordered where a layout cannot take it (`strict` raises instead); declined calls and the
+Python `out=` overloads go to ATen and ignore it. Without native AOT, to keep ATen, pass
+the overload names `sum.dim_IntList`, `mean.dim`, `prod.dim_int`, `amax` and `amin` to
+`disable_operations`, or set
 `torch.backends.python_native.cutedsl.enabled = False`, which turns off every CuTeDSL
 override, not only these reductions. The `cutedsl.disabled()` context manager does the
 same while its block runs (process-wide), along with native AOT for every DSL. Setting
 `TORCH_DISABLE_NATIVE_JIT=1` before `import torch` registers no native DSL overrides.
+Builds with native-AOT reduction kernels also serve covered calls from them, including
+`out=` calls of the overloads above (`mean.dtype_out` as a full reduction), except while
+`PYTORCH_NATIVE_INNER_TREE` is set, since the kernels have no inner-tree order. Only
+`torch._native.set_aot_enabled(False)`, `TORCH_DISABLE_NATIVE_AOT=1` and
+`cutedsl.disabled()` turn those kernels off; `cutedsl.enabled = False`,
+`disable_operations` and `TORCH_DISABLE_NATIVE_JIT=1` do not.
 
 ```{eval-rst}
 .. autofunction:: torch.backends.python_native.enable_operations

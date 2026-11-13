@@ -3,6 +3,7 @@
 # Wiring tests for routing, fallback, and CUDA graph capture, plus numerics against ATen
 # for the dtypes, dimension forms, and layouts the overrides serve.
 
+import contextlib
 import functools
 import os
 import unittest
@@ -28,6 +29,19 @@ from torch.testing._internal.common_utils import (
 
 def _disabled():
     return torch.backends.python_native.cutedsl.disabled()
+
+
+@contextlib.contextmanager
+def _aot_masked():
+    # Native-AOT-covered calls skip the overrides, so tests of the overrides mask AOT.
+    from torch import _native
+
+    enabled = _native.aot_enabled()
+    _native.set_aot_enabled(False)
+    try:
+        yield
+    finally:
+        _native.set_aot_enabled(enabled)
 
 
 _TOL = {
@@ -73,7 +87,8 @@ class TestCuTeDSLReductionWiring(TestCase):
 
         # A served call adds one replay entry for its metadata, so start from none.
         kg._REPLAYS.clear()
-        out = call()
+        with _aot_masked():
+            out = call()
         return out, len(kg._REPLAYS)
 
     def _check(self, call, fired=1, **tol):
@@ -363,7 +378,7 @@ class TestCuTeDSLReductionWiring(TestCase):
         y = torch.randn(4096, 768, device=device)
         recorded = len(kg._REPLAYS)
         g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
+        with _aot_masked(), torch.cuda.graph(g):
             out = torch.sum(y, dim=-1)
         self.assertEqual(len(kg._REPLAYS), recorded + 1)
         # _run started from no entries, so both are this test's recordings.
@@ -413,7 +428,8 @@ class TestCuTeDSLReductionOpInfo(TestCase):
                     self.assertTrue(accepted)
                 # A served call adds one replay entry for its metadata, so start from none.
                 kg._REPLAYS.clear()
-                got = op(x, *args, **kwargs)
+                with _aot_masked():
+                    got = op(x, *args, **kwargs)
                 if counted:
                     self.assertEqual(len(kg._REPLAYS), int(accepted))
                 with _disabled():
