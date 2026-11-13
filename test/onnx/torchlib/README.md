@@ -28,6 +28,88 @@ in onnxruntime by running the inference sessions in a separate process.
 
 ## How to add a new operator test
 
+PyTorch-owned implementations are ordinary Python functions accepting `onnx_ir.Value`
+inputs. Use `current_builder().call("Operator", ...)` from
+`torch.onnx._internal.exporter._ir_builder` to construct nodes; unpack its tuple of
+outputs explicitly. Tensor casts, shape construction, and control flow are explicit.
+The builder converts Python constants according to the ONNX schema but does not
+promote tensor inputs. Operator annotations document inputs and outputs, not dispatch
+overloads: registration selects the ATen target, real/complex branch, and opset.
+
+The test harness activates a native builder and supplies plain IR inputs for these
+functions. The isolated ONNX Script evaluator path remains for external torch_lib
+implementations until they are migrated. Tests requiring newer operators also require
+an ONNX Runtime release supporting their opset.
+
+Set `TorchLibOpInfo.supported_dtypes` to preserve a migrated implementation's
+source-supported numerical coverage without depending on its old annotations.
+This metadata only filters tests; it does not participate in exporter dispatch.
+Keep source tolerances and sample-specific skips with the migrated mapping.
+
+Structural core translations (views, axis transforms, indexing, scattering, masking,
+and reductions) use native IR registrations. Additional source samples live in
+`extra_opinfo.py`; they cover broadcast masks, optional slice bounds, scalar
+scatter inputs, and advanced index placement. Native regressions in
+`../exporter/test_native_structural_ops.py` also exercise symbolic dimensions,
+complex component axes, duplicate-index reductions, and FX export with optimization
+both enabled and disabled. Those tests prohibit legacy graph construction.
+Use ONNX's reference evaluator when the installed runtime does not support a
+tested opset; do not skip a migrated translation merely because its opset is newer.
+
+Factories, random sampling, windows, matrix products, and Tensor[] operations
+also use native IR. `factories.py`, `linalg.py`, and `sequences.py` preserve source
+implementations and comments without ONNX Script evaluation. Dynamic split sizes
+produce typed ONNX sequences, explicitly unpacked at FX multioutput boundaries.
+Sequence maps use native IR subgraphs and `If` nodes. Factory sizes may be an
+INT64 tensor or a list of static/symbolic dimensions. Device, generator, and
+layout limitations remain those of the source translations; empty allocation
+is represented by zeros. Random tests compare shapes, dtypes, and valid ranges,
+not identical random streams. Window tolerances retain ONNX's Hamming coefficient
+difference. `test_native_factory_sequence_ops.py` covers dynamic sizes, empty
+and scalar outputs, repeats, complex stacking, and optimizer-off/on FX exports.
+The OpInfo harness uses the reference evaluator for boolean `SplitToSequence`,
+which is missing from older ONNX Runtime kernel tables.
+
+Recurrent, embedding, and residual core operators live in `recurrent.py`,
+`embedding.py`, and `residual.py`. GRU/LSTM preserve gate ordering, direction
+layout, optional biases, initial states, and interlayer dropout. Sequence length
+and batch size may be dynamic; the recurrent hidden size must be known.
+Embedding bags use explicitly typed `Loop`/`If` subgraphs with lexical captures,
+including empty bags, padding, per-sample weights, and auxiliary outputs.
+`test_native_recurrent_residual_ops.py` compares these graphs with PyTorch and
+exports models with optimization both enabled and disabled without legacy
+translations.
+
+Convolution and normalization now live in `normalization.py`, including complex
+convolutions and functional batch-normalization outputs. Training is retained
+rather than forced to inference for older ORT kernels. Saved inference statistics
+keep source torchlib's CUDA convention, which differs from CPU's empty outputs.
+`neural.py` contains source NN translations, including opset18 GELU, group norm,
+and attention alternatives to the newer implementations in `nn.py`. Grouped-query
+attention requires static head counts; batch and sequence sizes may be dynamic.
+`test_native_neural_ops.py` checks native-only dynamic FX exports with optimization
+off/on. Source OpInfo mappings retain numerical tolerances and known limitations.
+The experimental flash/efficient-attention wrappers are native as well. Like
+the source translations, their auxiliary outputs are zero placeholders, not
+usable log-sum-exp statistics, sequence offsets, debug masks, or RNG state.
+
+FFT, prims, special, determinant/vector norm, optional vision, and decomposed
+dequantization translations complete the native registry. Built-in population
+does not consult ONNX Script's torch_lib. Construction uses plain `onnx_ir.Value`
+objects and `GraphBuilder`; ONNX Script remains available for optimization and
+the isolated legacy `custom_translation_table` adapter. Global native
+registrations are snapshotted per export; local translations override globals,
+which override built-ins. Built-ins select the highest eligible opset separately
+for real and complex inputs without dtype/signature overload searches.
+
+`test_native_final_ops.py` checks real/complex FFT, prims, special functions,
+quantization boundaries, attention auxiliary shapes, and direct vision graphs.
+Vision registration uses qualified names without importing torchvision; optional
+operators become executable FX targets only when their namespace is loaded.
+Unavailable/version-specific source aliases remain qualified-name registrations.
+DeformConv requires opset19; DFT uses the axis input starting at opset20.
+The source's 622 unsupported placeholder bodies do not add operator support.
+
 See _usage_ in [`ops_test_data.py`](./ops_test_data.py)
 
 ## How to add custom OpInfo tests
