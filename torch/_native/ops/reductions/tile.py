@@ -271,7 +271,7 @@ def _flag_issue(trait, flag: str, method: str) -> str | None:
         if isinstance(trait, WelfordOps):
             hint = (
                 "the flag is not inherited; a WelfordOps subclass that keeps leaf, combine "
-                f"and their helpers may set {flag} = True to opt in"
+                f"and their helpers must set {flag} = True"
             )
             return f"a trait with {flag}, got {name} ({hint})"
         return f"a trait with {flag}, got {name}"
@@ -966,10 +966,10 @@ def fold_cols_rolled(
 
     Single-field traits fold the leading nrows % group rows online, then each column's
     remaining rows as in-register trees of `group` rows, so no serial chain spans the
-    whole column. col_group in {4, 8, 16} groups any trait that way, as equal-count
-    combine_equal trees of col_group rows; it needs vec == 1 and a trait with
-    combine_equal, which TileReduce checks. Each group already issues `group`
-    independent loads, so only the online loop unrolls.
+    whole column. col_group in {4, 8, 16} groups any trait that way regardless of
+    nfields, as equal-count combine_equal trees of col_group rows; it needs vec == 1 and
+    a trait with combine_equal, which TileReduce checks. Each group already issues
+    `group` independent loads, so only the online loop unrolls.
     """
     if const_expr(col_group not in (1, 4, 8, 16)):
         raise AssertionError(f"col_group must be 1, 4, 8 or 16, got {col_group}")
@@ -995,7 +995,6 @@ def fold_cols_rolled(
         )
     if const_expr(grouped):
         leaf_fn, combine_fn = trait.leaf, trait.combine
-        equal_fn = getattr(trait, "combine_equal", None)
         gfrag = cute.make_rmem_tensor(cute.make_layout((vec, group)), mX.element_type)
         ngroups = (nrows - online) // Int32(group)
         for g in cutlass.range(ngroups):
@@ -1011,7 +1010,7 @@ def fold_cols_rolled(
                 for i in range(vec)
             ]
             if const_expr(col_group > 1):
-                roots = [_equal_count_reduce(lv, equal_fn) for lv in leaves]
+                roots = [_equal_count_reduce(lv, trait.combine_equal) for lv in leaves]
             else:
                 roots = [_inner_tree_reduce(lv, combine_fn) for lv in leaves]
             accs = tuple(combine_fn(accs[i], roots[i]) for i in range(vec))
@@ -1128,16 +1127,13 @@ class TileReduce:
                 raise ValueError(
                     "the inner-tree order needs a row or general axis and a plan"
                 )
-            if itree.combine_weights and not itree.uniform_count:
-                raise ValueError("precomputed weights require uniform combine counts")
+            uniform = itree.uniform_combine != "off"
             # _uniform_combine_issue checks the split's length before it is unpacked.
-            if itree.uniform_count:
+            if uniform:
                 issue = _uniform_combine_issue(trait, itree.split)
                 if issue is not None:
                     raise ValueError(f"uniform combine counts need {issue}")
-            if itree.uniform_count and (
-                itree.shape != "combine" or not itree.combine_tile
-            ):
+            if uniform and (itree.shape != "combine" or not itree.combine_tile):
                 raise ValueError(
                     f"uniform combine counts need a staged combine plan, got {itree.shape=} {itree.combine_tile=}"
                 )
@@ -1199,6 +1195,9 @@ class TileReduce:
         self.uniform_tree_loads, tail = divmod(tree_count, threads_per_block)
         self.uniform_tree_tail = bool(tail)
         self.col_group = col_group
+        # Grouped column folds run their online prefix at unroll 1, so plans differing only
+        # in unroll share a kernel; fold_cols_rolled itself honors any unroll.
+        self.col_unroll = 1 if col_group > 1 else unroll
         self.use_tma = use_tma
         self.combine = combine
         self.batched_col = batched_col
@@ -1269,8 +1268,7 @@ class TileReduce:
             self.threads_per_block,
             self.nouts,
             self.final,
-            # The grouped column fold ignores unroll, so its plans share a kernel.
-            1 if self.col_group > 1 else self.unroll,
+            self.col_unroll,
             self.use_tma,
             self.combine,
             self.batched_col,
@@ -1673,13 +1671,13 @@ class TileReduce:
 
     @cute.jit
     def _combine_itree_partial(self, a, b, index):
-        if const_expr(self.itree.uniform_count):
+        if const_expr(self.itree.uniform_combine != "off"):
             return self.trait.combine_uniform(
                 a,
                 b,
                 index,
                 const_expr(self.itree.split[1]),
-                b[-1] if const_expr(self.itree.combine_weights) else None,
+                b[-1] if const_expr(self.itree.uniform_combine == "weights") else None,
             )
         return self.trait.combine(a, b)
 
@@ -1702,10 +1700,11 @@ class TileReduce:
         rpb = const_expr(self.itree.rows_per_block)
         tile_n = const_expr(self.itree.combine_tile)  # partials per row per tile
         unroll = const_expr(self.itree.combine_unroll)
-        count = const_expr(self.itree.split[1] if self.itree.uniform_count else 0)
+        mode = self.itree.uniform_combine
+        count = const_expr(self.itree.split[1] if mode != "off" else 0)
         # Derived counts are not staged; weights depend only on the partial index, so one row of
         # them serves the whole block in the count field's slot.
-        weights = const_expr(self.itree.combine_weights)
+        weights = const_expr(mode == "weights")
         ncopy = const_expr(nf - 1 if count else nf)  # fields copied from global
         mult = const_expr(tile_n // (WARP * grp))  # cp.async per lane per row
         ntiles = const_expr(nbatch // tile_n)
@@ -2237,7 +2236,7 @@ class TileReduce:
                 index_row0,
                 cnt,
                 const_expr(self.vec),
-                const_expr(1 if self.col_group > 1 else self.unroll),
+                const_expr(self.col_unroll),
                 const_expr(self.col_group),
             )
         elif const_expr(self.use_tma):

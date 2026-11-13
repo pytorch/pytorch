@@ -148,8 +148,7 @@ class TestKernelRowTile(TestCase):
         # Both entry points check before compiling, so nothing is cached.
         trait = T.SumOps(acc=cutlass.Float32)
         out = torch.empty(x.shape[0], device=x.device)
-        plan = rt.itree_plan(*x.shape[::-1], x.element_size(), device=x.device)
-        self.assertIsNotNone(plan)
+        self.assertIsNotNone(rt.itree_plan(x.shape[1], x.shape[0], x.element_size()))
         before = set(rt._CACHE)
         with self.assertRaisesRegex(AssertionError, "is current"):
             rt.reduce_row_tile(trait, "off", x, [torch.float32], order="linear")

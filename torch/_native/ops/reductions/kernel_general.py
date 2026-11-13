@@ -646,7 +646,8 @@ def _ragged_rows_ok(
     N: int,
     alignment: int,
     trait: Any,
-    acc_bits: int = 32,
+    *,
+    acc_bits: int,
 ) -> bool:
     """Whether odd-width rows take the B200 ragged-vector row kernel."""
     min_n = _ragged_row_min_n(trait)
@@ -699,7 +700,7 @@ def _try_fast_row(
         return rt.reduce_row_tile(
             trait, trait_key, x, out_dtypes, nouts=nouts, order="inner_tree"
         )
-    if _ragged_rows_ok(cc, x.dtype, N, alignment, trait, acc_bits):
+    if _ragged_rows_ok(cc, x.dtype, N, alignment, trait, acc_bits=acc_bits):
         return rt.reduce_row_tile(
             trait,
             trait_key,
@@ -1220,6 +1221,8 @@ def replay_reduce(
     the outer recording captures the launches."""
     if not x.is_cuda:
         raise AssertionError(f"need a CUDA input, got {x.device}")
+    # Warm replays skip _reduce's check; without this one they would launch on x's
+    # device's stream while another device is current.
     check_current(x.get_device())
     dims = [dims] if isinstance(dims, int) else (None if dims is None else list(dims))
 

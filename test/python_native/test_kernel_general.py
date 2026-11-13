@@ -753,7 +753,7 @@ class TestKernelGeneral(TestCase):
         self.assertEqual(kg.ReduceBlock(**opted).tile.uniform_tree_loads, 1024 // 128)
         hint = (
             "(the flag is not inherited; a WelfordOps subclass that keeps leaf, combine "
-            "and their helpers may set has_combine_equal = True to opt in)"
+            "and their helpers must set has_combine_equal = True)"
         )
         welford = "a trait with has_combine_equal, got {} " + hint
         no_method = "a trait with combine_equal, got FlaggedSum, which sets has_combine_equal without it"
@@ -1050,6 +1050,19 @@ class TestKernelGeneral(TestCase):
         entries = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_dims"]
         self.assertEqual(len(entries), 2)
         self.assertNotIn(None, entries)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    def test_replay_requires_the_current_device(self):
+        # The warm path skips _reduce, so replay_reduce must check the device itself.
+        trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        x = torch.randn(64, 256, device="cuda:0")
+        call = lambda: kg.replay_reduce(trait, "replay_device", x, 1, torch.float32)  # noqa: E731
+        with torch.cuda.device(0):
+            call()
+        (replay,) = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_device"]
+        self.assertIsNotNone(replay)
+        with torch.cuda.device(1), self.assertRaisesRegex(AssertionError, "is current"):
+            call()
 
     def test_offset_views_share_a_general_plan(self):
         base = torch.randn(3, 8, 16, 16, device="cuda")

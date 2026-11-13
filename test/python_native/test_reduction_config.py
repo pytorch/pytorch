@@ -342,8 +342,7 @@ class TestReductionConfig(TestCase):
             combine_max=2048,
             combine_unroll=unroll,
             lowp_thread_elems=32,
-            uniform_count=welford,
-            combine_weights=welford,
+            uniform_combine="weights" if welford else "off",
         )
         self.assertEqual(arch, want)
 
@@ -869,10 +868,11 @@ class TestReductionConfig(TestCase):
             "var_mean": T.VarMeanOps(),
             "var": T.WelfordOps(),
         }[trait]
-        self.assertEqual(kg._ragged_rows_ok((10, 0), dtype, N, 16, trait), routed)
-        self.assertFalse(kg._ragged_rows_ok((9, 0), dtype, N, 16, trait))
-        self.assertFalse(kg._ragged_rows_ok((10, 0), dtype, N, 8, trait))
-        self.assertFalse(kg._ragged_rows_ok((10, 0), dtype, N, 16, trait, 64))
+        ok = kg._ragged_rows_ok
+        self.assertEqual(ok((10, 0), dtype, N, 16, trait, acc_bits=32), routed)
+        self.assertFalse(ok((9, 0), dtype, N, 16, trait, acc_bits=32))
+        self.assertFalse(ok((10, 0), dtype, N, 8, trait, acc_bits=32))
+        self.assertFalse(ok((10, 0), dtype, N, 16, trait, acc_bits=64))
 
     def test_b200_ragged_rows_start_late_traits_later(self):
         """Keep absmax, absmin and general-p norms off ragged rows at N = 255, and every
@@ -884,8 +884,9 @@ class TestReductionConfig(TestCase):
         self.assertEqual(kg._ragged_row_min_n(T.VarMeanOps(take_sqrt=True)), 1025)
         self.assertEqual(kg._ragged_row_min_n(T.WelfordOps(take_sqrt=True)), 1025)
         self.assertEqual(kg._ragged_row_min_n(T.WelfordOps(return_mean=True)), 255)
+        absmax = T.AbsMaxOps()
         for N, routed in ((255, False), (1023, True)):
-            ok = kg._ragged_rows_ok((10, 0), torch.float16, N, 16, T.AbsMaxOps())
+            ok = kg._ragged_rows_ok((10, 0), torch.float16, N, 16, absmax, acc_bits=32)
             self.assertEqual(ok, routed)
 
 
