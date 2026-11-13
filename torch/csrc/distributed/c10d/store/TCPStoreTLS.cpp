@@ -3,11 +3,15 @@
 #include <torch/csrc/distributed/c10d/store/TCPStoreOpenSSL.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
 #include <climits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <c10/util/StringUtil.h>
+#include <c10/util/error.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
@@ -55,6 +59,75 @@ int chunk(size_t length) {
   return -1;
 }
 
+// NCCL requires at least 32 bytes and reads the key as a C string, so a key
+// shared with it must not contain NUL bytes. OpenSSL 1.1.1 accepts at most 256
+// (3.x allows 512).
+constexpr size_t kMinPskSize = 32;
+constexpr size_t kMaxPskSize = 256;
+
+#ifdef __linux__
+constexpr int kTls12Version = 0x0303;
+constexpr int kTls13Version = 0x0304;
+// Change the version suffix if the PSK handshake ever becomes incompatible.
+constexpr std::string_view kPskIdentity = "torch.distributed.TCPStore.psk.v1";
+constexpr std::array<unsigned char, 2> kTlsAes128GcmSha256 = {0x13, 0x01};
+
+int rejectCertificate(int /*preverifyOk*/, void* /*storeCtx*/) {
+  return 0;
+}
+
+// A new external PSK session for a handshake; OpenSSL takes ownership.
+void* newPskSession(void* ssl) {
+  const auto& lib = openssl();
+  const auto* ctx = static_cast<const TLSContext*>(
+      lib.SSL_CTX_get_ex_data(lib.SSL_get_SSL_CTX(ssl), 0));
+  const auto& key = ctx->psk();
+  const void* cipher = lib.SSL_CIPHER_find(ssl, kTlsAes128GcmSha256.data());
+  void* session = lib.SSL_SESSION_new();
+  if (cipher != nullptr && session != nullptr &&
+      lib.SSL_SESSION_set1_master_key(
+          session,
+          reinterpret_cast<const unsigned char*>(key.data()),
+          key.size()) == 1 &&
+      lib.SSL_SESSION_set_cipher(session, cipher) == 1 &&
+      lib.SSL_SESSION_set_protocol_version(session, kTls13Version) == 1) {
+    return session;
+  }
+  lib.SSL_SESSION_free(session);
+  return nullptr;
+}
+
+int usePskSession(
+    void* ssl,
+    const void* /*md*/,
+    const unsigned char** id,
+    size_t* idLength,
+    void** session) {
+  *session = newPskSession(ssl);
+  if (*session == nullptr) {
+    return 0;
+  }
+  *id = reinterpret_cast<const unsigned char*>(kPskIdentity.data());
+  *idLength = kPskIdentity.size();
+  return 1;
+}
+
+// An unknown identity leaves session null, failing the handshake.
+int findPskSession(
+    void* ssl,
+    const unsigned char* id,
+    size_t idLength,
+    void** session) {
+  *session = nullptr;
+  if (std::string_view(reinterpret_cast<const char*>(id), idLength) !=
+      kPskIdentity) {
+    return 1;
+  }
+  *session = newPskSession(ssl);
+  return *session != nullptr ? 1 : 0;
+}
+#endif
+
 } // namespace
 
 TLSConfig tlsConfig(const TCPStoreOptions& opts) {
@@ -72,11 +145,12 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
     return path.value_or("");
   };
   TLSConfig config;
-  if (opts.tlsCert || opts.tlsKey || opts.tlsCa) {
+  if (opts.tlsCert || opts.tlsKey || opts.tlsCa || opts.tlsPsk) {
     config = {
         value(opts.tlsCert, "tls_cert"),
         value(opts.tlsKey, "tls_key"),
-        value(opts.tlsCa, "tls_ca")};
+        value(opts.tlsCa, "tls_ca"),
+        value(opts.tlsPsk, "tls_psk")};
   } else {
     auto env = [&](const char* name) {
       return value(c10::utils::get_env(name), name);
@@ -85,6 +159,7 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
         env("TORCH_TCPSTORE_TLS_CERT"),
         env("TORCH_TCPSTORE_TLS_KEY"),
         env("TORCH_TCPSTORE_TLS_CA"),
+        env("TORCH_TCPSTORE_TLS_PSK"),
         /*fromEnv=*/true};
   }
   if (!config.enabled()) {
@@ -96,6 +171,22 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
       "TCPStore TLS: ",
       empty,
       " must not be empty when TLS is enabled");
+  if (!config.psk.empty()) {
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        config.cert.empty() && config.key.empty() && config.ca.empty(),
+        config.fromEnv
+            ? "TCPStore TLS: TORCH_TCPSTORE_TLS_PSK cannot be combined with "
+              "TORCH_TCPSTORE_TLS_CERT, TORCH_TCPSTORE_TLS_KEY or "
+              "TORCH_TCPSTORE_TLS_CA"
+            : "TCPStore TLS: tls_psk cannot be combined with tls_cert, "
+              "tls_key or tls_ca");
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        config.psk.size() >= kMinPskSize && config.psk.size() <= kMaxPskSize,
+        "TCPStore TLS: PSK must contain 32 to 256 bytes");
+    return config;
+  }
   std::vector<std::string> missing;
   auto require =
       [&](const std::string& value, const char* opt, const char* env) {
@@ -127,11 +218,13 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
       DistStoreError, "TCPStore TLS is not supported on this platform");
 #else
   constexpr int kSslCtrlSetMinProtoVersion = 123;
-  constexpr long kTls12Version = 0x0303;
+  constexpr int kSslCtrlSetMaxProtoVersion = 124;
   constexpr int kSslFiletypePem = 1;
   constexpr int kSslVerifyPeer = 0x01;
   constexpr int kSslVerifyFailIfNoPeerCert = 0x02;
   constexpr uint64_t kSslOpNoRenegotiation = 1U << 30;
+  constexpr uint64_t kSslOpAllowNoDheKex = 1U << 10;
+  constexpr uint64_t kSslOpPreferNoDheKex = 1ULL << 35;
   const auto& cert = config.cert;
   const auto& key = config.key;
   const auto& ca = config.ca;
@@ -153,6 +246,45 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
         ": ",
         errorString());
   };
+  if (isServer) {
+    // Session tickets are unused and would make a client socket readable
+    // without a response.
+    ssl.SSL_CTX_set_num_tickets(ctx, 0);
+  }
+  ssl.SSL_CTX_set_options(ctx, kSslOpNoRenegotiation);
+  if (!config.psk.empty()) {
+    res->psk_ = config.psk;
+    // External PSKs require TLS 1.3. The cipher suite must match the PSK
+    // session's hash. The key exchange still uses (EC)DHE.
+    check(
+        ssl.SSL_CTX_ctrl(
+            ctx, kSslCtrlSetMinProtoVersion, kTls13Version, nullptr) == 1 &&
+            ssl.SSL_CTX_ctrl(
+                ctx, kSslCtrlSetMaxProtoVersion, kTls13Version, nullptr) == 1,
+        "TLS version",
+        "1.3");
+    check(
+        ssl.SSL_CTX_set_ciphersuites(ctx, "TLS_AES_128_GCM_SHA256") == 1,
+        "cipher suite",
+        "TLS_AES_128_GCM_SHA256");
+    // Keep (EC)DHE, and so forward secrecy, even if openssl.cnf allows
+    // PSK-only key exchange.
+    ssl.SSL_CTX_clear_options(ctx, kSslOpAllowNoDheKex | kSslOpPreferNoDheKex);
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        ssl.SSL_CTX_set_ex_data(ctx, 0, res.get()) == 1,
+        "TCPStore TLS: failed to initialize PSK context: ",
+        errorString());
+    if (isServer) {
+      // Without a certificate, only PSK handshakes can succeed.
+      ssl.SSL_CTX_set_psk_find_session_callback(ctx, findPskSession);
+    } else {
+      ssl.SSL_CTX_set_psk_use_session_callback(ctx, usePskSession);
+      // A server certificate means the server did not accept the PSK.
+      ssl.SSL_CTX_set_verify(ctx, kSslVerifyPeer, rejectCertificate);
+    }
+    return res;
+  }
   check(
       ssl.SSL_CTX_ctrl(
           ctx, kSslCtrlSetMinProtoVersion, kTls12Version, nullptr) == 1,
@@ -183,12 +315,6 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
       ca);
   ssl.SSL_CTX_set_verify(
       ctx, kSslVerifyPeer | kSslVerifyFailIfNoPeerCert, nullptr);
-  ssl.SSL_CTX_set_options(ctx, kSslOpNoRenegotiation);
-  if (isServer) {
-    // Session tickets are unused and would make a client socket readable
-    // without a response.
-    ssl.SSL_CTX_set_num_tickets(ctx, 0);
-  }
   return res;
 #endif
 }
@@ -229,14 +355,17 @@ void TLSSession::throwError(int ret, const char* op) {
   }
   auto msg = fmt::format("TCPStore TLS {} failed: {}", op, errorString());
   auto verify = ssl.SSL_get_verify_result(ssl_);
-  if (verify != kX509VOk) {
+  if (verify != kX509VOk && ctx_->psk().empty()) {
     msg += fmt::format(
         " (certificate verify: {})", ssl.X509_verify_cert_error_string(verify));
   }
-  msg +=
-      ". Check that TLS is enabled on both client and server, that each "
-      "certificate is signed by a CA trusted by the peer, and that its "
-      "purpose (extended key usage) allows both serverAuth and clientAuth.";
+  msg += ctx_->psk().empty()
+      ? ". Check that TLS is enabled on both client and server, that each "
+        "certificate is signed by a CA trusted by the peer, that its purpose "
+        "(extended key usage) allows both serverAuth and clientAuth, and that "
+        "both use the same TLS mode (certificate or PSK)."
+      : ". Check that the client and server both use TLS, the same TLS mode "
+        "(certificate or PSK) and the same PSK.";
   C10_THROW_ERROR(DistStoreError, msg);
 }
 

@@ -78,7 +78,7 @@ std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
         if (server != nullptr) {
           TORCH_CHECK_WITH(
               DistStoreError,
-              server->tls_.sameFiles(tls),
+              server->tls_.sameSettings(tls),
               "multi_tenant TCPStore server on port ",
               opts.port,
               " was started with a different TLS configuration");
@@ -292,7 +292,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
         "libuv is the only backend. Remove the option to silence this warning.");
   }
   // Resolved once for the server and connect retries. clone() reuses the
-  // resolved paths but builds a new context.
+  // resolved certificate paths or PSK value but builds a new context.
   auto tls = detail::tlsConfig(opts);
   // Checks the platform, OpenSSL and files before the backend.
   auto clientTls = detail::TLSContext::fromConfig(tls, /*isServer=*/false);
@@ -307,10 +307,13 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     // changes.
     tlsCert_ = "";
   }
-  if (tls.enabled()) {
+  if (!tls.cert.empty()) {
     tlsCert_ = tls.cert;
     tlsKey_ = tls.key;
     tlsCa_ = tls.ca;
+  }
+  if (!tls.psk.empty()) {
+    tlsPsk_ = tls.psk;
   }
 
   Socket::initialize();
@@ -323,6 +326,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
       serverOpts.tlsCert = tlsCert_;
       serverOpts.tlsKey = tlsKey_;
       serverOpts.tlsCa = tlsCa_;
+      serverOpts.tlsPsk = tlsPsk_;
       server_ = detail::TCPServer::start(serverOpts);
       // server successfully started
       C10D_DEBUG("The server has started on port = {}.", server_->port());
@@ -424,6 +428,7 @@ c10::intrusive_ptr<Store> TCPStore::clone() {
   opts.tlsCert = tlsCert_;
   opts.tlsKey = tlsKey_;
   opts.tlsCa = tlsCa_;
+  opts.tlsPsk = tlsPsk_;
 
   return c10::make_intrusive<TCPStore>(addr_.host, opts);
 }
@@ -485,9 +490,9 @@ void TCPStore::ping() {
   if (returnedNonce == detail::tlsRequiredMagicNumber) {
     C10_THROW_ERROR(
         DistStoreError,
-        "Server requires TLS. Set tls_cert, tls_key and tls_ca or "
-        "TORCH_TCPSTORE_TLS_CERT, TORCH_TCPSTORE_TLS_KEY and "
-        "TORCH_TCPSTORE_TLS_CA on the client.");
+        "Server requires TLS. Set tls_cert, tls_key and tls_ca, or tls_psk, "
+        "or the matching TORCH_TCPSTORE_TLS_* environment variables on the "
+        "client.");
   }
   if (nonce != returnedNonce) {
     C10_THROW_ERROR(
