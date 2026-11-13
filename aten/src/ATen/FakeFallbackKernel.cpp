@@ -326,7 +326,7 @@ void fakeFallback(
         if (!impl->is_wrapped_number() &&
             !(t.is_fake() && impl->fake_tensor_mode() == mode) &&
             (*c10::impl::getGlobalPyInterpreter())
-                ->fake_is_unrecognized_subclass(impl)) {
+                ->_check_for_subclass_arg(impl)) {
           unsupported(op, "tensor subclass inputs");
         }
       });
@@ -375,7 +375,7 @@ void fakeFallback(
                             "'allow_non_fake_inputs'");
         }
         return at::Tensor(
-            interpreter->to_meta_tensor(mode, t.getIntrusivePtr()));
+            interpreter->from_real_tensor(mode, t.getIntrusivePtr()));
       });
 
   // Input devices in argument order, paired with whether each is a CPU scalar.
@@ -467,7 +467,7 @@ void fakeFallback(
       }
       const auto resolved =
           (*c10::impl::getGlobalPyInterpreter())
-              ->fake_resolve_device_conflict(op, *common_device, input_device);
+              ->_resolve_device_conflict(op, *common_device, input_device);
       if (resolved == input_device) {
         common_device = input_device;
         common_is_cpu_zero_dim = is_cpu_zero_dim;
@@ -617,7 +617,7 @@ void fakeFallback(
   // kernel. Unlike Python's wrapping, this also changes those retained tensors.
   std::optional<c10::Device> output_common_device;
   std::unordered_set<const c10::TensorImpl*> converted_outputs;
-  auto wrap_output = [&](const at::Tensor& t, bool is_alias) {
+  auto wrap = [&](const at::Tensor& t, bool is_alias) {
     if (!t.defined()) {
       return;
     }
@@ -666,7 +666,7 @@ void fakeFallback(
   for (const auto i : c10::irange(num_returns)) {
     const bool is_alias = schema.returns()[i].alias_info() != nullptr;
     for_each_tensor(stack, returns_begin + i, 1, [&](const at::Tensor& t) {
-      wrap_output(t, is_alias);
+      wrap(t, is_alias);
     });
   }
 }
