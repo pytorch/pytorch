@@ -332,13 +332,13 @@ def _linear_reduce(vals, op):
 
 def _halving_reduce(vals, op):
     # warp_reduce's decreasing offsets: v[i] += v[i + n / 2], then v[i] += v[i + n / 4], ...
+    from .traits import _offsets
+
     v = list(vals)
-    if len(v) & (len(v) - 1):
-        raise ValueError(f"halving needs a power-of-two count, got {len(v)}")
-    half = len(v) // 2
-    while half:
+    if len(v) > WARP:
+        raise ValueError(f"halving takes at most {WARP} values, got {len(v)}")
+    for half in _offsets(len(v), ascending=False):
         v = [op(v[i], v[i + half]) for i in range(half)]
-        half //= 2
     return v[0]
 
 
@@ -446,6 +446,9 @@ def fold_itree_warp(
 _ITREE_STAGE_DEPTH = 1
 
 _ROLL_UNROLL = 4
+# Per-lane accumulators kept by multi-field traits (16-bit Welford would otherwise hold
+# 8 x 3).
+_FIELD_ACCS = 4
 
 
 @cute.jit
@@ -461,13 +464,14 @@ def fold_row_rolled(
 ):
     """Fold row `r` with a runtime loop, clamping and masking tail waves to avoid DSL branches.
 
-    Like ATen's input_vectorized_thread_reduce_impl, vector lane i folds into its own
-    accumulator and the accumulators combine linearly, shortening each serial chain.
-    Multi-field traits keep at most 4 (16-bit Welford would otherwise hold 8 x 3).
+    Vector lane i folds into its own accumulator and the accumulators combine linearly,
+    shortening each serial chain. That resembles ATen's
+    input_vectorized_thread_reduce_impl, but the vector widths, and so the bits, differ.
+    Multi-field traits keep at most _FIELD_ACCS.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     vec = const_expr(tm.vec)
-    nacc = const_expr(vec if trait.nfields == 1 else min(vec, 4))
+    nacc = const_expr(vec if trait.nfields == 1 else min(vec, _FIELD_ACCS))
     accs = tuple(trait.init() for _ in range(nacc))
     threads_per_row = const_expr(tm.threads_per_row)
     gv = cute.flat_divide(mX[Int64(r), None], (vec,))
@@ -514,13 +518,14 @@ def fold_row_aligned(
     the pointer's alignment (reduce_row_tile checks it). TileReduce and reduce_row_tile
     also reject empty rows: one would fold nothing and return trait.init(), which is no
     result for min, max or arg traits. The interior keeps fold_row_rolled's per-lane
-    accumulators; the edges fold into the first, as in ATen.
+    accumulators; lane 0 folds every edge element into the first accumulator, before the
+    interior.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
     n = Int32(tm.N)
     vec = const_expr(tm.vec)
-    nacc = const_expr(vec if trait.nfields == 1 else min(vec, 4))
+    nacc = const_expr(vec if trait.nfields == 1 else min(vec, _FIELD_ACCS))
     threads_per_row = const_expr(tm.threads_per_row)
     rowv = mX[Int64(r), None]
     aligned = rowv.iterator.align(TRANSFER_ALIGNMENT)
@@ -568,6 +573,41 @@ def fold_row_aligned(
 
 
 @cute.jit
+def _fold_tail_vectors(
+    reduce_fn,
+    acc_dt,
+    gv,
+    gfrag,
+    accs,
+    c0,
+    e0,
+    rem,
+    vec: cutlass.Constexpr,
+    group: cutlass.Constexpr,
+    j: cutlass.Constexpr,
+):
+    # If j < rem, fold vector c0 + j (element e0 + j * vec onward) into accumulators
+    # j * vec onward and nest vector j + 1 in that branch, so a short remainder costs
+    # one test past its last vector.
+    if const_expr(j < group - 1):
+        lo = const_expr(j * vec)
+        if Int32(j) < rem:
+            cute.autovec_copy(gv[None, c0 + Int32(j)], gfrag[None, j])
+            accs = (
+                accs[:lo]
+                + tuple(
+                    reduce_fn(accs[lo + i], acc_dt(gfrag[i, j]), e0 + lo + i, True)
+                    for i in range(vec)
+                )
+                + accs[lo + vec :]
+            )
+            accs = _fold_tail_vectors(
+                reduce_fn, acc_dt, gv, gfrag, accs, c0, e0, rem, vec, group, j + 1
+            )
+    return accs
+
+
+@cute.jit
 def fold_linear_rolled(
     trait,
     mX: cute.Tensor,
@@ -580,9 +620,10 @@ def fold_linear_rolled(
 
     Single-field traits fold element e into accumulator e % WARP and combine those like
     warp_reduce: chains of every WARP-th element, then a tree. For rows narrower than
-    128 elements that is ATen's association. Multi-field traits keep fold_row_rolled's
-    per-lane accumulators. `unroll` applies to multi-field traits only; each
-    single-field wave already issues WARP elements of loads.
+    128 elements that is ATen's association. Accumulators past a short row stay at
+    init and combine as identities. Multi-field traits keep fold_row_rolled's per-lane
+    accumulators. `unroll` applies to multi-field traits only; each single-field wave
+    already issues WARP elements of loads.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     gv = cute.flat_divide(mX[Int64(r), None], (vec,))
@@ -590,21 +631,25 @@ def fold_linear_rolled(
         group = const_expr(max(1, WARP // vec))  # vectors per WARP elements
         accs = tuple(trait.init() for _ in range(WARP))
         gfrag = cute.make_rmem_tensor(cute.make_layout((vec, group)), mX.element_type)
-        nwaves = (nchunks + Int32(group - 1)) // Int32(group)
-        for g in cutlass.range(nwaves):
+        full = nchunks // Int32(group)
+        for g in cutlass.range(full):
             c0 = g * Int32(group)
-            # Mask the last wave's vectors past the row; clamped loads stay in range.
-            oks = [c0 + Int32(j) < nchunks for j in range(group)]
             for j in cutlass.range_constexpr(group):
-                c = c0 + Int32(j) if oks[j] else Int32(0)
-                cute.autovec_copy(gv[None, c], gfrag[None, j])
+                cute.autovec_copy(gv[None, c0 + Int32(j)], gfrag[None, j])
             e0 = c0 * vec
-            vals = [acc_dt(gfrag[k % vec, k // vec]) for k in range(WARP)]
             accs = tuple(
-                reduce_fn(accs[k], vals[k], e0 + k, oks[k // vec]) for k in range(WARP)
+                reduce_fn(accs[k], acc_dt(gfrag[k % vec, k // vec]), e0 + k, True)
+                for k in range(WARP)
             )
+        # Every thread in the warp shares N, so these branches are uniform and skip the
+        # loads past the row.
+        last = full * Int32(group)
+        rem = nchunks - last
+        accs = _fold_tail_vectors(
+            reduce_fn, acc_dt, gv, gfrag, accs, last, last * vec, rem, vec, group, 0
+        )
         return _halving_reduce(accs, trait.combine)
-    nacc = const_expr(min(vec, 4))
+    nacc = const_expr(min(vec, _FIELD_ACCS))
     accs = tuple(trait.init() for _ in range(nacc))
     frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
     for c in cutlass.range(nchunks, unroll=unroll):
@@ -723,7 +768,7 @@ def fold_smem_rotated(trait, sX, rb, N: cutlass.Constexpr):
             _streaming_push(tree, leaf, c, N, trait.combine)
         return tree[0]
     vec = const_expr(TRANSFER_ALIGNMENT * 8 // sX.element_type.width)
-    nacc = const_expr(min(N, vec, 4))
+    nacc = const_expr(min(N, vec, _FIELD_ACCS))
     accs = tuple(trait.init() for _ in range(nacc))
     for c in cutlass.range_constexpr(N):
         col = (Int32(c) + rb) & Int32(mask)
