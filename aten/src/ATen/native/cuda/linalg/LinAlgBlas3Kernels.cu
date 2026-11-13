@@ -770,7 +770,7 @@ void lu_batched_panel_recursive(
     // Fallback: nrows > 1024 or nb is larger than what the register-resident kernel requires
     TORCH_CHECK(compute_pivots, "nopiv LU must not reach the pivoting colserial fallback");
     auto grid = dim3(1, 1, batch_count);
-    // Use faster int linearized index in the 1-rank panel updates, if the whole submatrix fits
+    // Use faster int linearized index in the rank-1 panel updates, if the whole submatrix fits
     auto use_32bit_linidx = static_cast<int64_t>(m - col_start) * nb <= std::numeric_limits<int>::max();
     if ((m - col_start) > tuning.panel_threshold) {
       if (use_32bit_linidx) {

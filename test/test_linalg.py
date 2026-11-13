@@ -11776,8 +11776,8 @@ class TestLinalgCudaOnly(TestCase):
             A = buffer
             A.fill_(float("nan"))
             LU, pivots, _ = torch.linalg.lu_factor_ex(A, pivot=pivot)
-            expected_pivots = torch.arange(1, min(r, c) + 2, device=device, dtype=torch.int32)
-            expected_pivots = expected_pivots.unsqueeze(0).expand(b, min(r, c) + 1)
+            expected_pivots = torch.arange(1, A.shape[-1] + 1, device=device, dtype=torch.int32)
+            expected_pivots = expected_pivots.unsqueeze(0).expand(b, A.shape[-1])
             self.assertEqual(pivots, expected_pivots)
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4,
