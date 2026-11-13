@@ -6202,7 +6202,8 @@ def normalize(
         dim (int or tuple of ints): the dimension to reduce. Default: 1
         eps (float, optional): small value to avoid division by zero. If not specified,
             uses the machine epsilon of the norm's dtype, ``torch.finfo(dtype).eps``.
-            Default: ``None``
+            The norm's dtype can differ from the input's, e.g. it is real for complex
+            inputs and float32 under CUDA or XPU autocast. Default: ``None``
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
