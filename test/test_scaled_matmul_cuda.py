@@ -97,6 +97,7 @@ if TEST_CUDA:
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
+mxfp4_cuda_skip_msg = "MXFP4 on CUDA is only supported on SM10x (B200/B300)"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
 cublaslt_fp32_block_skip_msg = "cuBLASLt grouped FP32 block scaling requires SM90 and CUDA 13.4+"
 cublaslt_grouped_mm_skip_msg = "cuBLASLt scaled grouped GEMM requires SM9.x/SM10.x/SM11.x with CUDA 13.4+"
@@ -230,6 +231,17 @@ def _pad_128x128_scales(scale: torch.Tensor) -> (torch.Tensor, int):
 
 def round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
+
+
+def mxfp4_unsupported_on_cuda(device) -> bool:
+    """cuBLAS only implements MXFP4 on SM10x (B200/B300).
+
+    `_check_mxfp4_support` in aten/src/ATen/native/cuda/ScaledBlas.cpp raises
+    NotImplementedError on every other CUDA arch, including SM11x (Thor) and
+    SM12x, even though PLATFORM_SUPPORTS_MX_GEMM is true there. Use it only for
+    tests that actually execute an MXFP4 GEMM.
+    """
+    return "cuda" in str(device) and torch.version.hip is None and not IS_SM10X
 
 
 def mx_swizzle_for(device, mat_dtype) -> SwizzleType:
@@ -2718,8 +2730,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         lambda p: (p['recipe'] == 'nvfp4' or p['recipe'] == 'mxfp4') and p['fast_accum'],
     )
     @decorateIf(
-        unittest.skip('MXFP4 on CUDA only supported on B200/B300'),
-        lambda p: p['recipe'] == 'mxfp4' and IS_SM12X,
+        unittest.skip(mxfp4_cuda_skip_msg),
+        lambda p: p['recipe'] == 'mxfp4' and mxfp4_unsupported_on_cuda(p['device']),
     )
     @decorateIf(
         unittest.skip('fast_accum not supported on XPU, skipping'),
@@ -2750,8 +2762,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
-        if recipe == "mxfp4" and IS_SM12X:
-            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        if recipe == "mxfp4" and mxfp4_unsupported_on_cuda(device):
+            raise unittest.SkipTest(mxfp4_cuda_skip_msg)
         if "xpu" in device:
             if fast_accum:
                 raise unittest.SkipTest("fast_accum not supported on XPU, skipping")
@@ -3309,14 +3321,14 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         lambda p: p['recipe'] == 'nvfp4' and torch.version.hip,
     )
     @decorateIf(
-        unittest.skip('MXFP4 on CUDA only supported on B200/B300'),
-        lambda p: p['recipe'] == 'mxfp4' and IS_SM12X,
+        unittest.skip(mxfp4_cuda_skip_msg),
+        lambda p: p['recipe'] == 'mxfp4' and mxfp4_unsupported_on_cuda(p['device']),
     )
     def test_blockwise_nvfp4_mxfp4_compile(self, device, recipe) -> None:
         if recipe == "nvfp4" and torch.version.hip:
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
-        if recipe == "mxfp4" and IS_SM12X:
-            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        if recipe == "mxfp4" and mxfp4_unsupported_on_cuda(device):
+            raise unittest.SkipTest(mxfp4_cuda_skip_msg)
 
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
