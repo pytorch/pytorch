@@ -14,13 +14,13 @@ Two kernels, picked by (K, N) - see ``flydsl_kernels.py``:
     one ordinal, so distinct NaN payload/index choices can differ from aten.
 
 ``_cond`` also requires a supported dtype on ``_SUPPORTED_ARCHES``, sorted
-output, a contiguous last-axis reduction, one CU-wave of rows, and the input
-(``M * N * itemsize``), values (``M * K * itemsize``), and indices
-(``M * K * 8``) buffers inside the 32-bit span an AMD buffer descriptor
-addresses. Values are not checked separately because every supported dtype is
-at most 4 bytes, so the indices bound is tighter. The N bounds are closed
-intervals - both kernels lose to aten again at large N; anything outside falls
-through.
+output, a contiguous last-axis reduction, enough rows for the kernel/dtype
+performance gate, and the input (``M * N * itemsize``), values
+(``M * K * itemsize``), and indices (``M * K * 8``) buffers inside the 32-bit
+span an AMD buffer descriptor addresses. Values are not checked separately
+because every supported dtype is at most 4 bytes, so the indices bound is
+tighter. The N bounds are closed intervals - both kernels lose to aten again
+at large N; anything outside falls through.
 
 ``self`` is read through ``ConstTensorWrapper`` so a COW input dispatches
 without materialising; writable ``out=`` buffers materialise through
@@ -48,15 +48,53 @@ _SUPPORTED_DTYPES = (
 )
 _REGISTER_KS: frozenset[int] = frozenset({2, 4, 8, 16})
 
-# One (min, max) N range shared by every K in _REGISTER_KS, tuned on MI355.
-_REGISTER_N_BOUNDS: tuple[int, int] = (1024, 8192)
+# Per-dtype inclusive N ranges, tuned on MI355.
+_REGISTER_N_BOUNDS = {
+    torch.float32: (1024, 32768),
+    torch.float16: (4096, 4096),
+    torch.bfloat16: (4096, 4096),
+    torch.int32: (1024, 16384),
+    torch.int16: (4096, 4096),
+    torch.int8: (8192, 32768),
+}
+_REGISTER_MIN_CU_WAVES = {
+    torch.float32: 4,
+    torch.float16: 16,
+    torch.bfloat16: 16,
+    torch.int32: 4,
+    torch.int16: 16,
+    torch.int8: 16,
+}
+_RADIX_MIN_CU_WAVES = 4
 
-# Per-K-range (min, max) N ranges tuned on MI355.
+# Per-K-range, per-dtype inclusive N ranges, tuned on MI355.
 _RADIX_GATE_RANGES = (
-    ((64, 256), (8192, 32768)),
-    ((257, 383), (16384, 32768)),
-    ((384, 831), (32768, 131072)),
-    ((832, 1024), (32768, 262144)),
+    (
+        (64, 256),
+        {
+            torch.float32: (8192, 65536),
+            torch.float16: (32768, 131072),
+            torch.bfloat16: (32768, 131072),
+            torch.int32: (32768, 65536),
+            torch.int16: (32768, 131072),
+            torch.int8: (32768, 131072),
+        },
+    ),
+    (
+        (257, 512),
+        {
+            torch.float32: (16384, 65536),
+            torch.float16: (16384, 262144),
+            torch.bfloat16: (16384, 262144),
+            torch.int32: (16384, 65536),
+            torch.int16: (16384, 262144),
+            torch.int8: (65536, 262144),
+        },
+    ),
+    (
+        (513, 1024),
+        dict.fromkeys(_SUPPORTED_DTYPES, (32768, 524288)),
+    ),
 )
 
 
@@ -70,18 +108,22 @@ def _is_pow2(x: int) -> bool:
     return x > 0 and (x & (x - 1)) == 0
 
 
-def _radix_n_range(k: int) -> tuple[int, int] | None:
-    for (k_min, k_max), n_range in _RADIX_GATE_RANGES:
+def _radix_n_range(
+    k: int, dtype: torch.dtype = torch.float32
+) -> tuple[int, int] | None:
+    for (k_min, k_max), dtype_ranges in _RADIX_GATE_RANGES:
         if k_min <= k <= k_max:
-            return n_range
+            return dtype_ranges.get(dtype)
     return None
 
 
-def _kernel_for(k: int, n: int) -> str | None:
-    register_min, register_max = _REGISTER_N_BOUNDS
-    if k in _REGISTER_KS and _is_pow2(n) and register_min <= n <= register_max:
-        return "register"
-    radix_range = _radix_n_range(k)
+def _kernel_for(k: int, n: int, dtype: torch.dtype = torch.float32) -> str | None:
+    register_range = _REGISTER_N_BOUNDS.get(dtype)
+    if register_range is not None:
+        register_min, register_max = register_range
+        if k in _REGISTER_KS and _is_pow2(n) and register_min <= n <= register_max:
+            return "register"
+    radix_range = _radix_n_range(k, dtype)
     if radix_range is not None and radix_range[0] <= n <= radix_range[1]:
         return "radix"
     return None
@@ -112,10 +154,17 @@ def _eligible(
     M = self.numel() // N if N else 0
     if not _fits_topk_buffer_span(M, N, k, self.element_size()):
         return False
-    # Performance gate: small row counts underutilize CUs, so fall back to ATen.
-    if M < _min_rows_for_full_wave(device_index):
+    kernel = _kernel_for(k, N, self.dtype)
+    if kernel is None:
         return False
-    return _kernel_for(k, N) is not None
+    # Amortize launch and per-row selection work across enough CU-waves.
+    min_rows = _min_rows_for_full_wave(device_index)
+    min_cu_waves = (
+        _RADIX_MIN_CU_WAVES if kernel == "radix" else _REGISTER_MIN_CU_WAVES[self.dtype]
+    )
+    if M < min_rows * min_cu_waves:
+        return False
+    return True
 
 
 def _cond(
@@ -158,7 +207,7 @@ def _run(
     from .flydsl_kernels import topk_radix, topk_register
 
     self_2d = flatten_last_dim(self)
-    kernel = _kernel_for(k, self_2d.shape[-1])
+    kernel = _kernel_for(k, self_2d.shape[-1], self.dtype)
 
     def _launch() -> tuple[torch.Tensor, torch.Tensor]:
         if kernel == "register":
