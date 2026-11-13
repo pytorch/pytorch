@@ -597,9 +597,10 @@ def promote_constants(
     """Convert raw Python scalars and sympy expressions in inputs to IR constants.
 
     When a tensor input is present, scalars become Constants of the tensor's
-    dtype, broadcast to its size. For bf16/fp16 tensors, the scalar value is
-    additionally rounded to the tensor dtype to match eager kernels that cast
-    scalar operands to the common dtype: always for comparison ops
+    dtype, broadcast to its size. For bf16/fp16 tensors (and float8_e5m2, whose
+    conversion saturates infinities), the scalar value is additionally rounded
+    to the tensor dtype to match eager kernels that cast scalar operands to the
+    common dtype: always for comparison ops
     (override_return_dtype == torch.bool) and for callers passing
     round_scalar_constants (e.g. remainder); on CPU and MPS only for ops
     passing round_scalars_to_tensor_dtype (e.g. add/sub, whose CUDA eager
@@ -638,6 +639,7 @@ def promote_constants(
     if tensor_dtype in (
         torch.bfloat16,
         torch.float16,
+        torch.float8_e5m2,
     ) and (
         override_return_dtype == torch.bool
         or round_scalar_constants
@@ -4545,7 +4547,8 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
             return result
 
     elif isinstance(data, (float, int)):
-        if _truncate_fp and isinstance(data, float):
+        # Also float8_e5m2, whose conversion saturates infinities.
+        if (_truncate_fp or dtype == torch.float8_e5m2) and isinstance(data, float):
             data = torch.tensor(data, dtype=dtype).item()
 
         def inner_fn(index):
@@ -4679,6 +4682,9 @@ def _full(fill_value, device, dtype, size):
         value = value.value
 
     if isinstance(value, (int, float)):
+        if dtype == torch.float8_e5m2:
+            # As in eager, whose conversion saturates infinities.
+            value = torch.tensor(value, dtype=dtype).item()
 
         def inner_fn(index):
             return ops.constant(value, dtype)
@@ -5914,6 +5920,9 @@ def constant_pad_nd(x, padding, fill_value=0):
     if len(output_size) != len(sizes):
         raise AssertionError("expected: len(output_size) == len(sizes)")
     fill_value = dtype_to_type(x.get_dtype())(fill_value)
+    if x.get_dtype() == torch.float8_e5m2:
+        # As in eager, whose conversion saturates infinities.
+        fill_value = torch.tensor(fill_value, dtype=x.get_dtype()).item()
 
     def mask(index):
         mask = []

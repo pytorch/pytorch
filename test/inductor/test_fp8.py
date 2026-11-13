@@ -28,6 +28,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCPU,
     onlyCUDA,
     onlyOn,
     preserves_device_selection,
@@ -225,6 +226,39 @@ class TestFP8Types(TestCase):
             actual = torch.compile(fn, fullgraph=True)(t)
         expected = fn(t)
         self.assertEqual(actual, expected)
+
+    @onlyOn(["cpu", "cuda"])
+    def test_float8_e5m2_infinities(self, device):
+        # As in eager: abs keeps infinities, and infinite scalars saturate like
+        # e5m2's conversion.
+        bits = torch.tensor([0x7C, 0xFC, 0x7B, 0x01] * 16, dtype=torch.uint8)
+        x = bits.to(device).view(torch.float8_e5m2).view(8, 8)
+        inf = float("inf")
+
+        def fn(x):
+            pad = torch.nn.functional.pad(x, (1, 1, 1, 0), value=-inf)
+            # A constant tensor of infinities, which constant folding must keep.
+            infs = torch.full_like(x, 0x7C, dtype=torch.uint8).view(x.dtype)
+            return x.abs(), torch.full_like(x, -inf), x.clone().fill_(inf), pad, infs
+
+        torch._dynamo.reset()
+        for actual, expected in zip(torch.compile(fn)(x), fn(x)):
+            self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
+
+    @onlyCPU  # Triton cannot compare float8 values.
+    @config.patch({"cpp.simdlen": 0})  # For the scalar abs too.
+    def test_float8_e5m2_infinities_scalar_cpp(self, device):
+        bits = torch.tensor([0x7C, 0xFC, 0x7B, 0x01], dtype=torch.uint8)
+        x = bits.to(device).view(torch.float8_e5m2)
+
+        def fn(x):
+            return x.abs(), x == float("inf")
+
+        torch._dynamo.reset()
+        actual, eq = torch.compile(fn)(x)
+        expected, expected_eq = fn(x)
+        self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
+        self.assertEqual(eq, expected_eq)
 
     @skipCUDAIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))

@@ -2,6 +2,7 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 import typing
 from collections import Counter
@@ -670,6 +671,10 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 torch.uint32,
                 torch.uint64,
             ):
+                continue
+
+            # aten.full would saturate infinities, like float8_e5m2's conversion.
+            if fake_tensor.dtype == torch.float8_e5m2 and not math.isfinite(value):
                 continue
 
             if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
