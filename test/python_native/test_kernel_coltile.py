@@ -108,7 +108,9 @@ class TestKernelColTile(TestCase):
             torch.float32,
             npar=1,
         )
-        self.assertEqual(out, x.sum(dim=0), atol=1e-2, rtol=1e-2)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=0)
+        self.assertEqual(out, want, atol=1e-2, rtol=1e-2)
 
     def test_plans_key_and_require_the_current_device(self):
         trait = T.SumOps(acc=cutlass.Float32)
@@ -133,7 +135,9 @@ class TestKernelColTile(TestCase):
         out = ct.reduce_col_tile(
             T.MeanOps(acc=cutlass.Float32), "smoke_split", x, torch.float32
         )
-        torch.testing.assert_close(out, x.mean(dim=0), atol=1e-3, rtol=1e-3)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.mean(dim=0)
+        torch.testing.assert_close(out, want, atol=1e-3, rtol=1e-3)
 
     def test_stage2_combine_body(self):
         # Only wide, split inputs select the otherwise untested shared combine body.
@@ -1201,7 +1205,9 @@ class TestOrderedColDevice(TestCase):
             got = ct.reduce_ordered_col(
                 trait, "ordered_reuse", x, [torch.float32], 1, config=_FIXED
             )
-            self.assertEqual(got[0], x.sum(dim=1), atol=1e-4, rtol=1e-4)
+            with torch.backends.python_native.cutedsl.disabled():
+                want = x.sum(dim=1)
+            self.assertEqual(got[0], want, atol=1e-4, rtol=1e-4)
         keys = [k for k in ct._CACHE if k[:2] == ("ordered_col", "ordered_reuse")]
         self.assertEqual(len(keys), 1)
 
@@ -1212,7 +1218,8 @@ class TestOrderedColDevice(TestCase):
         trait = T.SumOps(acc=cutlass.Float32)
         got = ct.reduce_ordered_col(trait, "ordered_wide", x, [torch.float32], 1)
         self.assertIsNotNone(got)
-        want = x.sum(dim=0, dtype=torch.float32)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=0, dtype=torch.float32)
         self.assertEqual(got[0], want, atol=1e-2, rtol=1e-3)
 
     @largeTensorTest("8GB", device="cuda")
@@ -1228,7 +1235,8 @@ class TestOrderedColDevice(TestCase):
         for b in range(3):
             want = ct.reduce_ordered_col(trait, "ordered_batch_offsets", x[b], f32, 1)
             self.assertEqual(got[0][b].view(torch.uint8), want[0].view(torch.uint8))
-        want = x.sum(dim=1, dtype=torch.float32)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=1, dtype=torch.float32)
         self.assertEqual(got[0], want, atol=1e-2, rtol=1e-3)
 
     def _reduce(self, device, trait, key, x, dim, outputs, *, route):
@@ -1247,7 +1255,9 @@ class TestOrderedColDevice(TestCase):
         return got, any(tag.startswith("ordered_col") for tag in tags)
 
     def _assert_torch_refs(self, name, got, x):
-        for g, ref in zip(got, _TORCH_REFS[name](x), strict=True):
+        with torch.backends.python_native.cutedsl.disabled():
+            refs = _TORCH_REFS[name](x)
+        for g, ref in zip(got, refs, strict=True):
             tol = _TOL.get(g.dtype, {"atol": 0, "rtol": 0})
             if name in _EXACT_REFS:
                 tol = {"atol": 0, "rtol": 0}
@@ -1369,7 +1379,9 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNone(ct.reduce_ordered_col(trait, "narrow", x, f32, 1))
         (got,), served = self._reduce(device, trait, "narrow", x, 1, f32, route=True)
         self.assertFalse(served)
-        self.assertEqual(got, x.sum(dim=1), atol=1e-4, rtol=1e-4)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=1)
+        self.assertEqual(got, want, atol=1e-4, rtol=1e-4)
 
     def test_unmeasured_dtypes_stay_on_the_indexed_tree(self, device):
         x = torch.randn(16, 128, 128, device=device, dtype=torch.float64)
@@ -1388,7 +1400,9 @@ class TestOrderedColDevice(TestCase):
         with mock.patch.object(ct, "_INT32_LIMIT", 16 * 128 + 32):
             got, served = self._reduce(device, trait, "declined", x, 1, f32, route=True)
         self.assertFalse(served)
-        self.assertEqual(got[0], x.sum(dim=1), atol=1e-4, rtol=1e-4)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=1)
+        self.assertEqual(got[0], want, atol=1e-4, rtol=1e-4)
 
     def test_unservable_views_decline(self, device):
         """Decline strided, rank-4, multirow and Int32-overflowing views."""

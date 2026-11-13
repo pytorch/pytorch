@@ -274,7 +274,7 @@ An example of an implementation of this spec can be found in [cutedsl_utils.py](
 
 ## Registration Orders and You
 
-Currently the registration order (both in general and per-op) is set by the order of imports in `torch/_native/ops/__init__.py`, noting that registration acts as a stack, in that **the last registered override for an op is the first that will be called**. If you wish to exercise control of the override ordering, please utilize one of the methods below.
+Currently the registration order (both in general and per-op) is set by the order of imports in `torch/_native/ops/__init__.py`, noting that overrides for an op are tried in registration order, so **the first registered override whose condition matches is the one called**. If you wish to exercise control of the override ordering, please utilize one of the methods below.
 
 ### User-Ordering Functions
 
