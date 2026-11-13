@@ -36,6 +36,7 @@ import os
 import re
 import struct
 import sys
+import sysconfig
 import textwrap
 import threading
 import time
@@ -3272,8 +3273,17 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
+_ORDERED_DICT_MUTATIONS_LOCKED = sys.version_info >= (3, 14, 1) or not bool(
+    sysconfig.get_config_var("Py_GIL_DISABLED")
+)
+
+
 class InvalidOrderedDict(ValueError):
     """An OrderedDict's storage and linked keys cannot form one snapshot."""
+
+
+class UnsupportedOrderedDictRuntime(InvalidOrderedDict):
+    """The runtime cannot safely snapshot this OrderedDict."""
 
 
 def enumerate_items_with_dict_position(
@@ -3288,6 +3298,21 @@ def enumerate_items_with_dict_position(
     with PyDict_Next / C++ DictGuardManager.
     """
     if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
+        if sys.version_info >= (3, 16):
+            raise UnsupportedOrderedDictRuntime(
+                "Native OrderedDict snapshots do not support Python 3.16+"
+            )
+        if not _ORDERED_DICT_MUTATIONS_LOCKED:
+            # Check both storage and linked emptiness without dereferencing any node.
+            if (
+                torch._C._dynamo.guards.ordered_dict_keys(obj, empty_only=True)
+                is not None
+            ):
+                return iter(())
+            # Older free-threaded deletion can free nodes outside the dictionary lock.
+            raise UnsupportedOrderedDictRuntime(
+                "Nonempty OrderedDict snapshots require Python 3.14.1+ on free-threaded builds"
+            )
         items = list(dict.items(obj))
         keys = torch._C._dynamo.guards.ordered_dict_keys(obj)
         positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
