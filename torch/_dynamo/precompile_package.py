@@ -1377,6 +1377,7 @@ def _object_identity(value: object) -> str:
 # never drops one, and the report compares them across variants.
 _SHAPE_BEARING_GUARD_TYPES = frozenset(
     {
+        "BUILTIN_METHOD_RECEIVER_ALIAS",
         "BOOL_MATCH",
         "CONSTANT_MATCH",
         "CONSTANT_SUBCLASS_MATCH",

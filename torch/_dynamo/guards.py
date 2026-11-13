@@ -67,6 +67,7 @@ from torch._C._dynamo.guards import (
     GuardDebugInfo,
     GuardManager,
     install_no_tensor_aliasing_guard,
+    install_object_alias_pattern_guard,
     install_object_aliasing_guard,
     install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
@@ -190,6 +191,7 @@ from .source import (
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
+    SkipGuardSource,
     SubclassAttrListSource,
     TorchFunctionModeStackSource,
     TupleIteratorGetItemSource,
@@ -485,45 +487,49 @@ class GuardManagerWrapper:
         # 0, so we collect them as well. Later on, we accumulate the diff guard
         # sources for all the guard managers.
 
-        def visit_dict_manager(node: DictGuardManager) -> bool:
-            is_diff_guard_node = (
-                node.get_source() in self.diff_guard_sources or node.fail_count() > 0
-            )
-            for _idx, (key_mgr, val_mgr) in sorted(
-                node.get_key_value_managers().items()
-            ):
-                is_diff_guard_node |= visit(key_mgr) | visit(val_mgr)
+        # A relational check needs all participants, including their access paths.
+        # This closure applies only to unsafe diff selection, not explicit filters.
+        parents: dict[str, OrderedSet[str]] = {}
+        groups: dict[int, OrderedSet[str]] = {}
+        source_groups: dict[str, list[int]] = {}
 
-            if is_diff_guard_node:
-                self.diff_guard_sources.add(node.get_source())
-
-            return is_diff_guard_node
-
-        def visit_manager(node: GuardManager) -> bool:
+        def visit(node: GuardManager, parent: str | None = None) -> None:
+            source = node.get_source()
+            if parent is not None:
+                parents.setdefault(source, OrderedSet()).add(parent)
+            if node.fail_count() > 0:
+                self.diff_guard_sources.add(source)
+            for guard in node.get_leaf_guards():
+                if isinstance(guard, RelationalGuard):
+                    group = guard.get_group_id()
+                    groups.setdefault(group, OrderedSet()).add(source)
+                    source_groups.setdefault(source, []).append(group)
             if isinstance(node, DictGuardManager):
-                raise AssertionError(
-                    f"Expected non-DictGuardManager node, got {type(node)}"
-                )
-
-            is_diff_guard_node = (
-                node.get_source() in self.diff_guard_sources or node.fail_count() > 0
-            )
-            for child_mgr in node.get_child_managers():
-                is_diff_guard_node |= visit(child_mgr)
-
-            if is_diff_guard_node:
-                self.diff_guard_sources.add(node.get_source())
-
-            return is_diff_guard_node
-
-        def visit(node: GuardManager) -> bool:
-            if node is None:
-                return False
-            if isinstance(node, DictGuardManager):
-                return visit_dict_manager(node)
-            return visit_manager(node)
+                children = [
+                    manager
+                    for pair in node.get_key_value_managers().values()
+                    for manager in pair
+                    if manager is not None
+                ]
+            else:
+                children = node.get_child_managers()
+            for child in children:
+                visit(child, source)
 
         visit(self.root)
+        pending = list(self.diff_guard_sources)
+        retained_groups: set[int] = set()
+        while pending:
+            source = pending.pop()
+            dependencies = OrderedSet(parents.get(source, ()))
+            for group in source_groups.get(source, ()):
+                if group not in retained_groups:
+                    retained_groups.add(group)
+                    dependencies.update(groups[group])
+            for dependency in dependencies:
+                if dependency not in self.diff_guard_sources:
+                    self.diff_guard_sources.add(dependency)
+                    pending.append(dependency)
 
         return self.diff_guard_sources
 
@@ -997,6 +1003,14 @@ def uninteresting_files() -> set[str]:
     return {inspect.getfile(m) for m in mods}
 
 
+def _receiver_alias_pattern(receivers: tuple[object, ...]) -> tuple[int, ...]:
+    positions: dict[int, int] = {}
+    return tuple(
+        positions.setdefault(id(receiver), index)
+        for index, receiver in enumerate(receivers)
+    )
+
+
 _CLOSURE_VARS: dict[str, object] | None = None
 
 
@@ -1005,6 +1019,7 @@ def _get_closure_vars() -> dict[str, object]:
     if _CLOSURE_VARS is None:
         _CLOSURE_VARS = {
             "___check_type_id": check_type_id,
+            "___receiver_alias_pattern": _receiver_alias_pattern,
             "___check_obj_id": check_obj_id,
             "___odict_getitem": collections.OrderedDict.__getitem__,
             "___key_to_id": key_to_id,
@@ -1962,6 +1977,9 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def get_guard_manager_from_source(self, source: Source) -> GuardManager:
+        if isinstance(source, SkipGuardSource):
+            # A relational check can depend on a skipped source without guarding it alone.
+            return self.get_guard_manager_from_source(source.base)
         root_guard_manager = self.guard_manager.root
 
         example_value = None
@@ -3745,6 +3763,27 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @skip_guard_check_spec
+    def BUILTIN_METHOD_RECEIVER_ALIAS(
+        self, guard: Guard, sources: tuple[Source, ...], aliases: tuple[int, ...]
+    ) -> None:
+        aliases = tuple(aliases)
+        if self.save_guards:
+            for source in sources:
+                if name := get_local_source_name(source):
+                    self.check_fn_manager.additional_used_local_vars.add(name)
+                if name := get_global_source_name(source):
+                    self.check_fn_manager.additional_used_global_vars.add(name)
+        refs = ", ".join(self.arg_ref(source.name) for source in sources)
+        code = [f"___receiver_alias_pattern(({refs},)) == {aliases!r}"]
+        self._set_guard_export_info(guard, code)
+        install_object_alias_pattern_guard(
+            [self.get_guard_manager_from_source(source) for source in sources],
+            aliases,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
 
     # Multi-source guard (two inputs aliasing) — not expressible as a
@@ -7367,8 +7406,17 @@ def update_diff_guard_managers_for_existing_cache_entries(
             cache_entry.guard_manager.collect_diff_guard_sources()
         )
 
-    # On the second pass, set the diff_guard_sources for each cache line to the
-    # accumulated value. And the re-populate the diff guard manager.
+    # A source imported from another cache entry can add relational partners.
+    # Close the shared set before cloning any tree, including transitive groups.
+    while True:
+        previous_size = len(acc_diff_guard_sources)
+        for cache_entry in cache_entries:
+            cache_entry.guard_manager.diff_guard_sources = acc_diff_guard_sources
+            cache_entry.guard_manager.collect_diff_guard_sources()
+        if len(acc_diff_guard_sources) == previous_size:
+            break
+
+    # Rebuild each cache line using the complete shared source set.
     for cache_entry in cache_entries:
         cache_entry.guard_manager.diff_guard_sources = acc_diff_guard_sources
         cache_entry.guard_manager.populate_diff_guard_manager()
