@@ -4,9 +4,15 @@ Tests that torch.compile preserves the IndexError exception contract for
 out-of-range dimension/index arguments, matching eager-mode behavior.
 """
 
+import contextlib
+
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 OPS = [
@@ -19,6 +25,16 @@ OPS = [
     ("cat", lambda t: torch.cat([t], dim=99)),
     ("stack", lambda t: torch.stack([t], dim=99)),
 ]
+
+
+# Ops whose out-of-range argument is rejected during fake tensor propagation.
+FAKE_PROP_OPS = {
+    "getitem": lambda t: t[10],
+    "select": lambda t: t.select(0, 10),
+    "sum": lambda t: t.sum(dim=5),
+    "transpose": lambda t: t.transpose(0, 5),
+}
+OUT_OF_RANGE_MSG = "out of (range|bounds)"
 
 
 class TestIndexErrorContract(TestCase):
@@ -89,6 +105,121 @@ class TestConstantFoldedExceptionContract(TestCase):
             return "no error"
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+
+@instantiate_parametrized_tests
+class TestIndexErrorUserHandlers(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _check(self, fn, *args):
+        expected = fn(*args)
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(*args), expected)
+
+    @parametrize("op_name", list(FAKE_PROP_OPS))
+    def test_except_index_error(self, op_name):
+        op = FAKE_PROP_OPS[op_name]
+
+        def fn(x):
+            try:
+                return op(x)
+            except IndexError as e:
+                return str(e)
+
+        self._check(fn, torch.ones(3, 4))
+
+    @parametrize("exc_type", [Exception, LookupError], name_fn=lambda t: t.__name__)
+    def test_except_base_classes(self, exc_type):
+        def fn(x):
+            try:
+                return x[10]
+            except exc_type as e:
+                return type(e).__name__
+
+        self._check(fn, torch.ones(3, 4))
+
+    def test_unused_result(self):
+        def fn(x):
+            try:
+                x.sum(dim=5)
+            except IndexError:
+                return x + 1
+            return x
+
+        self._check(fn, torch.ones(3, 4))
+
+    def test_suppress(self):
+        def fn(x):
+            with contextlib.suppress(IndexError):
+                return x.sum(dim=5)
+            return x + 1
+
+        self._check(fn, torch.ones(3, 4))
+
+    def test_finally_then_except(self):
+        def fn(x):
+            log = []
+            try:
+                try:
+                    return x.sum(dim=5)
+                finally:
+                    log.append("finally")
+            except IndexError:
+                log.append("except")
+                return log
+
+        self._check(fn, torch.ones(3, 4))
+
+    def test_handler_in_caller_of_inlined_function(self):
+        def inner(t):
+            return t.sum(dim=6)
+
+        def fn(x):
+            try:
+                return inner(x)
+            except IndexError:
+                return x + 1
+
+        self._check(fn, torch.ones(3, 4))
+
+    def test_unrelated_handler_does_not_catch(self):
+        def fn(x):
+            try:
+                return x.sum(dim=5)
+            except RuntimeError:
+                return x + 1
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            compiled(torch.ones(3, 4))
+
+    def test_unrelated_handler_fullgraph_is_unsupported(self):
+        # Like any other observed exception that is re-raised out of a handler,
+        # this cannot be raised as-is from the compiled region under fullgraph.
+        def fn(x):
+            try:
+                return x.sum(dim=5)
+            except RuntimeError:
+                return x + 1
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            compiled(torch.ones(3, 4))
+
+    @parametrize("op_name", list(FAKE_PROP_OPS))
+    @parametrize("fullgraph", [False, True])
+    def test_unhandled_preserves_index_error(self, op_name, fullgraph):
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            FAKE_PROP_OPS[op_name], backend="eager", fullgraph=fullgraph
+        )
+        with self.assertRaisesRegex(IndexError, OUT_OF_RANGE_MSG):
+            compiled(torch.ones(3, 4))
 
 
 if __name__ == "__main__":
