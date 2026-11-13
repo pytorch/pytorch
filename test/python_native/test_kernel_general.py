@@ -250,6 +250,25 @@ class TestKernelGeneral(TestCase):
     @unittest.skipIf(
         rt.inner_tree_order_enabled(), "requires unordered reduction order"
     )
+    def test_broadcast_split_fp32_error_is_no_worse_than_aten(self):
+        """Split a broadcast run with no more fp64-relative fp32 error than ATen, summed
+        over a few seeds."""
+        trait = T.SumOps(acc=cutlass.Float32)
+        ours = aten = 0.0
+        for seed in range(8):
+            gen = torch.Generator("cuda").manual_seed(seed)
+            x = torch.randn(8, 1, 257, device="cuda", generator=gen).expand(8, 33, 257)
+            got = kg.reduce_dim(trait, "broadcast_split", x, [1, 2], torch.float32)
+            with torch.backends.python_native.cutedsl.disabled():
+                ref = x.sum((1, 2))
+            want = x.double().sum((1, 2))
+            ours += (got.double() - want).abs().mean().item()
+            aten += (ref.double() - want).abs().mean().item()
+        self.assertLessEqual(ours, aten, f"CuTeDSL {ours:.3e} vs ATen {aten:.3e}")
+
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
     def test_reduce_all2_route(self):
         """Route one-element two-output reductions through reduce_all2."""
         x = torch.randn(1, 65537, device="cuda")
@@ -958,6 +977,23 @@ class TestKernelGeneral(TestCase):
             want, fresh_want = x.sum(dim=1), fresh.sum(dim=1)
         self.assertEqual(out, want)
         self.assertEqual(replay(fresh)[0], fresh_want)
+
+    def test_replay_keeps_a_cow_input_shared(self):
+        # The recording comes from a plain input; the replay must still not materialize x.
+        trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        base = torch.randn(64, 256, device="cuda")
+        kg.replay_reduce(trait, "replay_cow", base, 1, torch.float32)
+        x = torch._lazy_clone(base)
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
+        ptr = x.const_data_ptr()
+        with _replays_only(self):
+            got = kg.replay_reduce(trait, "replay_cow", x, 1, torch.float32)
+        self.assertTrue(torch._C._is_cow_tensor(x))
+        self.assertEqual(x.const_data_ptr(), ptr)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = base.sum(dim=1)
+        self.assertEqual(got, want)
 
     @unittest.skipIf(
         rt.inner_tree_order_enabled(), "requires unordered reduction order"

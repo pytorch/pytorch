@@ -177,7 +177,7 @@ class TestNativeUtils(TestCase):
         # An input on the current device skips the context; any other input enters it.
         for current, want in ((index, []), (index + 1, [index])):
             with (
-                patch.object(torch.cuda, "current_device", return_value=current),
+                patch.object(torch._C, "_cuda_getDevice", return_value=current),
                 patch.object(torch.cuda, "device", device),
             ):
                 self.assertIs(guarded(x), x)
