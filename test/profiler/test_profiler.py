@@ -1170,6 +1170,95 @@ class TestProfiler(TestCase):
             )
         )
 
+    @parametrize("active_steps", [0, 1, 2])
+    def test_python_stack_active_steps(self, active_steps):
+        traces = []
+
+        def on_trace_ready(p):
+            with TemporaryFileName(mode="w+") as fname:
+                p.export_chrome_trace(fname)
+                with open(fname) as f:
+                    traces.append(json.load(f))
+
+        with profile(
+            activities=[ProfilerActivity.CPU],
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=2),
+            on_trace_ready=on_trace_ready,
+            with_stack=True,
+            experimental_config=_ExperimentalConfig(
+                python_stack_active_steps=active_steps
+            ),
+        ) as p:
+            for _ in range(10):
+                torch.ones(8, 8).sin()
+                p.step()
+
+        self.assertEqual(len(traces), 2)
+        for trace in traces:
+            events = trace["traceEvents"]
+            step_start = {
+                int(e["name"].split("#")[1]): e["ts"]
+                for e in events
+                if e.get("name", "").startswith("ProfilerStep#")
+            }
+            first_step, last_step = min(step_start), max(step_start)
+            python_events = [e for e in events if e.get("cat") == "python_function"]
+            # CPU op collection continues for the whole active window.
+            self.assertTrue(
+                any(
+                    e.get("cat") == "cpu_op" and e["ts"] >= step_start[last_step]
+                    for e in events
+                )
+            )
+            if active_steps == 0:
+                self.assertNotIn("python_stack_steps", trace)
+                self.assertTrue(
+                    any(e["ts"] >= step_start[last_step] for e in python_events)
+                )
+                continue
+            pause_step = first_step + active_steps
+            self.assertEqual(
+                trace["python_stack_steps"],
+                {"first": first_step, "last": pause_step - 1},
+            )
+            self.assertTrue(
+                any(
+                    step_start[first_step] <= e["ts"] < step_start[pause_step]
+                    for e in python_events
+                )
+            )
+            self.assertLessEqual(
+                max(e["ts"] + e["dur"] for e in python_events),
+                step_start[pause_step],
+            )
+
+    def test_python_stack_active_steps_open_op_keeps_session_end(self):
+        # An op still running when the profiler stops ends at the session end in
+        # events(), as in the exported trace, even though Python frames around it
+        # are closed earlier.
+        results = []
+        with profile(
+            activities=[ProfilerActivity.CPU],
+            schedule=torch.profiler.schedule(wait=0, warmup=1, active=3),
+            on_trace_ready=lambda p: results.append(p.events()),
+            with_stack=True,
+            experimental_config=_ExperimentalConfig(python_stack_active_steps=1),
+        ) as p:
+            p.step()
+            rf = record_function("open_across_pause")
+            rf.__enter__()
+            for _ in range(3):
+                torch.ones(8, 8).sin()
+                p.step()
+            rf.__exit__(None, None, None)
+
+        self.assertEqual(len(results), 1)
+        (op,) = [e for e in results[0] if e.name == "open_across_pause"]
+        others = [e for e in results[0] if e.name != "open_across_pause"]
+        self.assertGreaterEqual(
+            op.time_range.end, max(e.time_range.end for e in others)
+        )
+
     def test_profiler_op_event_args(self):
         torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
         with _profile(record_shapes=True) as prof:

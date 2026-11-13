@@ -1329,6 +1329,9 @@ class profile(_KinetoProfile):
         self.on_trace_ready = on_trace_ready
         self.step_num = 0
         self.step_rec_fn: prof.record_function | None = None
+        # Step at which the current trace started recording Python stacks; None
+        # when no trace is recording them (or they were already paused).
+        self._python_stack_start_step: int | None = None
 
         schedule_action = self.schedule(self.step_num)
         if schedule_action == ProfilerAction.DEVICE_STOPPED:
@@ -1562,6 +1565,7 @@ class profile(_KinetoProfile):
             self.current_action = ProfilerAction.DEVICE_STOPPED
 
         self._transit_action(prev_action, self.current_action)
+        self._maybe_stop_python_tracer()
         if os.environ.get("KINETO_USE_DAEMON", "") or (
             is_fbcode() and os.environ.get("KINETO_FORCE_STEP_HOOK", "")
         ):
@@ -1587,6 +1591,34 @@ class profile(_KinetoProfile):
         if self.profiler is None:
             return None
         return self.profiler.trace_id
+
+    def start_trace(self) -> None:
+        super().start_trace()
+        self._python_stack_start_step = self.step_num if self.with_stack else None
+
+    def _maybe_stop_python_tracer(self) -> None:
+        """Stop Python stack tracing once the current trace has recorded
+        ``experimental_config.python_stack_active_steps`` active steps."""
+        start = self._python_stack_start_step
+        active_steps = (
+            self.experimental_config.python_stack_active_steps
+            if self.experimental_config is not None
+            else 0
+        )
+        if (
+            start is None
+            or active_steps <= 0
+            or self.step_num - start < active_steps
+            or self.current_action
+            not in (ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE)
+        ):
+            return
+        torch._C._autograd._stop_python_tracer()
+        self.add_metadata_json(
+            "python_stack_steps",
+            json.dumps({"first": start, "last": self.step_num - 1}),
+        )
+        self._python_stack_start_step = None
 
     def _finalize_trace(self) -> None:
         with _WaitCounter("pytorch.wait_counter.profiler.trace_finalization").guard():
