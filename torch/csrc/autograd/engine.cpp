@@ -1125,6 +1125,21 @@ static variable_list call_function(
       });
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
+  // Run the node, including its hooks, under the deterministic algorithms
+  // override of its forward op, if it had one; otherwise keep the policy of
+  // the thread that called backward(). See
+  // Note [Scoped deterministic algorithms].
+  const auto node_override = fn.deterministic_algorithms_override();
+  const auto previous_override = at::getDeterministicAlgorithmsOverride();
+  if (node_override) {
+    at::setDeterministicAlgorithmsOverride(node_override);
+  }
+  auto restore_override =
+      c10::make_scope_exit([&node_override, &previous_override]() {
+        if (node_override) {
+          at::setDeterministicAlgorithmsOverride(previous_override);
+        }
+      });
   auto inputs =
       call_tensor_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
   inputs = call_pre_hooks(fn, std::move(inputs));

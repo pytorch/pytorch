@@ -766,6 +766,11 @@ struct GlobalStateGuard {
     _torch_function_all_disabled = at::impl::torch_function_all_disabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
+    // Under an override, the global setter does not change the resolved
+    // setting, so a traced setter-then-getter is only valid for the same
+    // override state.
+    _deterministic_algorithms_override_set =
+        at::getDeterministicAlgorithmsOverride().has_value();
     _cuda_matmul_precision =
         ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL);
     _uses_legacy_allow_tf32 = false;
@@ -795,6 +800,8 @@ struct GlobalStateGuard {
             _deterministic_algorithms == ctx.deterministicAlgorithms() &&
             _deterministic_algorithms_warn_only ==
                 ctx.deterministicAlgorithmsWarnOnly() &&
+            _deterministic_algorithms_override_set ==
+                at::getDeterministicAlgorithmsOverride().has_value() &&
             cudaMatmulPrecisionMatches(ctx) &&
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
@@ -816,6 +823,9 @@ struct GlobalStateGuard {
     if (_deterministic_algorithms_warn_only !=
         ctx.deterministicAlgorithmsWarnOnly())
       os << "deterministic_algorithms_warn_only ";
+    if (_deterministic_algorithms_override_set !=
+        at::getDeterministicAlgorithmsOverride().has_value())
+      os << "deterministic_algorithms_override ";
     if (!cudaMatmulPrecisionMatches(ctx))
       os << "cuda_matmul_precision ";
     if (_allow_fp16_reduce != ctx.allowFP16ReductionCuBLAS())
@@ -838,6 +848,8 @@ struct GlobalStateGuard {
     json_j["deterministic_algorithms"] = json_t._deterministic_algorithms;
     json_j["deterministic_algorithms_warn_only"] =
         json_t._deterministic_algorithms_warn_only;
+    json_j["deterministic_algorithms_override_set"] =
+        json_t._deterministic_algorithms_override_set;
     if (json_t._uses_legacy_allow_tf32) {
       json_j["allow_tf32"] =
           json_t._cuda_matmul_precision == at::Float32Precision::TF32;
@@ -869,6 +881,9 @@ struct GlobalStateGuard {
     json_t._deterministic_algorithms = json_j.at("deterministic_algorithms");
     json_t._deterministic_algorithms_warn_only =
         json_j.at("deterministic_algorithms_warn_only");
+    json_t._deterministic_algorithms_override_set =
+        json_j.contains("deterministic_algorithms_override_set") &&
+        json_j.at("deterministic_algorithms_override_set").template get<bool>();
     if (json_j.contains("cuda_matmul_precision")) {
       json_t._cuda_matmul_precision = static_cast<at::Float32Precision>(
           static_cast<int64_t>(json_j.at("cuda_matmul_precision")));
@@ -894,6 +909,7 @@ struct GlobalStateGuard {
   bool _torch_function_all_disabled;
   bool _deterministic_algorithms;
   bool _deterministic_algorithms_warn_only;
+  bool _deterministic_algorithms_override_set;
   at::Float32Precision _cuda_matmul_precision;
   bool _uses_legacy_allow_tf32;
   at::CuBLASReductionOption _allow_fp16_reduce;

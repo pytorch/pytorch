@@ -2953,9 +2953,13 @@ class DeterministicGuard:
 
     @classmethod
     def _current_state(cls):
+        # Snapshot the process-wide default, which _update sets, rather than
+        # the resolved setting: restoring an active torch.deterministic_policy
+        # scope's setting would leak it into the process default.
+        deterministic, warn_only = torch._C._get_deterministic_algorithms_default()
         return cls(
-            torch.are_deterministic_algorithms_enabled(),
-            warn_only=torch.is_deterministic_algorithms_warn_only_enabled(),
+            deterministic,
+            warn_only=warn_only,
             fill_uninitialized_memory=torch.utils.deterministic.fill_uninitialized_memory,  # type: ignore[attr-defined]
         )
 

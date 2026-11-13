@@ -3706,7 +3706,7 @@ class SIMDScheduling(BaseScheduling):
 
         # The autotuning is skipped in deterministic mode
         if (
-            not torch._inductor.config.deterministic
+            not torch._inductor.config.deterministic_mode_enabled()
             and config.triton.mix_order_reduction_split_size is None
             and not kernel.fixed_config
             and (
@@ -5609,7 +5609,7 @@ class SIMDScheduling(BaseScheduling):
                 deterministic_compile_time_fallback = (
                     per_subkernel_blocks
                     and config.combo_kernel_compile_time_autotune
-                    and config.deterministic
+                    and config.deterministic_mode_enabled()
                 )
                 if (
                     enable_autotune

@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/utils/python_stub.h>
 
+#include <ATen/Context.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/SequenceNumber.h>
 #include <ATen/core/Tensor.h>
@@ -15,11 +16,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-
-#ifdef USE_ROCM
-// For at::ROCmBackwardPassGuard
-#include <ATen/Context.h>
-#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -149,6 +145,10 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
     // Store the thread_id of the forward operator.
     // See NOTE [ Sequence Numbers ]
     thread_id_ = at::RecordFunction::currentThreadId();
+
+    // See Note [Scoped deterministic algorithms]
+    deterministic_algorithms_override_ =
+        at::getDeterministicAlgorithmsOverride();
   }
 
   explicit Node(edge_list&& next_edges = edge_list())
@@ -260,6 +260,11 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
    * elements are on different devices (across multiple GPUs, for example)
    * they may have different streams.
    */
+  std::optional<at::DeterministicAlgorithmsSetting>
+  deterministic_algorithms_override() const {
+    return deterministic_algorithms_override_;
+  }
+
   std::optional<c10::Stream> stream() {
     auto opt_device_type = at::getAccelerator();
     if (!opt_device_type.has_value()) {
@@ -662,6 +667,12 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   // See node_creation_hooks_fired() above. Placed next to has_parent_ so it
   // packs into the padding before thread_id_.
   bool node_creation_hooks_fired_ = false;
+
+  // The deterministic algorithms override of the thread that created this
+  // node; the engine applies it while running the node. Also packs into the
+  // padding before thread_id_.
+  std::optional<at::DeterministicAlgorithmsSetting>
+      deterministic_algorithms_override_;
 
   // Id of the thread that created the instance
   uint64_t thread_id_ = 0;

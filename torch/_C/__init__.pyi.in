@@ -1229,6 +1229,15 @@ def _set_deterministic_algorithms(
     *,
     warn_only: _bool = ...,
 ) -> None: ...  # THPModule_setDeterministicAlgorithms
+def _get_deterministic_algorithms_default() -> (
+    tuple[_bool, _bool]
+): ...  # THPModule_deterministicAlgorithmsDefault
+def _get_deterministic_algorithms_override() -> (
+    tuple[_bool, _bool] | None
+): ...  # THPModule_deterministicAlgorithmsOverride
+def _set_deterministic_algorithms_override(
+    arg: tuple[_bool, _bool] | None,
+) -> None: ...  # THPModule_setDeterministicAlgorithmsOverride
 def _get_deterministic_fill_uninitialized_memory() -> (
     _bool
 ): ...  # THPModule_deterministicFillUninitializedMemory

@@ -220,6 +220,9 @@ class _WireProtocolInput:
     deterministic_guard_for_testing: (  # type: ignore[name-defined]  # mypy bug
         torch.testing._internal.common_utils.DeterministicGuard | None
     )
+    # The parent thread's resolved (mode, warn_only) deterministic setting,
+    # which codegen reads through torch.are_deterministic_algorithms_enabled().
+    deterministic_algorithms: tuple[bool, bool]
     logger_state: _LoggerState
     lowering: _LoweringSerializer
     fake_tensor_mode: _FakeTensorModeSerializer
@@ -528,6 +531,10 @@ class _SerializedFxCompile(FxCompile):
                 },
                 _VirtualizedSerializer.serialize(),
                 deterministic_guard_for_testing,
+                (
+                    torch.are_deterministic_algorithms_enabled(),
+                    torch.is_deterministic_algorithms_warn_only_enabled(),
+                ),
                 logger_state,
                 lowering,
                 fake_tensor_mode,
@@ -581,6 +588,9 @@ class _SerializedFxCompile(FxCompile):
             captured_logs = stack.enter_context(input.logger_state)
             if input.deterministic_guard_for_testing:
                 stack.enter_context(input.deterministic_guard_for_testing)
+            stack.enter_context(
+                torch._deterministic_algorithms_override(input.deterministic_algorithms)
+            )
             stack.enter_context(torch._guards.tracing(input.tracing_context))
             stack.enter_context(DebugContext())
 

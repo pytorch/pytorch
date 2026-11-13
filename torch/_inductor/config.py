@@ -954,7 +954,7 @@ def use_autoheuristic(name: str) -> bool:
     if hasattr(autoheuristic_use, name):
         attr = getattr(autoheuristic_use, name)
         if attr is None:
-            return torch._inductor.config.deterministic
+            return torch._inductor.config.deterministic_mode_enabled()
         return attr
     else:
         # For test compatibility with non-standard ops (e.g. "test", "foo" used in tests)
@@ -1200,6 +1200,17 @@ split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 # A deterministic mode that skips any on device benchmarking in Inductor
 # if we know they affect numerics.  WARNING: Expect perf hit in this mode.
 deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
+
+
+def deterministic_mode_enabled() -> bool:
+    """Whether ``deterministic`` is set or deterministic algorithms are enabled
+    for the current OS thread.
+    """
+    return (
+        torch._inductor.config.deterministic
+        or torch.are_deterministic_algorithms_enabled()
+    )
+
 
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"

@@ -15,6 +15,7 @@ from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -36,6 +37,9 @@ class DeterministicTest(TestCase):
         super().setUp()
         self._exit_stack = contextlib.ExitStack()
         self._exit_stack.enter_context(fresh_cache())
+        # Inductor's deterministic mode follows deterministic algorithms, so
+        # keep tests that enable them from leaking into later tests.
+        self._exit_stack.enter_context(DeterministicGuard(False))
 
     def tearDown(self) -> None:
         self._exit_stack.close()
@@ -46,7 +50,7 @@ class DeterministicTest(TestCase):
         try:
             for new_val in [True, False, True]:
                 torch.use_deterministic_algorithms(new_val, warn_only=True)
-                self.assertEqual(inductor_config.deterministic, new_val)
+                self.assertEqual(inductor_config.deterministic_mode_enabled(), new_val)
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 

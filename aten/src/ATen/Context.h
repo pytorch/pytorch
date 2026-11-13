@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 
 namespace at {
@@ -41,6 +42,28 @@ class Tensor;
 namespace native::xnnpack::internal {
 TORCH_API void register_backend();
 } // namespace native::xnnpack::internal
+
+// Note [Scoped deterministic algorithms]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Context::setDeterministicAlgorithms changes the process-wide default, not
+// an active override. Overrides are per OS thread and propagate through
+// ThreadLocalState: autograd engine threads inherit the override of the thread
+// calling backward(), and at::launch tasks inherit the launching thread's
+// override. Each autograd Node also records the override active when its
+// forward op ran, and the engine runs the node under it, so backward follows
+// the forward op's scope; nodes created without an override use the policy
+// of the thread calling backward(). New Python threads and at::parallel_for
+// workers do not inherit overrides; read the setting before entering a
+// parallel region.
+struct DeterministicAlgorithmsSetting {
+  bool enabled;
+  bool warn_only;
+};
+
+TORCH_API std::optional<DeterministicAlgorithmsSetting>
+getDeterministicAlgorithmsOverride();
+TORCH_API void setDeterministicAlgorithmsOverride(
+    std::optional<DeterministicAlgorithmsSetting> setting);
 
 enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
 
@@ -350,9 +373,16 @@ class TORCH_API Context {
   //      }
   //    }
 
+  //
+  // deterministicAlgorithms() and deterministicAlgorithmsWarnOnly() return the
+  // current thread's override when one is set (see
+  // Note [Scoped deterministic algorithms]), otherwise the process-wide default
+  // that setDeterministicAlgorithms sets.
   bool deterministicAlgorithms() const;
   bool deterministicAlgorithmsWarnOnly() const;
   void setDeterministicAlgorithms(bool /*b*/, bool /*warn_only*/);
+  bool deterministicAlgorithmsDefault() const;
+  bool deterministicAlgorithmsWarnOnlyDefault() const;
   bool deterministicFillUninitializedMemory() const;
   void setDeterministicFillUninitializedMemory(bool /*b*/);
 

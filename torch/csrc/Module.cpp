@@ -1291,6 +1291,59 @@ static PyObject* THPModule_setDeterministicAlgorithms(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* packDeterministicAlgorithmsSetting(
+    bool enabled,
+    bool warn_only) {
+  return Py_BuildValue(
+      "(NN)", PyBool_FromLong(enabled), PyBool_FromLong(warn_only));
+}
+
+static PyObject* THPModule_deterministicAlgorithmsDefault(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto& ctx = at::globalContext();
+  return packDeterministicAlgorithmsSetting(
+      ctx.deterministicAlgorithmsDefault(),
+      ctx.deterministicAlgorithmsWarnOnlyDefault());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_deterministicAlgorithmsOverride(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto setting = at::getDeterministicAlgorithmsOverride();
+  if (!setting) {
+    Py_RETURN_NONE;
+  }
+  return packDeterministicAlgorithmsSetting(
+      setting->enabled, setting->warn_only);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_setDeterministicAlgorithmsOverride(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (arg == Py_None) {
+    at::setDeterministicAlgorithmsOverride(std::nullopt);
+    Py_RETURN_NONE;
+  }
+  TORCH_CHECK(
+      PyTuple_Check(arg) && PyTuple_GET_SIZE(arg) == 2 &&
+          PyBool_Check(PyTuple_GET_ITEM(arg, 0)) &&
+          PyBool_Check(PyTuple_GET_ITEM(arg, 1)),
+      "_set_deterministic_algorithms_override expects None or a "
+      "(mode, warn_only) tuple of bools, but got ",
+      THPUtils_typename(arg));
+  at::setDeterministicAlgorithmsOverride(at::DeterministicAlgorithmsSetting{
+      Py_IsTrue(PyTuple_GET_ITEM(arg, 0)),
+      Py_IsTrue(PyTuple_GET_ITEM(arg, 1))});
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setAllowTF32OneDNN(
     PyObject* _unsued,
     PyObject* arg) {
@@ -2201,6 +2254,18 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_deterministic_algorithms",
      castPyCFunctionWithKeywords(THPModule_setDeterministicAlgorithms),
      METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_get_deterministic_algorithms_default",
+     THPModule_deterministicAlgorithmsDefault,
+     METH_NOARGS,
+     nullptr},
+    {"_get_deterministic_algorithms_override",
+     THPModule_deterministicAlgorithmsOverride,
+     METH_NOARGS,
+     nullptr},
+    {"_set_deterministic_algorithms_override",
+     THPModule_setDeterministicAlgorithmsOverride,
+     METH_O,
      nullptr},
     {"_get_deterministic_fill_uninitialized_memory",
      THPModule_deterministicFillUninitializedMemory,

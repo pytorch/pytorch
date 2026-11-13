@@ -5327,7 +5327,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             config.combo_kernels_autotune > 0
             and config.combo_kernel_per_subkernel_blocks
             and config.combo_kernel_compile_time_autotune
-            and not config.deterministic
+            and not config.deterministic_mode_enabled()
         ):
             indirect_nodes = [
                 n
@@ -6254,7 +6254,10 @@ class Scheduler:
 
         # reorder_for_compute_comm_overlap may do benchmarking to estimate
         # op runtime. Disable it for now in deterministic mode.
-        if not config.deterministic and config.reorder_for_compute_comm_overlap:
+        if (
+            not config.deterministic_mode_enabled()
+            and config.reorder_for_compute_comm_overlap
+        ):
             if not config.reorder_for_peak_memory:
                 from .memory import assign_memory_planning_info_for_scheduler_buffers
 

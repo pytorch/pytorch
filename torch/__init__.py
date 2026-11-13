@@ -9,6 +9,7 @@ on an NVIDIA GPU with compute capability >= 3.0.
 """
 
 import builtins
+import contextlib
 import ctypes
 import functools
 import glob
@@ -23,7 +24,11 @@ import threading
 import typing
 import typing_extensions
 import warnings
-from collections.abc import Callable as _Callable, Sequence as _Sequence
+from collections.abc import (
+    Callable as _Callable,
+    Iterator as _Iterator,
+    Sequence as _Sequence,
+)
 from types import ModuleType as _ModuleType
 from typing import (
     Any as _Any,
@@ -118,6 +123,7 @@ __all__ = [
     "chunk",
     "compile",
     "cond",
+    "deterministic_policy",
     "enable_grad",
     "export",
     "get_default_device",
@@ -1779,6 +1785,10 @@ def use_deterministic_algorithms(
     .. note:: :func:`torch.set_deterministic_debug_mode` offers an alternative
         interface for this feature.
 
+    .. note:: This sets the process-wide default. Inside a
+        :func:`torch.deterministic_policy` scope, the scope's setting stays in
+        effect for that thread until the scope exits.
+
     The following normally-nondeterministic operations will act
     deterministically when ``mode=True``:
 
@@ -1919,25 +1929,96 @@ def use_deterministic_algorithms(
         ...
         RuntimeError: avg_pool3d_backward_cuda does not have a deterministic implementation...
     """
-    import torch._inductor.config as inductor_config
-
-    inductor_config.deterministic = mode
     _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
 
 def are_deterministic_algorithms_enabled() -> builtins.bool:
-    r"""Returns True if the global deterministic flag is turned on. Refer to
-    :func:`torch.use_deterministic_algorithms` documentation for more details.
+    r"""Returns True if deterministic algorithms are enabled for the current
+    OS thread, using its override if present or the process-wide default
+    otherwise. Refer to :func:`torch.deterministic_policy` and
+    :func:`torch.use_deterministic_algorithms` for more details.
     """
     return _C._get_deterministic_algorithms()
 
 
 def is_deterministic_algorithms_warn_only_enabled() -> builtins.bool:
-    r"""Returns True if the global deterministic flag is set to warn only.
-    Refer to :func:`torch.use_deterministic_algorithms` documentation for more
-    details.
+    r"""Returns True if deterministic algorithms are set to warn only for the
+    current thread. Refer to :func:`torch.are_deterministic_algorithms_enabled`
+    and :func:`torch.use_deterministic_algorithms` for more details.
     """
     return _C._get_deterministic_algorithms_warn_only()
+
+
+def _parse_deterministic_debug_mode(
+    debug_mode: builtins.int | str,
+) -> tuple[builtins.bool, builtins.bool]:
+    # Returns (mode, warn_only) for a torch.set_deterministic_debug_mode value.
+    # NOTE: builtins.int is used here because int in this scope resolves
+    # to torch.int
+    if not isinstance(debug_mode, (builtins.int, str)):
+        raise TypeError(f"debug_mode must be str or int, but got {type(debug_mode)}")
+    settings = {
+        "default": (False, False),
+        "warn": (True, True),
+        "error": (True, False),
+        0: (False, False),
+        1: (True, True),
+        2: (True, False),
+    }
+    if debug_mode not in settings:
+        if isinstance(debug_mode, str):
+            raise RuntimeError(
+                "invalid value of debug_mode, expected one of `default`, "
+                f"`warn`, `error`, but got {debug_mode}"
+            )
+        raise RuntimeError(
+            f"invalid value of debug_mode, expected 0, 1, or 2, but got {debug_mode}"
+        )
+    return settings[debug_mode]
+
+
+@contextlib.contextmanager
+def _deterministic_algorithms_override(
+    setting: tuple[builtins.bool, builtins.bool] | None,
+) -> _Iterator[None]:
+    # Sets this thread's (mode, warn_only) override, or clears it for None,
+    # and restores the previous override on exit.
+    prev = _C._get_deterministic_algorithms_override()
+    _C._set_deterministic_algorithms_override(setting)
+    try:
+        yield
+    finally:
+        _C._set_deterministic_algorithms_override(prev)
+
+
+def deterministic_policy(
+    debug_mode: builtins.int | str,
+) -> contextlib.AbstractContextManager[None]:
+    r"""Context manager that overrides the deterministic debug mode for the
+    current OS thread until the scope exits. Calls to
+    :func:`torch.use_deterministic_algorithms` change the process-wide default
+    without changing an active override.
+
+    Backward ops run under the override that was active when their forward op
+    ran; ops recorded outside any scope use the policy of the thread calling
+    backward(). ``at::launch`` tasks inherit the launching thread's override.
+    New Python threads and ``at::parallel_for`` workers do not inherit overrides.
+
+    Compiled functions guard on the resolved policy.
+
+    Args:
+        debug_mode(str or int): ``"default"``/0, ``"warn"``/1 or ``"error"``/2,
+            as in :func:`torch.set_deterministic_debug_mode`.
+
+    Example::
+
+        >>> # xdoctest: +SKIP
+        >>> with torch.deterministic_policy("error"):
+        ...     y = model(x)
+    """
+    return _deterministic_algorithms_override(
+        _parse_deterministic_debug_mode(debug_mode)
+    )
 
 
 def set_deterministic_debug_mode(debug_mode: builtins.int | str) -> None:
@@ -1954,34 +2035,8 @@ def set_deterministic_debug_mode(debug_mode: builtins.int | str) -> None:
             nondeterministic operations.
     """
 
-    # NOTE: builtins.int is used here because int in this scope resolves
-    # to torch.int
-    if not isinstance(debug_mode, (builtins.int, str)):
-        raise TypeError(f"debug_mode must be str or int, but got {type(debug_mode)}")
-
-    if isinstance(debug_mode, str):
-        if debug_mode == "default":
-            debug_mode = 0
-        elif debug_mode == "warn":
-            debug_mode = 1
-        elif debug_mode == "error":
-            debug_mode = 2
-        else:
-            raise RuntimeError(
-                "invalid value of debug_mode, expected one of `default`, "
-                f"`warn`, `error`, but got {debug_mode}"
-            )
-
-    if debug_mode == 0:
-        _C._set_deterministic_algorithms(False)
-    elif debug_mode == 1:
-        _C._set_deterministic_algorithms(True, warn_only=True)
-    elif debug_mode == 2:
-        _C._set_deterministic_algorithms(True)
-    else:
-        raise RuntimeError(
-            f"invalid value of debug_mode, expected 0, 1, or 2, but got {debug_mode}"
-        )
+    mode, warn_only = _parse_deterministic_debug_mode(debug_mode)
+    _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
 
 def get_deterministic_debug_mode() -> builtins.int:

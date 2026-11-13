@@ -448,7 +448,7 @@ class OverlapScheduler:
         self.insert_overlap_deps = insert_overlap_deps
         self.max_compute_pre_fetch = max_compute_pre_fetch
         # In deterministic mode, force analytical estimation to avoid GPU sync
-        if config.deterministic:
+        if config.deterministic_mode_enabled():
             self.collective_estimator = "analytical"
             self.compute_estimator = "analytical"
         else:

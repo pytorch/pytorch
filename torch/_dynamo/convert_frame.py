@@ -348,8 +348,15 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             maybe_disable_inference_mode_for_fake_prop(),
         ):
             prior_inference_mode = torch.is_inference_mode_enabled()
-            prior_deterministic = torch.are_deterministic_algorithms_enabled()
-            prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+            # Save the process default and this thread's override separately:
+            # restoring the resolved value through the global setter would
+            # leak a torch.deterministic_policy scope into the process default.
+            prior_deterministic, prior_warn_only = (
+                torch._C._get_deterministic_algorithms_default()
+            )
+            prior_deterministic_override = (
+                torch._C._get_deterministic_algorithms_override()
+            )
             prior_mobile_allocator_state = (
                 torch._C._is_default_mobile_cpu_allocator_set()
             )
@@ -379,6 +386,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
                 torch._C._set_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
+                )
+                torch._C._set_deterministic_algorithms_override(
+                    prior_deterministic_override
                 )
                 torch.random.set_rng_state(torch_rng_state)
                 torch.set_default_dtype(prior_dtype)

@@ -27,6 +27,7 @@ ThreadLocalState::ThreadLocalState()
       node_creation_hooks_state_(at::impl::NodeCreationHooks::get_tls_state()),
       functionalization_reapply_views_state_(at::functionalization::impl::getFunctionalizationReapplyViewsTLS()),
       dtensor_allow_implicit_replication_(at::get_dtensor_allow_implicit_replication()),
+      deterministic_algorithms_override_(at::getDeterministicAlgorithmsOverride()),
       saved_objects_(at::impl::ThreadLocalPythonObjects::get_state()) {
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && !defined(BUILD_LITE_INTERPRETER)
   for(size_t i=0; i<autocast_dtypes_.size(); i++) {
@@ -73,6 +74,8 @@ void ThreadLocalState::setThreadLocalState(
   c10::impl::FakeTensorModeTLS::set_in_kernel_invocation(state.in_kernel_invocation_state_);
 
   at::set_dtensor_allow_implicit_replication(state.dtensor_allow_implicit_replication_);
+
+  at::setDeterministicAlgorithmsOverride(state.deterministic_algorithms_override_);
 
   c10::ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
 

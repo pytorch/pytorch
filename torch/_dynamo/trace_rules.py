@@ -206,6 +206,12 @@ manual_torch_name_rule_map: dict[
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch._C._group_tensors_by_device_and_dtype": TorchInGraphFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
+    # Graph break on these deterministic-policy accessors (see
+    # torch.deterministic_policy). GlobalStateGuard guards on the resolved
+    # policy, so code around a scope can still compile.
+    "torch._C._get_deterministic_algorithms_default": SkipFunctionVariable,
+    "torch._C._get_deterministic_algorithms_override": SkipFunctionVariable,
+    "torch._C._set_deterministic_algorithms_override": SkipFunctionVariable,
     "torch._check": TorchInGraphFunctionVariable,
     "torch._check_with": TorchInGraphFunctionVariable,
     "torch._check_index": TorchInGraphFunctionVariable,

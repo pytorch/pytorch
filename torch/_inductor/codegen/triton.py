@@ -3930,7 +3930,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # to filter triton configs. Return false immediately to avoid
         # increasing compilation time when the mode is off.
         if not (
-            config.deterministic or config.test_configs.force_filter_reduction_configs
+            config.deterministic_mode_enabled()
+            or config.test_configs.force_filter_reduction_configs
         ):
             return False
         support_vars = index.free_symbols
@@ -7995,7 +7996,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
-            "deterministic": config.deterministic or config.batch_invariant,
+            "deterministic": config.deterministic_mode_enabled()
+            or config.batch_invariant,
             "batch_invariant": config.batch_invariant,
             "force_filter_reduction_configs": config.test_configs.force_filter_reduction_configs,
             "mix_order_reduction_allow_multi_stages": config.triton.mix_order_reduction_allow_multi_stages,
@@ -8053,7 +8055,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
-        if config.deterministic or config.test_configs.force_filter_reduction_configs:
+        if (
+            config.deterministic_mode_enabled()
+            or config.test_configs.force_filter_reduction_configs
+        ):
             out["has_loadstore_with_contiguous_rdim"] = (
                 self.has_load_with_contiguous_rdim
                 or self.has_store_with_contiguous_rdim

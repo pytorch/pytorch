@@ -204,11 +204,40 @@ void Context::setDeterministicMkldnn(bool b) {
   deterministic_mkldnn = b;
 }
 
+namespace {
+thread_local std::optional<DeterministicAlgorithmsSetting>
+    deterministic_algorithms_override;
+} // namespace
+
+std::optional<DeterministicAlgorithmsSetting>
+getDeterministicAlgorithmsOverride() {
+  return deterministic_algorithms_override;
+}
+
+void setDeterministicAlgorithmsOverride(
+    std::optional<DeterministicAlgorithmsSetting> setting) {
+  deterministic_algorithms_override = setting;
+}
+
 bool Context::deterministicAlgorithms() const {
+  if (deterministic_algorithms_override) {
+    return deterministic_algorithms_override->enabled;
+  }
   return _deterministic_algorithms;
 }
 
 bool Context::deterministicAlgorithmsWarnOnly() const {
+  if (deterministic_algorithms_override) {
+    return deterministic_algorithms_override->warn_only;
+  }
+  return _deterministic_algorithms_warn_only;
+}
+
+bool Context::deterministicAlgorithmsDefault() const {
+  return _deterministic_algorithms;
+}
+
+bool Context::deterministicAlgorithmsWarnOnlyDefault() const {
   return _deterministic_algorithms_warn_only;
 }
 

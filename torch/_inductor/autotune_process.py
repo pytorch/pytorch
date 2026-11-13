@@ -1931,10 +1931,19 @@ class PrecompileThreadPool:
         return cls._instance
 
     def submit(self, fn, *args, **kwargs):
+        # Workers need the submitting thread's config settings (ContextVars) and
+        # deterministic algorithms setting (ATen thread-local state).
         ctx = contextvars.copy_context()
-        # Need to copy context so workers have access to the correct config settings
-        fn = functools.partial(ctx.run, fn)
-        return self._executor.submit(fn, *args, **kwargs)
+        deterministic_algorithms = (
+            torch.are_deterministic_algorithms_enabled(),
+            torch.is_deterministic_algorithms_warn_only_enabled(),
+        )
+
+        def run(*args, **kwargs):
+            with torch._deterministic_algorithms_override(deterministic_algorithms):
+                return ctx.run(fn, *args, **kwargs)
+
+        return self._executor.submit(run, *args, **kwargs)
 
     def _shutdown(self, wait: bool = False):
         return self._executor.shutdown(wait=wait)

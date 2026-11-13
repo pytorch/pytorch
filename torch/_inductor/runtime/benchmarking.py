@@ -156,7 +156,7 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
 
 
 def may_ban_benchmarking() -> None:
-    if torch._inductor.config.deterministic:
+    if torch._inductor.config.deterministic_mode_enabled():
         raise RuntimeError("""In the deterministic mode of Inductor, we will avoid those
         benchmarkings that would cause non-deterministic results. Only benchmarkings in the vetted
         scenarios are allowed. Examples include autotuning for triton configs of pointwise kernels.

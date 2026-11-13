@@ -313,6 +313,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.use_deterministic_algorithms,
         torch.is_deterministic_algorithms_warn_only_enabled,
         torch.set_deterministic_debug_mode,
+        torch.deterministic_policy,
         torch.get_device_module,
         torch.get_deterministic_debug_mode,
         torch.set_float32_matmul_precision,

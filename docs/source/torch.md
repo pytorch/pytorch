@@ -984,6 +984,7 @@ during migration, we recommend using the public APIs.
     is_deterministic_algorithms_warn_only_enabled
     set_deterministic_debug_mode
     get_deterministic_debug_mode
+    deterministic_policy
     set_float32_matmul_precision
     get_float32_matmul_precision
     set_warn_always

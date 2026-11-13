@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <ATen/Context.h>
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/NodeCreationHooks.h>
 #include <ATen/PythonTorchFunctionTLS.h>
@@ -91,6 +92,9 @@ class TORCH_API ThreadLocalState {
   bool functionalization_reapply_views_state_;
 
   bool dtensor_allow_implicit_replication_;
+
+  std::optional<DeterministicAlgorithmsSetting>
+      deterministic_algorithms_override_;
 
   // TLS for arbitrary python objects that is registered via hooks
   at::impl::ThreadLocalPythonObjects saved_objects_;

@@ -1568,9 +1568,7 @@ def expand(x, sizes, *, implicit=False, graph_fanout=False):
             x.mark_reuse(
                 V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
                 // x_size_product,
-                graph_reuse=graph_fanout
-                or config.deterministic
-                or torch.are_deterministic_algorithms_enabled(),
+                graph_reuse=graph_fanout or config.deterministic_mode_enabled(),
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 

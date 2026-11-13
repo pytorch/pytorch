@@ -4554,7 +4554,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 node = choices[0].output_node()
                 return node, choices[0]
 
-        if config.deterministic:
+        if config.deterministic_mode_enabled():
             choice = self.pick_deterministic_choice(choices)
             node = choice.output_node()
             return node, choice
