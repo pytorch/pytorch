@@ -14,6 +14,10 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch._logging import trace_structured
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -513,6 +517,277 @@ class TestOrigami(TestCase):
                 torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
                 self.assertIsNotNone(compiled)
 
+    def test_origami_falls_back_when_selector_raises(self):
+        for op_name in ("mm", "addmm", "bmm"):
+            with self.subTest(op_name=op_name):
+                fn, args = self._make_fn_and_inputs(op_name, 256)
+                expected = fn(*args)
+
+                torch._dynamo.reset()
+                counters.clear()
+
+                with (
+                    fresh_cache(),
+                    config.patch(self._origami_default_config(ORIGAMI_COMPILE_TOPK)),
+                    mock.patch.object(
+                        origami,
+                        "OrigamiMatmulSelector",
+                        side_effect=ValueError("unsupported layout"),
+                    ) as selector,
+                ):
+                    compiled = torch.compile(fn, dynamic=False)
+                    result = compiled(*args)
+
+                selector.assert_called()
+                self.assertGreater(counters["inductor"]["origami_fallback"], 0)
+                torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
+                self.assertGreater(
+                    self._benchmark_gpu_call_count(), ORIGAMI_COMPILE_TOPK
+                )
+
+    def test_origami_falls_back_when_selection_loop_fails(self):
+        fn, args = self._make_fn_and_inputs("mm", 256)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        counters.clear()
+        calls = []
+        real_topk = origami.select_topk_configs
+        real_mapping = origami.select_workgroup_mapping
+
+        # Count only calls made after topk selection: the selector constructor
+        # also calls select_workgroup_mapping.
+        def arm_topk(*a, **kw):
+            results = real_topk(*a, **kw)
+            calls.clear()
+            return results
+
+        def fail_on_second_call(*a, **kw):
+            calls.append(1)
+            if len(calls) > 1:
+                raise ValueError("selection failed midway")
+            return real_mapping(*a, **kw)
+
+        with (
+            fresh_cache(),
+            config.patch(self._origami_default_config(ORIGAMI_TOPK_VALUES[0])),
+            mock.patch.object(origami, "select_topk_configs", arm_topk),
+            mock.patch.object(origami, "select_workgroup_mapping", fail_on_second_call),
+        ):
+            result = torch.compile(fn, dynamic=False)(*args)
+
+        torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertGreater(counters["inductor"]["origami_fallback"], 0)
+        # A kept partial pick leaves one choice and no benchmarks; more choices
+        # than Origami could pick means the regular generator ran.
+        self.assertGreater(self._benchmark_gpu_call_count(), ORIGAMI_TOPK_VALUES[0])
+
+    def test_origami_falls_back_on_attribute_error(self):
+        # The _origami_* wrappers read private rocm-origami attributes; a renamed
+        # attribute must fall back instead of failing the compile.
+        fn, args = self._make_fn_and_inputs("mm", 256)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        counters.clear()
+        with (
+            fresh_cache(),
+            config.patch(self._origami_default_config(ORIGAMI_TOPK_VALUES[0])),
+            mock.patch.object(
+                triton_heuristics,
+                "_origami_hardware",
+                side_effect=AttributeError("_hardware"),
+            ) as hardware,
+        ):
+            result = torch.compile(fn, dynamic=False)(*args)
+
+        hardware.assert_called()
+        torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
+        self.assertGreater(counters["inductor"]["origami_fallback"], 0)
+        self.assertGreater(self._benchmark_gpu_call_count(), ORIGAMI_TOPK_VALUES[0])
+
+    def test_origami_falls_back_when_config_lookup_fails(self):
+        import dataclasses
+
+        import torch._inductor.heuristics.template.triton as th
+
+        fn, args = self._make_fn_and_inputs("mm", 256)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        counters.clear()
+        armed = []
+        rebuilt = []
+        real_mapping = origami.select_workgroup_mapping
+        real_filter = th.ROCmConfigHeuristic._filter_configs
+
+        def arm_mapping(*a, **kw):
+            armed.append(1)
+            return real_mapping(*a, **kw)
+
+        # The first filter call after Origami selection gets tiles whose keys
+        # match nothing stored, so every lookup fails.
+        def rebuild_tiles(self, configs):
+            out = real_filter(self, configs)
+            if armed:
+                armed.clear()
+                out = [dataclasses.replace(c, block_m=c.block_m + 1) for c in out]
+                rebuilt.append(len(out))
+            return out
+
+        with (
+            fresh_cache(),
+            config.patch(self._origami_default_config(ORIGAMI_COMPILE_TOPK)),
+            mock.patch.object(origami, "select_workgroup_mapping", arm_mapping),
+            mock.patch.object(th.ROCmConfigHeuristic, "_filter_configs", rebuild_tiles),
+        ):
+            result = torch.compile(fn, dynamic=False)(*args)
+
+        torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
+        self.assertTrue(rebuilt and all(rebuilt), rebuilt)
+        self.assertGreater(counters["inductor"]["origami_fallback"], 0)
+        self.assertGreater(self._benchmark_gpu_call_count(), ORIGAMI_COMPILE_TOPK)
+
+    def test_origami_honors_max_mm_configs(self):
+        patch_config = self._origami_default_config(ORIGAMI_TOPK_VALUES[0])
+        patch_config["test_configs.max_mm_configs"] = 1
+        case = self._compile_with_config("mm", patch_config, size=256)
+        self.assertEqual(case["topk_calls"], 0)
+
+    def test_origami_not_used_by_heuristic_subclass(self):
+        import torch._inductor.heuristics.template.triton as th
+
+        # Every in-tree ROCm heuristic that reaches the origami branch, directly
+        # or through super()._get_template_configs_impl.
+        stock_classes = (
+            th.ROCmMMTemplateConfigHeuristic,
+            th.ROCmAddMMTemplateConfigHeuristic,
+            th.ROCmMMAHTemplateConfigHeuristic,
+            th.ROCmInt8MMTemplateConfigHeuristic,
+            th.ROCmMMPlusMMTemplateConfigHeuristic,
+            th.ROCmScaledMMTemplateConfigHeuristic,
+            th.ROCmAddMMPersistentTemplateConfigHeuristic,
+            th.ROCmPersistentTDMTemplateConfigHeuristic,
+            th.ROCmAddMMPersistentTDMTemplateConfigHeuristic,
+            th.PersistentMMTemplateConfigHeuristic,
+        )
+        # Drop the ad-hoc subclasses from the singleton cache afterwards.
+        with mock.patch.dict(th.BaseHeuristicSingleton._instances):
+            for cls in stock_classes:
+                self.assertTrue(cls()._origami_may_select(), cls)
+                custom_cls = type(f"Custom{cls.__name__}", (cls,), {})
+                self.assertFalse(custom_cls()._origami_may_select(), custom_cls)
+
+    def _matmul_inputs(
+        self,
+        op_name: str,
+        m: int,
+        n: int,
+        k: int,
+        dtype: torch.dtype,
+        layout: str = "contiguous",
+    ) -> tuple[Callable[..., torch.Tensor], tuple[torch.Tensor, ...]]:
+        torch.manual_seed(0)
+        batch = (4,) if op_name == "bmm" else ()
+
+        def make(rows, cols, transposed, scale):
+            # Scale before transposing so the transposed view keeps its strides.
+            if transposed:
+                x = torch.randn(*batch, cols, rows, device=GPU_TYPE, dtype=dtype)
+                return (x * scale).transpose(-1, -2)
+            return torch.randn(*batch, rows, cols, device=GPU_TYPE, dtype=dtype) * scale
+
+        # 1/sqrt(k) on A keeps outputs near unit scale for every k.
+        a = make(m, k, layout == "trans_a", k**-0.5)
+        b = make(k, n, layout == "trans_b", 1.0)
+        if op_name == "mm":
+            return (lambda x, y: torch.mm(x, y)), (a, b)
+        if op_name == "bmm":
+            return (lambda x, y: torch.bmm(x, y)), (a, b)
+        bias = torch.randn(n, device=GPU_TYPE, dtype=dtype)
+        return (lambda bb, x, y: torch.addmm(bb, x, y)), (bias, a, b)
+
+    def _assert_origami_matches_eager(
+        self, fn, args, *, expect_origami=True, dynamic=False
+    ):
+        expected = fn(*args)
+        torch._dynamo.reset()
+        counters.clear()
+        with (
+            fresh_cache(),
+            config.patch(self._origami_default_config(ORIGAMI_TOPK_VALUES[0])),
+            mock.patch(
+                "origami.select_topk_configs", wraps=origami.select_topk_configs
+            ) as select_topk,
+        ):
+            result = torch.compile(fn, dynamic=dynamic)(*args)
+        tol = 5e-2 if expected.is_floating_point() else 0
+        torch.testing.assert_close(result, expected, atol=tol, rtol=tol)
+        if expect_origami:
+            # Without these a case could pass through the fallback and test nothing.
+            self.assertGreater(select_topk.call_count, 0, "Origami did not select")
+            self.assertEqual(
+                counters["inductor"]["origami_fallback"], 0, "Origami fell back"
+            )
+        else:
+            self.assertEqual(select_topk.call_count, 0)
+            # More choices than Origami could pick: the regular generator ran.
+            self.assertGreater(self._benchmark_gpu_call_count(), ORIGAMI_TOPK_VALUES[0])
+
+    @parametrize("op_name", ("mm", "addmm", "bmm"))
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
+    def test_origami_matches_eager_dtypes(self, op_name, dtype):
+        fn, args = self._matmul_inputs(op_name, 1024, 1024, 1024, dtype)
+        self._assert_origami_matches_eager(fn, args)
+
+    @parametrize("op_name", ("mm", "addmm", "bmm"))
+    @parametrize("layout", ("trans_a", "trans_b"))
+    def test_origami_matches_eager_layouts(self, op_name, layout):
+        fn, args = self._matmul_inputs(op_name, 1024, 1024, 1024, torch.float16, layout)
+        self._assert_origami_matches_eager(fn, args)
+
+    @parametrize("op_name", ("mm", "addmm", "bmm"))
+    @parametrize(
+        "mnk",
+        ((1000, 500, 700), (4096, 64, 256), (64, 4096, 512)),
+        name_fn=lambda mnk: "x".join(map(str, mnk)),
+    )
+    def test_origami_matches_eager_shapes(self, op_name, mnk):
+        fn, args = self._matmul_inputs(op_name, *mnk, torch.float16)
+        self._assert_origami_matches_eager(fn, args)
+
+    @parametrize(
+        "mnk",
+        ((1024, 1024, 1024), (64, 512, 256)),
+        name_fn=lambda mnk: "x".join(map(str, mnk)),
+    )
+    def test_origami_matches_eager_int8(self, mnk):
+        m, n, k = mnk
+        torch.manual_seed(0)
+        a = torch.randint(-8, 8, (m, k), device=GPU_TYPE, dtype=torch.int8)
+        b = torch.randint(-8, 8, (k, n), device=GPU_TYPE, dtype=torch.int8)
+        self._assert_origami_matches_eager(lambda x, y: torch._int_mm(x, y), (a, b))
+
+    @parametrize("epilogue", ("relu", "bias_gelu"))
+    def test_origami_matches_eager_with_epilogue(self, epilogue):
+        _, (a, b) = self._matmul_inputs("mm", 1024, 1024, 1024, torch.float16)
+        if epilogue == "relu":
+            fn, args = (lambda x, y: torch.relu(x @ y)), (a, b)
+        else:
+            bias = torch.randn(1024, device=GPU_TYPE, dtype=torch.float16)
+
+            def fn(bb, x, y):
+                return torch.nn.functional.gelu(torch.addmm(bb, x, y))
+
+            args = (bias, a, b)
+        self._assert_origami_matches_eager(fn, args)
+
+    def test_origami_skipped_for_dynamic_shapes(self):
+        # Non-square so m, n and k become separate symbols.
+        fn, args = self._matmul_inputs("mm", 1024, 512, 256, torch.float16)
+        self._assert_origami_matches_eager(fn, args, expect_origami=False, dynamic=True)
+
     def test_origami_module_gate_when_env_var_disabled(self):
         """Verify origami is not imported/used when TORCHINDUCTOR_ORIGAMI=0.
 
@@ -703,6 +978,9 @@ class TestOrigamiPackageVersionGate(TestCase):
                     _origami_package_supported(rocm_version, package_version),
                     expected,
                 )
+
+
+instantiate_parametrized_tests(TestOrigami)
 
 
 if __name__ == "__main__":
