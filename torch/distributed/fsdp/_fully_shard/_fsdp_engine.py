@@ -17,7 +17,9 @@ root's runtime at lazy init.
 
 from __future__ import annotations
 
+import functools
 import logging
+import weakref
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
@@ -160,6 +162,10 @@ class FSDPParamRepresentation(ParamRepresentation):
                 )
 
     def before_unshard(self) -> None:
+        # load_state_dict(assign=True) may have replaced parameters since the
+        # last unshard; the bucket takes their data first
+        if self.bucket.params_replaced:
+            self.bucket.refresh()
         self.bucket.sync_aliases()
 
     def defines_all_gathers(self) -> bool:
@@ -292,6 +298,13 @@ def _aligned_offsets(slots: list[tuple[int, torch.dtype]]) -> list[int]:
     return offsets
 
 
+def _mark_params_replaced(
+    bucket_ref: weakref.ref[FullyShardBucket], *args: Any
+) -> None:
+    if (bucket := bucket_ref()) is not None:
+        bucket.params_replaced = True
+
+
 class FullyShardBucket:
     """One ``fully_shard`` group (a call's parameters on one mesh) as an engine
     bucket: its ``FSDPParam`` representations, its storage and its runtime.
@@ -389,6 +402,14 @@ class FullyShardBucket:
         for module in modules:
             module.register_state_dict_pre_hook(self._reshard_hook)
             module._register_load_state_dict_pre_hook(self._reshard_hook)
+        # Set by load_state_dict, whose assign=True replaces parameters, after
+        # FSDPParam re-reads them; the next unshard re-homes their data
+        self.params_replaced = False
+        # A weak reference, so that a submodule kept alive does not keep the
+        # whole module alive
+        reload_hook = functools.partial(_mark_params_replaced, weakref.ref(self))
+        for module in {p._module_info.module for p in self.fsdp_params}:
+            module.register_load_state_dict_post_hook(reload_hook)
 
     def _reshard_hook(self, *args: Any, **kwargs: Any) -> None:
         if self.bucket.is_unsharded:
@@ -628,6 +649,7 @@ class FullyShardBucket:
         else:
             self._build_infos()
         self.bucket.bucket_params = self._bucket_params()
+        self.params_replaced = False
 
     def lazy_init(self) -> None:
         """Re-read parameters replaced since construction and resolve mixed
