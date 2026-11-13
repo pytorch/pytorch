@@ -24,16 +24,19 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes as device_dtypes,
     instantiate_device_type_tests,
-    onlyNativeDeviceTypes,
     OpDTypes,
     ops,
+    preserves_device_selection,
     skipCPUIf,
     skipCUDAIf,
+    skipIf,
     skipOps,
     skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    decorateIf,
+    HardwareClassification,
     IS_ARM64,
     IS_CI,
     IS_LINUX,
@@ -52,7 +55,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     has_triton,
@@ -186,16 +188,14 @@ def print_seen():
                 f"    {format_op(op)}: {fmt_dtypes(failed_dtypes)},{reasons}"
             )
 
-    for device_type in ("cpu", GPU_TYPE):
+    for device_type in sorted({dt for dt, _ in seen_failed}):
         expected_failures[device_type]
         nl = "\n"
-        print(
-            f"""
+        print(f"""
 inductor_expected_failures_single_sample[\"{device_type}\"] = {{
 {nl.join(expected_failures[device_type])}
 }}
-"""
-        )
+""")
 
 
 if COLLECT_EXPECT:
@@ -776,6 +776,8 @@ inductor_override_kwargs["xpu"] = {
         "grad_atol": 2e-3,
         "grad_rtol": 1e-3,
     },
+    # fp16 backward reduces over frames in a different order than eager.
+    ("stft", f16): {"grad_atol": 1e-2, "grad_rtol": 1e-3},
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
@@ -797,6 +799,11 @@ if TEST_WITH_ROCM:
             # Keep the forward tolerance unchanged and allow modest headroom only
             # for gradients. See https://github.com/pytorch/pytorch/issues/165296.
             ("__rpow__", f32): {"grad_atol": 1.5e-5, "grad_rtol": 2e-5},
+            # Inductor falls back to aten.max_pool3d_with_indices_backward, so
+            # both sides run the same kernel, which accumulates overlapping
+            # windows into grad_input with fp16 atomics. The accumulation order
+            # varies between runs and the results differ by up to ~2 fp16 ULPs.
+            ("nn.functional.max_pool3d", f16): {"grad_atol": 2e-4, "grad_rtol": 2e-3},
         }
     )
 
@@ -1315,6 +1322,11 @@ def _inductor_extra_samples(op_name, device, dtype, requires_grad):
 if NEXTAFTER_IN_RANGE:
 
     class TestInductorNextafter(TestCase):
+        setUp = preserves_device_selection(TestCase.setUp)
+        setUpClass = classmethod(
+            preserves_device_selection(TestCase.setUpClass.__func__)
+        )
+
         @device_dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
         @parametrize("noncontiguous", (False, True))
         @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
@@ -1429,7 +1441,11 @@ if NEXTAFTER_IN_RANGE:
 
 @wrapper_noop_set_seed_decorator
 class TestInductorOpInfo(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(TestCase.setUp)
+
     @classmethod
+    @preserves_device_selection
     def setUpClass(cls):
         super().setUpClass()
         cls._test_config_stack = contextlib.ExitStack()
@@ -1453,20 +1469,29 @@ class TestInductorOpInfo(TestCase):
     check_model = check_model
     check_model_gpu = check_model_gpu
 
-    @onlyNativeDeviceTypes
     @suppress_warnings
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
-    @skipXPUIf(
-        not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
-    )
+    @skipIf(not has_triton(), "Skipped! Triton not found", device_type=("cuda", "xpu"))
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @skipCPUIf(IS_MACOS, "Skipped under macOS")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
+    @decorateIf(
+        unittest.skip("Skipped!"),
+        lambda params: params["op"].full_name
+        not in (
+            "nn.functional.interpolate.bilinear",
+            "nn.functional.interpolate.bicubic",
+            "nn.functional.upsample_bilinear",
+            "nn.functional.upsample_nearest",
+            "fill",
+            "full_like",
+        )
+        and params["dtype"] not in (f16, f32, f64, i32, i64, b8),
+    )
     @_ops(op_db[START:END])
     @skipOps(test_skips_or_fails)
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
@@ -1478,16 +1503,10 @@ class TestInductorOpInfo(TestCase):
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
 
-        if device_type not in (GPU_TYPE, "cpu"):
-            raise AssertionError(f"Unexpected device_type: {device_type}")
-
         torch._dynamo.reset()
         with torch.no_grad():
-            # TODO: should we move empty_cache to the common device interface
-            if device_type == "cuda":
-                torch.cuda.empty_cache()
-            elif device == "xpu":
-                torch.xpu.empty_cache()
+            if device_type != "cpu":
+                torch.accelerator.empty_cache()
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
@@ -1536,7 +1555,7 @@ class TestInductorOpInfo(TestCase):
         )
         if (
             TEST_WITH_ROCM
-            and device_type == GPU_TYPE
+            and device_type != "cpu"
             and op_name == "addmm"
             and dtype is f16
             and isRocmArchAnyOf(MI200_ARCH)
@@ -1682,11 +1701,11 @@ class TestInductorOpInfo(TestCase):
                             adjusted_kwargs.update(
                                 copy_to_gpu=False,
                             )
-                            if device_type == GPU_TYPE:
+                            if device_type != "cpu":
                                 adjusted_kwargs["reference_in_float"] = False
 
                         # skip checking gradient on CPU for now
-                        if device_type == GPU_TYPE:
+                        if device_type != "cpu":
                             # Only check gradients if there are input tensors requiring gradients
                             has_grad_inputs = any(
                                 getattr(x, "requires_grad", False)
@@ -1708,9 +1727,9 @@ class TestInductorOpInfo(TestCase):
                         if exact_stride and device_type == "cpu":
                             exact_stride = op_name not in inductor_skip_exact_stride_cpu
                         # XPU has additional layout optimizations that change strides differently from eager mode.
-                        if exact_stride and GPU_TYPE == "xpu":
+                        if exact_stride and device_type == "xpu":
                             exact_stride = op_name not in inductor_skip_exact_stride_xpu
-                        if device_type == GPU_TYPE:
+                        if device_type != "cpu":
                             self.check_model_gpu(
                                 fn,
                                 args,
