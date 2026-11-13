@@ -34,14 +34,24 @@ class StateDictStager:
         pin_memory_min_bytes: int = 5,
     ):
         if pin_memory and not torch.cuda.is_available():
-            warnings.warn(
-                "Ignoring pin_memory flag for checkpoint staging as pinning memory"
-                "requires CUDA, but CUDA is not available. ",
-                stacklevel=2,
-            )
-            self.pin_memory = False
-        else:
-            self.pin_memory = pin_memory
+            # Without cudaHostRegister, storages are allocated from the
+            # accelerator's pinned host allocator instead of pinned in place.
+            # The probe needs 1 byte: pinned allocators skip 0-byte requests.
+            reason = None
+            if share_memory:
+                reason = "pinning shared memory is currently only supported on CUDA."
+            else:
+                try:
+                    torch.empty(1, dtype=torch.uint8, device="cpu", pin_memory=True)
+                except RuntimeError as e:
+                    reason = f"pinned memory allocation failed: {e}"
+            if reason is not None:
+                warnings.warn(
+                    f"Ignoring pin_memory flag for checkpoint staging: {reason}",
+                    stacklevel=2,
+                )
+                pin_memory = False
+        self.pin_memory = pin_memory
         self.share_memory = share_memory
         # Mapping from original storage objects to CPU storages using weak references
         self._cached_storage_mapping = WeakIdKeyDictionary()
@@ -157,16 +167,23 @@ class StateDictStager:
             cached_storage.copy_(storage, non_blocking=non_blocking)
             return cached_storage
 
-        # Create new CPU storage
-        if self.share_memory:
-            new_storage = type(storage)._new_shared(storage.size(), device="cpu")
-        else:
-            new_storage = type(storage)(storage.size(), device="cpu")
-
         # Skip pinning for tensors below the minimum size threshold
         # Small tensors (e.g., optimizer step counters, scalars) have negligible
         # transfer time improvement from pinning, but pinning overhead is significant
-        if self.pin_memory and new_storage.nbytes() >= self.pin_memory_min_bytes:
+        pin = self.pin_memory and storage.nbytes() >= self.pin_memory_min_bytes
+        register_pinned = pin and torch.cuda.is_available()
+
+        # Create new CPU storage
+        if self.share_memory:
+            new_storage = type(storage)._new_shared(storage.size(), device="cpu")
+        elif pin and not register_pinned:
+            new_storage = torch.empty(
+                storage.nbytes(), dtype=torch.uint8, device="cpu", pin_memory=True
+            ).untyped_storage()
+        else:
+            new_storage = type(storage)(storage.size(), device="cpu")
+
+        if register_pinned:
             pin_memory_utils.pin_memory(new_storage.data_ptr(), new_storage.nbytes())
             # Set up a weak reference to unpin when cpu storage is garbage collected
             f = weakref.finalize(
@@ -264,8 +281,9 @@ class StateDictStager:
         Clean up all cached storages and release associated resources.
 
         This method clears the internal storage cache, allowing garbage collection
-        of cached CPU storages. Any pinned memory associated with cached storages
-        will be automatically unpinned through weak reference finalizers.
+        of cached CPU storages. Memory pinned in place with cudaHostRegister is
+        automatically unpinned through weak reference finalizers; storages from
+        an accelerator's pinned host allocator are returned to that allocator's cache.
 
         It also clears the _deepcopy_dispatch dict to break the reference cycle
         created by closures that capture self. Without this, it may
