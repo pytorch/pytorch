@@ -195,18 +195,9 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
-        # The forward function from Module is special; never use this annotations; we
-        # need to infer type directly using JIT.  I originally wanted to write
-        # this test as isinstance(class_annotations[name], Callable) but
-        # isinstance on typing things doesn't seem to work: isinstance(list, Callable)
-        # is also true!
         inferred = False
         try:
-            if (
-                name in class_annotations
-                and class_annotations[name]
-                != torch.nn.Module.__annotations__["forward"]
-            ):
+            if name in class_annotations and class_annotations[name]:
                 ann_to_type = torch.jit.annotations.ann_to_type(
                     class_annotations[name], fake_range()
                 )
