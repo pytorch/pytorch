@@ -1429,8 +1429,14 @@ class PostProcess {
       const auto python_tid =
           std::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {
+        // A thread with no events while profiling has no system TID. Give
+        // each such thread its own placeholder, so that the start frames of
+        // different idle threads don't end up in one tree.
         const auto& tid_info =
-            tid_map.insert({python_tid, {NoTID, kineto::DeviceAndResource()}})
+            tid_map
+                .insert(
+                    {python_tid,
+                     {NoTID - python_tid, kineto::DeviceAndResource()}})
                 .first->second;
         (*it)->start_tid_ = tid_info.first;
         (*it)->kineto_info_ = tid_info.second;
