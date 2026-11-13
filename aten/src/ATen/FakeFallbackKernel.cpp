@@ -42,6 +42,18 @@
 // that torch._meta_registrations installs as Meta kernels run here like C++
 // ones.
 //
+// Sparse invariant checks read index data that Meta tensors do not have. Like
+// Python, this fallback disables the process-wide Context setting around sparse
+// redispatch when it was enabled, restoring it on normal or exceptional exit.
+// This keeps the existing global policy without introducing a Context override.
+// The setting is a non-atomic optional<bool>, and this path can run without the
+// GIL. Concurrent reads/writes can race: A disables checks, B observes false
+// and skips suppression, then A restores true while B's kernel still runs.
+// Real sparse constructors on other threads may also see checks disabled.
+// The scope guard provides restoration for serial calls, not thread isolation.
+// A thread-safe policy would need a thread-local override integrated with the
+// Context getters/setters, or synchronization covering all readers and writers.
+//
 // The mode is uninstalled while this fallback runs, except for decomposition
 // and prim metas.
 // Other callbacks that need an active mode must run outside that scope.
@@ -789,7 +801,7 @@ void fakeFallback(
          c10::DispatchKey::PythonTLSSnapshot}));
     c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
     c10::impl::InKernelInvocationGuard in_kernel;
-    // Match Python's global suppression of checks that read sparse index data.
+    // Uses global state; see Note [C++ fake fallback] for the concurrency limits.
     const bool suppress_invariants = has_sparse_inputs &&
         at::globalContext().checkSparseTensorInvariants().value_or(false);
     auto restore_invariants = c10::make_scope_exit([suppress_invariants] {
@@ -829,16 +841,30 @@ void fakeFallback(
   // object, so cross-mode reuse can fail and concurrent first conversions would
   // need synchronization. This is outside the dense ownership argument above;
   // no such retained-output pattern was established in the supported in-tree
-  // dense kernels. Sparse accessors returning stored component tensors also
-  // need a separate ownership analysis.
+  // dense kernels.
+  //
+  // COO _values/_indices are in-tree examples of retained outputs.
+  // _from_meta_and_device copies the outer sparse TensorImpl but shares its
+  // component TensorImpls with the caller's plain Meta tensor. These accessors
+  // return the stored components directly, so init_cpp_fake below also marks
+  // the caller's component fake. ADInplaceOrView calls Fake before as_view
+  // copies the result; that later copy cannot undo the shared mutation.
+  // The outer Meta tensor remains non-fake, so converting it again can succeed,
+  // but accessing the marked component through another mode or device fails
+  // the mode/device checks below. Concurrent first accesses to the same
+  // component also need synchronization. CSR accessors return .alias(), giving
+  // the fallback a separate TensorImpl and avoiding this component mutation.
   //
   // We keep the original TensorImpl instead of allocating a second wrapper.
-  // Shallow-copying each plain Meta output could protect a cached original,
+  // Shallow-copying retained outputs would protect their original TensorImpls
+  // without copying data. A per-call copy can address that isolation alone,
   // but preserving Python's converter identity across calls would also need
   // a per-mode memo, synchronized lookup/creation, and weak-reference lifetime
   // handling, including TensorImpl address reuse. Ordinary dense outputs do
-  // not require that machinery. Retained custom outputs are still converted
-  // in place; this does not promise Python's wrapping/memoization semantics.
+  // not require that machinery. The current allocation-saving choice also
+  // converts retained custom and COO outputs in place, accepting the mutation,
+  // cross-mode/device failures and concurrent-conversion limitation above.
+  // It does not provide Python's wrapping/memoization semantics.
   std::optional<c10::Device> output_common_device;
   std::unordered_set<const c10::TensorImpl*> converted_outputs;
   auto wrap = [&](const at::Tensor& t, bool is_alias) -> std::optional<at::Tensor> {
