@@ -1,11 +1,10 @@
 # Owner(s): ["module: dynamo"]
-import unittest
-
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
+    parametrize,
 )
 
 
@@ -13,12 +12,13 @@ class ComplexDynamoTestCase(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        cls._old_enable_complex_wrapper = torch._functorch.config.enable_complex_wrapper
         torch._functorch.config.enable_complex_wrapper = True
 
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
-        torch._functorch.config.enable_complex_wrapper = False
+        torch._functorch.config.enable_complex_wrapper = cls._old_enable_complex_wrapper
 
 
 def sample_function(a: torch.Tensor, b: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
@@ -70,21 +70,7 @@ class ComplexTests(ComplexDynamoTestCase):
         x = torch.randn(2, 2)
         self.assertEqual(fn_c(a, b, x), f(a, b, x))
 
-    def test_incorrect_aliasing_semantics_raises(self):
-        # view_as_real decomposes to stack (a copy), so mutation of the
-        # original complex tensor does not propagate through the view.
-        def f(a):
-            out = torch.view_as_real(a)
-            a[...] = torch.zeros_like(a)
-            return out
-
-        a = torch.randn(2, 2, dtype=torch.complex64)
-        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
-        self.assertRaises(RuntimeError, fn_c, a)
-
-    @unittest.expectedFailure
     def test_incorrect_aliasing_semantics(self):
-        # Once this succeeds, remove the xfail and the test above
         def f(a):
             out = torch.view_as_real(a)
             a[...] = torch.zeros_like(a)
@@ -117,7 +103,6 @@ class ComplexTests(ComplexDynamoTestCase):
         self.assertEqual(f(), fn_c())
 
     def test_complex_output_aliases_input(self):
-        # Once this succeeds, remove the xfail and the test above
         def f(a):
             return a[...]
 
@@ -129,20 +114,7 @@ class ComplexTests(ComplexDynamoTestCase):
         a[...] = torch.zeros_like(a)
         self.assertEqual(ref, test)
 
-    def test_complex_input_mutation_raises(self):
-        def f(a, b):
-            a.mul_(b)
-            return a.abs()
-
-        a = torch.randn(2, 2, dtype=torch.complex64)
-        b = torch.randn(2, 2, dtype=torch.complex64)
-
-        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
-        self.assertRaises(RuntimeError, fn_c, a, b)
-
-    @unittest.expectedFailure
     def test_complex_input_mutation(self):
-        # Once this succeeds, remove the xfail and the test above
         def f(a, b):
             a.mul_(b)
             return a.abs()
@@ -156,6 +128,93 @@ class ComplexTests(ComplexDynamoTestCase):
         a_test = a.clone()
         self.assertEqual(f(a_test, b), fn_c(a_ref, b))
         self.assertEqual(a_test, a_ref)
+
+    def _check_input_mutation(self, f, backend):
+        a = torch.randn(2, 3, dtype=torch.complex64)
+        b = torch.randn(2, 3, dtype=torch.complex64)
+        a_ref = a.clone()
+        a_test = a.clone()
+        fn_c = torch.compile(f, backend=backend, fullgraph=True)
+        self.assertEqual(fn_c(a_test, b), f(a_ref, b))
+        self.assertEqual(a_test, a_ref)
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_complex_input_mutation_through_view(self, backend):
+        def f(a, b):
+            a[0].mul_(b[0])
+            return a.abs()
+
+        self._check_input_mutation(f, backend)
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_complex_input_mutation_through_view_as_real(self, backend):
+        def f(a, b):
+            torch.view_as_real(a).mul_(3)
+            return a * b
+
+        self._check_input_mutation(f, backend)
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_complex_input_mutation_returns_view(self, backend):
+        def f(a, b):
+            a.mul_(b)
+            return a[0]
+
+        self._check_input_mutation(f, backend)
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_output_views_other_output(self, backend):
+        def f():
+            a = torch.randn(5, 5, dtype=torch.complex64)
+            return a, a.view(25), torch.view_as_real(a)
+
+        a, c, r = torch.compile(f, backend=backend, fullgraph=True)()
+        self.assertEqual(c, a.view(25))
+        self.assertEqual(r, torch.view_as_real(a))
+        self.assertEqual(c.untyped_storage().data_ptr(), a.untyped_storage().data_ptr())
+        self.assertEqual(r.untyped_storage().data_ptr(), a.untyped_storage().data_ptr())
+        a.add_(1)
+        self.assertEqual(c, a.view(25))
+        self.assertEqual(r, torch.view_as_real(a))
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_duplicate_complex_output(self, backend):
+        def f():
+            a = torch.randn(5, 5, dtype=torch.complex64)
+            return a, a
+
+        a, b = torch.compile(f, backend=backend, fullgraph=True)()
+        self.assertEqual(a.untyped_storage().data_ptr(), b.untyped_storage().data_ptr())
+        a.add_(1)
+        self.assertEqual(a, b)
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_conj_output(self, backend):
+        def f(x):
+            a = x * 2
+            return a, a.conj(), (x + 1).conj()
+
+        x = torch.randn(5, dtype=torch.complex64)
+        a, c, d = torch.compile(f, backend=backend, fullgraph=True)(x)
+        self.assertTrue(c.is_conj())
+        self.assertTrue(d.is_conj())
+        self.assertEqual((a, c, d), f(x))
+        self.assertEqual(c.untyped_storage().data_ptr(), a.untyped_storage().data_ptr())
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_saved_conj_of_complex_input(self, backend):
+        def f(a, y):
+            return a * y
+
+        a = torch.rand(3, dtype=torch.double, requires_grad=True)
+        y = torch.rand(3, dtype=torch.cdouble)
+        a_ref = a.detach().clone().requires_grad_()
+        out = torch.compile(f, backend=backend, fullgraph=True)(a, y)
+        ref = f(a_ref, y)
+        self.assertEqual(out, ref)
+        out.abs().sum().backward()
+        ref.abs().sum().backward()
+        self.assertEqual(a.grad, a_ref.grad)
 
     def test_aliasing_semantics(self):
         def mutate():
