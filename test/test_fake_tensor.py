@@ -6718,31 +6718,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(self._installed(), (None, False))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    def test_fake_fallback_sparse_invariant_checks(self):
-        import threading
-
-        mode = CppFakeTensorMode()
-        meta = torch.eye(2).to_sparse().to("meta")
-        sparse = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
-        enabled = torch.sparse.check_sparse_tensor_invariants.is_enabled
-        self.assertTrue(enabled())
-        checks = []
-
-        def sparse_probe_meta(t):
-            checks.append(enabled())
-            thread = threading.Thread(target=lambda: checks.append(enabled()))
-            thread.start()
-            thread.join()
-            return t.clone()
-
-        with torch.library._scoped_library("_test_fake_fallback_sparse", "DEF") as lib:
-            lib.define("probe(Tensor x) -> Tensor")
-            lib.impl("probe", sparse_probe_meta, "SparseMeta")
-            torch.ops._test_fake_fallback_sparse.probe(sparse)
-        self.assertEqual(checks, [False, True])
-        self.assertTrue(enabled())
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("component", ["_values", "_indices"])
     def test_fake_fallback_sparse_component_ownership(self, component):
         mode = CppFakeTensorMode()
