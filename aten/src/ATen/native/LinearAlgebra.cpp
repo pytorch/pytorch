@@ -3067,15 +3067,15 @@ Tensor linalg_matrix_norm(
   _linalg_matrix_norm_checks(A, dim_, opt_dtype, /*low_precision*/abs_ord != 2.);
 
   auto max_min_wrapper = [ord, keepdim](const Tensor &A, int64_t dim) {
-    if (A.size(dim) == 0 && ord > 0) {
-      auto new_shape(DimVector(A.sizes()));
+    if (A.sym_size(dim) == 0 && ord > 0) {
+      auto new_shape(c10::SymDimVector(A.sym_sizes()));
       auto dim_ = maybe_wrap_dim(dim, A.dim());
       if (keepdim) {
         new_shape[dim_] = 1;
       } else {
         new_shape.erase(std::begin(new_shape) + dim_);
       }
-      return at::zeros(new_shape, A.options());
+      return at::zeros_symint(new_shape, A.options());
     } else {
       return ord > 0 ? A.amax(dim, keepdim) : A.amin(dim, keepdim);
     }
@@ -3118,7 +3118,7 @@ Tensor& linalg_matrix_norm_out(
   TORCH_CHECK(out.scalar_type() == result.scalar_type(),
               "linalg.matrix_norm expected out tensor dtype ", out.scalar_type(),
               " but got: ", result.scalar_type());
-  at::native::resize_output(result, out.sizes());
+  at::native::resize_output_symint(result, out.sym_sizes());
   result.copy_(out);
   return result;
 }
@@ -3165,7 +3165,7 @@ Tensor& linalg_matrix_norm_out(
   TORCH_CHECK(out.scalar_type() == result.scalar_type(),
               "linalg.matrix_norm expected out tensor dtype ", out.scalar_type(),
               " but got: ", result.scalar_type());
-  at::native::resize_output(result, out.sizes());
+  at::native::resize_output_symint(result, out.sym_sizes());
   result.copy_(out);
   return result;
 }
@@ -3202,7 +3202,7 @@ Tensor& linalg_norm_out(const Tensor& X, const std::optional<Scalar>& opt_ord, O
   TORCH_CHECK(out.scalar_type() == result.scalar_type(),
               "linalg.norm expected out tensor dtype ", out.scalar_type(),
               " but got: ", result.scalar_type());
-  at::native::resize_output(result, out.sizes());
+  at::native::resize_output_symint(result, out.sym_sizes());
   result.copy_(out);
   return result;
 }
@@ -3227,7 +3227,7 @@ Tensor& linalg_norm_out(const Tensor& X, std::string_view ord, OptionalIntArrayR
   TORCH_CHECK(out.scalar_type() == result.scalar_type(),
               "linalg.norm expected out tensor dtype ", out.scalar_type(),
               " but got: ", result.scalar_type());
-  at::native::resize_output(result, out.sizes());
+  at::native::resize_output_symint(result, out.sym_sizes());
   result.copy_(out);
   return result;
 }

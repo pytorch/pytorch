@@ -30,6 +30,54 @@ from torch.testing._internal.common_utils import (
 )
 
 
+# linalg.norm, linalg.matrix_norm and linalg.cholesky(out=) are
+# CompositeImplicitAutograd ops whose C++ kernels used to call sizes() on
+# symbolic tensors (or, for cholesky's out=, hit aten.linalg_cholesky_ex.L,
+# which lacked a meta function). That specialized the dynamic dim, so they
+# recompiled on every new shape.
+def _norm_inputs(n):
+    return torch.randn(4, 4, n), torch.empty(n)
+
+
+def _empty_dim_inputs(n):
+    return torch.randn(4, 0, n), torch.empty(n)
+
+
+def _cholesky_inputs(n):
+    x = torch.randn(n, 3, 3)
+    return x @ x.mT + 3 * torch.eye(3), torch.empty(n, 3, 3)
+
+
+def _norm(a, out):
+    return torch.linalg.norm(a, ord=-1, dim=(0, 1))
+
+
+def _norm_out(a, out):
+    return torch.linalg.norm(a, ord=-1, dim=(0, 1), out=out)
+
+
+# ord > 0 over an empty dim takes the zeros branch of linalg_matrix_norm
+def _norm_empty_dim(a, out):
+    return torch.linalg.norm(a, ord=1, dim=(0, 1))
+
+
+def _matrix_norm_out(a, out):
+    return torch.linalg.matrix_norm(a, ord=-1, dim=(0, 1), out=out)
+
+
+def _cholesky_out(a, out):
+    return torch.linalg.cholesky(a, out=out)
+
+
+_LINALG_COMPOSITE_CASES = {
+    "norm": (_norm, _norm_inputs),
+    "norm_out": (_norm_out, _norm_inputs),
+    "norm_empty_dim": (_norm_empty_dim, _empty_dim_inputs),
+    "matrix_norm_out": (_matrix_norm_out, _norm_inputs),
+    "cholesky_out": (_cholesky_out, _cholesky_inputs),
+}
+
+
 class RecompileTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -997,6 +1045,18 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.reset()
             self.assertEqual(count_recompiles(out_fn), 2)
 
+    @parametrize("case", list(_LINALG_COMPOSITE_CASES))
+    def test_linalg_composite_does_not_overrecompile(self, case):
+        fn, make_inputs = _LINALG_COMPOSITE_CASES[case]
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt, dynamic=None)
+        for n in range(4, 10):
+            a, out = make_inputs(n)
+            self.assertEqual(opt(a, out), fn(a, out.clone()))
+        self.assertEqual(cnt.frame_count, 2)
+
+
     def test_cache_entry_invalidated_during_its_own_guard_eval(self):
         # The FX_ANNOTATION lambda guard compares annotations with ==, which runs
         # Tag.__eq__ in the middle of guard evaluation, with `other` being the
@@ -1217,6 +1277,7 @@ class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(RecompileTests)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
