@@ -4565,6 +4565,22 @@ def is_gpu(device: str | None) -> bool:
     return device in GPU_TYPES
 
 
+def triton_fp_fusion_enabled() -> bool:
+    """Whether Triton may contract multiply-adds in Inductor's kernels into FMAs.
+
+    Which multiply-adds Triton contracts can depend on the block size and
+    num_warps, so deterministic mode turns it off: otherwise the result depends
+    on the config autotuning picks.
+    """
+    from torch._inductor import config
+
+    return (
+        config.triton.enable_fp_fusion
+        and not config.emulate_precision_casts
+        and not (config.deterministic or config.batch_invariant)
+    )
+
+
 def is_rocm() -> bool:
     """Check if we're running on ROCm/HIP platform."""
     return torch.version.hip is not None

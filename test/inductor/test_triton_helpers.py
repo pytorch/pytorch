@@ -193,10 +193,10 @@ if HAS_GPU:
             result_max, result_sum = online_softmax_combine_with_sum(
                 a, sa, b, sb, FAST, STRICT
             )
-            expected_sum = sa * scale_a + sb * scale_b
+            expected_sum = tl.fma(sa, scale_a, sb * scale_b)
         else:
             result_max, result_sum = online_softmax_combine(a, sa, b, FAST, STRICT)
-            expected_sum = sa * scale_a + scale_b
+            expected_sum = tl.fma(sa, scale_a, scale_b)
         tl.store(actual_ptr + offsets, result_max, mask)
         tl.store(actual_ptr + offsets + N, result_sum, mask)
         tl.store(expected_ptr + offsets, maximum_value, mask)
