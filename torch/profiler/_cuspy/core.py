@@ -340,6 +340,7 @@ class Cuspy:
         self._cupti = cupti_python.pylibcupti()
         # The CUPTI subscriber handle.
         self._subscriber: int | None = None
+        self._hes_enabled = False
         self._latency_enabled = False
         self._device_ts_enabled = False
         # Layout state -- a function of registration.
@@ -361,7 +362,7 @@ class Cuspy:
         # Per-(domain, cbid) arm refcount, so consumers wanting the same callback over
         # different windows don't disable each other. Enabled on 0->1, disabled on 1->0.
         self._callback_armed: dict[_CallbackKey, int] = {}
-        self._callback_lock = threading.Lock()
+        self._callback_lock = threading.RLock()
         # Our single CUpti_CallbackFunc trampoline; must outlive the subscription.
         self._callback_trampoline: Any = None
         self._drain_stop = threading.Event()
@@ -424,12 +425,14 @@ class Cuspy:
         self._pm_lock = threading.Lock()
 
     def _ensure_subscribed(self) -> int:
-        """Take the process's one CUPTI subscription if we don't already hold it, and return
-        the handle.
+        with self._callback_lock:
+            return self._subscribe_locked()
 
-        Shared by the activity path (:meth:`register_callbacks`) and the subscriber-callback
-        path, which needs the subscription but none of the user-defined-record machinery --
-        so a callback-only consumer pays for neither UDR mode nor the decode worker.
+    def _subscribe_locked(self) -> int:
+        """Return the shared subscriber while the caller holds _callback_lock.
+
+        Shared by the activity and subscriber-callback paths. Serializing subscription
+        acquisition with release also lets early HES pin one handle through setup.
         """
         if self._subscriber is not None:
             return self._subscriber
@@ -534,8 +537,8 @@ class Cuspy:
         Exceptions are logged and swallowed.
         """
         handler = _CallbackHandler(domain, cbid, fn)
-        self._ensure_subscribed()
         with self._callback_lock:
+            self._ensure_subscribed()
             key = (domain, cbid)
             self._callback_handlers[key] = self._callback_handlers.get(key, ()) + (fn,)
         return handler
@@ -565,8 +568,8 @@ class Cuspy:
         """Enable one ``(domain, cbid)`` callback, refcounted: CUPTI is told to enable on the
         first arm and to disable on the last :meth:`disarm_callback`, so consumers scoping the
         same callback to different windows don't disable each other."""
-        subscriber = self._ensure_subscribed()
         with self._callback_lock:
+            subscriber = self._ensure_subscribed()
             key = (domain, cbid)
             count = self._callback_armed.get(key, 0)
             self._callback_armed[key] = count + 1
@@ -589,15 +592,17 @@ class Cuspy:
                 self._cupti.enable_callback(self._subscriber, domain, cbid, False)
 
     def _release_subscriber_if_idle(self) -> None:
-        """Unsubscribe once neither activity observers nor callback handlers need CUPTI.
+        """Release an idle subscription unless early HES must keep it alive.
 
-        The subscription is shared, so it outlives the activity session in both directions:
-        ``stop()`` disarms user-defined records but leaves the handle up while a handler holds
-        it, and a handler registered before any profiling keeps it up for a later ``start()``.
+        Callback handlers share the subscription with activity observers. Early HES
+        also holds it across sessions: a fresh subscriber cannot rearm HES after
+        CUDA driver initialization.
         """
         if self._observers or self._started:
             return
         with self._callback_lock:
+            if self._hes_enabled:
+                return
             subscriber = self._subscriber
             if self._callback_handlers or subscriber is None:
                 return
@@ -611,6 +616,7 @@ class Cuspy:
             self._cupti.unsubscribe(subscriber)
             self._subscriber = None
             self._callback_trampoline = None
+            self._latency_enabled = False
 
     def start(self) -> None:
         if self._started:
@@ -679,6 +685,24 @@ class Cuspy:
         self._started = True
 
     def stop(self) -> None:
+        """Stop collection; release early HES only when no consumers remain.
+
+        Closing the last activity observer retains early HES for later windows.
+        Call stop() explicitly after closing observers and callback handlers, before
+        tearing down CUDA or distributed communication, to release that subscription.
+        Calling it with a live consumer does not schedule a deferred release: call
+        it again after closing that consumer.
+        """
+        self._stop_collection()
+        with self._callback_lock:
+            if self._callbacks_registered and self._subscriber is not None:
+                self._cupti.disarm_user_defined_records(self._subscriber)
+                self._callbacks_registered = False
+            if not self._observers and not self._callback_handlers:
+                self._hes_enabled = False
+            self._release_subscriber_if_idle()
+
+    def _stop_collection(self) -> None:
         if not self._started:
             return
         # Stop the Python drain loop. The decode thread keeps running (and self-flushing
@@ -706,10 +730,9 @@ class Cuspy:
         # Disable everything we enabled, then tear down the activity session.
         self._disable(self._enabled.keys())
         self._enabled = {}
-        # Latency timestamps are a property of the subscription we are dropping, so
-        # forget them too -- otherwise the next session sees a stale "already on" and
-        # never arms them for a fresh subscriber.
-        self._latency_enabled = False
+        # Subscription attributes survive while a callback handler or early HES
+        # retains the handle. Keep the latency cache so the next selection can
+        # reconcile it; reset it only when we actually unsubscribe.
         if self._subscriber is not None:
             # Release CUPTI without poisoning it for the next session: turn
             # user-defined-record mode back off (it changes CUPTI's record layout),
@@ -937,7 +960,7 @@ class Cuspy:
             self._observers.remove(obs)
             empty = not self._observers
         if empty:
-            self.stop()
+            self._stop_collection()
         else:
             self._apply_selection()
 
@@ -1460,12 +1483,12 @@ class Cuspy:
         )
 
 
-_hes_enabled = False
-
-
 def enable_hes_early() -> None:
-    global _hes_enabled
-    if _hes_enabled:
+    """Arm HES and UDR on Cuspy's retained subscriber before CUDA initialization.
+
+    Call configure() first if non-default collector settings are needed.
+    """
+    if is_hes_enabled():
         return
     if torch.cuda.is_initialized() or _has_active_cuda_context():
         raise RuntimeError(
@@ -1473,20 +1496,44 @@ def enable_hes_early() -> None:
         )
     from cuda.bindings import driver as cuda_driver  # pyrefly: ignore[missing-import]
 
-    rc = cuda_driver.cuInit(0)[0]
-    if rc != cuda_driver.CUresult.CUDA_SUCCESS:
-        raise RuntimeError(f"cuInit failed with rc={rc}")
-
-    # Use the direct libcupti call (pylibcupti().activity_enable_hes), not
-    # cupti-python's activity_enable_hw_trace(): after torch is imported, the
-    # latter makes subsequent cuptiActivityRegisterCallbacks() fail with
-    # CUPTI_ERROR_MULTIPLE_SUBSCRIBERS_NOT_SUPPORTED, while the direct call works.
-    cupti_python.pylibcupti().activity_enable_hes()
-    _hes_enabled = True
+    cuspy = Cuspy()
+    with cuspy._lock, cuspy._callback_lock:
+        if cuspy._hes_enabled:
+            return
+        if cuspy._callbacks_registered:
+            raise RuntimeError(
+                "enable_hes_early() must be called before activity callback registration"
+            )
+        subscriber = cuspy._ensure_subscribed()
+        hes_armed = False
+        try:
+            # HES and UDR must use the same subscriber, before any activity kinds.
+            # On R580 B200 hosts, HES must also be armed before cuInit.
+            cuspy._cupti.activity_enable_hes(subscriber)
+            hes_armed = True
+            cuspy.register_callbacks()
+            rc = cuda_driver.cuInit(0)[0]
+            if rc != cuda_driver.CUresult.CUDA_SUCCESS:
+                raise RuntimeError(f"cuInit failed with rc={rc}")
+        except Exception:
+            try:
+                try:
+                    if cuspy._callbacks_registered:
+                        cuspy._cupti.disarm_user_defined_records(subscriber)
+                    if hes_armed:
+                        cuspy._cupti.activity_enable_hes(subscriber, enabled=False)
+                finally:
+                    cuspy._release_subscriber_if_idle()
+            except Exception:
+                logger.exception("Failed to roll back Cuspy's early HES subscription")
+            cuspy._callbacks_registered = False
+            raise
+        cuspy._hes_enabled = True
 
 
 def is_hes_enabled() -> bool:
-    return _hes_enabled
+    instance = Cuspy._instance
+    return instance is not None and instance._hes_enabled
 
 
 def configure(
@@ -1551,6 +1598,13 @@ def _reset_for_test() -> None:
     """Test-only: drop the singleton and reset the config to defaults so a test can build a
     freshly-configured Cuspy. Callers must have torn down any live session first."""
     with Cuspy._instance_lock:
+        instance = Cuspy._instance
+        if instance is not None and instance._hes_enabled:
+            if instance._callbacks_registered and instance._subscriber is not None:
+                instance._cupti.disarm_user_defined_records(instance._subscriber)
+                instance._callbacks_registered = False
+            instance._hes_enabled = False
+            instance._release_subscriber_if_idle()
         Cuspy._instance = None
         Cuspy._buffer_size = 4 * 1024 * 1024
         Cuspy._background_flush_period_s = -1.0
