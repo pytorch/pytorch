@@ -608,6 +608,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def should_allow_nested_graph_breaks(self) -> bool:
         return True
 
+    def is_dynamo_polyfill(self) -> bool:
+        return False
+
 
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
@@ -618,6 +621,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
         "fn",
         "is_constant",
+        "is_dynamo_polyfill_function",
         *BaseUserFunctionVariable._nonvar_fields,
     }
 
@@ -642,9 +646,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         self,
         fn: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
         is_constant: bool = False,
+        is_dynamo_polyfill_function: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
+        self.is_dynamo_polyfill_function = is_dynamo_polyfill_function
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
@@ -728,6 +734,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if is_ngb_suppressed_inline(filename):
             return False
         return True
+
+    def is_dynamo_polyfill(self) -> bool:
+        return self.is_dynamo_polyfill_function
 
     def bind_args(
         self,
@@ -1342,6 +1351,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         code: types.CodeType,
         f_globals: dict[str, Any],
         inline_tracer: "InliningGeneratorInstructionTranslator",
+        is_dynamo_polyfill_generator: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -1350,6 +1360,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.inline_tracer = inline_tracer
         self.remaining_items: list[VariableTracker] = []
         inline_tracer.output.track_generator(self)
+        self.is_dynamo_polyfill_generator = is_dynamo_polyfill_generator
 
     def get_code(self) -> types.CodeType:
         return self.code
@@ -1366,6 +1377,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def has_self(self) -> bool:
         return False
 
+    def is_dynamo_polyfill(self) -> bool:
+        return self.is_dynamo_polyfill_generator
+
     def __name__(self) -> str:
         return self.get_name()
 
@@ -1375,7 +1389,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
     __repr__ = __str__
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        from torch._dynamo.side_effects import disallow_side_effects_in_generator
+        from torch._dynamo.side_effects import (
+            disallow_side_effects_in_generator,
+            GeneratorReconstructionMode,
+        )
         from torch._dynamo.symbolic_convert import (
             save_and_restart_speculation_log,
             temporarely_allow_writes_to_output_graph,
@@ -1383,7 +1400,15 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         tx = codegen.tx
         save = save_and_restart_speculation_log(tx)
-        disallow = disallow_side_effects_in_generator(tx)
+        mode = (
+            GeneratorReconstructionMode.TENSOR_ONLY
+            if self.is_dynamo_polyfill()
+            else GeneratorReconstructionMode.STRICT
+        )
+        disallow = disallow_side_effects_in_generator(
+            tx,
+            mode=mode,
+        )
         temp = temporarely_allow_writes_to_output_graph(tx)
 
         with save, disallow, temp:
@@ -1766,6 +1791,9 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
     def has_self(self) -> bool:
         return self.vt.has_self()
 
+    def is_dynamo_polyfill(self) -> bool:
+        return self.vt.is_dynamo_polyfill()
+
     def _build_inline_tracer(
         self,
         tx: "InstructionTranslatorBase",
@@ -1817,6 +1845,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             code,
             f_globals,
             inline_tracer,  # type: ignore[arg-type]
+            is_dynamo_polyfill_generator=self.is_dynamo_polyfill(),
             source=self.source,
         )
 
@@ -2261,6 +2290,7 @@ def invoke_and_store_as_constant(
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
         "f_globals",
+        "is_dynamo_polyfill_function",
         *BaseUserFunctionVariable._nonvar_fields,
     }
 
@@ -2277,6 +2307,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         # `functools.wrap(wrapped_fn)(this_fn)`.
         wrapped_fn: VariableTracker | None = None,
         annotate: VariableTracker | None = None,
+        is_dynamo_polyfill_function: bool = False,
         **kwargs: Any,
     ) -> None:
         if kwargs.get("mutation_type") is None:
@@ -2302,6 +2333,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.wrapped_fn: VariableTracker | None = wrapped_fn
         # func_annotate (3.14+); None is the NULL slot.
         self.annotate = annotate
+        self.is_dynamo_polyfill_function = is_dynamo_polyfill_function
 
     def _set_defaults(
         self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
@@ -2656,6 +2688,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def has_self(self) -> bool:
         return False
+
+    def is_dynamo_polyfill(self) -> bool:
+        return self.is_dynamo_polyfill_function
 
     def get_globals(self) -> dict[str, Any]:
         return self.f_globals
@@ -4220,7 +4255,9 @@ class PolyfilledFunctionVariable(VariableTracker):
                 ),
             )
 
-        traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
+        traceable_function_variable = UserFunctionVariable(  # noqa: RVT001
+            self.traceable_fn, is_dynamo_polyfill_function=True
+        )
         return tx.inline_user_function_return(
             traceable_function_variable,
             list(args),

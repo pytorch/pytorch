@@ -133,6 +133,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import (
     AttributeMutationExisting,
     AttributeMutationNew,
+    GeneratorReconstructionMode,
     SideEffects,
     ValueMutationExisting,
 )
@@ -770,6 +771,9 @@ class OutputGraph(OutputGraphCommon):
             _aotautograd_guards=[],
             compile_on_one_rank=torch.fx.experimental.proxy_tensor._coor_enabled(),
         )
+        # Generator reconstruction is a frame-wide dynamic scope. Keep it on
+        # OutputGraph so nested higher-order-op tracers observe the same mode.
+        self.generator_reconstruction_mode = GeneratorReconstructionMode.OFF
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
@@ -4278,9 +4282,6 @@ class SubgraphTracer(fx.Tracer):
         # this subtracer's trace. Used by invoke_subgraph reuse to collect
         # guards and detect mutations on captured variables.
         self.traced_sources: OrderedSet[Source] = OrderedSet()
-
-        # True if this tracer is currently tracing (reconstructing) into a Python generator
-        self.is_reconstructing_generator = False
 
         self.debug_level: int = parent.debug_level + 1 if parent is not None else 0
 
