@@ -72,6 +72,8 @@ class TestReductionConfig(TestCase):
             nfields=1,
             nouts=1,
             welford_outs=0,
+            acc_bits=32,
+            alignment=16,
         )
         args.update(updates)
         return kg.select_general_config(**args)
@@ -211,7 +213,8 @@ class TestReductionConfig(TestCase):
         num_o = 4096
         pairs = (((count, 2),), ((num_o, 2 * count),))
         args = ((10, 0), torch.float16, count, num_o, *pairs)
-        cfg = kg.select_general_config(*args, **_contract(_TRAITS[trait]))
+        contract = _contract(_TRAITS[trait])
+        cfg = kg.select_general_config(*args, **contract, acc_bits=32, alignment=16)
         self.assertEqual(cfg, expected)
 
     def test_b200_rules_match_trait_types(self):
@@ -285,6 +288,8 @@ class TestReductionConfig(TestCase):
                 nfields=3,
                 nouts=1,
                 welford_outs=1,
+                acc_bits=32,
+                alignment=16,
             )
             self.assertTrue(cfg.uniform_tree)
             self.assertTrue(tile.uniform_tree_ok(T.WelfordOps(), count, cfg.block, 1))
@@ -569,10 +574,11 @@ class TestReductionConfig(TestCase):
             "var_mean": T.VarMeanOps(),
             "var": T.WelfordOps(),
         }[trait]
-        self.assertEqual(kg._ragged_rows_ok((10, 0), dtype, N, 16, trait), routed)
-        self.assertFalse(kg._ragged_rows_ok((9, 0), dtype, N, 16, trait))
-        self.assertFalse(kg._ragged_rows_ok((10, 0), dtype, N, 8, trait))
-        self.assertFalse(kg._ragged_rows_ok((10, 0), dtype, N, 16, trait, 64))
+        ok = kg._ragged_rows_ok
+        self.assertEqual(ok((10, 0), dtype, N, 16, trait, acc_bits=32), routed)
+        self.assertFalse(ok((9, 0), dtype, N, 16, trait, acc_bits=32))
+        self.assertFalse(ok((10, 0), dtype, N, 8, trait, acc_bits=32))
+        self.assertFalse(ok((10, 0), dtype, N, 16, trait, acc_bits=64))
 
     def test_b200_ragged_rows_start_late_traits_later(self):
         """Keep absmax, absmin and general-p norms off ragged rows at N = 255, and every
@@ -584,8 +590,9 @@ class TestReductionConfig(TestCase):
         self.assertEqual(kg._ragged_row_min_n(T.VarMeanOps(take_sqrt=True)), 1025)
         self.assertEqual(kg._ragged_row_min_n(T.WelfordOps(take_sqrt=True)), 1025)
         self.assertEqual(kg._ragged_row_min_n(T.WelfordOps(return_mean=True)), 255)
+        absmax = T.AbsMaxOps()
         for N, routed in ((255, False), (1023, True)):
-            ok = kg._ragged_rows_ok((10, 0), torch.float16, N, 16, T.AbsMaxOps())
+            ok = kg._ragged_rows_ok((10, 0), torch.float16, N, 16, absmax, acc_bits=32)
             self.assertEqual(ok, routed)
 
 

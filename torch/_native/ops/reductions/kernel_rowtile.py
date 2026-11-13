@@ -128,12 +128,11 @@ class _ItreeArch(NamedTuple):
     # Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N;
     # 0 keeps _ITREE_THREAD_ELEMS.
     lowp_thread_elems: int = 0
-    # Derive Welford partial counts from the plan where tile.uniform_combine_ok holds and
-    # the combine stages a tile; skip staging the count.
-    uniform_count: bool = False
-    # With uniform_count, stage each partial's precomputed Chan weight in one row shared
-    # by the block; weights depend only on the partial index.
-    combine_weights: bool = False
+    # "counts" derives Welford partial counts from the plan where tile.uniform_combine_ok
+    # holds and the combine stages a tile, skipping the count's staging. "weights" also
+    # stages each partial's precomputed Chan weight in one row shared by the block;
+    # weights depend only on the partial index.
+    uniform_combine: Literal["off", "counts", "weights"] = "off"
 
 
 # Performance tuning is keyed by full compute capability. Each measured GPU has
@@ -283,11 +282,10 @@ class _ItreePlan(NamedTuple):
     combine_tile: int = 0
     combine_unroll: int = 0
     # Staged COMBINE only: every partial holds split[1] values (tile.uniform_combine_ok). The
-    # fold derives counts from it, so the count field is not staged.
-    uniform_count: bool = False
-    # With uniform_count, a row shared by the block holds the current tile's weights,
-    # 1 / (index + 1) for each partial's global index, in the count's slot.
-    combine_weights: bool = False
+    # fold derives counts from it, so the count field is not staged. With "weights", a row
+    # shared by the block holds the current tile's weights, 1 / (index + 1) for each
+    # partial's global index, in the count's slot.
+    uniform_combine: Literal["off", "counts", "weights"] = "off"
 
     @property
     def sig(self) -> tuple[Any, ...]:
@@ -307,8 +305,7 @@ class _ItreePlan(NamedTuple):
             self.combine_grp,
             self.combine_tile,
             self.combine_unroll,
-            self.uniform_count,
-            self.combine_weights,
+            self.uniform_combine,
         )
 
 
@@ -542,8 +539,6 @@ def itree_combine_plan(
     if arch.combine_async and arch.combine_rpb > WARP:
         # The async copy maps one warp's lanes onto a row's partials.
         raise ValueError("combine_async requires combine_rpb <= WARP")
-    if arch.combine_weights and not arch.uniform_count:
-        raise ValueError("combine_weights requires uniform_count")
     caps = _hw.caps(device)
     nbatch = itree.split[0]
     rpb = arch.combine_rpb
@@ -553,8 +548,9 @@ def itree_combine_plan(
         rpb = 1 << (live - 1).bit_length()
     grp = arch.combine_group_bytes // itemsize
     g = max(1, math.gcd(nbatch, grp)) if grp else 1
-    uniform = arch.uniform_count and tile.uniform_combine_ok(trait, itree.split)
-    weights = uniform and arch.combine_weights
+    mode = arch.uniform_combine
+    uniform = mode != "off" and tile.uniform_combine_ok(trait, itree.split)
+    weights = uniform and mode == "weights"
     # Uniform counts stage no count field; weights stage one row shared by the block.
     row_fields = nfields - 1 if uniform else nfields
     # A staged tile must DIVIDE the batch count -- a ragged last tile would need predication --
@@ -590,8 +586,7 @@ def itree_combine_plan(
         combine_grp=g,
         combine_tile=tile_n,
         combine_unroll=min(arch.combine_unroll, tile_n),
-        uniform_count=uniform and bool(tile_n),
-        combine_weights=uniform and weights and bool(tile_n),
+        uniform_combine=mode if uniform and tile_n else "off",
     )
 
 
