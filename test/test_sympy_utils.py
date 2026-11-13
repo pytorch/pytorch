@@ -1188,6 +1188,25 @@ class TestSympyFunctions(TestCase):
                 self.assertEqual(actual, expected)
                 self.assertTrue(0 <= actual < nv * nv)
 
+    def test_modular_indexing_trunc_to_int_float_zero(self):
+        # https://github.com/pytorch/pytorch/issues/203979
+        from torch.utils._sympy.functions import ToFloat, TruncToInt
+
+        c0 = sympy.Symbol("c0", integer=True, nonnegative=True)
+        s = sympy.Symbol("s", integer=True, positive=True)
+        r = TruncToInt(ToFloat(s))
+        expr = ModularIndexing(Identity(c0), r + 1, r)
+
+        const_part = expr.subs({c0: 0, s: 0})
+        self.assertFalse(const_part.atoms(sympy.Float))
+        for sv in range(1, 5):
+            for c0v in range(20):
+                actual = int(expr.subs({s: sv, c0: c0v}).expand(identity=True))
+                self.assertEqual(actual, (c0v // (sv + 1)) % sv)
+
+        self.assertIs(TruncToInt(sympy.Float(0.0)), sympy.S.Zero)
+        self.assertEqual(TruncToInt(sympy.Integer(2**60 + 1)), 2**60 + 1)
+
 
 class TestSingletonInt(TestCase):
     def test_basic(self):
