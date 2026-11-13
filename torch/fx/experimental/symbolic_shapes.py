@@ -7525,9 +7525,6 @@ class ShapeEnv:
             return singleton_int_expr
 
         def resimplify_floor_div(axioms: dict[sympy.Expr, sympy.Expr]) -> None:
-            if not self._resimplify_floor_div_axioms:
-                return
-            self._resimplify_floor_div_axioms = False
             new_items: dict[sympy.Expr, sympy.Expr] = {}
             for k, v in list(axioms.items()):
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
@@ -7538,12 +7535,13 @@ class ShapeEnv:
                 if k.has(FloorDiv):
                     new_items.update({self.simplify(k): v})
             axioms.update(new_items)
-            if new_items and axioms is self.axioms:
-                self._update_version_counter()
 
         # Pattern matching
         if axioms is None:
-            resimplify_floor_div(self.axioms)
+            if self._resimplify_floor_div_axioms:
+                self._resimplify_floor_div_axioms = False
+                resimplify_floor_div(self.axioms)
+                self._update_version_counter()
             subst = self.axioms
         else:
             subst = {}
@@ -7552,7 +7550,8 @@ class ShapeEnv:
                 if e.free_symbols.issubset(expr_free_symbols):
                     subst.update(dict(self.get_implications(self.simplify(e))))
 
-            resimplify_floor_div(subst)
+            if self._resimplify_floor_div_axioms:
+                resimplify_floor_div(subst)
 
         expr = expr.xreplace(subst)
         # TODO: compute hint might have gotten broken here

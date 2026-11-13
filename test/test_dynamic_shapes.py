@@ -7713,6 +7713,34 @@ instantiate_parametrized_tests(ShapeEnvReplacementCacheTest)
 class ShapeEnvAxiomCacheInvalidationTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_explicit_axioms_preserve_pending_floor_div_resimplification(self):
+        for axioms in ((), (sympy.true,)):
+            with self.subTest(axioms=axioms):
+                shape_env = ShapeEnv()
+                a = create_symint(shape_env, 8, duck=False).node.expr
+                b = create_symint(shape_env, 5, duck=False).node.expr
+                floor_probe = sympy.Le(FloorDiv(a, 2), b, evaluate=False)
+                clean_probe = sympy.Le(CleanDiv(a, 2), b, evaluate=False)
+                shape_env.axioms.update(dict(shape_env.get_implications(floor_probe)))
+                shape_env._update_version_counter()
+                shape_env._add_divisible(Mod(a, 2))
+                previous_axioms = shape_env.axioms.copy()
+                version = shape_env._version_counter
+
+                self.assertIsNone(
+                    shape_env._maybe_evaluate_static(clean_probe, axioms=axioms)
+                )
+                self.assertTrue(shape_env._resimplify_floor_div_axioms)
+                self.assertEqual(shape_env._version_counter, version)
+                self.assertEqual(shape_env.axioms, previous_axioms)
+                self.assertEqual(
+                    shape_env._maybe_evaluate_static(clean_probe), sympy.true
+                )
+                self.assertFalse(shape_env._resimplify_floor_div_axioms)
+                self.assertGreater(shape_env._version_counter, version)
+                self.assertIn(canonicalize_bool_expr(clean_probe), shape_env.axioms)
+
+    @torch._dynamo.disable(reason="directly mutates the test's ShapeEnv")
     def _check_adds_only_axioms(self, shape_env, condition):
         state = (
             shape_env.var_to_range.copy(),
