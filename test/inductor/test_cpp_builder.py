@@ -304,6 +304,7 @@ class TestGetCppTorchDeviceOptionsWindows(TestCase):
             mock.patch.object(cpp_builder, "_IS_WINDOWS", True),
             mock.patch.object(torch.version, "hip", "7.14.0"),
             mock.patch.object(cpp_builder.config.aot_inductor, "link_libtorch", True),
+            mock.patch.dict(cpp_builder.config.__dict__, {"is_fbcode": lambda: False}),
             mock.patch(
                 "torch.utils.cpp_extension.include_paths", return_value=[]
             ) as include_paths,
