@@ -562,8 +562,7 @@ filter_mult_overflow(T& val1, T& val2) {
         // Clamp |val1| to (max - 1) / |val2|, keeping its sign, so that their
         // product fits. This only ever shrinks |val1|, as tests filter it
         // against several values.
-        T c = (std::numeric_limits<T>::max() - 1) / val2;
-        c = c < 0 ? -c : c;
+        T c = std::abs((std::numeric_limits<T>::max() - 1) / val2);
         if (val1 > c) {
             val1 = c;
         } else if (val1 < -c) {
