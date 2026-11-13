@@ -2,10 +2,12 @@
 import re
 import sys
 import unittest
+from unittest import mock
 from typing import NamedTuple
 
 import torch
-from torch._inductor import config
+from torch._inductor import config, ir
+from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing import FileCheck
@@ -153,6 +155,17 @@ class TestCppWrapper(InductorTestCase):
         ]
         self.assertEqual([len(names) for _, names in calls], [3, 3])
         self._check_freed_before_next_call(code, calls)
+
+    @unittest.skipIf(not RUN_CPU, "requires the CPU cpp_wrapper backend")
+    def test_optional_tensor_arg_codegen_once(self):
+        # Generating the reference of an optional tensor argument emits code
+        # (e.g. a new handle for a view) that is never freed, so it must run once.
+        wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
+        buf = mock.Mock(spec=ir.Buffer)
+        buf.codegen_reference.return_value = "buf0"
+        arg = wrapper.val_to_arg_str(buf, torch.OptionalType(torch.TensorType.get()))
+        self.assertEqual(arg, "&temporary_reference(buf0.get())")
+        buf.codegen_reference.assert_called_once()
 
 
 class DynamicShapesCppWrapperCpuTests(InductorTestCase):
