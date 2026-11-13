@@ -263,10 +263,17 @@ bool cpp_meta_supports_symint(
 }
 
 bool is_plain_tensor(const at::Tensor& t) {
-  return t.defined() && !t.is_fake() &&
-      !t.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python) &&
-      (*c10::impl::getGlobalPyInterpreter())
-          ->fake_has_plain_tensor_type(t.unsafeGetTensorImpl());
+  if (!t.defined() || t.is_fake()) {
+    return false;
+  }
+  const auto* impl = t.unsafeGetTensorImpl();
+  // Fresh native outputs have no Python object and need no type callback.
+  // Otherwise check the exact type: Parameters and subclasses without
+  // __torch_dispatch__ also lack the Python dispatch key.
+  return !impl->key_set().has(c10::DispatchKey::Python) &&
+      (impl->pyobj_slot()->load_pyobj() == nullptr ||
+       (*c10::impl::getGlobalPyInterpreter())
+           ->fake_has_plain_tensor_type(impl));
 }
 
 // FakeTensorMode.may_turn_const with CONSTANT_NUMEL_LIMIT == 1.
@@ -381,11 +388,11 @@ void fakeFallback(
       const auto& device =
           (*stack)[arguments_begin + *schema.argumentIndexWithName("device")];
       return device.isDevice() && !device.toDevice().is_cpu() &&
-          (*c10::impl::getGlobalPyInterpreter())->fake_avoid_device_init(mode);
+          mode->avoid_device_init_;
     }
     return schema.name() == "prims::device_put" &&
         schema.overload_name().empty() &&
-        (*c10::impl::getGlobalPyInterpreter())->fake_avoid_device_init(mode);
+        mode->avoid_device_init_;
   };
   const bool makes_constant = !has_mode_fakes &&
       (is_lift ||
