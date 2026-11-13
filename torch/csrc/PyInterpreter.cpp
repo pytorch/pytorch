@@ -164,7 +164,7 @@ struct ConcretePyInterpreterVTable final
   bool fake_run_with_mode_entered(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       c10::function_ref<bool()> step) const override;
-  c10::Device _resolve_device_conflict(
+  void fake_raise_device_mismatch(
       const c10::OperatorHandle& op,
       c10::Device common_device,
       c10::Device device) const override;
@@ -1062,9 +1062,6 @@ DEFINE_CACHED_PYTHON_IMPORT(
     get_fake_tensor_tls,
     py::module::import("torch._subclasses.fake_tensor").attr("fake_tensor_tls"))
 DEFINE_CACHED_PYTHON_IMPORT(
-    get_functorch_config,
-    py::module::import("torch._functorch.config"))
-DEFINE_CACHED_PYTHON_IMPORT(
     get_fake_tensor_device_mismatch_error,
     py::module::import("torch._subclasses.fake_tensor")
         .attr("FakeTensorDeviceMismatchError"))
@@ -1247,27 +1244,11 @@ bool ConcretePyInterpreterVTable::fake_run_with_mode_entered(
   return done;
 }
 
-c10::Device ConcretePyInterpreterVTable::_resolve_device_conflict(
+void ConcretePyInterpreterVTable::fake_raise_device_mismatch(
     const c10::OperatorHandle& op,
     c10::Device common_device,
     c10::Device device) const {
   py::gil_scoped_acquire gil;
-  // Match fake_tensor._resolve_device_conflict, including substring matching.
-  // Read the live config: overrides can change within an existing mode.
-  const auto preference =
-      get_functorch_config().attr("fake_tensor_prefer_device_type");
-  if (!preference.is_none()) {
-    const auto preferred = preference.cast<std::string>();
-    const bool common_has_preferred =
-        c10::DeviceTypeName(common_device.type(), /*lower_case=*/true)
-            .find(preferred) != std::string::npos;
-    const bool device_has_preferred =
-        c10::DeviceTypeName(device.type(), /*lower_case=*/true)
-            .find(preferred) != std::string::npos;
-    if (common_has_preferred != device_has_preferred) {
-      return device_has_preferred ? device : common_device;
-    }
-  }
   auto error_type = get_fake_tensor_device_mismatch_error();
   auto error = error_type(getTorchApiFunction(op), common_device, device);
   PyErr_SetObject(error_type.ptr(), error.ptr());
