@@ -88,6 +88,7 @@ from .hashable import (
 from .object_protocol import (
     _is_method_type,
     generic_getitem,
+    generic_hasattr_str,
     generic_is_true,
     generic_richcompare_bool,
     generic_setitem,
@@ -202,24 +203,39 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 "and all values must be VariableTracker"
             )
 
-        keys: list[HashableTracker] = []
+        keys: dict[int, HashableTracker] = {}
 
         def make_hashable(
             key: Union[VariableTracker, "HashableTracker"],
         ) -> "HashableTracker":
             result = key if isinstance(key, Hashable) else Hashable(key)
-            keys.append(result)
+            keys[id(key)] = result
             return result
 
         items_cls = cast(type, self._cpython_type)
         storage_cls = dict if items_cls is collections.defaultdict else items_cls
         self.items: dict[HashableTracker, VariableTracker]
         try:
-            self.items = storage_cls({make_hashable(x): v for x, v in items.items()})
+            if storage_cls is collections.OrderedDict and isinstance(
+                items, collections.OrderedDict
+            ):
+                # Preserve storage and linked order without hashing twice.
+                storage = cast(
+                    dict[VariableTracker | HashableTracker, VariableTracker], items
+                )
+                self.items = collections.OrderedDict(
+                    (make_hashable(key), value) for key, value in dict.items(storage)
+                )
+                for key in items:
+                    self.items.move_to_end(keys[id(key)])
+            else:
+                self.items = storage_cls(
+                    {make_hashable(x): v for x, v in items.items()}
+                )
         finally:
             # A caught equality exception still depends on the participating method keys.
             if keys and self.source is None:
-                guard_key_collisions(keys)
+                guard_key_collisions(keys.values())
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (
@@ -274,13 +290,18 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L3033-L3110
-        self.install_dict_order_guard(tx)
+        ConstDictVariable.install_dict_order_guard(self, tx)
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "{...}")
+            storage = (
+                self.items.items()
+                if isinstance(self.items, SideEffectsProxyDict)
+                else dict.items(self.items)
+            )
             items = [
-                f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
-                for key, value in self.items.items()
+                f"{tracked_repr(tx, cast(HashableTracker, key).vt)}: {tracked_repr(tx, value)}"
+                for key, value in storage
             ]
         return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
@@ -862,13 +883,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 # correctness.
                 other.install_dict_keys_match_guard()
                 self._update_items(other.materialize_keys())
-            elif (
-                isinstance(
-                    other,
-                    (variables.UserDefinedObjectVariable, MappingProxyVariable),
-                )
-                and other.call_obj_hasattr(tx, "keys").as_python_constant()
-            ):
+            elif isinstance(
+                other,
+                (variables.UserDefinedObjectVariable, MappingProxyVariable),
+            ) and generic_hasattr_str(tx, other, "keys"):
                 keys = other.call_method(tx, "keys", [], {})
                 for key in unpack_iterable(tx, keys):
                     value = generic_getitem(tx, other, key)
@@ -1036,31 +1054,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         self.install_dict_keys_match_guard()
         return VariableTracker.build(tx, len(self.items))
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        # dict not allow setting arbitrary attributes.  OrderedDict and
-        # defaultdict allow arbitrary setattr, but not deletion of default attrs
-        cls = self.python_type()
-        if any(
-            cls is t for t in (dict, collections.OrderedDict, collections.defaultdict)
-        ):
-            if hasattr(cls, name):
-                return ConstantVariable.create(True)
-            if cls is dict:
-                return ConstantVariable.create(False)
-
-        msg = f"hasattr on {cls} is not supported"
-        unimplemented(
-            gb_type="unsupported hasattr operation",
-            context=f"Class {cls}",
-            explanation=msg,
-            hints=[
-                "Consider using a regular dictionary instead",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
     def clone(self, **kwargs: Any) -> VariableTracker:
         self.install_dict_keys_match_guard()
         return super().clone(**kwargs)
@@ -1131,6 +1124,13 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.source:
+            unimplemented(
+                gb_type="Input OrderedDict linked-order mutation",
+                context="OrderedDict.move_to_end",
+                explanation="Dynamo does not yet replay linked order for input OrderedDicts.",
+                hints=[],
+            )
         self.install_dict_keys_match_guard()
         tx.output.side_effects.mutation(self)
         if args[0] not in self:
@@ -1201,6 +1201,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
         # uses dict-style formatting.
         # https://github.com/python/cpython/blob/v3.13.3/Objects/odictobject.c#L1385-L1418
+        self.install_dict_order_guard(tx)
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "...")
@@ -1389,13 +1390,6 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
         from .object_protocol import generic_richcompare
 
         return generic_richcompare(tx, self.dv_dict, other, op)
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is types.MappingProxyType:
-            return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
-        return super().call_obj_hasattr(tx, name)
 
 
 class NNModuleHooksDictVariable(ConstDictVariable):
@@ -1631,15 +1625,6 @@ class DictViewVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.kv is None:
-            raise AssertionError("kv must not be None for call_obj_hasattr")
-        if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
 
     # dictview_mapping getset returns a read-only mappingproxy of the underlying
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040

@@ -81,7 +81,6 @@ from torch._subclasses.fake_tensor import (
     maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
-from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
 from torch.fx.experimental.dynamic_spec import (
@@ -953,7 +952,9 @@ def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
             context=str(error),
             explanation="This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
             hints=[
-                "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+.",
+                "Snapshots are not implemented on Python 3.16+. On older free-threaded "
+                "Python, empty OrderedDicts remain supported; nonempty ones require "
+                "Python 3.14.1+. Keep unsupported inputs outside fullgraph capture.",
             ],
             from_exc=error,
             skip_frame=True,
@@ -972,6 +973,27 @@ def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
             skip_frame=True,
             apply_to_code=False,
         )
+
+
+def _build_dict_items(
+    value: dict[Any, Any],
+    build_key_value: Callable[[int, object, object], tuple[T, VariableTracker]],
+) -> dict[T, VariableTracker]:
+    snapshot = _dict_input_snapshot(value)
+    entries = [
+        (position, *build_key_value(position, key, item))
+        for position, key, item in snapshot
+    ]
+    value_type: type[Any] = type(value)
+    if not issubclass(value_type, collections.OrderedDict):
+        return {key: item for _, key, item in entries}
+    # Preserve both dict storage order and OrderedDict iteration order.
+    items = collections.OrderedDict(
+        (key, item) for _, key, item in sorted(entries, key=lambda entry: entry[0])
+    )
+    for _, key, _ in entries:
+        items.move_to_end(key)
+    return items
 
 
 class VariableBuilder:
@@ -1541,7 +1563,7 @@ class VariableBuilder:
             )
             if not (global_hooks and config.skip_nnmodule_hook_guards):
                 self.install_guards(GuardBuilder.TYPE_MATCH)
-            all_const = all(ConstantVariable.is_literal(k) for k in value)
+            all_const = all(ConstantVariable.is_literal(k) for k in dict.keys(value))
 
             # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
@@ -1583,9 +1605,7 @@ class VariableBuilder:
 
                 return key, res_value
 
-            result = dict(
-                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
-            )
+            result = _build_dict_items(value, build_key_value)
 
             if global_hooks:
                 flags_cls = (
@@ -2617,9 +2637,7 @@ class VariableBuilder:
 
                 return key, res_value
 
-            kv_items = dict(
-                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
-            )
+            kv_items = _build_dict_items(value, build_key_value)
 
             if issubclass(type(value), collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
@@ -4031,7 +4049,6 @@ class VariableBuilder:
             # when specialize_float=False
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda
             or torch._inductor.config.triton.cudagraphs
-            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or (
                 config.assume_static_by_default
                 and frame_state_entry.scalar is not auto_dynamic
