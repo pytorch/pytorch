@@ -1200,10 +1200,19 @@ class TestGroupBatchFusion(TestCase):
         x = torch.randn(m, 64)
         with torch.no_grad():
             expected = module(x)
-            actual = torch.compile(module, fullgraph=True)(x)
-        self.assertEqual(actual, expected)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        if consumer == "to_float64":
+            # The inputs are float32 GEMMs; compare at float32 precision.
+            self.assertEqual(actual[0].float(), expected[0].float())
+            self.assertEqual(actual[1:], expected[1:])
+        else:
+            self.assertEqual(actual, expected)
         self.assertEqual([t.stride() for t in actual], [t.stride() for t in expected])
+        self.assertEqual(subsets, [3])
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        if consumer == "two_contiguous":
+            self.assertEqual(actual[0].data_ptr(), actual[1].data_ptr())
 
     @parametrize("p,inplace", [(0.5, False), (0.0, False), (0.5, True)])
     @parametrize("m", [1, 32])
@@ -1233,9 +1242,12 @@ class TestGroupBatchFusion(TestCase):
         with torch.no_grad():
             torch.manual_seed(1234)
             expected = module(x)
-            torch.manual_seed(1234)
-            actual = torch.compile(module, fullgraph=True)(x)
+            with _record_fusion_subsets() as subsets:
+                torch.manual_seed(1234)
+                actual = torch.compile(module, fullgraph=True)(x)
         self.assertEqual(actual, expected)
+        self.assertEqual([t.stride() for t in actual], [t.stride() for t in expected])
+        self.assertEqual(subsets, [3])
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
     @parametrize("consumer", ["custom_contiguous", "merge_view"])
