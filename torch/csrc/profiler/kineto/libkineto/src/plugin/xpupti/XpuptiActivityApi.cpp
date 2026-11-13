@@ -238,6 +238,34 @@ constexpr std::span<const pti_view_kind> findPtiViewKinds(
       return {};
   }
 }
+
+void enableDriverMemoryApis() {
+  static constexpr pti_api_id_driver_levelzero kAllowedMemoryApis[]{
+      pti_api_id_driver_levelzero::zeMemAllocDevice_id,
+      pti_api_id_driver_levelzero::zeMemAllocHost_id,
+      pti_api_id_driver_levelzero::zeMemAllocShared_id,
+      pti_api_id_driver_levelzero::zeMemCloseIpcHandle_id,
+      pti_api_id_driver_levelzero::zeMemFreeExt_id,
+      pti_api_id_driver_levelzero::zeMemFree_id,
+      pti_api_id_driver_levelzero::zeMemGetFileDescriptorFromIpcHandleExp_id,
+      pti_api_id_driver_levelzero::zeMemGetIpcHandleFromFileDescriptorExp_id,
+      pti_api_id_driver_levelzero::zeMemGetIpcHandleWithProperties_id,
+      pti_api_id_driver_levelzero::zeMemGetIpcHandle_id,
+      pti_api_id_driver_levelzero::zeMemOpenIpcHandle_id,
+      pti_api_id_driver_levelzero::zeMemPutIpcHandle_id,
+      pti_api_id_driver_levelzero::zePhysicalMemCreate_id,
+      pti_api_id_driver_levelzero::zePhysicalMemDestroy_id,
+      pti_api_id_driver_levelzero::zeVirtualMemFree_id,
+      pti_api_id_driver_levelzero::zeVirtualMemMap_id,
+      pti_api_id_driver_levelzero::zeVirtualMemReserve_id,
+      pti_api_id_driver_levelzero::zeVirtualMemUnmap_id,
+  };
+
+  // No class scopes allocation, so these go in one id at a time.
+  for (const auto memoryApi : kAllowedMemoryApis)
+    XPUPTI_CALL(ptiViewEnableDriverApi(
+        /*enable=*/1, PTI_API_GROUP_LEVELZERO, memoryApi));
+}
 } // namespace
 
 void XpuptiActivityApi::enableXpuptiActivities(
@@ -259,7 +287,19 @@ void XpuptiActivityApi::enableXpuptiActivities(
     switch (activity) {
       case ActivityType::XPU_RUNTIME:
         XPUPTI_CALL(ptiViewEnableRuntimeApiClass(
-            1, PTI_API_CLASS_GPU_OPERATION_CORE, PTI_API_GROUP_ALL));
+            /*enable=*/1, PTI_API_CLASS_GPU_OPERATION_CORE, PTI_API_GROUP_ALL));
+        break;
+
+      case ActivityType::XPU_DRIVER:
+        // ptiViewEnable above left every L0 id enabled.
+        // The class call below is the first to set granularity,
+        // which resets the group to all-disabled before applying,
+        // so the per-id calls after it only add.
+        XPUPTI_CALL(ptiViewEnableDriverApiClass(
+            /*enable=*/1,
+            PTI_API_CLASS_GPU_OPERATION_CORE,
+            PTI_API_GROUP_LEVELZERO));
+        enableDriverMemoryApis();
         break;
 
       case ActivityType::EXTERNAL_CORRELATION:
