@@ -324,8 +324,18 @@ class PyCodegen:
             ):
                 return self(value.source)
 
-        if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
-            # Recompute from the operands at runtime instead of burning in the value
+        if isinstance(value, ComputedLazyConstantVariable) and (
+            not value.is_realized()
+            or (
+                self.graph_output_var is None
+                and isinstance(value.realize(), SymNodeVariable)
+            )
+        ):
+            # The common case is an unrealized ComputedLazyConstant which we want to recompute from its operands.
+            # However there's a special case where a cycle can form and a (realized) ComputedLazyConstant becomes both a
+            # graph output and an indirect graph input.  There's probably a more general fix, but for now we handle it
+            # by detecting when no graph outputs are available and the value is symbolic (which is needed for the cycle
+            # to form)
             self.uses[value] += 1
             self.call_reconstruct(value)
             if allow_cache and value in self.tempvars:

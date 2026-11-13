@@ -50,7 +50,11 @@ if TYPE_CHECKING:
 
     from torch._C._functorch import CInterpreter
     from torch._guards import Source
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch._subclasses.fake_tensor import (
+        CppFakeTensorMode,
+        FakeTensor,
+        FakeTensorMode,
+    )
 
     # Import here to avoid cycle
     # Import the following modules during type checking to enable code intelligence features,
@@ -753,7 +757,7 @@ class MetaTensorDesc(Generic[_TensorT]):
 
     ctx: object | None = None  # is_traceable_wrapper_subclass
     type: type | None = None  # is_traceable_wrapper_subclass
-    fake_mode: FakeTensorMode | None = None
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None
     view_func: ViewFunc[Any] | None = None
     # level looks serializable, but actually it is meaningless without
     # the functorch_stack below
@@ -922,7 +926,7 @@ def _grad_context_compatible(
 # meta storages. This class will hold weak references to cached tensors
 # and tensor storages.
 class MetaConverter(Generic[_TensorT]):
-    def __init__(self, *, copy_data: bool = False) -> None:
+    def __init__(self, *, copy_data: bool = False, cpp_fakes: bool = False) -> None:
         # Maps MetaStorageId to UntypedStorage
         self.storage_memo: weakref.WeakValueDictionary[
             MetaStorageId, torch.UntypedStorage
@@ -941,6 +945,7 @@ class MetaConverter(Generic[_TensorT]):
         # bearing: FakeTensor relies on real tensor being set to exactly this
         # value
         self.copy_data = copy_data
+        self.cpp_fakes = cpp_fakes
         self.describer = MetaTensorDescriber(copy_data=copy_data)
 
     def successful(self) -> bool:
@@ -1096,6 +1101,7 @@ class MetaConverter(Generic[_TensorT]):
         source: Source | None,
         symbolic_context: SymbolicContext | None,
     ) -> _TensorT:
+        from torch._guards import require_python_fake_mode
         from torch._subclasses.fake_tensor import (
             is_fake_tensor,
             maybe_get_fake_mode,
@@ -1604,6 +1610,7 @@ class MetaConverter(Generic[_TensorT]):
                             is_coalesced=t.is_coalesced,
                         )
                     )
+                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         # Pray that sparse clone doesn't lose information
                         if t.data is None:
@@ -1679,6 +1686,7 @@ class MetaConverter(Generic[_TensorT]):
                             device="meta",
                         )
                     )
+                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         # Pray sparse clone doesn't lose information
                         if t.data is None:
@@ -1724,6 +1732,7 @@ class MetaConverter(Generic[_TensorT]):
                             sizes, strides, dtype=t.dtype, device="meta"
                         )
                     )
+                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
                             if t.size is None:
@@ -1943,6 +1952,7 @@ class MetaConverter(Generic[_TensorT]):
                             torch._dynamo.source.AttrSource(source, "_base"),
                             base_symbolic_context,
                         )
+                    require_python_fake_mode(maybe_get_fake_mode(base))
 
                     def is_c_of_r(
                         complex_dtype: torch.dtype, real_dtype: torch.dtype
@@ -2324,8 +2334,10 @@ class MetaConverter(Generic[_TensorT]):
                 # pyrefly: ignore [unbound-name]
                 if not is_fake_tensor(r):
                     raise AssertionError("Expected r to be a FakeTensor for nested int")
+                # pyrefly: ignore [unbound-name]
+                r_mode = require_python_fake_mode(maybe_get_fake_mode(r))
                 # pyrefly: ignore [unbound-name, missing-attribute]
-                r.nested_int_memo = maybe_get_fake_mode(r).create_symbolic_nested_int(
+                r.nested_int_memo = r_mode.create_symbolic_nested_int(
                     nt_tensor_id=t.nested_int
                 )
 
