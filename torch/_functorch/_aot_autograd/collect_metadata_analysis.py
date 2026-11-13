@@ -18,7 +18,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, require_python_fake_mode
 from torch._library.opaque_object import is_custom_class
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
@@ -215,7 +215,7 @@ def run_functionalized_fw_and_collect_metadata(
             _keep_input_mutations=keep_input_mutations,
         )
         suppress_pending = contextlib.nullcontext()
-        fake_mode = detect_fake_mode()
+        fake_mode = require_python_fake_mode(detect_fake_mode())
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         with disable_above, mode, suppress_pending, disable_autocast_cache():
