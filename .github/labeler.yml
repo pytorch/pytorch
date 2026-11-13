@@ -208,6 +208,16 @@
 - test/test_mps.py
 - test/inductor/test_mps_basic.py
 
+# TestNestedTensorOpInfo only runs in periodic-strict. Its njt_op_db is derived
+# from op_db, so OpInfo changes are included. Compile stack changes are not, and
+# are only covered after merge.
+"ciflow/periodic-strict":
+- aten/src/ATen/native/nested/**
+- torch/nested/**
+- torch/testing/_internal/common_methods_invocations.py
+- torch/testing/_internal/opinfo/**
+- test/test_nestedtensor.py
+
 "ciflow/h100-symm-mem":
 - torch/csrc/distributed/c10d/symm_mem/**
 - torch/distributed/_symmetric_memory/**
@@ -221,6 +231,22 @@
 - .github/workflows/build-almalinux-images.yml
 - .github/actions/binary-docker-build/**
 - .lintrunner.toml
+
+"ciflow/binaries":
+# Files that pin the CUDA, cuDNN, cuSPARSELt, NCCL and MKL builds shipped in the
+# wheels. generate_binary_build_matrix.py is the whole matrix generator and
+# install_cuda.sh is shared with the CI images, so an edit that changes no pin
+# also matches. This starts every ciflow/binaries/* workflow (Linux x86/aarch64/
+# s390x, Windows x64/arm64, macOS arm64) on each push.
+# The .ci/docker paths also get ciflow/docker, so both labels can land together;
+# that relies on get-docker-tag in the Linux binary workflows waiting until every
+# builder image is published (the CUDA wheel jobs pull a different image than the
+# CPU one that it waits for today).
+- .github/scripts/generate_binary_build_matrix.py
+- .ci/pytorch/windows/internal/cuda_install.bat
+- .ci/docker/common/install_cuda.sh
+- .ci/docker/common/install_mkl.sh
+- .ci/docker/ci_commit_pins/nccl.txt
 
 "ciflow/torchtitan":
 # torchtitan commit pin updates
