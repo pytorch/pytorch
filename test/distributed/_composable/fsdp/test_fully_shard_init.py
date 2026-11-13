@@ -673,7 +673,11 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         model0 = model[0]
         model_ref = weakref.ref(model)
         del model
+        # gc.collect() is a no-op while another rank's thread is collecting, so
+        # collect after every rank drops its model and check after every rank collects
+        dist.barrier()
         gc.collect()
+        dist.barrier()
         self.assertIsNone(model_ref())
         model0_state = fully_shard.state(model0)
         model0_state._lazy_init()
