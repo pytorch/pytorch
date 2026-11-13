@@ -58,9 +58,6 @@
 // made below autograd, while Python's FakeTensor keeps the requires_grad a Meta
 // kernel set on its meta output.
 //
-// TODO: Python CIA kernels written directly into py_kernels for ops without
-// native CIA kernels are not recorded in the tables. In-tree direct writers
-// (torch.export) override ops with native CIA kernels, which we always probe.
 
 namespace {
 
@@ -273,9 +270,6 @@ void fakeFallback(
     }
   }
 
-  // The op's tensor inputs, so output wrapping can tell an input returned as
-  // an output (by in-place and out= ops) from a new tensor
-  std::unordered_set<const c10::TensorImpl*> input_impls;
   std::optional<c10::Device> device;
   // The sparse inputs' Meta keys; Meta is added before redispatch.
   c10::DispatchKeySet meta_keyset;
@@ -316,7 +310,6 @@ void fakeFallback(
         if (mode->get_constant(impl) != nullptr) {
           unsupported(op, "constant inputs");
         }
-        input_impls.insert(impl);
         const auto fake_device = impl->fake_device();
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
         if (!device.has_value()) {
@@ -354,16 +347,14 @@ void fakeFallback(
       !cpp_meta_supports_symint(op, categories)) {
     const bool has_cia =
         op.hasKernelForDispatchKey(c10::DispatchKey::CompositeImplicitAutograd);
-    // Probe every native CIA op too: export writes py_kernels directly,
-    // bypassing the registration hook that sets the PythonCIA bit.
     const bool try_decomp =
         (has(FakeDispatchCategory::StaticShapeDecomp) && !has_sparse_inputs) ||
-        has(FakeDispatchCategory::PythonCIA) || has_cia;
-    if (try_decomp) {
+        has(FakeDispatchCategory::PythonCIA);
+    if (try_decomp || has_cia) {
       const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
       auto decompose = [&] {
         bool has_python_cia = false;
-        if (interpreter->fake_try_decomp(
+        if (try_decomp && interpreter->fake_try_decomp(
                 op, stack, /*has_symbolic_sizes=*/false, &has_python_cia)) {
           return true;
         }
@@ -441,7 +432,10 @@ void fakeFallback(
       return;
     }
     auto* impl = t.unsafeGetTensorImpl();
-    if (t.is_fake() && impl->fake_tensor_mode() == mode) {
+    if (t.is_fake()) {
+      TORCH_CHECK(
+          impl->fake_tensor_mode() == mode,
+          "Meta kernel returned a fake tensor from another mode");
       // device() reports meta inside the kernel invocation scope.
       const auto fake_device = impl->fake_device();
       TORCH_CHECK(
@@ -450,12 +444,9 @@ void fakeFallback(
           *fake_device,
           ", expected ",
           *device);
-    }
-    // An input returned as an output (by in-place and out= ops, or an op that
-    // returns its input without an alias annotation) is kept as is, as Python
-    // does. Its stored fake device is read, as device() reports meta here.
-    if (input_impls.contains(impl)) {
-      TORCH_INTERNAL_ASSERT(impl->fake_device() == device);
+      if (output_dispatch_keys.has_value()) {
+        impl->set_fake_dispatch_keys(output_dispatch_keys);
+      }
       return;
     }
     if (!is_alias && t.requires_grad()) {
@@ -463,8 +454,7 @@ void fakeFallback(
       // requires_grad from an input
       t.set_requires_grad(false);
     }
-    // A copy a Meta kernel made of a fake input inherited the input's fake
-    // state (see init_cpp_fake), where Python would see a plain meta tensor
+    // New views and shallow copies inside the kernel are plain Meta tensors.
     at::init_cpp_fake(impl, *device, mode);
     impl->set_real_tensor(nullptr);
     impl->set_fake_dispatch_keys(output_dispatch_keys);
