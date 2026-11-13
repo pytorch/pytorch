@@ -164,7 +164,7 @@ struct ConcretePyInterpreterVTable final
   bool fake_run_with_mode_entered(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       c10::function_ref<bool()> step) const override;
-  c10::Device fake_resolve_device_conflict(
+  c10::Device _resolve_device_conflict(
       const c10::OperatorHandle& op,
       c10::Device common_device,
       c10::Device device) const override;
@@ -1239,7 +1239,7 @@ bool ConcretePyInterpreterVTable::fake_run_with_mode_entered(
   return done;
 }
 
-c10::Device ConcretePyInterpreterVTable::fake_resolve_device_conflict(
+c10::Device ConcretePyInterpreterVTable::_resolve_device_conflict(
     const c10::OperatorHandle& op,
     c10::Device common_device,
     c10::Device device) const {
