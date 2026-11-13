@@ -5273,7 +5273,8 @@ def _fx_node_is_input_dependent_cudagraph_unsafe(fx_node: torch.fx.Node) -> bool
 
     Some ops are only cudagraph-unsafe depending on their inputs (e.g., index_put
     with boolean indices triggers .nonzero() during capture, but integer indices
-    are safe).
+    are safe, and fake_quantize_per_channel_affine synchronizes with the device for
+    an integer zero_point only).
     """
     from torch.fx.operator_schemas import normalize_function
 
@@ -5299,6 +5300,20 @@ def _fx_node_is_input_dependent_cudagraph_unsafe(fx_node: torch.fx.Node) -> bool
                     torch.uint8,
                 ):
                     return True
+
+    # fake_quantize_per_channel_affine checks that an integer zero_point lies in
+    # [quant_min, quant_max], and synchronizes with the device to do so; a floating-point
+    # zero_point (per_channel_affine_float_qparams) is not checked
+    if target is torch.ops.aten.fake_quantize_per_channel_affine_cachemask.default:
+        normalized = normalize_function(
+            target, fx_node.args, fx_node.kwargs, normalize_to_only_use_kwargs=True
+        )
+        if normalized is not None:
+            _, kwargs = normalized
+            zero_point = kwargs["zero_point"]
+            val = zero_point.meta.get("val") if hasattr(zero_point, "meta") else None
+            if val is None or not val.dtype.is_floating_point:
+                return True
 
     return False
 
