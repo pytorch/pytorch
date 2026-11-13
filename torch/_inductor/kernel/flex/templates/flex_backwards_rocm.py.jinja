@@ -1,0 +1,458 @@
+{% set D96_PANEL_DOTS = ROCM_D96_PANEL_DOTS and ROCM_BWD_PHASE == 1 and QK_HEAD_DIM == 96 and V_HEAD_DIM == 96 and QK_HEAD_DIM_ROUNDED == 128 and V_HEAD_DIM_ROUNDED == 128 and BLOCK_M1 == 32 and BLOCK_N1 == 128 and BLOCK_M2 == 128 and BLOCK_N2 == 32 %}
+{% set PANEL_DOTS = ROCM_D256_PANEL_DOTS or (ROCM_D192_PANEL_DOTS and ROCM_BWD_PHASE == 1 and QK_HEAD_DIM == 192 and V_HEAD_DIM == 192) or D96_PANEL_DOTS %}
+{% set PANEL_WIDTH = 64 if D96_PANEL_DOTS else 128 %}
+{% set D128_DV_VIEW_CARRY_SPLIT64 = ROCM_D128_DV_VIEW_CARRY_SPLIT64 and ROCM_BWD_PHASE == 1 and QK_HEAD_DIM == 128 and V_HEAD_DIM == 128 and QK_HEAD_DIM_ROUNDED == 128 and V_HEAD_DIM_ROUNDED == 128 and (BLOCK_M1 == 32 and BLOCK_N1 == 128 and BLOCK_M2 == 128 and BLOCK_N2 == 32 or BLOCK_M1 == 16 and BLOCK_N1 == 64 and BLOCK_M2 == 64 and BLOCK_N2 == 16) and ROCM_GQA_SPLITS == 1 and GQA_SHARED_HEADS == 8 and ROCM_EARLY_DP and XCD_REMAP and not USE_TMA and not PRESCALE_QK and not PANEL_DOTS %}
+{% set GQA_QUERY_TILE_OUTER_FP16 = (ROCM_D128_GQA_QUERY_TILE_OUTER | default(false)) and D128_DV_VIEW_CARRY_SPLIT64 and matrix_instr_nonkdim == 0 and kpack == 1 and BLOCK_M1 == 32 and BLOCK_N1 == 128 and BLOCK_M2 == 128 and BLOCK_N2 == 32 and SPARSE_Q_BLOCK_SIZE == 128 and SPARSE_KV_BLOCK_SIZE == 128 and HAS_FULL_BLOCKS and IS_DIVISIBLE and SAFE_HEAD_DIM %}
+{% set GQA_QUERY_TILE_OUTER_FP32 = (ROCM_D128_GQA_QUERY_TILE_OUTER | default(false)) and D128_DV_VIEW_CARRY_SPLIT64 and matrix_instr_nonkdim == 0 and kpack == 1 and waves_per_eu == 0 and BLOCK_M1 == 16 and BLOCK_N1 == 64 and BLOCK_M2 == 64 and BLOCK_N2 == 16 and SPARSE_Q_BLOCK_SIZE == 128 and SPARSE_KV_BLOCK_SIZE == 128 and HAS_FULL_BLOCKS and IS_DIVISIBLE and SAFE_HEAD_DIM and FLOAT32_PRECISION == "'ieee'" %}
+{% set GQA_QUERY_TILE_OUTER = GQA_QUERY_TILE_OUTER_FP16 or GQA_QUERY_TILE_OUTER_FP32 %}
+{% set EARLY_PROBABILITY_COMPACT = ROCM_EARLY_PROBABILITY_COMPACT and ROCM_BWD_PHASE == 1 and QK_HEAD_DIM == 256 and ROCM_D256_PANEL_DOTS and ROCM_EARLY_DP and (BLOCK_M1 == 16 or (BLOCK_M1 == 32 and GQA_SHARED_HEADS == 4)) and BLOCK_N1 == 64 and BLOCK_M2 == 128 and BLOCK_N2 == 32 %}
+{% set D192_DQ_EARLY_DP = ROCM_D192_DQ_EARLY_DP and ROCM_BWD_PHASE == 2 and QK_HEAD_DIM == 192 and V_HEAD_DIM == 192 and QK_HEAD_DIM_ROUNDED == 256 and V_HEAD_DIM_ROUNDED == 256 and BLOCK_M1 == 16 and BLOCK_N1 == 64 and BLOCK_M2 == 128 and BLOCK_N2 == 32 and not USE_TMA and not ROCM_EARLY_DP %}
+{% set D96_DQ_EARLY_DP = ROCM_D96_DQ_EARLY_DP and ROCM_BWD_PHASE == 2 and QK_HEAD_DIM == 96 and V_HEAD_DIM == 96 and QK_HEAD_DIM_ROUNDED == 128 and V_HEAD_DIM_ROUNDED == 128 and BLOCK_M1 == 32 and BLOCK_N1 == 128 and BLOCK_M2 == 128 and BLOCK_N2 == 32 and not USE_TMA and not ROCM_EARLY_DP %}
+{% macro backward_comments(default) %}
+    # DK: Derivative of Key, written with store_output in the combined and dK/dV phases.
+    # The separate dQ phase writes DQ with store_output.
+    # ROCM_BWD_PHASE: 0 computes all gradients, 1 computes dK/dV, 2 computes dQ.
+    # ROCM_GQA_SPLITS partitions mapped query heads among dK/dV owners.
+{% endmacro -%}
+{% macro backward_program_ids(default) %}
+
+{%- if ROCM_XCD_SNAKE %}
+    tl.static_assert(ROCM_BWD_PHASE == 0 and ROCM_GQA_SPLITS == 1)
+    tl.static_assert(BLOCK_M1 == 32 and BLOCK_N1 == 64 and BLOCK_M2 == 64 and BLOCK_N2 == 64)
+    tl.static_assert(GQA_SHARED_HEADS == 1 or GQA_SHARED_HEADS == 4)
+    snake_work_per_head = NUM_KV_BLOCKS + NUM_Q_BLOCKS * GQA_SHARED_HEADS
+    snake_group_base = (pid // 8) * 8
+    snake_group_size = tl.minimum(8, snake_work_per_head - snake_group_base)
+    snake_offset = pid - snake_group_base
+    snake_reverse = (snake_group_base // 8) % 2 == 1
+    pid = snake_group_base + tl.where(snake_reverse, snake_group_size - 1 - snake_offset, snake_offset)
+    {%- endif %}
+
+{{ default() }}
+    tl.static_assert(ROCM_GQA_SPLITS == 1 or ROCM_GQA_SPLITS == 2 or ROCM_GQA_SPLITS == 4)
+    tl.static_assert(ROCM_BWD_PHASE == 1 or ROCM_GQA_SPLITS == 1)
+    tl.static_assert(GQA_SHARED_HEADS % ROCM_GQA_SPLITS == 0)
+    if XCD_REMAP:
+        XCD_COUNT: tl.constexpr = 8
+        physical_pid = tl.program_id(0).to(tl.int64)
+        physical_z = tl.program_id(1).to(tl.int64)
+        physical_h = tl.program_id(2).to(tl.int64)
+        {%- if ROCM_BWD_PHASE == 1 %}
+        work_per_head = NUM_KV_BLOCKS
+        {%- elif ROCM_BWD_PHASE == 2 %}
+        work_per_head = NUM_Q_BLOCKS * GQA_SHARED_HEADS
+        {%- else %}
+        work_per_head = NUM_KV_BLOCKS + NUM_Q_BLOCKS * GQA_SHARED_HEADS
+        {%- endif %}
+        head_count = ZQ * HKV * ROCM_GQA_SPLITS
+        flat_pid = physical_pid + work_per_head * (physical_z + ZQ * physical_h)
+        first_head = (flat_pid // (XCD_COUNT * work_per_head)) * XCD_COUNT
+        group_heads = tl.minimum(XCD_COUNT, head_count - first_head)
+        rank = flat_pid - first_head * work_per_head
+        width = group_heads * work_per_head
+        lane = rank % XCD_COUNT
+        mapped = lane * (width // XCD_COUNT) + tl.minimum(lane, width % XCD_COUNT) + rank // XCD_COUNT
+        pid = (mapped % work_per_head).to(INDEX_DTYPE)
+        logical_head = first_head + mapped // work_per_head
+        off_zq = (logical_head % ZQ).to(INDEX_DTYPE)
+        off_hkv = (logical_head // ZQ).to(INDEX_DTYPE)
+    off_howner = off_hkv
+    off_hsplit = off_howner % ROCM_GQA_SPLITS
+    off_hkv = off_howner // ROCM_GQA_SPLITS
+    {%- if ROCM_GQA_SPLITS > 1 %}
+    tl.static_assert(DV.dtype.element_ty == tl.float32)
+    {%- endif %}
+{% endmacro -%}
+{% macro backward_dv_offset(default) %}
+    dv_adj = (stride_dvh * off_howner + stride_dvz * off_zq).to(tl.int64)
+{% endmacro -%}
+{% macro backward_dq_dispatch(default) %}
+
+{%- if ROCM_BWD_PHASE == 1 %}
+    if False:
+    {%- elif ROCM_BWD_PHASE == 2 %}
+    if True:
+    {%- else %}
+    if pid >= NUM_KV_BLOCKS:
+    {%- endif %}
+        {%- if ROCM_BWD_PHASE == 2 %}
+        off_pid = pid
+        {%- else %}
+        off_pid = pid - NUM_KV_BLOCKS
+        {%- endif %}
+{% endmacro -%}
+{% macro backward_dq_owner(default) %}
+
+{%- if ROCM_BWD_PHASE == 2 and QK_HEAD_DIM != 64 %}
+        start_m2_block = off_pid // GQA_SHARED_HEADS
+        off_hq2 = off_pid % GQA_SHARED_HEADS + off_hkv * GQA_SHARED_HEADS
+        {%- else %}
+        off_hq2 = off_pid // NUM_Q_BLOCKS + off_hkv * GQA_SHARED_HEADS
+        start_m2_block = off_pid % NUM_Q_BLOCKS
+        {%- endif %}
+        {%- if ROCM_D128_REVERSE_DQ_ROWS and ROCM_BWD_PHASE == 2 %}
+        start_m2_block = NUM_Q_BLOCKS - 1 - start_m2_block
+        {%- endif %}
+{% endmacro -%}
+{% macro backward_dq_store(default) %}
+        dq *= SM_SCALE
+        {%- if ROCM_BWD_PHASE == 2 %}
+        dq_mask = (offs_m2[:, None] < Q_LEN) & (offs_k[None, :] < QK_HEAD_DIM)
+        {{store_output(("off_zq", "off_hq2", "offs_m2[:, None]", "offs_k[None, :]"), "dq", "dq_mask", indent_width=8, val_shape=("BLOCK_M2", "QK_HEAD_DIM_ROUNDED"))}}
+        {%- else %}
+        dq_ptrs = DQ2 + offs_m2[:, None].to(INDEX_DTYPE) * stride_dqm + offs_k[None, :].to(INDEX_DTYPE) * stride_dqd
+        if IS_DIVISIBLE and SAFE_HEAD_DIM:
+            tl.store(dq_ptrs, dq)
+        else:
+            tl.store(dq_ptrs, dq, mask=(offs_m2[:, None] < Q_LEN) & (offs_k[None, :] < QK_HEAD_DIM))
+        {%- endif %}
+{% endmacro -%}
+{% macro backward_dkdv_branch(default) %}
+{% if ROCM_BWD_PHASE != 2 %}
+{{ default() }}
+{% endif %}
+{% endmacro -%}
+{% macro backward_dkdv_head_loop(default) %}
+
+{%- if PANEL_DOTS %}
+        panel_indices = tl.broadcast_to(tl.arange(0, {{ PANEL_WIDTH }})[None, :], (BLOCK_N1, {{ PANEL_WIDTH }}))
+        k_lo = tl.gather(k, panel_indices, axis=1)
+        k_hi = tl.gather(k, panel_indices + {{ PANEL_WIDTH }}, axis=1)
+        v_lo = tl.gather(v, panel_indices, axis=1)
+        v_hi = tl.gather(v, panel_indices + {{ PANEL_WIDTH }}, axis=1)
+        {%- endif %}
+
+{% if GQA_QUERY_TILE_OUTER %}
+{% if GQA_QUERY_TILE_OUTER_FP32 %}
+        tl.static_assert(Q.dtype.element_ty == tl.float32 and DO.dtype.element_ty == tl.float32)
+        tl.static_assert(FLOAT32_PRECISION == 'ieee')
+{% else %}
+        tl.static_assert(Q.dtype.element_ty == tl.float16 and DO.dtype.element_ty == tl.float16)
+{% endif %}
+        sparse_hz_offset = sparse_idx_z * SPARSE_HQ
+        sparse_q_num_blks_offset = sparse_hz_offset * stride_q_num_blks_h + pid_mask
+        sparse_q_idx_offset = sparse_hz_offset * stride_q_idx_h + pid_mask * stride_q_idx_n
+        q_indices = Q_IDX + sparse_q_idx_offset
+        q_start = 0
+{% if BLOCKS_ARE_CONTIGUOUS %}
+        q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE
+{% endif %}
+        sparse_q_num_blocks = tl.load(Q_NUM_BLKS + sparse_q_num_blks_offset)
+        offs_m1 = q_start + tl.arange(0, BLOCK_M1)
+        dk, dv = bwd_dkdv_all_heads_inner(
+            {{gen_argdefs()}},
+            Q, DO, DELTA, LSE, q_start,
+            dk, dv, k, v,
+            off_zq, off_hkv, off_hsplit, offs_n1, offs_m1,
+            stride_qz, stride_qh, stride_doz, stride_doh,
+            stride_qm, stride_qd, stride_dom, stride_dod,
+            q_indices, sparse_q_num_blocks,
+            MATMUL_PRECISION,
+            IS_FULL_BLOCKS=False,
+        )
+        if HAS_FULL_BLOCKS:
+            sparse_full_q_num_blks_offset = sparse_hz_offset * stride_full_q_num_blks_h + pid_mask
+            sparse_full_q_idx_offset = sparse_hz_offset * stride_full_q_idx_h + pid_mask * stride_full_q_idx_n
+            q_indices = FULL_Q_IDX + sparse_full_q_idx_offset
+            q_start = 0
+{% if BLOCKS_ARE_CONTIGUOUS %}
+            q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE
+{% endif %}
+            sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_full_q_num_blks_offset)
+            offs_m1 = q_start + tl.arange(0, BLOCK_M1)
+            dk, dv = bwd_dkdv_all_heads_inner(
+                {{gen_argdefs()}},
+                Q, DO, DELTA, LSE, q_start,
+                dk, dv, k, v,
+                off_zq, off_hkv, off_hsplit, offs_n1, offs_m1,
+                stride_qz, stride_qh, stride_doz, stride_doh,
+                stride_qm, stride_qd, stride_dom, stride_dod,
+                q_indices, sparse_q_num_blocks,
+                MATMUL_PRECISION,
+                IS_FULL_BLOCKS=True,
+            )
+
+{% else %}
+{{ default() }}
+{% endif %}
+{% endmacro -%}
+{% macro backward_dkdv_head_owner(default) %}
+        for off_g in range(0, GQA_SHARED_HEADS // ROCM_GQA_SPLITS):
+            off_hq1 = off_hkv * GQA_SHARED_HEADS + off_hsplit * (GQA_SHARED_HEADS // ROCM_GQA_SPLITS) + off_g
+{% endmacro -%}
+{% macro backward_dkdv_arguments(indent_width) %}
+{% if PANEL_DOTS %}
+{{ " " * indent_width }}k_lo, k_hi, v_lo, v_hi,
+{% endif %}
+{% endmacro -%}
+{% macro backward_scale_dk(default) %}
+{% if ROCM_GQA_SPLITS == 1 %}
+{{ default() }}
+{% endif %}
+{% endmacro -%}
+{% macro backward_dk_store(default) %}
+        {{store_output(("off_zq", "off_howner", "index_n", "index_k"), "dk", "mask", indent_width=8, val_shape=("BLOCK_N1", "QK_HEAD_DIM_ROUNDED"))}}
+{% endmacro -%}
+{% macro backward_dq_loop(default) %}
+
+{%- if ROCM_D96_DQ_UNROLL2 and D96_DQ_EARLY_DP %}
+    for start_n in tl.range(0, hi, loop_unroll_factor=2):
+    {%- else %}
+{{ default() }}
+{% endif %}
+{% endmacro -%}
+{% macro backward_dq_early_dp(default) %}
+
+{%- if D192_DQ_EARLY_DP or D96_DQ_EARLY_DP %}
+    vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN, INDEX_DTYPE)
+    dp = tl.dot(do, vT, input_precision=FLOAT32_PRECISION)
+    {%- endif %}
+{% endmacro -%}
+{% macro backward_dq_dp(default) %}
+{% if not (D192_DQ_EARLY_DP or D96_DQ_EARLY_DP) %}
+{{ default() }}
+{% endif %}
+{% endmacro -%}
+{% macro backward_helpers(default) %}
+{% if GQA_QUERY_TILE_OUTER %}
+
+@triton.jit
+def bwd_dkdv_all_heads_inner(
+    {{gen_argdefs()}},
+    Q, DO, DELTA, LSE, q_start,
+    dk, dv, k, v,
+    off_zq, off_hkv, off_hsplit, offs_n1, offs_m1,
+    stride_qz, stride_qh, stride_doz, stride_doh,
+    stride_qm, stride_qd, stride_dom, stride_dod,
+    q_indices, sparse_q_num_blocks,
+    MATMUL_PRECISION,
+    IS_FULL_BLOCKS,
+):
+    {{gen_defines() | indent_except_first(1) }}
+    SPARSE_Q_MULTIPLE: tl.constexpr = (SPARSE_Q_BLOCK_SIZE // BLOCK_M1)
+    RCP_LN2: tl.constexpr = 1.44269504
+    Q_LEN = {{size("Q", 2)}}
+    KV_LEN = {{size("K", 2)}}
+    HQ = {{size("Q", 1)}}
+    offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
+    offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
+    tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
+{% if BLOCKS_ARE_CONTIGUOUS %}
+    hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(tl.cdiv(Q_LEN, BLOCK_M1), 1))
+    offset_block = 0
+    for start_m in range(0, hi):
+        for off_g in range(0, GQA_SHARED_HEADS // ROCM_GQA_SPLITS):
+            off_hq1 = off_hkv * GQA_SHARED_HEADS + off_hsplit * (GQA_SHARED_HEADS // ROCM_GQA_SPLITS) + off_g
+            q_adj1 = (stride_qh * off_hq1 + stride_qz * off_zq).to(tl.int64)
+            do_adj1 = (stride_doh * off_hq1 + stride_doz * off_zq).to(tl.int64)
+            off_chz1 = ((off_zq * HQ + off_hq1) * Q_LEN).to(tl.int64)
+            Q1 = Q + q_adj1
+            DO1 = DO + do_adj1
+            LSE1 = LSE + off_chz1
+            DELTA1 = DELTA + off_chz1
+            dk, dv = bwd_dkdv_block_mn(
+                {{gen_argdefs()}},
+                dk, dv, Q1, k, v, DO1, DELTA1, LSE1,
+                None, None, q_start, offset_block, Q_LEN, KV_LEN,
+                off_zq, off_hq1, offs_n1, offs_m1, offs_k, offs_v,
+                stride_qm, stride_qd, stride_dom, stride_dod,
+                q_indices, sparse_q_num_blocks,
+                MATMUL_PRECISION, RCP_LN2,
+                IS_FULL_BLOCKS,
+            )
+        offset = get_offset_for_next_block(
+            start_m, q_indices, sparse_q_num_blocks,
+            SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1, BLOCKS_ARE_CONTIGUOUS
+        )
+        offs_m1 += offset
+        offset_block += offset
+{% else %}
+    for sparse_q_idx in range(0, sparse_q_num_blocks):
+        q_block = tl.load(q_indices + sparse_q_idx, eviction_policy="evict_last")
+        q_start = q_block * SPARSE_Q_BLOCK_SIZE
+        for q_subtile in tl.range(0, SPARSE_Q_MULTIPLE, loop_unroll_factor=1):
+            offset_block = q_subtile * BLOCK_M1
+            offs_m1 = q_start + offset_block + tl.arange(0, BLOCK_M1)
+            for off_g in range(0, GQA_SHARED_HEADS // ROCM_GQA_SPLITS):
+                off_hq1 = off_hkv * GQA_SHARED_HEADS + off_hsplit * (GQA_SHARED_HEADS // ROCM_GQA_SPLITS) + off_g
+                q_adj1 = (stride_qh * off_hq1 + stride_qz * off_zq).to(tl.int64)
+                do_adj1 = (stride_doh * off_hq1 + stride_doz * off_zq).to(tl.int64)
+                off_chz1 = ((off_zq * HQ + off_hq1) * Q_LEN).to(tl.int64)
+                Q1 = Q + q_adj1
+                DO1 = DO + do_adj1
+                LSE1 = LSE + off_chz1
+                DELTA1 = DELTA + off_chz1
+                dk, dv = bwd_dkdv_block_mn(
+                    {{gen_argdefs()}},
+                    dk, dv, Q1, k, v, DO1, DELTA1, LSE1,
+                    None, None, q_start, offset_block, Q_LEN, KV_LEN,
+                    off_zq, off_hq1, offs_n1, offs_m1, offs_k, offs_v,
+                    stride_qm, stride_qd, stride_dom, stride_dod,
+                    q_indices, sparse_q_num_blocks,
+                    MATMUL_PRECISION, RCP_LN2,
+                    IS_FULL_BLOCKS,
+                )
+{% endif %}
+    return dk, dv
+{% endif %}
+{% endmacro -%}
+{% macro backward_dkdv_q_load(default) %}
+{% if PANEL_DOTS and not USE_TMA %}
+    panel_features = tl.arange(0, {{ PANEL_WIDTH }})
+    qT_lo_ptrs = Q + offs_m1[None, :].to(INDEX_DTYPE) * stride_qm + panel_features[:, None].to(INDEX_DTYPE) * stride_qd
+    qT_hi_ptrs = qT_lo_ptrs + {{ PANEL_WIDTH }} * stride_qd
+    {%- if D96_PANEL_DOTS %}
+    qT_lo = tl.load(qT_lo_ptrs, mask=(offs_m1[None, :] < Q_LEN) & (panel_features[:, None] < QK_HEAD_DIM), other=0.0)
+    qT_hi = tl.load(qT_hi_ptrs, mask=(offs_m1[None, :] < Q_LEN) & ((panel_features[:, None] + 64) < QK_HEAD_DIM), other=0.0)
+    {%- elif ROCM_D192_PANEL_DOTS %}
+    qT_lo = tl.load(qT_lo_ptrs, mask=(offs_m1[None, :] < Q_LEN) & (panel_features[:, None] < QK_HEAD_DIM), other=0.0)
+    qT_hi = tl.load(qT_hi_ptrs, mask=(offs_m1[None, :] < Q_LEN) & ((panel_features[:, None] + 128) < QK_HEAD_DIM), other=0.0)
+    {%- else %}
+    qT_lo = tl.load(qT_lo_ptrs, mask=offs_m1[None, :] < Q_LEN, other=0.0)
+    qT_hi = tl.load(qT_hi_ptrs, mask=offs_m1[None, :] < Q_LEN, other=0.0)
+    {%- endif %}
+    qT = tl.cat(qT_lo, qT_hi, dim=0)
+{% else %}
+{{ default() }}
+{% endif %}
+{% endmacro -%}
+{% macro backward_dkdv_qk(default) %}
+    if ROCM_EARLY_DP:
+        {%- if USE_TMA %}
+        do = tl.load_tensor_descriptor(
+            desc_do,
+            [(q_start + offset).to(tl.int32), 0],
+        )
+        {%- else %}
+        {%- if PANEL_DOTS %}
+        do_lo_ptrs = DO + offs_m1[:, None].to(INDEX_DTYPE) * stride_dom + panel_features[None, :].to(INDEX_DTYPE) * stride_dod
+        do_hi_ptrs = do_lo_ptrs + {{ PANEL_WIDTH }} * stride_dod
+        {%- if D96_PANEL_DOTS %}
+        do_lo = tl.load(do_lo_ptrs, mask=(offs_m1[:, None] < Q_LEN) & (panel_features[None, :] < V_HEAD_DIM), other=0.0)
+        do_hi = tl.load(do_hi_ptrs, mask=(offs_m1[:, None] < Q_LEN) & ((panel_features[None, :] + 64) < V_HEAD_DIM), other=0.0)
+        {%- elif ROCM_D192_PANEL_DOTS %}
+        do_lo = tl.load(do_lo_ptrs, mask=(offs_m1[:, None] < Q_LEN) & (panel_features[None, :] < V_HEAD_DIM), other=0.0)
+        do_hi = tl.load(do_hi_ptrs, mask=(offs_m1[:, None] < Q_LEN) & ((panel_features[None, :] + 128) < V_HEAD_DIM), other=0.0)
+        {%- else %}
+        do_lo = tl.load(do_lo_ptrs, mask=offs_m1[:, None] < Q_LEN, other=0.0)
+        do_hi = tl.load(do_hi_ptrs, mask=offs_m1[:, None] < Q_LEN, other=0.0)
+        {%- endif %}
+        do = tl.cat(do_lo, do_hi, dim=1)
+        {%- else %}
+        do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM, INDEX_DTYPE)
+        {%- endif %}
+        {%- endif %}
+    {%- if PANEL_DOTS %}
+    qkT = tl.dot(k_lo, qT_lo, input_precision=FLOAT32_PRECISION)
+    qkT = tl.dot(k_hi, qT_hi, acc=qkT, input_precision=FLOAT32_PRECISION)
+    {%- else %}
+{{ default() }}
+
+{%- endif %}
+    if ROCM_EARLY_DP:
+        {%- if PANEL_DOTS %}
+        dpT = tl.dot(v_lo, tl.trans(do_lo), input_precision=FLOAT32_PRECISION)
+        dpT = tl.dot(v_hi, tl.trans(do_hi), acc=dpT, input_precision=FLOAT32_PRECISION)
+        {%- else %}
+        dpT = tl.dot(v, tl.trans(do), input_precision=FLOAT32_PRECISION)
+        {%- endif %}
+{% endmacro -%}
+{% macro backward_dkdv_do_load(default) %}
+    if not ROCM_EARLY_DP:
+{% if PANEL_DOTS and not USE_TMA %}
+        do_lo_ptrs = DO + offs_m1[:, None].to(INDEX_DTYPE) * stride_dom + panel_features[None, :].to(INDEX_DTYPE) * stride_dod
+        do_hi_ptrs = do_lo_ptrs + {{ PANEL_WIDTH }} * stride_dod
+        {%- if D96_PANEL_DOTS %}
+        do_lo = tl.load(do_lo_ptrs, mask=(offs_m1[:, None] < Q_LEN) & (panel_features[None, :] < V_HEAD_DIM), other=0.0)
+        do_hi = tl.load(do_hi_ptrs, mask=(offs_m1[:, None] < Q_LEN) & ((panel_features[None, :] + 64) < V_HEAD_DIM), other=0.0)
+        {%- elif ROCM_D192_PANEL_DOTS %}
+        do_lo = tl.load(do_lo_ptrs, mask=(offs_m1[:, None] < Q_LEN) & (panel_features[None, :] < V_HEAD_DIM), other=0.0)
+        do_hi = tl.load(do_hi_ptrs, mask=(offs_m1[:, None] < Q_LEN) & ((panel_features[None, :] + 128) < V_HEAD_DIM), other=0.0)
+        {%- else %}
+        do_lo = tl.load(do_lo_ptrs, mask=offs_m1[:, None] < Q_LEN, other=0.0)
+        do_hi = tl.load(do_hi_ptrs, mask=offs_m1[:, None] < Q_LEN, other=0.0)
+        {%- endif %}
+        do = tl.cat(do_lo, do_hi, dim=1)
+{% else %}
+{{ default() | indent(4, true) }}
+{% endif %}
+{% endmacro -%}
+{% macro backward_dkdv_updates(default) %}
+{% if EARLY_PROBABILITY_COMPACT %}
+    if IS_DIVISIBLE:
+        Di = tl.load(DELTA + offs_m1)
+    else:
+        Di = tl.load(DELTA + offs_m1, mask=offs_m1 < Q_LEN)
+    # Compute dP and dS.
+    if not ROCM_EARLY_DP:
+        {%- if PANEL_DOTS %}
+        dpT = tl.dot(v_lo, tl.trans(do_lo), input_precision=FLOAT32_PRECISION)
+        dpT = tl.dot(v_hi, tl.trans(do_hi), acc=dpT, input_precision=FLOAT32_PRECISION)
+        {%- else %}
+        dpT = tl.dot(v, tl.trans(do), input_precision=FLOAT32_PRECISION)
+        {%- endif %}
+    dsT = pT * (dpT - Di[None, :])
+    ppT = pT.to(MATMUL_PRECISION)
+{{ backward_dkdv_modification() }}
+    dsT = dsT.to(MATMUL_PRECISION)
+    dv += tl.dot(ppT.to(MATMUL_PRECISION), do, input_precision=FLOAT32_PRECISION)
+    dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT), input_precision=FLOAT32_PRECISION)
+{% else %}
+{{ default() }}
+{% endif %}
+{% endmacro -%}
+{% macro backward_dv_update(default) %}
+{% if D128_DV_VIEW_CARRY_SPLIT64 %}
+    # Compute dV.
+    ppT = pT
+    dv_do_view = tl.reshape(do, (BLOCK_M1, 2, 64), can_reorder=False)
+    dv_do_pairs = tl.trans(dv_do_view, 0, 2, 1)
+    dv_do_lo, dv_do_hi = tl.split(dv_do_pairs)
+    dv_carry_view = tl.reshape(dv, (BLOCK_N1, 2, 64), can_reorder=False)
+    dv_carry_pairs = tl.trans(dv_carry_view, 0, 2, 1)
+    dv_carry_lo, dv_carry_hi = tl.split(dv_carry_pairs)
+    dv_probability = ppT.to(MATMUL_PRECISION)
+    {%- if GQA_QUERY_TILE_OUTER_FP16 %}
+    DV_FRAGMENT: tl.constexpr = V_HEAD_DIM_ROUNDED // 4
+    dv_do_lo_pairs = tl.trans(tl.reshape(dv_do_lo, (BLOCK_M1, 2, DV_FRAGMENT), can_reorder=False), 0, 2, 1)
+    dv_do_hi_pairs = tl.trans(tl.reshape(dv_do_hi, (BLOCK_M1, 2, DV_FRAGMENT), can_reorder=False), 0, 2, 1)
+    dv_do_0, dv_do_1 = tl.split(dv_do_lo_pairs)
+    dv_do_2, dv_do_3 = tl.split(dv_do_hi_pairs)
+    dv_carry_lo_pairs = tl.trans(tl.reshape(dv_carry_lo, (BLOCK_N1, 2, DV_FRAGMENT), can_reorder=False), 0, 2, 1)
+    dv_carry_hi_pairs = tl.trans(tl.reshape(dv_carry_hi, (BLOCK_N1, 2, DV_FRAGMENT), can_reorder=False), 0, 2, 1)
+    dv_carry_0, dv_carry_1 = tl.split(dv_carry_lo_pairs)
+    dv_carry_2, dv_carry_3 = tl.split(dv_carry_hi_pairs)
+    dv_update_0 = tl.dot(dv_probability, dv_do_0, acc=dv_carry_0, input_precision=FLOAT32_PRECISION)
+    dv_update_1 = tl.dot(dv_probability, dv_do_1, acc=dv_carry_1, input_precision=FLOAT32_PRECISION)
+    dv_update_lo = tl.cat(dv_update_0, dv_update_1, dim=1)
+    {%- else %}
+    dv_update_lo = tl.dot(dv_probability, dv_do_lo, acc=dv_carry_lo, input_precision=FLOAT32_PRECISION)
+    {%- endif %}
+    {%- if not GQA_QUERY_TILE_OUTER_FP16 %}
+    dv_update_hi = tl.dot(dv_probability, dv_do_hi, acc=dv_carry_hi, input_precision=FLOAT32_PRECISION)
+    dv = tl.cat(dv_update_lo, dv_update_hi, dim=1)
+    {%- endif %}
+{% else %}
+{{ default() }}
+{% endif %}
+{% endmacro -%}
+{% macro backward_dkdv_dp(default) %}
+    if not ROCM_EARLY_DP:
+        {%- if PANEL_DOTS %}
+        dpT = tl.dot(v_lo, tl.trans(do_lo), input_precision=FLOAT32_PRECISION)
+        dpT = tl.dot(v_hi, tl.trans(do_hi), acc=dpT, input_precision=FLOAT32_PRECISION)
+        {%- else %}
+{{ default() | indent(4, true) }}
+
+{%- endif %}
+{% endmacro -%}
+{% macro backward_dk_update(default) %}
+{{ default() }}
+
+{%- if GQA_QUERY_TILE_OUTER_FP16 %}
+    dv_update_2 = tl.dot(dv_probability, dv_do_2, acc=dv_carry_2, input_precision=FLOAT32_PRECISION)
+    dv_update_3 = tl.dot(dv_probability, dv_do_3, acc=dv_carry_3, input_precision=FLOAT32_PRECISION)
+    dv_update_hi = tl.cat(dv_update_2, dv_update_3, dim=1)
+    dv = tl.cat(dv_update_lo, dv_update_hi, dim=1)
+    {%- endif %}
+{% endmacro -%}

@@ -18,7 +18,15 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
-from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
+from ... import config
+from ...ir import (
+    ComputedBuffer,
+    ExternKernel,
+    FixedLayout,
+    StorageBox,
+    TensorBox,
+    TritonTemplateBuffer,
+)
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...runtime.runtime_utils import is_power_of_2
 from ...select_algorithm import (
@@ -27,6 +35,7 @@ from ...select_algorithm import (
     TritonTemplate,
 )
 from ...utils import can_use_tma, use_flex_tdm_descriptor
+from . import flex_rocm_backward as rocm_backward
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
@@ -58,6 +67,10 @@ from .flex_flash_attention import (
 )
 from .flex_flydsl_attention import create_flydsl_flex_attention_kernel
 from .flex_flydsl_backward import create_flydsl_flex_attention_backward_kernel
+from .flex_rocm_backward_autotune import (
+    prepare_backward_benchmark_requests,
+    RocmBackwardChoiceCaller,
+)
 
 
 if TYPE_CHECKING:
@@ -68,6 +81,40 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 Expr = sympy.Expr
+
+
+def _append_flex_attention_backward_choices(
+    choices,
+    configs,
+    input_nodes,
+    subgraphs,
+    layout,
+    kernel_options,
+    sparse_q_block_size,
+    sparse_kv_block_size,
+    *,
+    mutated_inputs,
+    split_available,
+):
+    """Preserve the fused hook ABI and prefer its custom pool over split execution."""
+    default_choices = tuple(choices)
+    choices = V.choices.append_flex_attention_backward_choices(
+        choices,
+        configs,
+        list(input_nodes),
+        list(subgraphs),
+        layout,
+        kernel_options,
+        sparse_q_block_size,
+        sparse_kv_block_size,
+        mutated_inputs=list(mutated_inputs),
+    )
+    use_split = (
+        split_available
+        and len(choices) == len(default_choices)
+        and all(actual is default for actual, default in zip(choices, default_choices))
+    )
+    return choices, use_split
 
 
 def _sanitize_kernel_options_for_triton(
@@ -240,6 +287,19 @@ def flex_attention(
     ) = block_mask
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    rocm_backward._strip_rocm_query_tile_outer_options(kernel_options)
+    for fp16_alias in (
+        "ROCM_D128_FP16_COVERAGE",
+        "fwd_ROCM_D128_FP16_COVERAGE",
+        "bwd_ROCM_D128_FP16_COVERAGE",
+    ):
+        kernel_options.pop(fp16_alias, None)
+    for fp32_balanced64_alias in (
+        "ROCM_D128_FP32_BALANCED64_COVERAGE",
+        "fwd_ROCM_D128_FP32_BALANCED64_COVERAGE",
+        "bwd_ROCM_D128_FP32_BALANCED64_COVERAGE",
+    ):
+        kernel_options.pop(fp32_balanced64_alias, None)
 
     # Early check for FLASH backend: reject scalar captures that cannot be
     # represented by flash-attn aux_scalars before building subgraph buffers.
@@ -497,6 +557,7 @@ def flex_attention(
                 cur_kernel_options[k[4:]] = v
             if k.startswith("bwd_"):
                 cur_kernel_options.pop(k)
+        cur_kernel_options["ROCM_D128_DV_VIEW_CARRY_SPLIT64"] = False
         cur_kernel_options.setdefault("num_stages", conf.num_stages)
         cur_kernel_options.setdefault("num_warps", conf.num_warps)
         if cur_kernel_options.get("num_consumer_groups", False):
@@ -922,6 +983,8 @@ def flex_attention_backward(*args, **kwargs):
         )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    user_kernel_options = kernel_options.copy()
+    rocm_requests = rocm_backward._normalize_rocm_backward_options(kernel_options)
     if backend == "FLASH":
         _check_flash_supported_scalar_captures(
             score_mod_other_buffers, mask_mod_other_buffers, backward=True
@@ -1144,6 +1207,21 @@ def flex_attention_backward(*args, **kwargs):
 
     choices: list[Any] = []
 
+    dkdv_choices: list[Any] = []
+    dq_choices: list[Any] = []
+    dkdv_input_nodes = None
+    dq_input_nodes = None
+    partial_grad_value = None
+    dkdv_options = None
+    split_dkdv = False
+    dkdv_layout = layout_broadcasted_k
+    layout_grad_query = FixedLayout(
+        query.get_device(),
+        query.get_dtype(),
+        query_size,
+        stride=[sympy.sympify(s) for s in grad_query_strides],
+    )
+
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
@@ -1188,17 +1266,20 @@ def flex_attention_backward(*args, **kwargs):
         *joint_outputs.mutated_grads,
     ]
 
+    is_gfx950 = (
+        bool(torch.version.hip)
+        and query.get_device().type == "cuda"
+        and torch.cuda.get_device_properties(query.get_device()).gcnArchName.split(
+            ":", 1
+        )[0]
+        == "gfx950"
+    )
     for conf in configs:
         # Performance tuning
         # Triton heuristics
-        cur_kernel_options = original_kernel_options.copy()
-        # Remove prefix for backward kernels options and delete forward kernel options.
-        for k in list(cur_kernel_options.keys()):
-            if k.startswith("bwd_"):
-                v = cur_kernel_options.pop(k)
-                cur_kernel_options[k[4:]] = v
-            if k.startswith("fwd_"):
-                cur_kernel_options.pop(k)
+        cur_kernel_options = rocm_backward._get_rocm_backward_config_options(
+            original_kernel_options, is_gfx950=is_gfx950
+        )
         cur_kernel_options.setdefault("num_warps", conf.num_warps)
         cur_kernel_options.setdefault("num_stages", conf.num_stages)
 
@@ -1213,6 +1294,16 @@ def flex_attention_backward(*args, **kwargs):
 
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
+
+        cur_kernel_options["ROCM_D256_PANEL_DOTS"] = (
+            rocm_backward._use_rocm_d256_panel_dots(
+                is_gfx950,
+                dtype,
+                head_dim,
+                V.graph.sizevars.guard_int(v_head_dim),
+                cur_kernel_options,
+            )
+        )
 
         # Shrink default tiles to fit smaller pow2 sparse block sizes;
         # user-pinned tiles and non-pow2 sparse sizes still error out below.
@@ -1268,9 +1359,39 @@ def flex_attention_backward(*args, **kwargs):
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
             if hasattr(conf, attrib):
-                cur_kernel_options[attrib] = getattr(conf, attrib)
+                if (
+                    (
+                        rocm_requests.d192_panel_phase_requested is True
+                        and head_dim == 192
+                        or rocm_requests.d96_panel_phase_requested is True
+                        and head_dim == 96
+                    )
+                    and is_gfx950
+                    and dtype == torch.bfloat16
+                ):
+                    cur_kernel_options.setdefault(attrib, getattr(conf, attrib))
+                else:
+                    cur_kernel_options[attrib] = getattr(conf, attrib)
 
-        flex_attention_backward_template.maybe_append_choice(
+        cur_kernel_options["ROCM_XCD_SNAKE"] = len(
+            configs
+        ) == 1 and rocm_backward._use_rocm_xcd_snake(
+            is_gfx950,
+            query,
+            key,
+            value,
+            cur_kernel_options,
+            is_trivial_score_graph(fw_graph.graph_module),
+            rocm_backward._is_rocm_simple_causal_mask_graph(mask_graph.graph_module),
+            bool(score_mod_other_buffers or mask_mod_other_buffers),
+        )
+
+        backward_template = (
+            rocm_backward.flex_attention_backward_template
+            if rocm_backward._use_rocm_backward_template(is_gfx950, cur_kernel_options)
+            else flex_attention_backward_template
+        )
+        backward_template.maybe_append_choice(
             choices=choices,
             input_nodes=bwd_input_nodes,
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
@@ -1280,17 +1401,72 @@ def flex_attention_backward(*args, **kwargs):
             **cur_kernel_options,
         )
 
-    choices = V.choices.append_flex_attention_backward_choices(
+        if is_gfx950:
+            rocm_plan = rocm_backward.create_backward_plan(
+                bwd_input_nodes,
+                cur_kernel_options=cur_kernel_options,
+                user_kernel_options=user_kernel_options,
+                rocm_requests=rocm_requests,
+                out=out,
+                backend=backend,
+                single_config=len(configs) == 1,
+                fw_graph=fw_graph.graph_module,
+                mask_graph=mask_graph.graph_module,
+                block_mask=block_mask,
+                grad_logsumexp=grad_logsumexp,
+                score_mod_other_buffers=score_mod_other_buffers,
+                mask_mod_other_buffers=mask_mod_other_buffers,
+                bwd_subgraphs=bwd_subgraphs,
+                dkdv_layout=dkdv_layout,
+                layout_grad_query=layout_grad_query,
+            )
+            dkdv_choices = rocm_plan.dkdv_choices
+            dq_choices = rocm_plan.dq_choices
+            dkdv_input_nodes = rocm_plan.dkdv_input_nodes
+            dq_input_nodes = rocm_plan.dq_input_nodes
+            partial_grad_value = rocm_plan.partial_grad_value
+            dkdv_options = rocm_plan.dkdv_options
+            split_dkdv = rocm_plan.split_dkdv
+            dkdv_layout = rocm_plan.dkdv_layout
+
+    fused_choices = tuple(choices)
+    choices, separate_dq = _append_flex_attention_backward_choices(
         choices,
         configs,
-        list(bwd_input_nodes),
-        list(bwd_subgraphs),
+        bwd_input_nodes,
+        bwd_subgraphs,
         layout_broadcasted_k,
         original_kernel_options,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
-        mutated_inputs=list(bwd_mutated_inputs),
+        mutated_inputs=bwd_mutated_inputs,
+        split_available=bool(dkdv_choices and dq_choices),
     )
+
+    if (
+        config.max_autotune
+        and is_gfx950
+        and len(choices) == len(fused_choices)
+        and all(actual is default for actual, default in zip(choices, fused_choices))
+    ):
+        rocm_backward.append_backward_autotune_choices(
+            choices,
+            bwd_input_nodes,
+            cur_kernel_options=original_kernel_options,
+            user_kernel_options=user_kernel_options,
+            rocm_requests=rocm_requests,
+            out=out,
+            backend=backend,
+            fw_graph=fw_graph.graph_module,
+            mask_graph=mask_graph.graph_module,
+            block_mask=block_mask,
+            grad_logsumexp=grad_logsumexp,
+            score_mod_other_buffers=score_mod_other_buffers,
+            mask_mod_other_buffers=mask_mod_other_buffers,
+            bwd_subgraphs=bwd_subgraphs,
+            dkdv_layout=dkdv_layout,
+            layout_grad_query=layout_grad_query,
+        )
 
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
@@ -1321,13 +1497,32 @@ def flex_attention_backward(*args, **kwargs):
         15: create_indices_fake,
     }
 
-    broadcasted_grad_key, _ = autotune_select_algorithm(
-        "flex_attention_backward",
+    if separate_dq:
+        if dkdv_input_nodes is None:
+            raise AssertionError("Expected dK/dV inputs for separate backward phases")
+        choices = dkdv_choices
+        inputs_for_autotuning = dkdv_input_nodes
+
+    autotune_name = "flex_attention_backward"
+    if any(isinstance(choice, RocmBackwardChoiceCaller) for choice in choices):
+        input_gen_fns.update(
+            prepare_backward_benchmark_requests(
+                choices,
+                bwd_input_nodes,
+                causal=rocm_backward._is_rocm_simple_causal_mask_graph(
+                    mask_graph.graph_module
+                ),
+            )
+        )
+        autotune_name = "flex_attention_backward_rocm_autotune"
+
+    broadcasted_grad_key, backward_choice = autotune_select_algorithm(
+        autotune_name,
         choices,
         # Autotuning materializes benchmark tensors. Scalar shape captures stay
         # in subgraph_inps below for dependency tracking and codegen.
         [x for x in inputs_for_autotuning if is_tensor_ir_node(x)],
-        layout_broadcasted_k,
+        dkdv_layout if separate_dq else layout_broadcasted_k,
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
 
@@ -1338,6 +1533,55 @@ def flex_attention_backward(*args, **kwargs):
     broadcasted_grad_key.data.data.subgraph_outs = get_bwd_subgraph_outputs(
         fw_subgraph_buffer, mask_graph_buffer, joint_outputs
     )
+
+    if isinstance(backward_choice, RocmBackwardChoiceCaller):
+        grad_query = backward_choice.output_grad_query()
+        dq_buffer = grad_query.data
+        if not isinstance(dq_buffer, StorageBox) or not isinstance(
+            dq_buffer.data, TritonTemplateBuffer
+        ):
+            raise AssertionError("Expected a Triton template buffer for dQ")
+        dq_buffer.data.subgraph_inps = list(mask_mod_other_buffers)
+        dq_buffer.data.subgraph_outs = [
+            *get_bwd_subgraph_outputs(
+                fw_subgraph_buffer, mask_graph_buffer, joint_outputs
+            )
+        ]
+
+    if separate_dq:
+        if dq_input_nodes is None:
+            raise AssertionError("Expected dQ inputs for separate backward phases")
+        grad_query, _ = autotune_select_algorithm(
+            "flex_attention_backward_dq",
+            dq_choices,
+            dq_input_nodes,
+            layout_grad_query,
+            input_gen_fns=input_gen_fns,
+        )
+        grad_query.data.data.subgraph_inps = list(mask_mod_other_buffers)
+        grad_query.data.data.subgraph_outs = get_bwd_subgraph_outputs(
+            fw_subgraph_buffer, mask_graph_buffer, joint_outputs
+        )
+        if split_dkdv:
+            if partial_grad_value is None or dkdv_options is None:
+                raise AssertionError("Expected split dK/dV buffer and options")
+            owner_size = [
+                Bq,
+                Hkv,
+                dkdv_options["ROCM_GQA_SPLITS"],
+                seq_len_kv,
+                qk_head_dim,
+            ]
+            grad_key_owners = lowerings[aten.reshape](broadcasted_grad_key, owner_size)
+            grad_value_owners = lowerings[aten.reshape](partial_grad_value, owner_size)
+            broadcasted_grad_key = lowerings[aten.sum](grad_key_owners, axis=2)
+            broadcasted_grad_key = lowerings[aten.mul](
+                broadcasted_grad_key, dkdv_options["SM_SCALE"]
+            )
+            broadcasted_grad_key = to_dtype(broadcasted_grad_key, key.get_dtype())
+            broadcasted_grad_value = to_dtype(
+                lowerings[aten.sum](grad_value_owners, axis=2), value.get_dtype()
+            )
 
     if V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv)):
         grad_key = broadcasted_grad_key
