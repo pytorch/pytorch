@@ -8,7 +8,7 @@ using namespace metal;
 using namespace c10::metal;
 
 struct IndexAB {
-  constant int64_t* indexArray;
+  device const int64_t* indexArray;
 };
 
 uint3 index_get_offsets(
@@ -62,7 +62,7 @@ OffsetT index_apply_indices(
 template <typename T, typename OffsetT = ulong>
 kernel void index_select(
     device T* output,
-    constant T* input,
+    device const T* input,
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* output_strides,
@@ -101,7 +101,7 @@ kernel void index_select(
 template <typename T, typename OffsetT = ulong>
 inline void index_put_impl(
     device T* output,
-    constant T* input,
+    device const T* input,
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* output_strides,
@@ -139,7 +139,7 @@ inline void index_put_impl(
 template <typename T, typename OffsetT = ulong>
 kernel void index_put(
     device T* output,
-    constant T* input,
+    device const T* input,
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* output_strides,
@@ -168,7 +168,7 @@ kernel void index_put(
 template <typename T, typename OffsetT = ulong>
 kernel void index_put_serial(
     device T* output,
-    constant T* input,
+    device const T* input,
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* output_strides,
@@ -200,7 +200,7 @@ kernel void index_put_serial(
 template <typename T, typename OffsetT = ulong>
 kernel void index_put_accumulate(
     device T* output,
-    constant T* input,
+    device const T* input,
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* output_strides,
@@ -242,8 +242,8 @@ kernel void index_put_accumulate(
   template [[host_name("index_" #OP_NAME "_" #SUFFIX)]] kernel void \
       index_##OP_NAME<DTYPE>(                                       \
           device DTYPE * output,                                    \
-          constant DTYPE * input,                                   \
-          constant IndexAB * indices,                               \
+          device const DTYPE* input,                                \
+          constant IndexAB* indices,                                \
           constant int64_t* sizes,                                  \
           constant int64_t* output_strides,                         \
           constant int64_t* input_strides,                          \
@@ -621,7 +621,7 @@ REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(long);
 template <typename T>
 kernel void masked_fill_scalar_dense(
     device T* input,
-    constant bool* mask,
+    device const bool* mask,
     constant T& val,
     uint thread_index [[thread_position_in_grid]]) {
   if (mask[thread_index]) {
@@ -632,7 +632,7 @@ kernel void masked_fill_scalar_dense(
 template <typename T>
 kernel void masked_fill_scalar_broadcast(
     device T* input,
-    constant bool* mask,
+    device const bool* mask,
     constant T& val,
     constant uint& mask_numel,
     uint thread_index [[thread_position_in_grid]]) {
@@ -644,12 +644,12 @@ kernel void masked_fill_scalar_broadcast(
 template <typename T>
 kernel void masked_fill_scalar_strided(
     device T* input,
-    constant bool* mask,
+    device const bool* mask,
     constant T& val,
     constant long* sizes,
     constant long* input_strides,
     constant long* mask_strides,
-    device uint& ndim,
+    constant uint& ndim,
     uint thread_index [[thread_position_in_grid]]) {
   int pos[max_ndim];
   pos_from_thread_index(int(thread_index), pos, sizes, ndim);
@@ -661,8 +661,8 @@ kernel void masked_fill_scalar_strided(
 template <typename T, typename index_t, typename OffsetT>
 kernel void index_copy_dense(
     device T* output,
-    constant T* source,
-    constant index_t* indices,
+    device const T* source,
+    device const index_t* indices,
     constant long& dim_size,
     constant long& inner,
     constant long& indices_numel,
@@ -678,8 +678,8 @@ kernel void index_copy_dense(
 template <typename T, typename index_t, typename OffsetT>
 kernel void index_copy_strided(
     device T* output,
-    constant T* source,
-    constant index_t* indices,
+    device const T* source,
+    device const index_t* indices,
     constant long& dim_size,
     constant long& dim_out_stride, // result.stride(dim)
     constant long& dim_source_stride, // source.stride(dim)
@@ -714,7 +714,7 @@ kernel void index_copy_strided(
 template <typename T>
 kernel void index_fill_dense(
     device T* output,
-    constant long* indices,
+    device const long* indices,
     constant T& fill_val,
     constant long& dim_size,
     constant long&
@@ -738,7 +738,7 @@ kernel void index_fill_dense(
 template <typename T>
 kernel void index_fill_strided(
     device T* output,
-    constant long* indices,
+    device const long* indices,
     constant T& fill_val,
     constant long& dim_size,
     constant long& dim_out_stride, // output.stride(dim)
@@ -778,7 +778,7 @@ kernel void index_fill_zero_mask(
 
 kernel void index_fill_set_mask(
     device bool* mask,
-    constant long* indices,
+    device const long* indices,
     constant long& dim_size,
     constant long& indices_stride,
     uint thread_index [[thread_position_in_grid]]) {
@@ -797,7 +797,7 @@ kernel void index_fill_set_mask(
 template <typename T>
 kernel void index_fill_dense_from_mask(
     device T* output,
-    constant bool* mask,
+    device const bool* mask,
     constant T& fill_val,
     constant uint& dim_size,
     constant uint& inner_size,
@@ -815,7 +815,7 @@ kernel void index_fill_dense_from_mask(
 template <typename T>
 kernel void index_fill_strided_from_mask(
     device T* output,
-    constant bool* mask,
+    device const bool* mask,
     constant T& fill_val,
     constant long* sizes,
     constant long* out_strides,
@@ -834,7 +834,7 @@ kernel void index_fill_strided_from_mask(
   template [[host_name("index_fill_dense_" #T)]]   \
   kernel void index_fill_dense<T>(                 \
       device T*,                                   \
-      constant long*,                              \
+      device const long*,                          \
       constant T&,                                 \
       constant long&,                              \
       constant long&,                              \
@@ -843,7 +843,7 @@ kernel void index_fill_strided_from_mask(
   template [[host_name("index_fill_strided_" #T)]] \
   kernel void index_fill_strided<T>(               \
       device T*,                                   \
-      constant long*,                              \
+      device const long*,                          \
       constant T&,                                 \
       constant long&,                              \
       constant long&,                              \
@@ -858,8 +858,8 @@ kernel void index_fill_strided_from_mask(
   template [[host_name("index_copy_dense_" #T "_" #index_t "_" #OBITS)]]   \
   kernel void index_copy_dense<T, index_t, OffsetT>(                       \
       device T*,                                                           \
-      constant T*,                                                         \
-      constant index_t*,                                                   \
+      device const T*,                                                     \
+      device const index_t*,                                               \
       constant long&,                                                      \
       constant long&,                                                      \
       constant long&,                                                      \
@@ -868,8 +868,8 @@ kernel void index_fill_strided_from_mask(
   template [[host_name("index_copy_strided_" #T "_" #index_t "_" #OBITS)]] \
   kernel void index_copy_strided<T, index_t, OffsetT>(                     \
       device T*,                                                           \
-      constant T*,                                                         \
-      constant index_t*,                                                   \
+      device const T*,                                                     \
+      device const index_t*,                                               \
       constant long&,                                                      \
       constant long&,                                                      \
       constant long&,                                                      \
@@ -889,19 +889,23 @@ kernel void index_fill_strided_from_mask(
   template [[host_name("masked_fill_scalar_strided_" #SIZE)]] kernel void   \
   masked_fill_scalar_strided<DTYPE>(                                        \
       device DTYPE*,                                                        \
-      constant bool*,                                                       \
+      device const bool*,                                                   \
       constant DTYPE&,                                                      \
       constant long*,                                                       \
       constant long*,                                                       \
       constant long*,                                                       \
-      device uint&,                                                         \
+      constant uint&,                                                       \
       uint);                                                                \
   template [[host_name("masked_fill_scalar_dense_" #SIZE)]] kernel void     \
   masked_fill_scalar_dense<DTYPE>(                                          \
-      device DTYPE*, constant bool*, constant DTYPE&, uint);                \
+      device DTYPE*, device const bool*, constant DTYPE&, uint);            \
   template [[host_name("masked_fill_scalar_broadcast_" #SIZE)]] kernel void \
   masked_fill_scalar_broadcast<DTYPE>(                                      \
-      device DTYPE*, constant bool*, constant DTYPE&, constant uint&, uint)
+      device DTYPE*,                                                        \
+      device const bool*,                                                   \
+      constant DTYPE&,                                                      \
+      constant uint&,                                                       \
+      uint)
 
 REGISTER_MASKED_FILL_SCALAR(64bit, long);
 REGISTER_MASKED_FILL_SCALAR(32bit, int);
@@ -947,7 +951,7 @@ INSTANTIATE_INDEX_FILL(half2);
   template [[host_name("index_fill_dense_from_mask_" #T)]]   \
   kernel void index_fill_dense_from_mask<T>(                 \
       device T*,                                             \
-      constant bool*,                                        \
+      device const bool*,                                    \
       constant T&,                                           \
       constant uint&,                                        \
       constant uint&,                                        \
@@ -955,7 +959,7 @@ INSTANTIATE_INDEX_FILL(half2);
   template [[host_name("index_fill_strided_from_mask_" #T)]] \
   kernel void index_fill_strided_from_mask<T>(               \
       device T*,                                             \
-      constant bool*,                                        \
+      device const bool*,                                    \
       constant T&,                                           \
       constant long*,                                        \
       constant long*,                                        \

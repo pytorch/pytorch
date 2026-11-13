@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repair a PyTorch wheel: bundle libgomp + GPU libs, set RPATHs, retag platform.
+"""Repair a PyTorch wheel: bundle runtime deps, set RPATHs, retag platform.
 
 Uses auditwheel for unpack/repack (not the `wheel` CLI). `wheel pack`/`wheel tags`
 emit an invalid ZIP64 header for archives over 4GB (pypa/wheel#692), which makes
@@ -14,7 +14,6 @@ Environment variables:
     GPU_ARCH_TYPE      - cpu, cuda, cuda-aarch64, rocm, xpu
     GPU_ARCH_VERSION   - 12.6, 13.0, 13.2, 6.4.1, etc. (empty for CPU)
     USE_CUDA           - "0" or "1"
-    PYTORCH_ROCM_ARCH  - ;-separated gfx targets (ROCm only)
     ROCM_HOME          - /opt/rocm (ROCm only)
 """
 
@@ -47,19 +46,10 @@ def wheel_platform_tags(wheel_name: str) -> list[str]:
 
 @dataclass
 class BundledLib:
-    """A shared library to copy into torch/lib/ and (optionally) patchelf-rewrite NEEDED entries for."""
+    """A compatibility library to copy into torch/lib."""
 
     src: Path
     dest_name: str  # final filename in torch/lib/
-    needed_alias: str | None = None  # original SONAME to replace in NEEDED entries
-
-
-@dataclass
-class AuxFile:
-    """Auxiliary content (e.g. MIOpen db, RCCL algos, gfx kernel files) copied into the wheel."""
-
-    src: Path
-    rel_dest: str  # relative path under torch/, e.g. "lib/rocblas/library/Tensile..."
 
 
 def detect_libgomp() -> Path:
@@ -160,163 +150,6 @@ def arch_extra_deps(arch: str, use_cuda: bool) -> list[Path]:
     return deps
 
 
-# ROCm shared libs to bundle. Discovered under $ROCM_HOME/{lib,lib64}.
-ROCM_SO_FILES: list[str] = [
-    "libMIOpen.so",
-    "libamdhip64.so",
-    "libhipblas.so",
-    "libhipfft.so",
-    "libhiprand.so",
-    "libhipsolver.so",
-    "libhipsparse.so",
-    "libhsa-runtime64.so",
-    "libamd_comgr.so",
-    "libmagma.so",
-    "librccl.so",
-    "librocblas.so",
-    "librocfft.so",
-    "libamd_smi.so",
-    "librocrand.so",
-    "librocsolver.so",
-    "librocsparse.so",
-    "libroctracer64.so",
-    "libroctx64.so",
-    "libhipblaslt.so",
-    "libhipsparselt.so",
-    "libhiprtc.so",
-    "librocprofiler-sdk.so",
-    "librocprofiler-register.so",
-    "libhsa-amd-aqlprofile64.so",
-    "librocm-core.so",
-    "librocroller.so",
-]
-
-# hipFile only ships with ROCm 7.14 and later, where it is required.
-_version_file = Path(os.environ.get("ROCM_HOME", "/opt/rocm")) / ".info" / "version"
-_rocm_version = _version_file.read_text().strip() if _version_file.is_file() else ""
-if tuple(int(x) for x in _rocm_version.split(".")[:2] if x.isdigit()) >= (7, 14):
-    ROCM_SO_FILES.append("libhipfile.so")
-
-
-def rocm_os_deps() -> list[Path]:
-    """OS-side runtime deps that must travel with ROCm wheels."""
-    os_release = Path("/etc/os-release").read_text()
-    if "Ubuntu" in os_release:
-        prefix = "/usr/lib/x86_64-linux-gnu"
-        libtinfo = "/lib/x86_64-linux-gnu/libtinfo.so.6"
-        libdrm_dir = "/usr/lib/x86_64-linux-gnu"
-    else:  # AlmaLinux / CentOS / RHEL
-        prefix = "/usr/lib64"
-        # CentOS Linux had libtinfo.so.5; AlmaLinux ships .6.
-        libtinfo_5 = Path("/usr/lib64/libtinfo.so.5")
-        libtinfo = (
-            str(libtinfo_5) if libtinfo_5.exists() else "/usr/lib64/libtinfo.so.6"
-        )
-        libdrm_dir = "/opt/amdgpu/lib64"
-    return [
-        Path(f"{prefix}/libnuma.so.1"),
-        Path(f"{prefix}/libelf.so.1"),
-        Path(libtinfo),
-        Path(f"{prefix}/libdw.so.1"),
-        Path(f"{libdrm_dir}/libdrm.so.2"),
-        Path(f"{libdrm_dir}/libdrm_amdgpu.so.1"),
-    ]
-
-
-def find_rocm_lib(rocm_home: Path, basename: str) -> Path | None:
-    """Locate a ROCm library, falling back from lib/ to lib64/ to a wider search."""
-    for sub in ("lib", "lib64"):
-        for hit in (rocm_home / sub).rglob(basename + "*"):
-            if hit.is_file() and hit.name.startswith(basename):
-                return hit
-    for hit in rocm_home.rglob(basename + "*"):
-        if hit.is_file() and hit.name.startswith(basename):
-            return hit
-    return None
-
-
-def rocm_arch_filter(arch_list: str) -> list[str]:
-    return [a for a in arch_list.split(";") if a]
-
-
-def rocm_lib_kernels(
-    rocm_home: Path, lib_subdir: str, archs: list[str]
-) -> list[AuxFile]:
-    """Per-gfx kernel files under $ROCM_HOME/lib/<lib_subdir>/library/ plus the non-gfx common files."""
-    src_dir = rocm_home / "lib" / lib_subdir / "library"
-    if not src_dir.is_dir():
-        return []
-    files: list[AuxFile] = []
-    for entry in sorted(src_dir.iterdir()):
-        if not entry.is_file():
-            continue
-        # Pick gfx-specific files matching the arch set, plus common (non-gfx) files.
-        name = entry.name
-        if "gfx" in name and not any(a in name for a in archs):
-            continue
-        files.append(AuxFile(src=entry, rel_dest=f"lib/{lib_subdir}/library/{name}"))
-    return files
-
-
-def rocm_bundle(
-    rocm_home: Path, gpu_arch_version: str
-) -> tuple[list[BundledLib], list[AuxFile]]:
-    """Build the ROCm bundle spec: shared libs and auxiliary kernel/db files.
-
-    Versioned ROCm sonames (libfoo.so.6) get renamed to bare .so to match the
-    NEEDED entries that hipcc emits, mirroring the original build_rocm.sh
-    fname_without_so_number behaviour. NEEDED entries inside the wheel are
-    rewritten to the renamed copies via patchelf in repair_wheel().
-    """
-    libs: list[BundledLib] = []
-    so_files = list(ROCM_SO_FILES)
-    # librocm_smi64.so is only needed for ROCm7.2 and earlier
-    if gpu_arch_version and tuple(map(int, gpu_arch_version.split(".")[:2])) <= (7, 2):
-        so_files.append("librocm_smi64.so")
-    for stem in so_files:
-        path = find_rocm_lib(rocm_home, stem)
-        if path is None:
-            sys.exit(f"Required ROCm library not found: {stem}")
-        # Strip the SO version: libfoo.so.6.1 -> libfoo.so. The ROCm-built
-        # binaries in the wheel link against the bare .so SONAME.
-        libs.append(BundledLib(src=path, dest_name=stem, needed_alias=stem))
-    for os_lib in rocm_os_deps():
-        if os_lib.is_file():
-            libs.append(BundledLib(src=os_lib, dest_name=os_lib.name))
-        else:
-            # Silently omitting one of these produces a wheel that imports but
-            # misbehaves at runtime, and it took a release candidate to notice.
-            print(
-                f"WARNING: OS dependency not present on the builder, "
-                f"not bundled into the wheel: {os_lib}",
-                file=sys.stderr,
-            )
-
-    archs = rocm_arch_filter(os.environ.get("PYTORCH_ROCM_ARCH", ""))
-    aux: list[AuxFile] = []
-    for sub in ("rocblas", "hipblaslt", "hipsparselt"):
-        aux += rocm_lib_kernels(rocm_home, sub, archs)
-    miopen_db = rocm_home / "share/miopen/db"
-    if miopen_db.is_dir():
-        for entry in sorted(miopen_db.iterdir()):
-            if entry.is_file() and any(a in entry.name for a in archs):
-                aux.append(AuxFile(src=entry, rel_dest=f"share/miopen/db/{entry.name}"))
-    rccl_dir = rocm_home / "share/rccl/msccl-algorithms"
-    if rccl_dir.is_dir():
-        for entry in sorted(rccl_dir.iterdir()):
-            if entry.is_file():
-                aux.append(
-                    AuxFile(
-                        src=entry,
-                        rel_dest=f"share/rccl/msccl-algorithms/{entry.name}",
-                    )
-                )
-    amdgpu_ids = Path("/opt/amdgpu/share/libdrm/amdgpu.ids")
-    if amdgpu_ids.is_file():
-        aux.append(AuxFile(src=amdgpu_ids, rel_dest="share/libdrm/amdgpu.ids"))
-    return libs, aux
-
-
 def patchelf(*args: str) -> None:
     subprocess.run([PATCHELF, *args], check=True)
 
@@ -329,47 +162,6 @@ def set_rpath(sofile: Path, rpath: str, force_rpath: bool) -> None:
     patchelf(*cmd)
 
 
-def replace_needed(unpacked_torch: Path, original: str, replacement: str) -> None:
-    """Rewrite NEEDED entries that match `original*` to `replacement` across the wheel."""
-    for sofile in unpacked_torch.rglob("*.so*"):
-        if not sofile.is_file():
-            continue
-        try:
-            needed = subprocess.check_output(
-                [PATCHELF, "--print-needed", str(sofile)], text=True
-            ).splitlines()
-        except subprocess.CalledProcessError:
-            continue
-        for entry in needed:
-            if entry == original or entry.startswith(original + "."):
-                patchelf("--replace-needed", entry, replacement, str(sofile))
-
-
-def check_no_dangling_bundled_needed(torch_lib: Path) -> None:
-    """Fail the build if a lib in torch/lib NEEDs a versioned soname of a
-    bundled lib without a file of that name in the wheel (a missed
-    replace_needed rewrite). Such a reference only resolves against a system
-    ROCm install, so the wheel silently stops being self-contained."""
-    names = {f.name for f in torch_lib.iterdir()}
-    dangling = []
-    for sofile in sorted(torch_lib.glob("*.so*")):
-        if not sofile.is_file():
-            continue
-        try:
-            needed = subprocess.check_output(
-                [PATCHELF, "--print-needed", str(sofile)], text=True
-            ).splitlines()
-        except subprocess.CalledProcessError:
-            continue
-        for entry in needed:
-            stem = entry.split(".so", 1)[0] + ".so"
-            if stem in names and entry not in names:
-                dangling.append(f"{sofile.name} -> {entry}")
-    if dangling:
-        joined = "\n".join(sorted(set(dangling)))
-        sys.exit(f"Dangling NEEDED entries after bundling (missed rewrite?):\n{joined}")
-
-
 def repair_wheel(
     wheel: Path,
     output_dir: Path,
@@ -377,7 +169,6 @@ def repair_wheel(
     libgomp_path: Path,
     arch_deps: list[Path],
     bundled_libs: list[BundledLib],
-    aux_files: list[AuxFile],
     c_so_rpath: str,
     lib_so_rpath: str,
     force_rpath: bool,
@@ -405,43 +196,10 @@ def repair_wheel(
         for dep in arch_deps:
             shutil.copy(dep, torch_lib / dep.name)
 
-        # TODO: Remove when switching to ROCm wheels
-        # Bundle GPU-specific shared libs (currently only ROCm uses this).
-        # Copy follows symlinks so versioned sonames become real files we can
-        # rename to their bare .so form to match what the wheel links against.
+        # Keep only compatibility dependencies that are not supplied by the
+        # ROCm SDK wheel packages (currently pre-10.0 rocSHMEM's libnuma).
         for lib in bundled_libs:
             shutil.copy(lib.src, torch_lib / lib.dest_name)
-            # Some bundled deps are dlopen'd by their *bare* soname at runtime,
-            # not just via NEEDED. In particular rocSHMEM's NUMAWrapper global
-            # ctor does dlopen("libnuma.so"). The original build_rocm.sh shipped
-            # OS deps under bare names; this pipeline keeps them versioned
-            # (e.g. libnuma.so.1), so add a bare-name symlink next to the
-            # versioned file. Without it that dlopen fails and rocSHMEM calls
-            # exit() at load, tripping a rocprofiler-sdk atexit deadlock that
-            # hangs `import torch` on no-GPU/no-kfd hosts. See
-            # pytorch/pytorch#189110.
-            if ".so." in lib.dest_name:
-                bare = lib.dest_name.split(".so.", 1)[0] + ".so"
-                bare_path = torch_lib / bare
-                if not bare_path.exists():
-                    bare_path.symlink_to(lib.dest_name)
-        # Rewrite NEEDED entries only after every bundled lib has been copied
-        # in: bundled libs reference each other (e.g. libhiprtc.so needs
-        # libamd_comgr.so.3), and replace_needed only visits files present in
-        # the wheel at call time, so rewriting inside the copy loop misses
-        # references from libs bundled after their dependency (#189194).
-        for lib in bundled_libs:
-            if lib.needed_alias:
-                replace_needed(torch_dir, lib.needed_alias, lib.dest_name)
-        if bundled_libs:
-            check_no_dangling_bundled_needed(torch_lib)
-
-        # Copy auxiliary content (gfx kernel files, MIOpen db, RCCL algos, ...)
-        for aux in aux_files:
-            dest = torch_dir / aux.rel_dest
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(aux.src, dest)
-
         # Set RPATH on top-level (_C.so etc.) and lib/ shared objects
         for sofile in torch_dir.glob("*.so*"):
             if sofile.is_file():
@@ -475,7 +233,6 @@ def main() -> None:
         sys.exit(f"libgomp not found at {libgomp_path}")
 
     bundled_libs: list[BundledLib] = []
-    aux_files: list[AuxFile] = []
 
     if use_cuda:
         rpaths = cuda_rpaths(gpu_arch_version)
@@ -490,37 +247,32 @@ def main() -> None:
         force_rpath = True
     elif is_rocm:
         rocm_home = Path(os.environ.get("ROCM_HOME", "/opt/rocm"))
-        if "_rocm_sdk" in str(rocm_home):
-            # TheRock wheel layout (rocm7.14): ROCm ships as the `rocm` pip
-            # package (_rocm_sdk_core, a sibling of torch/). Resolve libs via
-            # RPATH instead of bundling them, mirroring the CUDA/XPU wheels.
-            rpaths = rocm_rpaths(rocm_home)
-            c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
-            lib_so_rpath = f"{rpaths}:$ORIGIN"
-            force_rpath = True
-            # Pre-10.0 TheRock SDKs ship a rocSHMEM that dlopens the bare name
-            # "libnuma.so". At wheel runtime that name resolves nowhere: the
-            # SDK vendors numa only as librocm_sysdeps_numa.so.1, and on user
-            # systems the bare dev name exists only if numactl-devel is
-            # installed (#195670). The 10.0 SDK line links the vendored soname
-            # directly instead (rocm-systems#6640), so bundle a bare-named
-            # copy, reached via $ORIGIN on the RPATHs above, only for older
-            # SDKs. The builder image installs numactl-libs for this.
-            ver = gpu_arch_version
-            if not ver or tuple(map(int, ver.split(".")[:2])) < (10, 0):
-                is_ubuntu = "Ubuntu" in Path("/etc/os-release").read_text()
-                libdir = "/usr/lib/x86_64-linux-gnu" if is_ubuntu else "/usr/lib64"
-                libnuma = Path(libdir) / "libnuma.so.1"
-                if not libnuma.is_file():
-                    sys.exit(f"libnuma to bundle for rocSHMEM not found: {libnuma}")
-                bundled_libs.append(BundledLib(src=libnuma, dest_name="libnuma.so"))
-        else:
-            # Legacy OS/tarball layout (/opt/rocm, e.g. rocm7.2): bundle the
-            # ROCm libs into the wheel so it stays self-contained.
-            bundled_libs, aux_files = rocm_bundle(rocm_home, gpu_arch_version)
-            c_so_rpath = "$ORIGIN:$ORIGIN/lib"
-            lib_so_rpath = "$ORIGIN"
-            force_rpath = True
+        # A classic install has no _rocm_sdk_* siblings, so SDK RPATHs
+        # would not resolve. CI images always use the TheRock layout.
+        if "_rocm_sdk" not in str(rocm_home):
+            sys.exit(
+                f"Only the TheRock SDK layout is supported (ROCM_HOME={rocm_home})"
+            )
+        rpaths = rocm_rpaths(rocm_home)
+        c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
+        lib_so_rpath = f"{rpaths}:$ORIGIN"
+        force_rpath = True
+        # Pre-10.0 TheRock SDKs ship a rocSHMEM that dlopens the bare name
+        # "libnuma.so". At wheel runtime that name resolves nowhere: the
+        # SDK vendors numa only as librocm_sysdeps_numa.so.1, and on user
+        # systems the bare dev name exists only if numactl-devel is
+        # installed (#195670). The 10.0 SDK line links the vendored soname
+        # directly instead (rocm-systems#6640), so bundle a bare-named
+        # copy, reached via $ORIGIN on the RPATHs above, only for older
+        # SDKs. The builder image installs numactl-libs for this.
+        ver = gpu_arch_version
+        if not ver or tuple(map(int, ver.split(".")[:2])) < (10, 0):
+            is_ubuntu = "Ubuntu" in Path("/etc/os-release").read_text()
+            libdir = "/usr/lib/x86_64-linux-gnu" if is_ubuntu else "/usr/lib64"
+            libnuma = Path(libdir) / "libnuma.so.1"
+            if not libnuma.is_file():
+                sys.exit(f"libnuma to bundle for rocSHMEM not found: {libnuma}")
+            bundled_libs.append(BundledLib(src=libnuma, dest_name="libnuma.so"))
     else:
         c_so_rpath = "$ORIGIN:$ORIGIN/lib"
         lib_so_rpath = "$ORIGIN"
@@ -544,7 +296,6 @@ def main() -> None:
             libgomp_path,
             arch_deps,
             bundled_libs,
-            aux_files,
             c_so_rpath,
             lib_so_rpath,
             force_rpath,

@@ -16,6 +16,7 @@ import typing
 from torch._precompile import (
     Capture,
     capture,
+    DynamoTracer,
     load,
     MakeFxTracer,
     PrecompiledRunnable,
@@ -32,6 +33,7 @@ __all__ = [
     "capture",
     "load",
     "Capture",
+    "DynamoTracer",
     "MakeFxTracer",
     "PrecompiledRunnable",
     "PrecompileSummary",
