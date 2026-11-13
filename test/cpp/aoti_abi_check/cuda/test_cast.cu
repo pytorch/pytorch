@@ -42,7 +42,7 @@ using torch::headeronly::RoundingMode;
 
 constexpr int kModes = 4;
 // Per input: round_to_odd_float, convert<Half>, then convert_with_rounding to
-// Half, BFloat16 (whose subnormals cover float subnormals), Float8_e4m3fn
+// Half, BFloat16 (whose subnormals reach 2^-133), Float8_e4m3fn
 // (which saturates) and Float8_e8m0fnu (which has no zero), from the double
 // and from the float, in each mode.
 constexpr int kResults = 2 + 8 * kModes;
@@ -106,8 +106,9 @@ TEST(TestCastCuda, ConvertDeviceMatchesHost) {
       0x1p-149,
       0x1.8p-140,
       -0x1p-130,
-      // float subnormals whose BFloat16 results are subnormal too, the only
-      // ones that tell an undercount of leading_zeros apart.
+      // float subnormals in [2^-127, 2^-126): a leading_zeros that undercounts
+      // changes their BFloat16 results (whether they are normal), which no
+      // other input shows; one that overcounts changes other results.
       0x1.8p-127,
       -0x1.4p-127,
       // Subnormal doubles.
