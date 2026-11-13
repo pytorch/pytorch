@@ -2101,10 +2101,24 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
             self.assertEqual(ref_param.grad, param.grad.full_tensor())
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_requires_root(self):
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        fully_shard(model[0])
+        fully_shard(model[1])
+        fully_shard(model)
+        model[0].set_manual_backward_finalization(True)
+        with self.assertRaisesRegex(RuntimeError, "must be called on the root"):
+            model(torch.randn(4, 8, device=device_type.type))
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_manual_backward_finalization_on_submodule(self):
         """
-        Tests that the root-only methods called on submodules act on the root,
-        whether the root or only its submodules run forward.
+        Tests that the root-only methods called on submodules after the first
+        forward act on the root, whether the root or only its submodules run
+        forward.
         """
         for run_root in (True, False):
             torch.manual_seed(42)
@@ -2116,20 +2130,60 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
             fully_shard(model[0])
             fully_shard(model[1])
             fully_shard(model)
+
+            def forward(x: torch.Tensor) -> torch.Tensor:
+                return model(x) if run_root else model[1](model[0](x))
+
+            torch.manual_seed(42 + self.rank)
+            inp = torch.randn(4, 8, device=device_type.type)
+            with torch.no_grad():
+                forward(inp)
             model[0].set_manual_backward_finalization(True)
             self.assertTrue(
                 fully_shard.state(model)._state_ctx.manual_backward_finalization
             )
-
-            torch.manual_seed(42 + self.rank)
-            inp = torch.randn(4, 8, device=device_type.type)
-            (model(inp) if run_root else model[1](model[0](inp))).sum().backward()
+            forward(inp).sum().backward()
             model[1].finalize_backward()
             ref_model(inp).sum().backward()
             for ref_param, param in zip(ref_model.parameters(), model.parameters()):
                 dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
                 self.assertEqual(ref_param.grad, param.grad.full_tensor())
             model[0].reset_iter_state()
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_on_submodules_as_roots(self):
+        """
+        Tests that a submodule that enables manual backward finalization before
+        its first forward runs as a root of its own, and so does a submodule
+        that first runs after it, as pipeline stages cut from one model do.
+        """
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model[0])
+        fully_shard(model[1])
+        fully_shard(model)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn(4, 8, device=device_type.type)
+        model[0].set_manual_backward_finalization(True)
+        model[0](inp).sum().backward()
+        model[0].finalize_backward(async_op=True).wait()
+        model[0].set_manual_backward_finalization(False)
+        # model[1] runs as a root of its own and finalizes its backward itself
+        model[1](inp).sum().backward()
+        self.assertEqual(
+            [fully_shard.state(module)._is_root for module in (model, *model)],
+            [None, True, True],
+        )
+        for ref_module in ref_model:
+            ref_module(inp).sum().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertEqual(ref_param.grad, param.grad.full_tensor())
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_manual_backward_finalization_call_order(self):

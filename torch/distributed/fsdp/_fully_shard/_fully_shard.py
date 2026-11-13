@@ -160,7 +160,10 @@ def fully_shard(
     an inference engine calls the embedding and the decoder layers itself.
     Such submodules are non-root modules, so with the default
     ``reshard_after_forward`` they reshard after each forward; pass
-    ``reshard_after_forward=False`` to keep them unsharded.
+    ``reshard_after_forward=False`` to keep them unsharded. If a submodule
+    enables manual backward finalization before the root is initialized,
+    submodules that run forward without the root instead run as roots of their
+    own, e.g. pipeline stages.
 
     When called with a list (``fully_shard([a, b, ...])``), the model's
     forward may run only a subset of the grouped modules, with the rest
@@ -484,13 +487,14 @@ class FSDPModule:
         """
         Set whether the caller must finalize backward.
 
-        This applies to the root FSDP module: calling it on a non-root module
-        sets the mode of its root. When enabled, manual finalization supersedes
-        :meth:`set_is_last_backward`. Call :meth:`finalize_backward` after all
-        backward passes in the logical backward operation and before reading or
-        clearing gradients. Otherwise, gradients may remain unreduced and
-        backward iteration state is retained. Gradient synchronization and
-        parameter resharding follow their current settings.
+        This applies to the root FSDP module: after the first forward, calling
+        it on a non-root module sets the mode of its root. When enabled, manual
+        finalization supersedes :meth:`set_is_last_backward`. Call
+        :meth:`finalize_backward` after all backward passes in the logical
+        backward operation and before reading or clearing gradients. Otherwise,
+        gradients may remain unreduced and backward iteration state is retained.
+        Gradient synchronization and parameter resharding follow their current
+        settings.
 
         Set this before backward. The mode cannot change after backward starts
         until the backward iteration is finalized or reset.

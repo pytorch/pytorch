@@ -97,12 +97,15 @@ class FSDPState(_State):
         return None if self._enclosing_state is None else self._enclosing_state()
 
     def _get_root_state(self) -> "FSDPState":
+        """Returns the root that initialized this state, or this state before lazy init."""
+        return self if self._is_root is None else self._state_ctx.all_states[0]
+
+    def _get_outermost_state(self) -> "FSDPState":
         """
-        Returns the root of this state's tree: the root that initialized this
-        state, or before lazy init, the state that lazy init makes the root.
+        Returns the state that lazy init makes the root: the outermost
+        single-module state enclosing this state, or this state if that
+        state's module tree cannot take it as a non-root.
         """
-        if self._is_root is not None:
-            return self._state_ctx.all_states[0]
         # Multi-module states cannot be the root, so skip them
         root_state = self
         state = self._get_enclosing_state()
@@ -110,13 +113,23 @@ class FSDPState(_State):
             if len(state._modules) == 1:
                 root_state = state
             state = state._get_enclosing_state()
-        # A module detached after sharding keeps its link, so the outermost
-        # state is the root only if this state is still inside its module tree
-        if root_state is not self and set(self._modules).isdisjoint(
-            root_state._modules[0].modules()
-        ):
+        if root_state is self:
             return self
-        return root_state
+        is_enclosed = False
+        for module in root_state._modules[0].modules():
+            if (state := self._get_state_for_module(module)) is None:
+                continue
+            # A state that already ran forward, or that enabled manual backward
+            # finalization, runs as a root of its own, which the outermost
+            # state's lazy init would reject
+            if state._is_root is not None or (
+                state is not root_state
+                and state._state_ctx.manual_backward_finalization
+            ):
+                return self
+            is_enclosed |= state is self
+        # A module detached after sharding keeps its link
+        return root_state if is_enclosed else self
 
     @property
     def _fsdp_param_group(self) -> FSDPParamGroup | None:
@@ -225,7 +238,7 @@ class FSDPState(_State):
         """
         if self._is_root is not None:
             return  # no-op: already initialized
-        if (root_state := self._get_root_state()) is not self:
+        if (root_state := self._get_outermost_state()) is not self:
             root_state._lazy_init()
             if self._is_root is not None:
                 return
