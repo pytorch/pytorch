@@ -44,9 +44,6 @@ if "%CUVER_NODOT%" == "134" (
 if "%CUVER_NODOT%" == "132" (
   set CUDA_ARCH_LIST=-gencode=arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120
 )
-if "%CUVER_NODOT%" == "130" (
-  set CUDA_ARCH_LIST=-gencode=arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120
-)
 
 set CC=cl.exe
 set CXX=cl.exe
