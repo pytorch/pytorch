@@ -701,6 +701,13 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  if (impl->is_fake()) {
+    if (auto mode = impl->fake_tensor_mode()) {
+      if (auto constant = mode->get_constant(this)) {
+        mode->set_constant(impl.get(), std::move(constant));
+      }
+    }
+  }
   return impl;
 }
 
@@ -1304,7 +1311,7 @@ void FakeTensorMode::clear_constant(c10::TensorImpl* fake_impl) noexcept {
 }
 
 c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
-    c10::TensorImpl* fake_impl) const {
+    const c10::TensorImpl* fake_impl) const {
   std::optional<c10::weak_intrusive_ptr<c10::TensorImpl>> weak_constant;
   {
     std::lock_guard guard(constant_mutex_);
