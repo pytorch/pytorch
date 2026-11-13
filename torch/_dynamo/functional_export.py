@@ -893,7 +893,7 @@ def op_overload_wrapper({", ".join(arg_list)}):
         with (
             _compiling_state_context(),
             torch._dynamo.config.patch(
-                replay_side_effects=False, side_effect_replay_policy="warn"
+                replay_side_effects=False, side_effect_replay_policy="error"
             ),
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
