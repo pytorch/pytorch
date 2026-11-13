@@ -135,21 +135,3 @@ complete output elements, and concatenation joins them without additional
 arithmetic. Different GEMM shapes and execution resources can change kernel
 selection and floating-point rounding, so results may differ numerically.
 Training with localization enabled is currently unsupported.
-
-#### Integration gotchas
-
-* For torchao, you must quantize and *then* localize; localization followed by
-quantization will cause the quantization to (silently) erase the localization.
-
-* torchao requires some additional ops to be implemented on e.g. Float8Tensor.
-This work is ongoing.
-
-* vLLM and SGLang contain custom ops for localization, and so applying
-torch.cuda.localize on top of those ops will not be valuable. For the vLLM /
-SGLang developers out there: we have prototyped using torch.cuda.localize
-*instead* of those custom ops and it works great. You might consider relying on
-torch for this kind of localization.
-
-* Certain cuBlasLt GEMMs can cause `CUBLAS_STATUS_NOT_SUPPORTED` errors when
-launching GEMMs on localized green streams. One possible cause is unsupported
-KMD / UMD driver combinations. Report all such issues to NVIDIA.
