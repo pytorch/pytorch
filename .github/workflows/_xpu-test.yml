@@ -341,6 +341,31 @@ jobs:
           # Workaround for multiple runners on same IDC node
           docker stop "${{ env.CONTAINER_NAME }}"
 
+      # Upload the test run reports for the ci database with a write role, assumed
+      # once the test container has stopped so test code never holds it.
+      - name: Authenticate to upload test run reports
+        id: torchci-reports-creds
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && steps.get-job-id.outputs.job-id
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_pytorch_artifacts
+          role-session-name: gha-torchci-reports
+          aws-region: us-east-1
+
+      # The key upload-test-artifacts uses; the job id is the job's check run id.
+      - name: Store Test Run Reports on S3 (write role)
+        if: always() && steps.torchci-reports-creds.outcome == 'success'
+        continue-on-error: true
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          s3-bucket: gha-artifacts
+          s3-prefix: |
+            torchci-reports/${{ github.repository }}/${{ github.run_id }}/${{ steps.get-job-id.outputs.job-id }}
+          retention-days: 14
+          if-no-files-found: ignore
+          path: test/torchci-reports/*.report.jsonl
+
       - name: Store Core dumps on GitHub
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
