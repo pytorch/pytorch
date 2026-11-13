@@ -271,7 +271,7 @@ def _flag_issue(trait, flag: str, method: str) -> str | None:
         if isinstance(trait, WelfordOps):
             hint = (
                 "the flag is not inherited; a WelfordOps subclass that keeps leaf, combine "
-                f"and their helpers may set {flag} = True to opt in"
+                f"and their helpers must set {flag} = True"
             )
             return f"a trait with {flag}, got {name} ({hint})"
         return f"a trait with {flag}, got {name}"
