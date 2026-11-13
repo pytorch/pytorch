@@ -1007,6 +1007,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
                 self._handle,
                 self._cpp_dispatch_handle,
                 self._handle.redispatch_boxed,
+                self,
             )
         )
         self._pyobj_dispatcher = _PyObjectDispatcher(
