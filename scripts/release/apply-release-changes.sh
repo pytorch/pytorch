@@ -39,6 +39,14 @@ sed -i "s#^        \.github/scripts/generate_ci_workflows.py#        RELEASE_VER
 echo "Triton Changes"
 sed -i -e s#-\ main#"-\ release\/${RELEASE_VERSION}"# .github/workflows/build-triton-wheel.yml
 
+# XPU dependency
+echo "XPU Changes"
+XPU_RELEASE_BRANCH="release/${RELEASE_VERSION}"
+if ! git ls-remote --exit-code https://github.com/intel/torch-xpu-ops.git "refs/heads/${XPU_RELEASE_BRANCH}" > /dev/null; then
+    echo "Warning: cannot resolve torch-xpu-ops branch ${XPU_RELEASE_BRANCH}; create it before building XPU." >&2
+fi
+printf '%s\n' "${XPU_RELEASE_BRANCH}" > "${GIT_TOP_DIR}/third_party/xpu.txt"
+
 # Regenerate templates
 export RELEASE_VERSION_TAG=${RELEASE_VERSION}
 ./.github/regenerate.sh
