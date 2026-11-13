@@ -114,18 +114,14 @@ class ContinuousBernoulli(ExponentialFamily):
         return torch.where(
             self._outside_unstable_region(),
             self.probs,
-            self._lims[0] * torch.ones_like(self.probs),
+            self._lims[0],
         )
 
     def _cont_bern_log_norm(self):
         """computes the log normalizing constant as a function of the 'probs' parameter"""
         cut_probs = self._cut_probs()
-        cut_probs_below_half = torch.where(
-            torch.le(cut_probs, 0.5), cut_probs, torch.zeros_like(cut_probs)
-        )
-        cut_probs_above_half = torch.where(
-            torch.ge(cut_probs, 0.5), cut_probs, torch.ones_like(cut_probs)
-        )
+        cut_probs_below_half = torch.where(torch.le(cut_probs, 0.5), cut_probs, 0)
+        cut_probs_above_half = torch.where(torch.ge(cut_probs, 0.5), cut_probs, 1)
         log_norm = torch.log(
             torch.abs(torch.log1p(-cut_probs) - torch.log(cut_probs))
         ) - torch.where(
@@ -205,8 +201,8 @@ class ContinuousBernoulli(ExponentialFamily):
         unbounded_cdfs = torch.where(self._outside_unstable_region(), cdfs, value)
         return torch.where(
             torch.le(value, 0.0),
-            torch.zeros_like(value),
-            torch.where(torch.ge(value, 1.0), torch.ones_like(value), unbounded_cdfs),
+            0,
+            torch.where(torch.ge(value, 1.0), 1, unbounded_cdfs),
         )
 
     def icdf(self, value):
@@ -240,9 +236,7 @@ class ContinuousBernoulli(ExponentialFamily):
         out_unst_reg = torch.max(
             torch.le(x, self._lims[0] - 0.5), torch.gt(x, self._lims[1] - 0.5)
         )
-        cut_nat_params = torch.where(
-            out_unst_reg, x, (self._lims[0] - 0.5) * torch.ones_like(x)
-        )
+        cut_nat_params = torch.where(out_unst_reg, x, self._lims[0] - 0.5)
         log_norm = torch.log(
             torch.abs(torch.special.expm1(cut_nat_params))
         ) - torch.log(torch.abs(cut_nat_params))
