@@ -750,7 +750,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         view = node.args[0]
         view_ops = []
         while view is not base:
-            if not (isinstance(view, torch.fx.Node) and _is_view_op(view.target)):
+            if not (
+                isinstance(view, torch.fx.Node)
+                and isinstance(view.target, torch._ops.OpOverload)
+                and _is_view_op(view.target)
+            ):
                 return False
             view_ops.append(ViewOp(view.target, args=view.args[1:], kwargs=view.kwargs))
             view = view.args[0]
@@ -767,7 +771,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return False
         (copy_node,) = copies
         src = copy_node.args[1]
-        while src is not scatter and src.target is _generalized_scatter:
+        while (
+            src is not scatter
+            and isinstance(src, torch.fx.Node)
+            and src.target is _generalized_scatter
+        ):
             src = src.args[0]
         if src is not scatter:
             return False
