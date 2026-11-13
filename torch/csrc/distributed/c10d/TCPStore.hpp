@@ -66,13 +66,16 @@ struct TCPStoreOptions {
   // private key and CA bundle, all three required. Alternatively, TLS 1.3 with
   // a pre-shared key value of 32 to 256 random bytes, which cannot
   // be combined with the certificate options. If no tls* option is set, the
-  // matching TORCH_TCPSTORE_TLS_{CERT,KEY,CA,PSK} environment variables are
-  // used instead. All empty/unset settings disable TLS; otherwise empty values
-  // are rejected. NUL bytes are rejected. Never log the PSK value.
+  // matching TORCH_TCPSTORE_TLS_{CERT,KEY,CA,PSK,PSK_FILE} environment
+  // variables are used instead. All empty/unset settings disable TLS; otherwise
+  // empty values are rejected. TORCH_TCPSTORE_TLS_REQUIRE=1 forbids disabled
+  // TLS. NUL bytes are rejected. Never log the PSK value.
   std::optional<std::string> tlsCert = std::nullopt;
   std::optional<std::string> tlsKey = std::nullopt;
   std::optional<std::string> tlsCa = std::nullopt;
   std::optional<std::string> tlsPsk = std::nullopt;
+  // Owner-only regular file containing the raw PSK; exclusive with tlsPsk.
+  std::optional<std::string> tlsPskFile = std::nullopt;
 };
 
 class TORCH_API TCPStore : public Store {

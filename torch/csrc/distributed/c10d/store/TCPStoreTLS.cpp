@@ -10,6 +10,13 @@
 #include <string_view>
 #include <vector>
 
+#ifdef __linux__
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
+#include <c10/util/ScopeExit.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/error.h>
 #include <fmt/format.h>
@@ -59,13 +66,12 @@ int chunk(size_t length) {
   return -1;
 }
 
-// NCCL requires at least 32 bytes and reads the key as a C string, so a key
-// shared with it must not contain NUL bytes. OpenSSL 1.1.1 accepts at most 256
-// (3.x allows 512).
+// Accept raw, NUL-free keys. OpenSSL 1.1.1 accepts at most 256 bytes
+// (3.x allows 512). Use separate randomly generated keys for each protocol.
 constexpr size_t kMinPskSize = 32;
 constexpr size_t kMaxPskSize = 256;
 
-#ifdef __linux__
+#if defined(__linux__) && INTPTR_MAX == INT64_MAX
 constexpr int kTls12Version = 0x0303;
 constexpr int kTls13Version = 0x0304;
 // Change the version suffix if the PSK handshake ever becomes incompatible.
@@ -130,6 +136,59 @@ int findPskSession(
 
 } // namespace
 
+namespace {
+std::string readPskFile(const std::string& path) {
+#ifndef __linux__
+  C10_THROW_ERROR(DistStoreError, "TCPStore TLS requires 64-bit Linux");
+#else
+  int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+  TORCH_CHECK_WITH(
+      DistStoreError, fd >= 0, "TCPStore TLS: cannot open PSK file");
+  auto close = c10::make_scope_exit([&] { ::close(fd); });
+  struct stat st{};
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      ::fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
+          st.st_uid == ::geteuid() && (st.st_mode & 0077) == 0,
+      "TCPStore TLS: PSK file must be a regular file owned by the current user with no group or other permissions");
+  std::array<char, kMaxPskSize + 1> data{};
+  auto wipe = c10::make_scope_exit([&] {
+    volatile char* bytes = data.data();
+    for (size_t i = 0; i < data.size(); ++i) {
+      bytes[i] = 0;
+    }
+  });
+  size_t size = 0;
+  while (size < data.size()) {
+    auto n = ::read(fd, data.data() + size, data.size() - size);
+    if (n < 0 && errno == EINTR) {
+      continue;
+    }
+    TORCH_CHECK_WITH(
+        DistStoreError, n >= 0, "TCPStore TLS: cannot read PSK file");
+    if (n == 0) {
+      break;
+    }
+    size += n;
+  }
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      size >= kMinPskSize && size <= kMaxPskSize,
+      "TCPStore TLS: PSK must contain 32 to 256 bytes");
+  return std::string(data.data(), size);
+#endif
+}
+
+bool tlsRequired() {
+  auto value = c10::utils::get_env("TORCH_TCPSTORE_TLS_REQUIRE");
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      !value || *value == "0" || *value == "1",
+      "TORCH_TCPSTORE_TLS_REQUIRE must be 0 or 1");
+  return value == "1";
+}
+} // namespace
+
 TLSConfig tlsConfig(const TCPStoreOptions& opts) {
   const char* empty = nullptr;
   auto value = [&](const std::optional<std::string>& path, const char* name) {
@@ -144,13 +203,17 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
         " must not contain NUL bytes");
     return path.value_or("");
   };
+  const bool requireTls = tlsRequired();
   TLSConfig config;
-  if (opts.tlsCert || opts.tlsKey || opts.tlsCa || opts.tlsPsk) {
+  std::string pskFile;
+  if (opts.tlsCert || opts.tlsKey || opts.tlsCa || opts.tlsPsk ||
+      opts.tlsPskFile) {
     config = {
         value(opts.tlsCert, "tls_cert"),
         value(opts.tlsKey, "tls_key"),
         value(opts.tlsCa, "tls_ca"),
         value(opts.tlsPsk, "tls_psk")};
+    pskFile = value(opts.tlsPskFile, "tls_psk_file");
   } else {
     auto env = [&](const char* name) {
       return value(c10::utils::get_env(name), name);
@@ -161,8 +224,13 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
         env("TORCH_TCPSTORE_TLS_CA"),
         env("TORCH_TCPSTORE_TLS_PSK"),
         /*fromEnv=*/true};
+    pskFile = env("TORCH_TCPSTORE_TLS_PSK_FILE");
   }
-  if (!config.enabled()) {
+  if (!config.enabled() && pskFile.empty()) {
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        !requireTls,
+        "TCPStore TLS is required but not configured");
     return config;
   }
   TORCH_CHECK_WITH(
@@ -171,6 +239,17 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
       "TCPStore TLS: ",
       empty,
       " must not be empty when TLS is enabled");
+  if (!pskFile.empty()) {
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        !config.enabled(),
+        "TCPStore TLS: PSK file cannot be combined with other TLS settings");
+    config.psk = readPskFile(pskFile);
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        config.psk.find('\0') == std::string::npos,
+        "TCPStore TLS: PSK must not contain NUL bytes");
+  }
   if (!config.psk.empty()) {
     TORCH_CHECK_WITH(
         DistStoreError,
@@ -213,9 +292,8 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
   if (!config.enabled()) {
     return nullptr;
   }
-#ifndef __linux__
-  C10_THROW_ERROR(
-      DistStoreError, "TCPStore TLS is not supported on this platform");
+#if !defined(__linux__) || INTPTR_MAX != INT64_MAX
+  C10_THROW_ERROR(DistStoreError, "TCPStore TLS requires 64-bit Linux");
 #else
   constexpr int kSslCtrlSetMinProtoVersion = 123;
   constexpr int kSslCtrlSetMaxProtoVersion = 124;
@@ -290,6 +368,10 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
           ctx, kSslCtrlSetMinProtoVersion, kTls12Version, nullptr) == 1,
       "minimum TLS version",
       "1.2");
+  check(
+      ssl.SSL_CTX_set_cipher_list(ctx, "ECDHE+AESGCM:ECDHE+CHACHA20") == 1,
+      "TLS 1.2 cipher list",
+      "ECDHE AEAD");
   bool encryptedKey = false;
   ssl.SSL_CTX_set_default_passwd_cb(ctx, noPassword);
   ssl.SSL_CTX_set_default_passwd_cb_userdata(ctx, &encryptedKey);
@@ -375,6 +457,10 @@ void TLSSession::feed(const void* data, size_t length) {
       DistStoreError,
       ret == static_cast<int>(length),
       "TCPStore TLS: BIO_write failed");
+}
+
+bool TLSSession::handshakeComplete() const {
+  return openssl().SSL_is_init_finished(ssl_) == 1;
 }
 
 bool TLSSession::handshake() {
