@@ -19896,7 +19896,6 @@ fn
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
 
-    @unittest.expectedFailure
     def test_builtin_numeric_unbound_method_constant_fold(self):
         def fn():
             out = [
