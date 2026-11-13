@@ -245,7 +245,7 @@ struct C10_API PyInterpreterVTable {
   // and for ops that allow mixed devices do not reconcile them: the one whose
   // type torch._functorch.config.fake_tensor_prefer_device_type names, else it
   // raises FakeTensorDeviceMismatchError. Acquires the GIL.
-  virtual c10::Device fake_resolve_device_conflict(
+  virtual c10::Device _resolve_device_conflict(
       const c10::OperatorHandle& op,
       c10::Device common_device,
       c10::Device device) const = 0;
