@@ -5756,6 +5756,74 @@ class TestFakeTensorPreferDeviceType(TestCase):
                 self.assertEqual(result.device.type, "cpu")
                 self.assertTrue(is_fake_tensor(result))
 
+    @torch._functorch.config.patch(fake_tensor_prefer_device_type=None)
+    @fake_tensor_modes
+    @parametrize("reverse", [False, True])
+    @parametrize(
+        "devices,preference,expected_device",
+        [
+            (("cuda:0", "cuda:1"), "cuda", None),
+            (("cuda:0", "cuda:1"), "uda", None),
+            (("cpu", "cuda:1"), "cuda", "cuda:1"),
+            (("cpu", "cuda:1"), "cpu", "cpu"),
+            (("cpu", "cuda:1"), "uda", "cuda:1"),
+            (("cpu", "cuda:1"), "cp", "cpu"),
+            (("cpu", "cuda:1"), "xpu", None),
+            (("cpu", "cuda:1"), "u", None),
+            (("cpu", "cuda:1"), "", None),
+            (("cpu", "cuda:1"), "cuda:1", None),
+        ],
+    )
+    def test_fake_tensor_prefer_device_type_fallback(
+        self, mode_cls, reverse, devices, preference, expected_device
+    ):
+        # Synthetic accelerator indices must not initialize GPU contexts.
+        with (
+            patch("torch._subclasses.fake_tensor.init_gpu_context", lambda _: None),
+            patch.object(mode_cls, "avoid_device_init", True),
+            torch.library._scoped_library("_test_fake_device_conflict", "DEF") as lib,
+        ):
+            mode = mode_cls()
+            a, b = (
+                mode.fake_tensor_converter.from_meta_and_device(
+                    mode, torch.empty(2, 3, device="meta"), torch.device(device)
+                )
+                for device in devices
+            )
+            if reverse:
+                a, b = b, a
+
+            lib.define("resolve(Tensor a, Tensor b) -> Tensor")
+            # A fresh Meta output forces common-device resolution in the fallback.
+            lib.impl("resolve", lambda a, b: torch.empty(2, 3, device="meta"), "Meta")
+            op = torch.ops._test_fake_device_conflict.resolve.default
+
+            def check(expected):
+                if expected is None:
+                    msg = re.escape(
+                        f"found at least two devices, {a.device} and {b.device}!"
+                    )
+                    with self.assertRaisesRegex(
+                        FakeTensorDeviceMismatchError, msg
+                    ) as exc:
+                        op(a, b)
+                    self.assertIs(exc.exception.func, op)
+                    self.assertEqual(exc.exception.common_device, a.device)
+                    self.assertEqual(exc.exception.device, b.device)
+                else:
+                    result = op(a, b)
+                    self.assertEqual(result.device, torch.device(expected))
+                    self.assertEqual(result.shape, (2, 3))
+                    self.assertIs(maybe_get_fake_mode(result), mode)
+
+            with mode:
+                check(None)
+                with torch._functorch.config.patch(
+                    fake_tensor_prefer_device_type=preference
+                ):
+                    check(expected_device)
+                check(None)
+
 
 class TestFakeTensorPreferDeviceTypeDevice(TestCase):
     r"""Accelerator-only TestFakeTensorPreferDeviceType cases (see except_for below)."""
