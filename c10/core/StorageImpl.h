@@ -157,7 +157,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   const at::DataPtr& data_ptr() const {
-    if (C10_UNLIKELY(has_immutable_data_ptr_check_)) {
+    if (has_immutable_data_ptr_check_) [[unlikely]] {
       if (throw_on_immutable_data_ptr_) {
         throw_data_ptr_access_error();
       }
@@ -167,7 +167,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   at::DataPtr& mutable_data_ptr() {
-    if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
+    if (has_mutable_data_ptr_check_) [[unlikely]] {
       if (throw_on_immutable_data_ptr_) {
         throw_data_ptr_access_error();
       }
@@ -224,7 +224,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void* mutable_data() {
-    if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
+    if (has_mutable_data_ptr_check_) [[unlikely]] {
       if (throw_on_immutable_data_ptr_) {
         throw_data_ptr_access_error();
       }
