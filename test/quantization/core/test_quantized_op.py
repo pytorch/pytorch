@@ -55,11 +55,13 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_ARM64,
     IS_FBCODE,
     IS_MACOS,
     IS_PPC,
     IS_SANDCASTLE,
+    parametrize,
     raise_on_run_directly,
     TestCase,
 )
@@ -4207,7 +4209,80 @@ class TestDynamicQuantizedOps(TestCase):
             self.assertEqual(out, ref)
 
 
+@instantiate_parametrized_tests
 class TestQuantizedLinear(TestCase):
+    @skipIfNoONEDNN
+    @parametrize("shape", [(0,), (2, 0), (2, 3, 0), (0, 0), (2, 0, 0)])
+    @parametrize("dtype", [torch.quint8, torch.qint8])
+    @parametrize("use_bias", [False, True])
+    @parametrize("per_channel", [False, True])
+    @parametrize("post_op", ["none", "relu", "leaky_relu", "tanh"])
+    def test_qlinear_onednn_zero_in_features(self, shape, dtype, use_bias, per_channel, post_op):
+        with override_quantized_engine("onednn"):
+            weight = torch.zeros(3, 0)
+            if per_channel:
+                qweight = torch.quantize_per_channel(
+                    weight, torch.tensor([0.1, 0.2, 0.3]), torch.zeros(3, dtype=torch.int64), 0, torch.qint8,
+                )
+            else:
+                qweight = torch.quantize_per_tensor(weight, 0.2, 0, torch.qint8)
+            bias = torch.tensor([-10., 0.75, 10.]) if use_bias else None
+            packed = torch.ops.quantized.linear_prepack(qweight, bias)
+            inp = torch.quantize_per_tensor(torch.zeros(shape), 0.1, 5 if dtype == torch.quint8 else -5, dtype)
+            scale, zero_point = 0.05, 100 if dtype == torch.quint8 else -3
+            op = getattr(torch.ops.quantized, "linear" if post_op == "none" else "linear_" + post_op)
+            op_kwargs = {"negative_slope": 0.2} if post_op == "leaky_relu" else {}
+            for update_bias in ([False, True] if use_bias else [False]):
+                if update_bias:
+                    bias.add_(0.25)
+                bias_before = bias.clone() if use_bias else None
+                result = op(inp, packed, scale, zero_point, **op_kwargs)
+                expected = F.linear(inp.dequantize(), weight, bias)
+                if post_op == "relu":
+                    expected = F.relu(expected)
+                elif post_op == "leaky_relu":
+                    expected = F.leaky_relu(expected, negative_slope=0.2)
+                elif post_op == "tanh":
+                    expected = torch.tanh(expected)
+                expected = torch.quantize_per_tensor(expected, scale, zero_point, dtype)
+                self.assertEqual(result.shape, (*shape[:-1], 3))
+                self.assertEqual(result.dtype, dtype)
+                self.assertEqual(result.q_scale(), scale)
+                self.assertEqual(result.q_zero_point(), zero_point)
+                self.assertEqual(result.int_repr(), expected.int_repr())
+                if use_bias:
+                    self.assertEqual(bias, bias_before)
+
+    @skipIfNoONEDNN
+    @parametrize("relu", [False, True])
+    @parametrize("use_bias", [False, True])
+    def test_qlinear_onednn_zero_in_features_module(self, relu, use_bias):
+        with override_quantized_engine("onednn"):
+            module_cls = torch.ao.nn.intrinsic.quantized.LinearReLU if relu else torch.nn.quantized.Linear
+            module = module_cls(0, 3, use_bias)
+            bias = torch.tensor([-1., 2., 4.]) if use_bias else None
+            weight = torch.quantize_per_tensor(torch.zeros(3, 0), 0.1, 0, torch.qint8)
+            module.set_weight_bias(weight, bias)
+            module.scale, module.zero_point = 0.1, 10
+            inp = torch.quantize_per_tensor(torch.zeros(2, 0), 0.1, 0, torch.quint8)
+            result = module(inp)
+            expected = F.linear(inp.dequantize(), weight.dequantize(), bias)
+            if relu:
+                expected = F.relu(expected)
+            expected = torch.quantize_per_tensor(expected, module.scale, module.zero_point, torch.quint8)
+            self.assertEqual(result.int_repr(), expected.int_repr())
+            self.assertEqual(result.shape, (2, 3))
+
+    @skipIfNoONEDNN
+    @parametrize("dtype", [torch.quint8, torch.qint8])
+    def test_qlinear_onednn_zero_in_features_mismatch(self, dtype):
+        with override_quantized_engine("onednn"):
+            weight = torch.quantize_per_tensor(torch.zeros(3, 2), 0.1, 0, torch.qint8)
+            packed = torch.ops.quantized.linear_prepack(weight, None)
+            inp = torch.quantize_per_tensor(torch.zeros(2, 0), 0.1, 0, dtype)
+            with self.assertRaisesRegex(RuntimeError, "zero input features do not match weight input features"):
+                torch.ops.quantized.linear(inp, packed, 0.1, 0)
+
     def _test_qlinear_impl(self, batch_size, input_channels, output_channels, use_bias,
                            post_op, use_multi_dim_input, use_channelwise, **post_op_kwargs):
         decimal_val = 4
