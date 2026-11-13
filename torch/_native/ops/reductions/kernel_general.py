@@ -512,8 +512,8 @@ def select_general_config(
     nfields: int,
     nouts: int,
     welford_outs: int,
-    acc_bits: int = 32,
-    alignment: int = 16,
+    acc_bits: int,
+    alignment: int,
 ) -> _GeneralConfig:
     # One-output strided reductions on B200 at 512 MiB: 128 threads ran 0.87x (fp32) and
     # 0.65x (bf16) of 256; 1-16 MiB were within 12% either way.
@@ -599,7 +599,8 @@ def _ragged_rows_ok(
     N: int,
     alignment: int,
     trait: Any,
-    acc_bits: int = 32,
+    *,
+    acc_bits: int,
 ) -> bool:
     """Whether odd-width rows take the B200 ragged-vector row kernel."""
     min_n = _ragged_row_min_n(trait)
@@ -652,7 +653,7 @@ def _try_fast_row(
         return rt.reduce_row_tile(
             trait, trait_key, x, out_dtypes, nouts=nouts, order="inner_tree"
         )
-    if _ragged_rows_ok(cc, x.dtype, N, alignment, trait, acc_bits):
+    if _ragged_rows_ok(cc, x.dtype, N, alignment, trait, acc_bits=acc_bits):
         return rt.reduce_row_tile(
             trait,
             trait_key,

@@ -110,7 +110,9 @@ class OrderedColConfig(NamedTuple):
 
 # kernel_general._reduce routes columns here only on its _ORDERED_COL_CCS, and
 # _reduce_col_tile hands off here only on _B200_CCS (b200_ragged_c4095_ordered); entries
-# for other architectures serve direct reduce_ordered_col calls alone.
+# for other architectures serve direct reduce_ordered_col calls alone. Keys are trait
+# types, so variants (NormOps p, WelfordOps var, std and return_mean) share an entry; a
+# measured entry must hold for all of them.
 _ORDERED_COL_CONFIGS: dict[tuple[int, int], dict[type, OrderedColConfig]] = {}
 
 

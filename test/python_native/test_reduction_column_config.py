@@ -272,19 +272,21 @@ class TestColumnCombine(TestCase):
             expected = x.sum(0)
         self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
 
-    def test_inner_tree_order_hands_off(self, device):
-        """inner_tree configs fall back to coltile when the ordered kernel declines."""
-        # test_b200_ragged_c4095_ordered pins the served hand-off, on cc 10.0 only.
-        x = torch.randn((257, 16), device=device)
+    @parametrize("columns", [16, 64])
+    def test_inner_tree_order_hands_off(self, device, columns):
+        """inner_tree configs serve views the ordered kernel accepts, which takes the
+        default looped mapping at 64 columns, and fall back to coltile when it declines
+        views narrower than a warp."""
+        x = torch.randn((257, columns), device=device)
         cfg = ct.ColConfig("test_order", 64, 7, 4, "column", kernel_order="inner_tree")
         trait = T.SumOps(acc=cutlass.Float32)
-        key = "order_16"
+        key = f"order_{columns}"
         args = (trait, key, x, [torch.float32], 1, None, None, None)
-        # No policy picks inner_tree this narrow, so patch one in to reach the decline.
+        # No policy picks inner_tree at these shapes, so patch one in.
         with patch.object(ct, "select_col_config", return_value=cfg):
             got = ct._reduce_col_tile(*args)[0]
         tags = {k[0] for k in ct._CACHE if k[1] == key} & {"ordered_col", "coltile"}
-        self.assertEqual(tags, {"coltile"})
+        self.assertEqual(tags, {"ordered_col" if columns >= 32 else "coltile"})
         with (
             native._unconditional_masked(),
             torch.backends.python_native.cutedsl.disabled(),
