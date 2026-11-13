@@ -267,6 +267,65 @@ def _scaled_dot_product_cudnn_attention_backward_cp_single_dim_strategy(
     return [cp_sharding]
 
 
+# ==================== Overrideable Fused Attention Strategies ====================
+
+
+def _scaled_dot_product_fused_attention_overrideable_cp_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: ArgsType,
+    kwargs_schema: KwargsType,
+) -> list[SingleDimPlacementList]:
+    has_attn_bias = len(args_schema) > 3 and args_schema[3] is not None
+    return_debug_mask = len(args_schema) > 6 and args_schema[6]
+
+    cp_strategy: SingleDimPlacementList = [
+        _cp_sharding(),  # output
+        _cp_sharding(),  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        _cp_sharding() if return_debug_mask else None,  # debug_attn_mask
+        _cp_sharding(),  # q
+        _cp_sharding(),  # k
+        _cp_sharding(),  # v
+    ]
+    if has_attn_bias:
+        cp_strategy.append(Replicate())  # attn_bias
+    return [cp_strategy]
+
+
+def _scaled_dot_product_fused_attention_overrideable_backward_cp_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: ArgsType,
+    kwargs_schema: KwargsType,
+) -> list[SingleDimPlacementList]:
+    has_attn_bias = args_schema[4] is not None
+
+    cp_strategy: SingleDimPlacementList = [
+        _cp_sharding(),  # grad_q
+        _cp_sharding(),  # grad_k
+        _cp_sharding(),  # grad_v
+        _ShardingPlaceholder(1) if has_attn_bias else None,  # grad_attn_bias
+        _cp_sharding(),  # grad_out
+        _cp_sharding(),  # q
+        _cp_sharding(),  # k
+        _cp_sharding(),  # v
+    ]
+    if has_attn_bias:
+        cp_strategy.append(_ShardingPlaceholder(1))  # attn_bias
+    cp_strategy.extend([_cp_sharding(), _cp_sharding()])  # out, logsumexp
+    # cum_seq_q and cum_seq_k are undefined unless the kernel returned them
+    cp_strategy.extend(None for i in (8, 9) if isinstance(args_schema[i], TensorMeta))
+    # philox_seed and philox_offset are scalar tensors
+    cp_strategy.extend(
+        Replicate() for i in (14, 15) if isinstance(args_schema[i], TensorMeta)
+    )
+    return [cp_strategy]
+
+
 # Store context managers and original strategies
 _cp_strategy_contexts = {}
 _original_strategies = {}
@@ -310,6 +369,16 @@ def register_cp_sharding_rules():
         (
             aten._scaled_dot_product_cudnn_attention_backward.default,
             _scaled_dot_product_cudnn_attention_backward_cp_single_dim_strategy,
+            None,
+        ),
+        (
+            aten._scaled_dot_product_fused_attention_overrideable.default,
+            _scaled_dot_product_fused_attention_overrideable_cp_single_dim_strategy,
+            RuntimeSchemaInfo(6),
+        ),
+        (
+            aten._scaled_dot_product_fused_attention_overrideable_backward.default,
+            _scaled_dot_product_fused_attention_overrideable_backward_cp_single_dim_strategy,
             None,
         ),
     ]

@@ -1223,6 +1223,92 @@ def scaled_dot_product_cudnn_attention_backward_single_dim_strategy(
     return [num_heads_dim_sharding, batch_dim_sharding]
 
 
+@register_single_dim_strategy(
+    aten._scaled_dot_product_fused_attention_overrideable.default,
+    schema_info=RuntimeSchemaInfo(6),
+)
+def scaled_dot_product_fused_attention_overrideable_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    query_meta = args_schema[0]
+    if not isinstance(query_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(query_meta)}")
+
+    has_attn_bias = len(args_schema) > 3 and args_schema[3] is not None
+    return_debug_mask = len(args_schema) > 6 and args_schema[6]
+
+    strategies: list[list[Placement | _ShardingPlaceholder | None]] = []
+    # shard on the heads dim (tensor parallelism) or on the batch dim
+    for dim in (1, 0):
+        debug_attn_mask = _ShardingPlaceholder(dim) if return_debug_mask else None
+        strategy: list[Placement | _ShardingPlaceholder | None] = [
+            _ShardingPlaceholder(dim),  # output
+            _ShardingPlaceholder(dim),  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            None,  # philox_seed
+            None,  # philox_offset
+            debug_attn_mask,
+            _ShardingPlaceholder(dim),  # q
+            _ShardingPlaceholder(dim),  # k
+            _ShardingPlaceholder(dim),  # v
+        ]
+        if has_attn_bias:
+            strategy.append(_ShardingPlaceholder(dim))  # attn_bias
+        strategies.append(strategy)
+    return strategies
+
+
+@register_single_dim_strategy(
+    aten._scaled_dot_product_fused_attention_overrideable_backward.default
+)
+def scaled_dot_product_fused_attention_overrideable_backward_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    if len(args_schema) < 16:
+        raise AssertionError(f"Expected at least 16 args, got {len(args_schema)}")
+
+    # grad_out, query, key, value, out, logsumexp
+    for arg_index in (0, 1, 2, 3, 6, 7):
+        arg = args_schema[arg_index]
+        if not isinstance(arg, TensorMeta):
+            raise AssertionError(f"Expected TensorMeta, got {type(arg)}")
+
+    has_attn_bias = args_schema[4] is not None
+    # cum_seq_q and cum_seq_k are undefined unless the kernel returned them
+    cum_seq_placements: list[None] = [
+        None for i in (8, 9) if isinstance(args_schema[i], TensorMeta)
+    ]
+    # philox_seed and philox_offset are scalar tensors
+    philox_placements: list[Placement] = [
+        Replicate() for i in (14, 15) if isinstance(args_schema[i], TensorMeta)
+    ]
+
+    strategies: list[list[Placement | _ShardingPlaceholder | None]] = []
+    # shard on the heads dim (tensor parallelism) or on the batch dim
+    for dim in (1, 0):
+        shard = _ShardingPlaceholder(dim)
+        strategy: list[Placement | _ShardingPlaceholder | None] = [
+            shard,  # grad_q
+            shard,  # grad_k
+            shard,  # grad_v
+            shard if has_attn_bias else None,  # grad_attn_bias
+            shard,  # grad_out
+            shard,  # q
+            shard,  # k
+            shard,  # v
+        ]
+        if has_attn_bias:
+            strategy.append(shard)  # attn_bias
+        strategy.extend([shard, shard])  # out, logsumexp
+        strategy.extend(cum_seq_placements)
+        strategy.extend(philox_placements)
+        strategies.append(strategy)
+    return strategies
+
+
 def _valid_grouped_mm_strides(
     mesh: DeviceMesh,
     op_schema: OpSchema,
