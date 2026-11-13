@@ -616,6 +616,7 @@ class CustomOpDef:
                 stacklevel=2,
             )
         self._abstract_fn = fn
+        utils._bump_fake_impl_epoch(self._namespace)
         return fn
 
     def register_effect(self, effect: EffectType | None) -> None:

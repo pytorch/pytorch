@@ -105,10 +105,23 @@ def lookup_op(qualname: str) -> OpOverload:
     return getattr(packet, overload)
 
 
+_BUILTIN_NAMESPACES = frozenset({"aten", "prim", "prims"})
+
+# FakeTensor's dispatch cache keys for cacheable_fake ops include this epoch, so
+# changing any non-builtin kernel through torch.library invalidates them.
+_fake_impl_epoch = 0
+
+
+def _bump_fake_impl_epoch(namespace: str) -> None:
+    global _fake_impl_epoch
+    if namespace not in _BUILTIN_NAMESPACES:
+        _fake_impl_epoch += 1
+
+
 def is_builtin(op: OpOverload) -> bool:
     if not isinstance(op, OpOverload):
         raise AssertionError(f"op must be OpOverload, got {type(op)}")
-    return op.namespace in {"aten", "prim", "prims"}
+    return op.namespace in _BUILTIN_NAMESPACES
 
 
 def is_out(op: OpOverload) -> bool:
