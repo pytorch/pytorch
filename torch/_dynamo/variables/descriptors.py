@@ -17,7 +17,7 @@ import types
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 from torch._C._dynamo import get_type_tp_name
-from torch._guards import Source
+from torch._guards import Source, TracingContext
 
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
@@ -27,8 +27,13 @@ from ..exc import (
     raise_type_error,
     unimplemented,
 )
-from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, TypeMROSource, TypeSource
+from ..guards import (
+    _method_identity_guards_filtered,
+    _receiver_alias_pattern,
+    GuardBuilder,
+    install_guard,
+)
+from ..source import AttrSource, is_from_skip_guard_source, TypeMROSource, TypeSource
 from ..utils import is_tensor_base_attr_getter, is_torch_class
 from .base import (
     AsPythonConstantNotImplementedError,
@@ -239,6 +244,28 @@ class WrapperDescriptorVariable(DescriptorVariable):
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
+def _bound_method_receiver(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> object:
+    if obj.source:
+        install_guard(obj.source.make_guard(GuardBuilder.ID_MATCH))
+        return tx.output.resolve_source_value(obj.source)
+    receiver = obj.get_real_python_backed_value()
+    if receiver is NO_SUCH_SUBOBJ or receiver is not obj.get_real_python_backed_value():
+        unimplemented(
+            gb_type="builtin method identity with unstable receiver",
+            context=f"receiver: {obj}",
+            explanation="Dynamo cannot preserve builtin method identity without a stable receiver. Resuming with a reconstructed copy can change its hash or comparisons.",
+            hints=[
+                "Bind the method on an input or another stable object.",
+                *graph_break_hints.DIFFICULT,
+            ],
+            skip_frame=True,
+            preserve_skip_frame_after_inline=True,
+        )
+    return receiver
+
+
 class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
     """Bound method-wrapper (wrapper_descriptor bound to an instance).
 
@@ -294,7 +321,8 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         return self.as_python_constant()
 
     def is_python_constant(self) -> bool:
-        return self.obj.is_python_constant()
+        # Container materialization copies the receiver, changing the wrapper's identity.
+        return type(self.obj.realize()) is ConstantVariable
 
     def as_python_constant(self) -> types.MethodWrapperType:
         obj_value = self.obj.as_python_constant()
@@ -330,6 +358,16 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
                 descriptor = cast(Any, method_wrapper.__self__)
                 return args[0].tp_getattro_impl(tx, descriptor.__name__)
 
+        if self.descriptor.__objclass__ is dict and isinstance(
+            self.obj, variables.ConstDictVariable
+        ):
+            # A prebound base-dict write still bypasses OrderedDict's linked storage.
+            self.obj.check_base_dict_mutation(tx, self.descriptor.__name__)
+        if (
+            inspect.getattr_static(self.obj.python_type(), self.descriptor.__name__)
+            is not self.descriptor
+        ):
+            return super().call_function(tx, args, kwargs)
         sd = self.obj.lookup_slotdefs(self.descriptor.__name__)
         if sd is None:
             return self.obj.call_method(tx, self.descriptor.__name__, args, kwargs)
@@ -339,20 +377,51 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
+    def _check_identity_guards(self, tx: "InstructionTranslatorBase") -> None:
+        if _method_identity_guards_filtered(tx):
+            unimplemented(
+                gb_type="slot-wrapper identity requires receiver guards",
+                context=f"{self}",
+                explanation="Slot-wrapper identity operations require receiver guards that saved capture may filter out.",
+                hints=["Compare or hash slot wrappers outside the compiled region."],
+            )
+
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        try:
-            # CPython wrapper_hash:
-            # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
-            return hash(self.as_python_constant()), False
-        except NotImplementedError:
-            return super().tp_hash_impl(tx)
+        self._check_identity_guards(tx)
+        obj = self.obj.realize()
+        receiver = _bound_method_receiver(tx, obj)
+        # CPython wrapper_hash combines receiver and descriptor identities.
+        method = self.descriptor.__get__(receiver, type(receiver))
+        return hash(method), type(obj) is not ConstantVariable
 
     def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import python_constant_richcompare_impl
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        if op not in ("__eq__", "__ne__") or not isinstance(
+            other, MethodWrapperVariable
+        ):
+            return ConstantVariable.create(NotImplemented)
+        equal = False
+        if self.descriptor is other.descriptor:
+            self._check_identity_guards(tx)
+            left, right = self.obj.realize(), other.obj.realize()
+            if left.source is not None and right.source is not None:
+                equal = _bound_method_receiver(tx, left) is _bound_method_receiver(
+                    tx, right
+                )
+            else:
+                from .object_protocol import vt_identity_compare
 
-        return python_constant_richcompare_impl(self, tx, other, op)
+                same = vt_identity_compare(left, right)
+                if same is None:
+                    unimplemented(
+                        gb_type="slot-wrapper comparison with undecidable identity",
+                        context=f"{self} {op} {other}",
+                        explanation="Dynamo cannot determine the receiver identities of these slot wrappers.",
+                        hints=[*graph_break_hints.DIFFICULT],
+                    )
+                equal = same.as_python_constant()
+        return ConstantVariable.create(equal if op == "__eq__" else not equal)
 
 
 class MethodDescriptorVariable(DescriptorVariable):
@@ -474,6 +543,8 @@ def _same_c_function(left: Any, right: Any) -> bool | None:
 
 
 def _bind_builtin_method(descriptor: Any, obj: Any) -> Any:
+    if not hasattr(descriptor, "__get__"):
+        return descriptor
     if isinstance(descriptor, types.ClassMethodDescriptorType):
         return descriptor.__get__(None, obj)
     # METH_METHOD descriptors need an explicit owner on Python 3.12.
@@ -560,7 +631,7 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         super().__init__(**kwargs)
         self.descriptor = descriptor
         self.obj = obj
-        # The ID_MATCH-guarded runtime method, when built from one.
+        # The guarded runtime method, when built from one.
         self.value = value
 
     def __repr__(self) -> str:
@@ -570,7 +641,47 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         return f"BoundBuiltinMethodVariable({cls_name}.{self.descriptor.__name__}, {self.obj})"
 
     def python_type(self) -> type:
-        return types.BuiltinMethodType
+        return type(self.value) if self.value is not None else types.BuiltinMethodType
+
+    def get_id(self, tx: "InstructionTranslatorBase") -> int | None:
+        if self.value is not None and _method_identity_guards_filtered(tx):
+            unimplemented(
+                gb_type="Prebound builtin method identity requires wrapper guards",
+                context="builtin method wrapper identity",
+                explanation="Binding guards cannot preserve builtin method wrapper identity when identity guards are filtered.",
+                hints=[
+                    "Keep wrapper identity observations outside saved or guard-filtered functions."
+                ],
+            )
+        return super().get_id(tx)
+
+    def has_fresh_container_receiver(self) -> bool:
+        return (
+            self.value is None
+            and self.obj.source is None
+            and (
+                (
+                    self.obj.mutation_type is not None
+                    and self.obj.mutation_type.scope > 0
+                )
+                or isinstance(self.obj, variables.RangeVariable)
+            )
+            and not (
+                isinstance(self.obj, variables.TupleVariable)
+                and self.obj.python_type() is tuple
+                and not self.obj.items
+            )
+        )
+
+    def key_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        filtered = _method_identity_guards_filtered(tx)
+        if self.value is not None:
+            return hash(self.value), filtered
+        obj = self.obj.realize()
+        if self.has_fresh_container_receiver():
+            # Internal bucket; equality still distinguishes C functions.
+            return id(obj), True
+        return self.tp_hash_impl(tx)
 
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
@@ -588,9 +699,15 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         # It hashes m_self by identity, so only a guarded runtime method has a
         # real hash; a method bound during tracing gets a compile-time-only one.
+        filtered = _method_identity_guards_filtered(tx)
         if self.value is not None:
-            return hash(self.value), False
-        return id(self), True
+            return hash(self.value), filtered
+        obj = self.obj.realize()
+        receiver = _bound_method_receiver(tx, obj)
+        # Ordinary compilation can pin a constant receiver. Saved graphs cannot
+        # retain its address-based hash when identity guards are filtered out.
+        is_fake = type(obj) is not ConstantVariable or filtered
+        return hash(_bind_builtin_method(self.descriptor, receiver)), is_fake
 
     def tp_richcompare_impl(self, tx, other, op):
         # meth_richcompare: equal iff both are builtin methods with the same
@@ -605,13 +722,63 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
             eq = self.value == other.value
             return ConstantVariable.create(eq if op == "__eq__" else not eq)
 
-        from .object_protocol import vt_identity_compare
-
-        same_self = vt_identity_compare(self.obj.realize(), other.obj.realize())
+        left, right = self.obj.realize(), other.obj.realize()
+        same_function = None
+        if left is right:
+            same_self = True
+        elif (
+            self.has_fresh_container_receiver() or other.has_fresh_container_receiver()
+        ):
+            same_self = False
+        elif left.source is not None and right.source is not None:
+            sources = (left.source, right.source)
+            # Immutable trackers can reconstruct copies; compare the actual inputs.
+            values = tuple(tx.output.resolve_source_value(s) for s in sources)
+            same_self = values[0] is values[1]
+            if self.descriptor is not other.descriptor:
+                try:
+                    same_function = _bind_builtin_method(
+                        self.descriptor, values[0]
+                    ) == _bind_builtin_method(other.descriptor, values[0])
+                except TypeError:
+                    same_function = False
+                if not same_function:
+                    return ConstantVariable.create(op == "__ne__")
+            if left.source != right.source:
+                source = next(
+                    (s for s in sources if not is_from_skip_guard_source(s)), None
+                )
+                if source is None or TracingContext.get().guards_context.skip_install:
+                    same_self = None
+                else:
+                    aliases = _receiver_alias_pattern(values)
+                    install_guard(
+                        source.make_guard(
+                            functools.partial(
+                                GuardBuilder.BUILTIN_METHOD_RECEIVER_ALIAS,
+                                sources=sources,
+                                aliases=aliases,
+                            )
+                        )
+                    )
+                    tracer = tx.output.current_tracer
+                    while tracer is not None:
+                        tracer.has_builtin_method_identity = True
+                        tracer = tracer.parent
+        elif (
+            left.source is not None or right.source is not None
+        ) and _method_identity_guards_filtered(tx):
+            same_self = None
+        else:
+            same_self = _bound_method_receiver(tx, left) is _bound_method_receiver(
+                tx, right
+            )
         eq = None
         if same_self is not None:
-            eq = same_self.as_python_constant() and _same_c_function(
-                self.descriptor, other.descriptor
+            eq = same_self and (
+                same_function
+                if same_function is not None
+                else _same_c_function(self.descriptor, other.descriptor)
             )
         if eq is None:
             unimplemented(
@@ -623,6 +790,8 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         return ConstantVariable.create(eq if op == "__eq__" else not eq)
 
     def as_python_constant(self) -> Any:
+        if self.value is not None:
+            return self.value
         obj = self.obj.as_python_constant()
         if hasattr(self.descriptor, "__get__"):
             return _bind_builtin_method(self.descriptor, obj)
