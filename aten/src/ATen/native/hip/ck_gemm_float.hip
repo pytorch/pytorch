@@ -10,7 +10,7 @@ using S = ck::Sequence<Is...>;
 
 namespace at::native {
 
-void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
+bool dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
   // If any of the shapes can't be tiled, we must use padding.
   bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
   // Dispatch to best implementation.
@@ -21,7 +21,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
   if (use_padding) {
     if (m <= 128) {
       if(transa_ && transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -57,7 +57,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else if(transa_ && !transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -93,7 +93,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else if(!transa_ && transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -129,7 +129,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else if(!transa_ && !transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -171,7 +171,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
     } else {
 
       if(transa_ && transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -207,7 +207,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else if(transa_ && !transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -243,7 +243,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else if(!transa_ && transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -279,7 +279,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else if(!transa_ && !transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -321,7 +321,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
   } else {
     {
       if(transa_ && transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -357,7 +357,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else if(transa_ && !transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -393,7 +393,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else if(!transa_ && transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -429,7 +429,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else if(!transa_ && !transb_) {
-          gemm_impl<
+          return gemm_impl<
             float,
             256,
             256,
@@ -474,14 +474,14 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
 
 
 template <>
-void gemm_internal_ck<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
-  dispatch_float_gemm(CUDABLAS_GEMM_ARGS(float));
+bool gemm_internal_ck<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
+  return dispatch_float_gemm(CUDABLAS_GEMM_ARGS(float));
 }
 
-// temporarily put this here until we implement double support
+// No CK double GEMM; the caller falls back to hipBLAS.
 template <>
-void gemm_internal_ck<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
-  return;
+bool gemm_internal_ck<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
+  return false;
 }
 
 } // namespace at::native
