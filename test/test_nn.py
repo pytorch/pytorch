@@ -7837,6 +7837,44 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(Y_ref, Y)
 
+    # Shapes reach each MPS layer_norm backward path the OpInfo samples miss: rows split into chunks (2, 20001), rows
+    # too long for registers (2, 4097), one threadgroup per row with wide weight and bias grad tiles split across rows
+    # (100, 256), and tall 32x32 weight and bias grad tiles with a column tail (300, 33). Every dtype accumulates in
+    # float32, so float16 against a float32 CPU reference covers the kernels.
+    @onlyAccelerator
+    @parametrize_test("shape", [(2, 20001), (2, 4097), (100, 256), (300, 33)])
+    def test_layer_norm_backward_shapes(self, device, shape):
+        normalized_shape = shape[-1:]
+        args = [torch.randn(s, dtype=torch.half) for s in (shape, normalized_shape, normalized_shape)]
+        grad = torch.randn(shape, dtype=torch.half)
+
+        def grads(device, dtype):
+            inputs = [t.to(device, dtype).requires_grad_() for t in args]
+            out = F.layer_norm(inputs[0], normalized_shape, inputs[1], inputs[2])
+            return torch.autograd.grad(out, inputs, grad.to(device, dtype))
+
+        for actual, expected in zip(grads(device, torch.half), grads("cpu", torch.float)):
+            self.assertEqual(actual.cpu().float(), expected, atol=2e-3 * expected.abs().max().item(), rtol=0)
+
+    # Shapes reach each MPS weight_norm backward path: for dim=0 rows packed into a simdgroup, one threadgroup per row,
+    # rows too long for registers and rows split into chunks, and for the last dim narrow, wide and tall column tiles.
+    # As above, float16 against a float32 CPU reference.
+    @onlyAccelerator
+    @parametrize_test("shape", [(1000, 4), (64, 3, 3, 3), (300, 129), (128, 768), (2, 4097), (2, 20001)])
+    @parametrize_test("last_dim", [False, True])
+    def test_weight_norm_backward_shapes(self, device, shape, last_dim):
+        dim = len(shape) - 1 if last_dim else 0
+        v, grad_w = torch.randn(shape, dtype=torch.half), torch.randn(shape, dtype=torch.half)
+        g = torch.randn([s if d == dim else 1 for d, s in enumerate(shape)], dtype=torch.half)
+
+        def grads(device, dtype):
+            v_dev, g_dev = v.to(device, dtype), g.to(device, dtype)
+            _, norms = torch._weight_norm_interface(v_dev, g_dev, dim)
+            return torch.ops.aten._weight_norm_interface_backward(grad_w.to(device, dtype), v_dev, g_dev, norms, dim)
+
+        for actual, expected in zip(grads(device, torch.half), grads("cpu", torch.float)):
+            self.assertEqual(actual.cpu().float(), expected, atol=2e-3 * expected.abs().max().item(), rtol=0)
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     def test_rmsnorm_epsilon(self, device, dtype):

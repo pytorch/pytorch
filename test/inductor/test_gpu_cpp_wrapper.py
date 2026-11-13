@@ -733,6 +733,7 @@ class TestGpuWrapper(InductorTestCase):
                 return supports_pdl
 
         class FakeWrapper:
+            device = "cuda"  # production wrappers always carry .device (see _generate_lazy_scratch)
             device_codegen = FakeDeviceCodegen()
 
             @staticmethod
