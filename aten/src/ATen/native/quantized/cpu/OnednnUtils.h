@@ -7,6 +7,7 @@
 #include <ideep.hpp>
 #include <ATen/native/mkldnn/detail/Conv.h>
 #include <ATen/native/mkldnn/detail/Deconv.h>
+#include <ATen/native/mkldnn/detail/Matmul.h>
 #if !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -42,7 +43,7 @@ struct PrimitiveCache {
   }
 };
 
-using LinearParams = ideep::matmul_forward_params;
+using LinearParams = at::native::mkldnn::matmul_forward_params;
 using Conv = dnnl::convolution_forward;
 using ConvDesc = dnnl::convolution_forward::primitive_desc;
 using ConvParams = at::native::mkldnn::convolution_forward_params;

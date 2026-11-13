@@ -870,14 +870,14 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
       // Prepacking does not know the output dtype. Select the layout for this
       // invocation before preparing the cached primitive.
       auto expected_w = w.reorder_if_differ_in(
-          ideep::matmul_forward::expected_weights_desc(
+          at::native::mkldnn::matmul_forward_expected_weights_desc(
               w.get_dims(), input_dims, w.get_data_type(), input_data_type,
               output_ideep_data_type, op_attr));
 #else
       auto& expected_w = w;
 #endif
       LinearParams params;
-      ideep::matmul_forward::prepare</*is_dynamic=*/false>(
+      at::native::mkldnn::matmul_forward_prepare</*is_dynamic=*/false>(
           params, x, expected_w, b, y,
           src_scales, weights_scales, dst_scales,
           src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr,
@@ -888,9 +888,9 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   });
   if (get_cache().hit(cache_key)) {
     LinearParams& params = get_cache().get_param();
-    ideep::matmul_forward::compute<false, false>(params, x, w, b, y);
+    at::native::mkldnn::matmul_forward_compute<false, false>(params, x, w, b, y);
   } else {
-    ideep::matmul_forward::compute(x, w, b, y, src_scales, weights_scales,
+    at::native::mkldnn::matmul_forward_compute(x, w, b, y, src_scales, weights_scales,
                                    dst_scales, src_zero_point, dst_zero_point,
                                    1.0f, 1.0f, op_attr,
                                    output_ideep_data_type,
