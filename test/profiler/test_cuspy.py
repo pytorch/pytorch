@@ -18,7 +18,7 @@ import textwrap
 import threading
 import time
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import call, MagicMock, patch
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
@@ -35,7 +35,9 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TemporaryFileName,
@@ -2660,6 +2662,245 @@ class TestCuspyRecordsCUDA(TestCase):
         self.assertEqual(submission_id_sets[0], {node_a_event_id})
 
 
+@unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+@instantiate_parametrized_tests
+class TestCuspyHes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        from torch.profiler._cuspy import core as cuspy_core
+
+        cuspy_core._reset_for_test()
+        self.addCleanup(cuspy_core._reset_for_test)
+        self.cupti = MagicMock()
+        self.cupti.get_version.return_value = 130500
+        self.cupti.subscribe.return_value = 1234
+        self.native = MagicMock()
+        self.native.buffer_request_callback_address.return_value = 1
+        self.native.buffer_complete_callback_address.return_value = 2
+        self.driver = MagicMock()
+        self.driver.CUresult.CUDA_SUCCESS = 0
+        self.driver.cuInit.return_value = (0,)
+        for patcher in (
+            patch.object(
+                cuspy_core.cupti_python, "pylibcupti", return_value=self.cupti
+            ),
+            patch.object(cuspy_core, "_cuspy_native", self.native),
+            patch.object(cuspy_core, "_has_active_cuda_context", return_value=False),
+            patch.object(torch.cuda, "is_initialized", return_value=False),
+            patch.object(torch.version, "cuda", "13.5"),
+            patch.dict(
+                sys.modules,
+                {"cuda.bindings": MagicMock(driver=self.driver)},
+            ),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_hes_subscriber_survives_sessions(self):
+        from torch.profiler._cuspy import core as cuspy_core
+
+        order = MagicMock()
+        order.attach_mock(self.cupti.subscribe, "subscribe")
+        order.attach_mock(self.cupti.activity_enable_hes, "hes")
+        order.attach_mock(self.cupti.arm_user_defined_records, "udr")
+        order.attach_mock(self.driver.cuInit, "init")
+        cuspy_core.enable_hes_early()
+        cuspy = cuspy_core.Cuspy()
+        subscriber = cuspy._subscriber
+        self.assertEqual(subscriber, 1234)
+        self.assertEqual(
+            [c[0] for c in order.mock_calls], ["subscribe", "hes", "udr", "init"]
+        )
+        self.cupti.activity_enable_hes.assert_called_once_with(subscriber)
+        self.assertEqual(
+            self.cupti.arm_user_defined_records.call_args.args[0], subscriber
+        )
+        self.assertTrue(cuspy_core.is_hes_enabled())
+        self.assertTrue(cuspy_core.has_live_subscription())
+        cuspy_core.enable_hes_early()
+        self.cupti.activity_enable_hes.assert_called_once()
+        self.driver.cuInit.assert_called_once_with(0)
+
+        with (
+            patch.object(cuspy._clock, "calibrate"),
+            patch.object(cuspy, "flush"),
+            patch.object(cuspy, "_drain_and_dispatch"),
+        ):
+            for _ in range(2):
+                cuspy.start()
+                cuspy.stop()
+                self.assertEqual(cuspy._subscriber, subscriber)
+                self.assertTrue(cuspy_core.is_hes_enabled())
+        self.cupti.subscribe.assert_called_once()
+        self.cupti.unsubscribe.assert_not_called()
+        self.assertEqual(
+            [c.args[0] for c in self.cupti.arm_user_defined_records.call_args_list],
+            [subscriber, subscriber],
+        )
+        self.assertEqual(
+            self.cupti.disarm_user_defined_records.call_args_list,
+            [call(subscriber), call(subscriber)],
+        )
+        cuspy_core._reset_for_test()
+        self.cupti.unsubscribe.assert_called_once_with(subscriber)
+        self.assertFalse(cuspy_core.is_hes_enabled())
+        self.assertFalse(cuspy_core.has_live_subscription())
+
+    def test_partial_udr_failure_restores_shared_subscriber(self):
+        import ctypes
+
+        from torch.profiler._cuspy import core as cuspy_core, cupti_python
+
+        cuspy = cuspy_core.Cuspy()
+        handler = cuspy.register_callback_handler(0, 0, lambda *args: None)
+        self.addCleanup(cuspy.unregister_callback_handler, handler)
+        trampoline = cuspy._callback_trampoline
+        lib = MagicMock()
+        lib.cuptiActivitySetAttribute_v2.return_value = 0
+        lib.cuptiActivityRegisterCallbacks_v2.return_value = 1
+        wrapper = object.__new__(cupti_python._PyLibCupti)
+        wrapper._lib = lib
+        self.cupti.activity_enable_hes.side_effect = wrapper.activity_enable_hes
+        self.cupti.arm_user_defined_records.side_effect = (
+            wrapper.arm_user_defined_records
+        )
+        with (
+            patch.object(
+                wrapper, "_result_string", return_value="CUPTI_ERROR_INVALID_PARAMETER"
+            ),
+            self.assertRaisesRegex(
+                cupti_python.CuptiError,
+                "cuptiActivityRegisterCallbacks_v2 failed with CUPTI_ERROR_INVALID_PARAMETER",
+            ),
+        ):
+            cuspy_core.enable_hes_early()
+        attributes = [
+            (
+                c.args[0].value,
+                c.args[1],
+                ctypes.cast(c.args[3], ctypes.POINTER(ctypes.c_uint8))[0],
+            )
+            for c in lib.cuptiActivitySetAttribute_v2.call_args_list
+        ]
+        self.assertEqual(
+            attributes,
+            [
+                (1234, cupti_python.ActivityAttr.ENABLE_HES, 1),
+                (1234, cupti_python.ActivityAttr.USER_DEFINED_RECORDS, 1),
+                (1234, cupti_python.ActivityAttr.USER_DEFINED_RECORDS, 0),
+                (1234, cupti_python.ActivityAttr.ENABLE_HES, 0),
+            ],
+        )
+        self.cupti.unsubscribe.assert_not_called()
+        self.assertEqual(cuspy._subscriber, 1234)
+        self.assertIs(cuspy._callback_trampoline, trampoline)
+        self.assertFalse(cuspy._callbacks_registered)
+        self.assertFalse(cuspy_core.is_hes_enabled())
+        self.driver.cuInit.assert_not_called()
+
+    def test_retained_subscriber_reconciles_latency_after_stop(self):
+        from torch.profiler._cuspy import core as cuspy_core
+
+        cuspy_core.enable_hes_early()
+        cuspy = cuspy_core.Cuspy()
+        with (
+            patch.object(cuspy._clock, "calibrate"),
+            patch.object(cuspy, "flush"),
+            patch.object(cuspy, "_drain_and_dispatch"),
+        ):
+            cuspy.start()
+            cuspy._latency_enabled = True
+            cuspy.stop()
+            self.assertTrue(cuspy._latency_enabled)
+            cuspy.start()
+            cuspy._apply_selection()
+            self.cupti.enable_kernel_latency_timestamps.assert_called_once_with(
+                1234, False
+            )
+            self.assertFalse(cuspy._latency_enabled)
+            cuspy.stop()
+
+    def test_hes_initialization_pins_subscriber_against_callback_teardown(self):
+        from torch.profiler._cuspy import core as cuspy_core
+
+        cuspy = cuspy_core.Cuspy()
+        handler = cuspy.register_callback_handler(0, 0, lambda *args: None)
+        entered = threading.Event()
+        resume = threading.Event()
+        teardown_started = threading.Event()
+        teardown_finished = threading.Event()
+        errors = []
+
+        def pause_hes(*args, **kwargs):
+            entered.set()
+            if not resume.wait(5):
+                raise RuntimeError("HES initialization did not resume")
+
+        def initialize():
+            try:
+                cuspy_core.enable_hes_early()
+            except Exception as error:
+                errors.append(error)
+
+        def teardown():
+            teardown_started.set()
+            try:
+                cuspy.unregister_callback_handler(handler)
+            except Exception as error:
+                errors.append(error)
+            finally:
+                teardown_finished.set()
+
+        self.cupti.activity_enable_hes.side_effect = pause_hes
+        worker = threading.Thread(target=initialize)
+        remover = threading.Thread(target=teardown)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            remover.start()
+            self.assertTrue(teardown_started.wait(5))
+            self.assertFalse(teardown_finished.wait(0.1))
+        finally:
+            resume.set()
+            worker.join(5)
+            if remover.ident is not None:
+                remover.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(remover.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(teardown_finished.is_set())
+        self.cupti.subscribe.assert_called_once()
+        self.cupti.unsubscribe.assert_not_called()
+        self.cupti.activity_enable_hes.assert_called_once_with(1234)
+        self.assertEqual(self.cupti.arm_user_defined_records.call_args.args[0], 1234)
+        self.assertEqual(cuspy._subscriber, 1234)
+        self.assertTrue(cuspy_core.is_hes_enabled())
+
+    @parametrize("failure", ["hes", "udr", "driver"])
+    def test_hes_initialization_failure_releases_subscriber(self, failure):
+        from torch.profiler._cuspy import core as cuspy_core
+
+        error = RuntimeError(f"{failure} failed")
+        if failure == "hes":
+            self.cupti.activity_enable_hes.side_effect = error
+        elif failure == "udr":
+            self.cupti.arm_user_defined_records.side_effect = error
+        else:
+            self.driver.cuInit.side_effect = error
+        with self.assertRaisesRegex(RuntimeError, f"{failure} failed"):
+            cuspy_core.enable_hes_early()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertIsNone(cuspy_core.Cuspy()._subscriber)
+        self.assertIsNone(cuspy_core.Cuspy()._callback_trampoline)
+        self.assertFalse(cuspy_core.Cuspy()._callbacks_registered)
+        self.assertFalse(cuspy_core.is_hes_enabled())
+        if failure != "driver":
+            self.driver.cuInit.assert_not_called()
+        else:
+            self.cupti.disarm_user_defined_records.assert_called_once_with(1234)
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuspyCUDA(TestCase):
     """Collection through Cuspy directly (not via torch.profiler.profile)."""
@@ -3684,7 +3925,7 @@ class TestCuspyProfilerCUDA(TestCase):
         cuspy_core._reset_for_test()
         self.addCleanup(cuspy_core._reset_for_test)
 
-    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @unittest.skipUnless(
         SM100OrLater, "hardware event sampling requires GB200+ (sm_100)"
     )
@@ -3697,10 +3938,32 @@ class TestCuspyProfilerCUDA(TestCase):
                 "-c",
                 """
 import torch
+from cupti.cupti import ActivityKind
 from torch.profiler._cuspy import core as cuspy_core
+from torch.profiler._cuspy.records import Kernel
 
 cuspy_core.enable_hes_early()
-assert cuspy_core.is_hes_enabled()
+if not cuspy_core.is_hes_enabled():
+    raise AssertionError("HES was not enabled")
+collector = cuspy_core.Cuspy()
+subscriber = collector._subscriber
+if subscriber is None:
+    raise AssertionError("early HES did not retain its subscriber")
+cuspy_core.enable_hes_early()
+for _ in range(2):
+    seen = []
+    kind = ActivityKind.CONCURRENT_KERNEL
+    observer = collector.register(
+        {kind: {Kernel.END}},
+        lambda cols: seen.append(cols[kind]) if kind in cols else None,
+    )
+    torch.randn(256, 256, device="cuda").sum().item()
+    collector.flush(sync=True)
+    collector.unregister(observer)
+    if not any(len(fields[Kernel.END.id]) for fields in seen):
+        raise AssertionError("HES + UDR produced no kernel records")
+    if collector._subscriber != subscriber:
+        raise AssertionError("HES subscriber changed between collection sessions")
 """,
             ],
             text=True,
@@ -4313,9 +4576,12 @@ cuspy_core.enable_hes_early()
                 try:
                     cuspy_core.enable_hes_early()
                 except CuptiError as e:
-                    # HES is unsupported on this platform (cuptiActivityEnableHWTrace
-                    # -> CUPTI_ERROR_NOT_SUPPORTED): skip the HES leg of the parity check.
-                    if "CUPTI_ERROR_NOT_SUPPORTED" not in str(e):
+                    # Skip only an explicit unsupported-platform result from the
+                    # subscriber-scoped ENABLE_HES attribute; preserve other errors.
+                    if (
+                        "cuptiActivitySetAttribute_v2(ENABLE_HES) failed with "
+                        "CUPTI_ERROR_NOT_SUPPORTED"
+                    ) not in str(e):
                         raise
                     print("SKIP_HES"); raise SystemExit(0)
                 if not cuspy_core.is_hes_enabled():
