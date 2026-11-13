@@ -10,19 +10,24 @@
 
 from __future__ import annotations
 
+import errno
 import gzip
 import json
 import os
+import socket
 import warnings
+from contextlib import redirect_stdout
 from dataclasses import replace
 from hashlib import sha256
+from http.client import IncompleteRead, RemoteDisconnected
+from io import BytesIO, StringIO
 from itertools import pairwise
 from types import MethodType
 from typing import Any, TYPE_CHECKING
 from unittest import main, mock, skip, TestCase
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
-from github_utils import gh_graphql, GHGraphQLError, GitHubComment
+from github_utils import gh_fetch_url, gh_graphql, GHGraphQLError, GitHubComment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from greenlight_guard import (
     GREENLIGHT_LOGIN,
@@ -55,6 +60,7 @@ from test_native_stack import (
     author,
     GitTestCase,
     LineStackTestCase,
+    make_entry,
     pr_url,
     TRUNK,
     VIABLE_STRICT,
@@ -68,7 +74,12 @@ from trymerge import (
     can_skip_internal_checks,
     categorize_checks,
     check_greenlight_reviewed_head_sha,
+    check_stacked_pr_merge_rule,
+    CLASSIFICATION_WAIT_SECONDS,
+    ClassificationWaitWindow,
     DRCI_CHECKRUN_NAME,
+    DRCI_RETRY_DELAYS_SECONDS,
+    DRCI_TIMEOUT_SECONDS,
     ensure_mergeable_labels,
     find_matching_merge_rule,
     format_failure_comment,
@@ -86,9 +97,11 @@ from trymerge import (
     IMPORT_STATUS_CHECKRUN_NAME,
     INTERNAL_CHANGES_CHECKRUN_NAME,
     is_ai_not_related,
+    is_ai_pending,
     is_authorized_without_greenlight,
     is_bot_initiated_codev_merge,
     is_docker_affecting_files,
+    is_unlisted_by_drci,
     iter_issue_timeline_until_comment,
     JobCheckState,
     LandedError,
@@ -111,6 +124,8 @@ from trymerge import (
     sha_from_force_push_after,
     try_revert,
     validate_revert,
+    waited_note,
+    with_waiting_reasons,
 )
 
 
@@ -1701,6 +1716,40 @@ class TestGitHubPRGhstackDependencies(TestCase):
             waivers,
         )
 
+    @mock.patch.object(GitHubPR, "get_checkrun_conclusions", return_value={})
+    @mock.patch.object(GitHubPR, "is_closed", return_value=False)
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=False)
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.GitRepo")
+    @mock.patch("trymerge.get_ghstack_prs")
+    def test_merge_ghstack_into_stops_on_a_lower_pr_failing_job(
+        self,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_repo: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        _mock_can_skip_internal_checks: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
+        _mock_get_checkrun_conclusions: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        """A failing non-mandatory job (a ciflow run) on a lower PR stops the land
+        before that PR is cherry-picked."""
+        parent_pr = GitHubPR("pytorch", "pytorch", 106034)
+        top_pr = GitHubPR("pytorch", "pytorch", 106068)
+        mock_get_ghstack_prs.return_value = [
+            (parent_pr, "rev_parent"),
+            (top_pr, "rev_top"),
+        ]
+        red = ("inductor / test (inductor, 1, 2)", "", 1)
+        mock_find_matching_merge_rule.return_value = (None, [], [red], {})
+
+        with self.assertRaisesRegex(RuntimeError, "stacked PR #106034") as cm:
+            top_pr.merge_ghstack_into(mock_repo, False)
+
+        self.assertNotIsInstance(cm.exception, MergeRuleFailedError)
+        self.assertIn(red[0], str(cm.exception))
+        mock_repo.cherry_pick.assert_not_called()
+
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
@@ -2059,6 +2108,7 @@ class TestDockerCiGates(TestCase):
                 "docker-builds",
                 "linux-build / build",
                 "docker-builds-nightly / x",
+                ".github/workflows/docker-builds.yml / docker-build (pytorch-linux-jammy)",
             )
         }
         self.assertEqual(
@@ -2066,6 +2116,7 @@ class TestDockerCiGates(TestCase):
             {
                 "docker-builds / docker-build (pytorch-linux-jammy)",
                 "docker-builds",
+                ".github/workflows/docker-builds.yml / docker-build (pytorch-linux-jammy)",
             },
         )
 
@@ -2115,13 +2166,27 @@ class TestDockerCiGates(TestCase):
         mock_get_ghstack_prs.return_value = ghstack_prs
         mock_find_matching_merge_rule.return_value = (None, [], [], {})
 
+        window = ClassificationWaitWindow()
+
         with self.assertRaisesRegex(RuntimeError, "stop after gates"):
-            GitHubPR.merge_into(top_pr, repo, comment_id=1)
+            GitHubPR.merge_into(top_pr, repo, comment_id=1, classification_wait=window)
 
         mock_get_ghstack_prs.assert_called_once_with(repo, top_pr, open_only=False)
         mock_check_docker_builds_ready.assert_called_once_with(lower_pr)
+        # The window reaches the top PR's rule check and the lower PR's, so a waiting
+        # job anywhere in the stack is retried.
+        windowed = [
+            call.args[0]
+            for call in mock_find_matching_merge_rule.call_args_list
+            if call.kwargs.get("classification_wait") is window
+        ]
+        self.assertEqual(windowed, [top_pr, lower_pr])
         top_pr.merge_changes_locally.assert_called_once_with(
-            repo, False, 1, ghstack_prs=ghstack_prs, ignore_current_checks=None
+            repo,
+            False,
+            1,
+            skip_all_rule_checks=True,
+            ghstack_prs=ghstack_prs,
         )
 
 
@@ -2539,6 +2604,43 @@ class TestGreenlightGuardCallSite(TestCase):
         self.assertEqual(repo_full_name, "pytorch/pytorch")
         self.assertEqual([(p.pr_num, p.head_sha) for p in prs], [(1, "head-sha")])
 
+    @mock.patch("trymerge.check_stacked_pr_merge_rule")
+    @mock.patch("trymerge.get_ghstack_prs")
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_a_waiting_lower_ghstack_pr_retries_before_the_greenlight_check(
+        self, mock_evaluate: Any, mock_get_ghstack_prs: Any, mock_stacked: Any
+    ) -> None:
+        """Whether a lower PR's human approvals suffice can depend on its CI, so the
+        question is not asked, and its answer not cached, while that CI waits."""
+        lower_pr, top_pr = self._pr(1), self._pr(2, ghstack=True)
+        mock_get_ghstack_prs.return_value = [(lower_pr, "lower"), (top_pr, "top")]
+        mock_stacked.side_effect = MandatoryChecksMissingError("waiting on Dr.CI")
+        window = ClassificationWaitWindow()
+
+        with self.assertRaisesRegex(MandatoryChecksMissingError, "waiting on Dr.CI"):
+            GitHubPR.merge_into(
+                top_pr,
+                mock.MagicMock(spec=GitRepo),
+                comment_id=1,
+                classification_wait=window,
+            )
+
+        self.assertIs(mock_stacked.call_args.args[0], lower_pr)
+        self.assertIs(mock_stacked.call_args.kwargs["classification_wait"], window)
+        mock_evaluate.assert_not_called()
+
+        # merge()'s retry, once the lower PR's CI has cleared.
+        mock_stacked.side_effect = None
+        mock_evaluate.return_value = GuardResult(GuardVerdict.ALLOW)
+        with self.assertRaisesRegex(RuntimeError, "stop after gates"):
+            GitHubPR.merge_into(
+                top_pr,
+                mock.MagicMock(spec=GitRepo),
+                comment_id=1,
+                classification_wait=window,
+            )
+        mock_evaluate.assert_called_once()
+
     @mock.patch("trymerge.get_ghstack_prs")
     @mock.patch("trymerge.evaluate_greenlight_guard")
     def test_ghstack_stack_is_checked_at_the_github_heads(
@@ -2808,9 +2910,8 @@ class TestGreenlightGuardWiring(TestCase):
         self.assertEqual(
             mock_check.call_args.kwargs["ignore_current_checks"], {(1, "some-check")}
         )
-        self.assertEqual(
-            pr.merge_changes_locally.call_args.kwargs["ignore_current_checks"],
-            {(1, "some-check")},
+        self.assertTrue(
+            pr.merge_changes_locally.call_args.kwargs["skip_all_rule_checks"]
         )
 
 
@@ -3150,6 +3251,478 @@ class TestAdvisorNotRelated(TestCase):
         self.assertEqual(classified["flaky job"].classification, "FLAKY")
 
 
+class TestClassificationWait(TestCase):
+    """A failed job whose Dr.CI classification is still on the way counts as pending.
+
+    These cover when trymerge waits, for how long, and that it never waits on anything
+    but a live Dr.CI answer.
+    """
+
+    URL = "https://github.com/pytorch/pytorch/actions/runs/1/job/{}"
+
+    def _check(
+        self, job_id: int | None, status: str = "FAILURE", url: str | None = None
+    ) -> JobCheckState:
+        return JobCheckState(
+            "pull / job",
+            self.URL.format(job_id) if url is None else url,
+            status,
+            None,
+            job_id,
+            "",
+            "",
+        )
+
+    def _classify(
+        self,
+        check: JobCheckState,
+        drci: Any,
+        window: ClassificationWaitWindow | None,
+        now: float = 1000.0,
+    ) -> str | None:
+        with (
+            mock.patch("trymerge.get_drci_classifications", return_value=drci),
+            mock.patch("trymerge.time.time", return_value=now),
+        ):
+            classified = get_classifications(
+                1, "pytorch", {check.name: check}, None, classification_wait=window
+            )
+        return classified[check.name].classification
+
+    def test_ai_pending_matches_on_job_id_only(self) -> None:
+        drci = {"AI_PENDING": [{"id": 7, "name": "pull / job"}]}
+        self.assertTrue(is_ai_pending(self._check(7), drci))
+        self.assertFalse(is_ai_pending(self._check(8), drci))
+        self.assertFalse(is_ai_pending(self._check(None), drci))
+        self.assertFalse(is_ai_pending(self._check(7), {}))
+
+    def test_unlisted_means_in_no_category_at_all(self) -> None:
+        self.assertTrue(is_unlisted_by_drci(self._check(7), {"FAILED": []}))
+        for category in ("FAILED", "FLAKY", "BROKEN_TRUNK", "UNKNOWN", "AI_PENDING"):
+            with self.subTest(category=category):
+                drci = {category: [{"id": 7, "name": "pull / job"}]}
+                self.assertFalse(is_unlisted_by_drci(self._check(7), drci))
+
+    def test_a_key_that_is_not_a_job_list_is_skipped(self) -> None:
+        drci = {"FAILED": [{"id": 7, "name": "pull / job"}], "NOTE": "text", "N": 1}
+        self.assertFalse(is_unlisted_by_drci(self._check(7), drci))
+        self.assertTrue(is_unlisted_by_drci(self._check(8), drci))
+
+    def test_a_rerun_dr_ci_has_not_seen_is_unlisted(self) -> None:
+        """Dr.CI still listing the earlier run of the same job does not count."""
+        drci = {"FAILED": [{"id": 6, "name": "pull / job"}]}
+        self.assertTrue(is_unlisted_by_drci(self._check(7), drci))
+
+    def test_ai_pending_skips_a_malformed_list(self) -> None:
+        """The category is new, so its shape is not trusted to fail a merge on."""
+        check = self._check(7)
+        for pending in (None, "text", [None, "x", {"name": "pull / job"}]):
+            with self.subTest(pending=pending):
+                drci = {"FAILED": [{"id": 7, "name": "pull / job"}]}
+                drci["AI_PENDING"] = pending
+                self.assertFalse(is_ai_pending(check, drci))
+                window = ClassificationWaitWindow()
+                self.assertIsNone(self._classify(check, drci, window))
+
+    def test_checks_that_are_not_actions_jobs_never_wait(self) -> None:
+        """EasyCLA and the Meta internal check never appear in Dr.CI, and an App check
+        run's job id does not make it a job the advisor can clear."""
+        external = self._check(7, url="https://code.facebook.com/cla/")
+        # A CRCR relay check links to the downstream run, not to a job.
+        relay = self._check(7, url=self.URL.split("/job/")[0])
+        job = {"id": 7, "name": "pull / job"}
+        for check in (external, relay):
+            for drci in ({"FAILED": []}, {"FAILED": [job], "AI_PENDING": [job]}):
+                with self.subTest(url=check.url, drci=drci):
+                    window = ClassificationWaitWindow()
+                    self.assertIsNone(self._classify(check, drci, window))
+            with self.subTest(url=check.url, drci="saved reason"):
+                window = ClassificationWaitWindow(reasons={7: "AI_PENDING"})
+                self.assertIsNone(self._classify(check, {}, window))
+        self.assertFalse(is_unlisted_by_drci(self._check(None), {"FAILED": []}))
+
+    def test_a_job_dr_ci_has_not_listed_waits(self) -> None:
+        drci = {"FAILED": []}
+        window = ClassificationWaitWindow()
+        self.assertEqual(self._classify(self._check(7), drci, window), "DRCI_PENDING")
+
+    def test_a_job_the_advisor_is_analyzing_waits(self) -> None:
+        job = {"id": 7, "name": "pull / job"}
+        drci = {"FAILED": [job], "AI_PENDING": [job]}
+        window = ClassificationWaitWindow()
+        self.assertEqual(self._classify(self._check(7), drci, window), "AI_PENDING")
+
+    def test_a_listed_failure_with_no_verdict_coming_blocks_at_once(self) -> None:
+        drci = {"FAILED": [{"id": 7, "name": "pull / job"}]}
+        window = ClassificationWaitWindow()
+        self.assertIsNone(self._classify(self._check(7), drci, window))
+
+    def test_a_classification_that_arrived_wins(self) -> None:
+        job = {"id": 7, "name": "pull / job"}
+        drci = {"FLAKY": [job], "AI_PENDING": [job]}
+        window = ClassificationWaitWindow()
+        self.assertEqual(self._classify(self._check(7), drci, window), "FLAKY")
+
+    def test_ignore_current_wins_over_waiting(self) -> None:
+        """`merge -i` named the check, so there is nothing to wait for."""
+        check = self._check(7)
+        with mock.patch(
+            "trymerge.get_drci_classifications", return_value={"FAILED": []}
+        ):
+            classified = get_classifications(
+                1,
+                "pytorch",
+                {check.name: check},
+                {(1, check.name)},
+                classification_wait=ClassificationWaitWindow(),
+            )
+        self.assertEqual(classified[check.name].classification, "IGNORE_CURRENT_CHECK")
+
+    def test_only_a_plain_failure_waits(self) -> None:
+        window = ClassificationWaitWindow()
+        for status in ("TIMED_OUT", "STARTUP_FAILURE"):
+            with self.subTest(status=status):
+                check = self._check(7, status=status)
+                self.assertIsNone(self._classify(check, {"FAILED": []}, window))
+
+    def test_without_a_window_nothing_waits(self) -> None:
+        """Every caller but merge() keeps failing at once, without reading for it."""
+        job = {"id": 7, "name": "pull / job"}
+        with mock.patch("trymerge.awaiting_classification") as awaiting:
+            self.assertIsNone(self._classify(self._check(7), {"FAILED": []}, None))
+            drci = {"FAILED": [job], "AI_PENDING": [job]}
+            self.assertIsNone(self._classify(self._check(7), drci, None))
+        awaiting.assert_not_called()
+
+    def test_the_check_run_summary_never_starts_a_wait(self) -> None:
+        """A snapshot cannot say what is in flight now, nor what Dr.CI has seen."""
+        job = {"id": 7, "name": "pull / job"}
+        summary = json.dumps({"FAILED": [job], "AI_PENDING": [job]})
+        checks = {
+            DRCI_CHECKRUN_NAME: JobCheckState(
+                DRCI_CHECKRUN_NAME, "", "NEUTRAL", None, None, "", summary
+            ),
+            "pull / job": self._check(7),
+            "pull / other": JobCheckState(
+                "pull / other", self.URL.format(8), "FAILURE", None, 8, "", ""
+            ),
+        }
+        for unavailable in ({}, None):
+            with self.subTest(live=unavailable):
+                with mock.patch(
+                    "trymerge.get_drci_classifications", return_value=unavailable
+                ):
+                    classified = get_classifications(
+                        1,
+                        "pytorch",
+                        checks,
+                        None,
+                        classification_wait=ClassificationWaitWindow(),
+                    )
+                self.assertIsNone(classified["pull / job"].classification)
+                self.assertIsNone(classified["pull / other"].classification)
+
+    def test_an_open_wait_survives_a_failed_dr_ci_call(self) -> None:
+        """Only starting a wait needs a live answer; keeping one does not."""
+        window = ClassificationWaitWindow()
+        job = {"id": 7, "name": "pull / job"}
+        drci = {"FAILED": [job], "AI_PENDING": [job]}
+        self.assertEqual(self._classify(self._check(7), drci, window), "AI_PENDING")
+        for unavailable in (None, {}):
+            with self.subTest(live=unavailable):
+                self.assertEqual(
+                    self._classify(self._check(7), unavailable, window), "AI_PENDING"
+                )
+        spent = 1000.0 + CLASSIFICATION_WAIT_SECONDS
+        self.assertIsNone(self._classify(self._check(7), None, window, now=spent))
+        # A job that never waited does not start to without a live answer.
+        self.assertIsNone(self._classify(self._check(8), None, window))
+
+    def test_an_open_wait_survives_a_failed_call_with_a_summary(self) -> None:
+        """On a real PR the summary fallback fills in; the wait still holds."""
+        job = {"id": 7, "name": "pull / job"}
+        summary = json.dumps({"FAILED": [job]})
+        checks = {
+            DRCI_CHECKRUN_NAME: JobCheckState(
+                DRCI_CHECKRUN_NAME, "", "NEUTRAL", None, None, "", summary
+            ),
+            "pull / job": self._check(7),
+        }
+        window = ClassificationWaitWindow()
+        for live, expected in (
+            ({"FAILED": [job], "AI_PENDING": [job]}, "AI_PENDING"),
+            (None, "AI_PENDING"),
+        ):
+            with (
+                mock.patch("trymerge.get_drci_classifications", return_value=live),
+                mock.patch("trymerge.time.time", return_value=1000.0),
+            ):
+                classified = get_classifications(
+                    1, "pytorch", checks, None, classification_wait=window
+                )
+            self.assertEqual(classified["pull / job"].classification, expected)
+
+    def test_a_job_a_live_answer_settled_does_not_wait_again(self) -> None:
+        window = ClassificationWaitWindow()
+        listed = {"FAILED": [{"id": 7, "name": "pull / job"}]}
+        self.assertEqual(
+            self._classify(self._check(7), {"FAILED": []}, window), "DRCI_PENDING"
+        )
+        self.assertIsNone(self._classify(self._check(7), listed, window))
+        self.assertIsNone(self._classify(self._check(7), None, window))
+
+    def test_a_stack_shares_the_window_without_losing_waits(self) -> None:
+        """One PR's answer settles only its own jobs."""
+        window = ClassificationWaitWindow()
+        lower, top = self._check(7), self._check(8)
+        self.assertEqual(self._classify(lower, {"FAILED": []}, window), "DRCI_PENDING")
+        self.assertEqual(self._classify(top, {"FAILED": []}, window), "DRCI_PENDING")
+        listed = {"FAILED": [{"id": 8, "name": "pull / job"}]}
+        self.assertIsNone(self._classify(top, listed, window))
+        self.assertEqual(window.waiting, {7})
+        self.assertEqual(self._classify(lower, None, window), "DRCI_PENDING")
+
+    def test_the_wait_is_bounded_per_job(self) -> None:
+        drci = {"FAILED": []}
+        window = ClassificationWaitWindow()
+        self.assertEqual(
+            self._classify(self._check(7), drci, window, now=1000.0), "DRCI_PENDING"
+        )
+        just_before = 1000.0 + CLASSIFICATION_WAIT_SECONDS - 1
+        self.assertEqual(
+            self._classify(self._check(7), drci, window, now=just_before),
+            "DRCI_PENDING",
+        )
+        spent = 1000.0 + CLASSIFICATION_WAIT_SECONDS
+        self.assertIsNone(self._classify(self._check(7), drci, window, now=spent))
+        # A rerun is a new job id and gets its own budget.
+        self.assertEqual(
+            self._classify(self._check(8), drci, window, now=spent), "DRCI_PENDING"
+        )
+
+    def test_a_waiting_job_counts_as_pending_not_failed(self) -> None:
+        checks = {
+            "pull / a": JobCheckState(
+                "pull / a", "", "FAILURE", "DRCI_PENDING", 1, "", ""
+            ),
+            "pull / b": JobCheckState(
+                "pull / b", "", "FAILURE", "AI_PENDING", 2, "", ""
+            ),
+        }
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertEqual(failed, [])
+        self.assertEqual({k: v for k, v in ignorable.items() if v}, {})
+        # Callers key on these names (save_merge_record), so they stay as they are;
+        # only the text built for people says why the job is waited on.
+        self.assertEqual([name for name, _, _ in pending], ["pull / a", "pull / b"])
+        self.assertEqual(
+            [name for name, _, _ in with_waiting_reasons(pending, checks)],
+            [
+                "pull / a (failed, waiting for Dr.CI to classify it)",
+                "pull / b (failed, waiting for the AI CI Advisor's verdict)",
+            ],
+        )
+
+    def _rule_pr(self, check: JobCheckState) -> Any:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org, pr.project, pr.pr_num = "pytorch", "pytorch", 1
+        pr.get_changed_files.return_value = ["foo.py"]
+        pr.get_approved_by.return_value = ["approver"]
+        pr.get_checkrun_conclusions.return_value = {check.name: check}
+        pr.last_commit_sha.return_value = "head-sha"
+        pr.has_internal_changes.return_value = False
+        return pr
+
+    def test_a_waiting_mandatory_job_makes_the_rule_check_retriable(self) -> None:
+        """Without the window it would score 30000 and end the merge."""
+        rule = MergeRule(
+            name="rule",
+            patterns=["*"],
+            approved_by=["approver"],
+            mandatory_checks_name=["pull / job"],
+        )
+        pr = self._rule_pr(self._check(7))
+        with (
+            mock.patch("trymerge.read_merge_rules", return_value=[rule]),
+            mock.patch(
+                "trymerge.get_drci_classifications", return_value={"FAILED": []}
+            ),
+        ):
+            with self.assertRaises(MandatoryChecksMissingError) as waited:
+                find_matching_merge_rule(
+                    pr, classification_wait=ClassificationWaitWindow()
+                )
+            self.assertIn("waiting for Dr.CI to classify it", str(waited.exception))
+            with self.assertRaises(MergeRuleFailedError) as failed:
+                find_matching_merge_rule(pr)
+            self.assertNotIsInstance(failed.exception, MandatoryChecksMissingError)
+            self.assertIn("mandatory check(s) failed", str(failed.exception))
+            self.assertNotIn("the merge waited on", str(failed.exception))
+            spent = ClassificationWaitWindow({7: 0.0}, waited_on={7})
+            with (
+                mock.patch(
+                    "trymerge.time.time", return_value=CLASSIFICATION_WAIT_SECONDS
+                ),
+                self.assertRaises(MergeRuleFailedError) as expired,
+            ):
+                find_matching_merge_rule(pr, classification_wait=spent)
+            self.assertNotIsInstance(expired.exception, MandatoryChecksMissingError)
+            self.assertIn("mandatory check(s) failed", str(expired.exception))
+            self.assertIn("the merge waited on", str(expired.exception))
+
+    def _loop_pr(self, check: JobCheckState) -> Any:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org, pr.project, pr.pr_num = "pytorch", "pytorch", 1
+        pr.last_commit_sha.return_value = "head-sha"
+        pr.get_labels.return_value = []
+        pr.is_ghstack_pr.return_value = False
+        pr.get_checkrun_conclusions.return_value = {check.name: check}
+        return pr
+
+    def _merge(self, pr: Any, drci_answers: Any, rule_patch: Any | None = None) -> None:
+        """Run merge() on a clock that only its sleeps advance, keeping the rule-check
+        calls, the sleeps and the output."""
+        now = [0.0]
+
+        def sleep(seconds: float) -> None:
+            now[0] += seconds
+
+        with (
+            mock.patch("trymerge.GitHubPR", return_value=pr),
+            mock.patch("trymerge.gh_add_labels"),
+            mock.patch("trymerge.check_for_sev"),
+            mock.patch("trymerge.post_starting_merge_comment"),
+            mock.patch("trymerge.ensure_mergeable_labels"),
+            rule_patch or mock.patch("trymerge.find_matching_merge_rule") as patched,
+            mock.patch("trymerge.time.sleep", side_effect=sleep) as slept,
+            mock.patch("trymerge.time.time", side_effect=lambda: now[0]),
+            mock.patch("trymerge.get_drci_classifications", side_effect=drci_answers),
+            redirect_stdout(StringIO()) as output,
+        ):
+            try:
+                merge(pr, mock.MagicMock(spec=GitRepo), comment_id=1, dry_run=True)
+            finally:
+                self.rule_calls = [] if rule_patch else patched.call_args_list
+                self.sleeps = slept.call_count
+                self.output = output.getvalue()
+
+    def test_merge_waits_until_the_job_is_classified(self) -> None:
+        job = {"id": 7, "name": "pull / job"}
+        pr = self._loop_pr(self._check(7))
+        self._merge(pr, [{"FAILED": []}, {"FLAKY": [job]}])
+        pr.merge_into.assert_called_once()
+        self.assertIn("waiting for Dr.CI to classify it", self.output)
+        # One window for the whole command: the loop's rule checks and merge_into.
+        # The first rule check is the approval check before the loop, without one.
+        window = pr.merge_into.call_args.kwargs["classification_wait"]
+        self.assertIsInstance(window, ClassificationWaitWindow)
+        loop_windows = [c.kwargs["classification_wait"] for c in self.rule_calls[1:]]
+        self.assertEqual(len(loop_windows), 2)
+        for loop_window in loop_windows:
+            self.assertIs(loop_window, window)
+
+    def test_merge_fails_once_the_wait_runs_out(self) -> None:
+        pr = self._loop_pr(self._check(7))
+        with self.assertRaisesRegex(RuntimeError, "1 jobs have failed") as failed:
+            self._merge(pr, lambda **_: {"FAILED": []})
+        pr.merge_into.assert_not_called()
+        self.assertEqual(self.sleeps, 3)  # within_budget's < makes it the ceiling
+        self.assertIn("the merge waited on", str(failed.exception))
+
+    def test_merge_keeps_waiting_through_a_failed_dr_ci_call(self) -> None:
+        job = {"id": 7, "name": "pull / job"}
+        pr = self._loop_pr(self._check(7))
+        self._merge(pr, [{"FAILED": []}, None, {"FLAKY": [job]}])
+        pr.merge_into.assert_called_once()
+        self.assertEqual(self.sleeps, 2)
+
+    def test_the_note_counts_only_jobs_waited_on(self) -> None:
+        window = ClassificationWaitWindow(waited_on={7})
+        failed = [("pull / a", None, 7), ("pull / b", None, 8)]
+        self.assertTrue(waited_note(failed, window).endswith("classification: 1."))
+
+    def test_a_failure_never_waited_on_gets_no_note(self) -> None:
+        pr = self._loop_pr(self._check(7))
+        listed = {"FAILED": [{"id": 7, "name": "pull / job"}]}
+        with self.assertRaisesRegex(RuntimeError, "1 jobs have failed") as failed:
+            self._merge(pr, [listed])
+        self.assertEqual(self.sleeps, 0)
+        self.assertNotIn("the merge waited on", str(failed.exception))
+
+    def test_a_wait_the_rule_check_opened_without_a_retry_gets_no_note(self) -> None:
+        """The rule check and the loop each ask Dr.CI; they can disagree."""
+        rule = MergeRule(
+            name="rule",
+            patterns=["*"],
+            approved_by=["approver"],
+            mandatory_checks_name=["pull / job"],
+        )
+        pr = self._rule_pr(self._check(7))
+        pr.get_labels.return_value = []
+        pr.is_ghstack_pr.return_value = False
+        listed = {"FAILED": [{"id": 7, "name": "pull / job"}]}
+        # The approval check before the loop, then the loop's rule check, which
+        # sees the job unlisted, then the loop's own answer, which lists it.
+        answers = [{"FAILED": []}, {"FAILED": []}, listed]
+        with self.assertRaisesRegex(RuntimeError, "1 jobs have failed") as failed:
+            self._merge(
+                pr,
+                answers,
+                rule_patch=mock.patch("trymerge.read_merge_rules", return_value=[rule]),
+            )
+        self.assertEqual(self.sleeps, 0)
+        self.assertNotIn("the merge waited on", str(failed.exception))
+
+    def test_a_job_not_waiting_at_the_sleep_gets_no_note(self) -> None:
+        """Another job's wait caused the sleep; this one had been classified."""
+        rule = MergeRule(
+            name="rule",
+            patterns=["*"],
+            approved_by=["approver"],
+            mandatory_checks_name=["pull / job"],
+        )
+        pr = self._rule_pr(self._check(7))
+        other = JobCheckState(
+            "pull / other", self.URL.format(8), "FAILURE", None, 8, "", ""
+        )
+        pr.get_checkrun_conclusions.return_value = {
+            "pull / job": self._check(7),
+            "pull / other": other,
+        }
+        pr.get_labels.return_value = []
+        pr.is_ghstack_pr.return_value = False
+        job = {"id": 7, "name": "pull / job"}
+        answers = [
+            {"FAILED": []},  # the approval check before the loop
+            {"FAILED": []},  # rule check: both unlisted, both wait
+            {"FLAKY": [job]},  # loop: the job is flaky, only the other waits
+            {"FAILED": [job], "FLAKY": [{"id": 8, "name": "pull / other"}]},
+        ]
+        with self.assertRaises(MergeRuleFailedError) as failed:
+            self._merge(
+                pr,
+                answers,
+                rule_patch=mock.patch("trymerge.read_merge_rules", return_value=[rule]),
+            )
+        self.assertEqual(self.sleeps, 1)
+        self.assertIn("mandatory check(s) failed", str(failed.exception))
+        self.assertNotIn("the merge waited on", str(failed.exception))
+
+    def test_a_waiting_job_does_not_use_the_ignorable_budget(self) -> None:
+        """Waiting clears nothing, so it must not count toward the flaky cap."""
+        checks = {
+            f"pull / {i}": JobCheckState(
+                f"pull / {i}", "", "FAILURE", "AI_PENDING", i + 1, "", ""
+            )
+            for i in range(IGNORABLE_FAILED_CHECKS_THESHOLD + 1)
+        }
+        pending, failed, _ = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=0
+        )
+        self.assertEqual(failed, [])
+        self.assertEqual(len(pending), IGNORABLE_FAILED_CHECKS_THESHOLD + 1)
+
+
 def stack_entry(
     position: int, closed: bool = False, head: str | None = None
 ) -> StackEntry:
@@ -3211,6 +3784,31 @@ class NoNetworkTestCase(TestCase):
         patcher = mock.patch(target, **kwargs)
         self.addCleanup(patcher.stop)
         return patcher.start()
+
+
+class TestAddNumberedLabel(NoNetworkTestCase):
+    def added_label(self, labels: list[str]) -> str:
+        add = self.patch("trymerge.gh_add_labels")
+        self.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
+        pr = GitHubPR("pytorch", "pytorch", 1)
+        pr.labels = labels
+        pr.add_numbered_label("merged", False)
+        return add.call_args.args[3][0]
+
+    def test_unrelated_label_containing_base_is_not_counted(self) -> None:
+        self.assertEqual(self.added_label(["mergedog", "autoland"]), "merged")
+        self.assertEqual(self.added_label(["mergedX1foo", "mergedx1"]), "merged")
+
+    def test_capitalized_repo_label_is_not_counted(self) -> None:
+        # GitHub applies "merged" as the repo's existing "Merged" label; matching
+        # stays case-sensitive so such PRs keep getting plain "Merged".
+        self.assertEqual(self.added_label(["Merged", "mergedog"]), "merged")
+
+    def test_own_repeats_are_counted(self) -> None:
+        self.assertEqual(self.added_label(["merged"]), "mergedX1")
+        self.assertEqual(
+            self.added_label(["mergedog", "merged", "mergedX1"]), "mergedX2"
+        )
 
 
 class TestGetNativeStackPrs(NoNetworkTestCase):
@@ -3326,6 +3924,15 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
             self.merge_into(dry_run=True)
         self.assertNotIsInstance(raised.exception, LandedError)
 
+    def test_the_classification_window_reaches_every_rule_check(self) -> None:
+        window = ClassificationWaitWindow()
+        self.assertStopsBeforeLanding(classification_wait=window)
+        self.assertEqual(
+            [call.args[0] for call in self.rule.call_args_list], [self.top, self.lower]
+        )
+        for call in self.rule.call_args_list:
+            self.assertIs(call.kwargs["classification_wait"], window)
+
     def test_gates_lower_prs_before_landing(self) -> None:
         waivers = {(1001, "red")}
         self.assertStopsBeforeLanding(ignore_current_checks=waivers)
@@ -3337,6 +3944,7 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
                 "skip_mandatory_checks": False,
                 "skip_internal_checks": False,
                 "ignore_current_checks": waivers,
+                "classification_wait": None,
             },
         )
         self.top.merge_native_stack_into.assert_called_once_with(
@@ -3543,6 +4151,79 @@ class TestNativeStackMergePlumbing(NoNetworkTestCase):
             self.top.merge_into.call_args.kwargs["ignore_current_checks"],
             {(1001, "red"), (1002, "red")},
         )
+
+
+class TestStackedPrChecks(NoNetworkTestCase):
+    """A PR landing below the merged one is held to the merged PR's bar: every check,
+    not only the mandatory ones of its rule."""
+
+    MANDATORY = "Lint"
+    CIFLOW = "inductor / test (inductor, 1, 2)"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.patch(
+            "trymerge.read_merge_rules",
+            return_value=[
+                MergeRule(
+                    name="rule",
+                    patterns=["*"],
+                    approved_by=[],
+                    mandatory_checks_name=[self.MANDATORY],
+                )
+            ],
+        )
+        self.drci = self.patch("trymerge.get_drci_classifications", return_value={})
+        self.pr = stacked_pr(1001)
+        self.pr.get_changed_files.return_value = ["torch/foo.py"]
+        self.pr.get_approved_by.return_value = []
+        self.pr.has_internal_changes.return_value = False
+
+    def gate(self, ciflow_status: str | None, **kwargs: Any) -> None:
+        self.pr.get_checkrun_conclusions.return_value = {
+            name: JobCheckState(name, "", status, None, i, None, None)
+            for i, (name, status) in enumerate(
+                [(self.MANDATORY, "SUCCESS"), (self.CIFLOW, ciflow_status)]
+            )
+        }
+        kwargs.setdefault("skip_mandatory_checks", False)
+        kwargs.setdefault("ignore_current_checks", None)
+        check_stacked_pr_merge_rule(
+            self.pr, mock.MagicMock(spec=GitRepo), skip_internal_checks=False, **kwargs
+        )
+
+    def test_a_green_pr_passes(self) -> None:
+        self.gate("SUCCESS")
+
+    def test_a_failing_ciflow_job_refuses(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "stacked PR #1001") as cm:
+            self.gate("FAILURE")
+        self.assertNotIsInstance(cm.exception, MergeRuleFailedError)
+        self.assertIn(self.CIFLOW, str(cm.exception))
+
+    def test_a_pending_ciflow_job_waits(self) -> None:
+        with self.assertRaisesRegex(
+            MandatoryChecksMissingError, "stacked PR #1001"
+        ) as cm:
+            self.gate(None)
+        self.assertIn(self.CIFLOW, str(cm.exception))
+
+    def test_a_startup_failure_refuses_even_when_dr_ci_excuses_it(self) -> None:
+        self.drci.return_value = {"FLAKY": [{"name": self.CIFLOW, "id": 1}]}
+        with self.assertRaisesRegex(RuntimeError, "STARTUP failures .* #1001"):
+            self.gate("STARTUP_FAILURE")
+
+    def test_a_flaky_failure_does_not_block(self) -> None:
+        self.drci.return_value = {"FLAKY": [{"name": self.CIFLOW, "id": 1}]}
+        self.gate("FAILURE")
+
+    def test_ignore_current_waives_a_failure_present_at_the_start(self) -> None:
+        self.gate("FAILURE", ignore_current_checks={(1001, self.CIFLOW)})
+
+    def test_force_merge_is_not_gated(self) -> None:
+        for status in ("FAILURE", None):
+            with self.subTest(status=status):
+                self.gate(status, skip_mandatory_checks=True)
 
 
 TARGETS_ANOTHER_BRANCH = "PR targets user/1001 rather than main, refusing merge request"
@@ -3948,27 +4629,56 @@ def revert_native_pr(repo: GitRepo, pr: Any) -> None:
     try_revert(repo, pr, dry_run=False, comment_id=1, reason="broken trunk")
 
 
-class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
-    """GitHubPR.merge_into lands a real stack and try_revert reverts it: the bot clone
-    builds the commits and pushes them to a local bare origin. Only GitHub is
-    patched."""
+def patch_landing(case: NoNetworkTestCase) -> Any:
+    """Patches the merge gates and the GitHub follow-ups of a landing by
+    GitHubPR.merge_into, and returns the mock of manually_close_merged_pr"""
+    case.patch("trymerge.find_matching_merge_rule", return_value=(None, [], [], {}))
+    case.patch("trymerge.can_skip_internal_checks", return_value=False)
+    for name in (
+        "check_greenlight_reviewed_head_sha",
+        "save_merge_record",
+        "time.sleep",
+    ):
+        case.patch(f"trymerge.{name}")
+    return case.patch("trymerge.manually_close_merged_pr")
+
+
+def landing_subjects(*numbers: int) -> list[str]:
+    """The subjects of the commits that land the native_stack_pr PRs `numbers`"""
+    return [f"Change {n} (#{n})" for n in numbers]
+
+
+class LandingTestCase(NoNetworkTestCase, GitTestCase):
+    """GitHubPR.merge_into lands from the bot clone into the local bare origin, with
+    only GitHub patched"""
 
     def setUp(self) -> None:
         GitTestCase.setUp(self)
         NoNetworkTestCase.setUp(self)
         self.origin = self.git("remote", "get-url", "origin")
+        self.close = patch_landing(self)
+
+    def trunk_log(
+        self, since: str, fmt: str = "%H", cwd: str | None = None
+    ) -> list[str]:
+        """The commits on TRUNK after `since`, oldest first, in the origin or `cwd`"""
+        args = ("log", "--reverse", f"--format={fmt}", f"{since}..{TRUNK}")
+        return self.git(*args, cwd=cwd or self.origin).splitlines()
+
+
+class TestNativeStackMergeEndToEnd(LandingTestCase):
+    """GitHubPR.merge_into lands a real stack and try_revert reverts it: the bot clone
+    builds the commits and pushes them to a local bare origin. Only GitHub is
+    patched."""
+
+    def setUp(self) -> None:
+        super().setUp()
         self.stack = self.push_stack()
         self.prs = {e.number: native_stack_pr(e) for e in self.stack.entries}
         self.patch("trymerge.GitHubPR", side_effect=lambda _, __, num: self.prs[num])
         self.get_stack = self.patch(
             "trymerge.get_native_stack", return_value=self.stack
         )
-        self.patch("trymerge.find_matching_merge_rule", return_value=(None, [], [], {}))
-        self.patch("trymerge.can_skip_internal_checks", return_value=False)
-        self.patch("trymerge.check_greenlight_reviewed_head_sha")
-        self.patch("trymerge.save_merge_record")
-        self.patch("trymerge.time.sleep")
-        self.close = self.patch("trymerge.manually_close_merged_pr")
         self.patch("trymerge.build_native_stack_commits", side_effect=self.build)
         self.bases: list[str] = []
         self.races: list[Callable[[], object]] = []
@@ -3991,11 +4701,6 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
             native_stack=self.stack,
         )
 
-    def origin_log(self, since: str, fmt: str = "%H") -> list[str]:
-        revs = f"{since}..{TRUNK}"
-        log = self.git("log", "--reverse", f"--format={fmt}", revs, cwd=self.origin)
-        return log.splitlines()
-
     def message(self, number: int, *deps: int) -> str:
         msg = (
             f"Change {number} (#{number})\n\nBody {number}\n"
@@ -4009,9 +4714,9 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
     def test_pushes_one_commit_per_pr(self) -> None:
         trunk = self.add_commits(TRUNK)
         self.merge_stack()
-        landed = self.origin_log(trunk)
+        landed = self.trunk_log(trunk)
         authors = [author(n) for n in (101, 102, 103)]
-        self.assertEqual(self.origin_log(trunk, "%an <%ae>"), authors)
+        self.assertEqual(self.trunk_log(trunk, "%an <%ae>"), authors)
         origin = GitRepo(self.origin)
         raw = [origin._run_git("cat-file", "commit", commit) for commit in landed]
         self.assertEqual(
@@ -4032,8 +4737,8 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
     def test_rebases_onto_trunk_that_moved_before_the_push(self) -> None:
         self.races.append(lambda: self.add_commits(TRUNK))
         self.merge_stack()
-        subjects = [f"Update {TRUNK}", *(f"Change {n} (#{n})" for n in (101, 102, 103))]
-        self.assertEqual(self.origin_log(self.root, "%s"), subjects)
+        subjects = [f"Update {TRUNK}", *landing_subjects(101, 102, 103)]
+        self.assertEqual(self.trunk_log(self.root, "%s"), subjects)
         self.assertEqual(self.bases, [self.root])
 
     def merge_then_patch_revert(self) -> tuple[list[str], Any]:
@@ -4045,7 +4750,7 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
         self.get_stack.return_value = None
         self.patch("trymerge.gh_post_pr_comment")
         self.patch("trymerge.gh_post_commit_comment")
-        return self.origin_log(self.root), self.patch("trymerge.gh_update_pr_state")
+        return self.trunk_log(self.root), self.patch("trymerge.gh_update_pr_state")
 
     def revert_pr(self, number: int) -> None:
         self.git("pull", "-q", "--ff-only", cwd=self.repo.repo_dir)
@@ -4056,7 +4761,7 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
         in its order, each naming its PR and the revert comment on PR `target`."""
         origin = GitRepo(self.origin)
         comment = f"([comment]({pr_url(target)}#issuecomment-1))"
-        reverts = [origin.commit_message(sha) for sha in self.origin_log(since)]
+        reverts = [origin.commit_message(sha) for sha in self.trunk_log(since)]
         self.assertEqual(
             [message.splitlines()[:5] for message in reverts],
             [
@@ -4085,6 +4790,137 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
         self.assertEqual(reopen.call_args_list, reopened)
 
 
+SUITE = "class Test:\n    def test_a(self):\n        pass\n\n    def test_z(self):\n        pass\n"
+SUITE_WITH_NEW_TEST = SUITE.replace(
+    "    def test_z", "    def test_new(self):\n        pass\n\n    def test_z"
+)
+
+
+class TestMergeChangesLocallyEndToEnd(LandingTestCase):
+    """GitHubPR.merge_changes_locally commits a real ghstack stack or PR onto the bot
+    clone's main, and merge_into pushes it to a local bare origin. Only GitHub is
+    patched."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.add_commits(TRUNK, files={"test_suite.py": SUITE})
+        # #101 adds a test between two others, and trunk then changes the same file
+        # elsewhere: cherry-picking #101 a second time is not empty, it adds the test
+        # again.
+        changes = (
+            {"test_suite.py": SUITE_WITH_NEW_TEST},
+            {"file102.txt": "102\n"},
+            {"file103.txt": "103\n"},
+        )
+        stack = self.push_stack(changes=changes)
+        renamed = SUITE.replace("test_a", "test_b")
+        self.add_commits(TRUNK, files={"test_suite.py": renamed})
+        self.git("pull", "-q", "--ff-only", cwd=self.repo.repo_dir)
+        self.prs = []
+        for entry in stack.entries:
+            pr = native_stack_pr(entry)
+            pr.is_ghstack_pr.return_value = True
+            pr.merge_changes_locally = MethodType(GitHubPR.merge_changes_locally, pr)
+            pr.merge_ghstack_into = MethodType(GitHubPR.merge_ghstack_into, pr)
+            self.prs.append(pr)
+        revs = [entry.head_oid for entry in stack.entries]
+        self.patch("trymerge.get_ghstack_prs", return_value=list(zip(self.prs, revs)))
+        self.stacked_rule = self.patch("trymerge.check_stacked_pr_merge_rule")
+
+    def record_push_bases(self, count: int) -> list[str]:
+        """Records the commit each push builds on, `count` commits below its tip"""
+        bases: list[str] = []
+        push = self.repo.push
+
+        def push_recording_base(branch: str, dry_run: bool) -> None:
+            bases.append(self.repo.rev_parse(f"{branch}~{count}"))
+            push(branch, dry_run)
+
+        patcher = mock.patch.object(self.repo, "push", side_effect=push_recording_base)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return bases
+
+    def test_a_pending_stacked_pr_stops_the_merge_before_any_cherry_pick(
+        self,
+    ) -> None:
+        self.stacked_rule.side_effect = [None, MandatoryChecksMissingError("pending")]
+        with self.assertRaisesRegex(MandatoryChecksMissingError, "pending"):
+            GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
+        self.assertEqual(
+            self.trunk_log(f"origin/{TRUNK}", "%s", self.repo.repo_dir), []
+        )
+
+    def test_a_rerun_after_a_failed_cherry_pick_lands_each_pr_once(self) -> None:
+        """The first attempt fails after #101 was cherry-picked onto the clone's main.
+        Trunk moves before merge_into runs again on the same clone. merge() does not
+        retry this error, and a pending lower PR now stops it before any cherry-pick
+        (see above), so this pins only that each attempt starts from the remote tip."""
+        picks = 0
+        cherry_pick = self.repo.cherry_pick
+
+        def fail_the_second_pick(ref: str) -> None:
+            nonlocal picks
+            picks += 1
+            if picks == 2:
+                raise RuntimeError("interrupted")
+            cherry_pick(ref)
+
+        with (
+            mock.patch.object(
+                self.repo, "cherry_pick", side_effect=fail_the_second_pick
+            ),
+            self.assertRaisesRegex(RuntimeError, "interrupted"),
+        ):
+            GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
+        left_over = self.trunk_log(f"origin/{TRUNK}", "%s", self.repo.repo_dir)
+        self.assertEqual(left_over, landing_subjects(101))
+        trunk = self.add_commits(TRUNK)
+        bases = self.record_push_bases(3)
+        GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
+        self.assertEqual(self.trunk_log(trunk, "%s"), landing_subjects(101, 102, 103))
+        self.assertEqual(bases, [trunk])
+
+    def test_check_mergeability_starts_from_the_remote_tip(self) -> None:
+        """main() calls merge_changes_locally alone for --check-mergeability"""
+        clone = self.repo.repo_dir
+        self.git("commit", "-q", "--allow-empty", "-m", "Left over", cwd=clone)
+        trunk = self.add_commits(TRUNK)
+        self.prs[-1].merge_changes_locally(
+            self.repo, skip_mandatory_checks=True, skip_all_rule_checks=True
+        )
+        self.assertEqual(self.repo.rev_parse(f"{TRUNK}~3"), trunk)
+        self.assertEqual(
+            self.trunk_log(trunk, "%s", clone), landing_subjects(101, 102, 103)
+        )
+        self.stacked_rule.assert_not_called()
+
+    def test_squash_merge_starts_from_the_remote_tip(self) -> None:
+        trunk = self.git("rev-parse", TRUNK)
+        head = self.push_branch("user/pr", trunk)
+        pr = native_stack_pr(make_entry(1, 201, "user/pr", head, TRUNK))
+        pr.get_commit_sha_at_comment.return_value = head
+        pr.merge_changes_locally = MethodType(GitHubPR.merge_changes_locally, pr)
+        self.patch("trymerge.GitHubPR", return_value=pr)
+        clone = self.repo.repo_dir
+        self.git("commit", "-q", "--allow-empty", "-m", "Left over", cwd=clone)
+        moved = self.add_commits(TRUNK)
+        bases = self.record_push_bases(1)
+        GitHubPR.merge_into(pr, self.repo, comment_id=1)
+        self.assertEqual(self.trunk_log(moved, "%s"), landing_subjects(201))
+        self.assertEqual(bases, [moved])
+
+    def test_failed_fetch_names_the_branch_and_keeps_the_clone(self) -> None:
+        clone = self.repo.repo_dir
+        self.git("commit", "-q", "--allow-empty", "-m", "Left over", cwd=clone)
+        before = self.repo.rev_parse(TRUNK)
+        missing = os.path.join(os.path.dirname(self.origin), "missing.git")
+        self.git("remote", "set-url", "origin", missing, cwd=clone)
+        with self.assertRaisesRegex(RuntimeError, "Could not fetch main from origin"):
+            self.prs[-1].merge_changes_locally(self.repo, skip_all_rule_checks=True)
+        self.assertEqual(self.repo.rev_parse(TRUNK), before)
+
+
 class TestNativeStackRevertRefreshEndToEnd(NoNetworkTestCase, LineStackTestCase):
     """Stacks rebased with merge commits and landed by GitHubPR.merge_into, then
     reverted by try_revert, which refreshes the branches of the reverted PRs once it
@@ -4099,16 +4935,8 @@ class TestNativeStackRevertRefreshEndToEnd(NoNetworkTestCase, LineStackTestCase)
         self.prs = {e.number: native_stack_pr(e) for e in self.stack.entries}
         self.patch("trymerge.GitHubPR", side_effect=lambda _, __, num: self.prs[num])
         self.patch("trymerge.get_native_stack", side_effect=self.read_stack)
-        self.patch("trymerge.find_matching_merge_rule", return_value=(None, [], [], {}))
-        self.patch("trymerge.can_skip_internal_checks", return_value=False)
-        for name in (
-            "check_greenlight_reviewed_head_sha",
-            "save_merge_record",
-            "time.sleep",
-            "manually_close_merged_pr",
-            "gh_post_commit_comment",
-        ):
-            self.patch(f"trymerge.{name}")
+        patch_landing(self)
+        self.patch("trymerge.gh_post_commit_comment")
         self.post = self.patch("trymerge.gh_post_pr_comment")
         # The heads of the stack's branches when each PR was reopened
         self.reopened: dict[int, dict[str, str]] = {}
@@ -4366,6 +5194,189 @@ class TestMainStatusTags(NoNetworkTestCase):
             )
         )
         self.merge.assert_not_called()
+
+
+def _drci_http_error(code: int, body: bytes) -> HTTPError:
+    return HTTPError(
+        "https://hud.pytorch.org/api/drci/drci?prNumber=1",  # @lint-ignore
+        code,
+        "Bad Request",
+        {},  # type: ignore[arg-type]
+        BytesIO(body),
+    )
+
+
+@mock.patch("trymerge.time.sleep")
+@mock.patch("trymerge.gh_fetch_url")
+class TestDrciRetries(TestCase):
+    def test_no_pause_when_hud_did_not_answer(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        for unreachable in (
+            URLError(OSError("no route")),
+            URLError(ConnectionRefusedError("refused")),
+            URLError(socket.gaierror(socket.EAI_NONAME, "Name or service not known")),
+        ):
+            mock_fetch.side_effect = [unreachable, {}]
+            with mock.patch("builtins.print"):
+                self.assertEqual(get_drci_classifications(1), {})
+        mock_sleep.assert_not_called()
+
+    def test_only_the_previous_failure_decides_the_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.side_effect = [
+            _drci_http_error(400, b""),
+            URLError(OSError("no route")),
+            {},
+        ]
+        with mock.patch("builtins.print"):
+            self.assertEqual(get_drci_classifications(1), {})
+        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+
+    def test_no_pause_on_auth_failure(self, mock_fetch: Any, mock_sleep: Any) -> None:
+        mock_fetch.side_effect = [_drci_http_error(401, b""), {}]
+        with mock.patch("builtins.print"):
+            self.assertEqual(get_drci_classifications(1), {})
+        self.assertEqual(mock_fetch.call_count, 2)
+        mock_sleep.assert_not_called()
+
+    def test_timeout_or_504_is_not_retried(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        for stalled in (
+            TimeoutError("timed out"),
+            URLError(TimeoutError("timed out")),
+            _drci_http_error(504, b""),
+        ):
+            mock_fetch.reset_mock()
+            mock_fetch.side_effect = [stalled, {}]
+            with mock.patch("builtins.print"):
+                self.assertIsNone(get_drci_classifications(1))
+            self.assertEqual(mock_fetch.call_count, 1)
+        mock_sleep.assert_not_called()
+
+    def test_retries_after_a_failure_with_a_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.side_effect = [
+            _drci_http_error(400, b'{"error": "boom"}'),
+            {"1": {"AI_NOT_RELATED": []}},
+        ]
+        with mock.patch("builtins.print") as mock_print:
+            self.assertEqual(get_drci_classifications(1), {"AI_NOT_RELATED": []})
+        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+        self.assertEqual(mock_fetch.call_count, 2)
+        logged = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn(f"Attempt 1 of {len(DRCI_RETRY_DELAYS_SECONDS) + 1}", logged)
+        self.assertIn('{"error": "boom"}', logged)
+
+    def test_first_success_does_not_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.return_value = {"1": {"FLAKY": []}}
+        self.assertEqual(get_drci_classifications(1), {"FLAKY": []})
+        mock_sleep.assert_not_called()
+        self.assertEqual(mock_fetch.call_count, 1)
+        self.assertEqual(mock_fetch.call_args.kwargs["timeout"], DRCI_TIMEOUT_SECONDS)
+
+    def test_unreadable_error_body_still_retries(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        err = _drci_http_error(400, b"")
+        err.read = mock.Mock(side_effect=ConnectionResetError("reset"))  # type: ignore[method-assign]
+        mock_fetch.side_effect = [err, {}]
+        with mock.patch("builtins.print"):
+            self.assertEqual(get_drci_classifications(1), {})
+        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+
+    def test_stalled_error_body_is_not_retried(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        err = _drci_http_error(400, b"")
+        err.read = mock.Mock(side_effect=TimeoutError("stalled"))  # type: ignore[method-assign]
+        mock_fetch.side_effect = [err, {}]
+        with mock.patch("builtins.print") as mock_print:
+            self.assertIsNone(get_drci_classifications(1))
+        self.assertEqual(mock_fetch.call_count, 1)
+        mock_sleep.assert_not_called()
+        logged = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("<body timed out: stalled>", logged)
+
+    def test_unexpected_error_retries_without_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        for bug in (
+            AttributeError("'list' object has no attribute 'get'"),
+            KeyError("x"),
+        ):
+            mock_fetch.reset_mock()
+            mock_fetch.side_effect = [bug, {}]
+            with mock.patch("builtins.print"):
+                self.assertEqual(get_drci_classifications(1), {})
+            self.assertEqual(mock_fetch.call_count, 2)
+        mock_sleep.assert_not_called()
+
+    def test_logged_error_body_is_bounded(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        err = _drci_http_error(400, b"x" * 2000)
+        err.read = mock.Mock(wraps=err.read)  # type: ignore[method-assign]
+        mock_fetch.side_effect = [err, {}]
+        with mock.patch("builtins.print") as mock_print:
+            get_drci_classifications(1)
+        err.read.assert_called_once_with(500)
+        logged = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("x" * 500, logged)
+        self.assertNotIn("x" * 501, logged)
+
+    def test_returns_none_once_every_attempt_fails(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.side_effect = [
+            _drci_http_error(400, b"{}")
+            for _ in range(len(DRCI_RETRY_DELAYS_SECONDS) + 1)
+        ]
+        with mock.patch("builtins.print"):
+            self.assertIsNone(get_drci_classifications(1))
+        self.assertEqual(mock_fetch.call_count, len(DRCI_RETRY_DELAYS_SECONDS) + 1)
+        self.assertEqual(
+            [c.args[0] for c in mock_sleep.call_args_list],
+            list(DRCI_RETRY_DELAYS_SECONDS),
+        )
+
+    def test_dropped_connection_pauses(self, mock_fetch: Any, mock_sleep: Any) -> None:
+        for dropped in (
+            RemoteDisconnected("closed"),
+            URLError(ConnectionResetError("reset")),
+            URLError(TimeoutError(errno.ETIMEDOUT, "Connection timed out")),
+            URLError(socket.gaierror(socket.EAI_AGAIN, "Temporary failure")),
+            IncompleteRead(b"{", 10),
+            json.JSONDecodeError("cut off", "{", 1),
+            UnicodeDecodeError("utf-8", b"\xe2", 0, 1, "unexpected end of data"),
+            _drci_http_error(408, b""),
+            _drci_http_error(429, b""),
+            _drci_http_error(500, b""),
+        ):
+            mock_fetch.reset_mock()
+            mock_sleep.reset_mock()
+            mock_fetch.side_effect = [dropped, {}]
+            with mock.patch("builtins.print"):
+                self.assertEqual(get_drci_classifications(1), {})
+            mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+            self.assertEqual(mock_fetch.call_count, 2)
+
+
+class TestFetchUrlTimeout(TestCase):
+    @mock.patch("github_utils.urlopen")
+    def test_timeout_reaches_urlopen_only_when_given(self, mock_urlopen: Any) -> None:
+        url = "https://hud.pytorch.org/x"  # @lint-ignore
+        gh_fetch_url(url, reader=lambda conn: None, timeout=DRCI_TIMEOUT_SECONDS)
+        self.assertEqual(
+            mock_urlopen.call_args.kwargs, {"timeout": DRCI_TIMEOUT_SECONDS}
+        )
+        gh_fetch_url(url, reader=lambda conn: None)
+        self.assertEqual(mock_urlopen.call_args.kwargs, {})
 
 
 if __name__ == "__main__":

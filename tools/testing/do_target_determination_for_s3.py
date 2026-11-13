@@ -15,6 +15,7 @@ from tools.stats.import_test_stats import (
     copy_pytest_cache,
     get_td_heuristic_historial_edited_files_json,
     get_td_heuristic_profiling_json,
+    get_td_scorer,
     get_test_class_ratings,
     get_test_class_times,
     get_test_file_ratings,
@@ -23,20 +24,27 @@ from tools.stats.import_test_stats import (
 from tools.stats.upload_metrics import emit_metric
 from tools.testing.discover_tests import TESTS
 from tools.testing.target_determination.determinator import get_test_prioritizations
+from tools.testing.target_determination.heuristics import HEURISTICS
 from tools.testing.target_determination.heuristics.interface import (
     AggregatedHeuristics,
     TestPrioritizations,
 )
+from tools.testing.target_determination.heuristics.utils import query_changed_files
+from tools.testing.target_determination.scorer import (
+    build_scorer_block,
+    TD_RESULTS_PATH,
+)
+from tools.testing.target_determination.scorer_model import MAX_MODEL_BYTES
 
 
 sys.path.remove(str(REPO_ROOT))
 
 
 def import_results() -> TestPrioritizations:
-    if not (REPO_ROOT / ".additional_ci_files/td_results.json").exists():
+    if not TD_RESULTS_PATH.exists():
         print("No TD results found")
         return TestPrioritizations([], {})
-    with open(REPO_ROOT / ".additional_ci_files/td_results.json") as f:
+    with open(TD_RESULTS_PATH) as f:
         td_results = json.load(f)
         tp = TestPrioritizations.from_json(td_results)
 
@@ -76,8 +84,24 @@ def main() -> None:
             {"aggregated_heuristics": aggregated_heuristics.to_json()},
         )
 
+    try:
+        changed_files: list[str] | None = query_changed_files()
+    except Exception as e:
+        print(f"TD scorer: changed files unavailable: {e!r}")
+        changed_files = None
+
+    td_results = test_prioritizations.to_json()
+    scorer_block = build_scorer_block(
+        aggregated_heuristics,
+        HEURISTICS,
+        lambda: get_td_scorer(MAX_MODEL_BYTES),
+        changed_files,
+    )
+    if scorer_block is not None:
+        td_results["scorer"] = scorer_block
+
     with open(REPO_ROOT / "td_results.json", "w") as f:
-        f.write(json.dumps(test_prioritizations.to_json()))
+        f.write(json.dumps(td_results))
 
 
 if __name__ == "__main__":

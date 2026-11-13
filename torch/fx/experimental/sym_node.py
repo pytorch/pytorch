@@ -115,6 +115,12 @@ class SymNode:
         self.shape_env = shape_env
         self.pytype = pytype
         self._optimized_summation = optimized_summation
+        # Memo for the `expr` property, i.e. shape_env.replace(self._expr).
+        # replace() depends only on shape_env.replacements and
+        # shape_env.var_to_range, so _expr_cache is valid iff both
+        # _replacements_version_counter == _expr_ver and
+        # _var_to_range_version_counter == _expr_range_ver. -1 means
+        # "never computed".
         self._expr_ver = -1
         self._expr_range_ver = -1
         self._expr_cache: object | None = None

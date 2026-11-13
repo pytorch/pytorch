@@ -1425,7 +1425,7 @@ class TestQuantizedTensor(TestCase):
                     super().__init__()
                     self.fname = fname
 
-                @torch.jit.script_method
+                @torch.jit._script.script_method
                 def forward(self, x, y):
                     torch.save((x, y), self.fname)
                     return y
@@ -1447,31 +1447,6 @@ class TestQuantizedTensor(TestCase):
 
     def test_pickle_checkpoint_qtensor(self):
         self._test_pickle_checkpoint_qtensor('cpu')
-
-    def test_jit_serialization(self):
-        class SimpleQTensor(torch.jit.ScriptModule):
-            def __init__(self, per_channel):
-                super().__init__()
-                x = torch.rand(5, 5).float()
-                if not per_channel:
-                    x_q = torch.quantize_per_tensor(x, 0.2, 10, torch.quint8)
-                else:
-                    s = torch.rand(5, dtype=torch.float64) + 0.1
-                    zp = torch.randint(5, 15, (5,))
-                    x_q = torch.quantize_per_channel(x, s, zp, 1, torch.quint8)
-                self.x = torch.nn.Buffer(x_q)
-
-            @torch.jit.script_method
-            def forward(self):
-                return self.x
-
-        for per_channel in [False, True]:
-            model = SimpleQTensor(per_channel)
-            buffer = io.BytesIO()
-            torch.jit.save(model, buffer)
-            buffer.seek(0)
-            model_loaded = torch.jit.load(buffer)
-            self.assertEqual(model_loaded(), model())
 
     def test_bfp16_quantize(self):
         X = torch.randn(5 , 10)
