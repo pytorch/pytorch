@@ -47,6 +47,10 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  pip_install nccl-extensions==0.1.0
+fi
+
 # Remove onnxruntime if present to avoid interference with non-ONNX tests
 if [[ "$TEST_CONFIG" != "onnx" ]]; then
   pip uninstall -y onnxruntime 2>/dev/null || true
@@ -1533,7 +1537,9 @@ test_dynamo_benchmark() {
 
   if [[ "$suite" == "torchbench" &&
         ( "${TEST_CONFIG}" == *perf_compare* ||
-          ( "${TEST_CONFIG}" != *perf* && " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --inductor "* ) ) ]]; then
+          ( "${TEST_CONFIG}" != *perf* &&
+            ( " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --inductor "* ||
+              " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --export-aot-inductor "* ) ) ) ]]; then
     local model
     for model in "${INDUCTOR_TORCHBENCH_MIGRATION_MODELS[@]}"; do
       extra_args+=(--exclude-exact "$model")
