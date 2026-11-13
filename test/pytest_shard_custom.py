@@ -7,7 +7,9 @@ Modifications:
 """
 
 import hashlib
+from collections.abc import Iterator
 
+import pytest
 from _pytest.config.argparsing import Parser
 
 
@@ -56,8 +58,13 @@ class PytestShardPlugin:
         ]
         return new_items
 
-    def pytest_collection_modifyitems(self, config, items):
+    @pytest.hookimpl(hookwrapper=True, trylast=True)
+    def pytest_collection_modifyitems(self, config, items) -> Iterator[None]:
         """Mutate the collection to consist of just items to be tested in this shard."""
+        # Finish collection filters and pruning before assigning tests to shards.
+        outcome = yield
+        if outcome.excinfo is not None:
+            return
         shard_id = config.getoption("shard_id")
         shard_total = config.getoption("num_shards")
         if shard_id < 1 or shard_id > shard_total:
