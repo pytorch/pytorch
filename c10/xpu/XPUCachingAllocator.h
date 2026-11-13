@@ -32,11 +32,11 @@ class XPUAllocator : public DeviceAllocator {
 
 #if SYCL_COMPILER_VERSION >= 20260200
     namespace syclex = sycl::ext::oneapi::experimental;
-    const auto arch = device.get_info<syclex::info::device::architecture>();
     // Only Xe2+ discrete GPUs need adjustment; integrated GPUs already account
     // for the headroom in the reported free memory.
-    if (arch < syclex::architecture::intel_gpu_bmg_g21 ||
-        device.has(sycl::aspect::ext_oneapi_is_integrated_gpu)) {
+    if (device.has(sycl::aspect::ext_oneapi_is_integrated_gpu) ||
+        device.get_info<syclex::info::device::architecture>() <
+            syclex::architecture::intel_gpu_bmg_g21) {
       return {free, total};
     }
     // See
