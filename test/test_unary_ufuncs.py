@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     ops,
     precisionOverride,
+    skipMPSIf,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -43,6 +44,7 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_mps import mps_ops_modifier
 from torch.testing._internal.common_utils import (
     decorateIf,
+    DeterministicGuard,
     gradcheck,
     HardwareClassification,
     is_iterable_of_tensors,
@@ -1596,15 +1598,42 @@ class TestUnaryUfuncs(TestCase):
         # Float8_e5m2 is the only fp8 dtype that can encode infinity (which
         # conversions saturate, so build it from its encoding); for the rest
         # isinf is trivially false and isfinite reduces to "not NaN".
-        vals = [1.0, inf, -inf, nan] if dtype is torch.float8_e5m2 else [1.0, nan]
-        ref = torch.tensor(vals, device=device)
-        t = ref.to(dtype)
         if dtype is torch.float8_e5m2:
-            bits = torch.tensor([0x3C, 0x7C, 0xFC, 0x7F], dtype=torch.uint8)
-            t = bits.to(device).view(dtype)
+            ref = torch.tensor([1.0, inf, -inf, nan], device=device)
+            bits = [0x3C, 0x7C, 0xFC, 0x7F]
+            t = torch.tensor(bits, dtype=torch.uint8, device=device).view(dtype)
+        else:
+            ref = torch.tensor([1.0, nan], device=device)
+            t = ref.to(dtype)
 
         self.assertEqual(t.isinf(), ref.isinf())
         self.assertEqual(t.isfinite(), ref.isfinite())
+
+    @skipMPSIf(True, "MPS does not support float8_e5m2")
+    def test_float8_e5m2_exact_ops_keep_infinity(self, device):
+        # Conversions to float8_e5m2 saturate infinities, so ops that are exact
+        # must not go through float. 128 elements, for the vectorized paths.
+        pattern = [0x7C, 0xFC, 0x3C, 0xBC] * 32
+        bits = torch.tensor(pattern, dtype=torch.uint8, device=device)
+        x = bits.view(torch.float8_e5m2)
+        self.assertEqual(x.abs().view(torch.uint8), bits & 0x7F)
+        # Strided inputs take the scalar loop.
+        for start in (0, 1):
+            y = x[start::2].abs().view(torch.uint8)
+            self.assertEqual(y, bits[start::2] & 0x7F)
+        self.assertEqual(torch._refs.isinf(x), x.isinf())
+
+        out = torch.zeros_like(x)
+        torch._foreach_copy_([out], [x])
+        self.assertEqual(out.view(torch.uint8), bits)
+
+        # The deterministic index_put_ of accelerators sorts the indices, with
+        # kernels for slices of one element, up to a warp (32 or 64), and more.
+        for shape in ((128,), (4, 32), (1, 128)):
+            with DeterministicGuard(True):
+                out = torch.zeros(shape, dtype=x.dtype, device=device)
+                out[torch.arange(shape[0], device=device)] = x.view(shape)
+            self.assertEqual(out.view(torch.uint8).flatten(), bits)
 
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):

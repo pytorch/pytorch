@@ -596,34 +596,26 @@ void foreach_tensor_copy_list_kernel_cuda_(
       self[0].scalar_type(),
       "foreach_tensor_copy",
       [&]() {
-        AT_DISPATCH_SOURCE_TYPES(src[0].scalar_type(), "foreach_tensor_copy", [&] {
-          if constexpr (std::is_same_v<scalar_t, src_t>) {
-            multi_tensor_apply<2>(
-                tensor_lists,
-                UnaryOpFunctor<
-                    scalar_t,
-                    /* depth */ 2,
-                    /* r_args_depth */ 1,
-                    /* res_arg_index */ 1>(),
-                Copy<scalar_t, scalar_t>());
-          } else {
-            // Ref:
-            // https://github.com/pytorch/pytorch/blob/656134c38f4737d13c3f43fc5c59470bc23c1d2f/aten/src/ATen/native/Copy.cpp#L299-L301
-            if (!self[0].is_complex() && src[0].is_complex()) {
-              TORCH_WARN_ONCE(
-                  "Casting complex values to real discards the imaginary part");
-            }
-            multi_tensor_apply<2>(
-                tensor_lists,
-                CopyFunctor<
-                    scalar_t,
-                    src_t,
-                    /* depth */ 2,
-                    /* r_args_depth */ 1,
-                    /* res_arg_index */ 1>(),
-                Copy<scalar_t, src_t>());
-          }
-        });
+        AT_DISPATCH_SOURCE_TYPES(
+            src[0].scalar_type(), "foreach_tensor_copy", [&] {
+              // Ref:
+              // https://github.com/pytorch/pytorch/blob/656134c38f4737d13c3f43fc5c59470bc23c1d2f/aten/src/ATen/native/Copy.cpp#L299-L301
+              if (!self[0].is_complex() && src[0].is_complex()) {
+                TORCH_WARN_ONCE(
+                    "Casting complex values to real discards the imaginary part");
+              }
+              // Also for same-dtype copies, which must not go through opmath_t:
+              // e.g. float8_e5m2's conversion from float saturates infinities.
+              multi_tensor_apply<2>(
+                  tensor_lists,
+                  CopyFunctor<
+                      scalar_t,
+                      src_t,
+                      /* depth */ 2,
+                      /* r_args_depth */ 1,
+                      /* res_arg_index */ 1>(),
+                  Copy<scalar_t, src_t>());
+            });
       });
   increment_version(self);
 }

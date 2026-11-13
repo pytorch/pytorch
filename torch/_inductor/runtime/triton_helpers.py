@@ -312,6 +312,7 @@ def float32_to_float8_bits(x, MODE: tl.constexpr, E4M3: tl.constexpr, RZ: tl.con
                 pack=1,
             )
         down = tl.where(rounded > tl.abs(x), -1, 0)
+        # MAX_FINITE in codegen/triton.py's ROUNDING_FORMATS.
         max_magnitude = 0x7E if E4M3 else 0x7B
         up = tl.where((rounded < tl.abs(x)) & (magnitude != max_magnitude), 1, 0)
         neg = x < 0

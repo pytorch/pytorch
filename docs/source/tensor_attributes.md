@@ -41,7 +41,7 @@ A {class}`torch.dtype` is an object that represents the data type of a
 | `torch.float8_e5m2` [^shell] [^5] | 8-bit floating point, S-E-M 1-5-2, from <https://arxiv.org/abs/2209.05433> |
 | `torch.float8_e4m3fnuz` [^shell] [^1] | 8-bit floating point, S-E-M 1-4-3, from <https://arxiv.org/pdf/2206.02915> |
 | `torch.float8_e5m2fnuz` [^shell] [^1] | 8-bit floating point, S-E-M 1-5-2, from <https://arxiv.org/pdf/2206.02915> |
-| `torch.float8_e8m0fnu` [^shell] [^1] | 8-bit floating point, S-E-M 0-8-0, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
+| `torch.float8_e8m0fnu` [^shell] [^1] [^e8m0] | 8-bit floating point, S-E-M 0-8-0, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
 | `torch.float8_e5m3fnu` [^shell] [^1] [^4] | 8-bit unsigned floating point, S-E-M 0-5-3, block-scale format, from <https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#alternate-floating-point-data-formats> (`ue5m3`) |
 | `torch.float4_e2m1fn_x2` [^shell] [^1] [^3] | packed 4-bit floating point, S-E-M 1-2-1, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
 
@@ -89,6 +89,12 @@ A {class}`torch.dtype` is an object that represents the data type of a
     to `114688` (`1.75 * 2**16`). Casting to this dtype rounds the absolute value
     of the input to nearest, ties to even: the sign is ignored, values above the
     max and infinities saturate to the max, and NaN maps to NaN.
+
+[^e8m0]: Casting to `torch.float8_e8m0fnu` rounds the absolute value of the
+    input to the nearest power of two, ties going up (there are no mantissa bits
+    to be even): the sign is ignored, values below `2**-127`, including 0,
+    become `2**-127` (the smallest value), and values from `1.5 * 2**127` up,
+    infinities and NaN map to NaN.
 
 [^5]: Casting to `torch.float8_e4m3fn` or `torch.float8_e5m2` rounds to
     nearest, ties to even, and saturates: values beyond the largest finite

@@ -198,8 +198,9 @@ __global__ void indexing_backward_kernel_stride_1(
         if (!accumulate) {
           const int64_t weight_row = crnt_sorted_idx * stride + z * stride_before;
           grad_row = ((int64_t)indices[idx + num_duplicates - 1]) * stride + z * numel * stride;
-          grad_weight[weight_row] =
-            static_cast<scalar_t>(static_cast<opmath_t>(grad_output[grad_row]) * scale);
+          // Copied, as going through opmath_t may not be exact (e.g.
+          // float8_e5m2's conversion from float saturates infinities).
+          grad_weight[weight_row] = grad_output[grad_row];
           continue;
         }
 
@@ -304,7 +305,7 @@ __global__ void indexing_backward_kernel(
         const int64_t grad_row = ((int64_t) indices[idx]) * stride + z * numel * stride;
         const opmath_t scale = (opmath_t)1.0;
 
-        opmath_t gradient[SZ];
+        scalar_t gradient[SZ];
         opmath_t weight[SZ];
 
         while (start_feature < stride) {
@@ -312,7 +313,7 @@ __global__ void indexing_backward_kernel(
           for (int ii = 0; ii < SZ; ii++) {
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
-              gradient[ii] = static_cast<opmath_t>(grad_output[grad_row + feature_dim]);
+              gradient[ii] = grad_output[grad_row + feature_dim];
               if (accumulate) {
                 weight[ii] = static_cast<opmath_t>(grad_weight[weight_row + feature_dim]);
               }
@@ -322,9 +323,7 @@ __global__ void indexing_backward_kernel(
           #pragma unroll
           for (int ii = 0; ii < SZ; ii++) {
             if (accumulate) {
-              weight[ii] += gradient[ii] * scale;
-            } else {
-              weight[ii] = gradient[ii] * scale;
+              weight[ii] += static_cast<opmath_t>(gradient[ii]) * scale;
             }
           }
 
@@ -332,7 +331,11 @@ __global__ void indexing_backward_kernel(
           for (int ii = 0; ii < SZ; ii++) {
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
-                grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
+                // Without accumulation, copied: going through opmath_t may not
+                // be exact (e.g. float8_e5m2's conversion saturates infinities).
+                grad_weight[weight_row + feature_dim] = accumulate
+                    ? static_cast<scalar_t>(weight[ii])
+                    : gradient[ii];
             }
           }
           start_feature += gridDim.y * blockDim.x * SZ;
@@ -372,8 +375,7 @@ __global__ void indexing_backward_kernel_stride_1(
 
       if (!accumulate) {
         grad_row = ((int64_t)indices[idx + num_duplicates - 1]) * stride + z * numel * stride;
-        grad_weight[weight_row] =
-          static_cast<scalar_t>(static_cast<opmath_t>(grad_output[grad_row]) * scale);
+        grad_weight[weight_row] = grad_output[grad_row];
       } else {
         opmath_t gradient = (opmath_t)0.0;
 
@@ -431,8 +433,7 @@ __global__ void indexing_backward_kernel_small_stride(
 
       if (!accumulate) {
         grad_row = ((int64_t)indices[idx + num_duplicates - 1]) * stride + z * numel * stride;
-        grad_weight[weight_row + tidx] =
-          static_cast<scalar_t>(static_cast<opmath_t>(grad_output[grad_row + tidx]) * scale);
+        grad_weight[weight_row + tidx] = grad_output[grad_row + tidx];
       } else {
         opmath_t gradient = (opmath_t)0.0;
         for (int64_t i = 0; i < num_duplicates; ++i) {

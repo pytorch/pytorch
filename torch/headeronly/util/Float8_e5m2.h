@@ -2,8 +2,12 @@
 
 /// Defines the Float8_e5m2 type (8-bit floating-point) including conversions
 /// to standard C types and basic arithmetic operations. Note that arithmetic
-/// operations are implemented by converting to floating point and
-/// performing the operation in float32.
+/// operations (except unary minus, which flips the sign bit) are implemented
+/// by converting to floating point and performing the operation in float32.
+/// Conversion from float32 rounds to nearest, ties to even, and saturates:
+/// magnitudes from 61440 and infinities become the largest finite value of
+/// their sign (57344), so results of arithmetic do too, and NaN converts to
+/// NaN.
 /// Binary configuration:
 /// s eeeee mm
 /// 1 sign bit

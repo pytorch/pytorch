@@ -821,6 +821,9 @@ def isfinite(a: TensorLikeType) -> TensorLikeType:
 def isinf(a: TensorLikeType) -> TensorLikeType:
     if utils.is_complex_dtype(a.dtype):
         return torch.logical_or(isinf(torch.real(a)), isinf(torch.imag(a)))
+    if a.dtype == torch.float8_e5m2:
+        # As in eager: float("inf") would saturate to float8_e5m2's max.
+        return isinf(a.to(torch.float16))
     if utils.is_float_dtype(a.dtype):
         return torch.abs(a) == float("inf")
     return torch.zeros_like(a, dtype=torch.bool)
@@ -835,6 +838,8 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
     )
+    if a.dtype == torch.float8_e5m2:
+        return isposinf(a.to(torch.float16))
     if utils.is_float_dtype(a.dtype):
         return a == float("inf")
     return torch.zeros_like(a, dtype=torch.bool)
@@ -849,6 +854,8 @@ def isneginf(a: TensorLikeType) -> TensorLikeType:
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
     )
+    if a.dtype == torch.float8_e5m2:
+        return isneginf(a.to(torch.float16))
     if utils.is_float_dtype(a.dtype):
         return a == float("-inf")
     return torch.zeros_like(a, dtype=torch.bool)
@@ -2307,8 +2314,9 @@ def _check_to_dtype_rounded(a: TensorLikeType, dtype: torch.dtype, rounding: str
     """The checks of aten._to_dtype_rounded, in the same order as its kernel
     (check_to_dtype_rounded in aten/src/ATen/native/RoundedConversion.cpp)."""
     torch._check(
-        a.layout == torch.strided,
-        lambda: f"rounding is only supported for strided tensors, but got {a.layout}",
+        a.layout == torch.strided and not a.is_nested,
+        lambda: "rounding is only supported for strided, non-nested tensors, but got "
+        + ("a nested tensor" if a.is_nested else str(a.layout)),
     )
     narrower = {
         torch.float64: (torch.float32, torch.float16, torch.bfloat16),
@@ -2366,8 +2374,16 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
         if device is None:
             return to(convert(a), **kwargs)
         device = torch.device(device)
-        if has_kernel(a.device) and (a.device.type != "cpu" or not has_kernel(device)):
+        # For a target of the same type, dispatch decides where to convert.
+        if device.type == a.device.type or (
+            has_kernel(a.device) and (a.device.type != "cpu" or not has_kernel(device))
+        ):
             return to(convert(a), **kwargs)
+        torch._check_not_implemented(
+            has_kernel(device),
+            lambda: "Tensor.to(..., round=...) converts on CPU or CUDA, but got a "
+            f"conversion from {a.device} to {device}",
+        )
         return convert(to(a, **kwargs))
 
     _canonicalize_to_arguments(a, kwargs)

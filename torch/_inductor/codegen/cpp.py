@@ -762,6 +762,10 @@ class CppOverrides(OpOverrides):
             # abs(x) == x for unsigned types; return identity to avoid
             # -Wtautological-compare and unsigned unary minus warnings.
             return f"{x}"
+        if isinstance(x, CppCSEVariable) and x.dtype == torch.float8_e5m2:
+            # Exact, unlike std::abs, which goes through float, whose
+            # conversion back saturates infinities.
+            return f"c10::Float8_e5m2({x}.x & 0x7F, c10::Float8_e5m2::from_bits())"
         return f"std::abs({x})"
 
     @staticmethod
