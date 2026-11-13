@@ -72,7 +72,7 @@ void lstm_forward_inference(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_forward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},
@@ -205,7 +205,7 @@ void lstm_forward_training(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_forward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},
@@ -327,7 +327,7 @@ void lstm_backward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_backward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},

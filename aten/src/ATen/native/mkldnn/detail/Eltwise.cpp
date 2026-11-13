@@ -38,7 +38,7 @@ void eltwise_forward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::eltwise_forward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC, src_in},
        {DNNL_ARG_DST, dst},
        {DNNL_ARG_SCRATCHPAD, scratchpad}});
@@ -112,7 +112,7 @@ void eltwise_backward(
   auto expected_src_dst = src.reorder_if_differ_in(expected_src_dst_desc);
   ITensor scratchpad(pd.scratchpad_desc());
   dnnl::eltwise_backward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {src_dst_arg, expected_src_dst},
        {DNNL_ARG_DIFF_SRC, expected_diff_src},

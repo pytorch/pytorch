@@ -31,7 +31,7 @@ void sum(
     args.insert({DNNL_ARG_MULTIPLE_SRC + static_cast<int>(i), srcs[i]});
   }
 
-  dnnl::sum(pd).execute(Stream::default_stream(), args);
+  dnnl::sum(pd).execute(IStream::default_stream(), args);
 }
 
 void binary(
@@ -58,7 +58,7 @@ void binary(
   dst.reinit_if_possible(pd.dst_desc());
 
   dnnl::binary(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC_0, expected_src0},
        {DNNL_ARG_SRC_1, expected_src1},
        {DNNL_ARG_DST, dst},

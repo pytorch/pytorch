@@ -249,7 +249,7 @@ void do_compute_binary(
       expected_dst = dst;
     }
     args.insert({DNNL_ARG_DST, expected_dst});
-    primitive.execute(Stream::default_stream(), args);
+    primitive.execute(IStream::default_stream(), args);
 
     // reorder back to dst's buffer if needed
     if (dst.is_empty() ||
@@ -272,7 +272,7 @@ void do_compute_binary(
 #endif
     }
     args.insert({DNNL_ARG_DST, dst});
-    primitive.execute(Stream::default_stream(), args);
+    primitive.execute(IStream::default_stream(), args);
   }
 }
 
@@ -325,7 +325,7 @@ void do_compute_(
       expected_dst = dst;
     }
     args.insert({DNNL_ARG_DST, expected_dst});
-    primitive.execute(Stream::default_stream(), args);
+    primitive.execute(IStream::default_stream(), args);
 
     // reorder back to dst's buffer if needed
     if (dst.is_empty() ||
@@ -348,7 +348,7 @@ void do_compute_(
 #endif
     }
     args.insert({DNNL_ARG_DST, dst});
-    primitive.execute(Stream::default_stream(), args);
+    primitive.execute(IStream::default_stream(), args);
   }
 }
 
@@ -486,7 +486,7 @@ void backward_weights_compute_impl(
   }
 
   dnnl::inner_product_backward_weights(pd).execute(
-      Stream::default_stream(), args);
+      IStream::default_stream(), args);
   // reorder back to diff_weights's buffer if needed
   if (diff_weights.is_empty() ||
       diff_weights.get_desc() == expected_diff_weights.get_desc() ||
@@ -663,7 +663,7 @@ void inner_product_backward_data(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::inner_product_backward_data(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_WEIGHTS, expected_weights},
        {DNNL_ARG_DIFF_SRC, expected_diff_src},

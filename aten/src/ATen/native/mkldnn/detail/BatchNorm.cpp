@@ -40,7 +40,7 @@ void batch_normalization_forward_inference(
   auto expected_mean = mean.reorder_if_differ_in(pd.mean_desc());
   auto expected_var = variance.reorder_if_differ_in(pd.variance_desc());
   dnnl::batch_normalization_forward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_SCALE, scale},
        {DNNL_ARG_SHIFT, shift},
@@ -84,7 +84,7 @@ void batch_normalization_forward_training(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::batch_normalization_forward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_SCALE, scale},
        {DNNL_ARG_SHIFT, shift},
@@ -151,7 +151,7 @@ void batch_normalization_backward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::batch_normalization_backward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_SCALE, scale},

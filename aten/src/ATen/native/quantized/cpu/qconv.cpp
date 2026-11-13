@@ -1856,7 +1856,7 @@ static at::Tensor _quantized_convolution_onednn(
   if (output_zero_point != 0) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_t});
   }
-  primitive.execute(at::native::mkldnn::Stream::default_stream(), args);
+  primitive.execute(at::native::mkldnn::IStream::default_stream(), args);
 #else
   // Scales of ONEDNN and PyTorch are reciprocal
   const std::vector<float>& src_scales = std::vector<float>(1, 1.0 / act_scale);

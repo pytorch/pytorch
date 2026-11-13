@@ -27,7 +27,7 @@ void softmax_forward(
       op_attr);
   ITensor scratchpad(pd.scratchpad_desc());
   dnnl::softmax_forward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC, src},
        {DNNL_ARG_DST, dst},
        {DNNL_ARG_SCRATCHPAD, scratchpad}});

@@ -701,7 +701,7 @@ void do_compute(
       expected_dst = dst;
     }
     args.insert({DNNL_ARG_DST, expected_dst});
-    primitive.execute(Stream::default_stream(), args);
+    primitive.execute(IStream::default_stream(), args);
     // reorder back to dst's buffer if needed
     if (dst.is_empty() || dst.get_desc() == expected_dst.get_desc() ||
         !dst.get_desc().has_same_shape_as(expected_dst.get_desc())) {
@@ -711,7 +711,7 @@ void do_compute(
     }
   } else {
     args.insert({DNNL_ARG_DST, dst});
-    primitive.execute(Stream::default_stream(), args);
+    primitive.execute(IStream::default_stream(), args);
   }
 }
 
@@ -773,7 +773,7 @@ void do_compute_binary(
   if (with_bias) {
     args.insert({DNNL_ARG_BIAS, bias});
   }
-  primitive.execute(Stream::default_stream(), args);
+  primitive.execute(IStream::default_stream(), args);
 }
 
 // Ported from ideep::convolution_forward::compute_dispatch.
@@ -1339,7 +1339,7 @@ void backward_weights_compute_impl(
   if (with_diff_bias) {
     diff_bias.reinit_if_possible(pd.diff_bias_desc());
     dnnl::convolution_backward_weights(pd).execute(
-        Stream::default_stream(),
+        IStream::default_stream(),
         {{DNNL_ARG_DIFF_DST, expected_diff_dst},
          {DNNL_ARG_SRC, expected_src},
          {DNNL_ARG_DIFF_WEIGHTS, expected_diff_weights},
@@ -1347,7 +1347,7 @@ void backward_weights_compute_impl(
          {DNNL_ARG_SCRATCHPAD, scratchpad}});
   } else {
     dnnl::convolution_backward_weights(pd).execute(
-        Stream::default_stream(),
+        IStream::default_stream(),
         {{DNNL_ARG_DIFF_DST, expected_diff_dst},
          {DNNL_ARG_SRC, expected_src},
          {DNNL_ARG_DIFF_WEIGHTS, expected_diff_weights},
@@ -1935,7 +1935,7 @@ void convolution_backward_data_compute_v2(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::convolution_backward_data(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_WEIGHTS, expected_weights},
        {DNNL_ARG_DIFF_SRC, diff_src},

@@ -661,7 +661,7 @@ void do_compute(
       expected_dst = dst;
     }
     args.insert({DNNL_ARG_DST, expected_dst});
-    primitive.execute(Stream::default_stream(), args);
+    primitive.execute(IStream::default_stream(), args);
     // reorder back to dst's buffer if needed
     if (dst.is_empty() || dst.get_desc() == expected_dst.get_desc() ||
         !dst.get_desc().has_same_shape_as(expected_dst.get_desc())) {
@@ -671,7 +671,7 @@ void do_compute(
     }
   } else {
     args.insert({DNNL_ARG_DST, dst});
-    primitive.execute(Stream::default_stream(), args);
+    primitive.execute(IStream::default_stream(), args);
   }
 }
 
@@ -750,7 +750,7 @@ void do_compute_dynamic_quant(
   // Reroder src (f32 -> u8)
   ITensor expected_src(expected_src_desc);
   src_reorder.execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_FROM, src},
        {DNNL_ARG_TO, expected_src},
        {DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, src_scales_m},
@@ -790,7 +790,7 @@ void do_compute_dynamic_quant(
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_m});
   args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zero_point_m});
 
-  primitive.execute(Stream::default_stream(), args);
+  primitive.execute(IStream::default_stream(), args);
 }
 
 // Ported from ideep::matmul_forward::compute_impl.

@@ -715,7 +715,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   if (with_bias) {
     args.insert({DNNL_ARG_BIAS, onednn_bias.value()});
   }
-  primitive.execute(at::native::mkldnn::Stream::default_stream(), args);
+  primitive.execute(at::native::mkldnn::IStream::default_stream(), args);
   return dim == 2 ? output : output.reshape(output_size);
 }
 
