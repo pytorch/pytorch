@@ -201,6 +201,9 @@ class FSDPParam:
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: tuple[int, ...]
     padded_sharded_param_size: torch.Size  # ND
+    # Whether this rank's Shard(i), i > 0, shard is shorter than the padded shard,
+    # so collectives pad it (Shard(0) shards are stored padded)
+    needs_nonzero_dim_padding: bool
     sharded_post_forward_size: torch.Size  # ND
     contiguous_sharded_post_forward_stride: tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
@@ -350,15 +353,6 @@ class FSDPParam:
             shard_rank = 0
             shard_world_size = 1
 
-        if shard_dim > 0 and param_data.size(shard_dim) % shard_world_size != 0:
-            # If sharding on nonzero dim, require even sharding for now because
-            # the uneven sharding (1) requires extra copies before/after FSDP
-            # collectives and (2) introduces extra complexity to handle padding
-            # and unpadding
-            raise NotImplementedError(
-                f"FSDP does not support uneven sharding on dim {shard_dim}: "
-                f"{param_data.size()} (world size: {shard_world_size})"
-            )
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
         sharded_param = chunks[shard_rank]
         self.sharded_size = _get_dim_chunked_size(
@@ -367,13 +361,20 @@ class FSDPParam:
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         self.padded_sharded_param_size = padded_sharded_size
+        self.needs_nonzero_dim_padding = (
+            shard_dim != 0 and self.sharded_size != padded_sharded_size
+        )
         self._default_all_gather_output_layouts = (
             _get_all_gather_output_layout(
                 padded_sharded_size, shard_dim, shard_world_size
             ),
         )
-        # Pre-pad the sharded parameter to avoid padding before all-gather
-        padded_sharded_param = param_data.new_zeros(padded_sharded_size)
+        # Pre-pad the sharded parameter to avoid padding before all-gather. For
+        # Shard(i), i > 0, padding would sit between the rows of the dims before
+        # i, so keep the shard itself and pad it in all_gather_inputs if uneven.
+        padded_sharded_param = param_data.new_zeros(
+            padded_sharded_size if shard_dim == 0 else self.sharded_size
+        )
         if sharded_param.numel() > 0:
             padded_sharded_param.narrow(
                 dim=shard_dim, start=0, length=sharded_param.size(shard_dim)
@@ -870,6 +871,14 @@ class FSDPParam:
                 "requires fsdp_pre_all_gather and fsdp_post_all_gather to be "
                 f"defined: {inner_tensor}"
             )
+        if has_fsdp_pre_all_gather and isinstance(self.mesh_info, FSDPMeshInfo):
+            _validate_uneven_shard_pre_all_gather(
+                # pyrefly: ignore [missing-attribute]
+                inner_tensor.fsdp_pre_all_gather,
+                self._orig_size,
+                shard_dim=self.fsdp_placement.dim,
+                shard_world_size=self.mesh_info.shard_mesh_size,
+            )
         self._all_gather_metadata = None
         self._extension_all_gather_output_layouts = None
         self._extension_layouts_by_key = {}
@@ -906,9 +915,19 @@ class FSDPParam:
     ):
         if len(self.all_gather_outputs) > 0:
             return  # already initialized
+        output_numels = [numel * world_size for numel in all_gather_input_numels]
+        shard_dim = self.fsdp_placement.dim
+        if (
+            shard_dim != 0
+            and self._orig_size[shard_dim] % world_size != 0
+            and not hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather")
+        ):
+            # The copy-out drops the padding (see _default_all_gather_output_fn),
+            # while extensions receive it, as for Shard(0)
+            output_numels = [self._orig_size.numel()]
         self.all_gather_outputs = [
-            torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
-            for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
+            torch.empty(torch.Size([numel]), dtype=dtype, device=device)
+            for numel, dtype in zip(output_numels, all_gather_input_dtypes)
         ]
 
     def init_unsharded_param(self):
@@ -940,6 +959,23 @@ class FSDPParam:
                 self.param_dtype or self.orig_dtype,
             )
             self._all_gather_metadata = None
+            shard_dim = self.fsdp_placement.dim
+            if (
+                shard_dim != 0
+                and isinstance(self.mesh_info, FSDPMeshInfo)
+                and self._orig_size[shard_dim] % self.mesh_info.shard_mesh_size
+                and unsharded_tensor.numel() != self._orig_size.numel()
+            ):
+                # Unlike Shard(0) padding, which a prefix of the output drops,
+                # padding inside the rows must be dropped by the extension. Every
+                # rank gets the same output, so every rank raises.
+                raise ValueError(
+                    f"{self._display_name} is unevenly sharded on dim {shard_dim}, "
+                    "so fsdp_post_all_gather must drop the padding in each row of "
+                    "the all-gather outputs and return the "
+                    f"{tuple(self._orig_size)} parameter, but it returned a tensor "
+                    f"of size {tuple(unsharded_tensor.size())}"
+                )
         else:
             # For the default path (no post-all-gather), the all-gather output
             # gives the unsharded parameter data directly
@@ -1204,6 +1240,15 @@ class FSDPParam:
                 sharded_param_data = sharded_param_data.to(
                     self.device, non_blocking=True
                 )
+            if self.needs_nonzero_dim_padding:
+                dim = self.fsdp_placement.dim
+                padded = sharded_param_data.new_zeros(
+                    self.padded_sharded_param_size, dtype=self.param_dtype
+                )
+                padded.narrow(dim, 0, self.sharded_size[dim]).copy_(
+                    sharded_param_data.view(self.sharded_size)
+                )
+                return [padded.view(-1)]
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
@@ -1482,11 +1527,23 @@ class FSDPParam:
         padded_sharded_size = self.padded_sharded_param_size
         shard_dim = self.fsdp_placement.dim
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
-        if local_tensor.size() != padded_sharded_size and not same_local_tensor:
-            if shard_dim != 0:
+        if shard_dim != 0:
+            # Shard(i), i > 0, keeps the shard itself, without padding
+            if local_tensor.size() != self.sharded_size and not same_local_tensor:
                 raise AssertionError(
-                    f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
+                    f"Shard({shard_dim}) expects local tensor size {self.sharded_size}: "
+                    f"{local_tensor.size()=}"
                 )
+            if (
+                local_tensor.numel() == 0
+                and local_tensor.stride() != self.contiguous_sharded_stride
+            ):
+                # An empty shard, e.g. from distribute_tensor, can keep the strides
+                # of the tensor it views, but fused optimizers require the
+                # contiguous strides of its gradient
+                local_tensor = local_tensor.new_empty(self.sharded_size)
+                updated_local_tensor = True
+        elif local_tensor.size() != padded_sharded_size and not same_local_tensor:
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
                 local_tensor
@@ -1683,3 +1740,26 @@ def set_requires_grad_if_needed(
     # switch overhead
     if src_tensor.requires_grad != dst_tensor.requires_grad:
         dst_tensor.requires_grad_(src_tensor.requires_grad)
+
+
+def _validate_uneven_shard_pre_all_gather(
+    pre_all_gather: Callable[..., Any],
+    orig_size: torch.Size,
+    *,
+    shard_dim: int,
+    shard_world_size: int,
+) -> None:
+    """
+    Raises if the parameter is unevenly sharded on a nonzero dim and its
+    ``fsdp_pre_all_gather`` takes only ``mesh``: only the 5-argument hook gets
+    ``outer_size`` to pad its shard with (#137005).
+    """
+    uneven = shard_dim != 0 and orig_size[shard_dim] % shard_world_size != 0
+    if uneven and len(inspect.signature(pre_all_gather).parameters) == 1:
+        raise NotImplementedError(
+            f"FSDP does not support uneven sharding on dim {shard_dim} for "
+            "all-gather extensions whose fsdp_pre_all_gather takes only "
+            f"mesh: {orig_size} (world size: {shard_world_size}). Use "
+            "fsdp_pre_all_gather(self, mesh, outer_size, outer_stride, module, "
+            "mp_policy) to get the unsharded size to pad the shard with."
+        )
