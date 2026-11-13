@@ -109,6 +109,7 @@ def get_filtered_export_db_tests():
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@instantiate_parametrized_tests
 class TestSerialize(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -710,6 +711,130 @@ def forward(self, x):
         self.assertEqual(node.inputs[2].arg.as_bool, True)
         self.assertEqual(node.inputs[3].name, "side")
         self.assertEqual(node.inputs[3].arg.as_string, "right")
+
+    def test_hop_optional_kwarg_backward_compatibility(self) -> None:
+        from torch._higher_order_ops.while_loop import WhileLoopOp
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                def cond(i, x):
+                    return i < 2
+
+                def body(i, x):
+                    return i + 1, x + 1
+
+                return torch.ops.higher_order.while_loop(
+                    cond, body, (torch.tensor(0), x), ()
+                )[1]
+
+        original_call = WhileLoopOp.__call__
+
+        def legacy_call(self, cond_fn, body_fn, carried_inputs, additional_inputs, /):
+            return original_call(
+                self, cond_fn, body_fn, carried_inputs, additional_inputs
+            )
+
+        inputs = (torch.ones(2),)
+        buffer = io.BytesIO()
+        with patch.object(WhileLoopOp, "__call__", legacy_call):
+            ep = export(M(), inputs, strict=False)
+            node = next(
+                node
+                for node in ep.graph.nodes
+                if node.target is torch.ops.higher_order.while_loop
+            )
+            self.assertEqual(node.kwargs, {})
+            serialized = ExportedProgramSerializer().serialize(ep)
+            serialized_node = next(
+                node
+                for node in serialized.exported_program.graph_module.graph.nodes
+                if node.target == "torch.ops.higher_order.while_loop"
+            )
+            self.assertEqual(
+                [arg.kind for arg in serialized_node.inputs],
+                [ArgumentKind.POSITIONAL] * 4,
+            )
+            save(ep, buffer)
+
+        self.assertIs(WhileLoopOp.__call__, original_call)
+        buffer.seek(0)
+        loaded = load(buffer)
+        node = next(
+            node
+            for node in loaded.graph.nodes
+            if node.target is torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(node.kwargs, {})
+        self.assertEqual(loaded.module()(*inputs), torch.full((2,), 3.0))
+
+    @parametrize(
+        "case,kwargs,expected_kwargs",
+        [
+            ("omitted", {}, {}),
+            ("explicit_default", {"mutated_arg_indices": ""}, {}),
+            (
+                "non_default",
+                {"mutated_arg_indices": "1"},
+                {"mutated_arg_indices": "1"},
+            ),
+        ],
+        name_fn=lambda case, kwargs, expected_kwargs: case,
+    )
+    def test_hop_default_kwarg_serialization(
+        self, case, kwargs, expected_kwargs
+    ) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.hop_kwargs = kwargs
+
+            def forward(self, x):
+                def cond(i, x):
+                    return i < 2
+
+                def body(i, x):
+                    return i + 1, x + 1
+
+                return torch.ops.higher_order.while_loop(
+                    cond, body, (torch.tensor(0), x), (), **self.hop_kwargs
+                )[1]
+
+        inputs = (torch.ones(2),)
+        ep = export(M(), inputs, strict=False)
+        node = next(
+            node
+            for node in ep.graph.nodes
+            if node.target is torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(node.kwargs, expected_kwargs)
+        serialized = ExportedProgramSerializer().serialize(ep)
+        serialized_node = next(
+            node
+            for node in serialized.exported_program.graph_module.graph.nodes
+            if node.target == "torch.ops.higher_order.while_loop"
+        )
+        self.assertEqual(
+            [arg for arg in serialized_node.inputs if arg.kind == ArgumentKind.KEYWORD],
+            [
+                schema.NamedArgument(
+                    name=name,
+                    arg=schema.Argument.create(as_string=value),
+                    kind=ArgumentKind.KEYWORD,
+                )
+                for name, value in expected_kwargs.items()
+            ],
+        )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded = load(buffer)
+        node = next(
+            node
+            for node in loaded.graph.nodes
+            if node.target is torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(node.kwargs, expected_kwargs)
+        self.assertEqual(loaded.module()(*inputs), torch.full((2,), 3.0))
 
     def test_canonicalize(self) -> None:
         class Module(torch.nn.Module):
