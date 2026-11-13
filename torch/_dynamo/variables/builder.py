@@ -81,7 +81,6 @@ from torch._subclasses.fake_tensor import (
     maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
-from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
 from torch.fx.experimental.dynamic_spec import (
@@ -946,7 +945,9 @@ def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
             context=str(error),
             explanation="This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
             hints=[
-                "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+.",
+                "Snapshots are not implemented on Python 3.16+. On older free-threaded "
+                "Python, empty OrderedDicts remain supported; nonempty ones require "
+                "Python 3.14.1+. Keep unsupported inputs outside fullgraph capture.",
             ],
             from_exc=error,
             skip_frame=True,
@@ -3986,7 +3987,6 @@ class VariableBuilder:
             # when specialize_float=False
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda
             or torch._inductor.config.triton.cudagraphs
-            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or (
                 config.assume_static_by_default
                 and frame_state_entry.scalar is not auto_dynamic
