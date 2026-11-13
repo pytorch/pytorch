@@ -43,6 +43,17 @@ class FakeWork : public Work {
     return fut;
   }
 
+  // Succeeded at issue, like isCompleted().
+  c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override {
+    auto fut =
+        c10::make_intrusive<c10::ivalue::Future>(c10::AnyEnumType::get());
+    fut->markCompleted(at::IValue(static_cast<uint8_t>(WorkResult::SUCCESS)));
+    return fut;
+  }
+  bool hasFutureResult() const override {
+    return true;
+  }
+
  private:
   std::vector<at::Tensor> result_;
 };

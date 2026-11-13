@@ -358,6 +358,13 @@ See the [maintainer guide](maintainer_guide.md) for how to triage and review iss
 - Paul Zhang ([PaulZhang12](https://github.com/PaulZhang12))
 - (emeritus) Dmytro Ivchenko ([divchenko](https://github.com/divchenko))
 
+### TensorDict
+
+- Peter Sharpe ([peterdsharpe](https://github.com/peterdsharpe))
+- Ben Sprenger ([bsprenger](https://github.com/bsprenger))
+- Achintya Paningapalli ([theap06](https://github.com/theap06))
+- (emeritus) Vincent Moens ([vmoens](https://github.com/vmoens))
+
 ## Sunsetted Modules
 
 ### TorchTune
