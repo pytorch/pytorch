@@ -1057,9 +1057,12 @@ DEFINE_CACHED_PYTHON_IMPORT(
     get_fake_tensor_tls,
     py::module::import("torch._subclasses.fake_tensor").attr("fake_tensor_tls"))
 DEFINE_CACHED_PYTHON_IMPORT(
-    get_resolve_device_conflict,
+    get_functorch_config,
+    py::module::import("torch._functorch.config"))
+DEFINE_CACHED_PYTHON_IMPORT(
+    get_fake_tensor_device_mismatch_error,
     py::module::import("torch._subclasses.fake_tensor")
-        .attr("_resolve_device_conflict"))
+        .attr("FakeTensorDeviceMismatchError"))
 
 #undef DEFINE_CACHED_PYTHON_IMPORT
 
@@ -1244,9 +1247,26 @@ c10::Device ConcretePyInterpreterVTable::_resolve_device_conflict(
     c10::Device common_device,
     c10::Device device) const {
   py::gil_scoped_acquire gil;
-  return get_resolve_device_conflict()(
-             getTorchApiFunction(op), common_device, device)
-      .cast<c10::Device>();
+  // Match fake_tensor._resolve_device_conflict, including substring matching.
+  // Read the live config: overrides can change within an existing mode.
+  const auto preference =
+      get_functorch_config().attr("fake_tensor_prefer_device_type");
+  if (!preference.is_none()) {
+    const auto preferred = preference.cast<std::string>();
+    const bool common_has_preferred =
+        c10::DeviceTypeName(common_device.type(), /*lower_case=*/true)
+            .find(preferred) != std::string::npos;
+    const bool device_has_preferred =
+        c10::DeviceTypeName(device.type(), /*lower_case=*/true)
+            .find(preferred) != std::string::npos;
+    if (common_has_preferred != device_has_preferred) {
+      return device_has_preferred ? device : common_device;
+    }
+  }
+  auto error_type = get_fake_tensor_device_mismatch_error();
+  auto error = error_type(getTorchApiFunction(op), common_device, device);
+  PyErr_SetObject(error_type.ptr(), error.ptr());
+  throw py::error_already_set();
 }
 
 // Try a registered Python decomposition for op.
