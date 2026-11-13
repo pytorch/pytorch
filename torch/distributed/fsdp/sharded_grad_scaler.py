@@ -42,6 +42,17 @@ class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
         self.master = master_tensor
         self._per_device_tensors: dict[torch.device, torch.Tensor] = {}
 
+    def get(self, device: torch.device) -> torch.Tensor:
+        retval = self._per_device_tensors.get(device, None)
+        if retval is None:
+            # CPU kernels access the replica immediately, so a non-blocking
+            # device-to-host copy could land after them and clobber the result.
+            retval = self.master.to(
+                device=device, non_blocking=device.type != "cpu", copy=True
+            )
+            self._per_device_tensors[device] = retval
+        return retval
+
 
 def _infer_default_device() -> str:
     # A half-registered backend (accelerator hooks registered without a
