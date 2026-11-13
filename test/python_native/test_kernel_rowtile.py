@@ -172,7 +172,7 @@ class TestKernelRowTile(TestCase):
         # One GPU has no other device, so pretend another one is current.
         x = torch.randn(64, 512, device="cuda")
         other = x.get_device() + 1
-        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+        with mock.patch.object(torch._C, "_cuda_getDevice", return_value=other):
             self._assert_launchers_reject(x)
 
     def test_two_output_trait(self):

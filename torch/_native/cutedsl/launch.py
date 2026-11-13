@@ -3,8 +3,10 @@
 # ENV detection misses tensors inside lists and packed-id lookup deadlocks capture. read_only()
 # exports COW inputs through const_data_ptr() to avoid forbidden materialization in backward.
 
-from collections.abc import Callable, Sequence
-from typing import Any, overload, TYPE_CHECKING
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, NamedTuple, overload, TYPE_CHECKING
 
 import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 
@@ -13,6 +15,7 @@ import cutlass.cute as cute
 
 import torch
 from torch._native.utils.tensor import const_data_ptr
+from torch.utils._pytree import tree_leaves
 from torch.utils.dlpack import ReadOnlyTensorWrapper
 
 
@@ -80,3 +83,245 @@ def stream(device_index: int | None = None) -> cuda.CUstream:
     if device_index is None:
         device_index = torch.cuda.current_device()
     return cuda.CUstream(torch._C._cuda_getCurrentRawStream(device_index))
+
+
+class _View(NamedTuple):
+    slot: int  # -1 for the recorded input, else a buffer index
+    whole: bool  # the operand is the slot's tensor itself
+    size: tuple[int, ...]
+    stride: tuple[int, ...]
+    offset: int
+
+
+_RECORD: ContextVar["LaunchRecord | None"] = ContextVar("_RECORD", default=None)
+
+
+def _storage_id(t: torch.Tensor) -> int:
+    # The StorageImpl address: data_ptr() would materialize a COW input.
+    return t.untyped_storage()._cdata
+
+
+def _geometry(t: torch.Tensor) -> tuple[tuple[int, ...], tuple[int, ...], int]:
+    return tuple(t.shape), t.stride(), t.storage_offset()
+
+
+def launch(fn: "Function", device: int, ins: Any, *args: Any) -> None:
+    """Call compiled `fn` on `device`'s current stream. `ins`, a tensor or a list of
+    tensors, is exported read-only; tensors in `args`, bare or in lists, are outputs.
+    This calls fn(read-only ins, *args, stream), so kernels are compiled with the stream
+    as their last parameter and callers do not pass it.
+
+    While recording, launches must follow LaunchRecord's replay contract; a direct
+    compiled-kernel call is missing from the replay.
+    """
+    record = _RECORD.get()
+    if record is not None:
+        record.add(fn, device, ins, args)
+    ins = [read_only(t) for t in ins] if isinstance(ins, list) else read_only(ins)
+    fn(ins, *args, stream(device))
+
+
+class LaunchRecord:
+    """The launches that computed outputs from `x`, replayable on any input that matches
+    x's dtype, device, sizes, strides, storage offset, storage size and pointer alignment.
+
+    A replay allocates every buffer uninitialized and repeats only the launches, so
+    callers must ensure that no recorded launch depends on an output buffer's contents
+    from before the recorded launches wrote it (later launches may read earlier
+    launches' outputs, e.g. gensplit2 combines gensplit1's partials), that every
+    compiled-kernel call goes through launch(), and that no torch op writes data to a
+    launch buffer while recording (resizes that do not grow the storage are fine).
+    finish() catches a direct call only when it writes a storage no launch has seen and a
+    launch then reads that storage, or that storage is returned without a launch writing
+    it.
+    finish() returns None unless every operand views `x` or a buffer whose storage first
+    appeared in a launch's output position, before any input position, and every output
+    views a distinct such buffer. Torch-op results that a launch reads, or that are
+    returned without a launch writing them, therefore decline, as do operands that view
+    `x` at another dtype than `x.dtype`, or a buffer at another dtype than its first
+    sighting; the first rule above is what protects tensors first passed as launch
+    outputs. Buffers are keyed by storage, since views made below autograd do not
+    record their base.
+    """
+
+    def __init__(self, x: torch.Tensor) -> None:
+        self._x = x
+        self._device = x.device
+        self._slots = {_storage_id(x): -1}
+        # Holding the buffers keeps their storage ids unique while recording.
+        self._buffers: list[torch.Tensor] = []
+        self._allocs: list[tuple[int, torch.dtype]] = []
+        self._launches: list[tuple[Function, int, Any, tuple[Any, ...]]] = []
+        self._ok = True
+
+    @staticmethod
+    def input_key(x: torch.Tensor, max_align: int) -> tuple[Any, ...]:
+        """The metadata of `x` a replay must match, alignment capped at `max_align`."""
+        # Routes and compiled kernels assume the pointer's alignment, and a storage base
+        # need not be allocator-aligned (e.g. a sliced UntypedStorage).
+        return (
+            x.dtype,
+            x.get_device(),
+            x.shape,
+            x.stride(),
+            x.storage_offset(),
+            x.untyped_storage().nbytes(),
+            supported_alignment(x, max_align),
+        )
+
+    def _view(self, t: torch.Tensor, written: bool) -> _View | None:
+        slot = self._slots.get(_storage_id(t))
+        if slot is None:
+            if not written:
+                return None
+            slot = self._slots[_storage_id(t)] = len(self._buffers)
+            self._buffers.append(t)
+            numel = t.untyped_storage().nbytes() // t.element_size()
+            self._allocs.append((numel, t.dtype))
+        if slot < 0:
+            dtype, whole = self._x.dtype, _geometry(self._x)
+        else:
+            numel, dtype = self._allocs[slot]
+            whole = ((numel,), (1,), 0)
+        if t.dtype != dtype:
+            return None
+        return _View(slot, _geometry(t) == whole, *_geometry(t))
+
+    def _template(self, value: Any, written: bool) -> Any:
+        if isinstance(value, list):
+            return [self._template(v, written) for v in value]
+        if isinstance(value, torch.Tensor):
+            view = self._view(value, written)
+            self._ok = self._ok and view is not None
+            return view
+        # Replays substitute bare tensors and tensors in lists only; others go stale.
+        if any(isinstance(leaf, torch.Tensor) for leaf in tree_leaves(value)):
+            self._ok = False
+        return value
+
+    def add(self, fn: "Function", device: int, ins: Any, args: tuple[Any, ...]) -> None:
+        ins = self._template(ins, written=False)
+        args = tuple(self._template(a, written=True) for a in args)
+        self._launches.append((fn, device, ins, args))
+
+    def finish(self, outs: Sequence[torch.Tensor]) -> "LaunchReplay | None":
+        views = [self._view(out, written=False) for out in outs]
+        slots = [-1 if view is None else view.slot for view in views]
+        if not self._ok or not slots or min(slots) < 0 or len(set(slots)) < len(slots):
+            return None
+        devices = list(dict.fromkeys(device for _, device, _, _ in self._launches))
+        launches = [
+            _ReplayLaunch(fn, devices.index(device), *_compile_params([ins, *args]))
+            for fn, device, ins, args in self._launches
+        ]
+        return LaunchReplay(self._device, self._allocs, devices, launches, views)
+
+
+# (path of the list holding the slot, index in it, view, whether a COW input is wrapped)
+_Slot = tuple[tuple[int, ...], int, _View, bool]
+
+
+class _ReplayLaunch(NamedTuple):
+    fn: "Function"
+    device: int  # index into LaunchReplay's devices
+    params: tuple[Any, ...]  # fn's arguments before the stream, tensor slots unfilled
+    lists: tuple[tuple[int, ...], ...]  # paths of lists holding slots, outer first
+    slots: tuple[_Slot, ...]
+
+
+def _compile_params(
+    params: list[Any],
+) -> tuple[tuple[Any, ...], tuple[tuple[int, ...], ...], tuple[_Slot, ...]]:
+    lists: list[tuple[int, ...]] = []
+    slots: list[_Slot] = []
+
+    def walk(values: list[Any], path: tuple[int, ...]) -> bool:
+        start = len(slots)
+        for i, value in enumerate(values):
+            if isinstance(value, _View):
+                # launch() exports ins, params[0], read-only, and only x can be COW.
+                wrapped = (path + (i,))[0] == 0 and value.slot < 0
+                slots.append((path, i, value, wrapped))
+            elif isinstance(value, list):
+                at = len(lists)
+                lists.append(path + (i,))
+                if not walk(value, path + (i,)):
+                    del lists[at:]
+        return len(slots) > start
+
+    walk(params, ())
+    return tuple(params), tuple(lists), tuple(slots)
+
+
+@contextmanager
+def recording(x: torch.Tensor) -> Iterator[LaunchRecord]:
+    """Record the launches made from `x` in this context. Recordings must not nest: a
+    nested recording would hide its launches from the outer one, so nesting raises."""
+    if _RECORD.get() is not None:
+        raise RuntimeError("launch recordings must not nest")
+    record = LaunchRecord(x)
+    token = _RECORD.set(record)
+    try:
+        yield record
+    finally:
+        _RECORD.reset(token)
+
+
+def recording_active() -> bool:
+    return _RECORD.get() is not None
+
+
+class LaunchReplay:
+    """Fresh buffers and the recorded launches on them; see LaunchRecord. Replays call
+    the compiled kernels directly, so no recording sees them; replay_reduce never
+    replays under a recording."""
+
+    def __init__(
+        self,
+        device: torch.device,
+        allocs: list[tuple[int, torch.dtype]],
+        devices: list[int],
+        launches: list[_ReplayLaunch],
+        outs: list[_View],
+    ) -> None:
+        self._device = device
+        self._allocs = allocs
+        self._devices = devices
+        self._launches = launches
+        self._outs = outs
+
+    def __call__(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        bufs = [
+            torch.empty(numel, dtype=dtype, device=self._device)
+            for numel, dtype in self._allocs
+        ]
+        # Wrapping costs about 1.5 us, so only a COW input (or a subclass, which launch()
+        # would strip) is exported through read_only().
+        wrap = type(x) is not torch.Tensor or torch._C._is_cow_tensor(x)
+        streams = [stream(device) for device in self._devices]
+        for fn, device, template, lists, slots in self._launches:
+            params = list(template)
+            for path in lists:
+                parent = params
+                for i in path[:-1]:
+                    parent = parent[i]
+                parent[path[-1]] = list(parent[path[-1]])
+            for path, i, view, wrapped in slots:
+                t = x if view.slot < 0 else bufs[view.slot]
+                if not view.whole:
+                    t = t.as_strided(view.size, view.stride, view.offset)
+                if wrapped and wrap:
+                    t = read_only(t)
+                parent = params
+                for j in path:
+                    parent = parent[j]
+                parent[i] = t
+            fn(*params, streams[device])
+        outs = []
+        for view in self._outs:
+            out = bufs[view.slot]
+            if not view.whole:
+                # Outputs own their storage rather than viewing a buffer.
+                out.as_strided_(view.size, view.stride, view.offset)
+            outs.append(out)
+        return tuple(outs)

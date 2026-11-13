@@ -9,6 +9,9 @@ import torch
 
 def const_data_ptr(tensor: torch.Tensor) -> int:
     """Read a pointer without materializing COW or re-entering torch_function."""
+    # A plain tensor has no subclass __torch_function__ to disable.
+    if type(tensor) is torch.Tensor:
+        return tensor.const_data_ptr()
     with torch._C.DisableTorchFunctionSubclass():
         return tensor.const_data_ptr()
 
