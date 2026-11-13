@@ -55,6 +55,7 @@ from .utils import (
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
+from .virtualized import V
 
 
 _T = TypeVar("_T")
@@ -154,7 +155,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.lerp,
     aten.lerp_,
     aten.special_log_ndtr,  # inductor re-registers with copysign wrapper (#187336)
-    aten.roll.default,  # inductor re-registers to honor avoid_modular_indexing
+    aten.roll.default,  # inductor re-registers to roll with two slices where the backend avoids modular indexing
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -186,7 +187,7 @@ def adaptive_max_pool3d(input, output_size):
 
 @register_decomposition([aten.roll.default])
 def roll(a: torch.Tensor, shifts: DimsType, dims: DimsType = ()) -> torch.Tensor:
-    if not config.avoid_modular_indexing:
+    if V.choices.use_modular_indexing(a.device, kind="roll"):
         return decomp_roll(a, shifts, dims)
     if not isinstance(shifts, Sequence):
         shifts = (shifts,)
