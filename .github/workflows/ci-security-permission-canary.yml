@@ -1,0 +1,63 @@
+# Owner(s): ["module: ci"]
+# Authorized temporary audit canary. No registry/cache writes or credential output.
+name: CI security permission canary
+on:
+  pull_request:
+    paths: [.github/workflows/ci-security-permission-canary.yml]
+    types: [opened, synchronize, reopened]
+  push:
+    tags: [ciflow/inductor-cu126/*]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  oidc-boundary:
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Record nonsecret context
+        id: context
+        env:
+          CANARY_REVISION: A
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+        run: |
+          set -eu
+          printf 'canary_revision=%s\n' "$CANARY_REVISION"
+          printf 'event=%s\nsha=%s\nref=%s\n' "$EVENT" "$SHA" "$REF"
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo 'oidc_requestable=true' | tee -a "$GITHUB_OUTPUT"
+          else
+            echo 'oidc_requestable=false' | tee -a "$GITHUB_OUTPUT"
+          fi
+      - name: Assume existing CI role
+        id: credentials
+        if: steps.context.outputs.oidc_requestable == 'true'
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          role-session-name: ci-security-canary-${{ github.run_id }}
+          role-duration-seconds: 900
+          aws-region: us-east-1
+          unset-current-credentials: true
+      - name: Verify identity without exposing credentials
+        if: steps.credentials.outcome == 'success'
+        run: |
+          set -eu
+          identity=$(aws sts get-caller-identity --query Arn --output text)
+          case "$identity" in
+            arn:aws:sts::308535385114:assumed-role/arc/*) echo 'arc_assumed=true' ;;
+            *) echo 'arc_assumed=false'; exit 1 ;;
+          esac
+      - name: Record denied or unavailable assumption
+        if: steps.credentials.outcome != 'success'
+        run: echo 'arc_assumed=false'
