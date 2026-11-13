@@ -61,6 +61,7 @@ from torch._functorch.aot_autograd import (
     make_boxed_func,
     SerializableAOTDispatchCompiler,
 )
+from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
@@ -126,7 +127,7 @@ from .decomposition import select_decomp_table
 from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import (
-    decompose_triton_kernel_wrapper_functional,
+    decompose_user_kernel_wrapper_functional,
     post_grad_passes,
     view_to_reshape,
 )
@@ -783,30 +784,31 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         _propagate_invoke_subgraph_nested_region_config(gm)
         with _patch_nested_region_inductor_config(gm):
             if not config.use_post_grad_passes:
-                # triton_kernel_wrapper_functional (a user-defined Triton kernel already
-                # in the model) has no inductor lowering; post_grad_passes normally
-                # decomposes it into its mutation form, which lowers to a
-                # UserDefinedTritonKernel and compiles into the AOT artifact. With
-                # post-grad passes disabled (e.g. lite mode / fallback_by_default), still
-                # run just that decomposition -- it is a correctness pass, not an
-                # optimization -- so such kernels keep compiling instead of hard-erroring
-                # at lowering (the functional HOP is neither an OpOverload with a lowering
-                # nor serializable by the proxy executor). Gated on the graph actually
-                # containing one so a lite-mode graph without user Triton kernels -- the
-                # common case -- pays neither the pattern match nor the recompile.
+                # A user-kernel functional HOP (e.g. triton_kernel_wrapper_functional,
+                # a user-defined Triton kernel already in the model) has no inductor
+                # lowering; post_grad_passes normally decomposes it into its mutation
+                # form, which lowers to a UserDefined*Kernel and compiles into the AOT
+                # artifact. With post-grad passes disabled (e.g. lite mode /
+                # fallback_by_default), still run just that decomposition -- it is a
+                # correctness pass, not an optimization -- so such kernels keep
+                # compiling instead of hard-erroring at lowering (the functional HOP is
+                # neither an OpOverload with a lowering nor serializable by the proxy
+                # executor). Gated on the graph actually containing one so a lite-mode
+                # graph without user kernels -- the common case -- pays neither the
+                # pattern match nor the recompile.
                 #
                 # Reinplacing must run FIRST: the decomposition emits "clone(s) + the
                 # mutation node" and relies on it to mark which clones are unnecessary,
-                # so without it every user Triton kernel pays a device-to-device copy.
-                if gm.graph.find_nodes(
-                    op="call_function",
-                    target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+                # so without it every user kernel pays a device-to-device copy.
+                if any(
+                    gm.graph.find_nodes(op="call_function", target=info.functional)
+                    for info in user_kernel_hop_infos()
                 ):
                     from .fx_passes.reinplace import reinplace_inplaceable_ops
                     from .fx_utils import FakeTensorUpdater
 
                     reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
-                    decompose_triton_kernel_wrapper_functional(gm.graph)
+                    decompose_user_kernel_wrapper_functional(gm.graph)
                     gm.recompile()
                 return
 
@@ -934,12 +936,10 @@ def maybe_disable_comprehensive_padding(
 
 
 def maybe_disable_graph_partition(
-    cpp_wrapper: bool, aot_mode: bool
+    cpp_wrapper: bool, aot_mode: bool, fx_wrapper: bool
 ) -> AbstractContextManager[None, None]:
-    """
-    graph partition does not support cpp_wrapper and aot_mode yet.
-    """
-    if cpp_wrapper or aot_mode:
+    """Graph partitioning is only supported by the non-AOT Python wrapper."""
+    if cpp_wrapper or fx_wrapper or aot_mode:
         return config.patch(graph_partition=False)
     else:
         return contextlib.nullcontext()
@@ -957,7 +957,9 @@ def fake_tensor_prop(
     """
     # Ensure that decomps that support symbolic shapes are used
     with enable_python_dispatcher():
-        fake_mode = detect_fake_mode(example_inputs)
+        fake_mode = torch._guards.require_python_fake_mode(
+            detect_fake_mode(example_inputs)
+        )
         if not fake_mode:
             fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
             FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
@@ -980,7 +982,11 @@ def get_patched_config_dict(
     config_patches: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with patch_compile_options(config_patches):
-        config_copy = config.get_config_copy()
+        # Entries excluded from saved configs, such as custom passes, can hold
+        # arbitrary state, so they are not deep-copied.
+        config_copy = config.get_serializable_config_copy()
+        for name in config._save_config_ignore:
+            config_copy[name] = getattr(config, name)
         for name in config_patches or {}:
             # core inductor keys take precedence over device namespaces
             if name.replace("-", "_") in config._config:  # type: ignore[attr-defined]
@@ -1762,7 +1768,7 @@ class _InProcessFxCompile(FxCompile):
             with (
                 V.set_fake_mode(fake_mode),
                 maybe_disable_comprehensive_padding(example_inputs),
-                maybe_disable_graph_partition(cpp_wrapper, aot_mode),
+                maybe_disable_graph_partition(cpp_wrapper, aot_mode, fx_wrapper),
             ):
                 const_output_index = None
                 const_graph = None
@@ -2634,13 +2640,17 @@ def fw_compiler_freezing(
     return wrapper
 
 
+def get_wrapper_cudagraph_skip_reason() -> str | None:
+    if config.graph_partition:
+        wrapper = "fx-wrapper" if config.fx_wrapper else "cpp-wrapper"
+        return f"{wrapper} does not support graph partition yet"
+    return None
+
+
 def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]:
-    if log_cudagraph_skip and config.triton.cudagraphs and config.graph_partition:
-        log_cudagraph_skip_and_bump_counter(
-            format_default_skip_message(
-                "cpp-wrapper does not support graph partition yet"
-            )
-        )
+    skip_reason = get_wrapper_cudagraph_skip_reason()
+    if log_cudagraph_skip and config.triton.cudagraphs and skip_reason:
+        log_cudagraph_skip_and_bump_counter(format_default_skip_message(skip_reason))
 
     autotune_at_compile_time = (
         config.triton.autotune_at_compile_time
@@ -2655,9 +2665,7 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
         "triton.autotune_at_compile_time": autotune_at_compile_time,
         "triton.autotune_cublasLt": not autotune_at_compile_time,
         "triton.cudagraphs": (
-            config.triton.cudagraphs
-            and not V.aot_compilation
-            and not config.graph_partition
+            config.triton.cudagraphs and not V.aot_compilation and skip_reason is None
         ),
         "triton.store_cubin": True,
     }
@@ -2796,14 +2804,16 @@ def create_compiler_config_extra(
         and (annotation := dynamo_graph_metadata.get("cudagraph_annotation"))
         is not None
     ):
-        # cpp_wrapper cannot partition, so get_cpp_wrapper_config turned cudagraphs
-        # off under graph_partition, and the annotation does not turn them back on.
-        cpp_wrapper_refuses = config.cpp_wrapper and config.graph_partition
-        if (
-            annotation.fwd is not None
-            and annotation.fwd != config.triton.cudagraphs
-            and not (annotation.fwd and cpp_wrapper_refuses)
-        ):
+        skip_reason = (
+            get_wrapper_cudagraph_skip_reason()
+            if config.cpp_wrapper or config.fx_wrapper
+            else None
+        )
+        if annotation.fwd and skip_reason:
+            cudagraphs_log.info(
+                "ignoring override_cudagraphs annotation: %s", skip_reason
+            )
+        elif annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
             cudagraphs = BoxedBool(annotation.fwd)
             if annotation.fwd:
                 cudagraphs_log.info(
@@ -3242,7 +3252,9 @@ def compile_fx(
                 if isinstance(model_, GraphModule)
                 else example_inputs_
             )
-            fake_mode = detect_fake_mode(inputs_)
+            fake_mode = torch._guards.require_python_fake_mode(
+                detect_fake_mode(inputs_)
+            )
             with _fakify_script_objects(model_, inputs_, {}, fake_mode) as (
                 patched_mod,
                 fake_args,
@@ -3460,8 +3472,8 @@ def _compile_fx_main(
 
         bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
-        fake_mode = detect_fake_mode(
-            example_inputs_
+        fake_mode = torch._guards.require_python_fake_mode(
+            detect_fake_mode(example_inputs_)
         ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
         tracing_context = (
             torch._guards.TracingContext.try_get()
@@ -3796,9 +3808,9 @@ def autograd_cache_key(
     #       torch._guards.tracing, compiled_autograd._disable,
     #       functorch_config.patch
 
-    fake_mode = detect_fake_mode(example_inputs) or torch._subclasses.FakeTensorMode(
-        allow_non_fake_inputs=True
-    )
+    fake_mode = torch._guards.require_python_fake_mode(
+        detect_fake_mode(example_inputs)
+    ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
     tracing_context = (
         torch._guards.TracingContext.try_get()
         or torch._guards.TracingContext(fake_mode)
