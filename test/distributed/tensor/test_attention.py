@@ -323,8 +323,12 @@ class RingAttentionTest(DTensorTestBase):
             # bf16's own quantization floor: dv sums the whole sequence, so with
             # grad_out=ones it reaches ~10 under a causal mask, where one bf16 ulp is
             # already 0.0625. That floor does not shrink with world_size the way a
-            # scaled rtol does, so ROCm needs an rtol above bf16 eps (2**-8).
-            rtol = 2e-2 if TEST_WITH_ROCM else 1e-3 * self.world_size
+            # scaled rtol does, so ROCm needs an rtol above bf16 eps (2**-8). The same
+            # floor applies on CUDA: at world_size=2 (e.g. a 2-GPU runner), the scaled
+            # rtol (1e-3 * world_size = 2e-3) undershoots the ~5.6e-3 FLASH_ATTENTION
+            # actually needs there, so give CUDA the same kind of floor, just a lower
+            # one since CUDA's own measurements don't show ROCm's extra AOTriton drift.
+            rtol = 2e-2 if TEST_WITH_ROCM else max(1e-3 * self.world_size, 6e-3)
         torch.testing.assert_close(out, cp_out, atol=atol, rtol=rtol)
 
         if test_forward_only:
