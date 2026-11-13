@@ -6873,7 +6873,8 @@ class TestCppFakeTensorModeBindings(TestCase):
             dst = FakeTensor(mode, meta_dst, torch.device(device))
             src = FakeTensor(mode, meta_src, torch.device(source_device))
         version = dst._version
-        with mode if active else contextlib.nullcontext():
+        # Autograd's CUDA gradient accumulator needs a CUDA-enabled build.
+        with torch.no_grad(), mode if active else contextlib.nullcontext():
             result = aten.shallow_copy_data_.default(dst, src)
         self.assertIs(result, dst)
         self.assertIs(maybe_get_fake_mode(dst), mode)
