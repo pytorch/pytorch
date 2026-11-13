@@ -2332,9 +2332,42 @@ class Reduction(Loops):
         return None if pos == len(reduction_sizes) - 1 else pos
 
     @classmethod
+    def _flat_reduction_is_affine(
+        cls,
+        inner_fns: Sequence[Callable[..., Any]],
+        ranges: Sequence[_IntLike],
+        reduction_ranges: Sequence[_IntLike],
+        input_node: IRNode | None,
+    ) -> bool:
+        """
+        Whether inner_fns load with affine indices through the flattened
+        reduction index: the reduced dims are row-major contiguous in every
+        operand, so the flat split leaves at most the modulus of its masked
+        tail in the kernel.
+        """
+        numel = sympy_product(reduction_ranges)
+        dense = cls.check_for_split_dense_dim_reindexing(numel, input_node)
+        reindex = View.dynamic_reshape_indexer(reduction_ranges, [numel], dense)
+
+        def flat(index: Sequence[Expr], reduction_index: Sequence[Expr]) -> None:
+            for fn in inner_fns:
+                fn(index, reindex(reduction_index))
+
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            rw = dependencies.extract_read_writes(flat, ranges, [numel])
+        var_ranges = rw.var_ranges or {}
+        simplify = V.graph.sizevars.simplify_with_ranges
+        return all(
+            is_affine_indexing(simplify(dep.index, var_ranges))
+            for dep in rw.reads
+            if isinstance(dep, dependencies.MemoryDep)
+        )
+
+    @classmethod
     def _split_reduction_ranges(
         cls,
         device: torch.device,
+        inner_fns: Sequence[Callable[..., Any]],
         ranges: Sequence[_IntLike],
         reduction_ranges: Sequence[_IntLike],
         split: _IntLike,
@@ -2347,16 +2380,29 @@ class Reduction(Loops):
         the outer numel closest to split, preferring an even division (an
         uneven one needs a mask). Like the flat split, a full reduction over
         an input whose dense dim is not the last one reduces the dense dim
-        innermost. Returns None when the backend keeps the flat split or a
-        range is symbolic.
+        innermost. Returns None when the flat split stays: the backend keeps
+        it, a range is symbolic, there is one reduction dim, whose flat split
+        is affine as it is, or the backend keeps it for reduced dims that are
+        row-major contiguous in every operand.
         """
-        if V.choices.use_modular_indexing(
-            device, numel=sympy_product([*ranges, *reduction_ranges]), kind="reduction"
-        ):
+        use_modular_indexing = functools.partial(
+            V.choices.use_modular_indexing,
+            device,
+            numel=sympy_product([*ranges, *reduction_ranges]),
+        )
+        if use_modular_indexing(kind="reduction"):
             return None
         if not all(_is_static(r) for r in [*reduction_ranges, split]):
             return None
         sizes = [int(r) for r in reduction_ranges]
+        if sum(s != 1 for s in sizes) <= 1:
+            return None
+        if use_modular_indexing(
+            kind="reduction_linear"
+        ) and cls._flat_reduction_is_affine(
+            inner_fns, ranges, reduction_ranges, input_node
+        ):
+            return None
         perm = None
         dense = cls._dense_reduction_dim(sizes, input_node)
         if dense is not None:
@@ -2520,7 +2566,7 @@ class Reduction(Loops):
             None
             if strict_reduction
             else cls._split_reduction_ranges(
-                device, ranges, reduction_ranges, split, input_node
+                device, [inner_fn], ranges, reduction_ranges, split, input_node
             )
         )
         if aligned is not None:
@@ -2539,11 +2585,12 @@ class Reduction(Loops):
                 aligned.split,
                 reduction_hint,
                 strict_reduction,
-                # The chunks of the boundary dim can leave the first stage
-                # above the size the split count was chosen for, and above
-                # the size that is split; splitting it again only adds a
-                # kernel.
-                split_first_stage=False,
+                # The split count of an inner reduction makes each partial
+                # one kernel's worth, but the chunks of the boundary dim can
+                # leave the first stage above that size, and splitting it
+                # again would only add a kernel. An outer reduction over few
+                # outputs is split recursively by design.
+                split_first_stage=reduction_hint != ReductionHint.INNER,
             )
 
         # TODO(jansel): realize the reduction so we can do dynamic indexing
@@ -2917,7 +2964,7 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
     ) -> Sequence[TensorBox]:
         reduction_numel = sympy_product(reduction_ranges)
         aligned = cls._split_reduction_ranges(
-            device, ranges, reduction_ranges, split, input_node
+            device, [inner_fn], ranges, reduction_ranges, split, input_node
         )
         if aligned is not None:
             aligned_split = aligned
@@ -3182,7 +3229,9 @@ class WelfordReduction(MultiOutputReduction):
         recursively
         """
         reduction_numel = sympy_product(reduction_ranges)
-        aligned = cls._split_reduction_ranges(device, ranges, reduction_ranges, split)
+        aligned = cls._split_reduction_ranges(
+            device, inner_fns, ranges, reduction_ranges, split
+        )
         if aligned is not None:
             need_mask = aligned.need_mask
         else:
@@ -3244,8 +3293,8 @@ class WelfordReduction(MultiOutputReduction):
             new_reduction_ranges,
             reduction_type,
             reduction_hint,
-            # like Reduction.create_multilayer: an aligned first stage is final
-            allow_split=aligned is None,
+            # like Reduction.create_multilayer
+            allow_split=aligned is None or reduction_hint != ReductionHint.INNER,
         )
         for i in intermediates:
             i.realize()

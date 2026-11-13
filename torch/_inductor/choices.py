@@ -515,19 +515,22 @@ class InductorChoices:
         (including a device without an Inductor backend, such as meta tensors
         during tracing) inlines as before, and Triton GPU backends (CUDA,
         ROCm, XPU and out-of-tree ones) follow what benchmarks on CUDA
-        showed: splitting a reduction at a dim boundary and iterating a
-        strided slice_scatter in split space are faster at nearly every size,
-        realizing a merged view only pays off for large tensors of fresh
-        compute (a copy of an existing buffer never does), and the
+        showed: splitting a reduction at a dim boundary when its flat split
+        loads through FloorDiv/ModularIndexing and iterating a strided
+        slice_scatter in split space are faster at nearly every size (a
+        reduction over dims that are row-major contiguous in every operand
+        keeps the flat split, which leaves only the modulus of its masked
+        tail), realizing a merged view only pays off for large tensors of
+        fresh compute (a copy of an existing buffer never does), and the
         alternatives to %, // for repeat, roll, index arithmetic and loop
         reindexing are slower than the modular index. The one exception that
         holds in every mode: index arithmetic on an affine-preferring backend
         without indirect indexing (Pallas) has no affine form there and stays
         inlined. TORCHINDUCTOR_AVOID_MODULAR_INDEXING=0 restores inlining on
-        every backend; with the heuristic, split reductions on Triton GPUs
-        regroup partial sums and no longer match the previous release
-        bitwise, except under config.batch_invariant, which keeps the flat
-        split.
+        every backend; with the heuristic, the reductions that split at a dim
+        boundary on Triton GPUs regroup partial sums and no longer match the
+        previous release bitwise, except under config.batch_invariant, which
+        keeps the flat split.
         """
         from .codegen.common import BackendFeature
         from .ir import get_device_type, is_triton

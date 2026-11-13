@@ -2,6 +2,7 @@
 import contextlib
 import dataclasses
 import math
+import re
 from unittest import mock
 
 import sympy
@@ -13,8 +14,8 @@ from torch._inductor.choices import InductorChoices
 from torch._inductor.exc import InductorError, NonAffineIndexingError
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import is_affine_indexing
-from torch._inductor.virtualized import V
+from torch._inductor.utils import is_affine_indexing, run_and_get_triton_code
+from torch._inductor.virtualized import ops, V
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -472,20 +473,71 @@ class AvoidModularIndexingTest(TestCase):
         self.check_split_reduction(fn, x, y)
 
     @parametrize("var_mean,shape", [(False, (64, 4097)), (True, (2, 128, 8193))])
-    def test_split_reduction_first_stage_not_split_again(self, device, var_mean, shape):
+    def test_inner_split_reduction_first_stage_is_final(self, device, var_mean, shape):
         # no chunking of 64 (128) rows gives the 33 (129) partials the split
         # asks for, so the first stage reduces 8194 (8193) elements, above
         # the size that devices with this threshold split: it must stay one
-        # kernel
-        def fn(x):
-            return torch.var_mean(x, (1, 2)) if var_mean else x.sum()
+        # kernel, like the first stage of the flat split
+        def fn(x, y):
+            return torch.var_mean(x * y, (1, 2)) if var_mean else (x * y).sum()
 
+        x = torch.randn(shape, device=device)
+        y = torch.randn(*shape[:-1], 1, device=device)
         with mock.patch.object(
             InductorChoices, "_inner_reduction_no_split_threshold", return_value=8192
         ):
+            self.check_split_reduction(fn, x, y)
+
+    def test_outer_split_reduction_splits_like_flat(self, device):
+        # an outer reduction over few outputs is split recursively by design,
+        # and so is the first stage of its dim-aligned split
+        def fn(x, y):
+            return (x * y).sum((0, 1))
+
+        def split_factor(
+            self, device, reduction_numel_hint, numel_hint, inner_reduction
+        ):
+            return 16 if reduction_numel_hint > 1024 else 1
+
+        x = torch.randn(4096, 2048, 2, device=device)
+        y = torch.randn(4096, 1, 1, device=device)
+        if device == "cpu":
+            self.check(fn, x, y)
+            return
+        with mock.patch.object(InductorChoices, "reduction_split_factor", split_factor):
+            metrics.reset()
+            with config.patch(
+                {
+                    "avoid_modular_indexing": False,
+                    "test_configs.raise_on_modular_indexing": False,
+                }
+            ):
+                torch.compile(fn)(x, y)
+            flat_kernel_count = metrics.generated_kernel_count
+            self.assertGreater(flat_kernel_count, 2)
+            torch._dynamo.reset()
+            # with these even splits the flat one happens to be affine too
             self.check_split_reduction(
-                fn, torch.randn(shape, device=device), modular_without_option=False
+                fn, x, y, kernel_count=flat_kernel_count, modular_without_option=False
             )
+
+    def test_one_dim_reduction_keeps_flat_split(self, device):
+        # the flat split of one reduction dim is affine as it is, so the
+        # kernels are those of the option being off, split three times here
+        def fn(x):
+            return x.sum(0)
+
+        x = torch.randn(32768 * 256, 2, device=device)
+        if device == "cpu":
+            self.check(fn, x)
+            return
+        codes = []
+        for avoid in (False, True):
+            torch._dynamo.reset()
+            with config.patch(avoid_modular_indexing=avoid):
+                code = run_and_get_triton_code(torch.compile(fn), x)
+            codes.append(re.sub(r"# AOT ID: .*", "", code))
+        self.assertEqual(*codes)
 
     def test_online_softmax_split_reduction(self, device):
         # a long softmax row is split; the chunks of the prime row length
@@ -889,6 +941,41 @@ class AvoidModularIndexingTest(TestCase):
             else:
                 self.check(fn, x, y)
 
+    def test_auto_mode_row_major_reduction_keeps_flat_split(self, device):
+        # reduced dims that are row-major contiguous in every operand keep
+        # the flat split where the backend decides (the kernels are those of
+        # the option being off); an operand broadcast over the last dim makes
+        # the flat split index it with a FloorDiv, which the heuristic avoids
+        def fn(x):
+            return x.sum((1, 2))
+
+        def fn_broadcast(x, y):
+            return (x * y).sum((1, 2))
+
+        x = torch.randn(4, 64, 4097, device=device)
+        y = torch.randn(4, 64, 1, device=device)
+        with config.patch(avoid_modular_indexing=None):
+            if device == "cpu" or not V.choices.use_modular_indexing(
+                device, kind="reduction_linear"
+            ):
+                self.check(fn, x)
+                return
+            codes = []
+            for avoid in (False, None):
+                torch._dynamo.reset()
+                with config.patch(
+                    {
+                        "avoid_modular_indexing": avoid,
+                        "test_configs.raise_on_modular_indexing": False,
+                    }
+                ):
+                    code = run_and_get_triton_code(torch.compile(fn), x)
+                codes.append(re.sub(r"# AOT ID: .*", "", code))
+            self.assertEqual(*codes)
+            torch._dynamo.reset()
+            if not V.choices.use_modular_indexing(device, kind="reduction"):
+                self.check(fn_broadcast, x, y, kernel_count=2)
+
     def test_avg_pool2d_backward_with_padding(self, device):
         # the window bounds are FloorDiv/Min of the output index and reach the
         # grad load through indirect_indexing
@@ -920,8 +1007,26 @@ class _IndexOps:
         return sympy.Lt(a, b)
 
 
+def _load_broadcast_operand(index, reduction_index):
+    """
+    The loader of an operand broadcast over the trailing reduction dims: the
+    flat split indexes it with a FloorDiv of the flattened reduction index.
+    """
+    return ops.load("y", reduction_index[0])
+
+
 class SplitReductionRangesTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def aligned_split(self, reduction_ranges, split, load=None, device="cpu"):
+        with V.set_graph_handler(_SizeVarsGraph()):
+            return ir.Reduction._split_reduction_ranges(
+                torch.device(device),
+                [load] if load is not None else [],
+                [],
+                reduction_ranges,
+                split,
+            )
 
     @parametrize(
         "reduction_ranges,split",
@@ -935,9 +1040,7 @@ class SplitReductionRangesTest(TestCase):
     )
     @config.patch(avoid_modular_indexing=True)
     def test_chunks_cover_boundary_dim(self, reduction_ranges, split):
-        aligned = ir.Reduction._split_reduction_ranges(
-            torch.device("cpu"), [], reduction_ranges, split
-        )
+        aligned = self.aligned_split(reduction_ranges, split)
         outer, inner = aligned.outer_ranges, aligned.inner_ranges
         k = len(outer) - 1
         self.assertEqual([int(s) for s in outer[:-1]], list(reduction_ranges[:k]))
@@ -974,22 +1077,35 @@ class SplitReductionRangesTest(TestCase):
 
     def test_disabled_without_option(self):
         with config.patch(avoid_modular_indexing=False):
-            self.assertIsNone(
-                ir.Reduction._split_reduction_ranges(
-                    torch.device("cpu"), [], (1000, 4), 900
-                )
-            )
+            self.assertIsNone(self.aligned_split((1000, 4), 900))
 
     @config.patch(avoid_modular_indexing=None)
     def test_batch_invariant_keeps_flat_split(self):
         def aligned():
-            return ir.Reduction._split_reduction_ranges(
-                torch.device("cuda"), [2], (64, 4097), 33
-            )
+            return self.aligned_split((64, 4097), 33, _load_broadcast_operand, "cuda")
 
         self.assertIsNotNone(aligned())
         with config.patch(batch_invariant=True):
             self.assertIsNone(aligned())
+
+    @config.patch(avoid_modular_indexing=True)
+    def test_one_reduction_dim_keeps_flat_split(self):
+        self.assertIsNone(self.aligned_split((100003,), 13))
+        self.assertIsNone(self.aligned_split((1, 100003, 1), 13))
+
+    @config.patch(avoid_modular_indexing=None)
+    def test_row_major_reduction_keeps_flat_split(self):
+        # reduced dims that are row-major contiguous in the operand: the flat
+        # split leaves only the modulus of its masked tail, which Triton GPUs
+        # keep and a forced option does not
+        def load_row_major(index, reduction_index):
+            return ops.load("x", 4097 * reduction_index[0] + reduction_index[1])
+
+        self.assertIsNone(self.aligned_split((64, 4097), 33, load_row_major, "cuda"))
+        with config.patch(avoid_modular_indexing=True):
+            self.assertIsNotNone(
+                self.aligned_split((64, 4097), 33, load_row_major, "cuda")
+            )
 
 
 instantiate_parametrized_tests(SplitReductionRangesTest)

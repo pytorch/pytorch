@@ -1763,7 +1763,8 @@ ModularIndexingUse = Literal[
     "view",  # dim-merging view of unrealized compute whose inlined loads need it
     "view_linear",  # dim-merging view whose inlined loads are affine anyway
     "view_copy",  # dim-merging view of a realized buffer or a load/cast of one
-    "reduction",  # flat split of a multi-dim reduction
+    "reduction",  # flat split of a multi-dim reduction whose loads need it
+    "reduction_linear",  # flat split over dims that are row-major contiguous
     "repeat",
     "roll",
     "slice_scatter",  # strided slice_scatter
