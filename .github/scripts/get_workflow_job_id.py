@@ -197,6 +197,10 @@ def main() -> None:
     except Exception as e:
         print(repr(e), file=sys.stderr)
         print(f"workflow-{args.workflow_run_id}")
+        # job.check_run_id is the job id, so only the name is lost when the API
+        # fails, e.g. when the GITHUB_TOKEN quota shared by every job runs out.
+        if check_run_id := os.environ.get("CHECK_RUN_ID"):
+            set_output("job-id", check_run_id)
 
 
 if __name__ == "__main__":
