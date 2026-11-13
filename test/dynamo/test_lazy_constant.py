@@ -1,13 +1,234 @@
 # Owner(s): ["module: dynamo"]
 
 import keyword
+import operator
 import sys
+from unittest import mock
 
 import torch
 import torch._dynamo
+from torch._dynamo.comptime import comptime
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
-from torch.testing._internal.common_utils import HardwareClassification
+from torch._dynamo.variables.base import SourceLocation, VariableTracker
+from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.lazy import (
+    ComputedLazyCache,
+    LazyCache,
+    LazySymNodeFormatString,
+    LazyVariableTracker,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
+
+
+_constant_vt_capture: list[VariableTracker] = []
+
+
+class _StrSubclass(str):  # noqa: SLOT000
+    pass
+
+
+class _IntSubclass(int):
+    pass
+
+
+class _FloatSubclass(float):
+    pass
+
+
+_GLOBAL_STR_SUBCLASS = _StrSubclass("g")
+_GLOBAL_INT_SUBCLASS = _IntSubclass(3)
+
+
+def _capture_constant_vt(ctx) -> None:
+    tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+    flag_vt = tx.symbolic_locals.get("flag")
+    if flag_vt is None:
+        raise AssertionError("flag VariableTracker was not found")
+    _constant_vt_capture.append(flag_vt)
+
+
+@instantiate_parametrized_tests
+class CachedConstantSourceLocationTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "value",
+        (None, True, False, NotImplemented),
+        name_fn=lambda value: repr(value).lower(),
+    )
+    def test_cached_singleton_source_location_cow(self, value):
+        prototype = ConstantVariable.create(value)
+        self.assertIs(prototype, ConstantVariable.create(value))
+        self.assertEqual(prototype.get_id(None), id(value))
+        self.assertIsNone(prototype.source)
+        self.assertIsNone(prototype.source_location)
+        self.assertIsNone(prototype.mutation_type)
+        self.assertIsNone(prototype.dict_vt)
+
+        location = SourceLocation("constant.py", 1)
+        located = prototype.with_source_location(location)
+        self.assertIsNot(located, prototype)
+        self.assertEqual(located.source_location, location)
+        self.assertIsNone(prototype.source_location)
+
+        source = ConstantSource("constant")
+        sourceful = ConstantVariable.create(value, source=source)
+        self.assertIsNot(sourceful, prototype)
+        self.assertEqual(sourceful.source, source)
+        self.assertIs(
+            ConstantVariable.create(value, source_location=location).source_location,
+            location,
+        )
+
+    def test_cached_true_source_location_across_compilations(self):
+        _constant_vt_capture.clear()
+        self.addCleanup(_constant_vt_capture.clear)
+        namespace = {
+            "_capture_constant_vt": _capture_constant_vt,
+            "comptime": comptime,
+        }
+        exec(
+            compile(
+                "def first(x):\n"
+                "    flag = True\n"
+                "    comptime(_capture_constant_vt)\n"
+                "    return x + 1, flag\n",
+                "first_file.py",
+                "exec",
+            ),
+            namespace,
+        )
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(namespace["first"], backend="eager", fullgraph=True)(x),
+            (x + 1, True),
+        )
+
+        torch._dynamo.reset()
+        exec(
+            compile(
+                "def second(x):\n"
+                "    flag = True\n"
+                "    comptime(_capture_constant_vt)\n"
+                "    return x + 2, flag\n",
+                "second_file.py",
+                "exec",
+            ),
+            namespace,
+        )
+        self.assertEqual(
+            torch.compile(namespace["second"], backend="eager", fullgraph=True)(x),
+            (x + 2, True),
+        )
+
+        self.assertEqual(len(_constant_vt_capture), 2)
+        first_vt, second_vt = _constant_vt_capture
+        self.assertIsNot(first_vt, second_vt)
+        self.assertEqual(first_vt.source_location.filename, "first_file.py")
+        self.assertEqual(second_vt.source_location.filename, "second_file.py")
+        self.assertIsNone(ConstantVariable.create(True).source_location)
+
+    @parametrize(
+        "cache_kind,attach_before_realize",
+        (
+            ("lazy", True),
+            ("lazy", False),
+            ("computed", True),
+            ("computed", False),
+        ),
+        name_fn=lambda cache_kind, attach_before_realize: (
+            f"{cache_kind}_{'before' if attach_before_realize else 'after'}"
+        ),
+    )
+    def test_lazy_source_location_cow(self, cache_kind, attach_before_realize):
+        prototype = ConstantVariable.create(True)
+        location = SourceLocation("lazy.py", 1)
+        if cache_kind == "lazy":
+            cache = LazyCache(object(), object())
+        else:
+            cache = ComputedLazyCache(True, [], [], operator.add, 1)
+        lazy = LazyVariableTracker(cache)
+
+        if attach_before_realize:
+            self.assertIs(lazy.with_source_location(location), lazy)
+
+        from torch._dynamo import variables
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        with (
+            mock.patch.object(
+                InstructionTranslator, "current_tx", return_value=object()
+            ),
+            mock.patch.object(variables.builder, "VariableBuilder") as variable_builder,
+        ):
+            variable_builder.return_value.return_value = prototype
+            realized = lazy.realize()
+
+        if not attach_before_realize:
+            self.assertIs(realized, prototype)
+            self.assertIs(lazy.with_source_location(location), lazy)
+
+        self.assertIsNot(lazy.realize(), prototype)
+        self.assertEqual(lazy.realize().source_location, location)
+        self.assertIsNone(prototype.source_location)
+
+
+@instantiate_parametrized_tests
+class LazyCacheTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("raises", (False, True))
+    def test_init_does_not_access_dunder_class(self, raises):
+        calls = []
+
+        class Cache:
+            @property
+            def __class__(self):
+                calls.append("hook")
+                if raises:
+                    raise RuntimeError("class-hook")
+                return Cache
+
+        def fn(x, values):
+            return x + len(values)
+
+        obj = Cache()
+        values = [obj]
+        x = torch.ones(1)
+        expected = fn(x, values)
+        self.assertEqual(calls, [])
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, values), expected)
+        self.assertEqual(calls, [])
+        self.assertIs(values[0], obj)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_init_source(self):
+        value = object()
+        source = ConstantSource("value")
+        cache = LazyCache(value, source)
+        self.assertIs(cache.value, value)
+        self.assertIs(cache.source, source)
+        with self.assertRaisesRegex(AssertionError, "source is required"):
+            LazyCache(value, None)
+
+        class FormatStringSubclass(LazySymNodeFormatString):
+            pass
+
+        for cls in (LazySymNodeFormatString, FormatStringSubclass):
+            with self.subTest(cls=cls):
+                value = object.__new__(cls)
+                cache = LazyCache(value, None)
+                self.assertIs(cache.value, value)
+                self.assertIsNone(cache.source)
 
 
 class LazyConstantVariableTests(TestCase):
@@ -547,9 +768,9 @@ class LazyConstantVariableTests(TestCase):
 class ComputedLazyConstantTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def _check(self, fn, arg_sets, expected_frames):
+    def _check(self, fn, arg_sets, expected_frames, fullgraph=False):
         counter = CompileCounter()
-        opt_fn = torch.compile(fn, backend=counter)
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=fullgraph)
         for args in arg_sets:
             eager = fn(*args)
             compiled = opt_fn(*args)
@@ -902,6 +1123,44 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 1.5, 2.5)], expected_frames=2)
 
+    def test_operand_type_change_in_reconstructed_container_recompiles(self):
+        # The tensor ahead of the computed constant keeps the container from
+        # being loaded as a constant, so the constant is recomputed in output bytecode
+        t = torch.ones(2)
+
+        def to_str(a):
+            try:
+                return "p" + a
+            except TypeError:
+                return "int"
+
+        def fn_extend(t, a, lst):
+            lst.extend([t.sin(), to_str(a)])
+            return t.cos()
+
+        def fn_setitem(t, a, d):
+            d["v"] = (t.sin(), to_str(a))
+            return t.cos()
+
+        for fn, make in [(fn_extend, list), (fn_setitem, dict)]:
+            with self.subTest(fn=fn.__name__):
+                torch._dynamo.reset()
+                counter = CompileCounter()
+                opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+                for a in ["x", "y", 1]:
+                    eager_out, compiled_out = make(), make()
+                    self.assertEqual(opt_fn(t, a, compiled_out), fn(t, a, eager_out))
+                    self.assertEqual(compiled_out, eager_out)
+                self.assertEqual(counter.frame_count, 2)
+
+        def fn_graph_break(t, a):
+            pair = (t.sin(), to_str(a))
+            torch._dynamo.graph_break()
+            return pair
+
+        torch._dynamo.reset()
+        self._check(fn_graph_break, [(t, "x"), (t, "y"), (t, 1)], expected_frames=2)
+
     def test_chained_computed_constants_do_not_recompile(self):
         t = torch.ones(2)
 
@@ -953,6 +1212,36 @@ class ComputedLazyConstantTests(TestCase):
             return t.sin(), a + b
 
         self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=2)
+
+    def test_sourceless_constant_subclass_operand_realizes(self):
+        # Output bytecode cannot rebuild a subclass instance created in the
+        # frame, so these fall back to guarding the lazy operand's value
+        t = torch.ones(2)
+        cases = [
+            (lambda t, a: (t.sin(), _StrSubclass("p") + a), "xyz", 3),
+            (lambda t, a: (t.sin(), a + _StrSubclass("p")), "xyz", 3),
+            (lambda t, a: (t.sin(), (_StrSubclass("p") + a) + a), "xyz", 3),
+            (lambda t, a: (t.sin(), _StrSubclass("p") == a), "xpz", 3),
+            (lambda t, a: (t.sin(), _IntSubclass(2) * a), (5, 6, 7), 2),
+            (lambda t, a: (t.sin(), _FloatSubclass(0.5) + a), (1.5, 2.5, 3.5), 2),
+        ]
+        for i, (fn, values, expected_frames) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                arg_sets = [(t, v) for v in values]
+                self._check(fn, arg_sets, expected_frames, fullgraph=True)
+
+    def test_sourced_constant_subclass_operand_does_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            (lambda t, a: (t.sin(), _GLOBAL_STR_SUBCLASS + a), "xyz"),
+            (lambda t, a: (t.sin(), _GLOBAL_INT_SUBCLASS * a), (5, 6, 7)),
+        ]
+        for i, (fn, values) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                arg_sets = [(t, v) for v in values]
+                self._check(fn, arg_sets, expected_frames=1, fullgraph=True)
 
     def test_computed_constant_in_branch_recompiles(self):
         t = torch.ones(2)

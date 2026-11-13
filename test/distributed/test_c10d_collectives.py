@@ -2,6 +2,7 @@
 
 import itertools
 import sys
+import time
 
 import torch
 import torch.distributed as dist
@@ -594,12 +595,21 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
         # The legacy backend returns no work for an all-sync window.
         completed = work is not None and work.is_completed()
         if signal_peer is not None:
-            signal_peer()
-            # The peers have not issued anything yet, so the window cannot be done.
-            self.assertFalse(completed)
-            # Only wait() orders the current stream after side-stream ops.
-            if stream is not None:
-                self.assertTrue(current.query())
+            try:
+                # The peers have not issued anything yet, so the window cannot
+                # be done.
+                self.assertFalse(completed)
+                # Only wait() orders the current stream after side-stream ops.
+                # Check before the peers run, so a wrong wait can never clear,
+                # and poll: the backend may have just recorded an event on the
+                # current stream.
+                if stream is not None:
+                    deadline = time.monotonic() + 1
+                    while not current.query() and time.monotonic() < deadline:
+                        pass
+                    self.assertTrue(current.query())
+            finally:
+                signal_peer()
         if work is not None:
             work.wait()
         elif stream is not None:
