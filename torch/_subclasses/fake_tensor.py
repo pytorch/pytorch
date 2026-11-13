@@ -1091,10 +1091,6 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     def is_our_fake(self, t: object) -> TypeGuard[Tensor]:
         return isinstance(t, Tensor) and torch._C._maybe_get_fake_mode(t) is self
 
-    @property
-    def avoid_device_init(self) -> bool:
-        return _avoid_device_init()
-
     def __enter__(self) -> Self:
         if type(self) is not CppFakeTensorMode:
             raise TypeError("Expected a CppFakeTensorMode, not a subclass")
