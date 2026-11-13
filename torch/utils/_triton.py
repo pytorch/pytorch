@@ -355,28 +355,58 @@ def _triton_compile_iq_flag(env_var: str, flag: str) -> bool:
 
 
 @functools.cache
+def _devices_supporting_triton(
+    *, include_cpu: bool = False, disable_device_detection: bool = False
+) -> list[str]:
+    """Body of functionality for ``devices_supporting_triton``.
+
+    Split the function like this so that we can still cache the result per-value
+    of ``torch._inductor.config.triton_disable_device_detection``.
+    """
+    if not has_triton_package():
+        return []
+
+    if disable_device_detection:
+        return []
+
+    from torch._dynamo.device_interface import get_registered_device_interfaces
+
+    res: list[str] = []
+    # A device supports Triton if it is available, reports Triton capability, and
+    # its Triton backend is actually built. Capability is gated first so that
+    # raise_if_triton_unavailable() only surfaces missing-backend errors (and
+    # not, e.g., CUDA's GPUTooOldForTriton for sub-capable devices). We catch the
+    # specific TritonUnavailableError rather than RuntimeError so unexpected
+    # errors are not silently swallowed.
+    for name, device_interface in get_registered_device_interfaces():
+        if ":" in name or (name == "cpu" and not include_cpu):
+            continue
+        if _interface_has_triton(device_interface):
+            res.append(name)
+    return res
+
+
+def devices_supporting_triton(*, include_cpu: bool = False) -> list[str]:
+    """Get the devices that support generating Triton code as a backend.
+
+    Note that returned devices may not be currently set to generate Triton, even
+    if they support it.
+    """
+    from torch._inductor.config import triton_disable_device_detection
+
+    return _devices_supporting_triton(
+        include_cpu=include_cpu,
+        disable_device_detection=triton_disable_device_detection,
+    )
+
+
 def has_triton(*, include_cpu: bool = False) -> bool:
     """Return whether a usable Triton backend is available.
 
     By default, this helper only considers accelerator devices; callers must
     explicitly include CPU.
     """
-    if not has_triton_package():
-        return False
-
-    from torch._inductor.config import triton_disable_device_detection
-
-    if triton_disable_device_detection:
-        return False
-
-    from torch._dynamo.device_interface import get_registered_device_interfaces
-
-    for name, device_interface in get_registered_device_interfaces():
-        if ":" in name or (name == "cpu" and not include_cpu):
-            continue
-        if _interface_has_triton(device_interface):
-            return True
-    return False
+    return len(devices_supporting_triton(include_cpu=include_cpu)) > 0
 
 
 @functools.cache
@@ -388,14 +418,20 @@ def _has_triton_for_interface_on_device(
     return _interface_has_triton(device_interface, device)
 
 
-def has_triton_for_device(device: "str | torch.device") -> bool:
+def has_triton_for_device(
+    device: "str | torch.device", *, include_cpu: bool = False
+) -> bool:
     """Whether Triton can compile+run kernels for *this* device.
 
     The conjunction from has_triton(), scoped to one device, index included:
     a cuda:1 operand is answered about cuda:1. A concrete index is checked
     against device_count() before any probe, so a device this host lacks
-    answers False while other probe errors propagate. False for cpu, for
-    names ``torch.device`` cannot parse, and for unregistered types. Memoized
+    answers False while other probe errors propagate.
+
+    False for cpu (if ``include_cpu`` is ``False``), for
+    names ``torch.device`` cannot parse, and for unregistered types.
+
+    Memoized
     per (interface, device) until cleared; package/config gates re-run live.
     """
     import torch
@@ -407,7 +443,7 @@ def has_triton_for_device(device: "str | torch.device") -> bool:
         # back a Triton compile, so report False rather than raising.
         return False
 
-    if device.type == "cpu":
+    if device.type == "cpu" and not include_cpu:
         return False
     if not has_triton_package():
         return False
