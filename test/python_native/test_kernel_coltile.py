@@ -589,7 +589,7 @@ class TestColTileHost(TestCase):
             (dict(vec=4), "column groups need vec=1, got vec=4$"),
             (
                 dict(trait=T.SumOps(acc=cutlass.Float32)),
-                "column groups need a trait with has_combine_equal, got SumOps \\(",
+                "column groups need a trait with has_combine_equal, got SumOps$",
             ),
         ],
         name_fn=lambda case, error: "_".join(case),

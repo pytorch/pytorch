@@ -170,12 +170,17 @@ class TestInnerTreeCombineUnroll(TestCase):
         class OptedIn(OwnCombine):
             has_combine_uniform = True
 
+        class KeepsOptIn(OptedIn):
+            pass
+
         split, acc = (1024, 8192, 8192, 512, 512), cutlass.Float32
         self.assertFalse(OwnCombine.has_combine_uniform)
         self.assertTrue(OptedIn.has_combine_uniform)
         self.assertFalse(OptedIn.has_combine_equal)
+        self.assertFalse(KeepsOptIn.has_combine_uniform)
         self.assertFalse(tile.uniform_combine_ok(OwnCombine(acc=acc), split))
         self.assertTrue(tile.uniform_combine_ok(OptedIn(acc=acc), split))
+        self.assertFalse(tile.uniform_combine_ok(KeepsOptIn(acc=acc), split))
 
     @parametrize(
         "updates,msg",
@@ -383,9 +388,9 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         for g, w in zip(got, want):
             self.assertEqual(g.view(torch.int32), w.view(torch.int32))
 
-    @parametrize("key", ["sum", "var1"])
+    @parametrize("name", ["sum", "var1"])
     @largeTensorTest("1GB", device="cuda")
-    def test_sm107_profile_reaches_every_plan(self, device, key):
+    def test_sm107_profile_reaches_every_plan(self, device, name):
         """Thread the SM107 profile through both row entry points' split and combine
         builders, bitwise equal to the default profile."""
         import cutlass
@@ -413,7 +418,8 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
 
             return plan
 
-        welford = key == "var1"
+        welford = name == "var1"
+        key = f"sm107_profile_{name}"
         trait = (T.WelfordOps if welford else T.SumOps)(acc=cutlass.Float32)
         x = torch.randn(1, (256 << 20) // 4, device=device)
         with (
@@ -442,7 +448,8 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         self.assertEqual(folded, want)
         # Each stage's cache key ends with its plan's sig.
         for tag, plan in (("rowitree1", split), ("rowitree2", c)):
-            self.assertIn(plan.sig, {k[-1] for k in rt._CACHE if k[:2] == (tag, key)})
+            sigs = {k[-1] for k in rt._CACHE if k[:2] == (tag, key)}
+            self.assertEqual(sigs, {plan.sig})
         # Every _ItreeArch knob is bit-neutral, so the default profile gives the same bits.
         default = rt._ITREE_ARCH["default"]
         ref_plan = rt.trait_itree_plan(trait, x.shape[1], 1, 4, arch=default)

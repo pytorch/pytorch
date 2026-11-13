@@ -54,13 +54,13 @@ class TestKernelRowTile(TestCase):
             out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
         )
 
-    # (65536, 128) takes one thread per row, staged through TMA on sm_90+.
+    # (65536, 128) takes one thread per row, staged through TMA.
     @parametrize("rows,columns,tpr", ((64, 1000, None), (65536, 128, 1)))
     def test_fp32_row_sum_error_is_no_worse_than_aten(self, rows, columns, tpr):
-        """Sum fp32 rows with no more fp64-relative error than ATen, summed over a few
-        seeds."""
+        """Sum fp32 rows with no more mean absolute error against the fp64 sum than
+        ATen, summed over a few seeds."""
         trait, f32 = T.SumOps(acc=cutlass.Float32), [torch.float32]
-        kw = {"threads_per_row": tpr}
+        kw = {"threads_per_row": tpr, "use_tma": tpr == 1}
         ours = aten = 0.0
         for seed in range(8):
             gen = torch.Generator("cuda").manual_seed(seed)
@@ -72,6 +72,26 @@ class TestKernelRowTile(TestCase):
             ours += (got.double() - want).abs().mean().item()
             aten += (ref.double() - want).abs().mean().item()
         self.assertLessEqual(ours, aten, f"CuTeDSL {ours:.3e} vs ATen {aten:.3e}")
+
+    # 100 columns end in a partial wave of vectors.
+    @parametrize("columns", (96, 100))
+    @parametrize("dist", ("randn", "rand"))
+    def test_fp32_one_thread_rows_match_aten(self, columns, dist):
+        """One thread per row folds rows narrower than 128 elements in ATen's
+        association, so fp32 sums match it bitwise."""
+        gen = torch.Generator("cuda").manual_seed(0)
+        x = getattr(torch, dist)(65536, columns, device="cuda", generator=gen)
+        (got,) = rt.reduce_row_tile(
+            T.SumOps(acc=cutlass.Float32),
+            "fp32_one_thread",
+            x,
+            [torch.float32],
+            threads_per_row=1,
+            use_tma=False,
+        )
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = x.sum(1)
+        self.assertEqual(got, ref, atol=0, rtol=0)
 
     def test_one_kernel_per_vec_class(self):
         trait = T.SumOps(acc=cutlass.Float32)
@@ -128,7 +148,8 @@ class TestKernelRowTile(TestCase):
         # Both entry points check before compiling, so nothing is cached.
         trait = T.SumOps(acc=cutlass.Float32)
         out = torch.empty(x.shape[0], device=x.device)
-        self.assertIsNotNone(rt.itree_plan(x.shape[1], x.shape[0], x.element_size()))
+        plan = rt.itree_plan(*x.shape[::-1], x.element_size(), device=x.device)
+        self.assertIsNotNone(plan)
         before = set(rt._CACHE)
         with self.assertRaisesRegex(AssertionError, "is current"):
             rt.reduce_row_tile(trait, "off", x, [torch.float32], order="linear")
@@ -379,10 +400,14 @@ class TestKernelRowTile(TestCase):
                     out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
                 )
 
-    @parametrize("dtype,columns", ((torch.float32, 100), (torch.float16, 200)))
+    @parametrize(
+        "dtype,columns",
+        ((torch.float32, 100), (torch.float32, 124), (torch.float16, 200)),
+    )
     def test_one_thread_row_partial_group(self, dtype, columns):
-        # 25 whole vectors leave one past the last full group of 32 elements. Integer sums
-        # are exact, so a dropped or repeated vector shows bitwise.
+        # 25 whole vectors leave one past the last full group of 32 elements, and 31 a
+        # seven-vector tail. Integer sums are exact, so a dropped or repeated vector shows
+        # bitwise.
         x = torch.randint(1, 9, (4096, columns), device="cuda").to(dtype)
         (got,) = rt.reduce_row_tile(
             self._sum_trait(),
@@ -583,20 +608,26 @@ class TestKernelRowTile(TestCase):
         self.assertEqual(got, torch.full((8,), 384.0, device="cuda"))
 
     def test_rolled_lane_accumulators_combine_in_order(self):
-        """Combine whole-vector lane accumulators: index ties across them keep the first
-        column, NaN wins, and Welford counts stay exact."""
+        """Combine whole-vector lane accumulators: each one holds some row's result,
+        index ties across them keep the first column, NaN wins from any of them, and
+        Welford counts stay exact."""
         # 4104 fp16 columns are 513 whole 8-wide vectors, so every power-of-two
-        # threads_per_row leaves the last wave masked. Index traits keep 4 accumulators,
-        # so columns 1 and 4 of a vector fold into different ones.
+        # threads_per_row leaves the last wave masked. Index traits keep 4 accumulators
+        # and fold column c into accumulator c % 4.
         rows, columns = 33, 4096 + 8
         x = torch.randn(rows, columns, device="cuda", dtype=torch.float16)
         r = torch.arange(rows, device="cuda")
-        first = r * 128 + 1  # row 32 plants in vector 512, the masked last wave
+        # Row r plants its maximum in accumulator r % 4 and a tie in the next one.
+        # Row 32 plants in vector 512, the masked last wave.
+        first = r * 128 + r % 4
         x[r, first] = 10.0
-        x[r, first + 3] = 10.0
-        x[7, first[7] + 4] = float("nan")
+        x[r, first + 5] = 10.0
+        nan_rows = torch.arange(4, 8, device="cuda")
+        x[nan_rows, first[nan_rows] + 2] = float("nan")
         want = first.clone()
-        want[7] = first[7] + 4
+        want[nan_rows] += 2
+        finite = torch.ones(rows, dtype=torch.bool, device="cuda")
+        finite[nan_rows] = False
         (idx,) = rt.reduce_row_tile(
             T.ArgMaxOps(acc=cutlass.Float32), "rolled_argmax", x, [torch.int32]
         )
@@ -609,8 +640,8 @@ class TestKernelRowTile(TestCase):
             nouts=2,
         )
         self.assertEqual(idx, want.to(torch.int32))
-        self.assertTrue(vals[7].isnan())
-        self.assertEqual(vals[r != 7], torch.full((rows - 1,), -10.0, device="cuda"))
+        self.assertTrue(vals[nan_rows].isnan().all())
+        self.assertEqual(vals[finite], torch.full((rows - 4,), -10.0, device="cuda"))
         y = torch.randn(rows, columns, device="cuda", dtype=torch.float16)
         trait = T.WelfordOps(acc=cutlass.Float32)
         mean, _, count = rt.reduce_row_tile(
