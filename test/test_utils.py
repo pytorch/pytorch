@@ -37,11 +37,12 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    parametrize,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
 )
 from torch.utils._device import set_device
-from torch.utils._pytree import tree_all_only, tree_any
+from torch.utils._pytree import tree_all_only, tree_any, tree_leaves
 from torch.utils._traceback import (
     CapturedTraceback,
     format_traceback_short,
@@ -51,6 +52,7 @@ from torch.utils.checkpoint import (
     _infer_device_type,
     checkpoint,
     checkpoint_sequential,
+    DefaultDeviceType,
     get_device_states,
 )
 from torch.utils.data import DataLoader
@@ -592,6 +594,89 @@ class TestCheckpointDeviceType(TestCase):
 instantiate_device_type_tests(
     TestCheckpointDeviceType, globals(), except_for=["cpu"], allow_xpu=True
 )
+
+
+@skipIfTorchDynamo("torch.compile always preserves checkpoint RNG state")
+class TestCheckpointRNG(TestCase):
+    def _check_rng(self, devices, input_kind, preserve_rng_state):
+        if input_kind == "mixed":
+            devices = ["cpu", *devices]
+        inputs = [torch.ones(16, device=d, requires_grad=True) for d in devices]
+        if input_kind == "positional":
+            args, kwargs = tuple(inputs), {}
+        else:
+            keyword_input = (
+                {"nested": [(inputs[-1],)]}
+                if input_kind == "nested_keyword"
+                else inputs[-1]
+            )
+            args, kwargs = tuple(inputs[:-1]), {"input": keyword_input}
+
+        def run_fn(*args, input=()):
+            return [x * torch.rand_like(x) for x in tree_leaves((args, input))]
+
+        def rng_states():
+            return [
+                torch.get_rng_state()
+                if torch.device(d).type == "cpu"
+                else torch.get_device_module(d).get_rng_state(d)
+                for d in devices
+            ]
+
+        torch.manual_seed(1234)
+        expected = run_fn(*args, **kwargs)
+        forward_states = rng_states()
+        torch.autograd.backward([x.sum() for x in expected])
+        self.assertEqual([x.grad for x in inputs], expected, atol=0, rtol=0)
+        self.assertEqual(rng_states(), forward_states)
+        with torch.no_grad():
+            recomputed = run_fn(*args, **kwargs)
+        recompute_states = rng_states()
+
+        for x in inputs:
+            x.grad = None
+        torch.manual_seed(1234)
+        # A matching default could hide failure to infer devices from kwargs.
+        with mock.patch.object(DefaultDeviceType, "_default_device_type", "cpu"):
+            out = checkpoint(
+                run_fn,
+                *args,
+                use_reentrant=False,
+                preserve_rng_state=preserve_rng_state,
+                **kwargs,
+            )
+            self.assertEqual(out, expected, atol=0, rtol=0)
+            self.assertEqual(rng_states(), forward_states)
+            # Serialize recomputation for outputs on different devices.
+            with torch.autograd.set_multithreading_enabled(False):
+                torch.autograd.backward([x.sum() for x in out])
+
+        grads = [x.grad for x in inputs]
+        states = rng_states()
+        expected_grads = expected if preserve_rng_state else recomputed
+        expected_states = forward_states if preserve_rng_state else recompute_states
+        self.assertEqual(grads, expected_grads, atol=0, rtol=0)
+        self.assertEqual(states, expected_states)
+        if not preserve_rng_state:
+            self.assertNotEqual(grads, expected, atol=0, rtol=0)
+            self.assertNotEqual(states, forward_states)
+
+    @parametrize("input_kind", ["positional", "keyword", "mixed", "nested_keyword"])
+    @parametrize("preserve_rng_state", [True, False])
+    def test_checkpoint_rng_inputs(self, device, input_kind, preserve_rng_state):
+        self._check_rng([device], input_kind, preserve_rng_state)
+
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    @parametrize("input_kind", ["keyword", "nested_keyword"])
+    @parametrize("preserve_rng_state", [True, False])
+    def test_checkpoint_rng_multiple_devices(
+        self, devices, input_kind, preserve_rng_state
+    ):
+        self._check_rng(devices[:2], input_kind, preserve_rng_state)
+
+
+instantiate_device_type_tests(TestCheckpointRNG, globals(), allow_xpu=True)
 
 
 class TestDataLoaderUtils(TestCase):
