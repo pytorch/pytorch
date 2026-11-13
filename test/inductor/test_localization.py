@@ -14,6 +14,7 @@ Pointwise tails (relu, bias-add, gelu, ...) consume the concatenated output.
 
 import contextlib
 import functools
+import os
 import re
 import unittest
 import warnings
@@ -1477,6 +1478,60 @@ class TestConcatMemPool(TestCase):
 
 
 instantiate_device_type_tests(TestConcatMemPool, globals(), only_for="cuda")
+
+
+class TestLocalizationCudagraphs(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def tearDown(self):
+        torch._dynamo.reset()
+        super().tearDown()
+
+    @_requires_green_contexts
+    @torch.inference_mode()
+    @inductor_config.patch("triton.slow_path_cudagraph_asserts", True)
+    def test_localize_after_replay(self, device):
+        from torch._inductor.cudagraph_trees import get_container
+
+        x = torch.randn(8, 256, device=device)
+        a = nn.Linear(256, 256, device=device)
+        ref_a = a(x)
+        torch.cuda.localize(a)
+        compiled_a = torch.compile(a, mode="reduce-overhead", fullgraph=True)
+        for _ in range(3):
+            compiled_a(x)
+
+        b = nn.Linear(256, 256, device=device)
+        ref_b = b(x)
+        torch.cuda.localize(b)
+        h = torch.compile(torch.sin, mode="reduce-overhead", fullgraph=True)
+        h(x)
+
+        c = nn.Linear(256, 256, device=device)
+        ref_c = c(x)
+        torch.cuda.localize(c)
+        self.assertEqual(a(x), ref_a)
+        self.assertEqual(b(x), ref_b)
+        self.assertEqual(c(x), ref_c)
+        manager = get_container(x.device.index).tree_manager
+        self.assertIsNotNone(manager)
+        self.assertGreater(manager.debug_checkpointing_counter, 0)
+
+    @torch.inference_mode()
+    def test_rejects_cached_workspace(self, device):
+        model = nn.Linear(8, 8, device=device)
+        with mock.patch.dict(os.environ, TORCH_CUBLAS_WORKSPACE_CACHE="1"):
+            with self.assertRaisesRegex(RuntimeError, "TORCH_CUBLAS_WORKSPACE_CACHE"):
+                torch.cuda.localize(model)
+        for param in model.parameters():
+            self.assertIs(type(param), nn.Parameter)
+
+
+instantiate_device_type_tests(TestLocalizationCudagraphs, globals(), only_for="cuda")
 
 
 class TestLocalizationAllocatorMeta(TestCase):
