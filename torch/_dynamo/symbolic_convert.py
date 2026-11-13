@@ -977,7 +977,12 @@ def generic_jump(
             return
 
         if value.is_python_constant():
-            if truth_fn(value.as_python_constant()):
+            value = value.unwrap()
+            if isinstance(value, variables.NNModuleHooksDictVariable):
+                constant_value = value.mp_length_impl(self).as_python_constant()
+            else:
+                constant_value = value.as_python_constant()
+            if truth_fn(constant_value):
                 if push:
                     self.push(value)
                 self.jump(inst)

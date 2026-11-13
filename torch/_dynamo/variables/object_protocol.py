@@ -477,8 +477,12 @@ def generic_is_true(
     Resolution order: constants → nb_bool → mp_length/sq_length → truthy.
     """
     from .constant import ConstantVariable
+    from .dicts import NNModuleHooksDictVariable
 
     if obj.is_python_constant():
+        if isinstance(obj, NNModuleHooksDictVariable):
+            length = obj.mp_length_impl(tx).as_python_constant()
+            return ConstantVariable.create(bool(length))
         try:
             return ConstantVariable.create(bool(obj.as_python_constant()))
         except Exception as e:
