@@ -591,11 +591,10 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
   return {selfTensor_, otherTensor_, output};
 }
 
-bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
+bool use_metal_mm(const Tensor& self, const Tensor& output) {
   static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
-  constexpr auto max_stride_size = 32768;
   constexpr auto max_complex_inner_size = 2048;
-  if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
+  if (always_use_metal || !c10::isComplexType(self.scalar_type())) {
     return true;
   }
   // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
@@ -606,32 +605,57 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   }
   // multiplicationWithPrimaryTensor: returns incorrect results if inner size exceeds 2048
   // See https://github.com/pytorch/pytorch/issues/167727#issuecomment-3529308548
-  if (c10::isComplexType(self.scalar_type()) && self.size(1) > max_complex_inner_size) {
-    return true;
-  }
-  // Detect conditions that would trigger LORADOWN GEMV kernel with potential padding overflow
-  // See https://github.com/pytorch/pytorch/issues/178056
-  if (self.scalar_type() == at::ScalarType::Half && (self.size(0) <= 16 || other.size(1) <= 16) &&
-      self.stride(1) == 1 && other.stride(0) == 1) {
-    int64_t self_padding = self.stride(0) - self.size(1);
-    int64_t other_padding = other.stride(1) - other.size(0);
+  return self.size(1) > max_complex_inner_size;
+}
 
-    if (self_padding > 15 || other_padding > 15 || self_padding % 4 != 0 || other_padding % 4 != 0) {
-      TORCH_WARN_ONCE(
-          "MPS mm implementation has a known issue with this shape, dtype and slice. Dispatching to metal implementation instead. This may impact performance.");
-      return true;
+// out = alpha * a @ b + beta * bias for 2-D or batched float32, float16 and bfloat16 operands: matmul_mpp where
+// matmul2d takes the layout, else matmul_simd.
+void metal_gemm(const Tensor& a,
+                const Tensor& b,
+                const Tensor& out,
+                const Tensor& bias = {},
+                const Scalar& alpha = 1,
+                const Scalar& beta = 0) {
+  // out stands in for a bias that is not read.
+  const bool add = bias.defined() && beta.toDouble() != 0;
+  const auto bias_ = add ? bias.expand_as(out) : out;
+  const auto params = matmul_params<uint64_t>(a, b, out, bias_, alpha.toFloat(), add ? beta.toFloat() : 0.0f);
+  const int64_t batch = out.dim() == 3 ? out.size(0) : 1;
+  static const int64_t full_grid = kMatmulFullGridPerCore * MPSDevice::getInstance()->getCoreCount();
+  constexpr uint32_t mpp_bn = kMatmulBlock * kMatmulBlockSimdgroups;
+  const int64_t mpp_tiles = at::ceil_div(params.m, kMatmulBlock) * at::ceil_div(params.n, mpp_bn) * batch;
+  const uint32_t mpp_bm = mpp_tiles < full_grid ? kMatmulBlock / 2 : kMatmulBlock;
+  const bool use_mpp = has_mpp() && params.out_stride_n == 1 && params.bias_stride_n == 1 &&
+      (params.a_stride_m == 1 || params.a_stride_k == 1) && (params.b_stride_k == 1 || params.b_stride_n == 1) &&
+      matmul_mpp_indices_fit(params, mpp_bm, mpp_bn);
+  const auto bm = use_mpp ? mpp_bm : matmul_tile_rows(params.m);
+  const auto bn = use_mpp ? mpp_bn : kMatmulTileN;
+  const auto simdgroups = use_mpp ? kMatmulBlockSimdgroups : matmul_simdgroups(bm, bn);
+  const bool use_u32 = !use_mpp && offsetsFitIn<int32_t>(a, b, out, bias_);
+  const auto dtype = scalarToMetalTypeString(out);
+  const auto name = use_mpp ? fmt::format("matmul_mpp_{}{}_{}_bm{}",
+                                          params.a_stride_k == 1 ? 'n' : 't',
+                                          params.b_stride_k == 1 ? 't' : 'n',
+                                          dtype,
+                                          bm)
+                            : fmt::format("matmul_simd_{}_bm{}{}", dtype, bm, mtlIdxSuffix(use_u32));
+  const auto pso = lib.getPipelineStateForFunc(name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "metal_mm", {a, b}, stream);
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      if (use_u32) {
+        mtl_setArgs(encoder, a, b, out, bias_, matmul_params<uint32_t>(a, b, out, bias_, params.alpha, params.beta));
+      } else {
+        mtl_setArgs(encoder, a, b, out, bias_, params);
+      }
+      [encoder dispatchThreadgroups:MTLSizeMake(at::ceil_div(params.n, bn), at::ceil_div(params.m, bm), batch)
+              threadsPerThreadgroup:MTLSizeMake(simdgroups * c10::metal::simdgroup_size, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso, stream);
     }
-  }
-
-  // On Apple7/8, MPSGraph intermittently corrupts matmuls with a reduction
-  // dimension over 2^15 when both output dimensions use the matrix kernels;
-  // whether a given call misbehaves depends on allocator/session state, and
-  // fully contiguous operands are affected too. Apple9+ handles this
-  // correctly.
-  static const bool is_affected_gpu = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
-  constexpr int64_t min_matrix_dim = 16;
-  return is_affected_gpu && self.size(1) > max_stride_size && self.size(0) >= min_matrix_dim &&
-      other.size(1) >= min_matrix_dim;
+  });
 }
 
 } // anonymous namespace
@@ -655,38 +679,7 @@ void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out) {
     out.zero_();
     return;
   }
-  const auto params = matmul_params<uint64_t>(a, b, out);
-  const auto bm = matmul_tile_rows(params.m);
-  const bool use_mpp = has_mpp() && params.out_stride_n == 1 && (params.a_stride_m == 1 || params.a_stride_k == 1) &&
-      (params.b_stride_k == 1 || params.b_stride_n == 1) && matmul_mpp_indices_fit(params, bm, kMatmulTileN);
-  const bool use_u32 = !use_mpp && offsetsFitIn<int32_t>(a, b, out);
-  const auto dtype = scalarToMetalTypeString(out);
-  const auto name = use_mpp ? fmt::format("matmul_mpp_{}{}_{}_bm{}",
-                                          params.a_stride_k == 1 ? 'n' : 't',
-                                          params.b_stride_k == 1 ? 't' : 'n',
-                                          dtype,
-                                          bm)
-                            : fmt::format("matmul_simd_{}_bm{}{}", dtype, bm, mtlIdxSuffix(use_u32));
-  const auto pso = lib.getPipelineStateForFunc(name);
-  auto stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(pso, "metal_mm", {a, b}, stream);
-      auto encoder = stream->commandEncoder();
-      [encoder setComputePipelineState:pso];
-      if (use_u32) {
-        mtl_setArgs(encoder, a, b, out, matmul_params<uint32_t>(a, b, out));
-      } else {
-        mtl_setArgs(encoder, a, b, out, params);
-      }
-      const auto grid_size_x = at::ceil_div<NSUInteger>(params.n, kMatmulTileN);
-      const auto grid_size_y = at::ceil_div<NSUInteger>(params.m, bm);
-      [encoder
-           dispatchThreadgroups:MTLSizeMake(grid_size_x, grid_size_y, 1)
-          threadsPerThreadgroup:MTLSizeMake(matmul_simdgroups(bm, kMatmulTileN) * c10::metal::simdgroup_size, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso, stream);
-    }
-  });
+  metal_gemm(a, b, out);
 }
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
@@ -719,7 +712,11 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   // And crashes if its a view of matrix with dimensions larger than 2**15
   // See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
   // In such cases, fallback to naive but accurate metal shader
-  if (use_metal_mm(self, other, output)) {
+  if (supportedFloatingType(self.scalar_type())) {
+    metal_gemm(self, other, output);
+    return output;
+  }
+  if (use_metal_mm(self, output)) {
     return do_metal_mm(self, other, output);
   }
 
@@ -730,25 +727,12 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
       std::tie(newCachedGraph->inputTensor_, newCachedGraph->otherTensor_, newCachedGraph->outputTensor_) =
           do_mm(mpsGraph, self, other);
     });
-    // MPS TODO:
     // Strided API doesn't play nice with complex data types (at least not in case of matmul).
-    // MPSGraph's matrixMultiplication produces incorrect results with stride-0 NDArray
-    // inputs (only every 16th row is computed) on macOS < 26.4, and again on macOS 27.0.0;
-    // 26.4+ and 27.0.1+ are fine. On affected versions, contiguify such tensors by disabling
-    // the strided API so they go through the gather/clone path first.
-    // See https://github.com/pytorch/pytorch/issues/180201
-    static const bool has_stride_zero_mm_bug = !is_macos_at_least(MacOSVersion::MACOS_26_4) ||
-        (is_macos_at_least(MacOSVersion::MACOS_27_0) && !is_macos_at_least(MacOSVersion::MACOS_27_0_1));
-    auto hasZeroStride = [](const Tensor& t) {
-      return std::ranges::any_of(t.strides(), [](auto s) { return s == 0; });
-    };
-    auto useStridedSelf = !isComplexType(self.scalar_type()) && (!has_stride_zero_mm_bug || !hasZeroStride(self));
-    auto useStridedOther = !isComplexType(other.scalar_type()) && (!has_stride_zero_mm_bug || !hasZeroStride(other));
     auto selfPlaceholder = self.numel() != 0
-        ? Placeholder(cachedGraph->inputTensor_, self, nil, true, MPSDataTypeInvalid, useStridedSelf)
+        ? Placeholder(cachedGraph->inputTensor_, self, nil, true, MPSDataTypeInvalid, false)
         : Placeholder();
     auto otherPlaceholder = other.numel() != 0
-        ? Placeholder(cachedGraph->otherTensor_, other, nil, true, MPSDataTypeInvalid, useStridedOther)
+        ? Placeholder(cachedGraph->otherTensor_, other, nil, true, MPSDataTypeInvalid, false)
         : Placeholder();
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
@@ -834,80 +818,18 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     return result;
   }
 
-  // Use Metal kernels for integer and complex types
-  if (c10::isIntegralType(batch1.scalar_type(), true) || c10::isComplexType(batch1.scalar_type())) {
-    return do_metal_addbmm_or_baddbmm(input, batch1, batch2, alpha, beta, result, opType == BADDBMM_OP_TYPE);
+  if (supportedFloatingType(batch1.scalar_type())) {
+    // addbmm is one product over the batches' K laid end to end.
+    const bool sum = opType == ADDBMM_OP_TYPE;
+    metal_gemm(sum ? batch1.transpose(0, 1).reshape({batch1.size(1), -1}) : batch1,
+               sum ? batch2.reshape({-1, batch2.size(2)}) : batch2,
+               result,
+               input,
+               alpha,
+               beta);
+    return result;
   }
-
-  auto stream = getCurrentMPSStream();
-
-  struct CachedGraph : public mps::MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* batch1Tensor_ = nil;
-    MPSGraphTensor* batch2Tensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  @autoreleasepool {
-    std::string key = (opType == ADDBMM_OP_TYPE) ? ("addbmm_out_mps_impl") : ("baddbmm_out_mps_impl");
-    key += getTensorsStringKey({batch1, batch2, input}) + ":" + std::to_string(beta.toDouble()) + ":" +
-        std::to_string(alpha.toDouble());
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, input);
-      MPSGraphTensor* batch1Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch1);
-      MPSGraphTensor* batch2Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch2);
-
-      // Intermediate for alpha
-      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
-                                                        dataType:getMPSScalarType(batch1.scalar_type())];
-
-      MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1Tensor
-                                                                      secondaryTensor:batch2Tensor
-                                                                                 name:@"(batch1@batch2)"];
-
-      MPSGraphTensor* reductionSumTensor = productTensor;
-      if (opType == ADDBMM_OP_TYPE) {
-        reductionSumTensor = [mpsGraph reductionSumWithTensor:productTensor axis:0 name:@"reductionSum(batch1@batch2)"];
-      }
-
-      // Intermediate for multiplying by alpha
-      MPSGraphTensor* reductionSumTimesAlphaTensor =
-          [mpsGraph multiplicationWithPrimaryTensor:reductionSumTensor
-                                    secondaryTensor:alphaTensor
-                                               name:@"alpha*(batch1@batch2)"];
-
-      // When beta == 0, input is ignored so nan/inf in it are not propagated (matches CPU/CUDA and addmm).
-      const double betaVal = beta.toDouble();
-      MPSGraphTensor* outputTensor = reductionSumTimesAlphaTensor;
-      if (betaVal != 0.0) {
-        MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:betaVal
-                                                         dataType:getMPSScalarType(input.scalar_type())];
-        MPSGraphTensor* biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
-                                                                        secondaryTensor:betaTensor
-                                                                                   name:@"beta*input"];
-        outputTensor = [mpsGraph additionWithPrimaryTensor:reductionSumTimesAlphaTensor
-                                           secondaryTensor:biasTimesBetaTensor
-                                                      name:@"beta*input + alpha*(batch1@batch2)"];
-      }
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->batch1Tensor_ = batch1Tensor;
-      newCachedGraph->batch2Tensor_ = batch2Tensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
-    Placeholder batch1Placeholder = Placeholder(cachedGraph->batch1Tensor_, batch1);
-    Placeholder batch2Placeholder = Placeholder(cachedGraph->batch2Tensor_, batch2);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, batch1Placeholder, batch2Placeholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  return result;
+  return do_metal_addbmm_or_baddbmm(input, batch1, batch2, alpha, beta, result, opType == BADDBMM_OP_TYPE);
 }
 
 static Tensor& addmm_out_mps_impl(const Tensor& bias,
@@ -962,74 +884,11 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     return output;
   }
 
-  // Complex addmm must use the Metal kernel (like bmm/baddbmm): the MPSGraph-based fallback
-  // for real types below encodes alpha/beta as real (double) constants via toDouble(), which
-  // throws for a complex scalar and drops its imaginary part.
-  if (use_metal_mm(self, other, output) || c10::isComplexType(self.scalar_type())) {
-    return do_metal_addmm(self, other, output, alpha, beta, *bias_);
+  if (supportedFloatingType(self.scalar_type())) {
+    metal_gemm(self, other, output, *bias_, alpha, beta);
+    return output;
   }
-
-  bool is_beta_non_zero = beta.toDouble() != 0.0;
-
-  struct CachedGraph : public mps::MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* selfTensor_ = nil;
-    MPSGraphTensor* otherTensor_ = nil;
-    MPSGraphTensor* biasTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  @autoreleasepool {
-    std::string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" +
-        std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
-      auto biasTensor_ = bias_->is_conj() ? [mpsGraph conjugateWithTensor:biasTensor name:nil] : biasTensor;
-
-      // TODO: Use alpha and beta here with fill_.Scalar and mul
-      auto [selfTensor, otherTensor, productTensor] = do_mm(mpsGraph, self, other);
-
-      auto productTimesAlphaTensor = productTensor;
-      if (alpha.toDouble() != 1.0) {
-        auto alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble() dataType:getMPSScalarType(self.scalar_type())];
-
-        productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:productTensor
-                                                            secondaryTensor:alphaTensor
-                                                                       name:@"MM/alpha*(mat1@mat2)"];
-      }
-      auto biasTimesBetaTensor = biasTensor_;
-      if (is_beta_non_zero && beta.toDouble() != 1.0) {
-        auto betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
-                                              dataType:getMPSScalarType((*bias_).scalar_type())];
-        biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:biasTensor_
-                                                        secondaryTensor:betaTensor
-                                                                   name:@"MM/beta*input"];
-      }
-
-      MPSGraphTensor* outputTensor = productTimesAlphaTensor;
-      if (is_beta_non_zero) {
-        outputTensor = [mpsGraph additionWithPrimaryTensor:productTimesAlphaTensor
-                                           secondaryTensor:biasTimesBetaTensor
-                                                      name:@"MM/beta*input + alpha*(mat1@mat2)"];
-      }
-
-      newCachedGraph->selfTensor_ = selfTensor;
-      newCachedGraph->otherTensor_ = otherTensor;
-      newCachedGraph->biasTensor_ = biasTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder selfPlaceholder = self.numel() != 0 ? Placeholder(cachedGraph->selfTensor_, self) : Placeholder();
-    Placeholder otherPlaceholder = other.numel() != 0 ? Placeholder(cachedGraph->otherTensor_, other) : Placeholder();
-    Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, *bias_);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-
-    auto feeds = self.numel() != 0 ? dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder, biasPlaceholder)
-                                   : dictionaryFromPlaceholders(biasPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  return output;
+  return do_metal_addmm(self, other, output, alpha, beta, *bias_);
 }
 
 static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
@@ -1177,6 +1036,10 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     return result;
   }
 
+  if (supportedFloatingType(batch1.scalar_type())) {
+    metal_gemm(batch1, batch2, result);
+    return result;
+  }
   if (c10::isIntegralType(batch1.scalar_type(), true)) {
     return do_metal_bmm(batch1, batch2, result);
   }

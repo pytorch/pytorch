@@ -1,7 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
-#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/addmm.h>
@@ -13,83 +12,6 @@
 namespace at::native {
 
 using namespace mps;
-
-// MPSNDArrayMatrixMultiplication and MPSGraph matrixMultiplication produce
-// non-deterministic results for >2D fp16/bf16 inputs on Apple M5+ (Apple10 GPU family).
-// Flatten to 2D to work around the issue (See https://github.com/pytorch/pytorch/issues/180776 )
-static bool needs_nd_workaround(const Tensor& input) {
-  static const bool is_m5_or_newer = is_apple_family_or_newer(AppleGPUFamily::APPLE_10_PLUS);
-  return input.dim() > 2 && is_m5_or_newer && (input.scalar_type() == kHalf || input.scalar_type() == kBFloat16);
-}
-
-// Apple7/8 (M1/M2) MPSGraph matmul intermittently returns wrong results when the
-// reduction dimension exceeds 2^15 and both output dimensions are at least 16; the
-// corruption is allocator/session-state dependent and hits contiguous and transposed
-// operands alike. Apple9+ is fine. mm/addmm already divert such shapes to the
-// stride-aware metal kernels, but linear builds its own graph, so it has to test the
-// GEMM it would form and delegate instead. Mirrors use_metal_mm in Matmul.mm.
-static bool needs_mm_overflow_fallback(int64_t m, int64_t k, int64_t n) {
-  static const bool is_affected_gpu = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
-  constexpr int64_t max_mpsgraph_dim = 32768;
-  constexpr int64_t min_matrix_dim = 16;
-  return is_affected_gpu && k > max_mpsgraph_dim && m >= min_matrix_dim && n >= min_matrix_dim;
-}
-
-static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const Tensor& bias, Tensor& output) {
-  bool is_bias_defined = bias.defined();
-
-  auto mpsStream = getCurrentMPSStream();
-  auto device = MPSDevice::getInstance()->device();
-
-  const std::string key = "mps_linear" + getTensorsStringKey({input, weight, bias}, true, true);
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      mpsStream->endKernelCoalescing();
-
-      auto computeEncoder = mpsStream->commandEncoder();
-      auto commandBuffer = mpsStream->commandBuffer();
-
-      const auto mpsDataType = getMPSDataType(weight.scalar_type());
-
-      auto inputNDArray = getMPSNDArray(input, input.sizes(), input.strides());
-      auto outNDArray = getMPSNDArray(output, output.sizes(), output.strides());
-
-      auto weightBuf = getMTLBufferStorage(weight);
-      auto weightDesc = [MPSNDArrayDescriptor descriptorWithDataType:mpsDataType shape:getMPSShape(weight.sizes())];
-      weightDesc.preferPackedRows = YES;
-      [weightDesc transposeDimension:0 withDimension:1];
-      auto weightNDArray = [[[MPSNDArray alloc] initWithBuffer:weightBuf
-                                                        offset:weight.storage_offset() * weight.element_size()
-                                                    descriptor:weightDesc] autorelease];
-
-      if (is_bias_defined) {
-        auto biasNDArray = getMPSNDArray(bias, bias.sizes(), bias.strides());
-        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(key, [&]() {
-          return [[[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:3] autorelease];
-        });
-        auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
-
-        getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias}, mpsStream);
-        [kernel encodeToCommandEncoder:computeEncoder
-                         commandBuffer:commandBuffer
-                          sourceArrays:@[ inputNDArray, weightNDArray, biasNDArray ]
-                      destinationArray:outNDArray];
-        getMPSProfiler().endProfileKernel(kernel, mpsStream);
-      } else {
-        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(key, [&]() {
-          return [[[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2] autorelease];
-        });
-        auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
-        getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias}, mpsStream);
-        [kernel encodeToCommandEncoder:computeEncoder
-                         commandBuffer:commandBuffer
-                          sourceArrays:@[ inputNDArray, weightNDArray ]
-                      destinationArray:outNDArray];
-        getMPSProfiler().endProfileKernel(kernel, mpsStream);
-      }
-    }
-  });
-}
 
 Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::optional<Tensor>& bias_opt) {
   // wT = transpose(weight);
@@ -152,11 +74,10 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   }
 
   const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());
-  const auto rows = c10::multiply_integers(input.sizes().begin(), input.sizes().end() - 1);
 
   // See pytorch/pytorch#177116. Delegating to addmm/mm reaches the metal kernels, which
   // take the weight's real strides, so the transposed (column-major) operand costs nothing.
-  if (!is_complex && (rows == 1 || needs_mm_overflow_fallback(rows, input.size(-1), weight.size(0)))) {
+  if (!is_complex) {
     const auto input_2d = input.dim() != 2 ? input.reshape({-1, input.size(-1)}) : input;
     // addmm fuses the bias and routes rank-1 shapes to the GEMV kernels. A multi-dim bias
     // cannot broadcast against the 2D result, so it is added after the reshape instead.
@@ -165,38 +86,9 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     if (is_bias_defined && !fuse_bias) {
       result.add_(bias);
     }
+    result = result.contiguous(input.suggest_memory_format());
     // Squeeze last dim of 1D linear
     return weight_arg.dim() != 1 ? result : result.squeeze(-1);
-  }
-
-  // No-graph execution causes nonsense if these are non-contiguous.
-  const bool is_contiguous = input.is_contiguous() && weight.is_contiguous() && bias.is_contiguous();
-
-  if (is_contiguous && !is_complex) {
-    // The fused 3-source kernel drops the bias for vector-shaped (M==1) inputs on the M1
-    // (Apple7) family on macOS 26; add it separately there. Fixed in macOS 27.
-    static const bool decompose_bias = is_apple_family_or_newer(AppleGPUFamily::APPLE_7_PLUS) &&
-        !is_apple_family_or_newer(AppleGPUFamily::APPLE_8_PLUS) && is_macos_at_least(MacOSVersion::MACOS_26_0) &&
-        !is_macos_at_least(MacOSVersion::MACOS_27_0);
-    // linear's leading dims are a fake batch (weight is shared), so a >2D input is one 2D GEMM.
-    // Passing it as a batched NDArray instead triggers a 2^16 batch-index wraparound (#189495) and
-    // a small-batch GEMV perf cliff (#189847); flatten to 2D (a free view here) to avoid both.
-    // A multi-dim bias cannot be flattened, so run the bias-free kernel there and add the bias afterwards.
-    const bool needs_flatten = input.dim() > 2;
-    const bool add_bias_after = is_bias_defined && (decompose_bias || (needs_flatten && bias.dim() > 1));
-    const Tensor kernel_bias = add_bias_after ? Tensor() : bias;
-    if (needs_flatten) {
-      auto input2d = input.flatten(0, -2);
-      auto output2d = output.flatten(0, -2);
-      _mps_linear_nograph(input2d, weight, kernel_bias, output2d);
-    } else {
-      _mps_linear_nograph(input, weight, kernel_bias, output);
-    }
-    if (add_bias_after) {
-      output.add_(bias);
-    }
-    // Squeeze last dim of 1D linear
-    return weight_arg.dim() != 1 ? output : output.squeeze(-1);
   }
   MPSStream* stream = getCurrentMPSStream();
   struct CachedGraph : public MPSCachedGraph {
@@ -220,9 +112,6 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     // improves performance with 3D+ inputs
     needs_flatten =
         input_size.size() > 2 && input_size[0] > 1 && input_size[1] >= 1 && input_size[1] <= 32 && bias.dim() <= 1;
-  }
-  if (!needs_flatten) {
-    needs_flatten = needs_nd_workaround(input);
   }
   const Tensor linear_input = needs_flatten ? input.reshape({-1, input.size(-1)}) : input;
 
