@@ -87,10 +87,12 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfRocm,
@@ -323,6 +325,90 @@ def cleanup_dispatch_trace_metadata(mod: torch.export.ExportedProgram) -> None:
         ):
             continue
         del node.meta["custom"]
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@instantiate_parametrized_tests
+class TestStrictExportSideEffects(TorchTestCase):
+    @parametrize("tracer", ["legacy", "legacy_capture", "fullgraph_capture"])
+    @parametrize("persistent", [False, True])
+    @parametrize("nested", [False, True])
+    def test_reject_buffer_reassignment(self, tracer, persistent, nested):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                target = self
+                if nested:
+                    self.child = torch.nn.Module()
+                    target = self.child
+                target.register_buffer("buf", torch.zeros(2), persistent=persistent)
+
+            def forward(self, x):
+                target = self.child if nested else self
+                target.buf = target.buf + 1.0
+                return x + target.buf
+
+        m = M()
+        target = m.child if nested else m
+        original = target.buf
+        with torch._export.config.patch(
+            use_new_tracer_experimental=tracer != "legacy",
+            use_legacy_dynamo_graph_capture=tracer == "legacy_capture",
+        ):
+            with self.assertRaisesRegex(RuntimeError, "side effects happened"):
+                torch.export.export(m, (torch.zeros(2),), strict=True)
+        self.assertIs(target.buf, original)
+        self.assertEqual(target.buf, torch.zeros(2))
+
+    @parametrize("persistent", [False, True])
+    def test_nonstrict_buffer_reassignment(self, persistent):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(2), persistent=persistent)
+
+            def forward(self, x):
+                self.buf = self.buf + 1.0
+                return x + self.buf
+
+        ep = torch.export.export(
+            M(), (torch.zeros(2),), strict=False
+        ).run_decompositions({})
+        self.assertEqual(
+            list(ep.graph_signature.buffers_to_mutate.values()), ["buf"]
+        )
+        gm = ep.module()
+        eager = M()
+        x = torch.zeros(2)
+        self.assertEqual(gm(x), eager(x))
+        self.assertEqual(gm(x), eager(x))
+        self.assertEqual(gm.buf, torch.full((2,), 2.0))
+
+    @parametrize("tracer", ["legacy", "legacy_capture", "fullgraph_capture"])
+    def test_strict_inplace_buffer_update(self, tracer):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(2))
+
+            def forward(self, x):
+                self.buf.add_(1.0)
+                return x + self.buf
+
+        with torch._export.config.patch(
+            use_new_tracer_experimental=tracer != "legacy",
+            use_legacy_dynamo_graph_capture=tracer == "legacy_capture",
+        ):
+            ep = torch.export.export(
+                M(), (torch.zeros(2),), strict=True
+            ).run_decompositions({})
+        self.assertEqual(list(ep.graph_signature.buffers_to_mutate.values()), ["buf"])
+        gm = ep.module()
+        eager = M()
+        x = torch.zeros(2)
+        self.assertEqual(gm(x), eager(x))
+        self.assertEqual(gm(x), eager(x))
+        self.assertEqual(gm.buf, eager.buf)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -19540,15 +19626,11 @@ def forward(self, x):
             lengths=torch.IntTensor([0, 2, 0, 1, 1, 1, 0, 3]),
             offsets=torch.IntTensor([0, 0, 2, 2, 3, 4, 5, 5, 8]),
         )
-        # TODO tmanlaibaatar
-        # because we call unflatten in the flat tracer, it creates a new JaggedTensor
-        # and it gets pruned as it is not reachable. Not sure what the right way to fix
-        # is but since it is just warning, probably ok to xfail it for now.
+        # Input-object side effects are not represented in the exported graph.
         with (
-            self.assertWarnsRegex(
-                UserWarning,
-                "While exporting, we found certain side effects happened in the model.forward. "
-                "Here are the list of potential sources you can double check: \\[\"L\\['jt'\\]\"\\]",
+            self.assertRaisesRegex(
+                RuntimeError,
+                "side effects happened",
             ),
             torch._export.config.patch(use_new_tracer_experimental=False),
         ):
