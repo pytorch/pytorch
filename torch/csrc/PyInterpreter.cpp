@@ -172,7 +172,6 @@ struct ConcretePyInterpreterVTable final
   void fake_raise_python_error(
       c10::impl::FakePythonError kind,
       const std::string& msg) const override;
-  bool _check_for_subclass_arg(const c10::TensorImpl* self) const override;
   bool fake_has_plain_tensor_type(const c10::TensorImpl* self) const override;
   bool fake_avoid_device_init(
       const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
@@ -1075,13 +1074,12 @@ DEFINE_CACHED_PYTHON_IMPORT(
     get_fake_tensor_tls,
     py::module::import("torch._subclasses.fake_tensor").attr("fake_tensor_tls"))
 DEFINE_CACHED_PYTHON_IMPORT(
-    get_resolve_device_conflict,
-    py::module::import("torch._subclasses.fake_tensor")
-        .attr("_resolve_device_conflict"))
+    get_functorch_config,
+    py::module::import("torch._functorch.config"))
 DEFINE_CACHED_PYTHON_IMPORT(
-    get_check_for_subclass_arg,
+    get_fake_tensor_device_mismatch_error,
     py::module::import("torch._subclasses.fake_tensor")
-        .attr("_check_for_subclass_arg"))
+        .attr("FakeTensorDeviceMismatchError"))
 
 #undef DEFINE_CACHED_PYTHON_IMPORT
 
@@ -1266,9 +1264,26 @@ c10::Device ConcretePyInterpreterVTable::_resolve_device_conflict(
     c10::Device common_device,
     c10::Device device) const {
   py::gil_scoped_acquire gil;
-  return get_resolve_device_conflict()(
-             getTorchApiFunction(op), common_device, device)
-      .cast<c10::Device>();
+  // Match fake_tensor._resolve_device_conflict, including substring matching.
+  // Read the live config: overrides can change within an existing mode.
+  const auto preference =
+      get_functorch_config().attr("fake_tensor_prefer_device_type");
+  if (!preference.is_none()) {
+    const auto preferred = preference.cast<std::string>();
+    const bool common_has_preferred =
+        c10::DeviceTypeName(common_device.type(), /*lower_case=*/true)
+            .find(preferred) != std::string::npos;
+    const bool device_has_preferred =
+        c10::DeviceTypeName(device.type(), /*lower_case=*/true)
+            .find(preferred) != std::string::npos;
+    if (common_has_preferred != device_has_preferred) {
+      return device_has_preferred ? device : common_device;
+    }
+  }
+  auto error_type = get_fake_tensor_device_mismatch_error();
+  auto error = error_type(getTorchApiFunction(op), common_device, device);
+  PyErr_SetObject(error_type.ptr(), error.ptr());
+  throw py::error_already_set();
 }
 
 void ConcretePyInterpreterVTable::fake_raise_python_error(
@@ -1283,14 +1298,6 @@ void ConcretePyInterpreterVTable::fake_raise_python_error(
   }
   PyErr_SetString(type, msg.c_str());
   throw py::error_already_set();
-}
-
-bool ConcretePyInterpreterVTable::_check_for_subclass_arg(
-    const c10::TensorImpl* self) const {
-  py::gil_scoped_acquire gil;
-  PyObject* obj = self->pyobj_slot()->load_pyobj();
-  return obj != nullptr &&
-      get_check_for_subclass_arg()(py::handle(obj)).cast<bool>();
 }
 
 bool ConcretePyInterpreterVTable::fake_has_plain_tensor_type(
@@ -1569,6 +1576,16 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::
         const c10::intrusive_ptr<c10::TensorImpl>& real_impl,
         bool make_constant) const {
   py::gil_scoped_acquire gil;
+  // Subclasses with custom dispatch run at Python before Fake.
+  if (auto* obj = real_impl->pyobj_slot()->load_pyobj()) {
+    auto* type = Py_TYPE(obj);
+    TORCH_CHECK(
+        type == reinterpret_cast<PyTypeObject*>(THPVariableClass) ||
+            PyType_IsSubtype(
+                type, reinterpret_cast<PyTypeObject*>(ParameterClass)),
+        "C++ FakeTensorMode does not support converting tensor subclass ",
+        type->tp_name);
+  }
   at::Tensor real(real_impl);
   py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
   auto converter = py::reinterpret_borrow<py::object>(
