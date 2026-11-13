@@ -1010,8 +1010,18 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
-        super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
+        super().__init__(
+            FakeTensorConverter(copy_data=copy_data),
+            shape_env,
+            creation_traceback=CapturedTraceback.extract(),
+        )
         self.allow_non_fake_inputs = allow_non_fake_inputs
+
+    # Symbolized on demand, without retaining the creation frame's locals.
+    @property
+    def stack(self) -> str:
+        tb = self._creation_traceback
+        return "" if tb is None else "".join(tb.format())
 
     @property
     def avoid_device_init(self) -> bool:
