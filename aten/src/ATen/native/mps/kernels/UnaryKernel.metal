@@ -57,15 +57,11 @@ struct exp_functor {
 struct expm1_functor {
   template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
-    if (::metal::fabs(x) < 1e-1f) {
-      return static_cast<T>(c10::metal::expm1f(static_cast<float>(x)));
-    } else {
-      return static_cast<T>(exp_(static_cast<float>(x)) - 1.0f);
-    }
+    return static_cast<T>(c10::metal::expm1f(static_cast<float>(x)));
   }
   template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
   inline float operator()(const T x) {
-    return exp_(static_cast<float>(x)) - 1;
+    return c10::metal::expm1f(static_cast<float>(x));
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {

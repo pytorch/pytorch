@@ -15,7 +15,9 @@
 #include <chrono>
 #include <fstream>
 #include <future>
+#include <memory>
 #include <mutex>
+#include <string_view>
 
 #include "include/Config.h"
 #include "include/libkineto.h"
@@ -815,6 +817,67 @@ TEST_F(AsyncClientTest, CancelStopsClient) {
   ASSERT_EQ(client_.startCount.load(), 1);
 
   handler.cancel();
+  EXPECT_FALSE(handler.isAsyncActive());
+  EXPECT_EQ(client_.stopCount.load(), 1);
+}
+
+// The GPU tracer keeps its stopped state after a trace ends. A later trace that
+// opts out of GPU tracing must neither be cancelled in warmup nor cut short
+// during collection because of it.
+TEST_F(AsyncClientTest, StaleGpuStopDoesNotEndOptOutTrace) {
+  MockGpuProfiler profiler;
+  AsyncActivityProfilerHandler handler(profiler);
+
+  auto traceFile = createTempTraceFile("libkineto_test", ".json");
+
+  constexpr int kWarmupSecs = 5;
+  constexpr int kDurationSecs = 1;
+  const auto makeConfig = [&](time_point<system_clock> startTime,
+                              std::string_view extra) {
+    auto cfg = std::make_unique<Config>();
+    EXPECT_TRUE(cfg->parse(fmt::format(
+        R"CFG(
+    ACTIVITIES_WARMUP_PERIOD_SECS = {}
+    ACTIVITIES_DURATION_SECS = {}
+    ACTIVITIES_LOG_FILE = {}
+    PROFILE_START_TIME = {}
+    {}
+  )CFG",
+        kWarmupSecs,
+        kDurationSecs,
+        traceFile.path(),
+        duration_cast<milliseconds>(startTime.time_since_epoch()).count(),
+        extra)));
+    return cfg;
+  };
+
+  // A GPU trace runs out of buffers during warmup and is cancelled.
+  auto now = system_clock::now();
+  auto startTime = now + seconds(kWarmupSecs + 1);
+  const auto gpuCfg = makeConfig(startTime, "");
+  handler.configure(*gpuCfg, now);
+  profiler.setGpuCollectionStopped(true);
+  now = startTime;
+  handler.performRunLoopStep(now, now);
+  ASSERT_FALSE(handler.isAsyncActive());
+
+  // The stopped state is still set when the next trace opts out.
+  startTime = now + seconds(kWarmupSecs + 1);
+  const auto cpuCfg = makeConfig(startTime, "DEVICE_TRACING_ENABLED = false");
+  handler.configure(*cpuCfg, now);
+  now = startTime;
+  handler.performRunLoopStep(now, now); // Warmup -> CollectTrace
+  EXPECT_TRUE(handler.isAsyncActive());
+  EXPECT_EQ(client_.startCount.load(), 1);
+
+  // Inside the collection window the trace keeps collecting.
+  handler.performRunLoopStep(now, now);
+  EXPECT_EQ(client_.stopCount.load(), 0);
+
+  // It ends when its window does.
+  const auto afterEnd = startTime + seconds(kDurationSecs + 1);
+  handler.performRunLoopStep(afterEnd, afterEnd);
+  handler.performRunLoopStep(afterEnd, afterEnd);
   EXPECT_FALSE(handler.isAsyncActive());
   EXPECT_EQ(client_.stopCount.load(), 1);
 }
