@@ -194,6 +194,15 @@ class ONNXRegistry:
                 target = _get_overload(qualified_name)
                 if target is None:
                     continue
+                if any(
+                    isinstance(
+                        entry.onnx_function, _custom_translation.NativeTranslation
+                    )
+                    and entry.is_complex == torchlib_meta.is_complex
+                    and entry.opset_introduced <= opset_version
+                    for entry in registry.get_decomps(target)
+                ):
+                    continue
 
                 meta = OnnxDecompMeta(
                     onnx_function=overload_func,
