@@ -783,6 +783,7 @@ def make_pointwise(
     triton_fallback: Callable[..., _T] | None = None,
     round_scalars_to_tensor_dtype: bool = False,
     force_output_cast: bool = False,
+    preserve_cuda_scalar_precision: bool = False,
 ) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR.
@@ -790,6 +791,11 @@ def make_pointwise(
     force_output_cast rounds a bf16/fp16 result down and back up in registers,
     emulating the rounding eager applies at the op's output; see
     emulate_lowp_output_cast.
+
+    preserve_cuda_scalar_precision keeps original CUDA bf16/fp16 arithmetic
+    scalars in FP32 at emulation boundaries. Enable it only for operations whose
+    eager CUDA kernels use opmath scalars; tensor constants retain input casts.
+    Generic alpha scaling retains its existing input casts.
     """
 
     def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
@@ -800,6 +806,20 @@ def make_pointwise(
                 raise AssertionError("expected: not allow_alpha")
             return triton_fallback(*inputs)
 
+        # Preserve scalar provenance before promotion assigns a tensor dtype.
+        original_inputs = inputs
+        scalar_inputs = (
+            {
+                index: inp
+                for index, inp in enumerate(inputs)
+                if isinstance(inp, (int, float, sympy.Basic))
+            }
+            if preserve_cuda_scalar_precision
+            else {}
+        )
+        current_node = (
+            getattr(V.graph, "current_node", None) if V.graph is not None else None
+        )
         # pyrefly: ignore [bad-assignment]
         inputs = promote_constants(
             inputs,
@@ -817,12 +837,23 @@ def make_pointwise(
                         and inp_device is not None
                         and inp_device.type == "cuda"
                     ):
+                        if (
+                            scalar_inputs
+                            and inputs[0].get_dtype() in (torch.bfloat16, torch.float16)
+                            and _has_lowp_pointwise_barrier(current_node)
+                        ):
+                            return make_pointwise(
+                                lambda a, b, scale: ops.fma(b, scale, a),
+                                preserve_cuda_scalar_precision=True,
+                            )(*original_inputs, alpha)
                         return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
 
                 # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
                 # pyrefly: ignore [unsupported-operation]
                 inputs[-1] = mul(inputs[-1], alpha)
+                # Preserve the existing rounding path for generic alpha scaling.
+                scalar_inputs.clear()
         else:
             if alpha is not None:
                 raise AssertionError("expected: alpha is None")
@@ -841,9 +872,6 @@ def make_pointwise(
         # a pointwise node that would have been run in eager. intermediary pointwise nodes
         # during decompositions are not annotated.
         low_pr_fp = (torch.bfloat16, torch.float16)
-        current_node = (
-            getattr(V.graph, "current_node", None) if V.graph is not None else None
-        )
         emulate_precision_casts = _has_lowp_pointwise_barrier(current_node)
         truncate_saved_output = (
             config.emulate_precision_casts_on_saved_tensors
@@ -863,11 +891,28 @@ def make_pointwise(
             else:
                 inputs_loaded = []
                 for inp_index, load in enumerate(loaders):
-                    out = load(index)
-                    inp_dtype = inputs[inp_index].get_dtype()
-                    if emulate_precision_casts and inp_dtype in low_pr_fp:
-                        downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
-                        out = ops.to_dtype(downcast, inp_dtype)
+                    inp = inputs[inp_index]
+                    inp_dtype = inp.get_dtype()
+                    if (
+                        emulate_precision_casts
+                        and inp_dtype in low_pr_fp
+                        and inp_index in scalar_inputs
+                        and inp.get_device().type == "cuda"
+                    ):
+                        # Eager converts these arithmetic scalars directly to FP32.
+                        # Bypass the promoted loader and tensor input-rounding casts.
+                        scalar = scalar_inputs[inp_index]
+                        if isinstance(scalar, sympy.Basic):
+                            out = ops.index_expr(scalar, torch.float32)
+                        else:
+                            out = ops.constant(scalar, torch.float32)
+                    else:
+                        out = load(index)
+                        if emulate_precision_casts and inp_dtype in low_pr_fp:
+                            downcast = ops.to_dtype(
+                                out, inp_dtype, use_compute_types=False
+                            )
+                            out = ops.to_dtype(downcast, inp_dtype)
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
@@ -1214,6 +1259,7 @@ def register_pointwise(
     use_fma_for_alpha=False,
     triton_fallback=None,
     round_scalars_to_tensor_dtype=False,
+    preserve_cuda_scalar_precision=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -1235,6 +1281,7 @@ def register_pointwise(
         use_fma_for_alpha=use_fma_for_alpha,
         triton_fallback=triton_fallback,
         round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
+        preserve_cuda_scalar_precision=preserve_cuda_scalar_precision,
     )
     fn = register_lowering(
         aten_fn,
@@ -8482,6 +8529,7 @@ add = register_pointwise(
     use_fma_for_alpha=True,
     override_fn_when_input_bool="logical_or",
     round_scalars_to_tensor_dtype=True,
+    preserve_cuda_scalar_precision=True,
 )
 
 sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
@@ -8760,7 +8808,12 @@ relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
-sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
+sub = register_pointwise(
+    aten.sub,
+    allow_alpha=True,
+    round_scalars_to_tensor_dtype=True,
+    preserve_cuda_scalar_precision=True,
+)
 
 
 def _with_positional_alpha(lowering, self, other, alpha=1):
