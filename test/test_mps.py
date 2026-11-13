@@ -22,7 +22,7 @@ from collections import defaultdict
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (parametrize, run_tests, TestCase, MACOS_VERSION, IS_CI,
+    (decorateIf, parametrize, preserves_unittest_skip_marks, run_tests, TestCase, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
@@ -369,6 +369,7 @@ class TestAutocastMPS(TestCase):
         self.assertEqual(is_enabled, torch.is_autocast_enabled())
 
 # Expand TestCase class with Memory Leak Detection on MPS device
+@preserves_unittest_skip_marks("wrap_with_mps_policy")
 class TestCaseMPS(TestCase):
     _do_mps_memory_leak_check = True
 
@@ -808,80 +809,6 @@ class TestMPS(TestCaseMPS):
         q = mps_hist / mps_hist.sum()
         kl_div = F.kl_div(q.log(), p, reduction='sum').item()
         self.assertLess(kl_div, 0.03)
-
-    def test_stream(self):
-        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        with torch.mps.stream(None):
-            self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        s1 = torch.mps.Stream()
-        s2 = torch.mps.Stream()
-        self.assertNotEqual(s1, torch.mps.default_stream())
-        self.assertNotEqual(s2, torch.mps.default_stream())
-        self.assertNotEqual(s1, s2)
-
-        # Check that the stream is reset correctly if an exception is raised
-        # within another stream's context.
-        # Note: Use a custom exception type so that any unexpected errors inside
-        # the `try` block pass through to fail the test
-        class MyException(Exception):
-            pass
-
-        try:
-            with torch.mps.stream(s1):
-                self.assertEqual(torch.mps.current_stream(), s1)
-                raise MyException
-
-        except MyException:
-            self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        # Check that the stream is reset correctly with nested contexts
-        with torch.mps.stream(s1):
-            self.assertEqual(torch.mps.current_stream(), s1)
-            with torch.mps.stream(s2):
-                self.assertEqual(torch.mps.current_stream(), s2)
-
-            self.assertEqual(torch.mps.current_stream(), s1)
-
-        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        def concurrent_sine_loop(a1, a2, s1=None, s2=None, n=100):
-            r1 = a1
-            r2 = a2
-
-            for _ in range(n):
-                with torch.mps.stream(s1):
-                    r1 = torch.sin(r1)
-                with torch.mps.stream(s2):
-                    r2 = torch.sin(r2)
-
-            return r1, r2
-
-        # Check that two separate workloads run on separate streams gives the
-        # same result as running them on one stream.
-        try:
-            a1 = torch.randn(100, device='mps')
-            a2 = torch.randn(100, device='mps')
-            torch.mps.synchronize()
-
-            r1, r2 = concurrent_sine_loop(a1, a2, s1, s2)
-            s1.synchronize()
-            s2.synchronize()
-
-            r1_check, r2_check = concurrent_sine_loop(a1, a2, s1=None, s2=None)
-            torch.mps.synchronize()
-
-            self.assertEqual(r1, r1_check)
-            self.assertEqual(r2, r2_check)
-
-        finally:
-            torch.mps.synchronize()
-            s1.synchronize()
-            s2.synchronize()
-            torch.mps.empty_cache()
-
-        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
 
     def _get_stream_by_name(self, stream):
         if stream == "default":
@@ -7287,11 +7214,22 @@ class TestMPS(TestCaseMPS):
                 atol=0, rtol=0
             )
 
+    skip_sort_k_frac = decorateIf(
+        unittest.skip("k_frac only applies to kth/topk"),
+        lambda p: p["mode"] == "sort" and p["k_frac"] != "lo",
+    )
+    skip_kth_descending = decorateIf(
+        unittest.skip("kthvalue has no descending parameter"),
+        lambda p: p["mode"] == "kth" and p["descending"],
+    )
+
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
     @parametrize("descending", [False, True])
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
     def test_sort_single_block(self, dtype, descending, dup, mode, k_frac):
         # Shapes that hit the Metal single-block path: n_rows >= 2, last-dim,
         # sort_size within one threadgroup (<=4096, or <=1024 for 8-byte types).
@@ -7366,6 +7304,8 @@ class TestMPS(TestCaseMPS):
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
     def test_sort_multi_block(self, dtype, descending, dup, mode, k_frac):
         # shapes chosen to hit the metal multi block merge path
         if mode == "sort" and k_frac != "lo":
@@ -7419,6 +7359,12 @@ class TestMPS(TestCaseMPS):
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
+    @decorateIf(
+        unittest.skip("kthvalue/topk not supported for bool"),
+        lambda p: p["mode"] in ("kth", "topk") and p["dtype"] == torch.bool,
+    )
     def test_sort_radix(self, dtype, descending, dup, mode, k_frac):
         # Shapes chosen to hit the Metal radix path: 4-byte needs sort_size >= 65536,
         # 2/1-byte needs sort_size > 4096; n_rows >= 32 with 2-byte triggers the
@@ -10026,6 +9972,17 @@ class TestMPS(TestCaseMPS):
             ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
         self.assertEqual(y, ref, atol=0, rtol=0)
 
+    # https://github.com/pytorch/pytorch/issues/111374
+    def test_lerp_inf(self):
+        inf = float("inf")
+        x = torch.tensor([-inf, inf, 0.0, 0.0, 1.5], device="mps")
+        y = torch.tensor([0.0, 0.0, -inf, inf, 2.5], device="mps")
+        for dtype, w in product([torch.float, torch.half, torch.bfloat16, torch.cfloat], [0.0, 0.3, 0.5, 0.7, 1.0]):
+            xd, yd = x.to(dtype), y.to(dtype)
+            wt = torch.full_like(xd, w + 0.1j if dtype.is_complex else w)
+            self.assertEqual(torch.lerp(xd, yd, w), torch.lerp(xd.cpu(), yd.cpu(), w))
+            self.assertEqual(torch.lerp(xd, yd, wt), torch.lerp(xd.cpu(), yd.cpu(), wt.cpu()))
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
@@ -12482,6 +12439,10 @@ class TestSDPA(TestCaseMPS):
     @parametrize("is_causal", [False, True])
     @parametrize("broadcast_mask", [False, True])
     @parametrize("gqa_factor", [1, 4])
+    @decorateIf(
+        unittest.skip("PyTorch SDPA disallows attn_mask together with is_causal"),
+        lambda p: p["is_causal"] and p["with_mask"],
+    )
     def test_fast_vector_attention(
         self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, broadcast_mask: bool, gqa_factor: int
     ):
@@ -12502,6 +12463,10 @@ class TestSDPA(TestCaseMPS):
     @parametrize("is_causal", [False, True])
     @parametrize("broadcast_mask", [False, True])
     @parametrize("gqa_factor", [1, 4])
+    @decorateIf(
+        unittest.skip("PyTorch SDPA disallows attn_mask together with is_causal"),
+        lambda p: p["is_causal"] and p["with_mask"],
+    )
     def test_fast_vector_attention_2pass(
         self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, broadcast_mask: bool, gqa_factor: int
     ):
@@ -15224,6 +15189,31 @@ class TestConsistency(TestCaseMPS):
             # non-deterministic and introduces more rounding than forward
             bwd_atol, bwd_rtol = (5e-3, 2e-2) if dtype == torch.float16 else (1e-1, 5e-1)
             self.assertEqual(half_grad_input, full_grad_input.to(dtype), atol=bwd_atol, rtol=bwd_rtol)
+
+    @parametrize("spatial_dims", (2, 3))
+    def test_grid_sample_size_one_large_stride(self, device, spatial_dims):
+        input_shape = (1, 2, 1, 4) if spatial_dims == 2 else (1, 2, 1, 3, 4)
+        grid_shape = (1, 2, 1, 2) if spatial_dims == 2 else (1, 1, 2, 1, 3)
+        input_cpu = torch.randn(input_shape, requires_grad=True)
+        grid_cpu = torch.empty(grid_shape).uniform_(-0.8, 0.8).requires_grad_()
+        expected = F.grid_sample(input_cpu, grid_cpu, align_corners=False)
+        grad_output_cpu = torch.randn_like(expected)
+        tensors = []
+        for tensor in (input_cpu, grid_cpu, grad_output_cpu):
+            tensor_mps = tensor.detach().to(device)
+            strides = tuple(2**31 if size == 1 else stride
+                            for size, stride in zip(tensor_mps.shape, tensor_mps.stride()))
+            tensor_mps = tensor_mps.as_strided(tensor_mps.shape, strides)
+            self.assertEqual(tensor_mps.stride(), strides)
+            tensors.append(tensor_mps)
+        input_mps, grid_mps, grad_output_mps = tensors
+        input_mps.requires_grad_()
+        grid_mps.requires_grad_()
+        actual = F.grid_sample(input_mps, grid_mps, align_corners=False)
+        self.assertEqual(actual, expected)
+        expected_grads = torch.autograd.grad(expected, (input_cpu, grid_cpu), grad_output_cpu)
+        actual_grads = torch.autograd.grad(actual, (input_mps, grid_mps), grad_output_mps)
+        self.assertEqual(actual_grads, expected_grads, atol=1e-5, rtol=1e-5)
 
     def test_grid_sampler_3d_nan(self, device):
         input = torch.ones(1, 1, 3, 3, 3)

@@ -330,9 +330,17 @@ TEST(TestNative, PoolDowncastCompatibility) {
   }
 }
 
+// A mode made in C++ starts without a Python wrapper.
+static std::shared_ptr<c10::FakeTensorMode> make_cpp_fake_mode(
+    bool allow_meta = true,
+    bool allow_unsafe_data_ptr_access = true) {
+  return std::make_shared<c10::FakeTensorMode>(
+      nullptr, nullptr, allow_meta, allow_unsafe_data_ptr_access);
+}
+
 TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
   auto input = at::empty({4}, at::device(at::kMeta));
-  auto mode = std::make_shared<c10::FakeTensorMode>(nullptr, nullptr);
+  auto mode = make_cpp_fake_mode();
   auto* input_impl = input.unsafeGetTensorImpl();
   at::set_and_normalize_fake_device(input_impl, c10::Device(c10::kCPU));
   input_impl->set_fake_tensor_mode(mode);
@@ -343,15 +351,18 @@ TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
 
   ASSERT_TRUE(fake_device.has_value());
   EXPECT_EQ(*fake_device, c10::Device(c10::kCPU));
-  EXPECT_EQ(result_impl->fake_tensor_mode(), mode);
+  auto handle = result_impl->fake_tensor_mode();
+  ASSERT_NE(handle, nullptr);
+  EXPECT_EQ(handle, mode);
 }
 
 TEST(TestNative, InitCppFake) {
-  auto mode = std::make_shared<c10::FakeTensorMode>(nullptr, nullptr);
+  auto mode = make_cpp_fake_mode();
   auto make_fake = [&]() {
     auto t = at::empty({2}, at::device(at::kMeta));
     at::init_cpp_fake(t.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
-    EXPECT_EQ(t.unsafeGetTensorImpl()->fake_tensor_mode(), mode);
+    auto handle = t.unsafeGetTensorImpl()->fake_tensor_mode();
+    EXPECT_EQ(handle, mode);
     EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
     return t;
   };
@@ -429,11 +440,8 @@ TEST(TestNative, InitCppFake) {
     t.mutable_data_ptr();
     EXPECT_EQ(handler.messages.size(), count);
   };
-  auto strict_mode = std::make_shared<c10::FakeTensorMode>(
-      nullptr,
-      nullptr,
-      /*allow_meta=*/false,
-      /*allow_unsafe_data_ptr_access=*/false);
+  auto strict_mode = make_cpp_fake_mode(
+      /*allow_meta=*/false, /*allow_unsafe_data_ptr_access=*/false);
   expect_rejected(at::empty({2}), cpu, mode, "expects a meta tensor");
   expect_rejected(
       at::empty({2}, at::device(at::kMeta)), meta, strict_mode, "allow_meta");

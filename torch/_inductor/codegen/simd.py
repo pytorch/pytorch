@@ -106,7 +106,7 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 pexpr = PythonPrinter().doprint
 
-all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_", "r2_"])
+all_prefixes = OrderedSet(["z0_", "y", "x", "r0_", "r1_", "r2_"])
 TRITON_MAX_TENSOR_DIMS = 5
 
 
@@ -683,7 +683,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 val: idx for idx, val in enumerate(val for val in seq if val in mask)
             }
 
-        grid_dims = ["x", "y", "z"]
+        grid_dims = ["x", "y", "z0_"]
         pointwise_tensor_dims = list(reversed(grid_dims))
         reduction_dims = ["r0_", "r1_", "r2_"]
         if no_x_dim:
@@ -720,7 +720,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     is_loop=is_reduction and not persistent_reduction,
                     tensor_dim=tensor_dim,
                     grid_dim=grid_dim,
-                    has_zdim="z" in numels,
+                    has_zdim="z0_" in numels,
                 )
             )
         return range_trees
@@ -3961,7 +3961,7 @@ class SIMDScheduling(BaseScheduling):
             outer_rnumel,
             coalesce_analysis,
         )
-        if "y" in tiling or "z" in tiling:
+        if "y" in tiling or "z0_" in tiling:
             raise AssertionError("nested reduction does not support tiled reductions")
 
         metrics.codegen_nested_reduction += 1
@@ -5900,7 +5900,7 @@ class SIMDScheduling(BaseScheduling):
         """
         Create a tiling dict from pointwise and reduction splits.
         """
-        pw_prefixes = ("z", "y", "x")
+        pw_prefixes = ("z0_", "y", "x")
         reduction_prefixes = ("r0_", "r1_", "r2_")
         if len(pw_tiling) > len(pw_prefixes):
             raise AssertionError(
@@ -6532,7 +6532,7 @@ class SIMDScheduling(BaseScheduling):
                     return None
 
                 new_tiling = {
-                    "z": a0,
+                    "z0_": a0,
                     "y": FloorDiv(a1, b1),
                     "x": b1,
                     "r0_": tiling0["r0_"],

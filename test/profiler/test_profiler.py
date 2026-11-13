@@ -58,7 +58,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     skipXPUIf,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -93,10 +92,6 @@ def get_profiler_activities(device_type):
         if device_activity and device_activity in supported_activities():
             activities.append(device_activity)
     return activities
-
-
-def setUpModule():
-    initialize_kineto_with_accelerator()
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -209,7 +204,7 @@ class TestProfilerCUDA(TestCase):
                 """
 import os
 import torch
-from torch.profiler import ProfilerActivity, profile
+from torch.profiler import DeviceType, ProfilerActivity, profile
 
 def add_one(in_: torch.Tensor):
     return in_ + 1
@@ -228,8 +223,11 @@ if out[0] != 1:
 with profile(activities=[ProfilerActivity.CPU]):
     add_one_graphed(zeros)
 
-with profile(activities=[ProfilerActivity.CUDA]):
+with profile(activities=[ProfilerActivity.CUDA]) as prof:
     add_one_graphed(zeros)
+    torch.cuda.synchronize()
+if not any(e.device_type == DeviceType.CUDA for e in prof.events()):
+    raise AssertionError("Expected device events from the graphed callable")
 """,
             ],
             text=True,
@@ -476,6 +474,17 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 y = torch.mm(x, x)
         self.assertGreater(len(p.events()), 0)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_toggle_cpu_without_cpu_is_noop(self):
+        # Turning CPU back on in a session without CPU collection used to crash.
+        with torch.autograd.profiler.profile(
+            use_cpu=False, use_device="cuda", use_kineto=True
+        ) as p:
+            p.toggle_collection_dynamic(False, [ProfilerActivity.CPU])
+            p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
+            torch.ones(1, device="cuda").add_(1)
+        self.assertFalse(any(e.name.startswith("aten::") for e in p.function_events))
+
     @unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_dict_syntax(self, device):
@@ -500,6 +509,33 @@ with profile(activities=[ProfilerActivity.CUDA]):
 
 
 instantiate_device_type_tests(TestProfilerCUDA, globals(), only_for=("cuda",))
+
+
+class TestProfilerAtExitCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_left_running_at_exit_cuda(self):
+        # With GPU tracing still on at exit, BLAS libraries' static destructors
+        # make traced runtime calls after the main thread's thread_locals are
+        # destroyed. MALLOC_PERTURB_ poisons freed memory so a use of freed
+        # per-thread tracer state faults instead of passing silently.
+        script = """
+import torch
+from torch.profiler import profile, ProfilerActivity
+p = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA])
+p.start()
+x = torch.randn(64, 64, device="cuda")
+(x @ x).sum().item()
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "MALLOC_PERTURB_": "165"},
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
 
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
@@ -1280,29 +1316,6 @@ torch.ones(10) * 2
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_profiler_left_running_at_exit_cuda(self):
-        # With GPU tracing still on at exit, BLAS libraries' static destructors
-        # make traced runtime calls after the main thread's thread_locals are
-        # destroyed. MALLOC_PERTURB_ poisons freed memory so a use of freed
-        # per-thread tracer state faults instead of passing silently.
-        script = """
-import torch
-from torch.profiler import profile, ProfilerActivity
-p = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA])
-p.start()
-x = torch.randn(64, 64, device="cuda")
-(x @ x).sum().item()
-"""
-        proc = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "MALLOC_PERTURB_": "165"},
-            timeout=60,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-
     def test_profiler_disable_fwd_bwd_link(self):
         try:
             torch._C._profiler._set_fwd_bwd_enabled_val(False)
@@ -2030,72 +2043,6 @@ x = torch.randn(64, 64, device="cuda")
             validate_json(prof, gc_flag)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(not torch.accelerator.is_available(), "Accelerator is required")
-    def test_region_device_time(self):
-        if not supported_activities() - {ProfilerActivity.CPU, ProfilerActivity.HPU}:
-            self.skipTest("Device kernel attribution is unavailable")
-
-        # Isolate backend/operator ID allocation from earlier profiler tests.
-        script = """
-import json
-import sys
-
-import torch
-from torch.profiler import DeviceType, profile, record_function
-
-device = torch.accelerator.current_accelerator(check_available=True)
-x = torch.randn(128, 128, device=device)
-torch.accelerator.synchronize()
-with profile() as prof:
-    for _ in range(4):
-        with record_function("workload"):
-            torch.accelerator.synchronize()
-            output = torch.empty_like(x)
-            torch.mm(x, x, out=output)
-    torch.accelerator.synchronize()
-
-raw = prof.profiler.kineto_results.events()
-raw_device_us = sum(
-    (e.end_ns() - e.start_ns()) / 1000 for e in raw
-    if e.activity_type() in ("kernel", "gpu_memcpy", "gpu_memset")
-)
-cpu_scopes = [e for e in prof.events() if e.name == "workload" and e.device_type == DeviceType.CPU]
-# CPU scopes select the workload; their host durations are never summed.
-# Match benchmarks by collecting descendants' attached device durations, not
-# the scopes' own synthetic device annotation spans.
-children = [child for scope in cpu_scopes for child in scope.cpu_children]
-benchmark_device_us = 0
-while children:
-    event = children.pop()
-    benchmark_device_us += sum(k.duration for k in event.kernels)
-    children.extend(event.cpu_children)
-with open(sys.argv[1], "w") as f:
-    json.dump([len(cpu_scopes), raw_device_us, benchmark_device_us], f)
-"""
-        with TemporaryFileName() as filename:
-            # Initializing the GPU here makes ROCm setenv()
-            # ROCPROFILER_REGISTER_LIBRARY to the profiler lib it loaded.
-            # os.environ never sees it, but subprocesses inherit it, and the
-            # child then records no device kernels. Rebuilding from os.environ
-            # drops it.
-            env = os.environ.copy()
-            env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
-            result = subprocess.run(
-                [sys.executable, "-c", script, filename],
-                capture_output=True,
-                text=True,
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-                timeout=120,
-                env=env,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with open(filename) as f:
-                scope_count, raw_device_us, benchmark_device_us = json.load(f)
-        self.assertEqual(scope_count, 4)
-        self.assertGreater(raw_device_us, 0, "Expected real device activity")
-        self.assertEqual(benchmark_device_us, raw_device_us, atol=1e-6, rtol=0)
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_parse_kineto_results_timeout_none(self):
         """Test that _parse_kineto_results works normally without timeout."""
         with _profile(use_kineto=True) as p:
@@ -2340,8 +2287,8 @@ with open(sys.argv[1], "w") as f:
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
-    # The child deadlocks once the parent has initialized Kineto's XPU profiler,
-    # which setUpModule does on any XPU build.
+    # The child deadlocks once the parent has run an XPU profiling session,
+    # which earlier tests in this file do on XPU builds.
     @unittest.skipIf(
         TEST_XPU,
         "os.fork() deadlocks after Kineto XPU init! Refer https://github.com/intel/torch-xpu-ops/issues/5287",
@@ -2389,6 +2336,29 @@ with open(sys.argv[1], "w") as f:
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
+
+    def test_init_for_cuda_graphs_traces_cuda(self):
+        from torch.profiler._utils import _init_for_cuda_graphs
+
+        cupti = {ProfilerActivity.CPU, ProfilerActivity.CUDA}
+        with (
+            patch("torch.profiler.profile") as profile_mock,
+            patch("torch.profiler.supported_activities", return_value=cupti),
+            patch("torch.version.cuda", "12.8"),
+        ):
+            _init_for_cuda_graphs()
+        profile_mock.assert_called_once_with(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+        )
+
+        # ROCm has no CUPTI to initialize.
+        with (
+            patch("torch.profiler.profile") as profile_mock,
+            patch("torch.profiler.supported_activities", return_value=cupti),
+            patch("torch.version.cuda", None),
+        ):
+            _init_for_cuda_graphs()
+        profile_mock.assert_not_called()
 
 
 class SimpleNet(nn.Module):
@@ -3366,6 +3336,72 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 e.self_device_time_total,
                 total_device_time,
             )
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @onlyAccelerator
+    def test_region_device_time(self, device):
+        if not supported_activities() - {ProfilerActivity.CPU, ProfilerActivity.HPU}:
+            self.skipTest("Device kernel attribution is unavailable")
+
+        # Isolate backend/operator ID allocation from earlier profiler tests.
+        script = """
+import json
+import sys
+
+import torch
+from torch.profiler import DeviceType, profile, record_function
+
+device = sys.argv[2]
+x = torch.randn(128, 128, device=device)
+torch.accelerator.synchronize()
+with profile() as prof:
+    for _ in range(4):
+        with record_function("workload"):
+            torch.accelerator.synchronize()
+            output = torch.empty_like(x)
+            torch.mm(x, x, out=output)
+    torch.accelerator.synchronize()
+
+raw = prof.profiler.kineto_results.events()
+raw_device_us = sum(
+    (e.end_ns() - e.start_ns()) / 1000 for e in raw
+    if e.activity_type() in ("kernel", "gpu_memcpy", "gpu_memset")
+)
+cpu_scopes = [e for e in prof.events() if e.name == "workload" and e.device_type == DeviceType.CPU]
+# CPU scopes select the workload; their host durations are never summed.
+# Match benchmarks by collecting descendants' attached device durations, not
+# the scopes' own synthetic device annotation spans.
+children = [child for scope in cpu_scopes for child in scope.cpu_children]
+benchmark_device_us = 0
+while children:
+    event = children.pop()
+    benchmark_device_us += sum(k.duration for k in event.kernels)
+    children.extend(event.cpu_children)
+with open(sys.argv[1], "w") as f:
+    json.dump([len(cpu_scopes), raw_device_us, benchmark_device_us], f)
+"""
+        with TemporaryFileName() as filename:
+            # Initializing the GPU here makes ROCm setenv()
+            # ROCPROFILER_REGISTER_LIBRARY to the profiler lib it loaded.
+            # os.environ never sees it, but subprocesses inherit it, and the
+            # child then records no device kernels. Rebuilding from os.environ
+            # drops it.
+            env = os.environ.copy()
+            env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
+            result = subprocess.run(
+                [sys.executable, "-c", script, filename, device],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                timeout=120,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            with open(filename) as f:
+                scope_count, raw_device_us, benchmark_device_us = json.load(f)
+        self.assertEqual(scope_count, 4)
+        self.assertGreater(raw_device_us, 0, "Expected real device activity")
+        self.assertEqual(benchmark_device_us, raw_device_us, atol=1e-6, rtol=0)
 
 
 instantiate_device_type_tests(TestProfilerDevice, globals(), allow_xpu=True)
@@ -4917,6 +4953,45 @@ class TestProfilerTraceCompression(TestCase):
                 prof.export_chrome_trace(gzip_path, use_python_export=use_python_export)
                 with gzip.open(gzip_path, "rt") as f:
                     self.assertIn("traceEvents", json.load(f))
+
+    @parametrize("use_python_export", [False, True])
+    @parametrize("suffix", [".json", ".json.gz"])
+    def test_export_to_missing_dir(self, use_python_export, suffix):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bad_path = os.path.join(tmpdir, "missing_dir", "trace" + suffix)
+            # Only Kineto's native save raises from C++; the rest fail in open().
+            native = suffix == ".json" and not use_python_export
+            error = RuntimeError if native else FileNotFoundError
+            with self.assertRaisesRegex(error, "missing_dir"):
+                prof.export_chrome_trace(bad_path, use_python_export=use_python_export)
+            # A failed export must not consume the native trace.
+            path = os.path.join(tmpdir, "trace" + suffix)
+            prof.export_chrome_trace(path, use_python_export=use_python_export)
+            opener = gzip.open if suffix.endswith(".gz") else open
+            with opener(path, "rt") as f:
+                self.assertIn("traceEvents", json.load(f))
+
+    def test_failed_compressed_export_keeps_existing_file(self):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+
+        def failing_export(path, *args, **kwargs):
+            raise OSError("export failed")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json.gz")
+            with open(path, "wb") as f:
+                f.write(b"existing trace")
+            with patch.object(prof.profiler, "export_chrome_trace", failing_export):
+                with self.assertRaisesRegex(OSError, "export failed"):
+                    prof.export_chrome_trace(path)
+            with open(path, "rb") as f:
+                self.assertEqual(f.read(), b"existing trace")
+            # The partially written file is cleaned up.
+            self.assertEqual(os.listdir(tmpdir), ["trace.json.gz"])
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")

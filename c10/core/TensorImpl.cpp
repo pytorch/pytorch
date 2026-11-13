@@ -444,10 +444,10 @@ void TensorImpl::throw_data_ptr_access_error() const {
 
 c10::SymBool TensorImpl::sym_is_contiguous_custom(
     at::MemoryFormat memory_format) const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
     // TO reduce BC breaking and reduce having to introduce
     // sym_is_contiguous. call is_contiguous when tensor does not
-    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+    if (has_symbolic_sizes_strides_) [[unlikely]] {
       return (*c10::impl::getGlobalPyInterpreter())
           ->sym_is_contiguous(this, memory_format);
     } else {
@@ -460,7 +460,7 @@ c10::SymBool TensorImpl::sym_is_contiguous_custom(
 }
 
 bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())
         ->is_strides_like(this, memory_format);
   }
@@ -468,7 +468,7 @@ bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
 }
 
 c10::SymBool TensorImpl::sym_is_non_overlapping_and_dense_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())
         ->is_non_overlapping_and_dense(this);
   }
@@ -479,10 +479,10 @@ IntArrayRef TensorImpl::sizes_custom() const {
   // for faketensors with symints, a return type of IntArrayRef is problematic
   // because in order to return a ref you need to have smth owning it and for
   // SymInts this is not materialized yet
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->sizes(this);
   }
-  if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+  if (has_symbolic_sizes_strides_) [[unlikely]] {
     // guard_int() the SymInts to materialize an int64_t vector owned by
     // SymbolicShapeMeta (lifetime tied to the TensorImpl). Explicit Python
     // customization goes through the CustomSizes branch above; every other
@@ -493,31 +493,31 @@ IntArrayRef TensorImpl::sizes_custom() const {
 }
 
 c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->sym_sizes(this);
   }
   return sym_sizes_default();
 }
 
 c10::SymInt TensorImpl::sym_numel_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->sym_numel(this);
   }
   return sym_numel_default();
 }
 
 c10::SymIntArrayRef TensorImpl::sym_strides_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->sym_strides(this);
   }
   return sym_strides_default();
 }
 
 c10::Device TensorImpl::device_custom() const {
-  if (C10_UNLIKELY(python_custom_device_)) {
+  if (python_custom_device_) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->device(this);
   }
-  if (C10_UNLIKELY(extra_meta_ && extra_meta_->fake_device_.has_value())) {
+  if (extra_meta_ && extra_meta_->fake_device_.has_value()) [[unlikely]] {
     if (c10::impl::FakeTensorModeTLS::in_kernel_invocation()) {
       return device_default();
     }
@@ -532,10 +532,10 @@ IntArrayRef TensorImpl::strides_custom() const {
   // for faketensors with symints, a return type of IntArrayRef is problematic
   // because in order to return a ref you need to have smth owning it and for
   // SymInts this is not materialized yet
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->strides(this);
   }
-  if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+  if (has_symbolic_sizes_strides_) [[unlikely]] {
     // same reasoning as sizes_custom() above
     return symbolic_shape_meta().materialized_strides();
   }
@@ -543,21 +543,21 @@ IntArrayRef TensorImpl::strides_custom() const {
 }
 
 int64_t TensorImpl::dim_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->dim(this);
   }
   return dim_default();
 }
 
 int64_t TensorImpl::numel_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->numel(this);
   }
   return numel_default();
 }
 
 c10::Layout TensorImpl::layout_custom() const {
-  if (C10_UNLIKELY(python_custom_layout_)) {
+  if (python_custom_layout_) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->layout(this);
   }
   // TODO: fix this
@@ -567,7 +567,7 @@ c10::Layout TensorImpl::layout_custom() const {
 }
 
 int64_t TensorImpl::storage_offset_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     // TODO: fix this
     return (*c10::impl::getGlobalPyInterpreter())
         ->sym_storage_offset(this)
@@ -577,7 +577,7 @@ int64_t TensorImpl::storage_offset_custom() const {
 }
 
 c10::SymInt TensorImpl::sym_storage_offset_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->sym_storage_offset(this);
   }
   return sym_storage_offset_default();

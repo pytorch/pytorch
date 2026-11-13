@@ -513,27 +513,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
 
   m.def("_supported_activities", []() {
-    std::set<torch::profiler::impl::ActivityType> activities{
-        torch::profiler::impl::ActivityType::CPU};
-#if defined(USE_KINETO)
-#if defined(HAS_CUPTI) || defined(HAS_ROCTRACER)
-    if (at::getNumGPUs() > 0) {
-      activities.insert(torch::profiler::impl::ActivityType::CUDA);
-    }
-#endif // defined(HAS_CUPTI) || defined(HAS_ROCTRACER)
-    if (at::hasXPU()) {
-      activities.insert(torch::profiler::impl::ActivityType::XPU);
-    }
-    if (at::hasMTIA()) {
-      activities.insert(torch::profiler::impl::ActivityType::MTIA);
-    }
-    if (at::hasHPU()) {
-      activities.insert(torch::profiler::impl::ActivityType::HPU);
-    }
-    if (c10::get_privateuse1_backend() != "privateuseone") {
-      activities.insert(torch::profiler::impl::ActivityType::PrivateUse1);
-    }
-#endif // defined(USE_KINETO)
+    auto activities =
+        torch::profiler::impl::kineto::supportedDeviceActivities();
+    activities.insert(torch::profiler::impl::ActivityType::CPU);
     return activities;
   });
 
@@ -1653,26 +1635,21 @@ static PyObject* get_dispatch_stack_at(
 
 // A C++ FakeTensorMode lives in FakeTensorModeTLS rather than the FAKE infra
 // mode slot, but set/get/unset_dispatch_mode treat it as the FAKE mode (through
-// its Python CppFakeTensorMode wrapper) whenever no Python FakeTensorMode is
+// its Python object, a CppFakeTensorMode) whenever no Python FakeTensorMode is
 // set, so callers that enter, suspend and restore the fake mode through these
-// calls handle either kind the same way; they use the wrapper as the fake mode
+// calls handle either kind the same way; they use that object as the fake mode
 // (e.g. read its shape_env). The mode stack APIs
 // (push/pop_torch_dispatch_stack, _len_torch_dispatch_stack) do not see it, so
 // a C++ mode is installed and removed only through set/unset_dispatch_mode.
-// get/unset return the mode's wrapper, rebuilding it if it was collected, and
-// raise if that fails; see Note [C++ FakeTensorMode Python wrapper lifetime].
-// TODO: the rebuild always fails until CppFakeTensorMode is added.
+// The slot owns the C++ mode. Lookups reuse or recreate its Python wrapper;
+// see Note [C++ FakeTensorMode Python object lifetime].
 static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(!Py_IsNone(mode));
 
-  py::object cpp_mode_obj = PyObject_FastGetAttrString(mode, "_cpp_mode");
-  if (cpp_mode_obj) {
-    auto cpp_mode =
-        py::cast<std::shared_ptr<c10::FakeTensorMode>>(cpp_mode_obj);
-    TORCH_CHECK(
-        cpp_mode != nullptr,
-        "set_dispatch_mode() called with a mode whose _cpp_mode is None");
+  if (PyObject_TypeCheck(mode, &torch::fake_tensor::PyCppFakeTensorModeType)) {
+    // Raises for a bare _CppFakeTensorMode or a subclass of CppFakeTensorMode
+    auto cpp_mode = torch::fake_tensor::getCppFakeTensorMode(mode);
     TORCH_CHECK(
         !c10::impl::TorchDispatchModeTLS::get_mode(
              c10::impl::TorchDispatchModeKey::FAKE)
@@ -1688,7 +1665,7 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   py::object maybe_mode_key_obj = PyObject_FastGetAttrString(mode, "_mode_key");
   TORCH_CHECK(
       maybe_mode_key_obj,
-      "set_dispatch_mode() called with a mode that has no _cpp_mode or _mode_key attribute!");
+      "set_dispatch_mode() called with a mode that is not a CppFakeTensorMode and has no _mode_key attribute!");
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
   check_no_cpp_fake_mode(mode_key);
 
@@ -1733,7 +1710,8 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
       TORCH_CHECK(
           !c10::impl::TorchDispatchModeTLS::get_mode(mode_key).has_value(),
           "both a Python FakeTensorMode and a C++ FakeTensorMode are set");
-      // Get the wrapper first, so a failed rebuild leaves the mode installed
+      // Rebuild before clearing TLS, so a failed reconstruction leaves the
+      // installed mode and dispatch keys unchanged.
       auto py_mode = torch::fake_tensor::getCppFakeTensorModePyObj(cpp_mode);
       c10::impl::FakeTensorModeTLS::reset_state();
       return py_mode.release().ptr();
