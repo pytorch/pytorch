@@ -237,15 +237,19 @@ def complex_impl(re: torch.Tensor, im: torch.Tensor) -> ComplexTensor:
 
 @register_real_to_complex(aten.polar.default)
 def polar_impl(abs: torch.Tensor, angle: torch.Tensor) -> ComplexTensor:
+    if abs.dtype not in REAL_TO_COMPLEX or angle.dtype not in REAL_TO_COMPLEX:
+        raise NotImplementedError(
+            f"Expected both inputs to be Half, Float or Double tensors but got {abs.dtype} and {angle.dtype}"
+        )
     if abs.dtype != angle.dtype:
         raise RuntimeError(
             f"Expected object of scalar type {abs.dtype} but got scalar type {angle.dtype} for second argument"
         )
-    if abs.dtype not in REAL_TO_COMPLEX:
-        raise NotImplementedError(
-            f"Expected both inputs to be Half, Float or Double tensors but got {abs.dtype} and {angle.dtype}"
-        )
-    return ComplexTensor(abs * torch.cos(angle), abs * torch.sin(angle))
+    out_dt, (abs, angle) = promote_tensors(abs, angle)
+    return ComplexTensor(
+        (abs * torch.cos(angle)).to(out_dt),
+        (abs * torch.sin(angle)).to(out_dt),
+    )
 
 
 @register_complex(aten.pow)

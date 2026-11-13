@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import itertools
 import unittest
 
 import torch
@@ -6,6 +7,7 @@ import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
+    parametrize,
 )
 
 
@@ -327,11 +329,42 @@ class ComplexTests(ComplexDynamoTestCase):
                     torch.ones(2, dtype=torch.float32),
                     torch.ones(2, dtype=torch.float64),
                 )
-            with self.assertRaises(NotImplementedError):
-                torch.polar(
-                    torch.ones(2, dtype=torch.bfloat16),
-                    torch.ones(2, dtype=torch.bfloat16),
-                )
+
+    @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
+    def test_polar_special_values(self, dtype):
+        from torch._subclasses.complex_tensor import WrapComplexMode
+
+        special_vals = [
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            float("inf"),
+            float("-inf"),
+            float("nan"),
+        ]
+        pairs = list(itertools.product(special_vals, special_vals)) + [
+            (100.0, 0.25),
+            (200.0, 1.5),
+            (65504.0, 0.0),
+        ]
+        abs_t = torch.tensor([a for a, _ in pairs], dtype=dtype)
+        angle = torch.tensor([b for _, b in pairs], dtype=dtype)
+        expected = torch.polar(abs_t, angle)
+
+        with WrapComplexMode():
+            wrapped = torch.polar(abs_t, angle)
+        tol = {"atol": 0, "rtol": 0} if dtype == torch.float16 else {}
+        self.assertEqual(
+            torch.view_as_real(wrapped.as_interleaved()),
+            torch.view_as_real(expected),
+            equal_nan=True,
+            **tol,
+        )
+
+        self._assert_decomposed_no_complex(
+            lambda a, b: torch.view_as_real(torch.polar(a, b)), abs_t, angle
+        )
 
     def test_real_to_complex_aliasing_and_mutation(self):
         def fn_passthrough(x):
