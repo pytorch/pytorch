@@ -713,9 +713,16 @@ class AOTInductorModelContainer {
     size_t main_blob_idx = 0;
     size_t aux_cpu_blob_idx = 0;
 #ifdef USE_CUDA
-    // Opt-in pinned async staging pool for the delta-update H2D copies below.
-    // nullptr (default / on allocation failure) keeps the throttled path.
-    auto staging_pool = tryMakeConstantsStagingPool();
+    // Pinned async staging pool for the pageable-host H2D copies below (see
+    // usePinnedAsyncConstantsCopy()), created on the first such copy so an
+    // update that copies nothing from pageable memory does not allocate one.
+    // nullptr (disabled, not needed yet, or allocation failure) keeps the
+    // throttled path. Creation is tried once per update, as in
+    // load_constants(): retrying per constant under pinned-memory pressure
+    // would retry the 2 x 64 MiB allocation for every remaining constant.
+    std::unique_ptr<PinnedStagingPool> staging_pool;
+    bool staging_pool_tried =
+        user_managed || !torch::aot_inductor::usePinnedAsyncConstantsCopy();
 #endif
     auto _update_start = std::chrono::steady_clock::now();
     AOTI_LOG_LOADING(
@@ -833,7 +840,7 @@ class AOTInductorModelContainer {
         // Detect per constant: a single update may mix pageable-host and
         // device/pinned sources, so the type cannot be cached across the loop.
         bool use_staging = false;
-        if (staging_pool != nullptr) {
+        if (!staging_pool_tried || staging_pool != nullptr) {
           cudaPointerAttributes attrs{};
           cudaError_t pointer_attrs_result =
               cudaPointerGetAttributes(&attrs, user_constant_ptr);
@@ -843,6 +850,11 @@ class AOTInductorModelContainer {
           } else {
             use_staging = (attrs.type == cudaMemoryTypeUnregistered);
           }
+          if (use_staging && !staging_pool_tried) {
+            staging_pool = tryMakeConstantsStagingPool();
+            staging_pool_tried = true;
+          }
+          use_staging = use_staging && staging_pool != nullptr;
         }
         if (use_staging) {
           staging_pool->copyH2DViaStage(
@@ -897,13 +909,13 @@ class AOTInductorModelContainer {
     target.update_array(&model);
 
 #ifdef USE_CUDA
-    // S638065: the GPU constant copies above run on the default stream (raw
-    // cudaMemcpy), while run_const_fold launches the fold on
-    // getCurrentCUDAStream(). On ROCm the default stream is not implicitly
-    // ordered with the fold's stream, so without this the fold could read
-    // not-yet-copied weights and bake stale values into the folded constants.
-    // Wait for the copies to complete before returning, so any subsequent fold
-    // (on any stream) sees the updated weights.
+    // S638065: the GPU constant copies above that skip the staging pool run on
+    // the default stream (raw cudaMemcpy), while run_const_fold launches the
+    // fold on getCurrentCUDAStream(). On ROCm the default stream is not
+    // implicitly ordered with the fold's stream, so without this the fold could
+    // read not-yet-copied weights and bake stale values into the folded
+    // constants. Wait for the copies to complete before returning, so any
+    // subsequent fold (on any stream) sees the updated weights.
     AOTI_RUNTIME_CUDA_CHECK(cudaStreamSynchronize(0));
 #endif // USE_CUDA
   }
