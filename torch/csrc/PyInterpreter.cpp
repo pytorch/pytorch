@@ -173,8 +173,6 @@ struct ConcretePyInterpreterVTable final
       c10::impl::FakePythonError kind,
       const std::string& msg) const override;
   bool fake_has_plain_tensor_type(const c10::TensorImpl* self) const override;
-  bool fake_avoid_device_init(
-      const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
   void invalidate_written_to_constants(
       const c10::OperatorHandle& op,
       const torch::jit::Stack& stack,
@@ -1287,14 +1285,6 @@ bool ConcretePyInterpreterVTable::fake_has_plain_tensor_type(
   PyObject* obj = self->pyobj_slot()->load_pyobj();
   return obj == nullptr ||
       Py_TYPE(obj) == reinterpret_cast<PyTypeObject*>(THPVariableClass);
-}
-
-bool ConcretePyInterpreterVTable::fake_avoid_device_init(
-    const std::shared_ptr<c10::FakeTensorMode>& mode) const {
-  py::gil_scoped_acquire gil;
-  return fake_tensor::getCppFakeTensorModePyObj(mode)
-      .attr("avoid_device_init")
-      .cast<bool>();
 }
 
 void ConcretePyInterpreterVTable::invalidate_written_to_constants(

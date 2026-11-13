@@ -259,9 +259,6 @@ struct C10_API PyInterpreterVTable {
   // Python's exact `type(t) is Tensor`, excluding Parameter and subclasses.
   // A TensorImpl without a Python object has the base Tensor type.
   virtual bool fake_has_plain_tensor_type(const TensorImpl* self) const = 0;
-  // Reads the owning mode's avoid_device_init property under the GIL.
-  virtual bool fake_avoid_device_init(
-      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
   // Matches FakeTensorMode.invalidate_written_to_constants, including
   // SchemaInfo's training-op mutability rules. Acquires the GIL.
   virtual void invalidate_written_to_constants(
