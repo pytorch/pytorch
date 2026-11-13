@@ -127,6 +127,10 @@ def _stack(*filenames):
     return traceback.StackSummary.from_list([(f, 1, "forward", "") for f in filenames])
 
 
+class MethodKeyDict(dict):
+    pass
+
+
 def _aot_compile(fn, *args, guard_filter_fn=None, seen=None):
     """aot_compile fn on args through guard_filter_fn (the default filter when
     None), appending every (entry, verdict) pair to seen."""
@@ -398,6 +402,25 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                     self.assertEqual(compiled(x, obj, obj), x + 2)
             self.assertFalse(os.path.exists(artifact))
             self.assertFalse(os.path.exists(cache))
+
+    @torch._dynamo.config.patch(caching_precompile=False)
+    @parametrize("alias_pair", [False, True])
+    def test_builtin_method_keys_all_guards(self, alias_pair):
+        def fn(x, left, right):
+            keys = {left.get, right.get} if alias_pair else {left.get}
+            return x + len(keys)
+
+        x = torch.ones(1)
+        args = (x, MethodKeyDict(), MethodKeyDict())
+        compiled = _aot_compile(fn, *args, guard_filter_fn=lambda gs: [True] * len(gs))
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        left, right = MethodKeyDict(), MethodKeyDict()
+        self.assertEqual(loaded(x, left, right), fn(x, left, right))
+        self.assertTrue(loaded.guard_check(x, left, right))
+        self.assertEqual(loaded.guard_check(x, left, left), not alias_pair)
+        if not alias_pair:
+            self.assertEqual(loaded(x, left, left), fn(x, left, left))
 
     @parametrize("caching_precompile", (False, True))
     @parametrize("descriptor_kind", ("method", "classmethod"))

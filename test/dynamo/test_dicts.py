@@ -69,6 +69,38 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    @parametrize("raises", [False, True])
+    def test_display_hash_and_equality_callback_order(self, raises):
+        class Key:
+            def __init__(self, name, events):
+                self.name, self.events = name, events
+
+            def __hash__(self):
+                self.events.append("hash:" + self.name)
+                return 1
+
+            def __eq__(self, other):
+                self.events.append("eq:" + self.name + other.name)
+                if raises:
+                    raise ValueError("collision")
+                return False
+
+        def fn(x, a, b, c):
+            try:
+                mapping = {a: 1, b: 2, c: 3}
+                return x + len(mapping)
+            except ValueError:
+                return x - 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x, expected_events, actual_events = torch.ones(1), [], []
+        expected = fn(x, *(Key(name, expected_events) for name in "abc"))
+        actual = compiled(x, *(Key(name, actual_events) for name in "abc"))
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_events, expected_events)
+        self.assertEqual(counter.frame_count, 1)
+
     def test_keyword_expansion_preserves_mapping_protocol(self):
         class Mapping(dict):
             def __iter__(self):
