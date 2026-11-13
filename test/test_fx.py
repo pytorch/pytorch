@@ -77,6 +77,7 @@ from torch.fx.proxy import TraceError
 from torch.testing._internal.common_cuda import blas_library_context
 from torch.testing._internal.common_utils import (
     find_library_location,
+    instantiate_parametrized_tests,
     HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
@@ -85,6 +86,7 @@ from torch.testing._internal.common_utils import (
     IS_CPU_CAPABILITY_SVE256,
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     xfailIf,
@@ -267,6 +269,7 @@ def _parse_profiler_trace_lines(traces: str) -> list[tuple[str, str, str]]:
     return lines
 
 
+@instantiate_parametrized_tests
 class TestFX(JitTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1218,6 +1221,104 @@ class TestFX(JitTestCase):
 
         x = torch.randn(bs, d_hid)
         torch.testing.assert_close(ec(x), traced(x))
+
+    @parametrize(
+        "mutation",
+        ["mul_", "view", "detach", "data", "out", "foreach", "setitem", "resize_", "set_"],
+    )
+    def test_trace_rejects_buffer_mutation(self, mutation):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = torch.nn.Module()
+                self.child.register_buffer("b", torch.ones(2), persistent=False)
+
+            def forward(self, x):
+                b = self.child.b
+                y = x + b
+                if mutation == "mul_":
+                    b.mul_(2.0)
+                elif mutation == "view":
+                    b.view(-1).mul_(2.0)
+                elif mutation == "detach":
+                    b.detach().mul_(2.0)
+                elif mutation == "data":
+                    b.data.mul_(2.0)
+                elif mutation == "out":
+                    torch.mul(b, 2.0, out=b)
+                elif mutation == "foreach":
+                    torch._foreach_mul_([b], 2.0)
+                elif mutation == "setitem":
+                    b[0] = 2.0
+                elif mutation == "resize_":
+                    b.resize_(4)
+                elif mutation == "set_":
+                    b.set_(torch.zeros(2))
+                return y
+
+        m = M()
+        b = m.child.b
+        version = b._version
+        msg = r"buffer 'child\.b'.*proxy_buffer_attributes=True"
+        with self.assertRaisesRegex(TraceError, msg):
+            symbolic_trace(m)
+        self.assertIs(m.child.b, b)
+        self.assertEqual(b, torch.ones(2))
+        self.assertEqual(b._version, version)
+        b.mul_(2.0)
+        self.assertEqual(b, torch.full((2,), 2.0))
+
+    def test_trace_proxied_buffer_mutation(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.ones(2))
+
+            def forward(self, x):
+                y = x + self.b
+                self.b.mul_(2.0)
+                return y
+
+        m = M()
+        with self.assertRaisesRegex(TraceError, "buffer 'b'"):
+            symbolic_trace(m)
+        self.assertEqual(m.b, torch.ones(2))
+
+        tracer = Tracer()
+        tracer.proxy_buffer_attributes = True
+        graph = tracer.trace(m)
+        graph.lint()
+        self.assertEqual(m.b, torch.ones(2))
+        self.assertTrue(
+            any(n.op == "call_method" and n.target == "mul_" for n in graph.nodes)
+        )
+        gm = GraphModule(m, graph)
+        eager = M()
+        x = torch.zeros(2)
+        self.assertEqual(gm(x), eager(x))
+        self.assertEqual(gm(x), eager(x))
+        self.assertEqual(m.b, eager.b)
+
+    def test_trace_buffer_constant_and_temporary_mutation(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.ones(2))
+
+            def forward(self, x):
+                if self.b.sum().item() > 0:
+                    temp = self.b.clone()
+                    temp.mul_(2.0)
+                    return x + temp
+                return x
+
+        m = M()
+        gm = symbolic_trace(m)
+        gm.graph.lint()
+        self.assertEqual(m.b, torch.ones(2))
+        x = torch.zeros(2)
+        self.assertEqual(gm(x), m(x))
+        self.assertEqual(symbolic_trace(lambda x: x + 1)(x), x + 1)
 
     def test_node_tagging(self):
         class TaggingTracer(Tracer):

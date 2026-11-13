@@ -20,13 +20,14 @@ import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class, is_opaque_symbolic_type
+from torch.utils._python_dispatch import TorchDispatchMode
 
 from ._compatibility import compatibility
 from ._lazy_graph_module import _make_graph_module
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
 from .graph_module import GraphModule
 from .node import Argument, base_types, map_aggregate
-from .proxy import ParameterProxy, Proxy, Scope, ScopeContextManager, TracerBase
+from .proxy import ParameterProxy, Proxy, Scope, ScopeContextManager, TraceError, TracerBase
 
 
 log = logging.getLogger(__name__)
@@ -277,6 +278,36 @@ def _transfer_attrs(fr: object, to: object) -> None:
             and not hasattr(to, attr_name)
         ):
             setattr(to, attr_name, attr_val)
+
+
+class _BufferMutationGuard(TorchDispatchMode):
+    def __init__(self, buffers: list[tuple[str, torch.Tensor]]) -> None:
+        super().__init__()
+        self.buffers = buffers
+
+    def __torch_dispatch__(
+        self,
+        func: torch._ops.OpOverload,
+        types: tuple[type, ...],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        kwargs = kwargs or {}
+        for index, argument in enumerate(func._schema.arguments):
+            if argument.alias_info is None or not argument.alias_info.is_write:
+                continue
+            value = args[index] if index < len(args) else kwargs.get(argument.name)
+            for tensor in pytree.tree_leaves(value):
+                if not isinstance(tensor, torch.Tensor):
+                    continue
+                for name, buffer in self.buffers:
+                    if torch._C._is_alias_of(tensor, buffer):
+                        raise TraceError(
+                            f"symbolic_trace cannot execute an in-place update to buffer '{name}' "
+                            f"({func}). Set proxy_buffer_attributes=True on a Tracer to "
+                            "record supported buffer mutations."
+                        )
+        return func(*args, **kwargs)
 
 
 @compatibility(is_backward_compatible=True)
@@ -816,6 +847,10 @@ class Tracer(TracerBase):
         create an ``nn.Module`` instance to use as the root and add embedded constants
         to.
 
+        Operations that would mutate an unproxied registered buffer or its aliases
+        raise ``TraceError`` before executing. To record traceable buffer mutations,
+        set ``proxy_buffer_attributes=True`` on this tracer.
+
 
         Args:
 
@@ -922,7 +957,11 @@ class Tracer(TracerBase):
                 )
                 return self.call_module(mod, forward, args, kwargs)
 
-            with _new_patcher() as patcher:
+            buffers = list(self.root.named_buffers())
+            with (
+                _new_patcher() as patcher,
+                _BufferMutationGuard(buffers) if buffers else contextlib.nullcontext(),
+            ):
                 # Resolve fn's lazy globals before patching, so a torch.fx.wrap their
                 # module bodies call applies to this trace.
                 _resolve_lazy_imports(patcher, fn_globals)
