@@ -100,16 +100,23 @@ positions, the capacity `generate` allocates for its first forward, so attention
 spans the same KV length as in generation; `prompt_length + 2000` must fit the
 model's context length. Cache allocation and reset occur outside the compiled
 and timed forward. Use `--accuracy` to check correctness or
-`--disable-cudagraphs` to measure without CUDA graphs. Prefill requires inference
-and a backend; autocast, dynamic shapes, distributed execution, and export modes
-are unsupported. `--prompt-length` (default 1000) and `--batch-size` configure
-the prefill workload; generation retains its existing `1 x 1000` inputs and
-rejects `--prompt-length`.
+`--disable-cudagraphs` to measure without CUDA graphs. `--prompt-length`
+(default 1000) and `--batch-size` configure the prefill workload; generation
+retains its existing `1 x 1000` inputs and rejects `--prompt-length`.
+
+Prefill requires `--inference` and a backend. It rejects `--amp`,
+`--aot-precompile`, `--batch-invariant`, `--compare-backed-unbacked`, `--ddp`,
+`--dynamic-batch-only`, `--dynamic-shapes`, `--enable-activation-checkpointing`,
+`--export`, `--export-aot-inductor`, `--export-nativert`, `--find-batch-sizes`,
+`--fsdp`, `--multiprocess`, `--optimus`, `--quantization`,
+`--recompile-profiler`, `--tolerance`, `--torchscript-jit-trace`,
+`--trace-on-xla`, `--unbacked-batch-only`, and `--xla`.
 
 CSV `abs_latency` and `eager_latency` are milliseconds for all
 `--iterations-per-run` requests; `input_tokens_per_second` includes all batch
-elements. Default output and profiler trace names get a `_prefill` suffix; use
-separate files for different input dimensions.
+elements. Rows do not record the inference mode or prompt length, so write each
+mode and input size to its own file. Default output and profiler trace names get
+a `_prefill` suffix.
 
 As an example, the commands to run first line of the dashboard (performance only) would be:
 ```

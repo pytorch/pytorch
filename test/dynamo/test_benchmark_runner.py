@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_CONFIG,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
@@ -136,7 +137,6 @@ class TestHuggingFaceLLMPerformance(TestCase):
                 clock[0] += 10.0
 
         class Runner(common.BenchmarkRunner):
-            hf_llm = True
             suite_name = "test"
 
             def pick_grad(self, name, is_training):
@@ -151,6 +151,8 @@ class TestHuggingFaceLLMPerformance(TestCase):
                     self.generate,
                     setup_fn=self.setup if prefill else None,
                     compile_forward=True,
+                    measure_iters=1,
+                    stabilization_iters=4,
                 )
 
             def setup(self, model, inputs):
@@ -211,23 +213,31 @@ class TestHuggingFaceLLMPerformance(TestCase):
 class HuggingFacePrefillTestCase(TestCase):
     def setUp(self):
         super().setUp()
+        # The inductor_huggingface CI job installs the pinned transformers to run these
+        # tests, so a skip there would hide a pin bump.
+        unavailable = (
+            AssertionError
+            if TEST_CONFIG == "inductor_huggingface"
+            else unittest.SkipTest
+        )
         try:
             version = importlib.metadata.version("transformers")
         except importlib.metadata.PackageNotFoundError:
-            raise unittest.SkipTest("requires transformers") from None
+            raise unavailable("requires transformers") from None
         try:
             with mock.patch(
                 "subprocess.check_call",
-                side_effect=unittest.SkipTest("requires compatible transformers"),
+                side_effect=unavailable("requires compatible transformers"),
             ):
                 from benchmarks.dynamo.huggingface_llm_models import (
                     PREFILL_TRANSFORMERS_VERSION,
                 )
-        except ImportError:
-            raise unittest.SkipTest("requires compatible transformers") from None
+        except ImportError as e:
+            raise unavailable("requires compatible transformers") from e
         if Version(version) != Version(PREFILL_TRANSFORMERS_VERSION):
-            raise unittest.SkipTest(
-                f"requires transformers == {PREFILL_TRANSFORMERS_VERSION}"
+            raise unavailable(
+                f"requires transformers == {PREFILL_TRANSFORMERS_VERSION}, "
+                f"found {version}"
             )
         from transformers import AutoConfig
 
@@ -311,8 +321,8 @@ class HuggingFacePrefillTestCase(TestCase):
 
 class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
     @torch._dynamo.config.patch(repro_tolerance=1e-4)
-    @parametrize("prefill_first", (False, True))
-    def test_timing_units_setup_and_csv_columns(self, prefill_first):
+    @parametrize("mode", ("generate", "prefill"))
+    def test_timing_units_setup_and_csv_columns(self, mode):
         clock = [0.0]
         calls = collections.Counter()
 
@@ -332,87 +342,83 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
                 clock[0] += 100.0
 
         inputs = {"input_ids": torch.zeros(2, 3, dtype=torch.long)}
-        modes = ("prefill", "generate") if prefill_first else ("generate", "prefill")
+        runner = self.huggingface.HuggingfaceRunner()
+        runner.args = self._runner_args(
+            f"--hf-inference-mode={mode}",
+            "--iterations-per-run=4",
+            "--repeat=1",
+            "--export-profiler-trace",
+        )
+        runner.args.profile_details = {}
+        runner.args.profiler_trace_name = "profile"
+        runner.hf_llm = True
+        runner.model_iter_fn = runner.forward_pass
+        workload = runner.get_workload(inputs, is_performance=True)
+        self.assertTrue(workload.compile_forward)
+        self.assertEqual((workload.measure_iters, workload.stabilization_iters), (1, 4))
+        if mode == "generate":
+            self.assertEqual(workload.iter_fn, runner.generate)
+            self.assertIsNone(workload.setup_fn)
+            self.assertFalse(workload.report_eager_latency)
+            self.assertIsNone(workload.request_tokens)
+            accuracy = runner.get_workload(inputs)
+            self.assertEqual(accuracy.iter_fn, runner.forward_pass)
+            self.assertFalse(accuracy.compile_forward)
+        profile = mock.Mock()
         with tempfile.TemporaryDirectory() as tmp:
             output = os.path.join(tmp, "results.csv")
-            for mode in modes:
-                calls.clear()
-                runner = self.huggingface.HuggingfaceRunner()
-                runner.args = self._runner_args(
-                    f"--hf-inference-mode={mode}",
-                    "--iterations-per-run=4",
-                    "--repeat=1",
-                    "--export-profiler-trace",
+            with (
+                mock.patch.object(common, "current_name", Model.name),
+                mock.patch.object(common, "current_batch_size", 2),
+                mock.patch.object(common, "output_filename", output),
+                mock.patch.object(common, "synchronize"),
+                mock.patch.object(common, "reset_rng_state"),
+                mock.patch("time.perf_counter", new=lambda: clock[0]),
+                mock.patch.object(torch._dynamo, "run", side_effect=lambda fn: fn),
+                mock.patch.object(common, "write_outputs", common.output_csv),
+                mock.patch("torch._dynamo.utils.compile_times", return_value=([], [])),
+                mock.patch.object(common, "output_signpost"),
+                mock.patch(
+                    "torch._inductor.utils.maybe_profile",
+                    return_value=contextlib.nullcontext(profile),
+                ),
+            ):
+                common.speedup_experiment(
+                    runner.args,
+                    workload.iter_fn,
+                    Model(),
+                    inputs,
+                    compile_forward=workload.compile_forward,
+                    setup_fn=workload.setup_fn,
+                    request_tokens=workload.request_tokens,
+                    report_eager_latency=workload.report_eager_latency,
+                    compilation_latency=3.0,
+                    compression_ratio=4.0,
+                    eager_peak_mem=5.0,
+                    dynamo_peak_mem=6.0,
+                    dynamo_stats={"calls_captured": 7},
                 )
-                runner.args.profile_details = {}
-                runner.args.profiler_trace_name = "profile"
-                runner.hf_llm = True
-                runner.model_iter_fn = runner.forward_pass
-                workload = runner.get_workload(inputs, is_performance=True)
-                self.assertTrue(workload.compile_forward)
-                if mode == "generate":
-                    self.assertEqual(workload.iter_fn, runner.generate)
-                    self.assertIsNone(workload.setup_fn)
-                    self.assertFalse(workload.report_eager_latency)
-                    self.assertIsNone(workload.request_tokens)
-                    accuracy = runner.get_workload(inputs)
-                    self.assertEqual(accuracy.iter_fn, runner.forward_pass)
-                    self.assertFalse(accuracy.compile_forward)
-                profile = mock.Mock()
-                with (
-                    mock.patch.object(common, "current_name", mode),
-                    mock.patch.object(common, "current_batch_size", 2),
-                    mock.patch.object(common, "output_filename", output),
-                    mock.patch.object(common, "synchronize"),
-                    mock.patch.object(common, "reset_rng_state"),
-                    mock.patch("time.perf_counter", new=lambda: clock[0]),
-                    mock.patch.object(torch._dynamo, "run", side_effect=lambda fn: fn),
-                    mock.patch.object(common, "write_outputs", common.output_csv),
-                    mock.patch(
-                        "torch._dynamo.utils.compile_times", return_value=([], [])
-                    ),
-                    mock.patch.object(common, "output_signpost"),
-                    mock.patch(
-                        "torch._inductor.utils.maybe_profile",
-                        return_value=contextlib.nullcontext(profile),
-                    ),
-                ):
-                    common.speedup_experiment(
-                        runner.args,
-                        workload.iter_fn,
-                        Model(),
-                        inputs,
-                        compile_forward=workload.compile_forward,
-                        setup_fn=workload.setup_fn,
-                        request_tokens=workload.request_tokens,
-                        report_eager_latency=workload.report_eager_latency,
-                        compilation_latency=3.0,
-                        compression_ratio=4.0,
-                        eager_peak_mem=5.0,
-                        dynamo_peak_mem=6.0,
-                        dynamo_stats={"calls_captured": 7},
-                    )
-                self.assertEqual(calls["forward"], 16)
-                self.assertEqual(calls["generate"], 16 if mode == "generate" else 0)
-                self.assertEqual(calls["setup"], 16 if mode == "prefill" else 0)
-                trace = Path(profile.export_chrome_trace.call_args.args[0])
-                self.assertEqual(trace.name, "profile_Qwen_Qwen3-0.6B.json")
             with open(output) as f:
-                rows = {row["name"]: row for row in csv.DictReader(f)}
-        self.assertEqual(set(rows), {"generate", "prefill"})
-        for mode, row in rows.items():
-            self.assertEqual(float(row["speedup"]), 2.0)
-            self.assertEqual(float(row["abs_latency"]), 2000.0)
-            self.assertEqual(float(row["compilation_latency"]), 3.0)
-            self.assertEqual(float(row["compression_ratio"]), 4.0)
-            self.assertEqual(float(row["eager_peak_mem"]), 5.0)
-            self.assertEqual(float(row["dynamo_peak_mem"]), 6.0)
-            self.assertEqual(int(row["calls_captured"]), 7)
-            self.assertEqual(
-                float(row["eager_latency"]), 4000.0 if mode == "prefill" else 0.0
-            )
-            tokens_per_second = 12.0 if mode == "prefill" else 0.0
-            self.assertEqual(float(row["input_tokens_per_second"]), tokens_per_second)
+                (row,) = csv.DictReader(f)
+        self.assertEqual(calls["forward"], 16)
+        self.assertEqual(calls["generate"], 16 if mode == "generate" else 0)
+        self.assertEqual(calls["setup"], 16 if mode == "prefill" else 0)
+        trace = Path(profile.export_chrome_trace.call_args.args[0])
+        self.assertEqual(trace.name, "profile_Qwen_Qwen3-0.6B.json")
+        self.assertEqual(row["name"], Model.name)
+        self.assertEqual(float(row["speedup"]), 2.0)
+        self.assertEqual(float(row["abs_latency"]), 2000.0)
+        self.assertEqual(float(row["compilation_latency"]), 3.0)
+        self.assertEqual(float(row["compression_ratio"]), 4.0)
+        self.assertEqual(float(row["eager_peak_mem"]), 5.0)
+        self.assertEqual(float(row["dynamo_peak_mem"]), 6.0)
+        self.assertEqual(int(row["calls_captured"]), 7)
+        if mode == "prefill":
+            self.assertEqual(float(row["eager_latency"]), 4000.0)
+            self.assertEqual(float(row["input_tokens_per_second"]), 12.0)
+        else:
+            self.assertNotIn("eager_latency", row)
+            self.assertNotIn("input_tokens_per_second", row)
 
     @parametrize(
         "extra, message",
@@ -484,11 +490,11 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             ),
             (
                 ["--hf-inference-mode=prefill", "--quantization=int8dynamic"],
-                "does not support .*torchao",
+                "does not support --quantization",
             ),
             (
                 ["--hf-inference-mode=prefill", "--optimus=all"],
-                "does not support .*optimus",
+                "does not support --optimus",
             ),
         ],
     )
@@ -496,7 +502,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         runner = self.huggingface.HuggingfaceRunner()
         with (
             mock.patch.object(common.mp, "spawn") as spawn,
-            mock.patch.object(subprocess, "check_call") as child,
+            mock.patch.object(common, "process_entry") as entry,
             self.assertRaisesRegex(ValueError, message),
         ):
             common.main(
@@ -509,7 +515,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
                 ],
             )
         spawn.assert_not_called()
-        child.assert_not_called()
+        entry.assert_not_called()
 
     def test_prefill_requires_inference_backend(self):
         runner = self.huggingface.HuggingfaceRunner()

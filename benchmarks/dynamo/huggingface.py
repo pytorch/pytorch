@@ -468,6 +468,8 @@ class HuggingfaceRunner(BenchmarkRunner):
             "find_batch_sizes",
             "fsdp",
             "multiprocess",
+            "optimus",
+            "quantization",
             "recompile_profiler",
             "torchscript_jit_trace",
             "tolerance",
@@ -478,15 +480,13 @@ class HuggingfaceRunner(BenchmarkRunner):
         ):
             if getattr(args, flag, False):
                 unsupported.append("--" + flag.replace("_", "-"))
-        if args.backend in ("optimus", "torchao"):
-            unsupported.append(f"--backend={args.backend}")
         if unsupported:
             raise ValueError(
                 "--hf-inference-mode=prefill does not support " + ", ".join(unsupported)
             )
         if args.iterations_per_run <= 0:
             raise ValueError("--iterations-per-run must be positive for prefill")
-        if args.backend is None and not args.inductor:
+        if args.backend is None:
             raise ValueError(
                 "--hf-inference-mode=prefill requires --backend or --inductor"
             )
@@ -501,9 +501,16 @@ class HuggingfaceRunner(BenchmarkRunner):
                 request_tokens={
                     "input_tokens_per_second": example_inputs["input_ids"].numel()
                 },
+                measure_iters=1,
+                stabilization_iters=4,
             )
         if self.hf_llm and is_performance:
-            return BenchmarkWorkload(self.generate, compile_forward=True)
+            return BenchmarkWorkload(
+                self.generate,
+                compile_forward=True,
+                measure_iters=1,
+                stabilization_iters=4,
+            )
         return super().get_workload(example_inputs, is_performance=is_performance)
 
     def setup_prefill(self, model, example_inputs):

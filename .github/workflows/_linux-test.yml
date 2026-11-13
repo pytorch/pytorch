@@ -230,7 +230,7 @@ jobs:
           for dll in win-torch-wheel/cudart64_*.dll; do
             if [ -f "$dll" ]; then
               mv "$dll" win-torch-wheel-extracted/bin/x64/
-              echo "Moved $(basename $dll) to win-torch-wheel-extracted/bin/x64/"
+              echo "Moved $(basename "$dll") to win-torch-wheel-extracted/bin/x64/"
             fi
           done
 
@@ -366,6 +366,7 @@ jobs:
 
       - name: Configure AWS credentials
         id: aws-creds-benchmark
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         continue-on-error: true
         uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
         with:
@@ -384,7 +385,7 @@ jobs:
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Upload the benchmark results
-        if: steps.aws-creds-benchmark.outcome == 'success'
+        if: always() && steps.aws-creds-benchmark.outcome == 'success'
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
         with:
           benchmark-results-dir: test/test-reports

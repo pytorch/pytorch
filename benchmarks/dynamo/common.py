@@ -1843,6 +1843,9 @@ class BenchmarkWorkload:
     compile_forward: bool = False
     report_eager_latency: bool = False
     request_tokens: dict[str, int] | None = None
+    # Performance warmup; measured iterations determine compilation latency.
+    measure_iters: int = 5
+    stabilization_iters: int = 0
 
 
 class BenchmarkRunner:
@@ -3021,11 +3024,8 @@ class BenchmarkRunner:
     ):
         workload = self.get_workload(example_inputs, is_performance=True)
         model_iter_fn, setup_fn = workload.iter_fn, workload.setup_fn
-        measure_iters = 5
-        stabilization_iters = 0
-        if getattr(self, "hf_llm", False):
-            measure_iters = 1
-            stabilization_iters = 4
+        measure_iters = workload.measure_iters
+        stabilization_iters = workload.stabilization_iters
 
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
