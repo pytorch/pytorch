@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 
 import operator
+import unittest
+from unittest import mock
 
 import torch
 import torch._inductor.config as inductor_config
@@ -16,6 +18,7 @@ from torch._inductor import inductor_prims
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.fx_passes.reinplace import (
     inplaceable_foreach_ops,
+    reinplace_inplaceable_ops,
     reinplace_inplaceable_ops_core,
 )
 from torch._inductor.fx_utils import FakeTensorUpdater, get_node_storage
@@ -1035,6 +1038,119 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
             # Both list inputs failed to reinplace. So we should have emitted clones for them.
             self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
+
+    @parametrize("reinplace_whenever_possible", [False, True])
+    def test_scatter_reinplace_whenever_possible(self, reinplace_whenever_possible):
+        def f(x, value):
+            base = x.sin()
+            updated = aten.select_scatter.default(base, value, 0, 1)
+            return updated.cos()
+
+        inputs = (torch.randn(2, 4), torch.randn(4))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        fake_mode = detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
+        with (
+            inductor_config.patch(
+                reinplace_whenever_possible=reinplace_whenever_possible
+            ),
+            V.set_fake_mode(fake_mode),
+        ):
+            reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        if reinplace_whenever_possible:
+            self.assertIn(aten.copy_.default, targets)
+            self.assertNotIn(aten.select_scatter.default, targets)
+        else:
+            self.assertIn(aten.select_scatter.default, targets)
+            self.assertNotIn(aten.copy_.default, targets)
+        self.assertEqual(gm(*inputs), f(*inputs))
+
+    @parametrize("enabled", [False, True])
+    @parametrize("e2e", [False, True])
+    @parametrize("return_view", [False, True])
+    def test_chained_scatter_preserves_last_result(self, enabled, e2e, return_view):
+        class Model(torch.nn.Module):
+            def forward(self, x, first_value, second_value, replacement):
+                first = x.select_scatter(first_value, 0, 0)
+                second = first.select_scatter(second_value, 0, 1)
+                x.copy_(replacement)
+                return second[:, 1:] if return_view else second
+
+        model = Model()
+        x = torch.arange(8, dtype=torch.float32).reshape(2, 4).clone()
+        inputs = (
+            torch.full((4,), 10.0),
+            torch.full((4,), 20.0),
+            torch.full_like(x, -1.0),
+        )
+        expected_input = x.clone()
+        expected = model(expected_input, *inputs)
+        actual_input = x.clone()
+        with inductor_config.patch(reinplace_whenever_possible=enabled):
+            if e2e:
+                compiled = torch.compile(model, fullgraph=True)
+            else:
+                compiled = make_fx(model, tracing_mode="fake")(x, *inputs)
+                fake_mode = detect_fake_mode(
+                    [node.meta.get("val") for node in compiled.graph.nodes]
+                )
+                with V.set_fake_mode(fake_mode):
+                    reinplace_inplaceable_ops(
+                        FakeTensorUpdater(compiled), compiled.graph
+                    )
+                compiled.graph.lint()
+                compiled.recompile()
+                targets = [node.target for node in compiled.graph.nodes]
+                self.assertEqual(
+                    targets.count(aten.select_scatter.default), 1 if enabled else 2
+                )
+            actual = compiled(actual_input, *inputs)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_input, expected_input)
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "distributed support required"
+    )
+    @parametrize("enabled", [False, True])
+    @parametrize("auto_select", [False, True])
+    @parametrize("keep_input_live", [False, True])
+    @parametrize("symmetric_memory", [False, True])
+    def test_all_reduce_reinplace_whenever_possible(
+        self, enabled, auto_select, keep_input_live, symmetric_memory
+    ):
+        def f(x):
+            base = x.sin()
+            updated = torch.ops._c10d_functional.all_reduce.default(
+                base, "sum", "test_group"
+            )
+            return (updated, base) if keep_input_live else updated
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(4))
+        with (
+            inductor_config.patch(
+                reinplace_whenever_possible=enabled,
+                **{"_collective.auto_select": auto_select},
+            ),
+            mock.patch(
+                "torch.distributed._symmetric_memory.is_symm_mem_enabled_for_group",
+                return_value=symmetric_memory,
+            ),
+        ):
+            reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        targets = [node.target for node in gm.graph.nodes]
+        should_mutate = not keep_input_live and (
+            enabled or not auto_select or not symmetric_memory
+        )
+        self.assertEqual(
+            torch.ops._c10d_functional.all_reduce_.default in targets, should_mutate
+        )
+        self.assertEqual(
+            torch.ops._c10d_functional.all_reduce.default in targets, not should_mutate
+        )
 
     def test_generalized_scatter(self):
         # This is an integration test for the reinplacing pass.
