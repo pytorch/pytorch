@@ -5,18 +5,26 @@ import math
 import numpy as np
 
 import torch
+from torch._dynamo.testing import AotEagerAndRecordGraphs
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.nn.utils.rnn import pack_padded_sequence
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_dtype import float8_types_and
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
 
+
+MODES = ("to_nearest_even", "toward_zero", "toward_positive", "toward_negative")
 
 FLOAT8_DTYPES = tuple(float8_types_and(torch.float8_e8m0fnu, torch.float8_e5m3fnu))
 # These only represent magnitudes: the conversions round |x|.
@@ -71,9 +79,8 @@ def _virtual_next(mags, dst):
     return 2 * mags[-1] - mags[-2]
 
 
-def _expected_narrow(x, dst):
-    """Reference rounding to nearest of the float64 values x (exact source
-    values) to dst, with ties to even (or up, for dtypes without mantissa),
+def _expected_narrow(x, dst, mode):
+    """Reference rounding of the float64 values x (exact source values) to dst,
     computed from a table of all of dst's finite values."""
     mags = _finite_magnitudes(dst)
     n = len(mags)
@@ -90,12 +97,26 @@ def _expected_narrow(x, dst):
     down = down.clamp(min=0)
     up = torch.where((mags[down] == a) | below, down, down + 1)
     up_value = torch.where(up < n, mags[up.clamp(max=n - 1)], virtual_next)
-    mid = (mags[down] + up_value) / 2
-    tie = up if no_mantissa else torch.where(down % 2 == 0, down, up)
-    r = torch.where(a < mid, down, torch.where(a > mid, up, tie))
+
+    if mode == "to_nearest_even":
+        to_zero = torch.zeros_like(neg)
+        mid = (mags[down] + up_value) / 2
+        tie = up if no_mantissa else torch.where(down % 2 == 0, down, up)
+        r = torch.where(a < mid, down, torch.where(a > mid, up, tie))
+    else:
+        to_zero = {
+            "toward_zero": torch.ones_like(neg),
+            "toward_positive": neg,
+            "toward_negative": ~neg,
+        }[mode]
+        r = torch.where(to_zero, down, up)
 
     value = mags[r.clamp(max=n - 1)]
-    value = torch.where(r >= n, torch.full_like(value, overflow_value), value)
+    value = torch.where(
+        r >= n,
+        torch.where(to_zero, mags[-1], torch.full_like(value, overflow_value)),
+        value,
+    )
     value = torch.where(x.isinf(), torch.full_like(value, overflow_value), value)
     value = torch.where(neg, -value, value)
     if not has_neg_zero:
@@ -103,11 +124,41 @@ def _expected_narrow(x, dst):
     return torch.where(x.isnan(), torch.full_like(value, math.nan), value)
 
 
-def _expected(x, dst):
+def _expected_float32(x, mode):
+    """Reference rounding of float64 values to float32."""
+    x = x.numpy()
+    with np.errstate(over="ignore", invalid="ignore"):
+        rn = x.astype(np.float32)
+    if mode == "to_nearest_even":
+        return torch.from_numpy(rn).double()
+    neg = np.signbit(x)
+    finite_max = np.float32(np.finfo(np.float32).max)
+    down = np.where(
+        np.isinf(rn) & np.isfinite(x), np.copysign(finite_max, x).astype(np.float32), rn
+    )
+    down = np.where(
+        np.abs(down.astype(np.float64)) > np.abs(x),
+        np.nextafter(down, np.float32(0)),
+        down,
+    )
+    toward_inf = np.where(neg, np.float32(-np.inf), np.float32(np.inf))
+    up = np.where(
+        np.abs(down.astype(np.float64)) < np.abs(x),
+        np.nextafter(down, toward_inf),
+        down,
+    )
+    to_zero = {
+        "toward_zero": np.ones_like(neg),
+        "toward_positive": neg,
+        "toward_negative": ~neg,
+    }[mode]
+    return torch.from_numpy(np.where(to_zero, down, up)).double()
+
+
+def _expected(x, dst, mode):
     if dst is torch.float32:
-        with np.errstate(over="ignore", invalid="ignore"):
-            return torch.from_numpy(x.numpy().astype(np.float32)).double()
-    return _expected_narrow(x, dst)
+        return _expected_float32(x, mode)
+    return _expected_narrow(x, dst, mode)
 
 
 def _boundary_inputs(src, dst):
@@ -196,11 +247,154 @@ class TestRoundedConversion(TestCase):
             )
 
     @parametrize("pair", PAIRS, name_fn=_pair_name)
+    def test_matches_reference(self, device, pair):
+        src, dst = pair
+        x = _all_inputs(src, dst)
+        x_dev = x.to(device)
+        for mode in MODES:
+            with self.subTest(mode=mode):
+                actual = x_dev.to(dst, round=mode)
+                self.assertEqual(actual.dtype, dst)
+                self.assertEqual(actual.device, x_dev.device)
+                self.assertSameValues(actual, _expected(x.double(), dst, mode), x)
+
+    @parametrize("pair", PAIRS, name_fn=_pair_name)
     def test_default_matches_reference(self, device, pair):
         src, dst = pair
         x = _all_inputs(src, dst)
-        expected = _expected(x.double(), dst)
+        expected = _expected(x.double(), dst, "to_nearest_even")
         self.assertSameValues(x.to(device).to(dst), expected, x)
+
+    def test_e8m0(self, device):
+        x = torch.tensor(
+            [
+                0.0,
+                -0.0,
+                1.0,
+                -1.5,
+                1.25,
+                0.75,
+                3.0,
+                2**-126,
+                1.5 * 2**-127,
+                2**-127,
+                2**-149,
+                2**127,
+                1.5 * 2**127,
+                torch.finfo(torch.float32).max,
+                math.inf,
+                -math.inf,
+                math.nan,
+            ],
+            device=device,
+        )
+
+        def bits(mode):
+            return x.to(torch.float8_e8m0fnu, round=mode).view(torch.uint8).tolist()
+
+        # These match PTX cvt.rz/rp.ue8m0x2.f32 (non-satfinite).
+        self.assertEqual(
+            bits("toward_zero"),
+            [
+                0x00,
+                0x00,
+                0x7F,
+                0x7F,
+                0x7F,
+                0x7E,
+                0x80,
+                0x01,
+                0x00,
+                0x00,
+                0x00,
+                0xFE,
+                0xFE,
+                0xFE,
+                0xFF,
+                0xFF,
+                0xFF,
+            ],
+        )
+        self.assertEqual(bits("toward_negative"), bits("toward_zero"))
+        self.assertEqual(
+            bits("toward_positive"),
+            [
+                0x00,
+                0x00,
+                0x7F,
+                0x80,
+                0x80,
+                0x7F,
+                0x81,
+                0x01,
+                0x01,
+                0x00,
+                0x00,
+                0xFE,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+            ],
+        )
+        self.assertEqual(
+            bits("to_nearest_even"),
+            [
+                0x00,
+                0x00,
+                0x7F,
+                0x80,
+                0x7F,
+                0x7F,
+                0x81,
+                0x01,
+                0x01,
+                0x00,
+                0x00,
+                0xFE,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+            ],
+        )
+
+    def test_overflow(self, device):
+        x = torch.tensor([1e6, -1e6, math.inf, -math.inf], device=device)
+        cases = {
+            # dtype: (toward_zero, toward_positive, toward_negative)
+            torch.float16: (
+                [65504, -65504, math.inf, -math.inf],
+                [math.inf, -65504, math.inf, -math.inf],
+                [65504, -math.inf, math.inf, -math.inf],
+            ),
+            torch.float8_e5m2: (
+                [57344, -57344, math.inf, -math.inf],
+                [math.inf, -57344, math.inf, -math.inf],
+                [57344, -math.inf, math.inf, -math.inf],
+            ),
+            torch.float8_e4m3fn: (
+                [448, -448, 448, -448],
+                [448, -448, 448, -448],
+                [448, -448, 448, -448],
+            ),
+            torch.float8_e4m3fnuz: (
+                [240, -240, math.nan, math.nan],
+                [math.nan, -240, math.nan, math.nan],
+                [240, math.nan, math.nan, math.nan],
+            ),
+        }
+        for dtype, expected in cases.items():
+            for mode, values in zip(MODES[1:], expected):
+                with self.subTest(dtype=dtype, mode=mode):
+                    actual = x.to(dtype, round=mode).double().cpu()
+                    self.assertEqual(
+                        actual,
+                        torch.tensor(values, dtype=torch.float64),
+                        equal_nan=True,
+                    )
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_double_rounding(self, device, dtype):
@@ -212,6 +406,7 @@ class TestRoundedConversion(TestCase):
         v = 1 + eps / 2 + 2**-40
         x = torch.tensor([v], dtype=torch.float64, device=device)
         self.assertEqual(x.to(dtype).item(), 1 + eps)
+        self.assertEqual(x.to(dtype, round="to_nearest_even").item(), 1 + eps)
         self.assertEqual(x.to(torch.float32).to(dtype).item(), 1.0)
         # Other conversions: from a Scalar (fill_ special-cases one element),
         # and of an operator's output, where chebyshev_polynomial_t
@@ -259,8 +454,234 @@ class TestRoundedConversion(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "without overflow"):
                     torch.full((n,), complex(1e5, 0), dtype=dtype, device=device)
 
+    def test_signatures(self, device):
+        x = torch.randn(4, 5, device=device)
+        expected = torch._to_dtype_rounded(x, torch.bfloat16, "toward_positive")
+        other = torch.empty((), dtype=torch.bfloat16, device=device)
+        for y in (
+            x.to(torch.bfloat16, round="toward_positive"),
+            x.to(dtype=torch.bfloat16, round="toward_positive"),
+            x.to(torch.bfloat16, False, False, round="toward_positive"),
+            x.to(device, torch.bfloat16, round="toward_positive"),
+            x.to(other, round="toward_positive"),
+            x.to(torch.bfloat16, copy=True, round="toward_positive"),
+        ):
+            self.assertEqual(y, expected, atol=0, rtol=0)
+        out = torch.empty_like(expected)
+        torch._to_dtype_rounded(x, torch.bfloat16, "toward_positive", out=out)
+        self.assertEqual(out, expected, atol=0, rtol=0)
+
+    def test_memory_format(self, device):
+        x = torch.randn(2, 3, 4, 5, device=device).to(memory_format=torch.channels_last)
+        y = x.to(torch.float16, round="toward_zero")
+        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
+        z = x.to(
+            torch.float16, round="toward_zero", memory_format=torch.contiguous_format
+        )
+        self.assertTrue(z.is_contiguous())
+        self.assertEqual(y, z, atol=0, rtol=0)
+        t = torch.randn(5, 6, device=device).t()
+        self.assertEqual(
+            t.to(torch.float16, round="toward_zero"),
+            t.contiguous().to(torch.float16, round="toward_zero"),
+            atol=0,
+            rtol=0,
+        )
+
+        # The binding converts with a single op, rather than converting and
+        # then copying to the requested layout.
+        class RecordOps(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.ops = []
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        with RecordOps() as recorder:
+            w = x.to(
+                torch.float16,
+                round="toward_zero",
+                memory_format=torch.contiguous_format,
+            )
+        self.assertEqual(recorder.ops, [torch.ops.aten._to_dtype_rounded.default])
+        self.assertTrue(w.is_contiguous())
+        self.assertEqual(w, z, atol=0, rtol=0)
+
+    def test_errors(self, device):
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(ValueError, "rounding mode must be one of"):
+            x.to(torch.float16, round="nearest")
+        for src, dst in [
+            (torch.float32, torch.float32),
+            (torch.float16, torch.float32),
+            (torch.float32, torch.float64),
+            (torch.int32, torch.float16),
+            (torch.float32, torch.int8),
+            (torch.float32, torch.bool),
+            (torch.complex64, torch.complex32),
+            (torch.float32, torch.float4_e2m1fn_x2),
+            (torch.float8_e4m3fn, torch.float8_e5m2),
+        ]:
+            with (
+                self.subTest(src=src, dst=dst),
+                self.assertRaisesRegex(RuntimeError, "rounding is only supported"),
+            ):
+                x.to(src).to(dst, round="toward_zero")
+        with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):
+            x.to(device, round="toward_zero")
+        with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):
+            torch._to_dtype_rounded(x, torch.float32, "toward_zero")
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2), torch.randn(3)], device=device
+        )
+        with self.assertRaisesRegex(RuntimeError, "non-nested"):
+            nested.to(torch.float16, round="toward_zero")
+        with self.assertRaisesRegex(ValueError, "rounding mode must be one of"):
+            torch._to_dtype_rounded(x, torch.float16, "nearest")
+        with self.assertRaisesRegex(RuntimeError, "expected out to have dtype"):
+            torch._to_dtype_rounded(
+                x, torch.float16, "toward_zero", out=torch.empty_like(x)
+            )
+
+    def test_autograd(self, device):
+        x = torch.randn(5, dtype=torch.float64, device=device, requires_grad=True)
+        y = x.to(torch.float32, round="toward_positive")
+        self.assertTrue(y.requires_grad)
+        y.backward(torch.arange(5.0, device=device))
+        self.assertEqual(x.grad, torch.arange(5.0, dtype=torch.float64, device=device))
+
+        tangent = torch.randn(5, dtype=torch.float64, device=device)
+        with torch.autograd.forward_ad.dual_level():
+            dual = torch.autograd.forward_ad.make_dual(x.detach(), tangent)
+            out = dual.to(torch.float32, round="toward_positive")
+            _, out_tangent = torch.autograd.forward_ad.unpack_dual(out)
+        # The tangent is converted like the gradient, not rounded in the mode.
+        self.assertEqual(out_tangent, tangent.to(torch.float32), atol=0, rtol=0)
+
+    def test_fake(self, device):
+        with FakeTensorMode():
+            z = torch.empty(4, 3, device=device).to(torch.bfloat16, round="toward_zero")
+        self.assertEqual(z.dtype, torch.bfloat16)
+        self.assertEqual(z.device.type, torch.device(device).type)
+
+    def test_vmap(self, device):
+        x = torch.randn(3, 4, device=device)
+        actual = torch.vmap(lambda t: t.to(torch.float16, round="toward_negative"))(x)
+        self.assertEqual(
+            actual, x.to(torch.float16, round="toward_negative"), atol=0, rtol=0
+        )
+
+    @skipIfTorchDynamo("inspects the graph of a nested torch.compile")
+    def test_compile(self, device):
+        def fn(x):
+            return (x * 3).to(torch.bfloat16, round="toward_positive") + 1
+
+        x = torch.randn(64, device=device)
+        backend = AotEagerAndRecordGraphs()
+        self.assertEqual(
+            torch.compile(fn, backend=backend, fullgraph=True)(x), fn(x), atol=0, rtol=0
+        )
+        targets = [n.target for n in backend.fw_graphs[0].graph.nodes]
+        self.assertIn(torch.ops.aten._to_dtype_rounded.default, targets)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x), atol=0, rtol=0)
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        for n in (5, 33):
+            x = torch.randn(n, 3, device=device)
+            self.assertEqual(compiled(x), fn(x), atol=0, rtol=0)
+
+    def test_export(self, device):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.to(torch.float16, round="toward_zero")
+
+        x = torch.randn(4, device=device)
+        ep = torch.export.export(M(), (x,)).run_decompositions()
+        targets = [n.target for n in ep.graph.nodes if n.op == "call_function"]
+        self.assertIn(torch.ops.aten._to_dtype_rounded.default, targets)
+        self.assertEqual(ep.module()(x), M()(x), atol=0, rtol=0)
+
+    @onlyAccelerator
+    def test_cross_device(self, device):
+        x = torch.randn(1000, dtype=torch.float64)
+        expected = x.to(torch.float32, round="toward_positive")
+        self.assertEqual(
+            x.to(device, torch.float32, round="toward_positive").cpu(),
+            expected,
+            atol=0,
+            rtol=0,
+        )
+        self.assertEqual(
+            x.to(device).to("cpu", torch.float32, round="toward_positive"),
+            expected,
+            atol=0,
+            rtol=0,
+        )
+        for y in (
+            x.to(device, torch.float32, round="toward_positive", non_blocking=True),
+            x.to(device).to(
+                "cpu", torch.float32, round="toward_positive", non_blocking=True
+            ),
+        ):
+            torch.accelerator.synchronize()
+            self.assertEqual(y.cpu(), expected, atol=0, rtol=0)
+
 
 instantiate_device_type_tests(TestRoundedConversion, globals())
+
+
+class TestRoundedConversionPython(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_refs(self):
+        x = torch.randn(10, dtype=torch.float64)
+        actual = torch._refs.to(x, torch.float16, round="toward_negative")
+        self.assertEqual(
+            actual, x.to(torch.float16, round="toward_negative"), atol=0, rtol=0
+        )
+
+    def test_meta(self):
+        x = torch.empty(4, 3, device="meta").t()
+        y = x.to(torch.float8_e8m0fnu, round="toward_positive")
+        self.assertEqual(y.dtype, torch.float8_e8m0fnu)
+        self.assertEqual(y.stride(), x.stride())
+        with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):
+            torch._to_dtype_rounded(x, torch.float64, "toward_positive")
+        # Like TensorIterator, out= gets the input's stride order when resized.
+        for t in (x, torch.empty(4, 3).t()):
+            out = torch.empty(0, dtype=torch.bfloat16, device=t.device)
+            torch._to_dtype_rounded(t, torch.bfloat16, "toward_zero", out=out)
+            self.assertEqual(out.stride(), t.stride())
+        # Errors are checked in the same order as on real tensors.
+        for t in (x, torch.empty(4, 3)):
+            with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):
+                torch._to_dtype_rounded(t, torch.float32, "nearest")
+
+    def test_packed_sequence(self):
+        data = torch.randn(3, 2, 4, dtype=torch.float64)
+        packed = pack_padded_sequence(data, torch.tensor([3, 2]), enforce_sorted=False)
+        converted = packed.to(torch.float16, round="toward_positive")
+        self.assertEqual(
+            converted.data,
+            packed.data.to(torch.float16, round="toward_positive"),
+            atol=0,
+            rtol=0,
+        )
+        self.assertEqual(converted.sorted_indices, packed.sorted_indices)
+
+    def test_module_to_rejects_round(self):
+        module = torch.nn.Linear(2, 2)
+        with self.assertRaisesRegex(RuntimeError, "does not accept round argument"):
+            module.to(torch.float16, round="toward_zero")
+
+        # Also through Dynamo's polyfill of the parser.
+        def fn():
+            return module.to(torch.float16, round="toward_zero")
+
+        with self.assertRaisesRegex(RuntimeError, "does not accept round argument"):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
 
 if __name__ == "__main__":
     run_tests()

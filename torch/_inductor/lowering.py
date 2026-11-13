@@ -3991,6 +3991,7 @@ make_fallback(aten._scaled_addmm.default, warn=False)
 make_fallback(aten._scaled_addmm_.default, warn=False)
 make_fallback(aten._quantize_tensor.default, warn=False)
 make_fallback(aten._quantize_tensor_dual.default, warn=False)
+make_fallback(aten._to_dtype_rounded.default, warn=False)
 
 
 # 1) Easy

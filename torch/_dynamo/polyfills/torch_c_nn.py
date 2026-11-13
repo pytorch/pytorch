@@ -35,6 +35,10 @@ def _parse_to_polyfill(
         if result is not NotImplemented:
             return result
 
+    # Like the C++ parser, which nn.Module.to uses, reject Tensor.to's round.
+    if kwargs.get("round") is not None:
+        raise RuntimeError(".to() does not accept round argument")
+
     # Default implementation
     device = None
     dtype = None
