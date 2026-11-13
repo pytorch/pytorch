@@ -255,7 +255,6 @@
   "test/dynamo/test_benchmark_runner.py",
   "test/dynamo/test_buffers_override.py",
   "test/dynamo/test_bytearray.py",
-  "test/dynamo/test_bytecode_debugger.py",
   "test/dynamo/test_bytecode_utils.py",
   "test/dynamo/test_callback.py",
   "test/dynamo/test_check_type_id.py",
