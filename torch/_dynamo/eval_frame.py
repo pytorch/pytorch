@@ -1664,7 +1664,8 @@ def _make(_dynamo_fn, _dynamo_fn_name{default_params}):
                 # Only export needs the annotation work. Skip annotation for
                 # __torch_dispatch__ (internal detail).
                 if (
-                    torch.compiler._is_exporting_flag
+                    torch.compiler._SESSIONS_ACTIVE
+                    and torch.compiler.is_exporting()
                     and _dynamo_fn_name != "__torch_dispatch__"
                 ):
                     with fx_traceback.annotate(
@@ -3076,11 +3077,12 @@ class TorchPatcher:
         # with torch.deploy internally.
         from .decorators import disable
 
-        torch.jit.trace = disable(
-            torch.jit.trace, reason="tracing into TorchScript not fully supported"
+        torch.jit._trace.trace = disable(
+            torch.jit._trace.trace,
+            reason="tracing into TorchScript not fully supported",
         )
-        torch.jit.trace_module = disable(
-            torch.jit.trace_module,
+        torch.jit._trace.trace_module = disable(
+            torch.jit._trace.trace_module,
             reason="tracing into TorchScript not fully supported",
         )
         torch.jit._get_trace_graph = disable(
