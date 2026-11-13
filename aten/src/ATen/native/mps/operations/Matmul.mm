@@ -617,10 +617,14 @@ void metal_gemm(const Tensor& a,
   const int64_t blocks = at::ceil_div(params.m, kMatmulBlock / 2) * at::ceil_div(params.n, kMatmulBlock) * batch;
   const bool k_groups = use_mpp && blocks <= kMatmulKGroupsFullGrids * full_grid;
   // x @ W.t() over a few rows, with aligned rows of W for the loads of matmul_mpp_staged.
-  const bool staged = use_mpp && params.m <= kMatmulStagedMaxRows && params.a_stride_k == 1 && params.b_stride_k == 1 &&
+  const bool staged = use_mpp && params.m <= kMatmulStagedMaxRows && params.k >= kMatmulStagedMinK &&
+      params.a_stride_k == 1 && params.b_stride_k == 1 &&
       (params.b_stride_n | b.storage_offset()) * b.element_size() % kMatmulStagedLoadBytes == 0 &&
-      (!apple10 || params.n * params.k * b.element_size() >= kMatmulStagedMinBytesApple10);
-  const auto staged_bm = params.m <= kMatmulStagedMaxRows / 2 ? kMatmulStagedMaxRows / 2 : kMatmulStagedMaxRows;
+      (!apple10 || out.scalar_type() == kFloat ||
+       params.n * params.k * b.element_size() >= kMatmulStagedMinBytesApple10);
+  const auto staged_bm = params.m <= kMatmulBlock / 4 ? kMatmulBlock / 4
+      : params.m <= kMatmulBlock / 2 || !apple10      ? kMatmulBlock / 2
+                                                      : kMatmulBlock;
   const auto bm = staged ? staged_bm : k_groups ? kMatmulBlock / 2 : use_mpp ? mpp_bm : matmul_tile_rows(params.m);
   const auto bn = staged ? kMatmulStagedBlock : k_groups ? kMatmulBlock : use_mpp ? mpp_bn : kMatmulTileN;
   const auto simdgroups = staged || k_groups ? kMatmulKGroups
