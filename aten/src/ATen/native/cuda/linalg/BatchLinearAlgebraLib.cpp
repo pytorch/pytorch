@@ -1072,14 +1072,15 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
   auto infos = at::zeros({1}, A.options().dtype(at::kInt));
   auto infos_data = infos.data_ptr<int>();
 
-  // get the optimal work size and allocate workspace tensor
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  // Get the workspace size once, and reuse allocations across the batch.
 #ifdef USE_CUSOLVER_64_BIT
   size_t worksize_device; // workspaceInBytesOnDevice
   size_t worksize_host; // workspaceInBytesOnHost
   cusolverDnParams_t params;
   TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
   at::cuda::solver::xgeqrf_bufferSize<scalar_t>(
-      at::cuda::getCurrentCUDASolverDnHandle(),
+      handle,
       params,
       m,
       n,
@@ -1094,20 +1095,24 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
   int n_32 = cuda_int_cast(n, "n");
   int lda_32 = cuda_int_cast(lda, "lda");
   at::cuda::solver::geqrf_bufferSize<scalar_t>(
-      at::cuda::getCurrentCUDASolverDnHandle(), m_32, n_32, A_data, lda_32, &lwork);
+      handle, m_32, n_32, A_data, lda_32, &lwork);
 #endif // USE_CUSOLVER_64_BIT
+
+#ifdef USE_CUSOLVER_64_BIT
+  auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
+  auto work_device_data = device_allocator.allocate(worksize_device);
+  auto& host_allocator = *at::getCPUAllocator();
+  auto work_host_data = host_allocator.allocate(worksize_host);
+#else
+  auto& allocator = *at::cuda::getCUDADeviceAllocator();
+  auto work_data = allocator.allocate(sizeof(scalar_t) * std::max<int>(1, lwork));
+#endif
 
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
     scalar_t* A_working_ptr = &A_data[i * A_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
-    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
 #ifdef USE_CUSOLVER_64_BIT
-    // allocate workspace storage on device and host
-    auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
-    auto work_device_data = device_allocator.allocate(worksize_device);
-    auto& host_allocator = *at::getCPUAllocator();
-    auto work_host_data = host_allocator.allocate(worksize_host);
     at::cuda::solver::xgeqrf<scalar_t>(
         handle,
         params,
@@ -1122,9 +1127,6 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
         worksize_host,
         infos_data);
 #else
-    // allocate workspace storage on device
-    auto& allocator = *at::cuda::getCUDADeviceAllocator();
-    auto work_data = allocator.allocate(sizeof(scalar_t) * std::max<int>(1, lwork));
     at::cuda::solver::geqrf<scalar_t>(
         handle,
         m_32,
@@ -1189,10 +1191,11 @@ static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& ot
   auto lda = std::max<int>(1, left ? m : n);
   auto ldc = std::max<int>(1, m);
 
-  // get the optimal work size and allocate workspace tensor
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  // Get workspace size once for the entire batch.
   int lwork;
   at::cuda::solver::ormqr_bufferSize<scalar_t>(
-    at::cuda::getCurrentCUDASolverDnHandle(), side, trans, m, n, k, input_data, lda, tau_data, other_data, ldc, &lwork);
+    handle, side, trans, m, n, k, input_data, lda, tau_data, other_data, ldc, &lwork);
 
   auto info = at::zeros({1}, input.options().dtype(at::kInt));
   auto info_data = info.data_ptr<int>();
@@ -1201,7 +1204,6 @@ static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& ot
   // operations use the current stream, so sequential calls can reuse it.
   auto& allocator = *at::cuda::getCUDADeviceAllocator();
   auto work_data = allocator.allocate(sizeof(scalar_t) * lwork);
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
   for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
     const scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
@@ -1268,10 +1270,11 @@ static void apply_orgqr(Tensor& self, const Tensor& tau) {
     return;
   }
 
-  // get the optimal work size and allocate workspace tensor
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  // Get workspace size once for the entire batch.
   int lwork;
   at::cuda::solver::orgqr_buffersize<scalar_t>(
-    at::cuda::getCurrentCUDASolverDnHandle(), m, n, k, self_data, lda, tau_data, &lwork);
+    handle, m, n, k, self_data, lda, tau_data, &lwork);
 
   auto info = at::zeros({1}, self.options().dtype(at::kInt));
   auto info_data = info.data_ptr<int>();
@@ -1280,7 +1283,6 @@ static void apply_orgqr(Tensor& self, const Tensor& tau) {
   // operations use the current stream, so sequential calls can reuse it.
   auto& allocator = *at::cuda::getCUDADeviceAllocator();
   auto work_data = allocator.allocate(sizeof(scalar_t) * lwork);
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
   for (auto i = decltype(batchsize){0}; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
