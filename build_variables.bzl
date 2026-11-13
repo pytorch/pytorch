@@ -1270,6 +1270,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/detail/Binary.cpp",
     "aten/src/ATen/native/mkldnn/detail/DirectCopy.cpp",
     "aten/src/ATen/native/mkldnn/detail/Eltwise.cpp",
+    "aten/src/ATen/native/mkldnn/detail/InnerProduct.cpp",
     "aten/src/ATen/native/mkldnn/detail/LayerNorm.cpp",
     "aten/src/ATen/native/mkldnn/detail/Lstm.cpp",
     "aten/src/ATen/native/mkldnn/detail/Pooling.cpp",
