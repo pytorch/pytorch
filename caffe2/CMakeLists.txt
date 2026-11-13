@@ -2082,6 +2082,10 @@ if(BUILD_MOBILE_TEST)
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
     target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+    # See vec_test_all_types_* below.
+    if(test_name STREQUAL "vec_test_all_types" AND NOT MSVC)
+      target_compile_options(${test_name} PRIVATE -ffp-contract=off)
+    endif()
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
   endforeach()
 endif()
@@ -2129,7 +2133,13 @@ if(BUILD_TEST)
         target_compile_definitions(${test_name}_${CPU_CAPABILITY} PRIVATE CPU_CAPABILITY=${CPU_CAPABILITY}  CPU_CAPABILITY_${CPU_CAPABILITY})
         target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE  ${FLAGS})
         if(NOT MSVC)
-              target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE -Wno-ignored-qualifiers)
+              # Tests compare vectorized code and scalar references compiled
+              # in the same file, often from the same source (e.g. complex
+              # division): contracting them into FMAs differently would round
+              # them differently. This also applies to the vectorized code
+              # under test, which is inlined, unlike in kernels, which keep the
+              # compiler's default.
+              target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE -Wno-ignored-qualifiers -ffp-contract=off)
         endif(NOT MSVC)
         add_test(NAME ${test_name}_${CPU_CAPABILITY} COMMAND $<TARGET_FILE:${test_name}_${CPU_CAPABILITY}>)
     endforeach()

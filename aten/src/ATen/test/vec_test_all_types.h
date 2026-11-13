@@ -75,6 +75,10 @@ template <>
 struct OpMathType<c10::Half> {
   using type = float;
 };
+template <>
+struct OpMathType<c10::BFloat16> {
+  using type = float;
+};
 
 
 template<typename T>
@@ -524,7 +528,19 @@ std::enable_if_t < !is_complex<T>::value, void> filter_sub_overflow(T& a, T& b) 
 template <typename T>
 std::enable_if_t<is_complex<T>::value, void>
 filter_mult_overflow(T& val1, T& val2) {
-    //missing
+    // Scale large parts below the square root of the largest value, so that
+    // the products and their sums stay finite: in overflowing a*c - b*d, which
+    // product the compiler contracts into an FMA decides between -inf, inf
+    // and NaN.
+    using R = typename T::value_type;
+    constexpr int half_exponent = std::numeric_limits<R>::max_exponent / 2;
+    auto scale = [](R v) {
+        return std::abs(v) < std::ldexp(R(1), half_exponent - 1)
+            ? v
+            : std::ldexp(v, -half_exponent - 1);
+    };
+    val1 = T(scale(val1.real()), scale(val1.imag()));
+    val2 = T(scale(val2.real()), scale(val2.imag()));
 }
 
 template <typename T>
@@ -543,10 +559,14 @@ std::enable_if_t<!is_complex<T>::value, void>
 filter_mult_overflow(T& val1, T& val2) {
     if constexpr (std::is_integral_v<T> == false) return;
     if (!is_zero(val2)) {
-        T c = (std::numeric_limits<T>::max() - 1) / val2;
-        if (std::abs(val1) >= c) {
-            // correct first;
+        // Clamp |val1| to (max - 1) / |val2|, keeping its sign, so that their
+        // product fits. This only ever shrinks |val1|, as tests filter it
+        // against several values.
+        T c = std::abs((std::numeric_limits<T>::max() - 1) / val2);
+        if (val1 > c) {
             val1 = c;
+        } else if (val1 < -c) {
+            val1 = -c;
         }
     }  // is_zero
 }
@@ -852,7 +872,7 @@ public:
         {
             stream << "Arguments:\n";
             stream << "#\t " << arg0 << '\n';
-            if (argSize == 2)
+            if (argSize >= 2)
             {
                 stream << "#\t " << arg1 << '\n';
             }
@@ -1290,8 +1310,9 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_multiply(Compl
     T x_imag = x.imag();
     T y_real = y.real();
     T y_imag = y.imag();
-#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
-    //check multiplication considering swap and fma
+#if defined(CPU_CAPABILITY_ZVECTOR)
+    // ZVECTOR fuses explicitly (fmadd); VSX's multiplication and addition are
+    // not contracted with -ffp-contract=off, like the branch below.
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
     T neg_imag = -y_imag;
@@ -1320,77 +1341,28 @@ std::enable_if_t<!is_complex<T>::value, T> local_division(T x, T y) {
 
 template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Complex<T> x, Complex<T> y) {
-#if defined(TEST_AGAINST_DEFAULT)
+    // Every CPU capability divides complex vectors element by element with
+    // c10::complex's operator/.
     return x / y;
-#else /* defined(TEST_AGAINST_DEFAULT) */
-    //re = (ac + bd)/abs_2()
-    //im = (bc - ad)/abs_2()
-    T x_real = x.real();
-    T x_imag = x.imag();
-    T y_real = y.real();
-    T y_imag = y.imag();
-    PreventFma noFma;
-#if defined(CPU_CAPABILITY_ZVECTOR)
-    T abs_c = std::abs(y_real);
-    T abs_d = std::abs(y_imag);
-    T scale = 1.0 / std::max(abs_c, abs_d);
-
-    T a_sc = x_real * scale; // a/sc
-    T b_sc = x_imag * scale; // b/sc
-    T c_sc = y_real * scale; // c/sc
-    T d_sc = y_imag * scale; // d/sc
-
-    T ac_sc2 = a_sc * c_sc; // ac/sc^2
-    T bd_sc2 = b_sc * d_sc; // bd/sc^2
-
-    T neg_d_sc = -1.0 * d_sc; // -d/sc^2
-
-    T neg_ad_sc2 = a_sc * neg_d_sc; // -ad/sc^2
-    T bc_sc2 = b_sc * c_sc; // bc/sc^2
-
-    T ac_bd_sc2 = noFma.add(ac_sc2, bd_sc2); // (ac+bd)/sc^2
-    T bc_ad_sc2 = noFma.add(bc_sc2, neg_ad_sc2); // (bc-ad)/sc^2
-
-    T c2_sc2 = c_sc * c_sc; // c^2/sc^2
-    T d2_sc2 = d_sc * d_sc; // d^2/sc^2
-
-    T c2_d2_sc2 = noFma.add(c2_sc2, d2_sc2); // (c^2+d^2)/sc^2
-
-    T rr = ac_bd_sc2 / c2_d2_sc2; // (ac+bd)/(c^2+d^2)
-    T ii = bc_ad_sc2 / c2_d2_sc2; // (bc-ad)/(c^2+d^2)
-
-    return Complex<T>(rr, ii);
-#else /* defined(CPU_CAPABILITY_ZVECTOR) */
-#if defined(CPU_CAPABILITY_VSX)
-    //check multiplication considering swap and fma
-    T rr = x_real * y_real;
-    T ii = x_imag * y_real;
-    T neg_imag = -y_imag;
-    rr = fma(x_imag, y_imag, rr);
-    ii = fma(x_real, neg_imag, ii);
-    //b.abs_2
-#else /* defined(CPU_CAPABILITY_VSX) */
-    T ac = x_real * y_real;
-    T bd = x_imag * y_imag;
-    T ad = x_real * y_imag;
-    T bc = x_imag * y_real;
-    T rr = noFma.add(ac, bd);
-    T ii = noFma.sub(bc, ad);
-#endif /* defined(CPU_CAPABILITY_VSX) */
-    //b.abs_2()
-    T abs_rr = y_real * y_real;
-    T abs_ii = y_imag * y_imag;
-    T abs_2 = noFma.add(abs_rr, abs_ii);
-    rr = rr / abs_2;
-    ii = ii / abs_2;
-    return Complex<T>(rr, ii);
-#endif /* defined(CPU_CAPABILITY_ZVECTOR) */
-#endif /* defined(TEST_AGAINST_DEFAULT) */
 }
 
 
+// With FP16 vector arithmetic on aarch64 (outside SVE256 and mobile builds,
+// which use generic code), Vectorized<Half>'s fused operations are native fp16
+// FMAs, which round once (the tests cover fmadd and fmsub); elsewhere, they
+// compute in float and round to float first.
+#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) && \
+    !defined(CPU_CAPABILITY_SVE256) && !defined(C10_MOBILE)
+constexpr bool kNativeHalfFma = true;
+#else
+constexpr bool kNativeHalfFma = false;
+#endif
+
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
+    if constexpr (std::is_same_v<T, c10::Half> && kNativeHalfFma) {
+        return static_cast<T>(std::fma(double(a), double(b), double(c)));
+    }
     PreventFma noFma;
     using op_math_t = typename OpMathType<T>::type;
     auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
@@ -1399,6 +1371,9 @@ std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
+    if constexpr (std::is_same_v<T, c10::Half> && kNativeHalfFma) {
+        return static_cast<T>(std::fma(double(a), double(b), -double(c)));
+    }
     PreventFma noFma;
     using op_math_t = typename OpMathType<T>::type;
     auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
