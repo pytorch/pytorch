@@ -246,18 +246,32 @@ void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
 }
 
 bool MPSStream::query() {
+  // Metal has no built-in way to check if there is any unfinished enqueued
+  // work. The strategy here is to enqueue an event, called a "query event". If
+  // the query event ever finishes before any other work has been enqueued, then
+  // we know that all enqueued work has finished.
+
   __block bool done;
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
-      // Only signal if there is new work, otherwise every call would commit a
-      // new command buffer and report busy, so polling would never finish
+      //  Any time `MPSStream::commandBuffer()` is called,
+      //  `_hasWorkSinceQuerySignal = true` is set, conservatively assuming that
+      //  the caller will enqueue work. So if `_hasWorkSinceQuerySignal ==
+      //  false`, then we know that no new work has been enqueued.
       if (_hasWorkSinceQuerySignal) {
         endKernelCoalescing();
+        // New work has been enqueued, so enqueue the query event.
         [commandBuffer() encodeSignalEvent:_queryEvent value:++_querySignalCounter];
+        // Commit now because `query` must be able to be called in a loop that
+        // eventually finishes.
         synchronize(SyncType::COMMIT);
-        // committing calls commandBuffer() again via addErrorHandler, so reset the flag afterwards
+        // Reset this flag since the query event will only signal after all the
+        // previously enqueued work is finished. This must be done only after
+        // the event is committed, because the commit sets the flag to true.
         _hasWorkSinceQuerySignal = false;
       }
+      // If all the enqueued query events have signaled then all the work
+      // enqueued before the event is finished.
       done = _queryEvent.signaledValue >= _querySignalCounter;
     }
   });
