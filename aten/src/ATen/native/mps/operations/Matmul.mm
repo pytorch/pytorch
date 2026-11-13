@@ -615,7 +615,9 @@ void metal_gemm(const Tensor& a,
       (params.a_stride_m == 1 || params.a_stride_k == 1) && (params.b_stride_k == 1 || params.b_stride_n == 1) &&
       matmul_mpp_indices_fit(params, mpp_bm, mpp_bn);
   const int64_t blocks = at::ceil_div(params.m, kMatmulBlock / 2) * at::ceil_div(params.n, kMatmulBlock) * batch;
-  const bool k_groups = use_mpp && blocks <= kMatmulKGroupsFullGrids * full_grid;
+  const bool few_blocks = use_mpp && blocks <= kMatmulKGroupsFullGrids * full_grid;
+  const int64_t grid_splits =
+      few_blocks ? std::min<int64_t>(params.k / kMatmulSplitMinK, full_grid / (kMatmulSplitGridShare * blocks)) : 1;
   // x @ W.t() over a few rows, with aligned rows of W for the loads of matmul_mpp_staged.
   const bool staged = use_mpp && params.m <= kMatmulStagedMaxRows && params.k >= kMatmulStagedMinK &&
       params.a_stride_k == 1 && params.b_stride_k == 1 &&
@@ -630,6 +632,9 @@ void metal_gemm(const Tensor& a,
       params.out_stride_m | params.out_batch | params.b_batch | out.storage_offset() | b.storage_offset();
   const bool outer = params.k == 1 && !add && params.b_stride_n == 1 && params.out_stride_n == 1 &&
       outer_align * out.element_size() % kMatmulOuterBytes == 0;
+  const bool slabs = use_mpp && !staged && !outer && grid_splits <= 1 && params.k >= kMatmulSlabMinK &&
+      batch * params.m * params.n <= kMatmulSlabMaxOutput;
+  const bool k_groups = few_blocks && !slabs;
   const auto bm = outer ? 1u
       : staged          ? staged_bm
       : k_groups        ? kMatmulBlock / 2
@@ -645,9 +650,9 @@ void metal_gemm(const Tensor& a,
       : use_mpp                 ? kMatmulBlockSimdgroups
                                 : matmul_simdgroups(bm, bn);
   const bool use_u32 = !use_mpp && !outer && offsetsFitIn<int32_t>(a, b, out, bias_);
-  const int64_t max_splits = k_groups && !staged
-      ? std::min<int64_t>(params.k / kMatmulSplitMinK, full_grid / (kMatmulSplitGridShare * blocks))
-      : 1;
+  const int64_t max_splits = slabs ? std::min<int64_t>(params.k / kMatmulSplitMinK, kMatmulSlabMaxPlanes)
+      : staged                     ? 1
+                                   : grid_splits;
   const int64_t k_split = max_splits > 1 ? at::ceil_div<int64_t>(params.k, max_splits) : 0;
   const int64_t splits = k_split ? at::ceil_div<int64_t>(params.k, k_split) : 1;
   Tensor partials;
