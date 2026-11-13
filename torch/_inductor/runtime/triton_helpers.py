@@ -614,6 +614,25 @@ def randint64(seed, offset, low, high):
 
 
 @triton.jit
+def philox_rand(seed, offset, idx, DIGITS: tl.constexpr):
+    # Matches the [0, 1) sample of the eager stateless Philox kernels: each Philox
+    # call yields four 32-bit values, or two 64-bit values when DIGITS > 32.
+    if DIGITS > 32:
+        r0, r1, r2, r3 = tl.randint4x(seed, offset + idx // 2)
+        first = idx % 2 == 0
+        hi = tl.where(first, r0, r2).to(tl.uint64)
+        lo = tl.where(first, r1, r3).to(tl.uint64)
+        r = (hi << 32) | lo
+        u = (r & ((1 << DIGITS) - 1)).to(tl.float64) * (1.0 / (1 << DIGITS))
+    else:
+        r0, r1, r2, r3 = tl.randint4x(seed, offset + idx // 4)
+        lane = idx % 4
+        r = tl.where(lane < 2, tl.where(lane == 0, r0, r1), tl.where(lane == 2, r2, r3))
+        u = (r & ((1 << DIGITS) - 1)).to(tl.float32) * (1.0 / (1 << DIGITS))
+    return u
+
+
+@triton.jit
 def _any_combine(a, b):
     return a | b
 
