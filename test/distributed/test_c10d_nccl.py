@@ -102,6 +102,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfXpu,
     subtest,
     TemporaryFileName,
     TEST_ACCELERATOR,
@@ -4720,7 +4721,10 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._run_invalid_nccl_blocking_wait_env("4294967295")
 
 
-@xfailIf(TEST_XPU)  # needs NCCL_ALGO/NCCL_DEBUG log scraping: #torch-xpu-ops/5385
+@skipIfXpu(
+    msg="needs NCCL_ALGO/NCCL_DEBUG log scraping: "
+    "https://github.com/intel/torch-xpu-ops/issues/5385"
+)
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
