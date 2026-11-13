@@ -413,6 +413,41 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<decltype({x})>(-{x})"
 
     @staticmethod
+    def _wrap_small_int(expr: str, *args: OpVarT) -> str:
+        # Metal promotes char, uchar and short operands to int, so cast the
+        # result back to wrap like eager does
+        dtypes = [a.dtype for a in args if isinstance(a, CSEVariable)]
+        if not dtypes or None in dtypes:
+            return expr
+        dtype = functools.reduce(torch.promote_types, dtypes)
+        if dtype not in (torch.int8, torch.uint8, torch.int16):
+            return expr
+        return f"static_cast<{DTYPE_TO_METAL[dtype]}>({expr})"
+
+    @staticmethod
+    def add(a: OpVarT, b: OpVarT) -> str:
+        return MetalOverrides._wrap_small_int(f"{a} + {b}", a, b)
+
+    @staticmethod
+    def sub(a: OpVarT, b: OpVarT) -> str:
+        return MetalOverrides._wrap_small_int(f"{a} - {b}", a, b)
+
+    @staticmethod
+    def mul(a: OpVarT, b: OpVarT) -> str:
+        return MetalOverrides._wrap_small_int(f"{a} * {b}", a, b)
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_not(x: OpVarT) -> str:
+        return MetalOverrides._wrap_small_int(f"~{OpOverrides.paren(x)}", x)
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_left_shift(a: OpVarT, b: OpVarT) -> str:
+        expr = f"{OpOverrides.paren(a)} << {OpOverrides.paren(b)}"
+        return MetalOverrides._wrap_small_int(expr, a)
+
+    @staticmethod
     # pyrefly: ignore [bad-override]
     def rsqrt(x: CSEVariable) -> str:
         return f"metal::precise::rsqrt({x})"
@@ -450,7 +485,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:
         # a and b must be of integer type
-        return f"c10::metal::floor_divide({a}, {b})"
+        return MetalOverrides._wrap_small_int(
+            f"c10::metal::floor_divide({a}, {b})", a, b
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -517,7 +554,7 @@ class MetalOverrides(OpOverrides):
             b.dtype is not None and b.dtype.is_floating_point
         ):
             return f"metal::trunc({quot})"
-        return quot
+        return MetalOverrides._wrap_small_int(quot, a, b)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
