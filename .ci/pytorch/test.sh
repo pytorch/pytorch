@@ -672,6 +672,10 @@ rdma_port_bytes() {
 
 rdma_port_deltas() {
   rdma_port_bytes > /tmp/rdma_after
+  if [[ ! -s /tmp/rdma_after ]]; then
+    echo "RDMA port counters not exposed; no byte deltas"
+    return
+  fi
   echo "RDMA port bytes moved (xmit rcv):"
   join /tmp/rdma_before /tmp/rdma_after | awk '{print $1, ($4-$2)*4, ($5-$3)*4}' || true
 }
@@ -709,7 +713,7 @@ test_transport_rdma() {
   nvidia-smi topo -m || true
   echo "memlock: $(ulimit -l)"
   # GPUDirect RDMA needs nvidia_peermem or dmabuf.
-  lsmod | grep -E 'peermem|^nvidia' || true
+  grep -E 'peermem|^nvidia' /proc/modules || true
   ls -l /dev/nvidia-caps /dev/nvidia-caps-imex-channels 2>&1 || true
   nvidia-smi -q | grep -A3 -i fabric || true
   rdma_port_bytes > /tmp/rdma_before
