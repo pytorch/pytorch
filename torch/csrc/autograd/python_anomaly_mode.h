@@ -26,6 +26,7 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
 
   void store_stack() override;
   void print_stack(const std::string& current_node_name) override;
+  std::string format_stack(const std::string& current_node_name) override;
   void assign_parent(const c10::intrusive_ptr<Node>& parent_node) override;
 
   PyObject* dict() {
@@ -35,7 +36,7 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
  private:
   c10::SafePyObject dict_;
 };
-void _print_stack(
+std::string _format_stack(
     PyObject* trace_stack,
     const std::string& current_node_name,
     bool is_parent);
