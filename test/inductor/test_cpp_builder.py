@@ -2,6 +2,8 @@
 
 import ntpath
 import os
+import tempfile
+import unittest
 from unittest import mock
 
 import torch
@@ -15,6 +17,7 @@ from torch._inductor.cpp_builder import get_cpp_torch_device_options
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     subtest,
 )
@@ -170,6 +173,74 @@ class TestMsvcLanguageCheck(TestCase):
         version_info.assert_not_called()
 
 
+class TestLinuxAarch64ArchFlag(TestCase):
+    def setUp(self):
+        super().setUp()
+        cpp_builder._get_linux_aarch64_cpu_flags.cache_clear()
+        cpp_builder._get_linux_aarch64_arch_cflags.cache_clear()
+
+    def tearDown(self):
+        cpp_builder._get_linux_aarch64_cpu_flags.cache_clear()
+        cpp_builder._get_linux_aarch64_arch_cflags.cache_clear()
+        super().tearDown()
+
+    def _arch_cflags(self, capabilities, *, is_gcc=True, gcc_major=15):
+        with (
+            mock.patch("sys.platform", "linux"),
+            mock.patch("platform.machine", return_value="aarch64"),
+            mock.patch(
+                "torch.cpu.get_capabilities",
+                return_value=dict.fromkeys(capabilities, True),
+            ),
+            mock.patch.object(cpp_builder, "_is_gcc", return_value=is_gcc),
+            mock.patch.object(
+                cpp_builder,
+                "_is_gcc_version_less_than",
+                side_effect=lambda cpp_compiler, major: is_gcc and gcc_major < major,
+            ),
+        ):
+            return cpp_builder._get_linux_aarch64_arch_cflags("g++")
+
+    def test_gcc15_sme_without_sve2_spells_out_detected_extensions(self):
+        # Apple M4 as seen from a Linux VM: SME and SME2, no SVE.
+        capabilities = ["bf16", "sme", "sme2", "dot", "fp16_arith", "fhm", "i8mm"]
+        self.assertEqual(
+            self._arch_cflags(capabilities),
+            ["march=armv8.2-a+dotprod+fp16+fp16fml+bf16+i8mm", "mtune=native"],
+        )
+
+    def test_gcc15_sme_without_sve2_omits_undetected_extensions(self):
+        self.assertEqual(
+            self._arch_cflags(["sme", "dot"]),
+            ["march=armv8.2-a+dotprod", "mtune=native"],
+        )
+
+    def test_gcc14_and_gcc16_sme_without_sve2_keep_native(self):
+        # GCC 14 does not enable SME under -march=native, and GCC 16 supports
+        # SME without SVE2.
+        capabilities = ["bf16", "sme", "sme2", "dot", "i8mm"]
+        for gcc_major in (14, 16):
+            with self.subTest(gcc_major=gcc_major):
+                cpp_builder._get_linux_aarch64_arch_cflags.cache_clear()
+                self.assertEqual(
+                    self._arch_cflags(capabilities, gcc_major=gcc_major),
+                    ["march=native"],
+                )
+
+    def test_gcc15_sme_with_sve2_keeps_native(self):
+        capabilities = ["bf16", "sve", "sve2", "sme", "dot", "i8mm"]
+        self.assertEqual(self._arch_cflags(capabilities), ["march=native"])
+
+    def test_gcc15_without_sme_keeps_native(self):
+        self.assertEqual(self._arch_cflags(["bf16", "dot", "i8mm"]), ["march=native"])
+
+    def test_clang_sme_without_sve2_keeps_native(self):
+        capabilities = ["bf16", "sme", "dot", "i8mm"]
+        self.assertEqual(
+            self._arch_cflags(capabilities, is_gcc=False), ["march=native"]
+        )
+
+
 class TestCppTorchDeviceOptionsCompiler(TestCase):
     class StopAfterSuperCall(Exception):
         pass
@@ -233,6 +304,7 @@ class TestGetCppTorchDeviceOptionsWindows(TestCase):
             mock.patch.object(cpp_builder, "_IS_WINDOWS", True),
             mock.patch.object(torch.version, "hip", "7.14.0"),
             mock.patch.object(cpp_builder.config.aot_inductor, "link_libtorch", True),
+            mock.patch.dict(cpp_builder.config.__dict__, {"is_fbcode": lambda: False}),
             mock.patch(
                 "torch.utils.cpp_extension.include_paths", return_value=[]
             ) as include_paths,
@@ -304,6 +376,48 @@ class TestCppBuilder(TestCase):
         self.assertEqual(cflags, [])
         self.assertEqual(libraries, [])
         self.assertEqual(passthrough, [])
+
+    @unittest.skipUnless(IS_LINUX, "--as-needed is an ELF linker flag")
+    def test_libtorch_free_aot_link_drops_unused_libraries(self) -> None:
+        # Ubuntu's GCC links as needed by default, so the built library cannot
+        # show a lost flag there. Check the link command and the CMake project.
+        def builder(
+            aot_mode: bool, link_libtorch: bool, device_type: str = "cpu"
+        ) -> cpp_builder.CppBuilder:
+            with mock.patch.object(
+                cpp_builder.config.aot_inductor, "link_libtorch", link_libtorch
+            ):
+                options = cpp_builder.CppTorchDeviceOptions(
+                    device_type=device_type, aot_mode=aot_mode
+                )
+            return cpp_builder.CppBuilder("model", "model.cpp", options)
+
+        libtorch_free = builder(aot_mode=True, link_libtorch=False)
+        args = libtorch_free.get_command_line().split()
+        # The linker applies the flag only to libraries listed after it.
+        first_library = next(
+            (i for i, arg in enumerate(args) if arg.startswith("-l")), len(args)
+        )
+        self.assertLess(args.index("-Wl,--as-needed"), first_library)
+
+        with tempfile.NamedTemporaryFile("r", suffix=".txt") as cmake_file:
+            libtorch_free.save_link_cmd_to_cmake(cmake_file.name)
+            self.assertIn(" -Wl,--as-needed ", cmake_file.read())
+
+        for aot_mode, link_libtorch in ((False, False), (True, True)):
+            command = builder(aot_mode, link_libtorch).get_command_line()
+            self.assertNotIn("--as-needed", command)
+
+        # A device that supplies its own options still gets OpenMP.
+        class MockDeviceInterface(DeviceInterface):
+            @staticmethod
+            def get_cpp_device_options(aot_mode, compile_only):
+                return ([], [], [], [], [], [], [])
+
+        self.addCleanup(device_interfaces.pop, "mock_own_options", None)
+        register_interface_for_device("mock_own_options", MockDeviceInterface)
+        command = builder(True, False, "mock_own_options").get_command_line()
+        self.assertIn("-Wl,--as-needed", command.split())
 
 
 if __name__ == "__main__":

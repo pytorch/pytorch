@@ -5,10 +5,15 @@ description: Set up XPU host for CI
 runs:
   using: composite
   steps:
-    - name: Clean all stopped docker containers
+    - name: Clean up leftover docker containers
       if: always()
       shell: bash
       run: |
+        # Reclaim containers orphaned by a killed runner; they are still
+        # running, so the prune below will not touch them.
+        docker ps -aq --filter "label=pytorch-runner=${RUNNER_NAME}" \
+          | xargs -r docker rm -f
+
         # Prune all stopped containers.
         # If other runner is pruning on this node, will skip.
         nprune=$(ps -ef | grep -c "docker container prune")
@@ -51,7 +56,10 @@ runs:
       if: ${{ failure() }}
       shell: bash
       run: |
-        killall runsvc.sh
+        # killall would also kill every other runner sharing this node.
+        runner_root="$(dirname "$(dirname "${RUNNER_WORKSPACE}")")"
+        echo "Disconnecting runner at ${runner_root}"
+        pkill -f "${runner_root}/runsvc.sh" || killall runsvc.sh
 
     - name: Setup useful environment variables
       shell: bash

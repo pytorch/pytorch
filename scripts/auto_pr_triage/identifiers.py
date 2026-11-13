@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 
 
-TARGET_BASE_REF = "main"
 ACCOUNT_PATTERN = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
 TEAM_SLUG_PATTERN = r"[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?"
 OWNER_HANDLE_PATTERN = rf"(?:@{ACCOUNT_PATTERN}|@{ACCOUNT_PATTERN}/{TEAM_SLUG_PATTERN})"

@@ -431,7 +431,9 @@ class ApplyMainTest(unittest.TestCase):
             workflow,
         )
         self.assertIn("github.event.pull_request.state == 'open'", workflow)
-        self.assertIn("github.event.pull_request.base.ref == 'main'", workflow)
+        # Intake checks the base ref, which also accepts ghstack base branches.
+        self.assertNotIn("github.event.pull_request.base.ref", workflow)
+        self.assertNotIn("expected-base-ref", action)
         self.assertIn("!github.event.pull_request.draft", workflow)
         self.assertIn("github.event.action == 'ready_for_review'", workflow)
         self.assertIn(

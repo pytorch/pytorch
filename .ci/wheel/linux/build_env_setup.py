@@ -153,14 +153,6 @@ def cuda_build_env(cuda_version: str, arch: str) -> dict[str, str]:
     if arch == "aarch64":
         # Pre-built MAGMA tarballs are x86-only.
         env["USE_MAGMA"] = "0"
-    # Bundle the CUDA 13.4 ptxas binary into nightly wheels so that users on
-    # Rubin (sm_107) hardware can use torch.compile without needing to
-    # install the CUDA 13.4 toolkit separately. Triton's default ptxas only
-    # goes up to CUDA 13.3 and will fail with "Value 'sm_107a' is not defined".
-    # torch/_inductor/runtime/compile_tasks.py picks up torch/bin/ptxas via
-    # _set_triton_ptxas_path() automatically.
-    if cuda_version == "13.4":
-        env.setdefault("BUILD_BUNDLE_PTXAS", "1")
     return env
 
 
@@ -509,6 +501,8 @@ def main() -> None:
         # the wheel layout), so no MAGMA_HOME/USE_MAGMA handling is needed here.
         rocm_home = discover_rocm_home()
         env_out["ROCM_HOME"] = rocm_home
+        # Keep ROCM_PATH consistent with ROCM_HOME for tools that read only it.
+        env_out["ROCM_PATH"] = rocm_home
         # DESIRED_CUDA is "rocmX.Y.Z" -- normalize so build_amd.py and
         # downstream tools see the rocm-prefixed form (matches build_rocm.sh).
         desired = os.environ.get("DESIRED_CUDA", "")
