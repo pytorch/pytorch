@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
-from torch.testing._internal.common_utils import HardwareClassification, skipIfRocm
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils.hooks import RemovableHandle
 
 
@@ -325,6 +325,86 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         result_eager.backward()
 
         self.assertEqual(x_compiled.grad, x_eager.grad)
+
+    def test_register_hook_identity_alias_fullgraph(self):
+        def fn(x):
+            y = x * x
+            y.register_hook(lambda grad: grad)
+            return y.sum()
+
+        x = torch.randn([2, 2], requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+
+        expected = fn(x_ref)
+        expected.backward()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        actual = opt_fn(x)
+        actual.backward()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    def test_register_hook_input_mutation_rejected(self):
+        def fn(x):
+            y = x * x
+            y.register_hook(lambda grad: grad.mul_(2))
+            return y
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "(?s)Encountered input mutation during higher order op tracing.*"
+            "Found in register_hook",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(3, requires_grad=True)
+            )
+
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+
+        x = torch.randn(3, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        grad = torch.randn_like(x)
+
+        expected = fn(x_ref)
+        expected.backward(grad.clone())
+
+        actual = torch.compile(fn, backend="eager")(x)
+        actual.backward(grad.clone())
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(x.grad, x_ref.grad)
+        graph_breaks = torch._dynamo.utils.counters["graph_break"]
+        self.assertEqual(sum(graph_breaks.values()), 1)
+        self.assertTrue(
+            any(
+                "Encountered input mutation during higher order op tracing" in reason
+                for reason in graph_breaks
+            )
+        )
+
+    def test_register_post_accumulate_grad_hook_intermediate_unsupported(self):
+        def fn(x):
+            y = x.detach().requires_grad_()
+            y.register_post_accumulate_grad_hook(lambda tensor: None)
+            return (y * 2).sum()
+
+        error = "register_post_accumulate_grad_hook on an intermediate tensor"
+        with (
+            torch._dynamo.compiled_autograd._disable(),
+            self.assertRaisesRegex(RuntimeError, error),
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        with torch._dynamo.compiled_autograd._disable():
+            out = torch.compile(fn, backend="eager")(torch.randn(3))
+            out.backward()
+
+        graph_breaks = torch._dynamo.utils.counters["graph_break"]
+        self.assertTrue(any(error in reason for reason in graph_breaks))
 
     def test_hook_on_intermediate_with_container(self):
         glb_list = []
@@ -1164,7 +1244,6 @@ def forward(self, L_x_ : torch.Tensor):
 class HooksTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipIfRocm(msg="pytorch/pytorch/issues/190414")
     @onlyAccelerator
     def test_register_hook_on_intermediate_autograd_cache(self, device):
         from torch._dynamo.utils import counters

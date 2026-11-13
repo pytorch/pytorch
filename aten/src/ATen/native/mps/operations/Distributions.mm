@@ -226,14 +226,7 @@ REGISTER_MPS_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel_mps)
 REGISTER_MPS_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel_mps)
 
 static void uniform_kernel_mps(TensorIteratorBase& iter, double from, double to, std::optional<Generator> gen) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "uniform_kernel_mps", [&] {
-    // Narrow bounds on the host to avoid Metal miscompiling constant float-to-bfloat casts.
-    std::array<float, 4> params{static_cast<float>(from),
-                                static_cast<float>(to),
-                                static_cast<float>(static_cast<scalar_t>(from)),
-                                static_cast<float>(static_cast<scalar_t>(to))};
-    distribution_kernel_mps_impl(iter, params, "uniform_dist", 1, gen);
-  });
+  distribution_kernel_mps_impl(iter, from, to, "uniform_dist", 1, gen);
 }
 
 static void normal_kernel_mps(const TensorBase& self, double mean, double std, std::optional<Generator> gen) {
@@ -681,7 +674,7 @@ Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& 
   // to avoid an extra cast / copy.
   Tensor keys = at::empty({n}, result.options().dtype(kFloat));
   auto keys_iter = at::TensorIterator::borrowing_nullary_op(keys);
-  uniform_kernel_mps(keys_iter, 0.0, 1.0, generator);
+  distribution_kernel_mps_impl(keys_iter, 0.0, 1.0, "uniform_dist", 1, generator);
   if (stype == kLong && result.is_contiguous()) {
     Tensor values = at::empty_like(keys);
     at::sort_out(values, result, keys);

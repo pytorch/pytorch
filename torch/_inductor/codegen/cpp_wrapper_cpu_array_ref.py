@@ -16,7 +16,9 @@ from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
     BufferLike,
+    EnterKernelProfileScopeLine,
     EnterSubgraphLine,
+    ExitKernelProfileScopeLine,
     ExitSubgraphLine,
     MemoryPlanningLine,
     MemoryPlanningState,
@@ -807,6 +809,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 planning_states.append(MemoryPlanningState())
             elif isinstance(line, ExitSubgraphLine):
                 past_planning_states.append(planning_states.pop())
+            elif isinstance(line, EnterKernelProfileScopeLine):
+                # A profiling block is a C++ scope, so a buffer reused across
+                # one of its braces would be declared on the wrong side of it.
+                # This mirrors the base wrapper; the two loops differ only in
+                # what they do with the resulting states.
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitKernelProfileScopeLine):
+                past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         if len(planning_states) != 0:
             raise AssertionError(
@@ -1127,6 +1137,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x)
             for x in inputs
         ]
+
+    def records_profiling_args(self) -> bool:
+        # An ArrayRefTensor is not an AtenTensorHandle, so the ivalue
+        # conversion the metadata is built from cannot be called on one. The
+        # record is emitted without it, and nothing is built here -- deriving
+        # it would make a reinterpret view mint a handle with no owner.
+        return False
 
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op

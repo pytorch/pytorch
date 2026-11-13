@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import logging
 import os
 from typing import Any, TYPE_CHECKING
@@ -32,7 +33,21 @@ log = logging.getLogger(__name__)
 
 def inductor_quack_cache_dir() -> str:
     """Return the Inductor-owned QuACK cache root for generated FlexGEMM."""
+    # Avoid per-launch cache_dir()/os.makedirs; QuACK creates dirs before writes.
+    # Key memoization on TORCHINDUCTOR_CACHE_DIR so fresh_cache() still works.
+    return _quack_cache_dir(os.environ.get("TORCHINDUCTOR_CACHE_DIR"))
+
+
+@functools.cache
+def _quack_cache_dir(_inductor_cache_dir_env: str | None) -> str:
     return os.path.join(cache_dir(), "quack")
+
+
+@functools.cache
+def _quack_gemm_config(config: QuackConfigKey) -> Any:
+    from torch._vendor.quack.gemm_config import GemmConfig
+
+    return GemmConfig(**dict(config))
 
 
 def flex_gemm_problem(
@@ -42,6 +57,8 @@ def flex_gemm_problem(
     concat_layout: Any,
     *,
     blockscaled: bool = False,
+    varlen_m: bool = False,
+    varlen_k: bool = False,
 ) -> Any:
     """Describe a FlexGEMM call (physical GEMM M and N) for QuACK config pruning."""
     from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn, ModProblem
@@ -50,7 +67,8 @@ def flex_gemm_problem(
         device=device,
         m=m,
         n=n,
-        b_kn=mod_b_kn(device, concat_layout),
+        b_kn=not varlen_k and mod_b_kn(device, concat_layout),
+        varlen_m=varlen_m,
         blockscaled=blockscaled,
         concat=bool(concat_layout),
     )
@@ -127,7 +145,7 @@ def normalize_c(
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmRuntimeLocalReducePlan:
-    """QuACK EpiOp configuration for one analyzed grouped local reduction."""
+    """QuACK EpiOp configuration for one grouped local reduction (physical geometry)."""
 
     geometry: FlexGemmLocalReduceGeometry
     stores: bool = False
@@ -136,6 +154,7 @@ class FlexGemmRuntimeLocalReducePlan:
     combine: str | None = None
     finalize: Callable[..., Any] | str | None = None
     finalize_operands: tuple[str, ...] = ()
+    fragment_reduced: bool = False
     store_finalize: Callable[..., Any] | str | None = None
     binary_store_finalize: bool = False
     prepass: Callable[..., Any] | None = None
@@ -185,6 +204,7 @@ class FlexGemmRuntimeLocalReducePlan:
             self.combine,
             self.finalize,
             self.finalize_operands,
+            self.fragment_reduced,
             self.store_finalize,
             self.prepass,
             self.prepass_combine,
@@ -205,6 +225,8 @@ def flex_gemm_epimod(
     aux_output_count: int,
     local_reduce: FlexGemmRuntimeLocalReducePlan | None,
     output_contraction: FlexGemmOutputContraction | None,
+    *,
+    varlen_m: bool,
 ):
     """Build and cache a QuACK TensorSSA EpiMod from FlexGEMM metadata.
 
@@ -218,15 +240,18 @@ def flex_gemm_epimod(
         aux_output_count,
         None if local_reduce is None else local_reduce.cache_key,
         output_contraction,
+        varlen_m,
     )
     epimod = _EPIMOD_CACHE.get(key)
     if epimod is not None:
         return epimod
 
+    from torch._inductor.kernel.flex_gemm.quack_ops.col_load import ScalarColVecLoad
     from torch._vendor.quack import cute_dsl_utils
     from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
 
     op_types = {
+        "scalar": epi_ops.Scalar,
         "row": epi_ops.RowVecLoad,
         "col": epi_ops.ColVecLoad,
         "tile": epi_ops.TileLoad,
@@ -237,19 +262,33 @@ def flex_gemm_epimod(
     ):
         name = f"operand{index}"
         dtype = cute_dsl_utils.torch2cute_dtype_map[arg_dtype]
-        ops[name] = (
-            epi_ops.Scalar(name, dtype=dtype)
-            if kind == "scalar"
-            else op_types[kind](name, dtype=dtype)
-        )
+        op_type = op_types[kind]
+        if varlen_m and kind == "col" and dtype.width < 32:
+            op_type = ScalarColVecLoad
+        ops[name] = op_type(name, dtype=dtype)
+    aux_output_names = tuple(f"output{index}" for index in range(aux_output_count))
     if output_contraction is not None:
         from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
             GroupedMainStore,
         )
 
-        outputs: tuple[Any, ...] = (GroupedMainStore("main", output_contraction.group),)
+        min_fragment_n = (
+            local_reduce.group
+            if local_reduce is not None
+            and local_reduce.feeds_main
+            and local_reduce.fragment_reduced
+            else None
+        )
+        outputs: tuple[Any, ...] = (
+            GroupedMainStore(
+                "main",
+                output_contraction.group,
+                min_fragment_n=min_fragment_n,
+            ),
+            *aux_output_names,
+        )
     else:
-        outputs = tuple(f"output{index}" for index in range(aux_output_count))
+        outputs = aux_output_names
     sinks: dict[str, Any] = {}
     prepass = None
     prepass_outs: tuple[str, ...] = ()
@@ -301,7 +340,7 @@ def flex_gemm_epimod(
                     )
                 sinks[LOCAL_REDUCE_STORE_ARG_NAME] = sink
         else:
-            if local_reduce.feeds_main:
+            if local_reduce.feeds_main and not local_reduce.fragment_reduced:
                 if output_layout is not None:
                     raise RuntimeError(
                         "feed-main local reductions do not support output layouts"
@@ -313,7 +352,8 @@ def flex_gemm_epimod(
                     combine=local_reduce.combine,
                     finalize=finalize,
                 )
-            else:
+                ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
+            elif local_reduce.stores:
                 reduce_op = grouped_reduce.GroupedLocalReduce(
                     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
                     axis=local_reduce.axis,
@@ -321,11 +361,9 @@ def flex_gemm_epimod(
                     combine=local_reduce.combine,
                     finalize=finalize,
                     finalize_operands=local_reduce.finalize_operands,
+                    fragment_reduced=local_reduce.fragment_reduced,
                     output_layout=output_layout,
                 )
-            if local_reduce.feeds_main:
-                ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
-            else:
                 sinks[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
     epimod = epilogue_module.fragment_epilogue(
         outputs=outputs,
@@ -355,15 +393,22 @@ def gemm_epilogue(
     epilogue_arg_kinds: tuple[str, ...] = (),
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
     output_contraction: FlexGemmOutputContraction | None = None,
+    cu_seqlens_m: torch.Tensor | None = None,
+    cu_seqlens_k: torch.Tensor | None = None,
     config: QuackConfigKey,
     stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense or block-scaled FlexGEMM call through the vendored QuACK EpiMod.
+    """Run a dense, block-scaled or varlen-M/K call through the vendored QuACK EpiMod.
 
     ``config`` pins the exact GemmConfig Inductor selected at lowering time.
+    ``cu_seqlens_m`` (``[0, *offs]``, int32) selects grouped_mm's varlen-M path:
+    ``a`` is ``[total_m, K]`` and ``b`` is per-group ``[E, K, N]``. Captured
+    row/col vectors are always passed rank-1; QuACK shares a row across groups
+    and offsets a ``[total_m]`` column per group. ``cu_seqlens_k`` instead segments
+    the reduction of ``a[M, total_k] @ b[total_k, N]`` into ``out[E, M, N]``.
     """
-    from torch._vendor.quack.gemm_config import GemmConfig
-
+    if cu_seqlens_k is not None and out.numel() == 0:
+        return out
     if blockscaled_format is not None:
         if SFA is None or SFB is None:
             raise RuntimeError("FlexGEMM block-scaled GEMMs require SFA and SFB")
@@ -389,6 +434,7 @@ def gemm_epilogue(
         len(aux_outs),
         local_reduce,
         output_contraction,
+        varlen_m=cu_seqlens_m is not None,
     )
     effective_C = normalize_c(C, tuple(out.shape), beta)
     operands: dict[str, Any] = {}
@@ -399,9 +445,9 @@ def gemm_epilogue(
     for index, (arg, kind) in enumerate(
         zip(quack_epilogue_args, epilogue_arg_kinds, strict=True)
     ):
-        operands[f"operand{index}"] = (
-            arg.squeeze(-1).unsqueeze(0) if kind == "col" else arg
-        )
+        if kind in ("row", "col"):
+            arg = arg.squeeze(0 if kind == "row" else -1)
+        operands[f"operand{index}"] = arg
     initialize_local_reduce_out = None
     if local_reduce is not None:
         # QuACK's host_validate checks the compressed buffer against the GEMM
@@ -435,28 +481,23 @@ def gemm_epilogue(
 
     from torch._vendor.quack.cache import cache_dir_override
 
-    output_buffers = (
-        {"main": quack_epilogue_arg(out)}
-        if output_contraction is not None
-        else {
-            "D": quack_epilogue_arg(out),
-            **dict(
-                zip(
-                    epimod.outputs,
-                    (quack_epilogue_arg(aux_out) for aux_out in aux_outs),
-                    strict=True,
-                )
-            ),
-        }
-    )
     main_name = "main" if output_contraction is not None else "D"
+    output_names = (main_name, *(f"output{index}" for index in range(len(aux_outs))))
+    output_buffers = dict(
+        zip(
+            output_names,
+            (quack_epilogue_arg(out), *map(quack_epilogue_arg, aux_outs)),
+            strict=True,
+        )
+    )
     concat_layout = (
         None if output_contraction is None else output_contraction.concat_layout
     )
-    quack_config = GemmConfig(**dict(config))
+    # Generated wrappers pass the current stream; switching streams costs ~20us.
     stream_context = (
         torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
         if stream is not None
+        and stream != torch._C._cuda_getCurrentRawStream(a.device.index)
         else contextlib.nullcontext()
     )
     with cache_dir_override(inductor_quack_cache_dir()), stream_context:
@@ -474,9 +515,11 @@ def gemm_epilogue(
             out=output_buffers,
             out_dtype=out.dtype,
             store_d=output_contraction is None,
-            config=quack_config,
+            config=_quack_gemm_config(config),
             tuned=False,
             concat_layout=concat_layout,
+            cu_seqlens_m=cu_seqlens_m,
+            cu_seqlens_k=cu_seqlens_k,
             compile_dispatch=False,
             **operands,
         )

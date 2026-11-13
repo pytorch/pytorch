@@ -557,7 +557,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   }
 
   virtual std::vector<AnyValue> _forward_populate_default_args(
-      std::vector<AnyValue>&& arguments) {
+      std::vector<AnyValue>&& /*arguments*/) {
     TORCH_CHECK(
         false,
         "torch::nn::Module subclass that has default arguments in `forward` method ",

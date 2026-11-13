@@ -9,21 +9,6 @@ _IS_FBCODE = os.environ.get("IS_FBCODE", "0") == "1"
 # The header location is src/rccl.h versus rccl/rccl.h, respectively.
 _RCCL_HEADER = "<rccl.h>" if _IS_FBCODE else "<rccl/rccl.h>"
 
-# List of math functions that should be replaced inside device code only.
-MATH_TRANSPILATIONS = collections.OrderedDict([
-    ("std::max", ("::max")),
-    ("std::min", ("::min")),
-    ("std::ceil", ("::ceil")),
-    ("std::floor", ("::floor")),
-    ("std::exp", ("::exp")),
-    ("std::log", ("::log")),
-    ("std::pow", ("::pow")),
-    ("std::fabs", ("::fabs")),
-    ("std::fmod", ("::fmod")),
-    ("std::remainder", ("::remainder")),
-    ("std::frexp", ("::frexp")),
-])
-
 CUDA_TYPE_NAME_MAP = collections.OrderedDict([
     ("CUresult", "hipError_t"),
     ("cudaError_t", "hipError_t"),
@@ -324,6 +309,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("curand_poisson.h", "hiprand/hiprand_kernel.h"),
     ("curand_precalc.h", "hiprand/hiprand_kernel.h"),
     ("curand_uniform.h", "hiprand/hiprand_kernel.h"),
+    ("cusolverDn.h", "hipsolver/hipsolver.h"),
     ("cusparse.h", "hipsparse/hipsparse.h"),
     ("cusparseLt.h", "hipsparselt/hipsparselt.h"),
     ("cufft.h", "hipfft/hipfft.h"),

@@ -340,8 +340,12 @@ Tensor& add_out_sparse_compressed_cuda(
       return out;
     }
 
-    at::native::resize_as_sparse_compressed_(out, self);
-    sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
+    // csrgeam2 must not read from storage that out is written to and
+    // resized into, so operate on clones of any input aliasing out.
+    const Tensor self_ = sparse_compressed_members_alias(self, out) ? self.clone() : self;
+    const Tensor other_ = sparse_compressed_members_alias(other, out) ? other.clone() : other;
+    at::native::resize_as_sparse_compressed_(out, self_);
+    sparse::impl::cuda::add_out_sparse_csr(self_, other_, Scalar(1), alpha, out);
   }
   return out;
 }

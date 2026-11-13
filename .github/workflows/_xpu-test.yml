@@ -85,6 +85,23 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     runs-on: ${{ matrix.runner }}
     steps:
+      # The test container bind-mounts this runner's persistent workspace, so a
+      # container-owned file it leaves behind breaks checkout on this runner's
+      # next job. Each runner has its own workspace; this is not cross-runner.
+      - name: Reclaim workspace ownership
+        shell: bash
+        run: |
+          if sudo -n true 2>/dev/null; then
+            # Only rewrite what is wrong; chown -R touches every inode.
+            sudo find "${GITHUB_WORKSPACE}" \
+              \( -not -user "$(id -u)" -o -not -group "$(id -g)" \) -print0 2>/dev/null \
+              | sudo xargs -0 --no-run-if-empty chown -h "$(id -u):$(id -g)" || true
+          fi
+          # --add would append a duplicate on every job into a shared gitconfig.
+          git config --global --get-all safe.directory \
+            | grep -qxF "${GITHUB_WORKSPACE}" \
+            || git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -255,6 +272,7 @@ jobs:
             --tty \
             --detach \
             --name="${container_name}" \
+            --label "pytorch-runner=${RUNNER_NAME}" \
             --user jenkins \
             --privileged \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
@@ -263,19 +281,22 @@ jobs:
           )
           # save container name for later step
           echo "CONTAINER_NAME=${container_name}" >> "$GITHUB_ENV"
-          # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
-          docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
+          # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home.
+          # The IDC hosts own the workspace as uid 1000, which jenkins (1001) cannot read, so copy as root.
+          docker exec -t "${container_name}" sh -c "cd .. && sudo cp -R workspace pytorch && sudo chown -R jenkins:jenkins pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
 
       - name: Save test results
-        if: always()
+        if: ${{ always() && env.CONTAINER_NAME }}
         run: |
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
-          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test && { test ! -d test/torchci-reports || sudo cp -R test/torchci-reports ../workspace/test; }"
 
       - name: Change permissions
-        if: ${{ always() && steps.test.conclusion }}
+        if: ${{ always() && env.CONTAINER_NAME }}
         run: |
-          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1000:1000 test"
+          # The container's jenkins user is uid 1001, which does not necessarily
+          # match the uid owning the workspace on these hosts.
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R $(id -u):$(id -g) test" || true
 
       - name: Print remaining test logs
         shell: bash
@@ -317,7 +338,7 @@ jobs:
           find . -iname "core.[1-9]*" -exec docker exec "${CONTAINER_NAME}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
 
       - name: Stop container before exit
-        if: always()
+        if: ${{ always() && env.CONTAINER_NAME }}
         run: |
           # Workaround for multiple runners on same IDC node
           docker stop "${{ env.CONTAINER_NAME }}"
@@ -348,4 +369,5 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Teardown XPU
+        if: always()
         uses: ./.github/actions/teardown-xpu

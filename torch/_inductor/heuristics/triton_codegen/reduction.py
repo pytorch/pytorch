@@ -14,8 +14,14 @@ from torch._inductor.heuristics.registry import (
     CodegenConfigHeuristics,
     register_codegen_heuristic,
 )
-from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TRITON_MAX_BLOCK
-from torch._inductor.runtime.runtime_utils import next_power_of_2
+from torch._inductor.runtime.hints import (
+    AutotuneHint,
+    mix_order_reduction_max_num_stages,
+    ReductionHint,
+    TRITON_MAX_BLOCK,
+    TRITON_MAX_MIX_ORDER_XBLOCK,
+)
+from torch._inductor.runtime.runtime_utils import last_power_of_2, next_power_of_2
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
 
@@ -347,6 +353,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         elif max_autotune_enabled:
             pass
         elif reduction_hint == ReductionHint.INNER:
+            configs.extend(
+                self._get_inner_extra_configs(make_config, register_intensive)
+            )
             inner_configs = scalar_acc_configs or [contiguous_config]
             if sm103_config is not None:
                 # Adding B300/GB300 config as autotuning option
@@ -545,6 +554,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         """Post-process non-persistent configs."""
         return configs
 
+    def _get_inner_extra_configs(self, make_config, register_intensive):
+        """Extra candidate configs to try for the INNER reduction hint."""
+        return []
+
     def _persistent_xblock_vals(self) -> list[int]:
         """XBLOCK values for persistent reduction."""
         return [1, 8, 32, 128]
@@ -589,7 +602,6 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     ) -> list[Config]:
         """Generate configs for cooperative reduction (RSPLIT)."""
         from torch._inductor.runtime.hints import TRITON_MAX_RSPLIT
-        from torch._inductor.runtime.runtime_utils import last_power_of_2
 
         # Cooperative reductions currently only support a single reduction dimension.
         if len(size_hints) != 2:
@@ -648,7 +660,19 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             required_x_block = max(
                 required_x_block, tma_min_block_sizes.get("XBLOCK", 1)
             )
-        x_block = min(max(rsplit_size // 32, min_x_block, required_x_block), 16)
+        x_block = last_power_of_2(
+            min(
+                max(rsplit_size // 32, min_x_block, required_x_block),
+                TRITON_MAX_MIX_ORDER_XBLOCK,
+            )
+        )
+        while rsplit_size % x_block != 0:
+            x_block //= 2
+        if x_block < required_x_block:
+            raise ValueError(
+                f"RSPLIT_SIZE={rsplit_size} is incompatible with the required "
+                f"XBLOCK={required_x_block}"
+            )
 
         new_configs: list[Config] = []
         for c in configs:
@@ -657,16 +681,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
             num_iters = rsplit_size // x_block
 
-            if inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
-                MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
-            else:
-                MAX_NUM_STAGES = 1
-            # Triton's tl.range pipeliner cannot predicate the ttng.tensormap_create
-            # emitted by device-side descriptors.
-            if inductor_meta.get("uses_device_tma"):
-                MAX_NUM_STAGES = 1
+            max_num_stages = mix_order_reduction_max_num_stages(
+                rnumel_hint, inductor_meta
+            )
             c.kwargs["NUM_STAGES"] = min(  # type: ignore[union-attr]
-                max(num_iters // 4, 1), MAX_NUM_STAGES
+                max(num_iters // 4, 1), max_num_stages
             )
 
             if rnumel_hint <= 1024:
@@ -771,6 +790,12 @@ class ROCmReductionHeuristic(ReductionHeuristic):
 @register_codegen_heuristic("reduction", "xpu", register=torch.xpu._is_compiled())
 class XPUReductionHeuristic(ReductionHeuristic):
     """Reduction configs for XPU devices."""
+
+    def _get_inner_extra_configs(self, make_config, register_intensive):
+        # We see performance regression on xpu in some models because the
+        # default INNER config lacks a high-num_warps candidate. Add one back
+        # for XPU to recover the regressed performance.
+        return [make_config(64, 64, num_warps=16)]
 
     def _persistent_inner_config(
         self,

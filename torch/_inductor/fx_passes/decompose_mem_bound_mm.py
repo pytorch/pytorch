@@ -87,6 +87,20 @@ def should_decompose_bmm(mat1, mat2) -> bool:
             return False
         return True
     elif check_device(mat1, mat2, device="cpu"):
+        if config.post_grad_fusion_options["decompose_mm_pass"].get(
+            "bmm_skip_dynamic_shape_dim_check", False
+        ):
+            return (
+                statically_known_true(
+                    mat1.shape[1] <= cpu_max_other_dimension_decomposition
+                )
+                and statically_known_true(
+                    mat1.shape[2] <= cpu_max_other_dimension_decomposition
+                )
+                and statically_known_true(
+                    mat2.shape[2] <= cpu_max_other_dimension_decomposition
+                )
+            )
         if (
             mat1.shape[0] <= cpu_max_first_dimension_decomposition
             and mat2.shape[0] <= cpu_max_first_dimension_decomposition
@@ -250,7 +264,8 @@ def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
 
 
 @register_graph_pattern(
-    CallFunction(aten.addmm, Arg(), Arg(), Arg()),
+    # The matcher drops kwargs a pattern doesn't declare; pin beta/alpha to what repl computes
+    CallFunction(aten.addmm, Arg(), Arg(), Arg(), beta=1, alpha=1),
     pass_dict=construct_pattern_matcher_pass("decompose_mm_pass"),
 )
 def decompose_addmm(

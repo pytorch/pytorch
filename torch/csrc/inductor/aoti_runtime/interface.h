@@ -429,7 +429,10 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
     const char** out_spec);
 
 // Enables or disables pinned async H2D copies for constant loading and updates.
-// Call before creating a model/container to affect embedded constant loading.
+// Eligible initial loads are coalesced into staging windows even when the CPU
+// copy thread count is one. Coalescing zero-fills the inter-constant alignment
+// padding in the device blob, which the per-range path left uninitialized. Call
+// before creating a model/container to affect embedded constant loading.
 AOTI_API AOTIRuntimeError
 AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled);
 
@@ -437,6 +440,13 @@ AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled);
 // AOTI_COPY_STAGE_BUFFER_BYTES or the runtime default.
 AOTI_API AOTIRuntimeError
 AOTInductorSetPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes);
+
+// Sets the total number of CPU threads used to fill pinned staging buffers,
+// including the caller. Pass 0 to use AOTI_COPY_STAGE_CPU_THREADS or the
+// runtime default. Clamped to 16 and to the machine's core count. Setting this
+// to 1 disables worker threads but eligible initial loads remain coalesced.
+AOTI_API AOTIRuntimeError
+AOTInductorSetPinnedAsyncConstantsCopyCpuThreads(size_t threads);
 
 // Retrieves the error message from the last failed AOTI runtime call on the
 // current thread. The returned pointer is valid until the next AOTI runtime

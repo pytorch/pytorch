@@ -6,7 +6,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.utils import is_symbolic
 from torch.utils._ordered_set import OrderedSet
 
-from . import config, ir
+from . import config as inductor_config, ir
 from .virtualized import V
 
 
@@ -166,11 +166,11 @@ def _should_lower_as_one_shot_all_reduce(
 
     inp_size = inp.get_numel() * inp.get_dtype().itemsize
     return (
-        config._collective.auto_select
+        inductor_config._collective.auto_select
         and is_symm_mem_enabled_for_group(group_name)
         and can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM)
         and reduce_op == "sum"
-        and inp_size <= config._collective.one_shot_all_reduce_threshold_bytes
+        and inp_size <= inductor_config._collective.one_shot_all_reduce_threshold_bytes
     )
 
 
@@ -185,6 +185,11 @@ def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
             group_name,
         ),
     )
+
+
+def _config_args(config) -> tuple:
+    # Omit config when unset so ordinary collective codegen is unchanged.
+    return () if config is None else (config,)
 
 
 def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
@@ -226,13 +231,16 @@ def register_comm_lowerings():
         inp: ir.TensorBox,
         reduce_op: str,
         group_name: "torch.distributed.distributed_c10d.GroupName",
+        config=None,
     ) -> ir.TensorBox:
-        if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
+        if config is None and _should_lower_as_one_shot_all_reduce(
+            inp, reduce_op, group_name
+        ):
             return _one_shot_all_reduce(inp, reduce_op, group_name)
 
         # Lower as c10d.all_reduce_
         inp = clone(inp)
-        if config.reorder_for_compute_comm_overlap:
+        if inductor_config.reorder_for_compute_comm_overlap:
             # The horizontal fusion of this clone often severely delays the
             # scheduling of the all_reduce_ node. Horizontally fusing this
             # clone can almost never out-perform scheduling the all_reduce_
@@ -249,6 +257,7 @@ def register_comm_lowerings():
             inp,  # type: ignore[arg-type]
             reduce_op,
             group_name,  # type: ignore[arg-type]
+            *_config_args(config),
         )
         return inp  # type: ignore[return-value]
 
@@ -257,8 +266,11 @@ def register_comm_lowerings():
         inp: ir.TensorBox,
         reduce_op: str,
         group_name: "torch.distributed.distributed_c10d.GroupName",
+        config=None,
     ) -> ir.TensorBox:
-        if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
+        if config is None and _should_lower_as_one_shot_all_reduce(
+            inp, reduce_op, group_name
+        ):
             ret = copy_(
                 inp,
                 _one_shot_all_reduce(inp, reduce_op, group_name),
@@ -274,41 +286,45 @@ def register_comm_lowerings():
             inp,  # type: ignore[arg-type]
             reduce_op,
             group_name,  # type: ignore[arg-type]
+            *_config_args(config),
         )
         return inp  # type: ignore[return-value]
 
     @register_comm_lowering(c10d.all_reduce_coalesced)
-    def _all_reduce_coalesced(inputs, reduce_op, group_name):
+    def _all_reduce_coalesced(inputs, reduce_op, group_name, config=None):
         inputs = [clone(inp) for inp in inputs]
         ir._CollectiveKernel.create_inplace(
             c10d.all_reduce_coalesced_.default,
             inputs,
             reduce_op,
             group_name,
+            *_config_args(config),
         )
         return inputs
 
     @register_comm_lowering(c10d.all_reduce_coalesced_)
-    def _all_reduce_coalesced_(inputs, reduce_op, group_name):
+    def _all_reduce_coalesced_(inputs, reduce_op, group_name, config=None):
         ir._CollectiveKernel.create_inplace(
             c10d.all_reduce_coalesced_.default,
             inputs,
             reduce_op,
             group_name,
+            *_config_args(config),
         )
         return inputs
 
     @register_comm_lowering(c10d.all_gather_into_tensor)
-    def _all_gather_into_tensor(inp, group_size, group_name):
+    def _all_gather_into_tensor(inp, group_size, group_name, config=None):
         return _create_out_of_place(
             c10d.all_gather_into_tensor.default,
             inp,
             group_size,
             group_name,
+            *_config_args(config),
         )
 
     @register_comm_lowering(c10d.all_gather_into_tensor_coalesced)
-    def _all_gather_into_tensor_coalesced(inputs, group_size, group_name):
+    def _all_gather_into_tensor_coalesced(inputs, group_size, group_name, config=None):
         return pytree.tree_map(
             ir.TensorBox.create,
             ir._CollectiveKernel.create_out_of_place(
@@ -316,28 +332,31 @@ def register_comm_lowerings():
                 inputs,
                 group_size,
                 group_name,
+                *_config_args(config),
             ),
         )
 
     @register_comm_lowering(c10d.all_gather_into_tensor_out)
-    def _all_gather_into_tensor_out(inp, group_size, group_name, *, out):
+    def _all_gather_into_tensor_out(inp, group_size, group_name, config=None, *, out):
         ir._CollectiveKernel.create_inplace(
             c10d.all_gather_into_tensor_out.default,
             inp,
             group_size,
             group_name,
+            *_config_args(config),
             out=out,
         )
         return out
 
     @register_comm_lowering(c10d.reduce_scatter_tensor)
-    def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
+    def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name, config=None):
         return _create_out_of_place(
             c10d.reduce_scatter_tensor.default,
             inp,
             reduce_op,
             group_size,
             group_name,
+            *_config_args(config),
         )
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_out)
@@ -353,7 +372,9 @@ def register_comm_lowerings():
         return out
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_coalesced)
-    def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):
+    def _reduce_scatter_tensor_coalesced(
+        inputs, reduce_op, group_size, group_name, config=None
+    ):
         return pytree.tree_map(
             ir.TensorBox.create,
             ir._CollectiveKernel.create_out_of_place(
@@ -362,17 +383,21 @@ def register_comm_lowerings():
                 reduce_op,
                 group_size,
                 group_name,
+                *_config_args(config),
             ),
         )
 
     @register_comm_lowering(c10d.all_to_all_single)
-    def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
+    def _all_to_all_single(
+        inp, output_split_sizes, input_split_sizes, group_name, config=None
+    ):
         return _create_out_of_place(
             c10d.all_to_all_single.default,
             inp,
             output_split_sizes,
             input_split_sizes,
             group_name,
+            *_config_args(config),
         )
 
     @register_comm_lowering(c10d.broadcast)

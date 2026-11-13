@@ -508,6 +508,7 @@ user_stack=None)
             None,
             type(x),
             torch._C._dispatch_keys(x),
+            False,
         )
         self.assertTrue(guard_manager.check(x))
         self.assertTrue(guard_manager.check_verbose(x).result)
@@ -522,6 +523,43 @@ user_stack=None)
         self.assertTrue(
             "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
         )
+
+    def test_tensor_match_guard_throw_restores_torch_function(self):
+        # The root disables the TorchFunction TLS while its accessors run and
+        # restores it on scope exit, so a C++ throw out of an accessor leaves
+        # the state as it found it. TENSOR_MATCH on a strided nested tensor is
+        # such a throw: it fires a TORCH_CHECK reading the strides (check) or
+        # sizes (check_verbose). The guard is built from explicit size and
+        # stride lists because building it from the tensor reads the same
+        # strides, and the accessor is the root's own so nothing else can
+        # reject the input first.
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        root = RootGuardManager()
+        manager = root.dict_getitem_manager("x", "L['x']", nested, default_mgr_enum)
+        manager.add_tensor_match_guard(
+            nested,
+            [None] * 3,
+            [None] * 3,
+            "x",
+            ["check_tensor(x)"],
+            None,
+            type(nested),
+            torch._C._dispatch_keys(nested),
+        )
+        # Under a non-default state, so restoring the captured old state is
+        # told apart from resetting to ENABLED.
+        err = "NestedTensorImpl doesn't support"
+        with torch._C.DisableTorchFunctionSubclass():
+            state = torch._C._get_torch_function_state()
+            self.assertEqual(state, torch._C._TorchFunctionState.SUBCLASSES_DISABLED)
+            with self.assertRaisesRegex(RuntimeError, err):
+                root.check({"x": nested})
+            self.assertEqual(torch._C._get_torch_function_state(), state)
+            with self.assertRaisesRegex(RuntimeError, err):
+                root.check_verbose({"x": nested})
+            self.assertEqual(torch._C._get_torch_function_state(), state)
 
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
@@ -765,6 +803,26 @@ user_stack=None)
         self.assertIn(
             "source=L['z'], accessed_by=FrameLocalsGuardAccessor(key='z', framelocals_idx=2)",
             guard_str,
+        )
+
+    def test_code_parts_include_epilogue_lambda_guards(self):
+        def fn(x):
+            if x.numel() >= 1024:
+                return x + 5
+            return x * 2
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(2)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_fn(x)
+
+        cache_entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(cache_entries), 1)
+        guard_manager = cache_entries[0].guard_manager
+        self.assertIn("L['x'].size()[0]", str(guard_manager))
+        self.assertTrue(
+            any("L['x'].size()[0]" in part for part in guard_manager.code_parts),
+            guard_manager.code_parts,
         )
 
     def test_dict_getitem_accessor(self):
@@ -1989,6 +2047,13 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn([1, 2, 3], expected))
         self.assertFalse(handler.eval_fn([1, 2], expected))
 
+        expected = handler.get_metadata_fn(guard, [(0.0,), frozenset({0.0})])
+        self.assertFalse(handler.eval_fn([(-0.0,), frozenset({0.0})], expected))
+        self.assertFalse(handler.eval_fn([(0.0,), frozenset({-0.0})], expected))
+
+        expected = handler.get_metadata_fn(guard, [float("nan")])
+        self.assertTrue(handler.eval_fn([float("nan")], expected))
+
     def test_id_match(self):
         from torch._dynamo.guards import GuardBuilder
 
@@ -2342,6 +2407,18 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         )
         self.assertFalse(handler.eval_fn(types.MappingProxyType({"x": 1}), expected))
 
+        expected = handler.get_metadata_fn(guard, types.MappingProxyType({0.0: None}))
+        self.assertFalse(
+            handler.eval_fn(types.MappingProxyType({-0.0: None}), expected)
+        )
+
+        expected = handler.get_metadata_fn(
+            guard, types.MappingProxyType({float("nan"): None})
+        )
+        self.assertTrue(
+            handler.eval_fn(types.MappingProxyType({float("nan"): None}), expected)
+        )
+
     @unittest.skipIf(
         sys.platform != "linux",
         "Only support mem leak checking on Linux.",
@@ -2392,6 +2469,12 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn({"a": 10, "b": 20, "c": 30}, expected))
         self.assertFalse(handler.eval_fn({"a": 1, "b": 2}, expected))
         self.assertFalse(handler.eval_fn({"x": 1, "y": 2, "z": 3}, expected))
+
+        expected = handler.get_metadata_fn(guard, {0.0: None})
+        self.assertFalse(handler.eval_fn({-0.0: None}, expected))
+
+        expected = handler.get_metadata_fn(guard, {float("nan"): None})
+        self.assertTrue(handler.eval_fn({float("nan"): None}, expected))
 
 
 if __name__ == "__main__":

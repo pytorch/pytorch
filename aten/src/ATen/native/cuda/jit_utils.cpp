@@ -824,49 +824,6 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   }
 )ESCAPE";
 
-static void replace_all(std::string& s, const std::string& to_replace, const std::string& replace_with) {
-  std::ostringstream oss;
-  std::size_t pos = 0;
-  std::size_t prev_pos = pos;
-
-  while (true) {
-    prev_pos = pos;
-    pos = s.find(to_replace, pos);
-    if (pos == std::string::npos)
-      break;
-    oss << s.substr(prev_pos, pos - prev_pos);
-    oss << replace_with;
-    pos += to_replace.size();
-  }
-
-  oss << s.substr(prev_pos);
-  s = std::move(oss).str();
-}
-
-// hipify replaces certain device math functions, e.g., std::max -> ::max
-// See torch/utils/hipify/cuda_to_hip_mappings.py.
-// Replace them back. Search for " ::<name>" to avoid duplicate replacements.
-static std::string unhipify_math_functions(const std::string &original) {
-  static std::vector<std::pair<std::string,std::string>> mappings = {
-    {" std::max", " ::max"},
-    {" std::min", " ::min"},
-    {" std::ceil", " ::ceil"},
-    {" std::floor", " ::floor"},
-    {" std::exp", " ::exp"},
-    {" std::log", " ::log"},
-    {" std::pow", " ::pow"},
-    {" std::fabs", " ::fabs"},
-    {" std::fmod", " ::fmod"},
-    {" std::remainder", " ::remainder"},
-    {" std::frexp", " ::frexp"}
-  };
-  std::string ret = original;
-  for (const auto& mapping : mappings) {
-    replace_all(ret, mapping.second, mapping.first);
-  }
-  return ret;
-}
-
 // The following is copied from fused_kernel.cpp
 // TODO: refactor codegenOutputQuery into its own file
 //   that can be included by both files
@@ -1156,11 +1113,6 @@ std::string generate_code(
     env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", get_complex_math_string());
-#ifdef USE_ROCM
-    // unhipify math functions, but only if std::complex is used.
-    func = unhipify_math_functions(func);
-    env.s("functor", func);
-#endif
   } else if (dynamic_casting) {
     env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
@@ -1429,10 +1381,6 @@ std::string generate_reduction_code(
         env.s("complex_body_string", get_complex_body_string());
         env.s("complex_math_string", get_complex_math_string());
         env.s("complex", std::to_string(1));
-#ifdef USE_ROCM
-        // unhipify math functions, but only if std::complex is used.
-        func = unhipify_math_functions(func);
-#endif
       } else {
         env.s("traits_string", "");
         env.s("complex_body_string", "");

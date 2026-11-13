@@ -3,6 +3,7 @@
 import types
 from itertools import count
 from types import SimpleNamespace
+from unittest import mock
 
 import sympy
 
@@ -10,11 +11,12 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor import ir
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.graph import GraphLowering
 from torch._inductor.lowering import _record_symbolic_input_source
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import IndentedBuffer
+from torch._inductor.utils import AotOnlyBuffer, IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import CallMethodKey
 from torch.testing._internal.common_utils import (
@@ -30,6 +32,36 @@ class TestPythonWrapperCodegen(TestCase):
         wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
         wrapper.prefix = IndentedBuffer()
         return wrapper
+
+    def _new_autotune_storage_case(self):
+        wrapper = self._new_wrapper()
+        base = ir.InputBuffer(
+            name="base",
+            layout=ir.FixedLayout(
+                torch.device("cpu"),
+                torch.float32,
+                size=[8, 8],
+                stride=[8, 1],
+            ),
+        )
+        view = ir.ReinterpretView(
+            data=ir.StorageBox(base),
+            layout=ir.FixedLayout(
+                torch.device("cpu"),
+                torch.float32,
+                size=[8, 4],
+                stride=[8, 1],
+                offset=4,
+            ),
+        )
+        view_buffer = ir.Buffer(name="view", layout=ir.NonOwningLayout(view))
+        wrapper.args_to_buffers = {"base": base, "view": view_buffer}
+        wrapper.kernel_autotune_calls = IndentedBuffer()
+        wrapper.kernel_autotune_storage_idx = 0
+        wrapper.kernel_autotune_tmp_arg_idx = 0
+        wrapper.kernel_autotune_example_arg_cache = {}
+        wrapper.kernel_autotune_storage_cache = {}
+        return wrapper, base, view, view_buffer
 
     def _graph_with_sizevars(self, **kwargs):
         return SimpleNamespace(
@@ -124,6 +156,67 @@ class TestPythonWrapperCodegen(TestCase):
             f"output index {bad_idx} is out of range for list with 1 elements",
         ):
             self._codegen_output_symbol([[output]], keypath)
+
+    @parametrize("wrapper_mode", ["python", "cpp_jit", "cpp_aoti"])
+    @parametrize("autotune", [False, True])
+    def test_stable_tma_descriptor_import_routing(self, wrapper_mode, autotune):
+        cpp_wrapper = wrapper_mode != "python"
+        wrapper = self._new_cpp_wrapper() if cpp_wrapper else self._new_wrapper()
+        wrapper.header = (
+            AotOnlyBuffer() if wrapper_mode == "cpp_aoti" else IndentedBuffer()
+        )
+        wrapper.kernel_autotune_calls = IndentedBuffer()
+        wrapper.add_import_once = mock.Mock()
+        descriptor = SimpleNamespace(
+            block_shape=[16],
+            descriptor_module="triton.tools.tensor_descriptor",
+            descriptor_class="TensorDescriptor",
+            tensor=SimpleNamespace(codegen_reference=lambda: "buf0"),
+        )
+        graph = self._graph_with_sizevars(cpp_wrapper=cpp_wrapper)
+
+        with (
+            V.set_graph_handler(graph),
+            torch._inductor.config.patch("triton.autotune_at_compile_time", autotune),
+        ):
+            call = wrapper._generate_tma_descriptor_call_stable(descriptor)
+
+        import_line = "import triton.tools.tensor_descriptor"
+        self.assertEqual(wrapper.header.getvalue(), "")
+        if cpp_wrapper:
+            wrapper.add_import_once.assert_not_called()
+        else:
+            wrapper.add_import_once.assert_called_once_with(import_line)
+        self.assertEqual(
+            wrapper.kernel_autotune_calls.getvalue(),
+            f"{import_line}\n" if cpp_wrapper and autotune else "",
+        )
+        self.assertEqual(
+            call,
+            "triton.tools.tensor_descriptor.TensorDescriptor.from_tensor(buf0, [16])",
+        )
+
+    def test_cpu_cpp_wrapper_rejects_tma_descriptor(self):
+        wrapper = self._new_cpp_wrapper()
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "TMA descriptors are not supported by the CPU cpp_wrapper",
+        ):
+            wrapper.generate_tma_descriptor(SimpleNamespace())
+
+    def test_aoti_gpu_rejects_backend_tma_descriptor(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        descriptor = SimpleNamespace(
+            descriptor_module="triton.backends.cpu.tensor_descriptor",
+            descriptor_class="TensorDescriptor",
+        )
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "does not support backend-specific stable TMA descriptors",
+        ):
+            wrapper._generate_stable_tma_descriptor(descriptor)
 
     def test_explicit_symbol_input_assignment_uses_canonical_symbol(self):
         wrapper = self._new_wrapper()
@@ -233,6 +326,402 @@ s0 = arg1_1""",
             _record_symbolic_input_source(view, 0, s0, "size")
 
         self.assertEqual(graph.symbolic_input_sources, {})
+
+    def test_autotune_storage_collection_includes_nonowning_tensor(self):
+        wrapper, base, _, _ = self._new_autotune_storage_case()
+        tensor = ir.TensorBox.create(base)
+        alias_buffer = ir.Buffer(
+            name="alias",
+            layout=ir.NonOwningLayout(tensor),
+        )
+        wrapper.args_to_buffers["alias"] = alias_buffer
+
+        storage_args = wrapper._collect_autotune_storage_args(
+            ["alias"],
+            [torch.float32],
+            [None],
+            [alias_buffer],
+            None,
+        )
+
+        self.assertEqual(set(storage_args), {"alias"})
+        self.assertIs(storage_args["alias"].base_buffer, base)
+        self.assertIs(storage_args["alias"].tensor, tensor)
+
+    def test_autotune_storage_collection_rejects_nested_reinterpret_views(self):
+        wrapper, _, inner_view, _ = self._new_autotune_storage_case()
+        nested_view = ir.ReinterpretView(
+            data=ir.StorageBox(inner_view),
+            layout=ir.FixedLayout(
+                torch.device("cpu"),
+                torch.float32,
+                size=[7, 4],
+                stride=[8, 1],
+                offset=8,
+            ),
+        )
+        nested_buffer = ir.Buffer(
+            name="nested_view",
+            layout=ir.NonOwningLayout(nested_view),
+        )
+        wrapper.args_to_buffers["nested_view"] = nested_buffer
+
+        storage_args = wrapper._collect_autotune_storage_args(
+            ["nested_view"],
+            [torch.float32],
+            [None],
+            [nested_buffer],
+            None,
+        )
+        self.assertEqual(storage_args, {})
+
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(
+                optimization_hint=lambda value: value,
+                optimization_hints=lambda values: tuple(values),
+            ),
+            get_allocation_size=lambda buffer: tuple(buffer.get_size()),
+        )
+        with V.set_graph_handler(graph):
+            wrapper.generate_example_arg_value(
+                "nested_view",
+                torch.float32,
+                nested_buffer,
+                storage_arg=None,
+            )
+
+        code = wrapper.kernel_autotune_calls.getvalue()
+        self.assertIn("nested_view = generate_example_value", code)
+        self.assertNotIn("torch.as_strided", code)
+
+    def test_autotune_storage_collection_unwraps_nested_alias_layouts(self):
+        wrapper, base, _, _ = self._new_autotune_storage_case()
+        graph = SimpleNamespace(mark_buffer_mutated=lambda _name: None)
+        with V.set_graph_handler(graph):
+            mutation_buffer = ir.Buffer(
+                name="mutation",
+                layout=ir.MutationLayoutSHOULDREMOVE(base),
+            )
+            nested_mutation_buffer = ir.Buffer(
+                name="nested_mutation_owner",
+                layout=ir.MutationLayoutSHOULDREMOVE(mutation_buffer),
+            )
+        nonowning_buffer = ir.Buffer(
+            name="nonowning",
+            layout=ir.NonOwningLayout(ir.TensorBox.create(base)),
+        )
+
+        for name, inner_buffer in (
+            ("nested_mutation", nested_mutation_buffer),
+            ("nested_nonowning", nonowning_buffer),
+        ):
+            nested_view = ir.ReinterpretView(
+                data=ir.StorageBox(inner_buffer),
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[7, 4],
+                    stride=[8, 1],
+                    offset=1,
+                ),
+            )
+            nested_buffer = ir.Buffer(
+                name=name,
+                layout=ir.NonOwningLayout(nested_view),
+            )
+            wrapper.args_to_buffers[name] = nested_buffer
+
+            storage_args = wrapper._collect_autotune_storage_args(
+                [name],
+                [torch.float32],
+                [None],
+                [nested_buffer],
+                None,
+            )
+
+            self.assertIs(storage_args[name].base_buffer, base)
+            self.assertIs(storage_args[name].tensor, nested_view)
+
+    def test_autotune_storage_collection_rejects_second_view_through_aliases(
+        self,
+    ):
+        wrapper, _, inner_view, view_buffer = self._new_autotune_storage_case()
+        graph = SimpleNamespace(mark_buffer_mutated=lambda _name: None)
+        with V.set_graph_handler(graph):
+            mutation_buffer = ir.Buffer(
+                name="mutation",
+                layout=ir.MutationLayoutSHOULDREMOVE(inner_view),
+            )
+
+        for name, inner_buffer in (
+            ("nested_mutation", mutation_buffer),
+            ("nested_nonowning", view_buffer),
+        ):
+            nested_view = ir.ReinterpretView(
+                data=ir.StorageBox(inner_buffer),
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[7, 4],
+                    stride=[8, 1],
+                    offset=1,
+                ),
+            )
+            nested_buffer = ir.Buffer(
+                name=name,
+                layout=ir.NonOwningLayout(nested_view),
+            )
+            wrapper.args_to_buffers[name] = nested_buffer
+
+            storage_args = wrapper._collect_autotune_storage_args(
+                [name],
+                [torch.float32],
+                [None],
+                [nested_buffer],
+                None,
+            )
+
+            self.assertEqual(storage_args, {})
+
+            graph = SimpleNamespace(
+                sizevars=SimpleNamespace(
+                    optimization_hint=lambda value: value,
+                    optimization_hints=lambda values: tuple(values),
+                ),
+                get_allocation_size=lambda buffer: tuple(buffer.get_size()),
+            )
+            with V.set_graph_handler(graph):
+                wrapper.generate_example_arg_value(
+                    name,
+                    torch.float32,
+                    nested_buffer,
+                    storage_arg=None,
+                )
+
+        code = wrapper.kernel_autotune_calls.getvalue()
+        self.assertIn("nested_mutation = generate_example_value", code)
+        self.assertIn("nested_nonowning = generate_example_value", code)
+        self.assertNotIn("torch.as_strided", code)
+
+    def test_autotune_storage_collection_groups_owning_and_view_mutations(self):
+        wrapper, base, view, _ = self._new_autotune_storage_case()
+        graph = SimpleNamespace(mark_buffer_mutated=lambda _name: None)
+        with V.set_graph_handler(graph):
+            base_mutation = ir.Buffer(
+                name="base_mutation",
+                layout=ir.MutationLayoutSHOULDREMOVE(base),
+            )
+            view_mutation = ir.Buffer(
+                name="view_mutation",
+                layout=ir.MutationLayoutSHOULDREMOVE(view),
+            )
+        wrapper.args_to_buffers.update(
+            {
+                "base_mutation": base_mutation,
+                "view_mutation": view_mutation,
+            }
+        )
+
+        storage_args = wrapper._collect_autotune_storage_args(
+            ["base_mutation", "view_mutation"],
+            [torch.float32, torch.float32],
+            [None, None],
+            [base_mutation, view_mutation],
+            None,
+        )
+
+        self.assertEqual(set(storage_args), {"base_mutation", "view_mutation"})
+        self.assertIs(storage_args["base_mutation"].base_buffer, base)
+        self.assertIs(storage_args["base_mutation"].tensor, base)
+        self.assertIs(storage_args["view_mutation"].base_buffer, base)
+        self.assertIs(storage_args["view_mutation"].tensor, view)
+
+    def test_autotune_storage_collection_includes_mutation_through_nonowning(self):
+        wrapper, base, view, view_buffer = self._new_autotune_storage_case()
+        mutation_graph = SimpleNamespace(mark_buffer_mutated=lambda _name: None)
+        with V.set_graph_handler(mutation_graph):
+            mutation_buffer = ir.Buffer(
+                name="mutation",
+                layout=ir.MutationLayoutSHOULDREMOVE(view_buffer),
+            )
+        wrapper.args_to_buffers["mutation"] = mutation_buffer
+
+        storage_args = wrapper._collect_autotune_storage_args(
+            ["mutation"],
+            [torch.float32],
+            [None],
+            [mutation_buffer],
+            None,
+        )
+        self.assertEqual(set(storage_args), {"mutation"})
+        self.assertIs(storage_args["mutation"].base_buffer, base)
+        self.assertIs(storage_args["mutation"].tensor, view)
+
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(
+                optimization_hint=lambda value: value,
+                optimization_hints=lambda values: tuple(values),
+            ),
+            get_allocation_storage_size=lambda _buffer: 64,
+        )
+        with V.set_graph_handler(graph):
+            wrapper.generate_example_arg_value(
+                "mutation",
+                torch.float32,
+                mutation_buffer,
+                kernel_name="kernel0",
+                storage_cache={},
+                storage_arg=storage_args["mutation"],
+            )
+
+        code = wrapper.kernel_autotune_calls.getvalue()
+        self.assertIn("_autotune_storage_0 = generate_example_value", code)
+        self.assertIn(
+            "mutation = torch.as_strided(_autotune_storage_0, (8, 4), (8, 1), 4)",
+            code,
+        )
+
+    def test_autotune_storage_collection_rejects_dtype_mismatch(self):
+        wrapper, base, _, _ = self._new_autotune_storage_case()
+        dtype_view = ir.ReinterpretView(
+            data=ir.StorageBox(base),
+            layout=ir.FixedLayout(
+                torch.device("cpu"),
+                torch.float16,
+                size=[8, 16],
+                stride=[16, 1],
+            ),
+        )
+        dtype_buffer = ir.Buffer(
+            name="dtype_view",
+            layout=ir.NonOwningLayout(dtype_view),
+        )
+        wrapper.args_to_buffers["dtype_view"] = dtype_buffer
+
+        storage_args = wrapper._collect_autotune_storage_args(
+            ["dtype_view"],
+            [torch.float16],
+            [None],
+            [dtype_buffer],
+            None,
+        )
+
+        self.assertEqual(storage_args, {})
+
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(
+                optimization_hint=lambda value: value,
+                optimization_hints=lambda values: tuple(values),
+            ),
+            get_allocation_size=lambda buffer: tuple(buffer.get_size()),
+        )
+        with V.set_graph_handler(graph):
+            wrapper.generate_example_arg_value(
+                "dtype_view",
+                torch.float16,
+                dtype_buffer,
+                kernel_name="kernel0",
+                storage_cache={},
+                storage_arg=None,
+            )
+
+        code = wrapper.kernel_autotune_calls.getvalue()
+        self.assertIn("dtype_view = generate_example_value", code)
+        self.assertNotIn("torch.as_strided", code)
+
+    def test_autotune_storage_collection_materializes_base_and_view(self):
+        wrapper, base, view, view_buffer = self._new_autotune_storage_case()
+        storage_args = wrapper._collect_autotune_storage_args(
+            ["base", "view"],
+            [torch.float32, torch.float32],
+            [None, None],
+            [base, view_buffer],
+            None,
+        )
+
+        self.assertEqual(set(storage_args), {"base", "view"})
+        self.assertIs(storage_args["base"].base_buffer, base)
+        self.assertIs(storage_args["base"].tensor, base)
+        self.assertIs(storage_args["view"].base_buffer, base)
+        self.assertIs(storage_args["view"].tensor, view)
+
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(
+                optimization_hint=lambda value: value,
+                optimization_hints=lambda values: tuple(values),
+            ),
+            get_allocation_storage_size=lambda _buffer: 64,
+        )
+        storage_cache = {}
+
+        with V.set_graph_handler(graph):
+            for arg, buf in (("base", base), ("view", view_buffer)):
+                wrapper.generate_example_arg_value(
+                    arg,
+                    torch.float32,
+                    buf,
+                    kernel_name="kernel0",
+                    storage_cache=storage_cache,
+                    storage_arg=storage_args[arg],
+                )
+
+        code = wrapper.kernel_autotune_calls.getvalue()
+        self.assertEqual(code.count("_autotune_storage_0 = generate_example_value"), 1)
+        self.assertIn(
+            "base = torch.as_strided(_autotune_storage_0, (8, 8), (8, 1), 0)",
+            code,
+        )
+        self.assertIn(
+            "view = torch.as_strided(_autotune_storage_0, (8, 4), (8, 1), 4)",
+            code,
+        )
+
+    def test_autotune_storage_groups_duplicate_owning_arguments(self):
+        wrapper, base, _, _ = self._new_autotune_storage_case()
+        wrapper.args_to_buffers["base_alias"] = base
+        storage_args = wrapper._collect_autotune_storage_args(
+            ["base", "base_alias"],
+            [torch.float32, torch.float32],
+            [None, None],
+            [base, base],
+            None,
+        )
+
+        self.assertEqual(set(storage_args), {"base", "base_alias"})
+        for arg in ("base", "base_alias"):
+            self.assertIs(storage_args[arg].base_buffer, base)
+            self.assertIs(storage_args[arg].tensor, base)
+
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(
+                optimization_hint=lambda value: value,
+                optimization_hints=lambda values: tuple(values),
+            ),
+            get_allocation_storage_size=lambda _buffer: 64,
+        )
+        storage_cache = {}
+
+        with V.set_graph_handler(graph):
+            for arg in ("base", "base_alias"):
+                wrapper.generate_example_arg_value(
+                    arg,
+                    torch.float32,
+                    base,
+                    kernel_name="kernel0",
+                    storage_cache=storage_cache,
+                    storage_arg=storage_args[arg],
+                )
+
+        code = wrapper.kernel_autotune_calls.getvalue()
+        self.assertEqual(code.count("_autotune_storage_0 = generate_example_value"), 1)
+        self.assertIn(
+            "base = torch.as_strided(_autotune_storage_0, (8, 8), (8, 1), 0)",
+            code,
+        )
+        self.assertIn(
+            "base_alias = torch.as_strided(_autotune_storage_0, (8, 8), (8, 1), 0)",
+            code,
+        )
 
     def test_record_symbolic_input_source_records_direct_input(self):
         s0 = sympy.Symbol("s0")

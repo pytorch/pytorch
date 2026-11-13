@@ -232,6 +232,51 @@ class TestSDPAXpuOnly(NNTestCase):
 
         self.assertEqual(actual, expected, atol=tol.atol, rtol=tol.rtol)
 
+    @parametrize("dtype", [torch.half, torch.bfloat16])
+    def test_onednn_attention_pure_mqa_without_enable_gqa(self, device, dtype):
+        """
+        Pure MQA (single shared K/V head, e.g. Falcon-7B) should work on the
+        OVERRIDEABLE backend even without enable_gqa=True.
+        """
+        tol = Tolerances(1e-2, 1e-2)
+        if dtype is torch.bfloat16:
+            tol = Tolerances(5e-2, 5e-2)
+
+        batch_size = 2
+        query_heads = 71
+        key_value_heads = 1
+        seq_len = 32
+        head_dim = 64
+
+        torch.manual_seed(0)
+        query = torch.randn(
+            batch_size, query_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+        key = torch.randn(
+            batch_size, key_value_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+        value = torch.randn(
+            batch_size, key_value_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+
+        with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+            actual = F.scaled_dot_product_attention(
+                query, key, value, dropout_p=0.0, is_causal=False, enable_gqa=False
+            )
+
+        key_expanded = key.expand(
+            batch_size, query_heads, seq_len, head_dim
+        ).contiguous()
+        value_expanded = value.expand(
+            batch_size, query_heads, seq_len, head_dim
+        ).contiguous()
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = F.scaled_dot_product_attention(
+                query, key_expanded, value_expanded, dropout_p=0.0, is_causal=False
+            )
+
+        self.assertEqual(actual, expected, atol=tol.atol, rtol=tol.rtol)
+
 
 instantiate_device_type_tests(
     TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True

@@ -28,6 +28,7 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_MACOS,
@@ -164,6 +165,8 @@ class BaseTestSelectAlgorithm(TestCase):
 
 
 class TestSelectAlgorithm(BaseTestSelectAlgorithm):
+    hw_classification = HardwareClassification.CPU
+
     common = check_model
 
     @inductor_config.patch({"freezing": True})
@@ -201,6 +204,24 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    def test_addmm_zero_beta_nan_bias(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.full((64,), float("nan"))
+                self.weight = torch.randn(128, 64)
+
+            def forward(self, x):
+                # alpha != 1 keeps freezing from packing this into an mkldnn linear.
+                return torch.addmm(self.bias, x, self.weight, beta=0, alpha=0.5)
+
+        counters.clear()
+        self.common(M().eval(), (torch.randn(32, 128),))
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -3548,6 +3569,8 @@ class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
 
 
 class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
+    hw_classification = HardwareClassification.CPU
+
     common = check_model
     test_linear_dynamic_shapes = TestSelectAlgorithm.test_linear_static_shapes
     test_linear_with_pointwise_dynamic_shapes = (

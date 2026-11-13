@@ -42,8 +42,9 @@ from torch.distributed.tensor.placement_types import (
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     generate_shard_orders,
+    LocalDTensorContinuousTestBase,
     LocalDTensorTestBase,
     patched_distribute_tensor as _distribute_tensor,
     shard_order_to_placement,
@@ -389,10 +390,8 @@ class LocalTest(TestCase):
             self.assertEqual(global_offset, (expected_shard_offset, 0))
 
 
-class UtilTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 8
+class UtilTest(DTensorContinuousTestBase):
+    world_size = 8
 
     def _compute_start_end_offsets(self, global_offset, local_size, n_dim):
         offset = []
@@ -813,10 +812,8 @@ class UtilSingleDeviceTest(TestCase):
         torch.distributed.destroy_process_group()
 
 
-class TestStridedSharding(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
+class TestStridedSharding(DTensorContinuousTestBase):
+    world_size = 4
 
     @with_comms
     def test_1d_mesh_strided_sharding(self):
@@ -1285,7 +1282,7 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
             )
 
 
-class Test_StridedShard_Optimizer(DTensorTestBase):
+class Test_StridedShard_Optimizer(DTensorContinuousTestBase):
     """Test optimizer updates with _StridedShard placement using FSDP+TP.
 
     This test uses FSDP+TP to create parameters with placement
@@ -1295,9 +1292,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
     The pattern follows _TestClipGradNormBase from test_fully_shard_clip_grad_norm_.py
     """
 
-    @property
-    def world_size(self) -> int:
-        return 4
+    world_size = 4
 
     def _test_optimizer_with_fsdp_tp(
         self,
@@ -1499,10 +1494,8 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
                 self.assertIsNone(shard_order)
 
 
-class Test2DStridedLocalShard(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
+class Test2DStridedLocalShard(DTensorContinuousTestBase):
+    world_size = 4
 
     @with_comms
     def test_fsdp1_tp_2d_dtensor_local_shards_and_offsets(self):
@@ -1724,10 +1717,10 @@ class TestStridedShardCollectiveOpUtils:
         return new_logical_shape
 
 
-class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
+class TestStridedShardReplicate(
+    TestStridedShardCollectiveOpUtils, DTensorContinuousTestBase
+):
+    world_size = 4
 
     @with_comms
     def test_StridedShard_to_replicate(self):
@@ -2019,10 +2012,14 @@ class TestIsTensorShardable(LocalTensorTestBase):
         self.assertFalse(is_tensor_evenly_shardable([16, 8], spec))
 
 
-UtilTestWithLocalTensor = create_local_tensor_test_class(UtilTest)
-TestStridedShardingWithLocalTensor = create_local_tensor_test_class(TestStridedSharding)
+UtilTestWithLocalTensor = create_local_tensor_test_class(
+    UtilTest, base_class=LocalDTensorContinuousTestBase
+)
+TestStridedShardingWithLocalTensor = create_local_tensor_test_class(
+    TestStridedSharding, base_class=LocalDTensorContinuousTestBase
+)
 Test2DStridedLocalShardWithLocalTensor = create_local_tensor_test_class(
-    Test2DStridedLocalShard
+    Test2DStridedLocalShard, base_class=LocalDTensorContinuousTestBase
 )
 
 if __name__ == "__main__":

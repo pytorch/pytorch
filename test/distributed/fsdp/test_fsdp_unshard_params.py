@@ -217,6 +217,8 @@ class TestUnshardParamsBase(FSDPTestContinuous):
 
 
 class TestUnshardParams(TestUnshardParamsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -676,6 +678,8 @@ class TestUnshardParams(TestUnshardParamsBase):
 
 
 class TestUnshardParamsNoShard(TestUnshardParamsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 1
@@ -707,6 +711,8 @@ class TestUnshardParamsNoShard(TestUnshardParamsBase):
 
 
 class TestUnshardParamsErrors(TestUnshardParamsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2

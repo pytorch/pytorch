@@ -420,6 +420,14 @@ class Optimizer:
                 "params argument given to the optimizer should be "
                 "an iterable of Tensors or dicts, but got " + torch.typename(params)
             )
+        elif isinstance(params, set):
+            warnings.warn(
+                "optimizer parameters need to be organized in ordered collections, but "
+                "the ordering of tensors in sets will change between runs. Please use a "
+                "list instead. This will be an error in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
 
         self.state: defaultdict[torch.Tensor, Any] = defaultdict(dict)
         self.param_groups: list[dict[str, Any]] = []
