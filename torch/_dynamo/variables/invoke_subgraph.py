@@ -921,6 +921,7 @@ def save_reuse_entry(
     max_reuse_entries: int = 8,
     condition: "InvokeSubgraphReuseCondition | None" = None,
     hash_key: int | None = None,
+    traced_sources: OrderedSet[Source] | None = None,
 ) -> None:
     """Save a traced subgraph into the reuse cache for future cache hits.
 
@@ -977,6 +978,11 @@ def save_reuse_entry(
         if isinstance(t, torch.Tensor)
     ]
 
+    effective_traced_sources = (
+        traced_sources
+        if traced_sources is not None
+        else (condition.traced_sources if condition is not None else OrderedSet())
+    )
     entry = InvokeSubgraphReuseEntry(
         body_name=body_name,
         body_gmod=body_gmod,
@@ -989,6 +995,8 @@ def save_reuse_entry(
         # rewrite captured variable sources for the current invocation.
         arg_sources=fingerprint.arg_sources,
         num_user_outputs=num_user_outputs,
+        condition=condition,
+        traced_sources=effective_traced_sources,
     )
     if condition is not None:
         invoke_subgraph_cache.add_reuse_entry(
@@ -1061,6 +1069,7 @@ def stamp_out_subgraph(
     source replacement before we can look up or create the corresponding
     graph placeholders.
     """
+    from torch._dynamo.guards import install_guard
     from torch._dynamo.variables.builder import VariableBuilder
     from torch._dynamo.variables.higher_order_ops import add_call_function, make_attr
 
@@ -1068,6 +1077,38 @@ def stamp_out_subgraph(
     new_arg_sources = fingerprint.arg_sources
 
     source_replacement = build_source_replacement(cached.arg_sources, new_arg_sources)
+
+    if cached.traced_sources:
+        if source_replacement:
+            remapped_sources = OrderedSet(
+                s.clone(lambda src: source_replacement.get(src, src))
+                for s in cached.traced_sources
+            )
+        else:
+            remapped_sources = cached.traced_sources
+        tx.output.current_tracer.traced_sources.update(remapped_sources)
+
+    if cached.condition is not None and source_replacement:
+        # Re-install the cached reuse condition's guards under the current
+        # call's sources so that an enclosing nested_compile_region picks them
+        # up when it builds its own reuse condition from traced_sources.
+        #
+        # Skip guards on the args themselves and TENSOR_MATCH guards: the
+        # caller already guarded the new args when it wrapped them, and
+        # captured tensor sources are re-wrapped through VariableBuilder below
+        # (which installs their TENSOR_MATCH).  TENSOR_MATCH is also bound to
+        # the original tensor via functools.partial, so cloning it onto a new
+        # source would install a second, stale tensor guard on that source and
+        # fail guard construction with "Duplicate tensors found".
+        old_arg_sources = {s for s in cached.arg_sources if s is not None}
+        for source, _handler, _expected, guard in cached.condition.guards:
+            if source in old_arg_sources or guard.create_fn_name() == "TENSOR_MATCH":
+                continue
+            new_source = source.clone(lambda src: source_replacement.get(src, src))
+            if new_source != source:
+                new_guard = new_source.make_guard(guard.create_fn)
+                new_guard._force_dict_keys_match = guard._force_dict_keys_match
+                install_guard(new_guard)
 
     new_lifted_args = []
     # Shared resolution context so get_value memoizes intermediate results
@@ -1470,6 +1511,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     example_value,
                     max_reuse_entries,
                     hash_key=hash_key,  # type: ignore[possibly-undefined]
+                    traced_sources=traced_sources,
                 )
             else:
                 traced_sources = tracing_info.traced_sources
@@ -1494,6 +1536,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                             example_value,
                             max_reuse_entries,
                             condition=condition,
+                            traced_sources=traced_sources,
                         )
 
         return _call_function_with_auto_output_flattening(  # type: ignore[return-value]
