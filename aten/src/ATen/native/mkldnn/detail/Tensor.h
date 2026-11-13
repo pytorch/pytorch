@@ -14,7 +14,7 @@ using ITensor = ideep::tensor;
 
 // CPU engine (with ATen's allocator registered) and its default stream.
 using Engine = ideep::engine;
-using Stream = ideep::stream;
+using IStream = ideep::stream;
 
 } // namespace at::native::mkldnn
 

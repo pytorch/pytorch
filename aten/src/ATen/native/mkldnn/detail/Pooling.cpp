@@ -62,7 +62,7 @@ void pooling_forward(
     args.insert({DNNL_ARG_WORKSPACE, dst.get_workspace()});
   }
 
-  dnnl::pooling_forward(pd).execute(Stream::default_stream(), args);
+  dnnl::pooling_forward(pd).execute(IStream::default_stream(), args);
 }
 
 void pooling_backward(
@@ -134,7 +134,7 @@ void pooling_backward(
     args.insert({DNNL_ARG_WORKSPACE, expected_workspace});
   }
 
-  dnnl::pooling_backward(pd).execute(Stream::default_stream(), args);
+  dnnl::pooling_backward(pd).execute(IStream::default_stream(), args);
 }
 
 } // namespace at::native::mkldnn

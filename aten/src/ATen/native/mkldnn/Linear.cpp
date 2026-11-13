@@ -621,7 +621,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_scales_t});
   }
 
-  primitive.execute(mkldnn::Stream::default_stream(), args);
+  primitive.execute(mkldnn::IStream::default_stream(), args);
   return out;
 }
 

@@ -1165,7 +1165,7 @@ static at::Tensor linear_int8_with_onednn_weight(
           auto other_2d = other_ref.reshape({-1, other_ref.size(dim - 1)});
           params.src1->set_data_handle(other_2d.data_ptr());
         }
-        params.primitive.execute(at::native::mkldnn::Stream::default_stream(), params.args);
+        params.primitive.execute(at::native::mkldnn::IStream::default_stream(), params.args);
         return dim == 2 ? output : output.resize_(params.output_size);
       }
     }
@@ -1355,7 +1355,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   if (binary_post_op == "add") {
     args.insert({DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src1});
   }
-  primitive.execute(at::native::mkldnn::Stream::default_stream(), args);
+  primitive.execute(at::native::mkldnn::IStream::default_stream(), args);
   // Update cache if needed
   if (allow_cache) {
     QlinearForwardParams params;

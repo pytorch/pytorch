@@ -33,7 +33,7 @@ void prelu_forward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::prelu_forward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC, src},
        {DNNL_ARG_WEIGHTS, expected_weights},
        {DNNL_ARG_DST, dst},
@@ -98,7 +98,7 @@ void prelu_backward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::prelu_backward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_WEIGHTS, expected_weights},

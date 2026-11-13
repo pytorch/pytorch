@@ -34,7 +34,7 @@ void layer_normalization_forward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::layer_normalization_forward(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_SCALE, scale},
        {DNNL_ARG_SHIFT, shift},

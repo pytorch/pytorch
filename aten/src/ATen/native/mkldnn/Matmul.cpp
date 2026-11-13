@@ -581,7 +581,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
   // Create primitive and execute
   auto primitive = dnnl::matmul(prim_desc);
-  primitive.execute(mkldnn::Stream::default_stream(), args);
+  primitive.execute(mkldnn::IStream::default_stream(), args);
 }
 
 template <typename a_type>

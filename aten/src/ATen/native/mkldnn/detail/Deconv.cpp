@@ -313,7 +313,7 @@ void do_compute(
       args.insert({DNNL_ARG_ATTR_ZERO_POINTS | dnnl_arg, zp_m});
     }
   }
-  primitive.execute(Stream::default_stream(), args);
+  primitive.execute(IStream::default_stream(), args);
 }
 
 // Ported from ideep::convolution_transpose_forward::compute_impl.
@@ -531,7 +531,7 @@ void backward_weights_compute_impl(
   if (with_diff_bias) {
     diff_bias.reinit_if_possible(pd.diff_bias_desc());
     dnnl::deconvolution_backward_weights(pd).execute(
-        Stream::default_stream(),
+        IStream::default_stream(),
         {{DNNL_ARG_DIFF_DST, expected_diff_dst},
          {DNNL_ARG_SRC, expected_src},
          {DNNL_ARG_DIFF_WEIGHTS, expected_diff_weights},
@@ -539,7 +539,7 @@ void backward_weights_compute_impl(
          {DNNL_ARG_SCRATCHPAD, scratchpad}});
   } else {
     dnnl::deconvolution_backward_weights(pd).execute(
-        Stream::default_stream(),
+        IStream::default_stream(),
         {{DNNL_ARG_DIFF_DST, expected_diff_dst},
          {DNNL_ARG_SRC, expected_src},
          {DNNL_ARG_DIFF_WEIGHTS, expected_diff_weights},
@@ -1000,7 +1000,7 @@ void convolution_transpose_backward_data_compute_v3(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::deconvolution_backward_data(pd).execute(
-      Stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_WEIGHTS, expected_weights},
        {DNNL_ARG_DIFF_SRC, diff_src},
