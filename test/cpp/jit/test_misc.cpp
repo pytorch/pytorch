@@ -1358,16 +1358,27 @@ TEST(RecordFunctionTest, CallbackSourceCount) {
           return nullptr;
         });
   };
+  // The exported version, for code built against older headers, agrees with
+  // the inline one.
+  auto has_step_callbacks = [](bool expected) {
+    const auto scope = at::RecordScope::FUNCTION;
+    EXPECT_EQ(at::getStepCallbacksUnlessEmpty(scope).has_value(), expected);
+    EXPECT_EQ(
+        at::getStepCallbacksUnlessEmptyInline(scope).has_value(), expected);
+  };
   const auto base = count();
+  has_step_callbacks(false);
 
   // One per global callback.
   auto g1 = at::addGlobalCallback(callback());
   auto g2 = at::addGlobalCallback(callback());
   EXPECT_EQ(count(), base + 2);
+  has_step_callbacks(true);
   at::removeCallback(g1);
   EXPECT_EQ(count(), base + 1);
   at::removeCallback(g2);
   EXPECT_EQ(count(), base);
+  has_step_callbacks(false);
 
   // One per thread that has thread-local callbacks.
   auto t1 = at::addThreadLocalCallback(callback());
