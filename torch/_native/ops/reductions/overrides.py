@@ -75,6 +75,8 @@ def _dims_ok(dim: _Dim, ndim: int) -> bool:
     if dim is None:
         return True
     dims = [dim] if isinstance(dim, int) else list(dim)
+    if len(dims) == 1:
+        return -ndim <= dims[0] < ndim
     if not dims:
         return True
     if not all(-ndim <= d < ndim for d in dims):
@@ -111,17 +113,19 @@ def _out_ok(self: torch.Tensor, dtype: torch.dtype | None) -> bool:
 
 
 def _base_cond(self: torch.Tensor, dim: _Dim) -> bool:
-    # A condition must decline unsupported calls without raising.
+    # A condition must decline unsupported calls without raising. Cheap metadata checks
+    # come first; numel and the data pointer need a real tensor (not fake, meta or
+    # functional).
     return (
         self.dtype in _SUPPORTED_DTYPES
+        and _dims_ok(dim, self.dim())
+        and not self.is_neg()
         and not cap.is_traced(self)
         and cap.device_ok(self, _ARCH_MAJORS)
-        and not self.is_neg()
+        and self.numel() != 0
         # Conservative: the kernels narrow their loads for lower alignment, but served
         # calls are measured and tested from 16-byte aligned bases only.
         and const_data_ptr(self) % 16 == 0
-        and _dims_ok(dim, self.dim())
-        and self.numel() != 0
     )
 
 

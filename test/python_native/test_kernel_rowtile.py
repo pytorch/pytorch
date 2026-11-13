@@ -54,6 +54,25 @@ class TestKernelRowTile(TestCase):
             out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
         )
 
+    # (65536, 128) takes one thread per row, staged through TMA on sm_90+.
+    @parametrize("rows,columns,tpr", ((64, 1000, None), (65536, 128, 1)))
+    def test_fp32_row_sum_error_is_no_worse_than_aten(self, rows, columns, tpr):
+        """Sum fp32 rows with no more fp64-relative error than ATen, summed over a few
+        seeds."""
+        trait, f32 = T.SumOps(acc=cutlass.Float32), [torch.float32]
+        kw = {"threads_per_row": tpr}
+        ours = aten = 0.0
+        for seed in range(8):
+            gen = torch.Generator("cuda").manual_seed(seed)
+            x = torch.randn(rows, columns, device="cuda", generator=gen)
+            (got,) = rt.reduce_row_tile(trait, "fp32_error", x, f32, **kw)
+            with torch.backends.python_native.cutedsl.disabled():
+                ref = x.sum(1)
+            want = x.double().sum(1)
+            ours += (got.double() - want).abs().mean().item()
+            aten += (ref.double() - want).abs().mean().item()
+        self.assertLessEqual(ours, aten, f"CuTeDSL {ours:.3e} vs ATen {aten:.3e}")
+
     def test_one_kernel_per_vec_class(self):
         trait = T.SumOps(acc=cutlass.Float32)
         rt._CACHE.clear()
@@ -364,6 +383,21 @@ class TestKernelRowTile(TestCase):
                     out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
                 )
 
+    @parametrize("dtype,columns", ((torch.float32, 100), (torch.float16, 200)))
+    def test_one_thread_row_partial_group(self, dtype, columns):
+        # 25 whole vectors leave one past the last full group of 32 elements. Integer sums
+        # are exact, so a dropped or repeated vector shows bitwise.
+        x = torch.randint(1, 9, (4096, columns), device="cuda").to(dtype)
+        (got,) = rt.reduce_row_tile(
+            self._sum_trait(),
+            "tpr1_groups",
+            x,
+            [torch.float32],
+            threads_per_row=1,
+            use_tma=False,
+        )
+        self.assertEqual(got, x.double().sum(dim=1).float(), atol=0, rtol=0)
+
     def test_narrow_row_ragged_m(self):
         # Nonmultiple M exercises the partial tile and TMA zero-fill.
         for m in (1, 3, 8191, 65537):
@@ -551,6 +585,44 @@ class TestKernelRowTile(TestCase):
             trait, "nw2", x, [torch.float32], threads_per_row=64, threads_per_block=64
         )
         self.assertEqual(got, torch.full((8,), 384.0, device="cuda"))
+
+    def test_rolled_lane_accumulators_combine_in_order(self):
+        """Combine whole-vector lane accumulators: index ties across them keep the first
+        column, NaN wins, and Welford counts stay exact."""
+        # 4104 fp16 columns are 513 whole 8-wide vectors, so every power-of-two
+        # threads_per_row leaves the last wave masked. Index traits keep 4 accumulators,
+        # so columns 1 and 4 of a vector fold into different ones.
+        rows, columns = 33, 4096 + 8
+        x = torch.randn(rows, columns, device="cuda", dtype=torch.float16)
+        r = torch.arange(rows, device="cuda")
+        first = r * 128 + 1  # row 32 plants in vector 512, the masked last wave
+        x[r, first] = 10.0
+        x[r, first + 3] = 10.0
+        x[7, first[7] + 4] = float("nan")
+        want = first.clone()
+        want[7] = first[7] + 4
+        (idx,) = rt.reduce_row_tile(
+            T.ArgMaxOps(acc=cutlass.Float32), "rolled_argmax", x, [torch.int32]
+        )
+        self.assertEqual(idx, want.to(torch.int32))
+        vals, idx = rt.reduce_row_tile(
+            T.MinDimOps(acc=cutlass.Float32),
+            "rolled_min_dim",
+            -x,
+            [torch.float32, torch.int32],
+            nouts=2,
+        )
+        self.assertEqual(idx, want.to(torch.int32))
+        self.assertTrue(vals[7].isnan())
+        self.assertEqual(vals[r != 7], torch.full((rows - 1,), -10.0, device="cuda"))
+        y = torch.randn(rows, columns, device="cuda", dtype=torch.float16)
+        trait = T.WelfordOps(acc=cutlass.Float32)
+        mean, _, count = rt.reduce_row_tile(
+            trait, "rolled_welford", y, [torch.float32] * trait.nfields, final=False
+        )
+        want_count = torch.full((rows,), float(columns), device="cuda")
+        self.assertEqual(count, want_count, atol=0, rtol=0)
+        self.assertEqual(mean, y.double().mean(dim=1).float(), atol=1e-4, rtol=1e-4)
 
     def _assert_keyed_width(self, trait_key, width):
         # Row-tile keys hold six fields before TileReduce.cache_sig, whose 13th keys N for
