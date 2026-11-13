@@ -647,6 +647,7 @@ ownership:
       - /third_party/gemmlowp/
       - /third_party/ideep
       - /third_party/kleidiai
+      - /third_party/oneDNN
       - /third_party/pthreadpool
       - /third_party/xnnpack.buck.bzl
       - /third_party/xnnpack_buck_shim.bzl
