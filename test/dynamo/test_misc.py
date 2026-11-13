@@ -5402,6 +5402,150 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
 
+    def test_deepcopy_ordered_dict(self):
+        def minimal(x):
+            copy.deepcopy(collections.OrderedDict(a=1))
+            return x + 1
+
+        x = torch.randn(4)
+        self.assertEqual(
+            torch.compile(minimal, fullgraph=True, backend="eager")(x), minimal(x)
+        )
+
+    @parametrize("copier", [copy.copy, copy.deepcopy])
+    def test_ordered_dict_copy_input_order(self, copier):
+        def fn(x, od):
+            return x + (next(iter(copier(od))) == "first key")
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(10)
+        original = collections.OrderedDict.fromkeys(["".join(["first", " key"]), "b"])
+        equal_key = "".join(["first", " key"])
+        self.assertIsNot(next(iter(original)), equal_key)
+        self.assertEqual(compiled(x, original), fn(x, original))
+        original.clear()
+        original.update([(equal_key, None), ("b", None)])
+        self.assertEqual(compiled(x, original), fn(x, original))
+        self.assertEqual(counter.frame_count, 1)
+        reversed_input = collections.OrderedDict(reversed(list(original.items())))
+        self.assertEqual(compiled(x, reversed_input), fn(x, reversed_input))
+        original.move_to_end(equal_key)
+        self.assertEqual(compiled(x, original), fn(x, original))
+
+    @parametrize("copier", [copy.copy, copy.deepcopy])
+    def test_ordered_dict_copy_instance_attributes(self, copier):
+        def fn(x, od):
+            return x + 1, copier(od)
+
+        compiled = torch.compile(fn, backend="eager")
+        x = torch.tensor(10)
+        od = collections.OrderedDict(a=1)
+        self.assertEqual(vars(compiled(x, od)[1]), {})
+        od.tag = [42]
+        copied = compiled(x, od)[1]
+        self.assertEqual(vars(copied), vars(od))
+        self.assertEqual(copied.tag is od.tag, copier is copy.copy)
+
+    @parametrize("copier", [copy.copy, copy.deepcopy])
+    @parametrize("create_inside", [False, True])
+    def test_ordered_dict_copy_after_instance_dict_write(self, copier, create_inside):
+        def fn(x, od):
+            if od is None:
+                od = collections.OrderedDict(a=1)
+            od.__dict__["tag"] = [42]
+            return x + 1, od, copier(od)
+
+        x = torch.tensor(10)
+        inp = None if create_inside else collections.OrderedDict(a=1)
+        result, od, copied = torch.compile(fn, backend="eager")(x, inp)
+        self.assertEqual(result, x + 1)
+        self.assertEqual(copied.tag, [42])
+        self.assertEqual(copied.tag is od.tag, copier is copy.copy)
+
+    def test_ordered_dict_copy_after_possible_instance_dict_alias_write(self):
+        def fn(x, od, attrs):
+            attrs["tag"] = 1
+            return x + 1, copy.copy(od)
+
+        compiled = torch.compile(fn, backend="eager")
+        for aliases in (False, True):
+            od = collections.OrderedDict(a=1)
+            attrs = od.__dict__ if aliases else {}
+            _, copied = compiled(torch.tensor(10), od, attrs)
+            self.assertEqual(vars(copied), {"tag": 1} if aliases else {})
+
+    def test_deepcopy_ordered_dict_nested(self):
+        def fn(x):
+            original = collections.OrderedDict(a=[1], b=[2])
+            copied = copy.deepcopy(original)
+            copied["a"][0] = 3
+            return x + original["a"][0] + copied["a"][0] + copied["b"][0]
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, fullgraph=True, backend="eager")(x), fn(x))
+
+    def test_copy_ordered_dict_nested(self):
+        def fn(x):
+            original = collections.OrderedDict(a=[1], b=[2])
+            copied = copy.copy(original)
+            copied["a"][0] = 3
+            return x + original["a"][0] + copied["b"][0]
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, fullgraph=True, backend="eager")(x), fn(x))
+
+    def test_deepcopy_ordered_dict_shared_value(self):
+        def fn(x):
+            shared = [1]
+            original = collections.OrderedDict(a=shared, b=shared)
+            copied = copy.deepcopy(original)
+            copied["a"][0] = 7
+            return x + 10 * copied["b"][0] + original["a"][0]
+
+        x = torch.randn(4)
+        self.assertEqual(
+            torch.compile(fn, fullgraph=True, backend="aot_eager")(x), fn(x)
+        )
+
+    def test_ordered_dict_reduce_iterator_type(self):
+        iterator_type = type(iter(collections.OrderedDict()))
+
+        def fn(x):
+            reduced = collections.OrderedDict(a=1).__reduce_ex__(4)
+            return x + (type(reduced[4]) is iterator_type)
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, fullgraph=True, backend="eager")(x), fn(x))
+
+    def test_ordered_dict_reduce_iterator_mutation(self):
+        def fn(x):
+            original = collections.OrderedDict(a=1, b=2)
+            items = original.__reduce_ex__(4)[4]
+            first = next(items)
+            original["b"] = 9
+            second = next(items)
+            return x + first[1] + second[1]
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, fullgraph=True, backend="eager")(x), fn(x))
+
+        def mutate_keys(x):
+            original = collections.OrderedDict(a=1, b=2)
+            items = original.__reduce_ex__(4)[4]
+            next(items)
+            original["c"] = 3
+            try:
+                next(items)
+            except RuntimeError:
+                return x + 1
+            return x + 2
+
+        self.assertEqual(
+            torch.compile(mutate_keys, fullgraph=True, backend="eager")(x),
+            mutate_keys(x),
+        )
+
     def test_deepcopy_dict(self):
         MY_DICT = {"a": 1, "b": 2.0, "c": None}
 
