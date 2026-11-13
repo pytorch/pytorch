@@ -87,10 +87,12 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfRocm,
@@ -323,6 +325,77 @@ def cleanup_dispatch_trace_metadata(mod: torch.export.ExportedProgram) -> None:
         ):
             continue
         del node.meta["custom"]
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@instantiate_parametrized_tests
+class TestExportRuntimeLowerBounds(TorchTestCase):
+    @parametrize("strict", [False, True])
+    @parametrize("condition", ["gt_one", "ne_one", "gt_zero"])
+    def test_specialized_shape_branch_lower_bound(self, strict, condition):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                if condition == "gt_one":
+                    pred = x.shape[0] > 1
+                elif condition == "ne_one":
+                    pred = x.shape[0] != 1
+                else:
+                    pred = x.shape[0] > 0
+                return x * 2 if pred else x + 100
+
+        m = M()
+        ep = torch.export.export(
+            m,
+            (torch.randn(4, 3),),
+            dynamic_shapes=({0: Dim.DYNAMIC},),
+            strict=strict,
+        )
+        gm = ep.module()
+        for size in (2, 4, 7):
+            x = torch.ones(size, 3)
+            self.assertEqual(gm(x), m(x))
+        for size in (0, 1):
+            with self.assertRaisesRegex((RuntimeError, AssertionError), ">= 2"):
+                gm(torch.ones(size, 3))
+
+    @parametrize("lower", [0, 1, 2, 3])
+    @parametrize("checker", ["python", "generated"])
+    def test_runtime_range_lower_bound(self, lower, checker):
+        from torch._export.utils import _check_input_constraints_for_graph
+        from torch.export._unlift import (
+            _convert_guards_code_to_fn,
+            _get_input_guards_for_graph,
+        )
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        ep = torch.export.export(
+            M(), (torch.ones(4, 3),), dynamic_shapes=({0: Dim.DYNAMIC},)
+        )
+        placeholders = [node for node in ep.graph.nodes if node.op == "placeholder"]
+        symbol = placeholders[0].meta["val"].shape[0].node.expr
+        constraints = {symbol: ValueRanges(lower, 8)}
+        for size in (0, 1, 2, 3, 8, 9):
+            args = (torch.ones(size, 3),)
+            flat_args, _ = pytree.tree_flatten_with_path((args, {}))
+            if checker == "python":
+                if lower <= size <= 8:
+                    _check_input_constraints_for_graph(placeholders, flat_args, constraints)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, ">=|<="):
+                        _check_input_constraints_for_graph(placeholders, flat_args, constraints)
+            else:
+                paths = [(pytree.MappingKey("x"),)]
+                guards = _get_input_guards_for_graph(placeholders, constraints, paths)
+                guards_fn = _convert_guards_code_to_fn(guards, paths)
+                if lower <= size <= 8:
+                    guards_fn(*args)
+                else:
+                    with self.assertRaisesRegex(AssertionError, ">=|<="):
+                        guards_fn(*args)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
