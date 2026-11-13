@@ -546,6 +546,12 @@ struct TORCH_API RecordFunction {
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);
 
+// Same as getStepCallbacksUnlessEmptyInline below. Out of line so that code
+// compiled against older headers, where this was the only version, still
+// links; new code should call the inline one.
+TORCH_API std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
+    RecordScope scope);
+
 namespace detail {
 // Global callbacks plus one per thread that has thread-local callbacks. Zero
 // means no thread can have active callbacks. May overcount (e.g. disabled
@@ -558,12 +564,12 @@ TORCH_API std::optional<StepCallbacks> getStepCallbacksUnlessEmptySlow(
 
 // Called for every operator call, so check for the common case of no
 // callbacks at all inline, without a call or thread-local lookup.
-inline std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
+inline std::optional<StepCallbacks> getStepCallbacksUnlessEmptyInline(
     RecordScope scope) {
   // Relaxed: a callback registered on another thread is picked up on a later
   // call, as with the version check behind the slow path.
-  if (C10_LIKELY(
-          detail::num_callback_sources.load(std::memory_order_relaxed) == 0)) {
+  if (detail::num_callback_sources.load(std::memory_order_relaxed) == 0)
+      [[likely]] {
     return std::nullopt;
   }
   return detail::getStepCallbacksUnlessEmptySlow(scope);

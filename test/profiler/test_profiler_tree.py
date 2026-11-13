@@ -4,6 +4,8 @@ import functools
 import os
 import re
 import textwrap
+import threading
+import time
 import traceback
 import unittest
 
@@ -547,6 +549,36 @@ class TestProfilerTree(_TestProfilerTreeBase):
                 torch/profiler/profiler.py(...): stop
                   ...""",
         )
+
+    @skipIfTorchDynamo("too slow")
+    @disable_gc()
+    def test_profiler_experimental_tree_with_idle_threads(self):
+        # Python threads that make no calls while profiling have no system TID.
+        # Their frames must still end up in a tree per thread: in one shared
+        # tree, a frame's parent is another thread's frame.
+        stop = threading.Event()
+        started = [threading.Event(), threading.Event()]
+
+        def idle(started):
+            started.set()
+            stop.wait()
+
+        threads = [threading.Thread(target=idle, args=(s,)) for s in started]
+        for t in threads:
+            t.start()
+        try:
+            for s in started:
+                s.wait()
+            # Let both threads block in stop.wait().
+            time.sleep(0.1)
+            with torch.profiler.profile(with_stack=True) as p:
+                torch.ones(1)
+            # Checks every frame's parent against its caller.
+            ProfilerTree.format(p.profiler)
+        finally:
+            stop.set()
+            for t in threads:
+                t.join()
 
 
 @unittest.skipIf(IS_ARM64, "Not working on ARM")
