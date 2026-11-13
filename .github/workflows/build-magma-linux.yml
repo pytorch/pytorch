@@ -51,6 +51,7 @@ jobs:
     strategy:
       matrix:
         include:
+          - { cuda_version: "135", desired_cuda: "13.5" }
           - { cuda_version: "134", desired_cuda: "13.4" }
           - { cuda_version: "132", desired_cuda: "13.2" }
           - { cuda_version: "129", desired_cuda: "12.9" }

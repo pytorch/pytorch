@@ -133,15 +133,24 @@ case "$tag" in
     INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11)
-    CUDA_VERSION=13.4.1
+    CUDA_VERSION=13.4.3
     ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
+  pytorch-linux-jammy-cuda13.5-cudnn9-py3-gcc11)
+    CUDA_VERSION=13.5.0
+    ANACONDA_PYTHON_VERSION=3.11
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    CUPTI_PYTHON=yes
+    ;;
   pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11-inductor-benchmarks)
-    CUDA_VERSION=13.4.1
+    CUDA_VERSION=13.4.3
     ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=11
     KATEX=yes
@@ -149,7 +158,7 @@ case "$tag" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-cuda13.4-cudnn9-py3.12-gcc11)
-    CUDA_VERSION=13.4.1
+    CUDA_VERSION=13.4.3
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     KATEX=yes
@@ -312,7 +321,7 @@ case "$tag" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13)
-    CUDA_VERSION=13.4.1
+    CUDA_VERSION=13.4.3
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
     ACL=yes
@@ -458,6 +467,7 @@ build_image() {
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
+       --build-arg "CUPTI_PYTHON=${CUPTI_PYTHON:-}" \
        --build-arg "PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL:-}" \
        --build-arg "PIP_PREFER_BINARY=${PIP_PREFER_BINARY:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
