@@ -1082,8 +1082,7 @@ std::function<py::object(py::object)> make_fake_device_stamp(
         t.device(),
         " tensor; handlers must return Meta or fake tensors, see "
         "Note [C++ fake op_impl outputs]");
-    at::set_and_normalize_fake_device(t.unsafeGetTensorImpl(), common_device);
-    t.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+    at::init_cpp_fake(t.unsafeGetTensorImpl(), common_device, mode);
     return obj;
   };
 }
@@ -1191,7 +1190,6 @@ ActiveFakeMode get_active_fake_mode() {
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
   py::object py_fake_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
-  TORCH_CHECK(!py_fake_mode.is_none(), "CppFakeTensorMode must be set on mode");
   return {std::move(mode), std::move(py_fake_mode)};
 }
 
@@ -1415,8 +1413,8 @@ bool ConcretePyInterpreterVTable::fake_infer_from_real_out(
       "infer_fake_from_real_out");
 }
 
-// Convert a real tensor to a meta tensor via the mode's converter, then stamp
-// it as a C++ fake on the real tensor's device.
+// Convert a real tensor to a C++ fake of the active mode through the mode's
+// converter (FakeTensorConverter.from_real_tensor).
 c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     const c10::intrusive_ptr<c10::TensorImpl>& real_impl) const {
   py::gil_scoped_acquire gil;
@@ -1432,8 +1430,9 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     // allow_non_fake_inputs this also re-fakeifies fakes from another mode; the
     // describer then reads the source's fake device, which Fake exclusion no
     // longer hides (see Note [C++ in_kernel_invocation]). from_real_tensor
-    // must only query the source's metadata and build outputs with an explicit
-    // meta device.
+    // must only query the source's metadata, build outputs with an explicit
+    // meta device, and run ops on the fakes it makes only under
+    // in_kernel_invocation_manager (as its set_ for a shared storage does).
     c10::impl::ExcludeDispatchKeyGuard exclude_fake(
         {c10::DispatchKeySet(c10::DispatchKey::Fake)});
     auto obj = converter.attr("from_real_tensor")(active.py_fake_mode, real);
@@ -1449,9 +1448,9 @@ bool ConcretePyInterpreterVTable::allow_non_fake_inputs() const {
   if (!override_val.is_none()) {
     return override_val.cast<bool>();
   }
-  auto mode = c10::impl::FakeTensorModeTLS::get_state();
-  TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
-  return mode->allow_non_fake_inputs_;
+  auto handle = c10::impl::FakeTensorModeTLS::get_state();
+  TORCH_CHECK(handle != nullptr, "FakeTensorMode must be active");
+  return handle->allow_non_fake_inputs_;
 }
 
 PyObject* ConcretePyInterpreterVTable::fake_run_real_op(

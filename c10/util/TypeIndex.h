@@ -2,10 +2,10 @@
 
 #include <c10/util/ConstexprCrc.h>
 #include <c10/util/IdWrapper.h>
-#include <c10/util/string_view.h>
 #include <cstdint>
 #include <ostream>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 namespace c10::util {
@@ -27,36 +27,41 @@ struct type_index final : IdWrapper<type_index, uint64_t> {
 namespace detail {
 
 template <typename T>
-inline constexpr c10::c10_string_view fully_qualified_type_name_impl() {
+inline constexpr std::string_view fully_qualified_type_name_impl() {
 #if defined(_MSC_VER) && !defined(__clang__)
   constexpr std::string_view fun_sig = __FUNCSIG__;
-#if defined(__NVCC__)
   constexpr std::string_view prefix =
-      "c10::basic_string_view<char> c10::util::detail::fully_qualified_type_name_impl<";
+      "c10::util::detail::fully_qualified_type_name_impl<";
+#if defined(__NVCC__)
   constexpr std::string_view suffix = ">()";
 #else
-  constexpr std::string_view prefix =
-      "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<";
   constexpr std::string_view suffix = ">(void)";
 #endif
-#elif defined(__clang__)
+#elif defined(__clang__) || defined(__GNUC__)
   constexpr std::string_view fun_sig = __PRETTY_FUNCTION__;
-  constexpr std::string_view prefix =
-      "c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [T = ";
+  // Clang uses [T = ...], while GCC and NVCC use [with T = ...].
+  constexpr std::string_view prefix = "T = ";
   constexpr std::string_view suffix = "]";
-#elif defined(__GNUC__)
-  constexpr std::string_view fun_sig = __PRETTY_FUNCTION__;
-  constexpr std::string_view prefix =
-      "constexpr c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ";
-  constexpr std::string_view suffix =
-      "; c10::c10_string_view = c10::basic_string_view<char>]";
 #endif
+  constexpr auto prefix_pos = fun_sig.find(prefix);
+  constexpr auto start = prefix_pos + prefix.size();
+  constexpr auto end = fun_sig.size() - suffix.size();
 #if !defined(__CUDA_ARCH__) && !defined(__CUDA_ARCH_LIST__)
-  static_assert(fun_sig.starts_with(prefix));
+  static_assert(prefix_pos != std::string_view::npos);
   static_assert(fun_sig.ends_with(suffix));
 #endif
-  return fun_sig.substr(
-      prefix.size(), fun_sig.size() - prefix.size() - suffix.size());
+#if defined(__GNUC__) && !defined(__clang__)
+  // GCC appends the expansion of the std::string_view return type alias.
+  constexpr auto alias_pos = fun_sig.rfind("; std::string_view = ");
+#if !defined(__CUDA_ARCH__) && !defined(__CUDA_ARCH_LIST__)
+  static_assert(alias_pos != std::string_view::npos);
+#endif
+  constexpr auto type_end =
+      alias_pos == std::string_view::npos ? end : alias_pos;
+#else
+  constexpr auto type_end = end;
+#endif
+  return std::string_view(fun_sig.data() + start, type_end - start);
 }
 
 #if !defined(__CUDA_ARCH__) && !defined(__CUDA_ARCH_LIST__)
@@ -110,8 +115,7 @@ inline constexpr type_index get_type_index<std::string>() {
 
 template <typename T>
 inline constexpr std::string_view get_fully_qualified_type_name() noexcept {
-  return static_cast<std::string_view>(
-      detail::fully_qualified_type_name_impl<T>());
+  return detail::fully_qualified_type_name_impl<T>();
 }
 } // namespace c10::util
 

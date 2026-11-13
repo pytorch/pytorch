@@ -38,13 +38,7 @@ from torch._C._dynamo import (
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
-from ..exc import (
-    ObservedAttributeError,
-    raise_attribute_error,
-    raise_type_error,
-    unimplemented,
-    Unsupported,
-)
+from ..exc import raise_attribute_error, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import format_source_range, istype
@@ -595,6 +589,13 @@ def getset_set(name: str) -> Callable[..., None]:
         store_attr_mutation(tx, vt, name, value)
 
     return setter
+
+
+def attr_getset(name: str, obj: Callable[[Any], Any]) -> GetSet:
+    """GetSet for a plain writable attribute: read via getattr(obj(self), name),
+    written through store_attr_mutation."""
+    getter = getset_load_or_build(lambda vt: getattr(obj(vt), name), name)
+    return GetSet(getter, getset_set(name))
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -1800,9 +1801,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     """
 
     # The CPython type(s) this VT is designed to represent.
-    # Single type or tuple of types. None means no static CPython type mapping
-    # (e.g., dynamic types like UserDefinedObjectVariable, or Dynamo-internal VTs).
-    _cpython_type: type | tuple[type, ...] | None = None
+    # Single type or tuple of types. None means no static CPython type mapping.
+    # Read per class (own __dict__), not inherited. The base class itself
+    # represents plain `object()` instances, like PyBaseObject_Type:
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L7243
+    _cpython_type: type | tuple[type, ...] | None = object
 
     # Declarative named-method table (analogous to CPython's tp_methods): maps a
     # method name to a Method describing its handler and calling convention.
@@ -1986,6 +1989,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Raises:
             NotImplementedError: If the method is not implemented in a subclass.
         """
+        if type(self) is VariableTracker:
+            return object
         try:
             return type(self.as_python_constant())
         except NotImplementedError:
@@ -2391,35 +2396,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
-        """Dynamo's hasattr(): try tp_getattro_impl, catch AttributeError.
-
-        Mirrors CPython's PyObject_HasAttr (via PyObject_GetOptionalAttr):
-        call tp_getattro, suppress AttributeError via PyErr_Clear, return
-        True/False.
-        https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
-        """
-        result = self._hasattr_check_side_effects(tx, name)
-        if result is not None:
-            return result
-
-        try:
-            self.tp_getattro_impl(tx, name)
-            return variables.ConstantVariable.create(True)
-        except ObservedAttributeError:
-            tx.exn_vt_stack.clear_current_exception()
-            return variables.ConstantVariable.create(False)
-        except (NotImplementedError, Unsupported):
-            pass
-
-        unimplemented(
-            gb_type="Unsupported hasattr call",
-            context=f"call_obj_hasattr {self} {name}",
-            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
-            hints=[
-                f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
+        """VT-specific hasattr shortcut. generic_hasattr_str only calls an
+        override; the default raises so an override can defer via super()."""
+        # Do not overload this unless you really need it: e.g. non-trivial
+        # hasattr behavior which cannot be captured by the generic_hasattr function.
+        raise NotImplementedError
 
     def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """
@@ -2974,7 +2955,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         Returns NO_SUCH_SUBOBJ if no concrete Python object is available.
         """
-
+        if type(self) is VariableTracker:
+            return self.value
         try:
             return self.as_python_constant()
         except NotImplementedError:
@@ -3481,8 +3463,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         mutation_type: MutationType | None = None,
         source_location: SourceLocation | None = None,
         dict_vt: variables.DunderDictVariable | None = None,
+        value: object = NO_SUCH_SUBOBJ,
     ) -> None:
         super().__init__()
+        # Only bare VariableTrackers (plain object() instances) pass a value;
+        # subclasses manage their own self.value.
+        if value is not NO_SUCH_SUBOBJ:
+            self.value: Any = value
         self.source = source
         self.source_location = source_location
         self.mutation_type = mutation_type

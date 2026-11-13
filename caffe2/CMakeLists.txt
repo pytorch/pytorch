@@ -716,7 +716,9 @@ if(USE_ROCM)
           endif()
         endforeach()
         set_source_files_properties(${ASYNC_MM_HIP_FILE} PROPERTIES
-          COMPILE_DEFINITIONS USE_ROCM_ASYNC_MM
+          # USE_NEW_UNIFIED_FRAMEWORK=0: see CK_SDPA_EXTRA_HIPCC_OPTIONS in
+          # aten/src/ATen/CMakeLists.txt.
+          COMPILE_DEFINITIONS "USE_ROCM_ASYNC_MM;USE_NEW_UNIFIED_FRAMEWORK=0"
           COMPILE_OPTIONS "${_async_mm_no_arch_opts}")
       endif()
     endif()
@@ -1518,10 +1520,6 @@ if(BUILD_TEST)
       ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
       ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
     )
-    add_subdirectory(
-      ${TORCH_ROOT}/test/mobile/lightweight_dispatch
-      ${CMAKE_BINARY_DIR}/test_codegen_unboxing
-    )
   else()
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
     add_subdirectory(${TORCH_ROOT}/test/cpp/lazy ${CMAKE_BINARY_DIR}/test_lazy)
@@ -1763,32 +1761,26 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 endif()
 
-if($ENV{TH_BINARY_BUILD})
-  if(NOT MSVC AND USE_CUDA AND NOT APPLE)
-    # Note [Extra MKL symbols for MAGMA in torch_cpu]
-    #
-    # When we build CUDA libraries and link against MAGMA, MAGMA makes use of
-    # some BLAS symbols in its CPU fallbacks when it has no GPU versions
-    # of kernels.  Previously, we ensured the BLAS symbols were filled in by
-    # MKL by linking torch_cuda with BLAS, but when we are statically linking
-    # against MKL (when we do wheel builds), this actually ends up pulling in a
-    # decent chunk of MKL into torch_cuda, inflating our torch_cuda binary
-    # size by 8M.  torch_cpu exposes most of the MKL symbols we need, but
-    # empirically we determined that there are four which it doesn't provide.  If
-    # we link torch_cpu with these --undefined symbols, we can ensure they
-    # do get pulled in, and then we can avoid statically linking in MKL to
-    # torch_cuda at all!
-    #
-    # We aren't really optimizing for binary size on Windows (and this link
-    # line doesn't work on Windows), so don't do it there.
-    #
-    # These linker commands do not work on OS X, do not attempt this there.
-    # (It shouldn't matter anyway, though, because OS X has dropped CUDA support)
-    foreach(_symb IN ITEMS slaed0 daled0 dormql sormql zheevd cheevd)
-      target_link_options(torch_cpu PRIVATE "LINKER:--undefined=mkl_lapack_${_symb}")
-    endforeach()
-
-  endif()
+if(CAFFE2_USE_MKL AND USE_CUDA AND NOT MSVC)
+  # Note [Extra MKL symbols for MAGMA in torch_cpu]
+  #
+  # When we build CUDA libraries and link against MAGMA, MAGMA makes use of
+  # some BLAS symbols in its CPU fallbacks when it has no GPU versions
+  # of kernels.  Previously, we ensured the BLAS symbols were filled in by
+  # MKL by linking torch_cuda with BLAS, but when we are statically linking
+  # against MKL (when we do wheel builds), this actually ends up pulling in a
+  # decent chunk of MKL into torch_cuda, inflating our torch_cuda binary
+  # size by 8M.  torch_cpu exposes most of the MKL symbols we need, but
+  # empirically we determined that there are four which it doesn't provide.  If
+  # we link torch_cpu with these --undefined symbols, we can ensure they
+  # do get pulled in, and then we can avoid statically linking in MKL to
+  # torch_cuda at all!
+  #
+  # We aren't really optimizing for binary size on Windows (and this link
+  # line doesn't work on Windows), so don't do it there.
+  foreach(_symb IN ITEMS slaed0 daled0 dormql sormql zheevd cheevd)
+    target_link_options(torch_cpu PRIVATE "LINKER:--undefined=mkl_lapack_${_symb}")
+  endforeach()
 endif()
 
 target_link_libraries(torch_cpu PUBLIC c10)
