@@ -1627,35 +1627,45 @@ static void apply_syevj_batched(const Tensor& values, const Tensor& vectors, con
 
   auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
   auto& host_allocator = *at::getCPUAllocator();
+  // All full chunks have the same workspace requirements. Reuse their
+  // allocations; only re-query if the batch size changes (e.g. the tail).
+  int64_t queried_batch_size = -1;
+  size_t worksize_device = 0;
+  size_t worksize_host = 0;
+  c10::DataPtr work_device_data;
+  c10::DataPtr work_host_data;
   for (int64_t start = 0; start < batch_size;) {
     int64_t chunk_size = std::min<int64_t>(max_batch_size, batch_size - start);
     auto* chunk_vectors = vectors_data + start * matrix_stride;
     auto* chunk_values = values_data + start * n;
     auto* chunk_infos = infos_data + start;
 
-    size_t worksize_device;
-    size_t worksize_host;
+    if (chunk_size != queried_batch_size) {
 #ifndef USE_ROCM
-    while (true) {
-      auto status = at::cuda::solver::xsyevBatched_bufferSize_unchecked<scalar_t>(
+      while (true) {
+        auto status = at::cuda::solver::xsyevBatched_bufferSize_unchecked<scalar_t>(
+            handle, syev_params, jobz, uplo, n, chunk_vectors, lda,
+            chunk_values, &worksize_device, &worksize_host, chunk_size);
+        if (status == CUSOLVER_STATUS_INVALID_VALUE && chunk_size > 1) {
+          chunk_size /= 2;
+          max_batch_size = chunk_size;
+          continue;
+        }
+        TORCH_CUSOLVER_CHECK(status);
+        break;
+      }
+#else
+      at::cuda::solver::xsyevBatched_bufferSize<scalar_t>(
           handle, syev_params, jobz, uplo, n, chunk_vectors, lda,
           chunk_values, &worksize_device, &worksize_host, chunk_size);
-      if (status == CUSOLVER_STATUS_INVALID_VALUE && chunk_size > 1) {
-        chunk_size /= 2;
-        max_batch_size = chunk_size;
-        continue;
-      }
-      TORCH_CUSOLVER_CHECK(status);
-      break;
-    }
-#else
-    at::cuda::solver::xsyevBatched_bufferSize<scalar_t>(
-        handle, syev_params, jobz, uplo, n, chunk_vectors, lda,
-        chunk_values, &worksize_device, &worksize_host, chunk_size);
 #endif
+      queried_batch_size = chunk_size;
+      // Keep the previous buffers alive until their replacement is ready.
+      // The allocator observes the current stream when recycling them.
+      work_device_data = device_allocator.allocate(worksize_device);
+      work_host_data = host_allocator.allocate(worksize_host);
+    }
 
-    auto work_device_data = device_allocator.allocate(worksize_device);
-    auto work_host_data = host_allocator.allocate(worksize_host);
     at::cuda::solver::xsyevBatched<scalar_t>(
         handle, syev_params, jobz, uplo, n, chunk_vectors, lda,
         chunk_values, work_device_data.get(), worksize_device,
