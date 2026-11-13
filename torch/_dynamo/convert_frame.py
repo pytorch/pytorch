@@ -1496,7 +1496,7 @@ def fullgraph_capture(
     """
     frame = _get_frame(mod, args, kwargs)
 
-    with compile_context(CompileContext(get_compile_id({}))):
+    with compile_context(CompileContext(get_compile_id({}), is_aot_capture=True)):
         return _fullgraph_capture_frame(
             frame,
             constraints=constraints,

@@ -79,12 +79,31 @@ if TYPE_CHECKING:
 def vt_identity_compare(
     left: VariableTracker,
     right: VariableTracker,
+    *,
+    guard_identity: bool = True,
 ) -> "VariableTracker | None":
     """Try to determine Python identity (left is right) at trace time.
 
     Returns ConstantVariable(True/False) if determinable, else None.
     Mirrors the logic in BuiltinVariable's handle_is handler.
     """
+    # Binding equality permits fresh wrappers; identity observations do not.
+    if guard_identity:
+        left, right = left.unwrap(), right.unwrap()
+        if (
+            isinstance(left, variables.BoundBuiltinMethodVariable)
+            and isinstance(right, variables.BoundBuiltinMethodVariable)
+            and type(left.value) is types.BuiltinMethodType
+            and type(right.value) is types.BuiltinMethodType
+            and left.value == right.value
+        ):
+            from ..symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
+            for arg in (left, right):
+                if arg.source is not None:
+                    arg.get_id(tx)
+                    install_guard(arg.source.make_guard(GuardBuilder.ID_MATCH))
     if left is right:
         return ConstantVariable.create(True)
 
@@ -2044,7 +2063,7 @@ def generic_richcompare_bool(
     """
     if op not in ("__eq__", "__ne__"):
         raise AssertionError(f"generic_richcompare_bool only supports eq/ne, got {op}")
-    identity = vt_identity_compare(v, w)
+    identity = vt_identity_compare(v, w, guard_identity=False)
     if identity is not None and identity.as_python_constant():
         return ConstantVariable.create(op == "__eq__")
     return generic_richcompare(tx, v, w, op)

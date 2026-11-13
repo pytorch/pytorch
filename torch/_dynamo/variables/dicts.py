@@ -499,6 +499,22 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
 
+    def check_base_dict_mutation(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> None:
+        if (
+            name in ("__init__", "__ior__", "__setitem__", "__delitem__")
+            or name in ("clear", "pop", "popitem", "setdefault", "update")
+        ) and issubclass(self.python_type(), collections.OrderedDict):
+            unimplemented(
+                gb_type="dict storage mutation on OrderedDict",
+                context=f"dict.{name}",
+                explanation="Base dict writes bypass OrderedDict's linked storage.",
+                hints=["Use OrderedDict methods to preserve its linked storage."],
+                skip_frame=True,
+                apply_to_code=False,
+            )
+
     def install_dict_contains_guard(
         self,
         tx: "InstructionTranslatorBase",

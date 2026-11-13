@@ -3,8 +3,8 @@ from __future__ import annotations
 import builtins
 import collections
 import functools
-import inspect
 import operator
+import types
 from typing import Any, TYPE_CHECKING
 
 from .. import config
@@ -340,7 +340,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         def _helper(value: object) -> bool:
             # TODO: Add support for more types
             return (
-                inspect.isbuiltin(value)
+                issubclass(type(value), types.BuiltinMethodType)
                 or issubclass(type(value), type)
                 or is_function_or_wrapper(value)
             )
@@ -350,7 +350,8 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
                 "is_hashable() called on an already realized LazyVariableTracker"
             )
         value = self._cache.value
-        if isinstance(value, tuple):
+        # Subclasses can override iteration or hashing; trace their callbacks.
+        if type(value) is tuple:
             return all(_helper(v) for v in value)
         return _helper(value)
 

@@ -1507,8 +1507,9 @@ def is_function_or_wrapper(
 def is_function(
     value: object,
 ) -> TypeIs[_FuncTypes]:
-    return isinstance(
-        value,
+    # Use actual types to ignore spoofed __class__ while retaining CPython subtypes.
+    return issubclass(
+        type(value),
         (
             types.FunctionType,
             types.BuiltinFunctionType,
@@ -5709,8 +5710,10 @@ def has_custom_metaclass_accessor(klass: type, name: str) -> bool:
 
 
 def find_bound_builtin_method_descriptor(value: object) -> object | None:
-    if not isinstance(value, types.BuiltinMethodType):
+    if not issubclass(type(value), types.BuiltinMethodType):
         return None
+
+    value = cast(types.BuiltinMethodType, value)
 
     receiver = value.__self__
     receiver_is_type = issubclass(type(receiver), type)
