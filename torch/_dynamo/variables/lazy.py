@@ -294,18 +294,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
                 value, (LazyConstantVariable, ComputedLazyConstantVariable)
             )
             if keep_lazy:
-                if isinstance(value, ComputedLazyConstantVariable):
-                    if value.is_realized():
-                        result = cls.realize_all(
-                            value.realize(), cache, allow_lazy_constant=True
-                        )
-                    else:
-                        # Output bytecode recomputes the value; operands only need TYPE_MATCH
-                        for lazy_var in value._cache.lazy_vars:
-                            lazy_var._ensure_type_guard()
-                        result = value
-                else:
-                    result = value
+                result = value
             else:
                 result = cls.realize_all(
                     value.realize(), cache, allow_lazy_constant=allow_lazy_constant
@@ -705,6 +694,8 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
     def reconstruct(self, codegen: Any) -> None:
         from ..bytecode_transformation import create_call_function
 
+        # Output bytecode re-runs the op; operand types must match the traced ones
+        self._ensure_operand_type_guards()
         cache = self._cache
         name = cache.op.__name__
         module = "builtins" if getattr(builtins, name, None) is cache.op else "operator"
