@@ -9,7 +9,11 @@ import torch.distributed._symmetric_memory as symm_mem
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
-from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
+from torch.distributed.fsdp._fully_shard._fsdp_api import (
+    AllGather,
+    AllReduce,
+    ReduceScatter,
+)
 from torch.distributed.tensor import DTensor
 
 from ._fsdp_api import _ReduceOp
@@ -167,6 +171,17 @@ class SymmMemAllGather(SymmMemAllocMixin, AllGather):
             group=group,
             async_op=async_op,
         )
+
+
+class DefaultAllReduce(DefaultAllocMixin, AllReduce):
+    def __call__(
+        self,
+        tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        op: _ReduceOp,
+        async_op: bool = False,
+    ) -> dist.Work | None:
+        return dist.all_reduce(tensor, group=group, op=op, async_op=async_op)
 
 
 class DefaultReduceScatter(DefaultAllocMixin, ReduceScatter):
@@ -663,6 +678,7 @@ def foreach_reduce(
     force_sum_reduction_for_comms: bool = False,
     *,
     prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
+    all_reduce_comm: AllReduce = DefaultAllReduce(),
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -777,10 +793,8 @@ def foreach_reduce(
             else:
                 all_reduce_stream.wait_stream(current_stream)
             with device_handle.stream(all_reduce_stream):
-                dist.all_reduce(
-                    reduce_output,
-                    group=all_reduce_group,
-                    op=all_reduce_op,
+                all_reduce_comm(
+                    tensor=reduce_output, group=all_reduce_group, op=all_reduce_op
                 )
                 # Keep refs to the reduce-dtype AR buffer + completion
                 # event so FSDPParamGroup._all_reduce_state can hold them
