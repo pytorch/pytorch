@@ -625,12 +625,26 @@ void metal_gemm(const Tensor& a,
   const auto staged_bm = params.m <= kMatmulBlock / 4 ? kMatmulBlock / 4
       : params.m <= kMatmulBlock / 2 || !apple10      ? kMatmulBlock / 2
                                                       : kMatmulBlock;
-  const auto bm = staged ? staged_bm : k_groups ? kMatmulBlock / 2 : use_mpp ? mpp_bm : matmul_tile_rows(params.m);
-  const auto bn = staged ? kMatmulStagedBlock : k_groups ? kMatmulBlock : use_mpp ? mpp_bn : kMatmulTileN;
-  const auto simdgroups = staged || k_groups ? kMatmulKGroups
-      : use_mpp                              ? kMatmulBlockSimdgroups
-                                             : matmul_simdgroups(bm, bn);
-  const bool use_u32 = !use_mpp && offsetsFitIn<int32_t>(a, b, out, bias_);
+  // K = 1 without a bias, with aligned rows of b and out for the loads of matmul_outer.
+  const uint64_t outer_align =
+      params.out_stride_m | params.out_batch | params.b_batch | out.storage_offset() | b.storage_offset();
+  const bool outer = params.k == 1 && !add && params.b_stride_n == 1 && params.out_stride_n == 1 &&
+      outer_align * out.element_size() % kMatmulOuterBytes == 0;
+  const auto bm = outer ? 1u
+      : staged          ? staged_bm
+      : k_groups        ? kMatmulBlock / 2
+      : use_mpp         ? mpp_bm
+                        : matmul_tile_rows(params.m);
+  const auto bn = outer ? static_cast<uint32_t>(kMatmulOuterThreads * kMatmulOuterBytes / out.element_size())
+      : staged          ? kMatmulStagedBlock
+      : k_groups        ? kMatmulBlock
+      : use_mpp         ? mpp_bn
+                        : kMatmulTileN;
+  const auto simdgroups = outer ? kMatmulOuterThreads / c10::metal::simdgroup_size
+      : staged || k_groups      ? kMatmulKGroups
+      : use_mpp                 ? kMatmulBlockSimdgroups
+                                : matmul_simdgroups(bm, bn);
+  const bool use_u32 = !use_mpp && !outer && offsetsFitIn<int32_t>(a, b, out, bias_);
   const int64_t max_splits = k_groups && !staged
       ? std::min<int64_t>(params.k / kMatmulSplitMinK, full_grid / (kMatmulSplitGridShare * blocks))
       : 1;
@@ -646,14 +660,15 @@ void metal_gemm(const Tensor& a,
   }
   const auto& dst = k_split ? partials : out;
   const auto dtype = scalarToMetalTypeString(out);
-  const auto name = staged ? fmt::format("matmul_mpp_staged_{}_bm{}", dtype, bm)
-      : use_mpp            ? fmt::format("matmul_mpp_{}{}{}_{}_bm{}",
+  const auto name = outer ? fmt::format("matmul_outer_{}", dtype)
+      : staged            ? fmt::format("matmul_mpp_staged_{}_bm{}", dtype, bm)
+      : use_mpp           ? fmt::format("matmul_mpp_{}{}{}_{}_bm{}",
                               k_groups ? "kg_" : "",
                               params.a_stride_k == 1 ? 'n' : 't',
                               params.b_stride_k == 1 ? 't' : 'n',
                               dtype,
                               bm)
-                           : fmt::format("matmul_simd_{}_bm{}{}", dtype, bm, mtlIdxSuffix(use_u32));
+                          : fmt::format("matmul_simd_{}_bm{}{}", dtype, bm, mtlIdxSuffix(use_u32));
   const auto pso = lib.getPipelineStateForFunc(name);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {

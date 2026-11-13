@@ -74,6 +74,52 @@ INSTANTIATE_MATMUL_SIMD_DTYPE(float);
 INSTANTIATE_MATMUL_SIMD_DTYPE(half);
 INSTANTIATE_MATMUL_SIMD_DTYPE(bfloat);
 
+// out = alpha * a * b for K = 1, with unit strides along N.
+template <typename T>
+kernel void matmul_outer(
+    device const T* a [[buffer(0)]],
+    device const T* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    device const T* bias [[buffer(3)]],
+    constant MatmulParams<uint64_t>& p [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]]) {
+  using V = vec<T, 4>;
+  constexpr uint VEC = kMatmulOuterBytes / sizeof(T);
+  const uint64_t col = (uint64_t(tgid.x) * kMatmulOuterThreads + tid) * VEC;
+  if (col >= p.n) {
+    return;
+  }
+  const float s =
+      p.alpha * float(a[tgid.z * p.a_batch + tgid.y * p.a_stride_m]);
+  device const T* src = b + tgid.z * p.b_batch + col;
+  device T* dst = out + tgid.z * p.out_batch + tgid.y * p.out_stride_m + col;
+  if (col + VEC <= p.n) {
+    for (uint v = 0; v < VEC; v += 4) {
+      *reinterpret_cast<device V*>(dst + v) =
+          V(s * float4(*reinterpret_cast<device const V*>(src + v)));
+    }
+  } else {
+    for (uint e = 0; col + e < p.n; ++e) {
+      dst[e] = T(s * float(src[e]));
+    }
+  }
+}
+
+#define INSTANTIATE_MATMUL_OUTER(T)                                       \
+  template [[host_name("matmul_outer_" #T)]] kernel void matmul_outer<T>( \
+      device const T*,                                                    \
+      device const T*,                                                    \
+      device T*,                                                          \
+      device const T*,                                                    \
+      constant MatmulParams<uint64_t>&,                                   \
+      uint3,                                                              \
+      uint)
+
+INSTANTIATE_MATMUL_OUTER(float);
+INSTANTIATE_MATMUL_OUTER(half);
+INSTANTIATE_MATMUL_OUTER(bfloat);
+
 #if C10_METAL_HAS_MPP
 template <typename T, int BM, bool TA, bool TB, int KG = 1>
 [[max_total_threads_per_threadgroup(kMatmulKGroups * simdgroup_size)]]
