@@ -2132,7 +2132,9 @@ if(BUILD_TEST)
               # Tests compare vectorized code and scalar references compiled
               # in the same file, often from the same source (e.g. complex
               # division): contracting them into FMAs differently would round
-              # them differently.
+              # them differently. This also applies to the vectorized code
+              # under test, which is inlined, unlike in kernels, which keep the
+              # compiler's default.
               target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE -Wno-ignored-qualifiers -ffp-contract=off)
         endif(NOT MSVC)
         add_test(NAME ${test_name}_${CPU_CAPABILITY} COMMAND $<TARGET_FILE:${test_name}_${CPU_CAPABILITY}>)
