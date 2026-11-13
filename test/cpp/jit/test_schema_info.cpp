@@ -98,6 +98,16 @@ TEST(SchemaInfoIsMutableTest, BatchNorm) {
   ASSERT_FALSE(schema_info.is_mutable("running_var"));
 }
 
+TEST(SchemaInfoIsMutableTest, RReluWithNoise) {
+  SchemaInfo schema_info(
+      "aten::rrelu_with_noise(Tensor self, Tensor(b!) noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor");
+  ASSERT_TRUE(schema_info.is_mutable("noise"));
+  schema_info.addArgumentValue("training", false);
+  ASSERT_FALSE(schema_info.is_mutable("noise"));
+  schema_info.addArgumentValue("training", true);
+  ASSERT_TRUE(schema_info.is_mutable("noise"));
+}
+
 TEST(SchemaInfoIsNonDeterministicTest, Basic) {
   SchemaInfo deterministic_schema_info(
       "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
