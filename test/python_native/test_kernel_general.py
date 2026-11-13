@@ -646,7 +646,7 @@ class TestKernelGeneral(TestCase):
         self.assertEqual(kg.ReduceBlock(**opted).tile.uniform_tree_loads, 1024 // 128)
         hint = (
             "(the flag is not inherited; a WelfordOps subclass that keeps leaf, combine "
-            "and their helpers may set has_combine_equal = True to opt in)"
+            "and their helpers must set has_combine_equal = True)"
         )
         welford = "a trait with has_combine_equal, got {} " + hint
         no_method = "a trait with combine_equal, got FlaggedSum, which sets has_combine_equal without it"
