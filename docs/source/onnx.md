@@ -84,7 +84,82 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     :noindex:
 .. autofunction:: is_in_onnx_export
     :noindex:
+.. autofunction:: register_custom_translation
+    :noindex:
+.. autofunction:: unregister_custom_translation
+    :noindex:
+.. autofunction:: get_translation_builder
+    :noindex:
 ```
+
+### Native custom translations
+
+Global translations apply to subsequent `dynamo=True` exports. They build ONNX
+IR directly, without ONNX Script evaluation. For example, to replace `aten.add`
+with an equivalent explicit translation:
+
+```python
+import torch
+import onnx_ir as ir
+
+@torch.onnx.register_custom_translation(torch.ops.aten.add.Tensor)
+def add(op, self: ir.Value, other: ir.Value, alpha: float = 1):
+    if alpha != 1:
+        other = op.Mul(other, alpha)
+    return op.Add(self, other)
+
+class Model(torch.nn.Module):
+    def forward(self, x, y):
+        return torch.add(x, y, alpha=2)
+
+try:
+    program = torch.onnx.export(Model(), (torch.ones(2), torch.ones(2)))
+finally:
+    torch.onnx.unregister_custom_translation(torch.ops.aten.add.Tensor)
+```
+
+Direct registration, `register_custom_translation(target, function)`, returns the
+same callable as the decorator form. `opset_version` is a minimum; the highest
+compatible variant is selected separately for real and `is_complex=True` inputs.
+Duplicate keys raise an error unless `replace=True`; replacement and unregister
+affect only that exact target/complex/minimum-opset variant. Missing unregister
+keys raise `KeyError`.
+
+The exporter injects a `TranslationContext` as the first argument of each native
+custom translation. Pass it explicitly to helpers. Named ONNX methods use the
+requested opset's schema: a fixed single output returns an `ir.Value`, fixed
+multiple outputs return a tuple, and optional/variadic outputs require explicit
+arity, for example `op.Split(x, outputs=2)`. Use `op.builder` for raw tuple-returning
+`call`, typed constants, custom-domain nodes, functions and subgraphs. No ambient
+builder lookup is necessary. The existing `get_translation_builder` getter remains
+available only for compatibility with callers explicitly activating a raw
+builder. Native exporter invocation does not install an ambient builder.
+
+Export-local `custom_translation_table` overrides globals, which override
+built-ins. Existing ONNX Script functions in that table remain supported. Global
+state is snapshotted before model capture: registrations changed by model code or
+another thread affect only later exports. Registration never loads ONNX Script or
+the built-in operator library.
+
+The builder's `call` returns a tuple and converts Python constants according to
+ONNX schemas, but never promotes or casts tensors. Use explicit `Cast`,
+`Reshape`/`Concat`, sequence and control-flow nodes as necessary. Raw/custom
+operators use `node(..., output_types=..., domain=..., version=...)`; local IR
+functions use `call_function`. Optional `signature` metadata uses
+`onnx_ir.schemas.OpSignature` with parameter names matching the Python callable;
+native IR tensor constraints and shared homogeneous bindings are checked before
+invocation. `torch.onnx.ops.symbolic` is a separate FX-level API.
+
+Arithmetic and elementwise built-ins are being migrated to direct ONNX IR
+construction in PyTorch. Native implementations use explicit casts and represent
+complex tensors with a trailing dimension of size two for real and imaginary
+components. Real/complex and opset eligibility select an implementation; tensor
+dtypes do not select overloads.
+
+Until all built-ins are migrated, legacy translations still use their isolated
+ONNX Script evaluator path. When a native value crosses into that path, an
+`Identity` supplies the legacy Python-operator interface; normal optimization
+can remove this compatibility node.
 
 ### Classes
 

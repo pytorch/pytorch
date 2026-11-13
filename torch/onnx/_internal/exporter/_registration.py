@@ -13,22 +13,25 @@ https://github.com/pytorch/pytorch/blob/6aa5bb1a76dee8112f1a9e7c194c790b5cdc6462
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import logging
 import math
 import operator
 import types
 from collections.abc import Callable
-from typing import Literal, TypeAlias
+from typing import Literal, TYPE_CHECKING, TypeAlias
 
 import torch
 import torch._ops
-from torch.onnx._internal._lazy_import import onnx_ir as ir, onnxscript, onnxscript_apis
-from torch.onnx._internal.exporter import _constants, _schemas
+from torch.onnx._internal._lazy_import import onnxscript_apis
+from torch.onnx._internal.exporter import _constants, _custom_translation
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
 
-TorchOp: TypeAlias = torch._ops.OpOverload | types.BuiltinFunctionType | Callable
+if TYPE_CHECKING:
+    import onnx_ir as ir
+
+
+TorchOp: TypeAlias = torch._ops.OpOverload | types.BuiltinFunctionType | Callable | str
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,10 @@ class OnnxDecompMeta:
 
     def __post_init__(self) -> None:
         if self.signature is None and not self.skip_signature_inference:
+            import onnxscript
+
+            from torch.onnx._internal.exporter import _schemas
+
             try:
                 if isinstance(self.onnx_function, onnxscript.OnnxFunction):
                     signature = _schemas.op_signature_from_function(
@@ -102,10 +109,6 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
         return getattr(operator, op_name)
     if namespace == "math":
         return getattr(math, op_name)
-    if namespace == "torchvision":
-        if importlib.util.find_spec("torchvision") is None:
-            logger.warning("torchvision is not installed. Skipping %s", qualified_name)
-            return None
     try:
         op_packet = getattr(getattr(torch.ops, namespace), op_name)
         if maybe_overload:
@@ -154,16 +157,30 @@ class ONNXRegistry:
         return self._opset_version
 
     @classmethod
-    def from_torchlib(cls, opset_version=_constants.TORCHLIB_OPSET) -> ONNXRegistry:
+    def from_torchlib(
+        cls,
+        opset_version=_constants.TORCHLIB_OPSET,
+        *,
+        custom_translations: tuple[_custom_translation.NativeTranslation, ...]
+        | None = None,
+    ) -> ONNXRegistry:
         """Populates the registry with ATen functions from torchlib.
 
         Args:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
+        if custom_translations is None:
+            custom_translations = _custom_translation.snapshot()
         registry = cls()
         registry._opset_version = opset_version
         for meta in _torchlib_registry.get_torchlib_ops():
-            registry._register(meta.fx_target, meta)
+            target = meta.fx_target
+            if isinstance(target, str):
+                # Resolve optional operators only if their namespace is already loaded.
+                # Keep unavailable/version-specific aliases discoverable by qualified name.
+                target = _get_overload(target) or target
+                meta = dataclasses.replace(meta, fx_target=target)
+            registry._register(target, meta)
 
         # TODO(justinchuby): Remove this once torchlib is migrated to PyTorch
         torchlib_ops = onnxscript_apis.get_torchlib_ops()
@@ -191,6 +208,22 @@ class ONNXRegistry:
                 continue
 
         registry._cleanup_registry_based_on_opset_version()
+        # Insert ascending versions at the front so the highest compatible
+        # global wins, without discarding lower-opset overrides of built-ins.
+        for entry in sorted(custom_translations, key=lambda e: e.opset_introduced):
+            if entry.opset_introduced <= opset_version:
+                registry._register(
+                    entry.target,
+                    OnnxDecompMeta(
+                        onnx_function=entry,
+                        fx_target=entry.target,
+                        signature=entry.signature,
+                        is_custom=True,
+                        is_complex=entry.is_complex,
+                        opset_introduced=entry.opset_introduced,
+                        skip_signature_inference=True,
+                    ),
+                )
         return registry
 
     def _register(
@@ -287,14 +320,19 @@ class ONNXRegistry:
             # Filter decompositions to only include those with opset_introduced <= opset_version
             decomps = [d for d in decomps if d.opset_introduced <= self.opset_version]
 
-            # Keep only the decomposition with the highest opset_introduced
+            # Select built-ins independently for real and complex inputs.
+            # Custom overrides must not be discarded by a newer built-in.
             if decomps:
-                # Find the maximum opset_introduced
-                max_opset = max(d.opset_introduced for d in decomps)
-
-                # Keep all decompositions with the maximum opset_introduced
                 cleaned_functions[target_or_name] = [
-                    d for d in decomps if d.opset_introduced == max_opset
+                    d
+                    for d in decomps
+                    if d.is_custom
+                    or d.opset_introduced
+                    == max(
+                        other.opset_introduced
+                        for other in decomps
+                        if not other.is_custom and other.is_complex == d.is_complex
+                    )
                 ]
 
         self.functions = cleaned_functions

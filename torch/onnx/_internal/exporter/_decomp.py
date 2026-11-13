@@ -33,7 +33,8 @@ def get_onnx_implemented_overloads(
         # Different OnnxDecompMeta for the same TorchOp should
         # have the same fx_target.
         fx_target = onnx_decomp_meta[0].fx_target
-        registered_ops.append(fx_target)
+        if not isinstance(fx_target, str):
+            registered_ops.append(fx_target)
     return registered_ops
 
 
