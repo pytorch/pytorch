@@ -299,6 +299,11 @@ class CustomOpDef:
         self._tags = _normalize_tags(tags)
 
         self._init_fn = fn
+        # Runs instead of a kernel disabled with set_kernel_enabled. The lambda
+        # keeps _disable_dynamo from unwrapping fn or setting attributes on it.
+        self._init_fn_without_dynamo: Callable[..., object] = torch._disable_dynamo(
+            lambda *args, **kwargs: fn(*args, **kwargs)
+        )
 
         self._backend_fns: dict[str | None, Callable] = {}
         # The utils.caller_module() of each register_kernel call, by dispatch key,
@@ -400,25 +405,31 @@ class CustomOpDef:
     def _make_backend_fn(
         self, device_type: str | None, fn: Callable[..., object]
     ) -> Callable[..., object]:
-        """Wraps fn to choose between the default implementation or the
-        device-specific one, depending on whether device_type's kernel is
-        disabled."""
+        """Makes a stand-in for fn in _backend_fns. Its first call replaces it
+        with fn wrapped to disable Dynamo. Building that wrapper needs
+        torch._dynamo, which can't be imported while torch is being imported,
+        and some custom ops are defined then.
+        """
 
-        @torch._disable_dynamo
-        def wrapped_fn(*args, **kwargs):
-            if device_type in self._disabled_kernel:
-                return self._init_fn(*args, **kwargs)
-            else:
-                return fn(*args, **kwargs)
+        def stub(*args: object, **kwargs: object) -> object:
+            from torch._dynamo.eval_frame import _disabled_wrapper
 
-        return wrapped_fn
+            wrapper = _disabled_wrapper(fn, wrapping=False, explicit_signature=True)
+            if self._backend_fns.get(device_type) is stub:
+                self._backend_fns[device_type] = wrapper
+            return wrapper(*args, **kwargs)
+
+        return stub
 
     def _make_backend_impl(self, device_type: str | None) -> Callable[..., object]:
         """Makes the dispatcher kernel for device_type, which runs the function
         registered for it and checks the result against the schema."""
 
         def backend_impl(*args, **kwargs):
-            result = self._backend_fns[device_type](*args, **kwargs)
+            if device_type in self._disabled_kernel:
+                result = self._init_fn_without_dynamo(*args, **kwargs)
+            else:
+                result = self._backend_fns[device_type](*args, **kwargs)
 
             def get_module():
                 fn = self._backend_fns[device_type]
