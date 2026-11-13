@@ -46,7 +46,7 @@ struct Attr : public dnnl::primitive_attr {
     (*scales_)[arg] = std::make_pair(scales, mask);
   }
 
-  // Defualt arg = DNNL_ARG_DST
+  // Default arg = DNNL_ARG_DST
   Attr(int mask, const std::vector<float>& scales) {
     set_scales_mask(DNNL_ARG_DST, mask);
     if (!scales_) {
