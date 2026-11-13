@@ -106,6 +106,7 @@ from .object_protocol import (
     generic_getattr,
     generic_getitem,
     generic_getiter,
+    generic_hasattr_str,
     generic_is_true,
     generic_richcompare_bool,
     generic_setitem,
@@ -913,6 +914,13 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         # A dict-family descriptor selects its declaring type, even on an OrderedDict.
         name = descriptor.__name__
         if descriptor.__objclass__ is dict:
+            if issubclass(self.python_type(), collections.OrderedDict):
+                flags = _flags_from_ml_flags(dict, name)
+                _check_method_arity(self, tx, name, flags, args, kwargs)
+                if name == "update":
+                    check_positional(tx, name, len(args), 0, 1)
+                elif name in ("pop", "setdefault"):
+                    check_positional(tx, name, len(args), 1, 2)
             self.check_base_dict_mutation(tx, name)
         if name not in ("keys", "values", "items", "__reversed__", "copy", "popitem"):
             return None
@@ -1141,10 +1149,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         container_name: str | None = None,
     ) -> None:
         # Probe subclass keys before dict_merge considers its raw-storage fast path.
-        if (
-            pyanydict_checkexact(other)
-            or other.call_obj_hasattr(tx, "keys").as_python_constant()
-        ):
+        if pyanydict_checkexact(other) or generic_hasattr_str(tx, other, "keys"):
             self.dict_merge(tx, other, container_name=container_name)
         else:
             # Mutable iterables must retain live iteration across key hashes.
@@ -1393,31 +1398,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         """Mapping length for dict objects."""
         self.install_dict_keys_match_guard()
         return VariableTracker.build(tx, len(self.items))
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        # dict not allow setting arbitrary attributes.  OrderedDict and
-        # defaultdict allow arbitrary setattr, but not deletion of default attrs
-        cls = self.python_type()
-        if any(
-            cls is t for t in (dict, collections.OrderedDict, collections.defaultdict)
-        ):
-            if hasattr(cls, name):
-                return ConstantVariable.create(True)
-            if cls is dict:
-                return ConstantVariable.create(False)
-
-        msg = f"hasattr on {cls} is not supported"
-        unimplemented(
-            gb_type="unsupported hasattr operation",
-            context=f"Class {cls}",
-            explanation=msg,
-            hints=[
-                "Consider using a regular dictionary instead",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         self.install_dict_keys_match_guard()
@@ -2408,13 +2388,6 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 
         return generic_richcompare(tx, self.dv_dict, other, op)
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is types.MappingProxyType:
-            return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
-        return super().call_obj_hasattr(tx, name)
-
 
 class NNModuleHooksDictVariable(ConstDictVariable):
     # Defer local hook-ID guards so equivalent modules can reuse hook dispatch.
@@ -2679,15 +2652,6 @@ class DictViewVariable(VariableTracker):
         codegen.add_push_null(load_method)
         codegen(self.dv_dict)
         codegen.extend_output(create_call_function(1, False))
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.kv is None:
-            raise AssertionError("kv must not be None for call_obj_hasattr")
-        return ConstantVariable.create(
-            mro_lookup(self.python_type(), name) is not NO_SUCH_SUBOBJ
-        )
 
     # dictview_mapping getset returns a read-only mappingproxy of the underlying
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
