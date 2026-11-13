@@ -43,9 +43,12 @@ C10_METAL_CONSTEXPR uint32_t kMatmulSplitGridShare = 2;
 // in whole cache lines. matmul_mpp_staged copies kMatmulStepBytes of each row
 // of a block of W to threadgroup memory, in loads of kMatmulStagedLoadBytes.
 C10_METAL_CONSTEXPR uint32_t kMatmulStagedBlock = 16;
-C10_METAL_CONSTEXPR uint32_t kMatmulStagedMaxRows = 16;
+C10_METAL_CONSTEXPR uint32_t kMatmulStagedMaxRows = 32;
 C10_METAL_CONSTEXPR uint32_t kMatmulStagedLoadBytes = 16;
-// Apple10 is faster on the unstaged tiles under this many bytes of W.
+// A shorter K leaves K groups without a step.
+C10_METAL_CONSTEXPR uint32_t kMatmulStagedMinK = 512;
+// Apple10 is faster on the unstaged tiles under this many bytes of a half or
+// bfloat W, and on tiles of kMatmulBlock rows above kMatmulBlock / 2 rows.
 C10_METAL_CONSTEXPR uint32_t kMatmulStagedMinBytesApple10 = 1 << 24;
 // Complex products with M, K and N up to this are faster on the naive
 // kernels than as a real GEMM.
