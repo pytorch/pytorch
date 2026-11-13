@@ -55,6 +55,11 @@ TEST(TestCast, TestRoundsThroughFloat) {
   static_assert(
       !rounds_through_float<float> && !rounds_through_float<double> &&
       !rounds_through_float<int8_t> && !rounds_through_float<bool>);
+  // Their numeric_limits are their parts', but their parts convert on their
+  // own.
+  static_assert(
+      !rounds_through_float<complex<Half>> &&
+      !rounds_through_float<complex<BFloat16>>);
 }
 
 TEST(TestCast, TestCheckedConvert) {

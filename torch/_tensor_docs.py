@@ -5155,7 +5155,7 @@ Here are the ways to call ``to``:
     Args:
         {memory_format}
         round (str, optional): if given, the direction in which to round
-        values that :attr:`dtype` cannot represent; see the note below.
+            values that :attr:`dtype` cannot represent; see the note below.
 
 .. note::
 
@@ -5180,7 +5180,7 @@ Here are the ways to call ``to``:
     Args:
         {memory_format}
         round (str, optional): if given, the direction in which to round
-        values that :attr:`dtype` cannot represent; see the note below.
+            values that :attr:`dtype` cannot represent; see the note below.
 
 .. method:: to(other, non_blocking=False, copy=False, *, memory_format=torch.preserve_format, round=None) -> Tensor
    :noindex:
@@ -5198,8 +5198,8 @@ Here are the ways to call ``to``:
     Args:
         {memory_format}
         round (str, optional): if given, the direction in which to round
-        values that the dtype of :attr:`other` cannot represent; see the note
-        below.
+            values that the dtype of :attr:`other` cannot represent; see the
+            note below.
 
 .. note::
 
@@ -5212,11 +5212,13 @@ Here are the ways to call ``to``:
 
     :attr:`round` converts to a narrower floating-point dtype, rounding the
     values that it cannot represent in the given direction. It is only allowed
-    when converting a strided ``float64``, ``float32``, ``float16`` or
-    ``bfloat16`` tensor to a dtype that cannot represent all its values exactly
-    (``float32``, ``float16``, ``bfloat16`` or a float8 dtype), and raises an
-    error otherwise. Only CPU and CUDA support it, and only in Python (not in
-    TorchScript). The modes are the IEEE 754 rounding directions:
+    when converting a strided, non-nested ``float64``, ``float32``, ``float16``
+    or ``bfloat16`` tensor to a dtype that cannot represent all its values
+    exactly (``float32``, ``float16``, ``bfloat16`` or a float8 dtype), and
+    raises an error otherwise. The conversion runs on the CPU or a CUDA device:
+    tensors on other devices can only be converted while moved to or from one
+    of them. It is only available in Python (not in TorchScript). The modes are
+    the IEEE 754 rounding directions:
 
     * ``"to_nearest_even"``: to the nearest value, ties to the one with an
       even last digit. This is how conversions round without :attr:`round`.
@@ -5236,14 +5238,17 @@ Here are the ways to call ``to``:
     ``"toward_negative"`` behaves like ``"toward_zero"``.
     ``torch.float8_e8m0fnu`` only has powers of two: values below
     :math:`2^{{-127}}` become :math:`2^{{-127}}`, and ties of
-    ``"to_nearest_even"`` round up.
+    ``"to_nearest_even"`` round up. Infinities and NaN convert as without
+    :attr:`round`, in every mode (NaN's sign and payload may differ).
 
     A device change, if any, is a separate transfer, and the result is never
-    ``self``. Like a plain dtype conversion, its gradient is the identity (cast
-    back to the original dtype), unlike that of :func:`torch.round`, which is
-    zero. On a DTensor with a ``Partial`` sum or average placement, the input
-    is reduced before it is rounded, whereas a conversion without
-    :attr:`round` keeps the placement, so their results can differ.
+    ``self``. A transfer to the CPU before converting there (from a device that
+    cannot convert) is blocking, even with :attr:`non_blocking`. Like a plain
+    dtype conversion, its gradient is the identity (cast back to the original
+    dtype), unlike that of :func:`torch.round`, which is zero. On a DTensor
+    with a ``Partial`` sum or average placement, the input is reduced before it
+    is rounded, whereas a conversion without :attr:`round` keeps the placement,
+    so their results can differ.
 
 Example::
 
