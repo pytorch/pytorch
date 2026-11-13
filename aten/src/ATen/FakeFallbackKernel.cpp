@@ -5,6 +5,7 @@
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
@@ -219,6 +220,9 @@ void fakeFallback(
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   const auto arguments_begin = stack->size() - num_arguments;
+  const bool metadata_copy = schema.overload_name().empty() &&
+      (schema.name() == "aten::detach" ||
+       schema.name() == "aten::shallow_copy_data_");
   if (c10::impl::PythonDispatcherTLS::get_state() != nullptr) {
     unsupported(op, "the Python dispatcher");
   }
@@ -260,7 +264,7 @@ void fakeFallback(
   using at::impl::FakeDispatchCategory;
   const auto categories =
       at::impl::fakeDispatchTableCategories(op.operator_name());
-  if (cpp_fake_not_implemented(op, categories)) {
+  if (!metadata_copy && cpp_fake_not_implemented(op, categories)) {
     unsupported(op, "ops with a Python fake implementation");
   }
   if (op.hasKernelForDispatchKey(c10::DispatchKey::CompositeImplicitAutograd)) {
@@ -318,7 +322,7 @@ void fakeFallback(
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
         if (!device.has_value()) {
           device = fake_device;
-        } else if (*device != *fake_device) {
+        } else if (!metadata_copy && *device != *fake_device) {
           // Including a zero-dim CPU tensor with others, which Python allows
           unsupported(
               op,
@@ -341,6 +345,23 @@ void fakeFallback(
   if (!device.has_value()) {
     unsupported(op, "ops without fake tensor inputs");
   }
+  if (metadata_copy) {
+    // These kernels only copy metadata. Run them on the fakes directly so
+    // shallow_copy_data_ never replaces an existing fake inside a Meta kernel.
+    c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
+        {c10::DispatchKey::Fake,
+         c10::DispatchKey::Python,
+         c10::DispatchKey::PreDispatch,
+         c10::DispatchKey::PythonTLSSnapshot}));
+    auto self = (*stack)[arguments_begin].toTensor();
+    auto result = schema.name() == "aten::detach"
+        ? at::impl::fake_detach(self)
+        : at::impl::fake_shallow_copy_data_(
+              self, (*stack)[arguments_begin + 1].toTensor());
+    torch::jit::drop(*stack, num_arguments);
+    torch::jit::push(*stack, std::move(result));
+    return;
+  }
   if (!has_sparse_inputs) {
     // Python decomposes these only without sparse inputs
     if (at::impl::fakeDispatchCategoriesHave(
@@ -356,12 +377,10 @@ void fakeFallback(
   }
   meta_keyset = meta_keyset.add(c10::DispatchKey::Meta);
 
-  // As in Python, the outputs of alias and detach of a fake keep its recorded
-  // dispatch keys (see Note [C++ fake dispatch keys]), and other new outputs
-  // have none
+  // As in Python, alias keeps its input's recorded dispatch keys (see Note
+  // [C++ fake dispatch keys]), and other new Meta outputs have none.
   std::optional<c10::DispatchKeySet> output_dispatch_keys;
-  if (schema.overload_name().empty() &&
-      (schema.name() == "aten::alias" || schema.name() == "aten::detach")) {
+  if (schema.overload_name().empty() && schema.name() == "aten::alias") {
     const auto& self = (*stack)[arguments_begin].toTensor();
     output_dispatch_keys = self.unsafeGetTensorImpl()->fake_dispatch_keys();
   }
@@ -377,14 +396,16 @@ void fakeFallback(
   c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
   c10::impl::InKernelInvocationGuard in_kernel;
   {
-    // As in Python, sparse invariant checks, which read index data meta tensors
-    // lack, are off for a sparse Meta kernel; here on this thread only, where
-    // Python turns the process-wide setting off. Override unconditionally to
-    // avoid reading that setting, which another thread can change. This also
-    // suppresses the uninitialized-setting warning inside sparse Meta kernels.
-    std::optional<at::impl::SparseTensorInvariantChecksGuard> checks_off;
-    if (has_sparse_inputs) {
-      checks_off.emplace(false);
+    // Match Python's global suppression of checks that read sparse index data.
+    const bool suppress_invariants = has_sparse_inputs &&
+        at::globalContext().checkSparseTensorInvariants().value_or(false);
+    auto restore_invariants = c10::make_scope_exit([suppress_invariants] {
+      if (suppress_invariants) {
+        at::globalContext().setCheckSparseTensorInvariants(true);
+      }
+    });
+    if (suppress_invariants) {
+      at::globalContext().setCheckSparseTensorInvariants(false);
     }
     try {
       op.redispatchBoxed(meta_keyset, stack);
@@ -395,8 +416,36 @@ void fakeFallback(
     }
   }
 
-  // Mark the original outputs fake, including tensors retained by a Meta
-  // kernel. Unlike Python's wrapping, this also changes those retained tensors.
+  // Note [In-place conversion of Meta outputs]
+  // The ownership argument for normal dense kernels is that an output is
+  // either an existing fake, handled below without reinitializing it, or a
+  // TensorImpl created by this invocation. A new view has its own TensorImpl
+  // even though it shares storage with an input. Concurrent calls on the same
+  // fake input therefore do not initialize the same output TensorImpl. Extra
+  // references from Python or return-value boxing do not imply that another
+  // invocation can return that object; releasing the GIL does not change this
+  // ownership argument.
+  //
+  // Shared storage is a separate concern: a view's storage was already marked
+  // for fake use when its input was initialized. Reapplying an established
+  // storage marking must be a no-op, rather than another write. Copying the
+  // output TensorImpl would not isolate its shared StorageImpl anyway.
+  //
+  // A custom Meta kernel could instead cache a plain Meta tensor and return
+  // that same TensorImpl across calls. In-place conversion changes that cached
+  // object, so cross-mode reuse can fail and concurrent first conversions would
+  // need synchronization. This is outside the dense ownership argument above;
+  // no such retained-output pattern was established in the supported in-tree
+  // dense kernels. Sparse accessors returning stored component tensors also
+  // need a separate ownership analysis.
+  //
+  // We keep the original TensorImpl instead of allocating a second wrapper.
+  // Shallow-copying each plain Meta output could protect a cached original,
+  // but preserving Python's converter identity across calls would also need
+  // a per-mode memo, synchronized lookup/creation, and weak-reference lifetime
+  // handling, including TensorImpl address reuse. Ordinary dense outputs do
+  // not require that machinery. Retained custom outputs are still converted
+  // in place; this does not promise Python's wrapping/memoization semantics.
   auto wrap_output = [&](const at::Tensor& t, bool is_alias) {
     if (!t.defined()) {
       return;
@@ -419,13 +468,16 @@ void fakeFallback(
       }
       return;
     }
-    if (!is_alias && t.requires_grad()) {
-      // Backend kernels run below autograd, but a Meta kernel can copy
-      // requires_grad from an input
-      t.set_requires_grad(false);
-    }
     // New views and shallow copies inside the kernel are plain Meta tensors.
     at::init_cpp_fake(impl, *device, mode);
+    if (!is_alias && t.requires_grad()) {
+      // Backend kernels run below autograd, but a Meta kernel can copy
+      // requires_grad from an input. Existing fakes returned above, and
+      // init_cpp_fake checked this output's eligibility before we change its
+      // gradient state. Validation is per output, not a rollback of earlier
+      // outputs if a later one is rejected.
+      t.set_requires_grad(false);
+    }
     impl->set_real_tensor(nullptr);
     impl->set_fake_dispatch_keys(output_dispatch_keys);
   };
