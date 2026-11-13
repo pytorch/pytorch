@@ -14,7 +14,7 @@ from .base import SourceLocation, VariableTracker, VariableTrackerMeta
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from typing_extensions import Self
+    from typing import Self
 
     from ..symbolic_convert import InstructionTranslatorBase
     from .tensor import SymNodeVariable
@@ -24,7 +24,7 @@ class LazyCache:
     """Container to cache the real VariableTracker"""
 
     def __init__(self, value: object, source: Any) -> None:
-        if not isinstance(value, LazySymNodeFormatString):
+        if not issubclass(type(value), LazySymNodeFormatString):
             if not source:
                 raise AssertionError(
                     "source is required for non-LazySymNodeFormatString values"
@@ -57,7 +57,7 @@ class LazyCache:
             self.vt.set_name_hint(self.name_hint)
 
         if self.source_location is not None and self.vt.source_location is None:
-            self.vt.set_source_location(self.source_location)
+            self.vt = self.vt.with_source_location(self.source_location)
 
         del self.value
         del self.source
@@ -117,18 +117,20 @@ class ComputedLazyCache:
             self.vt = ConstantVariable.create(self.op(value))
         elif any_symbolic:
             # The precomputed constant is stale; recompute symbolically
-            from .builtin import BuiltinVariable
+            from .builder import SourcelessBuilder
 
             tx = InstructionTranslator.current_tx()
             realized_args = [arg.realize() for arg in self.args]
-            self.vt = BuiltinVariable(self.op).call_function(tx, realized_args, {})
+            self.vt = SourcelessBuilder.create_internal_builtin(self.op).call_function(
+                tx, realized_args, {}
+            )
         else:
             self.vt = ConstantVariable.create(self.value)
 
         if self.name_hint is not None:
             self.vt.set_name_hint(self.name_hint)
         if self.source_location is not None and self.vt.source_location is None:
-            self.vt.set_source_location(self.source_location)
+            self.vt = self.vt.with_source_location(self.source_location)
 
 
 class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
@@ -232,12 +234,13 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         else:
             self._cache.name_hint = name
 
-    def set_source_location(self, source_location: SourceLocation) -> None:
+    def with_source_location(self, source_location: SourceLocation) -> VariableTracker:
         self.source_location = source_location
         if self.is_realized():
-            self._cache.vt.set_source_location(source_location)  # type: ignore[union-attr]
+            self._cache.vt = self._cache.vt.with_source_location(source_location)  # type: ignore[union-attr]
         else:
             self._cache.source_location = source_location
+        return self
 
     def __str__(self) -> str:
         variable_info = "LazyVariableTracker("
@@ -291,18 +294,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
                 value, (LazyConstantVariable, ComputedLazyConstantVariable)
             )
             if keep_lazy:
-                if isinstance(value, ComputedLazyConstantVariable):
-                    if value.is_realized():
-                        result = cls.realize_all(
-                            value.realize(), cache, allow_lazy_constant=True
-                        )
-                    else:
-                        # Output bytecode recomputes the value; operands only need TYPE_MATCH
-                        for lazy_var in value._cache.lazy_vars:
-                            lazy_var._ensure_type_guard()
-                        result = value
-                else:
-                    result = value
+                result = value
             else:
                 result = cls.realize_all(
                     value.realize(), cache, allow_lazy_constant=allow_lazy_constant
@@ -702,6 +694,8 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
     def reconstruct(self, codegen: Any) -> None:
         from ..bytecode_transformation import create_call_function
 
+        # Output bytecode re-runs the op; operand types must match the traced ones
+        self._ensure_operand_type_guards()
         cache = self._cache
         name = cache.op.__name__
         module = "builtins" if getattr(builtins, name, None) is cache.op else "operator"
