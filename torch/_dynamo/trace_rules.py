@@ -59,14 +59,18 @@ from .utils import (
     unwrap_if_wrapper,
 )
 from .variables import (
+    BoolBuiltinVariable,
     BuiltinVariable,
     ByteArrayBuiltinVariable,
+    ComplexBuiltinVariable,
     DictBuiltinVariable,
+    FloatBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     GetAttrBuiltinVariable,
     HasAttrBuiltinVariable,
     InspectSignatureVariable,
+    IntBuiltinVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
     LocalGeneratorFunctionVariable,
@@ -4159,10 +4163,14 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 BUILTIN_CALLABLES = {
+    bool: BoolBuiltinVariable,
     bytearray: ByteArrayBuiltinVariable,
+    complex: ComplexBuiltinVariable,
     dict: DictBuiltinVariable,
+    float: FloatBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
     hasattr: HasAttrBuiltinVariable,
+    int: IntBuiltinVariable,
     iter: IterBuiltinVariable,
     list: ListBuiltinVariable,
     setattr: SetAttrBuiltinVariable,
