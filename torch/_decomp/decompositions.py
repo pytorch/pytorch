@@ -5331,6 +5331,72 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
     )
 
 
+def _matmul_fold_broadcast_batch(
+    tensor1: torch.Tensor, tensor2: torch.Tensor
+) -> torch.Tensor | None:
+    # See matmul_fold_broadcast_batch in aten/src/ATen/native/LinearAlgebra.cpp
+    from torch._subclasses.fake_impls import _compute_stride
+    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+    if guard_or_false(tensor1.numel() == 0) or any(
+        is_traceable_wrapper_subclass(mb_unwrap_functional_tensor(t))
+        for t in (tensor1, tensor2)
+    ):
+        return None
+    sizes1 = tensor1.shape
+    nb = tensor1.dim() - 2
+    offset = tensor1.dim() - tensor2.dim()
+    keep: list[int] = []
+    fold: list[int] = []
+    for i in range(nb):
+        size2 = tensor2.size(i - offset) if i >= offset else 1
+        if guard_or_false(size2 == 1):
+            fold.append(i)
+        elif guard_or_false(sizes1[i] == size2):
+            keep.append(i)
+        else:
+            return None
+    if not any(guard_or_false(sizes1[i] != 1) for i in fold):
+        return None
+
+    n, m1 = sizes1[-2:]
+    m2, p = tensor2.shape[-2:]
+    perm = keep + fold + [nb, nb + 1]
+    non_unit = [i for i in perm if not guard_or_false(sizes1[i] == 1)]
+    in_order = non_unit == sorted(non_unit)
+    # Putting the result back in order copies it. That only costs less than expanding
+    # tensor2 for vector rows (n == 1) with m, p > 1, if tensor2 is not already expanded
+    if not in_order:
+        strides2 = [tensor2.stride(i - offset) for i in keep if i in non_unit]
+        if not (
+            guard_or_false(n == 1)
+            and guard_or_false(m1 > 1)
+            and guard_or_false(p > 1)
+            and all(guard_or_false(s != 0) for s in strides2)
+        ):
+            return None
+
+    keep_sizes = [sizes1[i] for i in keep]
+    fold_sizes = [sizes1[i] for i in fold]
+    t1 = tensor1.permute(perm)
+    t1_shape = [prod(keep_sizes), prod(fold_sizes) * n, m1]
+    t1_stride = _compute_stride(t1.shape, t1.stride(), t1_shape, size_oblivious=True)
+    # Folding must not copy tensor1, or give it a layout that bmm would copy
+    if t1_stride is None or not (
+        guard_or_false(t1_stride[2] == 1) and guard_or_false(t1_stride[1] >= m1)
+    ):
+        return None
+
+    out = t1.view(t1_shape).bmm(tensor2.reshape(t1_shape[0], m2, p))
+    if in_order:
+        return torch.ops.aten._unsafe_view(out, [*sizes1[:-1], p])
+    out = torch.ops.aten._unsafe_view(out, keep_sizes + fold_sizes + [n, p])
+    inv_perm = [perm.index(i) for i in range(len(perm))]
+    return out.permute(inv_perm).clone(memory_format=torch.contiguous_format)
+
+
 @aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.matmul.out.py_impl(DispatchKey.CompositeImplicitAutograd)
 @out_wrapper(pass_is_out=True)
@@ -5414,6 +5480,11 @@ def matmul(tensor1, tensor2, *, is_out=False):
                 return matmul(tensor1.squeeze(0), tensor2)
             if guard_or_false(batch_tensor2[0] == 1) and tensor2.requires_grad:
                 return matmul(tensor1, tensor2.squeeze(0))
+
+        if not is_out and dim_tensor2 > 1 and dim_tensor1 >= dim_tensor2:
+            folded = _matmul_fold_broadcast_batch(tensor1, tensor2)
+            if folded is not None:
+                return folded
 
         # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
         expand_batch_portion = list(
