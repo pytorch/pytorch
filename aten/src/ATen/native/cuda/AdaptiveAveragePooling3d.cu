@@ -344,22 +344,7 @@ void adaptive_avg_pool3d_out_cuda_template(
 
   checkAllSameGPU("adaptive_avg_pool3d_cuda", {output_arg, input_arg});
 
-  for (int64_t i = 1; i < input_.ndimension(); i++) {
-    TORCH_CHECK(
-        input_.size(i) > 0,
-        "adaptive_avg_pool3d_cuda(): Expected input to have non-zero size for non-batch dimensions, "
-        "but input has sizes ", input_.sizes(),
-        " with dimension ", i, " being empty");
-  }
-
-  TORCH_CHECK(
-      (input_.ndimension() == 4 || input_.ndimension() == 5),
-      "adaptive_avg_pool3d_cuda(): Expected 4D or 5D tensor, but got ", input_.sizes());
-
-  // the jit sometimes passes output_size.size() == 1
-  TORCH_CHECK(
-      output_size.size() == 1 || output_size.size() == 3,
-      "adaptive_avg_pool3d: internal error: output_size.size() must be 1 or 3");
+  adaptive_avg_pool_check(input_, output, output_size, /*pooling_dims=*/3, "adaptive_avg_pool3d()");
 
   int64_t osizeT = output_size[0];
   int64_t osizeH = output_size[1];
@@ -431,9 +416,8 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   TensorArg grad_output_arg{gradOutput_, "gradOutput_", 2};
   TensorArg input_arg{input, "input", 3};
 
-  adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
-  TORCH_CHECK(input.dim() == gradOutput_.dim(),
-    __func__, ": Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
+  adaptive_avg_pool_backward_check(
+      gradInput, gradOutput_, input, /*pooling_dims=*/3, "adaptive_avg_pool3d_backward()");
 
   checkAllSameGPU(
       "adaptive_avg_pool3d_out_cuda",
