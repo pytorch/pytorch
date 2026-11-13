@@ -49,8 +49,66 @@ pub fn builtin_passes() -> Vec<&'static str> {
     spec::BUILTIN_PASSES.to_vec()
 }
 
+fn interned(py: Python<'_>, name: &str) -> PyObj {
+    unsafe { PyObj::from_borrowed(pyo3::types::PyString::intern_bound(py, name).as_ptr()) }
+}
+
+/// Registers that a call of an instance whose class has `function` as its
+/// `__call__` is a call of the instance's method `target`, if every
+/// condition holds. A condition is `(kind, a, b)`:
+/// `("instance_falsy", name, None)`, `("attr_none", name, None)`,
+/// `("global_falsy", dict, name)`, `("call_falsy", callable, None)`,
+/// `("not_tracing", None, None)` or `("not_shadowed", name, None)`.
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, callees=true))]
+pub fn register_call_shortcut(
+    py: Python<'_>,
+    function: &Bound<'_, PyAny>,
+    target: &str,
+    conditions: Vec<(String, Bound<'_, PyAny>, Option<Bound<'_, PyAny>>)>,
+) -> PyResult<()> {
+    use crate::shortcuts::Condition;
+    let object = |o: &Bound<'_, PyAny>| unsafe { PyObj::from_borrowed(o.as_ptr()) };
+    let name = |o: &Bound<'_, PyAny>| -> PyResult<PyObj> { Ok(interned(py, &o.extract::<String>()?)) };
+    let mut parsed = Vec::new();
+    for (kind, a, b) in &conditions {
+        parsed.push(match (kind.as_str(), b) {
+            ("instance_falsy", None) => Condition::InstanceFalsy(name(a)?),
+            ("attr_none", None) => Condition::AttrNone(name(a)?),
+            ("global_falsy", Some(b)) => {
+                Condition::GlobalFalsy(object(a), name(b)?, Cell::new((0, null_mut())))
+            }
+            ("call_falsy", None) => Condition::CallFalsy(object(a)),
+            ("not_tracing", None) => Condition::NotTracing,
+            ("not_shadowed", None) => Condition::NotShadowed(name(a)?),
+            _ => return Err(PyValueError::new_err(format!("unknown shortcut condition {:?}", kind))),
+        });
+    }
+    crate::shortcuts::register_call(crate::shortcuts::CallShortcut {
+        function: object(function),
+        target: interned(py, target),
+        conditions: parsed,
+    });
+    Ok(())
+}
+
+/// Registers that, for an instance whose class has `function` as its
+/// `__getattr__`, an attribute the normal lookup does not find is an entry
+/// of one of the dicts that the instance's dict has under these names.
+#[pyfunction]
+pub fn register_getattr_shortcut(py: Python<'_>, function: &Bound<'_, PyAny>, dicts: Vec<String>) {
+    crate::shortcuts::register_getattr(crate::shortcuts::GetattrShortcut {
+        function: unsafe { PyObj::from_borrowed(function.as_ptr()) },
+        dicts: dicts.iter().map(|name| interned(py, name)).collect(),
+    });
+}
+
+#[pyfunction]
+pub fn clear_shortcuts() {
+    crate::shortcuts::clear();
+}
+
+#[pyfunction]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, callees=true, shortcuts=true))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -63,6 +121,7 @@ pub fn compile(
     inline: bool,
     unroll: bool,
     callees: bool,
+    shortcuts: bool,
 ) -> PyResult<CfgFunction> {
     let table = OpcodeTable::load(py)?;
     let options = Options {
@@ -74,6 +133,7 @@ pub fn compile(
         inline,
         unroll,
         callees,
+        shortcuts,
         ..Options::default()
     };
     let function = vm::lower(py, &table, func, &options)?;
