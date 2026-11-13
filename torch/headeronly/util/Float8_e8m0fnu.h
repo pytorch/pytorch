@@ -11,6 +11,11 @@
 /// This is the E8M0 dtype from the OCP MX format spec
 /// (https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf,
 /// Section 5.4.1)
+///
+/// Conversion from float rounds |x| to the nearest power of two, ties going up
+/// (the sign is ignored); values below 2^-127, including 0, become 2^-127, the
+/// smallest value, and values from 1.5 * 2^127 up, infinities and NaN become
+/// NaN.
 
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/floating_point_utils.h>
