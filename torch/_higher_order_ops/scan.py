@@ -11,7 +11,7 @@ import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._functorch.vmap import unwrap_batched, wrap_batched
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, require_python_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
     do_auto_functionalize_v2,
@@ -24,6 +24,7 @@ from torch._higher_order_ops.partitioner import (
 from torch._higher_order_ops.utils import (
     _batch_dims_as_last_for_scan,
     _maybe_compile_and_run_fn,
+    _maybe_run_with_interpreter,
     _move_batch_dims_to_last_for_scan,
     _VmapCombineFnWrapper,
     check_meta_consistency,
@@ -41,8 +42,14 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
+from torch._subclasses.fake_tensor import (
+    FakeTensorMode,
+    is_fake_tensor,
+    maybe_clear_fake_constant,
+    maybe_set_real_tensor,
+)
 from torch.fx.experimental.proxy_tensor import (
+    _unwrap_functorch,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
@@ -89,7 +96,8 @@ def _build_empty_output_for_length_zero(
     combine_fn: Callable, init: pytree.PyTree
 ) -> pytree.PyTree:
     """Probe combine_fn(init, None) to learn the output structure for length==0."""
-    fake_mode = detect_fake_mode(pytree.tree_leaves(init)) or FakeTensorMode()
+    leaves = pytree.tree_leaves(init)
+    fake_mode = require_python_fake_mode(detect_fake_mode(leaves)) or FakeTensorMode()
     with fake_mode:
         fake_init = pytree.tree_map(
             lambda t: fake_mode.from_tensor(t)
@@ -496,6 +504,20 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
     return scans
 
 
+def _scan_output_value(node: Any, value: Any) -> Any:
+    # Inside vmap, meta["val"] holds a plain fake tensor, while the output
+    # of scan must keep the functorch wrapper that the combine function returned.
+    # Otherwise meta["val"] is the value to use. Either way, the output holds no
+    # constant or real tensor from the one step that tracing ran.
+    if isinstance(value, torch.Tensor) and _unwrap_functorch(value) is not value:
+        value = value.detach()
+        inner = _unwrap_functorch(value)
+        maybe_clear_fake_constant(inner)
+        maybe_set_real_tensor(inner, None)
+        return value
+    return node.meta["val"] if node is not None else None
+
+
 def trace_scan(
     proxy_mode,
     func_overload,
@@ -514,7 +536,16 @@ def trace_scan(
             clone_input(x) if isinstance(x, torch.Tensor) else x
             for x in additional_inputs
         ]
-        combine_graph = reenter_make_fx(combine_fn)(
+        # Inside vmap, meta["val"] holds no functorch wrapper, so
+        # _scan_output_value reads the values the combine function returns.
+        combine_outs: list[Any] = []
+        run_combine = _maybe_run_with_interpreter(combine_fn)
+
+        def combine_and_keep_outs(*args):
+            combine_outs.append(run_combine(*args))
+            return combine_outs[-1]
+
+        combine_graph = reenter_make_fx(combine_and_keep_outs)(
             *sample_inits, *sample_inputs, *sample_additional_inputs
         )
 
@@ -531,6 +562,11 @@ def trace_scan(
 
     if outputs is None:
         raise AssertionError("no output node found in combine_graph")
+    if len(combine_outs) != 1:
+        raise AssertionError(
+            "expected the combine function to be traced once, but it ran "
+            f"{len(combine_outs)} times"
+        )
 
     carry, output = _extract_carry_and_out(outputs, len(init))
     init_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
@@ -560,7 +596,11 @@ def trace_scan(
     with disable_proxy_modes_tracing():
         scan_length = xs[0].shape[0]
         fake_carry, fake_outputs = _extract_carry_and_out(
-            [o.meta["val"] if o is not None else None for o in outputs], len(init)
+            [
+                _scan_output_value(o, v)
+                for o, v in zip(outputs, combine_outs[0], strict=True)
+            ],
+            len(init),
         )
         for t in fake_outputs:
             if not isinstance(t, torch.Tensor) and t is not None:

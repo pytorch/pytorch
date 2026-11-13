@@ -168,6 +168,30 @@ class AllGather(Comm):
     ) -> dist.Work | None: ...
 
 
+class AllReduce(Comm):
+    """Interface for an in-place all-reduce communication primitive.
+
+    FSDP calls this primitive synchronously on its internal all-reduce stream
+    with ``SUM`` or ``AVG``. ``AVG`` must divide by the process-group size.
+    Implementations using another stream must wait on the calling stream
+    before accessing the tensor and join it before returning, so that FSDP's
+    completion event covers the collective and protects the buffer lifetime.
+
+    The input buffer is allocated by the reduce-scatter primitive, so FSDP
+    does not call this primitive's ``allocate`` method. Implementations needing
+    registered memory may require a matching custom ``ReduceScatter``.
+    """
+
+    @abstractmethod
+    def __call__(
+        self,
+        tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        op: _ReduceOp,
+        async_op: bool = False,
+    ) -> dist.Work | None: ...
+
+
 class ReduceScatter(Comm):
     """
     Interface for reduce_scatter comm primitive
@@ -273,7 +297,9 @@ class AllGatherInput:
     are passed back in the outputs' dtype, or, with a single row (as for Shard(0))
     and nonzero trailing dims, shrink, leaving unspecified data after the gathered
     prefix. Extensions own any padding: the local shard is unpadded on ranks with
-    a smaller shard, so per-row payloads such as scales need padding too. When
+    a smaller shard, so per-row payloads such as scales need padding too. On a
+    nonzero shard dim, the padding lies inside every row of the gathered
+    parameter, and ``fsdp_post_all_gather`` must drop it. When
     ``fsdp_pre_all_gather`` takes ``outer_size``, FSDP requires every plain tensor
     of an unevenly sharded parameter to have the padded sharded size, so return
     payloads of other shapes, such as scales, as records.
