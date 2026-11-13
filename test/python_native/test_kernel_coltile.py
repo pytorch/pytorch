@@ -520,7 +520,8 @@ class TestColTileHost(TestCase):
             tile.TileReduce(welford, cutlass.Float32, "col", 1024, col_group=4)
 
     def test_column_groups_share_unroll_variants(self):
-        # The grouped fold ignores unroll, so configs differing only in it share a plan.
+        # TileReduce runs the grouped prefix at unroll 1, so configs differing only in
+        # unroll share a plan.
         op = (T.WelfordOps(acc=cutlass.Float32), cutlass.Float32, "col", 1024)
         kw = dict(vec=1, col_group=4)
         sigs = {tile.TileReduce(*op, **kw, unroll=u).cache_sig for u in (2, 8)}
