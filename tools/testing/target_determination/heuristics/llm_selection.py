@@ -16,6 +16,10 @@ from tools.testing.test_run import TestRun
 LLM_SELECTION_FILE = "llm_selection.json"
 LLM_SELECTION_PATH = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_SELECTION_FILE
 LLM_SELECTION_VERSION = 1
+# At most 0.25 in TD's sum, as the other heuristics that rank. The TD scorer
+# calibrates the score, so there only its order matters; changing the weight
+# would mix two scales in the scores it has logged.
+LLM_SELECTION_WEIGHT = 0.25
 
 
 class LLMSelection(HeuristicInterface):
@@ -36,9 +40,12 @@ class LLMSelection(HeuristicInterface):
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
         scores = load_scores()
         listed = set(tests)
-        return TestPrioritizations(
-            tests, {TestRun(t): s for t, s in scores.items() if t in listed}
-        )
+        weighted = {
+            TestRun(t): s * LLM_SELECTION_WEIGHT
+            for t, s in scores.items()
+            if t in listed
+        }
+        return TestPrioritizations(tests, weighted)
 
 
 def load_scores() -> dict[str, float]:

@@ -53,9 +53,9 @@ class TestLLMSelection(unittest.TestCase):
             selection({"test_a": 1, "dir/test_c": 0.25, "test_gone": 1.0})
         )
         expected = {
-            TestRun("test_a"): 1.0,
+            TestRun("test_a"): 0.25,
             TestRun("test_b"): 0.0,
-            TestRun("dir/test_c"): 0.25,
+            TestRun("dir/test_c"): 0.0625,
         }
         self.assertEqual(scores, expected)
 
@@ -102,7 +102,7 @@ class TestLLMSelection(unittest.TestCase):
     def test_td_logs_the_scores_and_they_reorder_nothing(self) -> None:
         self.path.write_text(json.dumps(selection({"test_b": 0.75})))
         log, aggregated = self.run_td()
-        self.assertIn("Results from LLMSelection\n  test_b (0.75)\n", log)
+        self.assertIn("Results from LLMSelection\n  test_b (0.1875)\n", log)
         self.assertEqual(set(aggregated.values()), {0.0})
 
     def test_td_logs_a_missing_selection_as_an_error(self) -> None:
