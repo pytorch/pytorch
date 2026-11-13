@@ -6,7 +6,7 @@ import enum
 import functools
 import operator
 import unittest
-from collections import defaultdict, OrderedDict
+from collections import defaultdict, OrderedDict, UserDict
 from unittest.mock import patch
 
 import torch
@@ -64,8 +64,8 @@ def identity_forward_hook(module, args, output):
     return output
 
 
-def add_one(module, args, output):
-    return output + 1
+def add_one(module, args, *rest):
+    return rest[-1] + 1
 
 
 def add_two(module, args, output):
@@ -94,9 +94,268 @@ class ClassWithVal:
 _mixed_hook_module = torch.nn.Identity()
 
 
+def multiply_forward_hook(module, args, *rest):
+    return rest[-1] * 2
+
+
 @instantiate_parametrized_tests
 class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("mapping_type", [dict, OrderedDict])
+    @parametrize("subclass", [False, True])
+    @parametrize(
+        "operation, with_kwargs",
+        [("forward", False), ("forward", True)]
+        + [
+            (operation, False)
+            for operation in ("call_values", "keys", "values", "items", "len_keys")
+        ],
+    )
+    def test_hook_dict_iteration_order(
+        self, mapping_type, with_kwargs, operation, subclass
+    ):
+        if subclass:
+            mapping_type = type("HookDict", (mapping_type,), {})
+
+        def fn(x, module):
+            if operation == "forward":
+                return module(x)
+            if operation == "call_values":
+                for hook in module._forward_hooks.values():
+                    x = hook(module, (x,), x)
+                return x
+            if operation == "len_keys":
+                return x + 1, len(module._forward_hooks.keys())
+            view = getattr(module._forward_hooks, operation)()
+            return x + len(view), type(view), list(view)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            module = torch.nn.Identity()
+            for callback in (add_one, multiply_forward_hook):
+                module.register_forward_hook(callback, with_kwargs=with_kwargs)
+            module._forward_hooks = mapping_type(module._forward_hooks)
+            self.assertEqual(compiled(x, module), fn(x, module))
+            self.assertEqual(counter.frame_count, 1)
+        if issubclass(mapping_type, OrderedDict):
+            module._forward_hooks.move_to_end(next(iter(module._forward_hooks)))
+        else:
+            module._forward_hooks = type(module._forward_hooks)(
+                reversed(module._forward_hooks.items())
+            )
+        self.assertEqual(compiled(x, module), fn(x, module))
+        # Plain keys retain storage positions, so returned IDs need no order specialization.
+        order_observed = operation not in ("keys", "len_keys") or (
+            operation == "keys" and issubclass(mapping_type, OrderedDict)
+        )
+        self.assertEqual(counter.frame_count, 2 if order_observed else 1)
+
+    @parametrize("mapping_type", [dict, OrderedDict])
+    def test_hook_dict_subclass_protocol(self, mapping_type):
+        class Hooks(mapping_type):
+            def items(self):
+                return list(super().items())[::-1]
+
+        def fn(x, module):
+            return module(x), type(module._forward_hooks)
+
+        module = torch.nn.Identity()
+        module._forward_hooks = Hooks({1: add_one, 2: multiply_forward_hook})
+        x = torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, module), fn(x, module))
+        self.assertEqual(counter.frame_count, 1)
+        with patch.object(Hooks, "items", mapping_type.items):
+            self.assertEqual(compiled(x, module), fn(x, module))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("ordered", [False, True])
+    @parametrize("populated", [False, True])
+    def test_hook_mapping_protocol_fallback(self, ordered, populated):
+        class Hooks(OrderedDict if ordered else dict):
+            marker = 3
+
+        def fn(x, module):
+            return module(x) + module._forward_hooks.marker
+
+        module = torch.nn.Identity()
+        module._forward_hooks = Hooks()
+        if populated:
+            module._forward_hooks[1] = identity_forward_hook
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for marker in (3, 7):
+            module._forward_hooks.marker = marker
+            self.assertEqual(compiled(x, module), x + marker)
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("mapping_type", [dict, OrderedDict])
+    @parametrize("populated", [False, True])
+    @parametrize("mutation", ["attribute", "content"])
+    def test_hook_subclass_attribute_mutation(self, mapping_type, populated, mutation):
+        class Hooks(mapping_type):
+            pass
+
+        def fn(x, module):
+            hooks = module._forward_hooks
+            if mutation == "attribute":
+                hooks.marker = x + 2
+                return module(x) + 1, hooks.marker
+            hooks[1] = multiply_forward_hook
+            return module(x) + 1, hooks[1] is multiply_forward_hook
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            module = torch.nn.Identity()
+            module._forward_hooks = Hooks(
+                {1: identity_forward_hook} if populated else {}
+            )
+            expected = (x + 1, x + 2) if mutation == "attribute" else (x * 2 + 1, True)
+            self.assertEqual(compiled(x, module), expected)
+            if mutation == "attribute":
+                self.assertEqual(module._forward_hooks.marker, x + 2)
+            else:
+                self.assertIs(module._forward_hooks[1], multiply_forward_hook)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("mapping_type", [dict, OrderedDict])
+    @parametrize("spoof_type", [False, True])
+    @parametrize("truth_method", ["__len__", "__bool__"])
+    def test_empty_hook_subclass_truth_protocol(
+        self, mapping_type, spoof_type, truth_method
+    ):
+        def hook(module, args, output):
+            return output + 2
+
+        class Meta(type):
+            __hash__ = type.__hash__
+
+            def __eq__(cls, other):
+                return cls is other or (
+                    spoof_type and (other is dict or other is OrderedDict)
+                )
+
+        class Hooks(mapping_type, metaclass=Meta):
+            if truth_method == "__len__":
+
+                def __len__(self):
+                    return 1
+            else:
+
+                def __bool__(self):
+                    return True
+
+            def items(self):
+                return [(1, hook)]
+
+        module = torch.nn.Identity()
+        module._forward_hooks = Hooks()
+        compiled = torch.compile(lambda x, m: m(x), backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, module), module(x))
+        self.assertEqual(module(x), x + 2)
+
+    def test_non_dict_hook_mapping_fallback(self):
+        def fn(x, module):
+            return module(x) + 1
+
+        module = torch.nn.Identity()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for amount in (1, 3):
+
+            def hook(module, args, output):
+                return output + amount
+
+            module._forward_hooks = UserDict({1: hook})
+            self.assertEqual(compiled(x, module), x + amount + 1)
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize(
+        "mapping_type, operation, custom_new",
+        [
+            (kind, operation, False)
+            for kind in (dict, OrderedDict)
+            for operation in ("copy", "union", "reflected_union")
+        ]
+        + [(OrderedDict, "union", True)],
+    )
+    def test_hook_subclass_detached_keys(self, mapping_type, operation, custom_new):
+        class Hooks(mapping_type):
+            if custom_new:
+
+                def __new__(cls, *args, **kwargs):
+                    return []
+
+        def fn(x, module):
+            hooks = module._forward_hooks
+            if operation == "copy":
+                result = hooks.copy()
+            elif operation == "union":
+                result = hooks | {}
+            else:
+                result = {} | hooks
+            return x + (1 in result), type(result), tuple(result)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(
+            fn, backend=counter, fullgraph=mapping_type is dict and not custom_new
+        )
+        x = torch.ones(1)
+        for keys in ((2, 3), (1, 3)):
+            module = torch.nn.Identity()
+            module._forward_hooks = mapping_type.__new__(Hooks)
+            mapping_type.update(
+                module._forward_hooks, dict.fromkeys(keys, identity_forward_hook)
+            )
+            if mapping_type is OrderedDict:
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    Unsupported, "OrderedDict subclass allocation"
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(x, module)
+            self.assertEqual(compiled(x, module), fn(x, module))
+        if mapping_type is dict and not custom_new:
+            self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("populated", [False, True])
+    def test_ordered_hook_fast_unpack(self, populated):
+        def fn(x, module):
+            keys = [*module._forward_hooks]
+            callbacks = [*module._forward_hooks.values()]
+            pairs = [*module._forward_hooks.items()]
+            for callback in callbacks:
+                x = callback(module, (), x)
+            return x + 1, keys, pairs
+
+        def add(module, args, output):
+            return output + 1
+
+        def multiply(module, args, output):
+            return output * 2
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            module = torch.nn.Identity()
+            if populated:
+                module.register_forward_hook(add)
+                module.register_forward_hook(multiply)
+            self.assertEqual(compiled(x, module), fn(x, module))
+        self.assertEqual(counter.frame_count, 1)
+        if populated:
+            module._forward_hooks.move_to_end(next(iter(module._forward_hooks)))
+            self.assertEqual(compiled(x, module), fn(x, module))
+            self.assertEqual(counter.frame_count, 2)
 
     def test_always_call_hook(self):
         cnt = torch._dynamo.testing.CompileCounter()
@@ -432,6 +691,36 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(len(guards), len(pairs))
 
+    @parametrize("view", ["keys", "items"])
+    def test_hook_view_repr_observes_ids(self, view):
+        def fn(x, module):
+            return x + 1, repr(getattr(module._forward_hooks, view)())
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for key in (1, 2):
+            module = torch.nn.Identity()
+            module._forward_hooks[key] = torch.sin
+            self.assertEqual(compiled(x, module), fn(x, module))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_empty_corrupted_forward_hooks(self):
+        module = torch.nn.Identity()
+        module.register_forward_pre_hook(lambda module, args: args)
+        handle = module.register_forward_hook(lambda module, args, output: output)
+        dict.__delitem__(module._forward_hooks, handle.id)
+
+        def fn(x, module):
+            return module(x)
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "OrderedDict storage differs from linked keys",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, module)
+
     @parametrize("key_type", [str, bool, enum.IntEnum("HookKey", {"value": 1})])
     def test_mixed_hook_key_types(self, key_type):
         def kwargs_hook(module, args, kwargs, output):
@@ -625,6 +914,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 for result in actual[1:3]:
                     self.assertIs(type(result), mapping_type)
 
+    @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize(
         "operation",
         [
@@ -642,7 +932,8 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             ),
             subtest(lambda d: 1 in frozenset(d), name="frozenset"),
             subtest(lambda d: 1 in HookKeyFrozenSet(d), name="frozenset_subclass"),
-            subtest(lambda d: 1 in dict.fromkeys(set(d)), name="fromkeys"),
+            subtest(lambda d: 1 in dict.fromkeys(set(d)), name="fromkeys_set"),
+            subtest(lambda d: 1 in dict.fromkeys(d), name="fromkeys"),
             subtest(lambda d: 1 in {0}.union(d), name="union"),
             subtest(lambda d: 1 in {1}.intersection(d), name="intersection"),
             subtest(lambda d: 1 in {1}.difference(d), name="difference"),
@@ -660,17 +951,20 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             ),
         ],
     )
-    def test_materialized_hook_keys(self, operation):
+    def test_materialized_hook_keys(self, operation, mapping_type):
         def fn(x, module):
             return x + operation(module._forward_hooks)
 
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
         for keys in ((2, 3), (1, 3)):
             module = torch.nn.Identity()
+            module._forward_hooks = mapping_type()
             for key in keys:
                 module._forward_hooks[key] = identity_forward_hook
             self.assertEqual(compiled(x, module), fn(x, module))
+        self.assertEqual(counter.frame_count, 2)
 
     @parametrize("recursive", [False, True])
     @parametrize("mapping_type", [dict, OrderedDict])

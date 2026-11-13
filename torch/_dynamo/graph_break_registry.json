@@ -4666,6 +4666,16 @@
       ]
     }
   ],
+  "GB3039": [
+    {
+      "Gb_type": "OrderedDict subclass allocation",
+      "Context": "OrderedDict subclass",
+      "Explanation": "Dynamo cannot trace allocating operations on OrderedDict subclasses.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB8982": [
     {
       "Gb_type": "Unsupported callable in torch.autograd.Function staticmethod",
@@ -6984,6 +6994,14 @@
       "Gb_type": "Unsupported builtin dictionary storage operation",
       "Context": "dict.{name} on {obj.python_type_name()}",
       "Explanation": "Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported builtin dictionary storage operation",
+      "Context": "dict.{name} on {obj.python_type_name()}",
+      "Explanation": "Dynamo cannot yet preserve builtin dictionary storage for this operation.",
       "Hints": []
     }
   ],
@@ -7396,6 +7414,16 @@
       "Hints": [
         "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB1160": [
+    {
+      "Gb_type": "Unsupported dictionary view owner",
+      "Context": "dict_vt.python_type_name()",
+      "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ]

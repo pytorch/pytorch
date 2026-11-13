@@ -1390,6 +1390,7 @@ def _unpack_fast_types() -> tuple[type, ...]:
         variables.ListVariable,
         variables.MappingProxyVariable,
         variables.NNModuleHooksDictVariable,
+        variables.NNModuleHooksOrderedDictVariable,
         variables.NumpyNdarrayVariable,
         variables.OrderedDictVariable,
         variables.OrderedSetVariable,
@@ -3203,7 +3204,9 @@ def check_numpy_ndarray_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> 
 dict_keys: type[KeysView[Any]] = type({}.keys())
 dict_values: type[ValuesView[Any]] = type({}.values())
 dict_items: type[ItemsView[Any, Any]] = type({}.items())
+odict_keys: type[KeysView[Any]] = type(OrderedDict().keys())
 odict_values: type[ValuesView[Any]] = type(OrderedDict().values())
+odict_items: type[ItemsView[Any, Any]] = type(OrderedDict().items())
 # pyrefly: ignore [bad-assignment]
 tuple_iterator: type[Iterator[Any]] = type(iter(()))
 # pyrefly: ignore [bad-assignment]

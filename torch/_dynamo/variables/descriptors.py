@@ -488,6 +488,10 @@ class MethodDescriptorVariable(DescriptorVariable):
         name = self.descriptor.__name__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj = obj.realize()
+        if isinstance(obj, variables.ConstDictVariable):
+            result = obj.call_method_descriptor(tx, self.descriptor, rest, kwargs)
+            if result is not None:
+                return result
         if isinstance(obj, UserDefinedObjectVariable):
             base_methods = obj._base_methods
             if base_methods is not None and self.descriptor in base_methods:
@@ -833,6 +837,10 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
             # graph, so a tensor subclass override never runs.
             fn = VariableTracker.build(tx, descriptor)
             return fn.call_function(tx, [obj, *args], kwargs)
+        if isinstance(obj, variables.ConstDictVariable):
+            result = obj.call_method_descriptor(tx, descriptor, args, kwargs)
+            if result is not None:
+                return result
         if mro_lookup(obj.python_type(), name) is descriptor:
             # Nothing overrides it, so name lookup reaches the same C method.
             return obj.call_method(tx, name, args, kwargs)

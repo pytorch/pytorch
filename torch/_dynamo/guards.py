@@ -5298,8 +5298,12 @@ class GuardsStatePickler(FunctionPicklerBase):
         return get_type_dict_no_user_code(owner)[name]
 
     @classmethod
-    def _unpickle_dict_keys(cls, elems: list[Any]) -> Any:
-        return dict.fromkeys(elems).keys()
+    def _unpickle_dict_keys(cls, owner: dict[Any, Any], ordered: bool) -> Any:
+        if ordered:
+            return collections.OrderedDict.keys(
+                cast(collections.OrderedDict[Any, Any], owner)
+            )
+        return dict.keys(owner)
 
     @classmethod
     def _restore_ordered_dict_state(
@@ -5974,8 +5978,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             if item is not NotImplemented and step is not NotImplemented:
                 return type(self)._unpickle_count_iter, (item, step)
 
+        elif isinstance(obj, torch._dynamo.utils.odict_keys):
+            return type(self)._unpickle_dict_keys, (gc.get_referents(obj)[0], True)
+
         elif isinstance(obj, torch._dynamo.utils.dict_keys):
-            return type(self)._unpickle_dict_keys, (list(obj),)
+            return type(self)._unpickle_dict_keys, (gc.get_referents(obj)[0], False)
 
         elif isinstance(
             obj, torch._ops.OpOverloadPacket
@@ -6415,6 +6422,13 @@ def pickle_guards_state(
         for value in state.output_graph.local_scope.values():
             if issubclass(type(value), dict):
                 required_dicts[id(value)] = cast(dict[Any, Any], value)
+        for value in tuple(guard_tree_values.values()):
+            if isinstance(
+                value, (torch._dynamo.utils.dict_keys, torch._dynamo.utils.odict_keys)
+            ):
+                owner = gc.get_referents(value)[0]
+                required_dicts[id(owner)] = owner
+                guard_tree_values[id(owner)] = owner
         # Rebuilding implicit managers requires dictionary structure, not every value.
         # Register all aliased/nested containers before pruning their unused entries.
         pickler = GuardsStatePickler(
