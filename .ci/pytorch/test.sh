@@ -662,6 +662,44 @@ test_python_smoke_b200() {
   assert_git_not_dirty
 }
 
+test_transport_rdma() {
+  # NIXL and Mooncake transports over RoCE/RDMA on the NVIDIA GB300 runner.
+  # nixl-cu13 depends on torch, so install it without deps to keep the built torch.
+  pip_install --no-deps nixl==1.5.2 nixl-cu13==1.5.2
+  pip_install mooncake-transfer-engine-cuda13==0.3.14
+  # supported() swallows import errors, which would turn a broken install into skips.
+  python -c "import nixl, mooncake.engine"
+
+  ls -l /dev/infiniband || true
+  for port in /sys/class/infiniband/*/ports/*; do
+    [[ -e "${port}" ]] || continue
+    echo "${port}: $(cat "${port}/state" "${port}/link_layer" "${port}/rate" 2>/dev/null | tr '\n' ' ')"
+  done
+  nvidia-smi topo -m || true
+
+  time env TORCH_TEST_CUDA_TRANSPORT=1 python test/run_test.py \
+    --include \
+      distributed/test_transport_registry \
+      distributed/test_transport_bootstrap \
+      distributed/test_transport_cuda_stream \
+      distributed/test_transport_nixl \
+      distributed/test_transport_nixl_work \
+    --verbose --upload-artifacts-while-running
+
+  # Default UCX picks shared memory/cuda_ipc for same-host peers; UCX_TLS=rc forces RDMA.
+  time env TORCH_TEST_CUDA_TRANSPORT=1 UCX_TLS=rc,self,cuda_copy python test/run_test.py \
+    --include distributed/test_transport_cuda_stream --verbose --upload-artifacts-while-running
+  time env TORCH_TEST_NIXL=1 python test/run_test.py \
+    --include distributed/test_transport_nixl_native --verbose --upload-artifacts-while-running
+  time env TORCH_TEST_NIXL=1 UCX_TLS=rc,self python test/run_test.py \
+    --include distributed/test_transport_nixl_native --verbose --upload-artifacts-while-running
+
+  # MC_FORCE_HCA=1 fails instead of silently falling back to NVLink without an HCA.
+  time env RUN_MOONCAKE_INTEGRATION=1 MC_FORCE_HCA=1 python test/run_test.py \
+    --include distributed/test_transport_mooncake --verbose --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
 
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
@@ -2924,6 +2962,8 @@ elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
 elif [[ "${TEST_CONFIG}" == smoke_b200 ]]; then
   test_python_smoke_b200
+elif [[ "${TEST_CONFIG}" == transport_rdma ]]; then
+  test_transport_rdma
 elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
   test_python_smoke_xpu
 elif [[ "${TEST_CONFIG}" == dtensor ]]; then
