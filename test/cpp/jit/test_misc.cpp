@@ -1347,6 +1347,77 @@ TEST(RecordFunctionTest, OperatorNameOverload) {
       << "Expected aten::pow.Tensor_Scalar to have been called and recorded, but it was not";
 }
 
+// at::detail::num_callback_sources may count too high, which only costs the
+// slow path, but never too low, which would skip registered callbacks.
+TEST(RecordFunctionTest, CallbackSourceCount) {
+  at::clearCallbacks();
+  auto count = [] { return at::detail::num_callback_sources.load(); };
+  auto callback = [] {
+    return at::RecordFunctionCallback(
+        [](const at::RecordFunction&) -> std::unique_ptr<at::ObserverContext> {
+          return nullptr;
+        });
+  };
+  // The exported version, for code built against older headers, agrees with
+  // the inline one.
+  auto has_step_callbacks = [](bool expected) {
+    const auto scope = at::RecordScope::FUNCTION;
+    EXPECT_EQ(at::getStepCallbacksUnlessEmpty(scope).has_value(), expected);
+    EXPECT_EQ(
+        at::getStepCallbacksUnlessEmptyInline(scope).has_value(), expected);
+  };
+  const auto base = count();
+  has_step_callbacks(false);
+
+  // One per global callback.
+  auto g1 = at::addGlobalCallback(callback());
+  auto g2 = at::addGlobalCallback(callback());
+  EXPECT_EQ(count(), base + 2);
+  has_step_callbacks(true);
+  at::removeCallback(g1);
+  EXPECT_EQ(count(), base + 1);
+  at::removeCallback(g2);
+  EXPECT_EQ(count(), base);
+  has_step_callbacks(false);
+
+  // One per thread that has thread-local callbacks.
+  auto t1 = at::addThreadLocalCallback(callback());
+  auto t2 = at::addThreadLocalCallback(callback());
+  EXPECT_EQ(count(), base + 1);
+  at::removeCallback(t1);
+  EXPECT_EQ(count(), base + 1);
+  at::removeCallback(t2);
+  EXPECT_EQ(count(), base);
+
+  at::addGlobalCallback(callback());
+  at::addThreadLocalCallback(callback());
+  EXPECT_EQ(count(), base + 2);
+  at::clearCallbacks();
+  EXPECT_EQ(count(), base);
+
+  // A thread that exits without removing its thread-local callback.
+  std::thread([&] {
+    at::addThreadLocalCallback(callback());
+    EXPECT_EQ(count(), base + 1);
+  }).join();
+  EXPECT_EQ(count(), base);
+
+  // Thread-local callbacks carried to another thread, which then restores its
+  // own state.
+  auto handle = at::addThreadLocalCallback(callback());
+  at::ThreadLocalState state;
+  std::thread([&] {
+    EXPECT_EQ(count(), base + 1);
+    {
+      at::ThreadLocalStateGuard guard(state);
+      EXPECT_EQ(count(), base + 2);
+    }
+    EXPECT_EQ(count(), base + 1);
+  }).join();
+  at::removeCallback(handle);
+  EXPECT_EQ(count(), base);
+}
+
 class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
  public:
   int getModelId() const {

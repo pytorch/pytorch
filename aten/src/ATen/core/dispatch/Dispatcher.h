@@ -793,7 +793,7 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
-      at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
+      at::getStepCallbacksUnlessEmptyInline(at::RecordScope::FUNCTION);
   if (step_callbacks.has_value() && op.operatorDef_->op.isObserved())
       [[unlikely]] {
     return callWithDispatchKeySlowPath<Return, Args...>(
@@ -871,7 +871,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
   const auto& kernel = entry.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
-      at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
+      at::getStepCallbacksUnlessEmptyInline(at::RecordScope::FUNCTION);
   if (step_callbacks.has_value() && entry.isObserved()) [[unlikely]] {
     at::RecordFunction guard(std::move(*step_callbacks));
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();

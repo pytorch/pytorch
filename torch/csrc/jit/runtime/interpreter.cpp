@@ -944,7 +944,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
     if (!frame.record_function) {
-      auto step_callbacks = at::getStepCallbacksUnlessEmpty(
+      auto step_callbacks = at::getStepCallbacksUnlessEmptyInline(
           at::RecordScope::TORCHSCRIPT_FUNCTION);
       if (step_callbacks.has_value()) [[unlikely]] {
         auto rec_fn =
