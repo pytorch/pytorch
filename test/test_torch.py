@@ -35,7 +35,7 @@ from torch.testing._internal.common_optimizers import (
     optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
-    MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_GRAPH, run_tests, IS_JETSON,
+    MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_XPU, TEST_CUDA_GRAPH, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
@@ -2478,7 +2478,8 @@ class TestTorchDeviceType(TestCase):
     # On ROCm, AMD XF32 round-down bias in the K=10 mm-based cdist path
     # (||a-b||² via a·b) pushes max_abs to ~5.8e-3, exceeding 0.005; ideal
     # NVIDIA TF32 stays under. See https://github.com/jeffdaily/tf32_analysis.
-    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
+    # oneDNN TF32 on XPU lands in the same place, at ~6.7e-3.
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM or TEST_XPU else 0.005)
     @reduced_f32_on_and_off(0.08)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
