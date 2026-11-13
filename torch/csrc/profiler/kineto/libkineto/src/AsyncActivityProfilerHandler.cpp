@@ -339,7 +339,7 @@ time_point<system_clock> AsyncActivityProfilerHandler::performRunLoopStep(
       VLOG(1) << "State: Warmup";
       profiler_.flushWarmupBuffers(currentIter, nextWakeupTime);
 
-      if (profiler_.isGpuCollectionStopped()) {
+      if (profiler_.isStopped()) {
         profiler_.cancelTrace(now);
         LOG(ERROR)
             << "State: Warmup stopped by GPU profiler. (Buffer size configured is "
@@ -385,7 +385,7 @@ time_point<system_clock> AsyncActivityProfilerHandler::performRunLoopStep(
       VLOG(1) << "State: CollectTrace";
       bool collection_done = profiler_.isCollectionDone(now, currentIter);
 
-      if (collection_done || profiler_.isGpuCollectionStopped()) {
+      if (collection_done || profiler_.isStopped()) {
         LOG(INFO) << "Tracing complete.";
         VLOG_IF(1, currentIter >= 0)
             << "This state change was invoked by application's step() call";
