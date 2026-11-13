@@ -47,7 +47,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
     return handle_torch_function(r, args, kwargs, THPNNVariableFunctionsModule, "torch.nn", "_parse_to");
   }
   // we don't want copy or round for nn.Module.to
-  auto parsed = parse_to_conversion(r, /*allow_copy*/ false, /*allow_round*/ false);
+  auto parsed = parse_to_conversion_with_round(r, /*allow_copy*/ false, /*allow_round*/ false);
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);

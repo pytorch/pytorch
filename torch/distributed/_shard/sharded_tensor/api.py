@@ -688,7 +688,8 @@ class ShardedTensor(ShardedTensorBase):
         process_group = kwargs.get("process_group")
 
         if rounding is not None:
-            # Validate on every rank, including those without local shards.
+            # Validate the dtype and mode on every rank, including those without
+            # local shards (devices are not validated here).
             torch.empty(0, dtype=current_dtype, device="meta").to(
                 dtype_to, round=rounding
             )

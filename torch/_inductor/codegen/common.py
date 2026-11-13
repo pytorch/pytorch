@@ -51,7 +51,6 @@ from ..utils import (
     sympy_subs,
     triton_type,
     unique,
-    upcast_compute_type,
 )
 from ..virtualized import (
     NullHandler,
@@ -908,8 +907,7 @@ def deduce_output_dtype_by_name(
     elif op_name == "to_dtype_bitcast":
         return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     elif op_name == "to_dtype_rounded":
-        # The compute type: float32 in Triton for float16 and bfloat16.
-        return upcast_compute_type(kwargs["dtype"] if "dtype" in kwargs else args[-3])
+        return kwargs["dtype"] if "dtype" in kwargs else args[-3]
     return None
 
 

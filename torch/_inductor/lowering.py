@@ -10056,12 +10056,12 @@ def _to_dtype_rounded(
     src_dtype = x.get_dtype()
     device = x.get_device()
     if device is not None and is_triton(device):
-        # The Triton codegen reduces float64 to float32 with PTX on CUDA, and
-        # with integer arithmetic on ROCm.
-        supported = device.type == "cuda" or src_dtype != torch.float64
-        supported = supported and is_triton_fp8_dtype_supported(dtype, device)
+        # Only CUDA (and ROCm) has an eager kernel to match.
+        supported = device.type == "cuda" and is_triton_fp8_dtype_supported(
+            dtype, device
+        )
     else:
-        supported = ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+        supported = ir.is_cpu(x) and config.cpu_backend == "cpp"
     # Inductor does not support float8_e5m3fnu yet.
     supported = supported and dtype != torch.float8_e5m3fnu
     if not supported:
