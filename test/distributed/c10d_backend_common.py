@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import Backend as C10dBackend
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import TEST_CUDA
 
@@ -56,9 +57,85 @@ class BackendConfig:
     complex_dtypes: tuple[torch.dtype, ...] = COMPLEX_DTYPES
 
 
+class PythonGlooBackend(C10dBackend):
+    """Python Backend that forwards to gloo to exercise the PyBackend trampoline."""
+
+    def __init__(self, gloo):
+        super().__init__(gloo.rank(), gloo.size())
+        self._gloo = gloo
+
+    @classmethod
+    def create(cls, store, rank, world_size, timeout):
+        return cls(dist.ProcessGroupGloo(store, rank, world_size, timeout))
+
+    def getBackendName(self):
+        return "python-gloo"
+
+    @property
+    def options(self):
+        return self._gloo.options
+
+    @property
+    def supports_splitting(self):
+        return self._gloo.supports_splitting
+
+    def split(self, store, ranks, opts):
+        child = self._gloo.split(store, ranks, opts)
+        return None if child is None else PythonGlooBackend(child)
+
+
+def _forward_to_gloo(name):
+    def method(self, *args, **kwargs):
+        return getattr(self._gloo, name)(*args, **kwargs)
+
+    method.__name__ = name
+    return method
+
+
+# Collectives, p2p and sequence numbers; other trampoline lookups use Backend defaults.
+for _name in (
+    "broadcast",
+    "allreduce",
+    "allreduce_sparse",
+    "allreduce_coalesced",
+    "reduce",
+    "allgather",
+    "all_gather_single",
+    "allgather_coalesced",
+    "all_gather_single_coalesced",
+    "gather",
+    "gather_single",
+    "scatter",
+    "reduce_scatter",
+    "reduce_scatter_single",
+    "reduce_scatter_single_coalesced",
+    "all_to_all_single",
+    "alltoall",
+    "send",
+    "recv",
+    "recv_anysource",
+    "barrier",
+    "monitored_barrier",
+    "_get_sequence_number_for_group",
+    "_set_sequence_number_for_group",
+):
+    setattr(PythonGlooBackend, _name, _forward_to_gloo(_name))
+
+if dist.is_gloo_available():
+    dist.Backend.register_backend(
+        "python-gloo", PythonGlooBackend.create, devices=["cpu"]
+    )
+
+
 C10D_BACKENDS = (
     BackendConfig(
         "gloo",
+        "cpu",
+        supports_bitwise_reductions=True,
+        supports_work_sequence_number=True,
+    ),
+    BackendConfig(
+        "python-gloo",
         "cpu",
         supports_bitwise_reductions=True,
         supports_work_sequence_number=True,

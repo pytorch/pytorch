@@ -293,6 +293,15 @@ def cummaxmin(self, dim):
 @register_meta([aten.logcumsumexp.default, aten.logcumsumexp.out])
 @out_wrapper()
 def logcumsumexp(self, dim):
+    # torch._check rather than _check_not_implemented: a NotImplementedError
+    # from a meta kernel means "no meta implementation", which makes FakeTensor
+    # fall back to the real kernel and Dynamo graph break, so the input would
+    # only be rejected by running it eagerly. This rejects it while tracing.
+    torch._check(
+        self.dtype.is_floating_point or self.dtype.is_complex,
+        lambda: "logcumsumexp(): input dtype should be either floating point or "
+        f"complex. Got {self.dtype} instead.",
+    )
     # Checks that dim is within bounds
     maybe_wrap_dim(dim, self.ndim)
     return torch.empty_like(self, memory_format=torch.contiguous_format)
@@ -4166,7 +4175,13 @@ def meta_randint_like(self, high, **kwargs):
     )
 
 
-@register_meta([aten._fused_adam_.default, aten._fused_adamw_.default])
+@register_meta(
+    [
+        aten._fused_adam_.default,
+        aten._fused_adamw_.default,
+        aten._fused_adamw_.tensor_lr,
+    ]
+)
 def meta__fused_adam_(
     self,
     grads,

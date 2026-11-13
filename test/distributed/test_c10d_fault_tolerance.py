@@ -271,6 +271,9 @@ class AbstractFaultToleranceTest:
         self._reconfigure(603, handles)
         self.assertEqual(dist.get_world_size(), self.world_size)
         self.assertEqual(dist.get_rank(), self.rank)
+        # A rank can return from the Gloo mesh connect before its peers do;
+        # shrinking right away closes its sockets under their handshake.
+        self._store_barrier("ft_scale_down_up_connected")
 
         self._reconfigure(604 + self.rank, [dist._get_reconfigure_handle()])
         self.assertEqual(dist.get_world_size(), 1)

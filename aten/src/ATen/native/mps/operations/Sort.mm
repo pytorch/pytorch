@@ -1,5 +1,6 @@
 //  Copyright © 2023 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>

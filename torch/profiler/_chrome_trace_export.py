@@ -136,7 +136,7 @@ def _device_properties() -> list[dict[str, Any]]:
     Every field kineto emits except ``regsPerBlock``, which torch's properties object
     does not carry; it is left out rather than guessed from ``regsPerMultiprocessor``,
     which only happens to match on current parts. ``sharedMemPerBlockOptin`` is
-    NVIDIA-only in that binding, so it is omitted on ROCm rather than raising.
+    bound on CUDA and, since ROCm 6.0, on HIP as well.
     """
     props: list[dict[str, Any]] = []
     for i in range(torch.cuda.device_count()):
@@ -155,7 +155,7 @@ def _device_properties() -> list[dict[str, Any]]:
             "regsPerMultiprocessor": p.regs_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
             "sharedMemPerMultiprocessor": p.shared_memory_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
         }
-        # NVIDIA-only in torch's binding, hence the guard rather than a plain read.
+        # Absent from the binding only on HIP predating ROCm 6.0.
         if hasattr(p, "shared_memory_per_block_optin"):
             entry["sharedMemPerBlockOptin"] = (
                 p.shared_memory_per_block_optin

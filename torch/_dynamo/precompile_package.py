@@ -34,7 +34,7 @@ import site
 import sys
 import sysconfig
 import types
-from typing import TYPE_CHECKING
+from typing import Generic, ParamSpec, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._functorch.config as functorch_config
@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from .convert_frame import ConvertFrameReturn
     from .hooks import Hooks
     from .package import _BackendId, _DynamoCacheEntry
+    from .precompile_context import BackendCacheArtifact
     from .repro.after_dynamo import WrapBackendDebug
     from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
     from .variables.builder import FrameStateSizeEntry
@@ -241,7 +242,9 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     ``torch._dynamo.config.caching_precompile``: its wrapper around every guard
     filter trips over the same artifact and drops, with a warning, any guard
     of type ID_MATCH, CLOSURE_MATCH, WEAKREF_ALIVE or DICT_VERSION or deriving
-    ID_MATCH or DICT_VERSION.
+    ID_MATCH or DICT_VERSION, except for direct TYPE_MATCH and BUILTIN_MATCH
+    guards. The serializer accepts those two by their own type; in particular,
+    BUILTIN_MATCH normally derives ID_MATCH but still has a serializable guard.
 
     Passing this filter does not mean the artifact serializes: the pre-check
     also refuses a kept TYPE_MATCH on a local-scope type, which cannot be
@@ -1280,6 +1283,7 @@ _UNMODELLED_GUARD_TYPES = frozenset(
         "DUAL_LEVEL",
         "FSDP_TRAINING_STATE",
         "FUNCTORCH_STACK_MATCH",
+        "FX_ANNOTATION",
         "GLOBAL_STATE",
         "OPAQUE_OBJ_GUARD_FN_MATCH",
         "SHAPE_ENV",
@@ -1586,7 +1590,11 @@ def _summarize(
     )
 
 
-class PrecompileSession:
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+class PrecompileSession(Generic[_P, _R]):
     """A caller-driven multi-graph capture in progress.
 
     Enter it to get the callable to exercise, call that with real inputs inside
@@ -1598,14 +1606,15 @@ class PrecompileSession:
 
     The artifact is STANDALONE: it rebuilds each captured frame from its code
     object and guard trees (see ``torch._precompile_driver._build_multigraph_forward``)
-    and installs nothing, so a frame the entry cannot reach through a graph-break
-    continuation -- one entered by an ordinary call, such as a child module's
-    forward that graph-breaks -- is refused at render rather than served eager.
+    and installs nothing, unless the entry cannot reach a frame through a
+    graph-break continuation -- one entered by an ordinary call, such as a child
+    module's forward that graph-breaks. That artifact is rendered installed-mode
+    instead (see ``torch._precompile_driver._build_installed_forward``).
     """
 
     def __init__(
         self,
-        fn: Callable[..., object],
+        fn: Callable[_P, _R],
         *,
         backend: str = "inductor",
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
@@ -1625,12 +1634,12 @@ class PrecompileSession:
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
         self._capture_errors: list[str] = []
-        self._backend_artifacts: dict[_BackendId, Any] = {}
+        self._backend_artifacts: dict[_BackendId, BackendCacheArtifact[Any]] = {}
         self._package = CompilePackage(fn)
         self._guard_filter_fn = self._recording_filter(
             default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
         )
-        self._compiled: Callable[..., object] | None = None
+        self._compiled: Callable[_P, _R] | None = None
         self._entered = False
         self._finished = False
 
@@ -1700,7 +1709,7 @@ class PrecompileSession:
 
         return filter_fn
 
-    def __enter__(self) -> Callable[..., object]:
+    def __enter__(self) -> Callable[_P, _R]:
         if self._entered:
             raise PackageError(
                 "PrecompileSession cannot be re-entered; start a new capture."
@@ -1719,7 +1728,7 @@ class PrecompileSession:
         )(self._fn)
         return self._call
 
-    def _call(self, *args: object, **kwargs: object) -> object:
+    def _call(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         if self._compiled is None or self._finished:
             raise PackageError("PrecompileSession is not active")
         # The compiler configuration is per call, not per block: user code
@@ -1762,14 +1771,14 @@ class PrecompileSession:
                 if artifact is not None:
                     self._backend_artifacts[backend_id] = artifact
 
-    def _collect_backends(self) -> dict[str, Any]:
+    def _collect_backends(self) -> dict[str, BackendCacheArtifact[Any]]:
         """The compiled subgraphs this capture produced, keyed by backend id."""
         from torch._dynamo.output_graph import noop_graph_call
         from torch._dynamo.precompile_context import EagerCacheArtifact
 
         self._take_backend_artifacts()
         entry = self._package.cache_entry()
-        collected: dict[str, Any] = {}
+        collected: dict[str, BackendCacheArtifact[Any]] = {}
         missing: list[_BackendId] = []
         for backend_id in sorted(entry.backend_ids):
             artifact = self._backend_artifacts.get(backend_id)
@@ -1802,6 +1811,9 @@ class PrecompileSession:
         # across a frame's variants: a dropped guard that told the variants
         # apart cannot pick between them at serve time. Merely being absent
         # from one variant (a MODULE_MATCH a branch does not touch) is not.
+        # Only variants some kept guard split apart can be compared, so a
+        # dropped slot that is the sole difference between two calls never
+        # recompiles and is never reported here.
         risky = set(self._risky_dropped_guards)
         for variants in self._guard_sets.values():
             values: dict[tuple[str, str], set[str]] = {}
@@ -1914,22 +1926,22 @@ class PrecompileSession:
 
 
 def precompile_capture(
-    fn: Callable[..., object],
+    fn: Callable[_P, _R],
     *,
     backend: str = "inductor",
     guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
     | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
-) -> PrecompileSession:
+) -> PrecompileSession[_P, _R]:
     """Begin capturing ``fn`` into a multi-graph artifact.
 
     ``recompile_limit`` defaults well above Dynamo's usual 8 because a precompile
     deliberately wants one compiled variant per condition, whereas the normal
-    limit exists to catch runaway recompilation. Runtime guards remain intact
-    during capture: ``guard_filter_fn`` applies only to the serialized guard
-    state, so every call observes the same recompilation behavior as ordinary
-    ``torch.compile``.
+    limit exists to catch runaway recompilation. ``guard_filter_fn`` applies to
+    the runtime guards as well as the serialized ones, so a dropped guard never
+    triggers a recompile during capture, just as it cannot pick a graph at serve
+    time.
     """
     if isinstance(fn, functools.partial):
         raise PackageError(
@@ -1942,7 +1954,7 @@ def precompile_capture(
         raise PackageError(
             "precompile cannot capture an nn.Module directly: capture the function "
             "that CALLS the model, e.g. a module-level 'def step(model, x): return "
-            "model(x)', calling cap(model, x)."
+            "model(x)'."
         )
     if isinstance(fn, types.MethodType):
         # The artifact rebuilds fn from its code object, which takes the
@@ -1950,7 +1962,7 @@ def precompile_capture(
         raise PackageError(
             "precompile cannot capture a bound method: capture a module-level "
             "function that takes the receiver as an argument, e.g. 'def step(model, "
-            "x): return model(x)', calling cap(model, x)."
+            "x): return model(x)'."
         )
     return PrecompileSession(
         fn,

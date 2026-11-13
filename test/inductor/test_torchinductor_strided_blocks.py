@@ -808,13 +808,17 @@ class CommonTemplate:
         "view_size,num_block_pointers,num_triton_kernels,reduction_op",
         [
             ((15, 15), 1, 1, torch.sum),  # Non-power-of 2 shapes.
-            ((129, 129), 3, 2, torch.sum),  # Large size, with loops.
+            subtest(
+                ((129, 129), 3, 2, torch.sum),  # Large size, with loops.
+                # RDNA emits a 1D reduction here instead of 2D tiling.
+                decorators=[skipIfRocmArch(NAVI_ARCH)],
+            ),
             ((3, 3), 1, 1, torch.argmax),
             ((129, 129), 1, 1, torch.argmax),
             ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
         ],
     )
-    @skipIfRocmArch(MI200_ARCH + NAVI_ARCH)
+    @skipIfRocmArch(MI200_ARCH)
     def test_2d_reduction_odd_shapes(
         self,
         view_size: tuple[int, ...],
@@ -2675,7 +2679,7 @@ class TritonHostSideTMAConfigTestCUDA(InductorTestCase):
             return x + 1
 
         x = torch.randn(1024, device=GPU_TYPE)
-        with self.assertWarnsRegex(UserWarning, "no effect"):
+        with self.assertWarnsRegex(UserWarning, "host-side TMA will be skipped"):
             result, code_list = run_and_get_code(torch.compile(fn), x)
         self.assertTrue(torch.allclose(result, fn(x)))
         self.assertNotIn("host_tma_descriptor_args", "\n".join(code_list))

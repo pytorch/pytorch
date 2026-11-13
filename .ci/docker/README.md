@@ -96,6 +96,11 @@ If your new Docker image needs a library installed from a specific pinned commit
 1. Add the repository you want to track in `nightly.yml` and `merge-rules.yml`
 2. Add the initial pinned commit in `.ci/docker/ci_commit_pins/`. The text filename should match the one defined in step 1
 
+3. When updating `rocm-preview.txt`, apply `ciflow/docker` and verify both
+   `pytorch-linux-noble-rocm-preview-py3.12` and
+   `manylinux2_28-builder:rocm-preview`. The pin drives both images, and the
+   content-addressed PR builders validate it before merge.
+
 #### 2. Configure the Base Docker Image
 1. **Add new Base Docker image configuration** (if applicable):
 

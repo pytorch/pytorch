@@ -115,7 +115,7 @@ struct PadReflection {
 // 2D Bilinear interpolation
 template <typename Pad, typename T, typename idx_t>
 static T interpolate_bilinear_2d(
-    constant T* input,
+    device const T* input,
     float ix,
     float iy,
     int32_t inp_H,
@@ -169,7 +169,7 @@ static T interpolate_bilinear_2d(
 // 2D Nearest neighbor interpolation
 template <typename Pad, typename T, typename idx_t>
 static T interpolate_nearest_2d(
-    constant T* input,
+    device const T* input,
     opmath_t<T> ix,
     opmath_t<T> iy,
     int32_t inp_H,
@@ -196,7 +196,7 @@ static T interpolate_nearest_2d(
 // Helper to get bounded value for bicubic interpolation
 template <typename Pad, typename T, typename idx_t>
 static opmath_t<T> get_bicubic_value(
-    constant T* input,
+    device const T* input,
     int32_t y,
     int32_t x,
     int32_t inp_H,
@@ -215,7 +215,7 @@ static opmath_t<T> get_bicubic_value(
 // 2D Bicubic interpolation
 template <typename Pad, typename T, typename idx_t>
 static T interpolate_bicubic_2d(
-    constant T* input,
+    device const T* input,
     float ix,
     float iy,
     int32_t inp_H,
@@ -287,7 +287,7 @@ template <typename Pad>
 struct Bilinear2D {
   template <typename T, typename idx_t>
   static T interpolate(
-      constant T* input,
+      device const T* input,
       opmath_t<T> ix,
       opmath_t<T> iy,
       int32_t inp_H,
@@ -304,7 +304,7 @@ template <typename Pad>
 struct Nearest2D {
   template <typename T, typename idx_t>
   static T interpolate(
-      constant T* input,
+      device const T* input,
       opmath_t<T> ix,
       opmath_t<T> iy,
       int32_t inp_H,
@@ -321,7 +321,7 @@ template <typename Pad>
 struct Bicubic2D {
   template <typename T, typename idx_t>
   static T interpolate(
-      constant T* input,
+      device const T* input,
       float ix,
       float iy,
       int32_t inp_H,
@@ -338,8 +338,8 @@ struct Bicubic2D {
 template <typename Interp, typename T, typename idx_t>
 kernel void grid_sampler_2d(
     device T* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
+    device const T* input [[buffer(1)]],
+    device const T* grid [[buffer(2)]],
     constant GridSamplerParams<4, idx_t>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   auto C = params.output_sizes[1];
@@ -386,7 +386,7 @@ kernel void grid_sampler_2d(
 // Takes pre-read grid coordinates as values, returns the interpolated value.
 template <typename Pad, typename T, typename idx_t>
 static T interpolate_trilinear_3d(
-    constant T* input,
+    device const T* input,
     opmath_t<T> ix,
     opmath_t<T> iy,
     opmath_t<T> iz,
@@ -467,7 +467,7 @@ static T interpolate_trilinear_3d(
 // 3D nearest neighbor interpolation matching the 2D nearest pattern.
 template <typename Pad, typename T, typename idx_t>
 static T interpolate_nearest_3d(
-    constant T* input,
+    device const T* input,
     opmath_t<T> ix,
     opmath_t<T> iy,
     opmath_t<T> iz,
@@ -501,7 +501,7 @@ template <typename Pad>
 struct Bilinear3D {
   template <typename T, typename idx_t>
   static T interpolate(
-      constant T* input,
+      device const T* input,
       opmath_t<T> ix,
       opmath_t<T> iy,
       opmath_t<T> iz,
@@ -531,7 +531,7 @@ template <typename Pad>
 struct Nearest3D {
   template <typename T, typename idx_t>
   static T interpolate(
-      constant T* input,
+      device const T* input,
       opmath_t<T> ix,
       opmath_t<T> iy,
       opmath_t<T> iz,
@@ -561,8 +561,8 @@ struct Nearest3D {
 template <typename Interp, typename T, typename idx_t>
 kernel void grid_sampler_3d(
     device T* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
+    device const T* input [[buffer(1)]],
+    device const T* grid [[buffer(2)]],
     constant GridSamplerParams<5, idx_t>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   auto C = params.output_sizes[1];
@@ -744,9 +744,9 @@ static bool within_bounds(T pos, T size) {
 
 template <typename T, typename idx_t>
 kernel void grid_sampler_3d_backward(
-    constant T* grad_output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
+    device const T* grad_output [[buffer(0)]],
+    device const T* input [[buffer(1)]],
+    device const T* grid [[buffer(2)]],
     device AtomicType_t<T>* grad_input [[buffer(3)]],
     device T* grad_grid [[buffer(4)]],
     constant GridSamplerBackwardParams<5, idx_t>& params [[buffer(5)]],
@@ -922,9 +922,9 @@ kernel void grid_sampler_3d_backward(
                        "_" #DTYPE)]] kernel void                        \
   grid_sampler_2d<INTERP<PAD>, DTYPE, IDX_T>(                           \
       device DTYPE * output [[buffer(0)]],                              \
-      constant DTYPE * input [[buffer(1)]],                             \
-      constant DTYPE * grid [[buffer(2)]],                              \
-      constant GridSamplerParams<4, IDX_T> & params [[buffer(3)]],      \
+      device const DTYPE* input [[buffer(1)]],                          \
+      device const DTYPE* grid [[buffer(2)]],                           \
+      constant GridSamplerParams<4, IDX_T>& params [[buffer(3)]],       \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_GRID_SAMPLER_2D_INTERP_IDX(                       \
@@ -946,9 +946,9 @@ kernel void grid_sampler_3d_backward(
                        "_" #DTYPE)]] kernel void                        \
   grid_sampler_3d<INTERP<PAD>, DTYPE, IDX_T>(                           \
       device DTYPE * output [[buffer(0)]],                              \
-      constant DTYPE * input [[buffer(1)]],                             \
-      constant DTYPE * grid [[buffer(2)]],                              \
-      constant GridSamplerParams<5, IDX_T> & params [[buffer(3)]],      \
+      device const DTYPE* input [[buffer(1)]],                          \
+      device const DTYPE* grid [[buffer(2)]],                           \
+      constant GridSamplerParams<5, IDX_T>& params [[buffer(3)]],       \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_GRID_SAMPLER_3D_INTERP_IDX(                       \
@@ -967,12 +967,12 @@ kernel void grid_sampler_3d_backward(
 #define REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, IDX_T, INAME_IDX)        \
   template [[host_name("grid_sampler_3d_backward_" INAME_IDX "_" #DTYPE)]] \
   kernel void grid_sampler_3d_backward<DTYPE, IDX_T>(                      \
-      constant DTYPE * grad_output [[buffer(0)]],                          \
-      constant DTYPE * input [[buffer(1)]],                                \
-      constant DTYPE * grid [[buffer(2)]],                                 \
-      device AtomicType_t<DTYPE> * grad_input [[buffer(3)]],               \
-      device DTYPE * grad_grid [[buffer(4)]],                              \
-      constant GridSamplerBackwardParams<5, IDX_T> & params [[buffer(5)]], \
+      device const DTYPE* grad_output [[buffer(0)]],                       \
+      device const DTYPE* input [[buffer(1)]],                             \
+      device const DTYPE* grid [[buffer(2)]],                              \
+      device AtomicType_t<DTYPE>* grad_input [[buffer(3)]],                \
+      device DTYPE* grad_grid [[buffer(4)]],                               \
+      constant GridSamplerBackwardParams<5, IDX_T>& params [[buffer(5)]],  \
       uint3 thread_index [[thread_position_in_grid]]);
 
 #define REGISTER_GRID_SAMPLER_BACKWARD(DTYPE)           \
@@ -1022,7 +1022,7 @@ static int2 apply_padding_2d(float x, float y, int2 size, bool align_corners) {
 // Get bounded value for bicubic backward
 template <typename Pad, typename T, typename idx_t>
 static opmath_t<T> get_value_bounded_backward(
-    constant T* data,
+    device const T* data,
     float x,
     float y,
     int2 size,
@@ -1073,7 +1073,7 @@ struct BackwardPreamble {
   float x, y;
 
   BackwardPreamble(
-      constant T* grid,
+      device const T* grid,
       constant GridSamplerBackwardParams<4, idx_t>& params,
       uint tid) {
     auto out_H = params.forward.output_sizes[2];
@@ -1092,8 +1092,8 @@ struct BackwardPreamble {
 template <typename T, typename idx_t>
 kernel void grid_sampler_2d_backward_bilinear_input(
     device AtomicType_t<T>* grad_input [[buffer(0)]],
-    constant T* grad_output [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
+    device const T* grad_output [[buffer(1)]],
+    device const T* grid [[buffer(2)]],
     constant GridSamplerBackwardParams<4, idx_t>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   BackwardPreamble<T, idx_t> p(grid, params, tid);
@@ -1171,9 +1171,9 @@ kernel void grid_sampler_2d_backward_bilinear_input(
 template <typename T, typename idx_t>
 kernel void grid_sampler_2d_backward_bilinear_grid(
     device T* grad_grid [[buffer(0)]],
-    constant T* grad_output [[buffer(1)]],
-    constant T* input [[buffer(2)]],
-    constant T* grid [[buffer(3)]],
+    device const T* grad_output [[buffer(1)]],
+    device const T* input [[buffer(2)]],
+    device const T* grid [[buffer(3)]],
     constant GridSamplerBackwardParams<4, idx_t>& params [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   BackwardPreamble<T, idx_t> p(grid, params, tid);
@@ -1244,8 +1244,8 @@ kernel void grid_sampler_2d_backward_bilinear_grid(
 template <typename T, typename idx_t>
 kernel void grid_sampler_2d_backward_nearest_input(
     device AtomicType_t<T>* grad_input [[buffer(0)]],
-    constant T* grad_output [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
+    device const T* grad_output [[buffer(1)]],
+    device const T* grid [[buffer(2)]],
     constant GridSamplerBackwardParams<4, idx_t>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   BackwardPreamble<T, idx_t> p(grid, params, tid);
@@ -1287,8 +1287,8 @@ kernel void grid_sampler_2d_backward_nearest_input(
 template <typename Pad, typename T, typename idx_t>
 kernel void grid_sampler_2d_backward_bicubic_input(
     device AtomicType_t<T>* grad_input [[buffer(0)]],
-    constant T* grad_output [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
+    device const T* grad_output [[buffer(1)]],
+    device const T* grid [[buffer(2)]],
     constant GridSamplerBackwardParams<4, idx_t>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   BackwardPreamble<T, idx_t> p(grid, params, tid);
@@ -1347,9 +1347,9 @@ kernel void grid_sampler_2d_backward_bicubic_input(
 template <typename Pad, typename T, typename idx_t>
 kernel void grid_sampler_2d_backward_bicubic_grid(
     device T* grad_grid [[buffer(0)]],
-    constant T* grad_output [[buffer(1)]],
-    constant T* input [[buffer(2)]],
-    constant T* grid [[buffer(3)]],
+    device const T* grad_output [[buffer(1)]],
+    device const T* input [[buffer(2)]],
+    device const T* grid [[buffer(3)]],
     constant GridSamplerBackwardParams<4, idx_t>& params [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   BackwardPreamble<T, idx_t> p(grid, params, tid);
@@ -1424,33 +1424,33 @@ kernel void grid_sampler_2d_backward_bicubic_grid(
                        "_" #DTYPE)]] kernel void                               \
       grid_sampler_2d_backward_##INTERP##_input<DTYPE, IDX_T>(                 \
           device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],               \
-          constant DTYPE * grad_output [[buffer(1)]],                          \
-          constant DTYPE * grid [[buffer(2)]],                                 \
-          constant GridSamplerBackwardParams<4, IDX_T> & params [[buffer(3)]], \
+          device const DTYPE* grad_output [[buffer(1)]],                       \
+          device const DTYPE* grid [[buffer(2)]],                              \
+          constant GridSamplerBackwardParams<4, IDX_T>& params [[buffer(3)]],  \
           uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_GRID_SAMPLER_2D_BACKWARD(DTYPE, INTERP)           \
   REGISTER_GRID_SAMPLER_2D_BACKWARD_IDX(DTYPE, INTERP, int, "i32") \
   REGISTER_GRID_SAMPLER_2D_BACKWARD_IDX(DTYPE, INTERP, long, "i64")
 
-#define REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC_IDX(                     \
-    DTYPE, PAD, PNAME, IDX_T, INAME_IDX)                                   \
-  template [[host_name("grid_sampler_2d_backward_bicubic_input_" PNAME     \
-                       "_" INAME_IDX "_" #DTYPE)]] kernel void             \
-  grid_sampler_2d_backward_bicubic_input<PAD, DTYPE, IDX_T>(               \
-      device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],               \
-      constant DTYPE * grad_output [[buffer(1)]],                          \
-      constant DTYPE * grid [[buffer(2)]],                                 \
-      constant GridSamplerBackwardParams<4, IDX_T> & params [[buffer(3)]], \
-      uint tid [[thread_position_in_grid]]);                               \
-  template [[host_name("grid_sampler_2d_backward_bicubic_grid_" PNAME      \
-                       "_" INAME_IDX "_" #DTYPE)]] kernel void             \
-  grid_sampler_2d_backward_bicubic_grid<PAD, DTYPE, IDX_T>(                \
-      device DTYPE * grad_grid [[buffer(0)]],                              \
-      constant DTYPE * grad_output [[buffer(1)]],                          \
-      constant DTYPE * input [[buffer(2)]],                                \
-      constant DTYPE * grid [[buffer(3)]],                                 \
-      constant GridSamplerBackwardParams<4, IDX_T> & params [[buffer(4)]], \
+#define REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC_IDX(                    \
+    DTYPE, PAD, PNAME, IDX_T, INAME_IDX)                                  \
+  template [[host_name("grid_sampler_2d_backward_bicubic_input_" PNAME    \
+                       "_" INAME_IDX "_" #DTYPE)]] kernel void            \
+  grid_sampler_2d_backward_bicubic_input<PAD, DTYPE, IDX_T>(              \
+      device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],              \
+      device const DTYPE* grad_output [[buffer(1)]],                      \
+      device const DTYPE* grid [[buffer(2)]],                             \
+      constant GridSamplerBackwardParams<4, IDX_T>& params [[buffer(3)]], \
+      uint tid [[thread_position_in_grid]]);                              \
+  template [[host_name("grid_sampler_2d_backward_bicubic_grid_" PNAME     \
+                       "_" INAME_IDX "_" #DTYPE)]] kernel void            \
+  grid_sampler_2d_backward_bicubic_grid<PAD, DTYPE, IDX_T>(               \
+      device DTYPE * grad_grid [[buffer(0)]],                             \
+      device const DTYPE* grad_output [[buffer(1)]],                      \
+      device const DTYPE* input [[buffer(2)]],                            \
+      device const DTYPE* grid [[buffer(3)]],                             \
+      constant GridSamplerBackwardParams<4, IDX_T>& params [[buffer(4)]], \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC(DTYPE, PAD, PNAME)           \
@@ -1463,10 +1463,10 @@ kernel void grid_sampler_2d_backward_bicubic_grid(
                        "_" #DTYPE)]]                                       \
   kernel void grid_sampler_2d_backward_bilinear_grid<DTYPE, IDX_T>(        \
       device DTYPE * grad_grid [[buffer(0)]],                              \
-      constant DTYPE * grad_output [[buffer(1)]],                          \
-      constant DTYPE * input [[buffer(2)]],                                \
-      constant DTYPE * grid [[buffer(3)]],                                 \
-      constant GridSamplerBackwardParams<4, IDX_T> & params [[buffer(4)]], \
+      device const DTYPE* grad_output [[buffer(1)]],                       \
+      device const DTYPE* input [[buffer(2)]],                             \
+      device const DTYPE* grid [[buffer(3)]],                              \
+      constant GridSamplerBackwardParams<4, IDX_T>& params [[buffer(4)]],  \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_GRID_SAMPLER_2D_BACKWARD_OPS(DTYPE)                      \

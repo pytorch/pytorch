@@ -984,9 +984,10 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
   refresh_sizes_strides_policy();
   auto& extra_meta{get_extra_meta()};
   if (extra_meta.symbolic_shape_meta_ == nullptr) {
-    extra_meta_->symbolic_shape_meta_ =
+    extra_meta.symbolic_shape_meta_ =
         std::make_unique<c10::SymbolicShapeMeta>();
-    extra_meta_->symbolic_shape_meta_->strides_valid_ = !is_sparse();
+    extra_meta.symbolic_shape_meta_->strides_valid_ = !is_sparse();
+    extra_meta.symbolic_shape_meta_->storage_offset_ = storage_offset_;
   }
 
   clone_symvec(sizes, symbolic_shape_meta().sizes_);

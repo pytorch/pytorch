@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import copy
 import glob
+import importlib.util
 import json
 import os
 import platform
@@ -96,6 +97,10 @@ except ImportError:
 
     def upload_adhoc_failure_json(*args, **kwargs):
         pass
+
+
+# The installed torch (sometimes a nightly) may predate the test run report writer.
+HAS_TORCHCI_REPORTS = bool(importlib.util.find_spec("torch.testing._internal.torchci"))
 
 
 from torch.testing._internal.common_utils import HardwareClassification
@@ -521,6 +526,20 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     return executable
 
 
+def _torchci_report_args(reports_dir: str | None) -> list[str]:
+    if not HAS_TORCHCI_REPORTS or not reports_dir:
+        return []
+    return [f"--save-torchci-reports={reports_dir}"]
+
+
+def _torchci_reports_default() -> str | None:
+    # The CI jobs that write reports by default, widening until it's all of CI.
+    # upload-test-artifacts uploads this folder.
+    if IS_CI and os.environ.get("GITHUB_WORKFLOW") in ("trunk", "pull"):
+        return str(REPO_ROOT / "test/torchci-reports")
+    return None
+
+
 def run_test(
     test_module: ShardedTest,
     test_directory,
@@ -597,6 +616,9 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    if not is_cpp_test:
+        unittest_args.extend(_torchci_report_args(options.save_torchci_reports))
 
     if options.hw_classification:
         # forward hw classification filter to test subprocess
@@ -1473,6 +1495,10 @@ def run_ci_sanity_check(test: ShardedTest, test_directory, options):
         os.remove(file)
     for dirname in glob.glob(f"{test_reports_dir}/**/{test.name}"):
         shutil.rmtree(dirname)
+    if options.save_torchci_reports:
+        name = sanitize_test_filename(test.name)
+        for file in glob.glob(f"{options.save_torchci_reports}/{name}-*.report.jsonl"):
+            os.remove(file)
     return 0
 
 
@@ -1651,6 +1677,14 @@ def parse_args():
         action="store_true",
         help="enable coverage",
         default=PYTORCH_COLLECT_COVERAGE,
+    )
+    parser.add_argument(
+        "--save-torchci-reports",
+        # Absolute, since tests run from test/.
+        type=os.path.abspath,
+        default=_torchci_reports_default(),
+        metavar="DIR",
+        help="write test run reports to DIR (default in rolled-out CI jobs: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",

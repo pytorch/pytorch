@@ -212,6 +212,8 @@ class MetalOverrides(OpOverrides):
                 "float64 cast requested, probably from tensorify_python_scalars"
             )
             return f"static_cast<float>({x})"
+        if use_compute_types and dtype in (torch.float16, torch.bfloat16):
+            return f"static_cast<float>(static_cast<{DTYPE_TO_METAL[dtype]}>({x}))"
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
@@ -439,6 +441,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def sign(x: CSEVariable) -> str:
+        # metal::sign has no integer overloads
+        if x.dtype is not None and not x.dtype.is_floating_point:
+            return f"static_cast<decltype({x})>(({x} > 0) - ({x} < 0))"
         return f"metal::sign({x})"
 
     @staticmethod

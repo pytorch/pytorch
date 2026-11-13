@@ -10,10 +10,10 @@ using namespace c10::metal;
 template <typename T>
 kernel void nllnd_loss_backward(
     device T* grad_input [[buffer(0)]],
-    constant T* grad_output [[buffer(1)]],
-    constant long* target [[buffer(2)]],
-    constant T* weight [[buffer(3)]],
-    constant T* total_weight [[buffer(4)]],
+    device const T* grad_output [[buffer(1)]],
+    device const long* target [[buffer(2)]],
+    device const T* weight [[buffer(3)]],
+    device const T* total_weight [[buffer(4)]],
     constant NLLLossBackwardParams<>& params [[buffer(5)]],
     device ErrorMessages* error_buf [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]) {
@@ -50,9 +50,9 @@ kernel void nllnd_loss_backward(
 
 template <typename T>
 kernel void nllnd_loss_forward(
-    constant T* input [[buffer(0)]],
-    constant long* target [[buffer(1)]],
-    constant T* weight [[buffer(2)]],
+    device const T* input [[buffer(0)]],
+    device const long* target [[buffer(1)]],
+    device const T* weight [[buffer(2)]],
     device T* output [[buffer(3)]],
     device T* sample_weights [[buffer(4)]],
     constant NLLLossForwardParams<>& params [[buffer(5)]],
@@ -83,7 +83,7 @@ kernel void nllnd_loss_forward(
 // Augmented target lookup: l'[idx] is BLANK for even idx, l[idx/2] for odd.
 template <typename T_target, typename T_index>
 inline T_index get_target_prime(
-    constant T_target* targets,
+    device const T_target* targets,
     T_index stride,
     T_index idx,
     T_index BLANK) {
@@ -119,11 +119,11 @@ static inline T logsumexp(T first, Ts... rest) {
 template <typename T, typename T_target, typename T_index, bool beta = false>
 static void calc_log_alpha_beta(
     device T* log_alpha,
-    constant T* log_probs,
-    constant T_target* targets,
-    constant T_index*,
-    constant T_index*,
-    constant T_index*,
+    device const T* log_probs,
+    device const T_target* targets,
+    device const T_index*,
+    device const T_index*,
+    device const T_index*,
     constant CTCLossParams<T_index>& params,
     uint tid,
     uint tptg,
@@ -240,11 +240,11 @@ template <typename T, typename T_target, typename T_index>
 kernel void ctc_loss(
     device T* loss [[buffer(0)]],
     device T* log_alpha [[buffer(1)]],
-    constant T* log_probs [[buffer(2)]],
-    constant T_target* targets [[buffer(3)]],
-    constant T_index* input_lengths [[buffer(4)]],
-    constant T_index* target_lengths [[buffer(5)]],
-    constant T_index* target_batch_offsets [[buffer(6)]],
+    device const T* log_probs [[buffer(2)]],
+    device const T_target* targets [[buffer(3)]],
+    device const T_index* input_lengths [[buffer(4)]],
+    device const T_index* target_lengths [[buffer(5)]],
+    device const T_index* target_batch_offsets [[buffer(6)]],
     constant CTCLossParams<T_index>& params [[buffer(7)]],
     uint tid [[thread_position_in_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
@@ -300,11 +300,11 @@ template <typename T, typename T_target, typename T_index>
 [[max_total_threads_per_threadgroup(1024)]]
 kernel void ctc_loss_backward_log_beta(
     device T* log_beta [[buffer(0)]],
-    constant T* log_probs [[buffer(1)]],
-    constant T_target* targets [[buffer(2)]],
-    constant T_index* input_lengths [[buffer(3)]],
-    constant T_index* target_lengths [[buffer(4)]],
-    constant T_index* target_batch_offsets [[buffer(5)]],
+    device const T* log_probs [[buffer(1)]],
+    device const T_target* targets [[buffer(2)]],
+    device const T_index* input_lengths [[buffer(3)]],
+    device const T_index* target_lengths [[buffer(4)]],
+    device const T_index* target_batch_offsets [[buffer(5)]],
     constant CTCLossParams<T_index>& params [[buffer(6)]],
     uint tid [[thread_position_in_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
@@ -340,15 +340,15 @@ kernel void ctc_loss_backward_log_beta(
 template <typename T, typename T_target, typename T_index>
 kernel void ctc_loss_backward_collect(
     device T* grad [[buffer(0)]],
-    constant T* grad_out [[buffer(1)]],
-    constant T* log_alpha [[buffer(2)]],
-    constant T* log_beta [[buffer(3)]],
-    constant T* log_probs [[buffer(4)]],
-    constant T_target* targets [[buffer(5)]],
-    constant T_index* input_lengths [[buffer(6)]],
-    constant T_index* target_lengths [[buffer(7)]],
-    constant T* loss [[buffer(8)]],
-    constant T_index* target_batch_offsets [[buffer(9)]],
+    device const T* grad_out [[buffer(1)]],
+    device const T* log_alpha [[buffer(2)]],
+    device const T* log_beta [[buffer(3)]],
+    device const T* log_probs [[buffer(4)]],
+    device const T_target* targets [[buffer(5)]],
+    device const T_index* input_lengths [[buffer(6)]],
+    device const T_index* target_lengths [[buffer(7)]],
+    device const T* loss [[buffer(8)]],
+    device const T_index* target_batch_offsets [[buffer(9)]],
     constant CTCLossBackwardCollectParams<T_index>& params [[buffer(10)]],
     uint2 tid [[thread_position_in_grid]]) {
   using T_op = opmath_t<T>;
@@ -413,11 +413,11 @@ kernel void ctc_loss_backward_collect(
   kernel void ctc_loss<T, T_target, T_index>(                       \
       device T*,                                                    \
       device T*,                                                    \
-      constant T*,                                                  \
-      constant T_target*,                                           \
-      constant T_index*,                                            \
-      constant T_index*,                                            \
-      constant T_index*,                                            \
+      device const T*,                                              \
+      device const T_target*,                                       \
+      device const T_index*,                                        \
+      device const T_index*,                                        \
+      device const T_index*,                                        \
       constant CTCLossParams<T_index>&,                             \
       uint,                                                         \
       uint,                                                         \
@@ -428,11 +428,11 @@ kernel void ctc_loss_backward_collect(
                        "_" #T_index)]]                                \
   kernel void ctc_loss_backward_log_beta<T, T_target, T_index>(       \
       device T*,                                                      \
-      constant T*,                                                    \
-      constant T_target*,                                             \
-      constant T_index*,                                              \
-      constant T_index*,                                              \
-      constant T_index*,                                              \
+      device const T*,                                                \
+      device const T_target*,                                         \
+      device const T_index*,                                          \
+      device const T_index*,                                          \
+      device const T_index*,                                          \
       constant CTCLossParams<T_index>&,                               \
       uint,                                                           \
       uint,                                                           \
@@ -443,15 +443,15 @@ kernel void ctc_loss_backward_collect(
                        "_" #T_index)]]                               \
   kernel void ctc_loss_backward_collect<T, T_target, T_index>(       \
       device T*,                                                     \
-      constant T*,                                                   \
-      constant T*,                                                   \
-      constant T*,                                                   \
-      constant T*,                                                   \
-      constant T_target*,                                            \
-      constant T_index*,                                             \
-      constant T_index*,                                             \
-      constant T*,                                                   \
-      constant T_index*,                                             \
+      device const T*,                                               \
+      device const T*,                                               \
+      device const T*,                                               \
+      device const T*,                                               \
+      device const T_target*,                                        \
+      device const T_index*,                                         \
+      device const T_index*,                                         \
+      device const T*,                                               \
+      device const T_index*,                                         \
       constant CTCLossBackwardCollectParams<T_index>&,               \
       uint2);
 
@@ -475,10 +475,10 @@ INSTANTIATE_CTC_LOSS_TARGET_TYPES(half);
   template [[host_name("nllnd_loss_backward_" #T)]] kernel void \
   nllnd_loss_backward<T>(                                       \
       device T*,                                                \
-      constant T*,                                              \
-      constant long*,                                           \
-      constant T*,                                              \
-      constant T*,                                              \
+      device const T*,                                          \
+      device const long*,                                       \
+      device const T*,                                          \
+      device const T*,                                          \
       constant NLLLossBackwardParams<>&,                        \
       device ErrorMessages*,                                    \
       uint);
@@ -490,9 +490,9 @@ INSTANTIATE_NLLND_LOSS_BACKWARD(half);
 #define INSTANTIATE_NLLND_LOSS_FORWARD(T)                      \
   template [[host_name("nllnd_loss_forward_" #T)]] kernel void \
   nllnd_loss_forward<T>(                                       \
-      constant T*,                                             \
-      constant long*,                                          \
-      constant T*,                                             \
+      device const T*,                                         \
+      device const long*,                                      \
+      device const T*,                                         \
       device T*,                                               \
       device T*,                                               \
       constant NLLLossForwardParams<>&,                        \

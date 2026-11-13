@@ -33,7 +33,6 @@ import os
 import warnings
 
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
-from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
 from .cuda_to_hip_mappings import CAFFE2_PATH_MAPPINGS
 
 from collections.abc import Iterator
@@ -69,7 +68,7 @@ PYTORCH_TEMPLATE_MAP = {"Dtype": "scalar_t", "T": "scalar_t"}
 
 __all__ = ['InputError', 'openf', 'bcolors', 'GeneratedFileCleaner', 'match_extensions', 'matched_files_iter',
            'preprocess_file_and_save_result', 'compute_stats', 'add_dim3', 'processKernelLaunches', 'find_closure_group',
-           'find_bracket_group', 'find_parentheses_group', 'replace_math_functions', 'hip_header_magic', 'replace_extern_shared',
+           'find_bracket_group', 'find_parentheses_group', 'hip_header_magic', 'replace_extern_shared',
            'get_hip_file_path', 'is_out_of_place', 'is_pytorch_file', 'is_cusparse_file', 'is_special_file', 'is_caffe2_gpu_file',
            'Trie', 'preprocessor', 'file_specific_replacement', 'file_add_header',
            'fix_static_global_kernels', 'extract_arguments', 'str2bool', 'CurrentState', 'HipifyResult', 'hipify']
@@ -473,22 +472,6 @@ def find_parentheses_group(input_string, start):
 
 
 RE_ASSERT = re.compile(r"\bassert[ ]*\(")
-
-
-def replace_math_functions(input_string):
-    """FIXME: Temporarily replace std:: invocations of math functions
-        with non-std:: versions to prevent linker errors NOTE: This
-        can lead to correctness issues when running tests, since the
-        correct version of the math function (exp/expf) might not get
-        called.  Plan is to remove this function once HIP supports
-        std:: math function calls inside device code
-
-    """
-    output_string = input_string
-    for func in MATH_TRANSPILATIONS:
-        output_string = output_string.replace(fr'{func}(', f'{MATH_TRANSPILATIONS[func]}(')
-
-    return output_string
 
 
 RE_SYNCTHREADS = re.compile(r":?:?\b(__syncthreads)\b(\w*\()")
@@ -950,10 +933,6 @@ def preprocessor(
     # Perform Kernel Launch Replacements
     if not hip_clang_launch:
         output_source = processKernelLaunches(output_source, stats)
-
-    # Replace std:: with non-std:: versions
-    if (filepath.endswith((".cu", ".cuh"))) and "PowKernel" not in filepath:
-        output_source = replace_math_functions(output_source)
 
     # Include header if device code is contained.
     output_source = hip_header_magic(output_source)

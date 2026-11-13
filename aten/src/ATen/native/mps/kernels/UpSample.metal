@@ -26,7 +26,7 @@ accscalar_t area_pixel_compute_source_index(
 
 template <typename scalar_t>
 scalar_t upsample_get_value_bounded(
-    constant scalar_t* data,
+    device const scalar_t* data,
     uint3 dim,
     ::metal::array<long, 5> strides,
     uint n,
@@ -48,7 +48,7 @@ scalar_t upsample_get_value_bounded(
 // lanes.
 template <typename scalar_t, uint N>
 scalar_t upsample_get_value_bounded(
-    constant scalar_t* data,
+    device const scalar_t* data,
     vec<long, N> sizes,
     vec<long, N> strides,
     vec<long, N> coords) {
@@ -164,7 +164,7 @@ inline float3 coords_to_real_coords(
 
 template <typename T>
 kernel void upsample_nearest_exact_3d(
-    constant T* inputData [[buffer(0)]],
+    device const T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<5>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
@@ -195,7 +195,7 @@ kernel void upsample_nearest_exact_3d(
 template <typename T>
 kernel void upsample_nearest_exact_3d_backward(
     device AtomicType_t<T>* gradInputData [[buffer(0)]],
-    constant T* gradOutputData [[buffer(1)]],
+    device const T* gradOutputData [[buffer(1)]],
     constant UpsampleParams<5>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
   const auto input_sizes = uint3(
@@ -225,7 +225,7 @@ kernel void upsample_nearest_exact_3d_backward(
 
 template <typename T>
 kernel void upsample_nearest_3d(
-    constant T* inputData [[buffer(0)]],
+    device const T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<5>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
@@ -256,7 +256,7 @@ kernel void upsample_nearest_3d(
 template <typename T>
 kernel void upsample_nearest_3d_backward(
     device AtomicType_t<T>* gradInputData [[buffer(0)]],
-    constant T* gradOutputData [[buffer(1)]],
+    device const T* gradOutputData [[buffer(1)]],
     constant UpsampleParams<5>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
   const auto input_sizes = uint3(
@@ -286,7 +286,7 @@ kernel void upsample_nearest_3d_backward(
 
 template <typename T>
 kernel void upsample_trilinear(
-    constant T* inputData [[buffer(0)]],
+    device const T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<5>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
@@ -388,7 +388,7 @@ kernel void upsample_trilinear(
 template <typename T>
 kernel void upsample_trilinear_backward(
     device AtomicType_t<T>* gradInputData [[buffer(0)]],
-    constant T* gradOutputData [[buffer(1)]],
+    device const T* gradOutputData [[buffer(1)]],
     constant UpsampleParams<5>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
   const auto input_sizes = uint3(
@@ -441,7 +441,7 @@ inline uchar linear_interp(uchar v0, uchar v1, float x) {
 
 template <typename T>
 kernel void upsample_linear1d(
-    constant T* inputData [[buffer(0)]],
+    device const T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<3>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
@@ -473,7 +473,7 @@ kernel void upsample_linear1d(
 }
 template <typename T>
 kernel void upsample_bilinear2d(
-    constant T* inputData [[buffer(0)]],
+    device const T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
@@ -536,7 +536,7 @@ inline long nearest_src_index(float scale, uint dst) {
 
 template <typename T, bool exact>
 kernel void upsample_nearest1d(
-    constant T* inputData [[buffer(0)]],
+    device const T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<3>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
@@ -561,7 +561,7 @@ kernel void upsample_nearest1d(
 
 template <typename T, bool exact>
 kernel void upsample_nearest2d(
-    constant T* inputData [[buffer(0)]],
+    device const T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
@@ -661,7 +661,7 @@ struct NearestSource {
 template <typename T, typename Source, typename index_t>
 kernel void upsample_gather_backward(
     device T* gradInputData [[buffer(0)]],
-    constant T* gradOutputData [[buffer(1)]],
+    device const T* gradOutputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint3 thread_index [[thread_position_in_grid]],
     uint3 grid_size [[threads_per_grid]]) {
@@ -682,12 +682,12 @@ kernel void upsample_gather_backward(
   for (auto plane = thread_index.z; plane < planes; plane += grid_size.z) {
     const auto n = plane / channels;
     const auto c = plane - n * channels;
-    constant auto* grad_output =
+    device const auto* grad_output =
         gradOutputData + n * output_strides.x + c * output_strides.y;
     float res = 0;
     for (auto y = y_run.x; y < y_run.y; y++) {
       const auto w_y = source_y.weight(y, input_y, input_sizes.z);
-      constant auto* row =
+      device const auto* row =
           grad_output + y * output_strides.z + x_run.x * output_strides.w;
       for (auto x = x_run.x; x < x_run.y; x++, row += output_strides.w) {
         res += w_y * source_x.weight(x, input_x, input_sizes.w) *
@@ -723,7 +723,7 @@ struct BicubicFunctor {
 
 template <typename T, typename F>
 kernel void upsample_2d_aa(
-    constant T* inputData [[buffer(0)]],
+    device const T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
@@ -758,7 +758,7 @@ kernel void upsample_2d_aa(
     for (int c = 0; c < output_sizes.y; c++) {
       float res = 0.0;
       float ws = 0.0;
-      constant auto* input =
+      device const auto* input =
           inputData + n * input_strides.x + c * input_strides.y;
       for (auto y = y_min; y < y_max; ++y) {
         auto dy = f((y - y_center) / clamped_scales.y);
@@ -781,7 +781,7 @@ kernel void upsample_2d_aa(
 template <typename T, typename F>
 kernel void upsample_2d_aa_backward(
     device AtomicType_t<T>* gradInputData [[buffer(0)]],
-    constant T* gradOutputData [[buffer(1)]],
+    device const T* gradOutputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
   const auto input_strides = to_vec(params.input_strides);
@@ -843,7 +843,7 @@ kernel void upsample_2d_aa_backward(
 
 template <typename T>
 kernel void upsample_bicubic2d(
-    constant T* inputData [[buffer(0)]],
+    device const T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
@@ -906,7 +906,7 @@ kernel void upsample_bicubic2d(
 template <typename T>
 kernel void upsample_bicubic2d_backward(
     device AtomicType_t<T>* gradInputData [[buffer(0)]],
-    constant T* gradOutputData [[buffer(1)]],
+    device const T* gradOutputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     uint thread_index [[thread_position_in_grid]]) {
   const auto input_strides = to_vec(params.input_strides);
@@ -955,25 +955,25 @@ kernel void upsample_bicubic2d_backward(
 #define INSTANTIATE_UPSAMPLE_2D(NAME, DTYPE)                       \
   template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
       upsample_##NAME<DTYPE>(                                      \
-          constant DTYPE * inputData [[buffer(0)]],                \
-          device DTYPE * outputData [[buffer(1)]],                 \
-          constant UpsampleParams<4> & params [[buffer(2)]],       \
+          device const DTYPE* inputData [[buffer(0)]],             \
+          device DTYPE* outputData [[buffer(1)]],                  \
+          constant UpsampleParams<4>& params [[buffer(2)]],        \
           uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_2D_AA(NAME, FUNCTOR, DTYPE)           \
   template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
   upsample_2d_aa<DTYPE, FUNCTOR>(                                  \
-      constant DTYPE * inputData [[buffer(0)]],                    \
-      device DTYPE * outputData [[buffer(1)]],                     \
-      constant UpsampleParams<4> & params [[buffer(2)]],           \
+      device const DTYPE* inputData [[buffer(0)]],                 \
+      device DTYPE* outputData [[buffer(1)]],                      \
+      constant UpsampleParams<4>& params [[buffer(2)]],            \
       uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(NAME, FUNCTOR, DTYPE)           \
   template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
   upsample_2d_aa_backward<DTYPE, FUNCTOR>(                                  \
       device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],             \
-      constant DTYPE * gradOutputData [[buffer(1)]],                        \
-      constant UpsampleParams<4> & params [[buffer(2)]],                    \
+      device const DTYPE* gradOutputData [[buffer(1)]],                     \
+      constant UpsampleParams<4>& params [[buffer(2)]],                     \
       uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_GATHER_BACKWARD_IDX(            \
@@ -982,8 +982,8 @@ kernel void upsample_bicubic2d_backward(
                        "_" #SUFFIX)]] kernel void            \
   upsample_gather_backward<DTYPE, SOURCE, IDX>(              \
       device DTYPE * gradInputData [[buffer(0)]],            \
-      constant DTYPE * gradOutputData [[buffer(1)]],         \
-      constant UpsampleParams<4> & params [[buffer(2)]],     \
+      device const DTYPE* gradOutputData [[buffer(1)]],      \
+      constant UpsampleParams<4>& params [[buffer(2)]],      \
       uint3 thread_index [[thread_position_in_grid]],        \
       uint3 grid_size [[threads_per_grid]])
 
@@ -995,32 +995,32 @@ kernel void upsample_bicubic2d_backward(
   template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
       upsample_##NAME##_backward<DTYPE>(                                    \
           device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],         \
-          constant DTYPE * gradOutputData [[buffer(1)]],                    \
-          constant UpsampleParams<4> & params [[buffer(2)]],                \
+          device const DTYPE* gradOutputData [[buffer(1)]],                 \
+          constant UpsampleParams<4>& params [[buffer(2)]],                 \
           uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_LINEAR(DTYPE)                        \
   template [[host_name("upsample_linear1d_" #DTYPE)]] kernel void \
   upsample_linear1d<DTYPE>(                                       \
-      constant DTYPE * inputData [[buffer(0)]],                   \
-      device DTYPE * outputData [[buffer(1)]],                    \
-      constant UpsampleParams<3> & params [[buffer(2)]],          \
+      device const DTYPE* inputData [[buffer(0)]],                \
+      device DTYPE* outputData [[buffer(1)]],                     \
+      constant UpsampleParams<3>& params [[buffer(2)]],           \
       uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_NEAREST_1D(NAME, EXACT, DTYPE)        \
   template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
   upsample_nearest1d<DTYPE, EXACT>(                                \
-      constant DTYPE * inputData [[buffer(0)]],                    \
-      device DTYPE * outputData [[buffer(1)]],                     \
-      constant UpsampleParams<3> & params [[buffer(2)]],           \
+      device const DTYPE* inputData [[buffer(0)]],                 \
+      device DTYPE* outputData [[buffer(1)]],                      \
+      constant UpsampleParams<3>& params [[buffer(2)]],            \
       uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_NEAREST_2D(NAME, EXACT, DTYPE)        \
   template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
   upsample_nearest2d<DTYPE, EXACT>(                                \
-      constant DTYPE * inputData [[buffer(0)]],                    \
-      device DTYPE * outputData [[buffer(1)]],                     \
-      constant UpsampleParams<4> & params [[buffer(2)]],           \
+      device const DTYPE* inputData [[buffer(0)]],                 \
+      device DTYPE* outputData [[buffer(1)]],                      \
+      constant UpsampleParams<4>& params [[buffer(2)]],            \
       uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_NEAREST(DTYPE)                      \
@@ -1032,42 +1032,42 @@ kernel void upsample_bicubic2d_backward(
 #define INSTANTIATE_UPSAMPLE_3D(DTYPE)                                    \
   template [[host_name("upsample_nearest_3d_" #DTYPE)]] kernel void       \
   upsample_nearest_3d<DTYPE>(                                             \
-      constant DTYPE * inputData [[buffer(0)]],                           \
-      device DTYPE * outputData [[buffer(1)]],                            \
-      constant UpsampleParams<5> & params [[buffer(2)]],                  \
+      device const DTYPE* inputData [[buffer(0)]],                        \
+      device DTYPE* outputData [[buffer(1)]],                             \
+      constant UpsampleParams<5>& params [[buffer(2)]],                   \
       uint thread_index [[thread_position_in_grid]]);                     \
   template [[host_name("upsample_nearest_exact_3d_" #DTYPE)]] kernel void \
   upsample_nearest_exact_3d<DTYPE>(                                       \
-      constant DTYPE * inputData [[buffer(0)]],                           \
-      device DTYPE * outputData [[buffer(1)]],                            \
-      constant UpsampleParams<5> & params [[buffer(2)]],                  \
+      device const DTYPE* inputData [[buffer(0)]],                        \
+      device DTYPE* outputData [[buffer(1)]],                             \
+      constant UpsampleParams<5>& params [[buffer(2)]],                   \
       uint thread_index [[thread_position_in_grid]]);                     \
   template [[host_name("upsample_trilinear_" #DTYPE)]] kernel void        \
   upsample_trilinear<DTYPE>(                                              \
-      constant DTYPE * inputData [[buffer(0)]],                           \
-      device DTYPE * outputData [[buffer(1)]],                            \
-      constant UpsampleParams<5> & params [[buffer(2)]],                  \
+      device const DTYPE* inputData [[buffer(0)]],                        \
+      device DTYPE* outputData [[buffer(1)]],                             \
+      constant UpsampleParams<5>& params [[buffer(2)]],                   \
       uint thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_UPSAMPLE_3D_BACKWARD(DTYPE)                               \
   template [[host_name("upsample_nearest_3d_backward_" #DTYPE)]] kernel void  \
   upsample_nearest_3d_backward<DTYPE>(                                        \
       device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],               \
-      constant DTYPE * gradOutputData [[buffer(1)]],                          \
-      constant UpsampleParams<5> & params [[buffer(2)]],                      \
+      device const DTYPE* gradOutputData [[buffer(1)]],                       \
+      constant UpsampleParams<5>& params [[buffer(2)]],                       \
       uint thread_index [[thread_position_in_grid]]);                         \
   template                                                                    \
       [[host_name("upsample_nearest_exact_3d_backward_" #DTYPE)]] kernel void \
       upsample_nearest_exact_3d_backward<DTYPE>(                              \
           device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],           \
-          constant DTYPE * gradOutputData [[buffer(1)]],                      \
-          constant UpsampleParams<5> & params [[buffer(2)]],                  \
+          device const DTYPE* gradOutputData [[buffer(1)]],                   \
+          constant UpsampleParams<5>& params [[buffer(2)]],                   \
           uint thread_index [[thread_position_in_grid]]);                     \
   template [[host_name("upsample_trilinear_backward_" #DTYPE)]] kernel void   \
   upsample_trilinear_backward<DTYPE>(                                         \
       device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],               \
-      constant DTYPE * gradOutputData [[buffer(1)]],                          \
-      constant UpsampleParams<5> & params [[buffer(2)]],                      \
+      device const DTYPE* gradOutputData [[buffer(1)]],                       \
+      constant UpsampleParams<5>& params [[buffer(2)]],                       \
       uint thread_index [[thread_position_in_grid]]);
 
 #define INSTANTIATE_UPSAMPLE_ALL(DTYPE)                                       \

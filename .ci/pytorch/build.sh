@@ -225,6 +225,10 @@ fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
+# Limit this ARM64 CUDA build's parallelism to avoid compiler OOMs.
+if [[ "$BUILD_ENVIRONMENT" == "linux-jammy-aarch64-cuda13.2-py3.12-gcc13" ]]; then
+  export MAX_JOBS=8
+fi
 if [ -z "$MAX_JOBS" ]; then
   if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; } && which sccache > /dev/null; then
     export MAX_JOBS=$(($(nproc) - 1))

@@ -94,8 +94,18 @@ Every reviewer assigned to the PR must accept the pre-review. Only one of them n
 
 ## Reviewing Pull Requests
 
-PRs labeled `ready for review` have passed the automated review, or have the `no automated review` label, and are
-waiting for one of their assigned reviewers.
+PRs labeled `ready for review` are waiting for one of their assigned reviewers.
+
+When a PR is in your `ready for review` queue, you can expect that:
+
+- The automated review ([pr-review skill](https://github.com/pytorch/pytorch/blob/main/.agents/skills/pr-review/SKILL.md)) <!-- @lint-ignore -->
+  ran and did not flag anything blocking.
+- All CI has finished and Dr. CI classified every failure as unrelated to the PR. Workflows waiting for a maintainer to
+  approve their run do not block this, so you may still need to approve CI.
+- Every comment from a maintainer has been addressed, either by a code change that fixes the specific problem or by a
+  reply explaining why no change is needed.
+
+PRs labeled `no automated review` skip these checks and move directly to `ready for review`.
 
 Do your review as usual. Once you accept the PR, the author is able to merge it.
 If the PR requires significant changes, use "Request changes".

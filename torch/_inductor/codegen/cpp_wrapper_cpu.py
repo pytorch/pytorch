@@ -600,6 +600,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # include a hash so our code cache gives different constants different files
         self.header.writeline(f"// {name} {hashed}")
 
+    def generate_tma_descriptor(self, desc):
+        raise NotImplementedError(
+            "TMA descriptors are not supported by the CPU cpp_wrapper"
+        )
+
     @staticmethod
     def get_device_include_path_jit(device: str) -> str:
         return f"#include <torch/csrc/inductor/cpp_wrapper/{device}.h>"
@@ -1656,6 +1661,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         metadata: str | None = None,
         gpu: bool = False,
         cpp_definition: str | None = None,
+        # Ignored: a C++ wrapper compiles each Triton kernel from its source string, not
+        # from a module-level def (see defines_triton_kernels_as_code). Accepted to keep
+        # one signature across _define_kernel_helper implementations.
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         # Misnomer: `gpu` actually means "is this a Triton kernel?"
         if gpu:

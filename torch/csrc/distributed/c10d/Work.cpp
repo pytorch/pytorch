@@ -146,7 +146,7 @@ void Work::blockCurrentStream() {
       c10d::cuda::block_stream(std::chrono::milliseconds(0));
 
   getFuture()->addCallback(
-      [handle](c10::ivalue::Future& future) { handle->abort(); });
+      [handle](c10::ivalue::Future& /*future*/) { handle->abort(); });
 }
 
 void Work::abort() {
