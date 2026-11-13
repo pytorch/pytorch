@@ -7,6 +7,7 @@
 #include <torch/headeronly/util/Float8_e4m3fnuz.h>
 #include <torch/headeronly/util/Float8_e5m2.h>
 #include <torch/headeronly/util/Float8_e5m2fnuz.h>
+#include <torch/headeronly/util/Float8_e5m3fnu.h>
 #include <torch/headeronly/util/Float8_e8m0fnu.h>
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/bits.h>
@@ -96,7 +97,8 @@ struct dummy_int1_7_t {};
   _(c10::Float8_e4m3fn, Float8_e4m3fn)         \
   _(c10::Float8_e5m2fnuz, Float8_e5m2fnuz)     \
   _(c10::Float8_e4m3fnuz, Float8_e4m3fnuz)     \
-  _(c10::Float8_e8m0fnu, Float8_e8m0fnu)
+  _(c10::Float8_e8m0fnu, Float8_e8m0fnu)       \
+  _(c10::Float8_e5m3fnu, Float8_e5m3fnu)
 
 // NB: Order matters for this macro; it is relied upon in
 // _promoteTypesLookup and the serialization format.
@@ -147,7 +149,8 @@ struct dummy_int1_7_t {};
   _(c10::dummy_int1_7_t<7>, Int7) /* 43 */               \
   _(c10::Float8_e8m0fnu, Float8_e8m0fnu) /* 44 */        \
   _(c10::Float4_e2m1fn_x2, Float4_e2m1fn_x2) /* 45 */    \
-  _(c10::complex<c10::BFloat16>, BComplex32) /* 46 */
+  _(c10::complex<c10::BFloat16>, BComplex32) /* 46 */    \
+  _(c10::Float8_e5m3fnu, Float8_e5m3fnu) /* 47 */
 
 // NB: despite its generic sounding name, the macros that don't take _AND
 // are mostly only used by tensorexpr
@@ -250,7 +253,8 @@ struct dummy_int1_7_t {};
   _(c10::Float8_e4m3fn, Float8_e4m3fn)     \
   _(c10::Float8_e5m2fnuz, Float8_e5m2fnuz) \
   _(c10::Float8_e4m3fnuz, Float8_e4m3fnuz) \
-  _(c10::Float8_e8m0fnu, Float8_e8m0fnu)
+  _(c10::Float8_e8m0fnu, Float8_e8m0fnu)   \
+  _(c10::Float8_e5m3fnu, Float8_e5m3fnu)
 
 #define AT_FORALL_COMPLEX_TYPES(_)     \
   _(c10::complex<float>, ComplexFloat) \

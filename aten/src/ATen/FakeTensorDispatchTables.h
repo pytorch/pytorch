@@ -2,6 +2,9 @@
 
 #include <ATen/core/operator_name.h>
 #include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
+
+#include <cstdint>
 
 namespace at::impl {
 
@@ -17,9 +20,10 @@ namespace at::impl {
 //               via torch._decomp._add_op_to_registry
 //   - OpImpl:   the exact-identity tier of
 //               torch._subclasses.fake_impls.op_implementations_dict, via
-//               register_op_impl / _deregister_op_impl. (Predicate-based
-//               op_impls are matched separately in fakeFallback and are not
-//               mirrored here.)
+//               register_op_impl / _deregister_op_impl, minus ops whose C++
+//               meta kernel is used instead (see cpp_meta_supports_symint_ops).
+//               (Predicate-based op_impls are matched separately in
+//               fakeFallback and are not mirrored here.)
 //   - PrimMeta: prims ops that define a prim_meta_impl, via torch._prims
 //   - PythonCIA: Python CompositeImplicitAutograd overrides, via
 //                OpOverload.py_impl
@@ -33,8 +37,16 @@ enum class FakeDispatchCategory {
   PythonCIA,
   // for custom op handling registered through
   // torch.library.custom_op(...).register_fake
-  CustomOpImpl
+  CustomOpImpl,
+  NumCategories
 };
+
+static_assert(static_cast<int>(FakeDispatchCategory::NumCategories) <= 32);
+
+inline uint32_t fakeDispatchCategoryBit(FakeDispatchCategory category) {
+  TORCH_INTERNAL_ASSERT(category < FakeDispatchCategory::NumCategories);
+  return 1u << static_cast<int>(category);
+}
 
 // Record/erase that `name` belongs to `category`. Called from the Python
 // registration hooks listed above.
@@ -49,5 +61,15 @@ TORCH_API void fakeDispatchTableRemove(
 TORCH_API bool fakeDispatchTableContains(
     FakeDispatchCategory category,
     const c10::OperatorName& name);
+
+// The categories `name` is registered under, read at once, as a bitmask to
+// test with fakeDispatchCategoriesHave
+TORCH_API uint32_t fakeDispatchTableCategories(const c10::OperatorName& name);
+
+inline bool fakeDispatchCategoriesHave(
+    uint32_t categories,
+    FakeDispatchCategory category) {
+  return categories & fakeDispatchCategoryBit(category);
+}
 
 } // namespace at::impl
