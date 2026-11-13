@@ -91,6 +91,38 @@ struct ConstantBufferSet {
   }
 };
 
+// A shared mutex whose waiting exclusive lockers keep new shared lockers out.
+// std::shared_mutex does not promise that, and glibc's prefers readers, so a
+// stream of overlapping shared lockers can starve an exclusive locker forever.
+// An exclusive locker holds turnstile_ while it waits, and every shared locker
+// has to pass through turnstile_. As with std::shared_mutex, a thread must not
+// lock it again while holding it: a second lock_shared() deadlocks as soon as
+// an exclusive locker is waiting for the first one to be released.
+class WritePrioritySharedMutex {
+ public:
+  void lock() {
+    std::lock_guard turnstile(turnstile_);
+    mutex_.lock();
+  }
+
+  void unlock() {
+    mutex_.unlock();
+  }
+
+  void lock_shared() {
+    std::lock_guard turnstile(turnstile_);
+    mutex_.lock_shared();
+  }
+
+  void unlock_shared() {
+    mutex_.unlock_shared();
+  }
+
+ private:
+  std::mutex turnstile_;
+  std::shared_mutex mutex_;
+};
+
 class AOTInductorModelContainer {
  public:
   AOTInductorModelContainer(
@@ -265,7 +297,7 @@ class AOTInductorModelContainer {
           pool_.return_model_to_available(model);
           throw;
         }
-        pool_.return_model_to_pending(model);
+        pool_.return_model_to_in_flight(model);
       }
       constants_folding_lk.unlock();
       model_lk.lock();
@@ -285,7 +317,7 @@ class AOTInductorModelContainer {
       throw;
     }
 
-    pool_.return_model_to_pending(model);
+    pool_.return_model_to_in_flight(model);
   }
 
   // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
@@ -442,7 +474,7 @@ class AOTInductorModelContainer {
         pool_.return_model_to_available(model);
         throw;
       }
-      pool_.return_model_to_pending(model);
+      pool_.return_model_to_in_flight(model);
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
       [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
@@ -453,6 +485,13 @@ class AOTInductorModelContainer {
       auto inactive_map = inactive().map;
       auto inactive_array = inactive().array;
 
+      auto use_active_constants = [&] {
+        auto active_map = active().map;
+        auto active_array = active().array;
+        model->update_constants_map(
+            active_map, /* remap_constants_array= */ false);
+        model->update_constants_array(active_array);
+      };
       try {
         model->update_constants_map(
             inactive_map, /* remap_constants_array= */ false);
@@ -464,19 +503,16 @@ class AOTInductorModelContainer {
             /* use_inactive = */ true,
             /* validate_full_update = */ false);
 
-        // Swap back the model's constants mapping
-        auto active_map = active().map;
-        auto active_array = active().array;
-        model->update_constants_map(
-            active_map, /* remap_constants_array= */ false);
-        model->update_constants_array(active_array);
+        use_active_constants();
         const_folded = ConstantState::FOLDED;
       } catch (...) {
+        // Otherwise the model would keep running with the inactive constants.
+        use_active_constants();
         pool_.return_model_to_available(model);
         throw;
       }
 
-      pool_.return_model_to_pending(model);
+      pool_.return_model_to_in_flight(model);
     }
   }
 
@@ -574,10 +610,10 @@ class AOTInductorModelContainer {
           continue;
         }
 
-        AtenTensorHandle tensor;
+        AtenTensorHandle tensor = nullptr;
         if (it == constants_map.end()) {
-          aoti_torch_clone(
-              source.map->find(constant_name)->second.get(), &tensor);
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone(
+              source.map->find(constant_name)->second.get(), &tensor));
         } else {
           tensor = it->second;
           // Null the source slot before RAIIAtenTensorHandle takes ownership so
@@ -596,6 +632,8 @@ class AOTInductorModelContainer {
           kv.second = nullptr;
         }
       }
+      // The array borrows from the map, whose replaced entries are freed.
+      target.update_array(&model);
       throw;
     }
     target.update_array(&model);
@@ -623,6 +661,11 @@ class AOTInductorModelContainer {
     AOTI_RUNTIME_CHECK(
         !(allow_h2d_copy && user_managed),
         "update_constant_buffer: allow_h2d_copy is not supported with user_managed");
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+    AOTI_RUNTIME_CHECK(
+        user_managed,
+        "update_constant_buffer: MTIA supports only user_managed constant updates");
+#endif
 
     int32_t cpu_device_type = aoti_torch_device_type_cpu();
     auto num_constants = model.num_constants();
@@ -670,9 +713,16 @@ class AOTInductorModelContainer {
     size_t main_blob_idx = 0;
     size_t aux_cpu_blob_idx = 0;
 #ifdef USE_CUDA
-    // Opt-in pinned async staging pool for the delta-update H2D copies below.
-    // nullptr (default / on allocation failure) keeps the throttled path.
-    auto staging_pool = tryMakeConstantsStagingPool();
+    // Pinned async staging pool for the pageable-host H2D copies below (see
+    // usePinnedAsyncConstantsCopy()), created on the first such copy so an
+    // update that copies nothing from pageable memory does not allocate one.
+    // nullptr (disabled, not needed yet, or allocation failure) keeps the
+    // throttled path. Creation is tried once per update, as in
+    // load_constants(): retrying per constant under pinned-memory pressure
+    // would retry the 2 x 64 MiB allocation for every remaining constant.
+    std::unique_ptr<PinnedStagingPool> staging_pool;
+    bool staging_pool_tried =
+        user_managed || !torch::aot_inductor::usePinnedAsyncConstantsCopy();
 #endif
     auto _update_start = std::chrono::steady_clock::now();
     AOTI_LOG_LOADING(
@@ -790,7 +840,7 @@ class AOTInductorModelContainer {
         // Detect per constant: a single update may mix pageable-host and
         // device/pinned sources, so the type cannot be cached across the loop.
         bool use_staging = false;
-        if (staging_pool != nullptr) {
+        if (!staging_pool_tried || staging_pool != nullptr) {
           cudaPointerAttributes attrs{};
           cudaError_t pointer_attrs_result =
               cudaPointerGetAttributes(&attrs, user_constant_ptr);
@@ -800,6 +850,11 @@ class AOTInductorModelContainer {
           } else {
             use_staging = (attrs.type == cudaMemoryTypeUnregistered);
           }
+          if (use_staging && !staging_pool_tried) {
+            staging_pool = tryMakeConstantsStagingPool();
+            staging_pool_tried = true;
+          }
+          use_staging = use_staging && staging_pool != nullptr;
         }
         if (use_staging) {
           staging_pool->copyH2DViaStage(
@@ -854,13 +909,13 @@ class AOTInductorModelContainer {
     target.update_array(&model);
 
 #ifdef USE_CUDA
-    // S638065: the GPU constant copies above run on the default stream (raw
-    // cudaMemcpy), while run_const_fold launches the fold on
-    // getCurrentCUDAStream(). On ROCm the default stream is not implicitly
-    // ordered with the fold's stream, so without this the fold could read
-    // not-yet-copied weights and bake stale values into the folded constants.
-    // Wait for the copies to complete before returning, so any subsequent fold
-    // (on any stream) sees the updated weights.
+    // S638065: the GPU constant copies above that skip the staging pool run on
+    // the default stream (raw cudaMemcpy), while run_const_fold launches the
+    // fold on getCurrentCUDAStream(). On ROCm the default stream is not
+    // implicitly ordered with the fold's stream, so without this the fold could
+    // read not-yet-copied weights and bake stale values into the folded
+    // constants. Wait for the copies to complete before returning, so any
+    // subsequent fold (on any stream) sees the updated weights.
     AOTI_RUNTIME_CUDA_CHECK(cudaStreamSynchronize(0));
 #endif // USE_CUDA
   }
@@ -946,7 +1001,15 @@ class AOTInductorModelContainer {
   // We acquire the mutex in unique mode when we want exclusive access of the
   // model. One such case is when we want to do a weight swapping. We want to
   // make sure no one is executing the model.
-  std::shared_mutex model_exec_mutex_;
+  // A waiting exclusive locker blocks new shared lockers and waits for the
+  // current holders. So, unlike glibc's reader-preferring std::shared_mutex, a
+  // thread holding this mutex shared must not lock it again, and must not
+  // block on work that needs another thread to take it: either deadlocks as
+  // soon as a swap or fold is waiting. Waiting for threads that already hold
+  // it is fine. run() and the inactive-buffer branch of run_const_fold() rely
+  // on this when they block in pool_.get_available_model() for a model another
+  // holder has checked out.
+  WritePrioritySharedMutex model_exec_mutex_;
 };
 
 } // namespace torch::aot_inductor

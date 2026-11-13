@@ -108,6 +108,16 @@ overlap more robust (e.g. when CPU-side overhead reduces the lead), use
 inside the current module's pre-forward hook rather than waiting for the next
 module's hook to fire.
 
+The all-gather buffers are allocated on the AG streams. The CUDA caching
+allocator does not reuse memory freed on one stream for allocations on
+another, so this can fragment memory across streams.
+``set_unshard_in_current_stream`` issues the all-gathers on the current stream
+instead, normally the one the forward and backward run on, keeping their
+buffers in that stream's memory. The copy-in and dtype cast before each
+all-gather then run on the current stream, and forward needs
+``set_modules_to_forward_prefetch`` (or ``unshard(async_op=True)``) for the
+all-gathers to overlap with compute.
+
 In **backward**, FSDP2 additionally prefetches the next module's all-gather
 explicitly and runs reduce-scatters on a separate CUDA stream, all without
 any additional configuration:
