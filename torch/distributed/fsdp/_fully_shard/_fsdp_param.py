@@ -29,11 +29,10 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
+from .._flex_shard.placements.shard import Shard as EngineShard
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
-    _chunk_with_empty,
     _from_local_no_grad,
-    _get_dim_chunked_size,
     _raise_assert_with_print,
     DataParallelMeshInfo,
     FSDPMeshInfo,
@@ -257,9 +256,8 @@ class FSDPParam:
             shard_rank = 0
             shard_world_size = 1
 
-        chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
-        self.sharded_size = _get_dim_chunked_size(
-            chunks[shard_rank], param_data.size(), dim=shard_dim
+        self.sharded_size = EngineShard(shard_dim).compute_local_shape(
+            param_data.size(), shard_rank, shard_world_size
         )
         # The tensor whose chunks the group's engine bucket stores: the
         # parameter, or the local tensor of a DTensor parameter

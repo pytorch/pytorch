@@ -14,8 +14,9 @@ from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
-from torch.distributed.fsdp._fully_shard._fsdp_api import UnshardHandle
+import torch.nn as nn
 
+from .api import UnshardHandle
 from .bucket_runtime import _alloc_storage, _free_storage, _inner_tensors
 
 
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from .all_gather_layout import AllGatherLayout
-    from .bucket_runtime import BucketCommContext, BucketRuntime
+    from .bucket_runtime import BucketRuntime
     from .bucket_storage import ShardedBucketStorage
 
 
@@ -59,16 +60,41 @@ class GroupMesh:
 
 # Unshard and reshard #
 def reshard(runtimes: Sequence[BucketRuntime]) -> None:
-    """Reshard each bucket, releasing a prefetch of it."""
+    """A module's explicit ``reshard()``, outside backward (see ``_reshard``)."""
+    _check_explicit_call(runtimes, "reshard")
+    _reshard(runtimes)
+
+
+def _reshard(runtimes: Sequence[BucketRuntime]) -> None:
+    """Reshard each bucket, releasing a prefetch of it. A backward left
+    unfinished, e.g. under manual backward finalization, may have deferred
+    grad upcasts; restore them, as FSDP2's post-backward does after every
+    call, so that the grads kept accumulate in the wider dtype."""
     for runtime in runtimes:
         runtime.context.release_pending_unshard(runtime)
         if runtime.is_unsharded:
             runtime.reshard()
+        runtime._set_unsharded_grad_dtypes(defer_upcast=False)
+
+
+def apply_to_params(
+    runtimes: Sequence[BucketRuntime], apply: Callable[[], nn.Module]
+) -> nn.Module:
+    """Run ``apply``, an ``nn.Module._apply`` (e.g. ``module.to(dtype)``,
+    ``to_empty()``), on the sharded parameters, which the buckets then re-read
+    and keep in their storage again."""
+    _reshard(runtimes)
+    saved = [runtime.homing.save_for_apply() for runtime in runtimes]
+    module = apply()
+    for runtime, grads in zip(runtimes, saved, strict=True):
+        runtime.homing.restore_after_apply(grads)
+    return module
 
 
 def unshard(runtimes: Sequence[BucketRuntime], async_op: bool) -> list[BucketRuntime]:
     """Start (``async_op``) or finish each bucket's unshard on the current
     stream; return the buckets to wait on (see ``wait_for_unshard``)."""
+    _check_explicit_call(runtimes, "unshard")
     started = []
     for runtime in runtimes:
         if runtime.is_unsharded:
@@ -79,6 +105,11 @@ def unshard(runtimes: Sequence[BucketRuntime], async_op: bool) -> list[BucketRun
             runtime.unshard(on_current_stream=True)
         started.append(runtime)
     return started
+
+
+def _check_explicit_call(runtimes: Sequence[BucketRuntime], method: str) -> None:
+    for context in {id(r.context): r.context for r in runtimes}.values():
+        context.check_outside_backward(method)
 
 
 def wait_for_unshard(runtimes: Sequence[BucketRuntime]) -> None:
@@ -108,8 +139,8 @@ def _sharded_storages(
     their own, their data, the inner tensors for tensor subclasses."""
     storages = []
     for runtime in runtimes:
-        homing = runtime.representation.homing
-        if homing is None or not homing.own_storage:
+        homing = runtime.homing
+        if not homing.own_storage:
             storage = runtime.bucket_storage
             storages.append((storage._byte_storage, storage._total_bytes))
             continue
@@ -252,17 +283,6 @@ def set_separate_reduce_scatter_group(
     reduce_meshes = {} if reduce_meshes is None else reduce_meshes
     for storage in storages:
         storage.set_separate_reduce_scatter_group(enable, reduce_meshes)
-
-
-def set_max_pending_reduce_grads(context: BucketCommContext, value: int) -> None:
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise ValueError(
-            "max_pending_reduce_grads must be a non-negative int, "
-            f"got {type(value).__name__}."
-        )
-    if value < 0:
-        raise ValueError(f"max_pending_reduce_grads must be non-negative, got {value}.")
-    context.max_pending_reduce_grads = value
 
 
 # Comms #

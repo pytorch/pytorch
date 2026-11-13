@@ -60,6 +60,7 @@ if TYPE_CHECKING:
 
     from ..bucket_runtime import ParamRepresentation
     from ..bucket_storage import ParamInfo, PlacementFn
+    from ..param_homing import ParamHoming
     from ..placement_contract import GradientReduction
 
 
@@ -175,6 +176,9 @@ class _MixedReduceGradState:
 class _MixedBucketMember:
     _mixed_bucket: MixedBucketPlacement
     _collective_placement: Placement
+    # One storage span per (placement, dtype) subgroup
+    requires_dtype_grouped_layout = True
+    supports_own_param_storage = False
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, _MixedBucketMember):
@@ -188,9 +192,12 @@ class _MixedBucketMember:
         return self._mixed_bucket
 
     def new_bucket_state(
-        self, infos: list[ParamInfo], representation: ParamRepresentation
+        self,
+        infos: list[ParamInfo],
+        representation: ParamRepresentation,
+        homing: ParamHoming | None,
     ) -> object | None:
-        return self._mixed_bucket.new_bucket_state(infos, representation)
+        return self._mixed_bucket.new_bucket_state(infos, representation, homing)
 
     def bucket_storage_layout(
         self,

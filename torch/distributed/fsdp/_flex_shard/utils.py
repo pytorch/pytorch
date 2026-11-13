@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from torch.distributed.device_mesh import DeviceMesh
 
-    from .bucket_storage import BucketParamFQNsByIndex, ShardedBucketStorage
+    from .bucket_storage import BucketParamFQNsByIndex
     from .placement_contract import Placement
 
 
@@ -160,14 +160,12 @@ def _top_level_owner_path(module: nn.Module, owner_path: str) -> str:
     return parts[0]
 
 
-def _get_bucket_storage_debug_fqn(
-    bucket_storage: ShardedBucketStorage,
-) -> str | None:
+def _bucket_debug_fqn(module: nn.Module, param_fqns: list[str]) -> str | None:
     """Return a concise module/bucket FQN for profiler annotations."""
     owner_paths = sorted(
         {
             _strip_checkpoint_wrapped_module_path(".".join(fqn.split(".")[:-1]))
-            for fqn in bucket_storage._param_infos
+            for fqn in param_fqns
         }
     )
     if not owner_paths:
@@ -176,10 +174,7 @@ def _get_bucket_storage_debug_fqn(
     if common:
         return common
     top_level_paths = sorted(
-        {
-            _top_level_owner_path(bucket_storage._module, owner_path)
-            for owner_path in owner_paths
-        }
+        {_top_level_owner_path(module, owner_path) for owner_path in owner_paths}
     )
     top_level_paths = [path for path in top_level_paths if path]
     if not top_level_paths:

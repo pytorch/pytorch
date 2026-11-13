@@ -124,11 +124,6 @@ class FSDPState(ShardedModuleState):
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
         return super()._post_forward(module, input, output)
 
-    def _retires_pending_reductions(self, group: "BucketGroup") -> bool:
-        # The last group's post-backward trigger wraps the others', so it
-        # reduces first
-        return group is self._groups[-1]
-
     def _after_group_pre_forward(self, group: "BucketGroup") -> None:
         if group.has_spmd_types:  # type: ignore[attr-defined]
             for fsdp_param in group.fsdp_params:  # type: ignore[attr-defined]

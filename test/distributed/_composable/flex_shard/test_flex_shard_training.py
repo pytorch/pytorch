@@ -2081,7 +2081,6 @@ class TestFlexShardTraining(FSDPTest):
         self.assertEqual(unsharded_param.grad_dtype, torch.float32)
         self.assertEqual(unsharded_param.grad.dtype, torch.float32)
         # A backward without sync then adds 1 to the kept 256 in fp32.
-        model.set_manual_backward_finalization(False)
         model.set_requires_gradient_sync(False)
         model(x).backward()
         grad = unsharded_param.grad

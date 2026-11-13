@@ -123,25 +123,6 @@ def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Si
     return torch.Size([padded_dim0]) + tensor_size[1:]
 
 
-def _chunk_with_empty(
-    tensor: torch.Tensor, num_chunks: int, dim: int
-) -> list[torch.Tensor]:
-    chunks = list(torch.chunk(tensor, num_chunks, dim=dim))
-    while len(chunks) < num_chunks:
-        chunks.append(chunks[0].new_empty(0))
-    return chunks
-
-
-def _get_dim_chunked_size(
-    chunk: torch.Tensor, unchunked_size: torch.Size, dim: int
-) -> torch.Size:
-    if chunk.numel() > 0:
-        return chunk.size()
-    # For 0 numel, we need to preserve nonzero-sized dims for DTensor APIs
-    # pyrefly: ignore [bad-return]
-    return unchunked_size[:dim] + torch.Size([0]) + unchunked_size[dim + 1 :]
-
-
 def _from_local_no_grad(
     local_tensor: torch.Tensor,
     sharding_spec: DTensorSpec,

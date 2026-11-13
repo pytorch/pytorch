@@ -31,10 +31,10 @@ from torch.distributed._composable_state import (
     _insert_module_state,
     _State,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_api import GradientReductionHandle
 from torch.distributed.utils import _apply_to_tensors
 
 from . import module_ops
+from .api import GradientReductionHandle
 from .bucket_runtime import _in_backward, BucketCommContext, PartialBackward
 from .utils import _cast_fp_tensor, TrainingState
 
@@ -58,36 +58,56 @@ class BucketGroup:
     bucket, the runtime, as a ``fully_shard`` group or a ``flex_shard``
     bucket."""
 
-    def __init__(self, runtime: BucketRuntime, modules: tuple[nn.Module, ...]) -> None:
+    def __init__(
+        self,
+        runtime: BucketRuntime,
+        modules: tuple[nn.Module, ...],
+        *,
+        named_by_modules: bool = True,
+    ) -> None:
         self.bucket = runtime
         self.modules = modules
-        # The FQNs of the modules, for debug logs, once the root names them
-        # (unless the frontend named the group: named_by_modules=False)
+        if len(modules) > 1:
+            runtime.group_modules = modules
+        # The FQNs of the modules, for debug logs, once the root names them,
+        # unless the frontend names the group
         self.module_fqn: str | None = None
-        self.named_by_modules = True
-        # The most packed reduce-scatter inputs to keep alive, if the group
-        # sets it; the root's context keeps the largest of its groups'
-        self.max_input_buffers: int | None = None
+        self.named_by_modules = named_by_modules
+        # The most packed reduce-scatter inputs to keep alive; the root's
+        # context keeps the largest of its groups' (FSDP2's
+        # set_reduce_scatter_max_input_buffers)
+        self.max_input_buffers = 1
+        self._lazy_initialized = False
 
     @property
     def storage(self) -> ShardedBucketStorage:
         return self.bucket.bucket_storage
 
     def lazy_init(self) -> None:
-        """Called once before the group joins its root's context."""
+        """Re-read parameters that modules replaced since construction (e.g.
+        ``to_empty()`` on a submodule), once, before the group joins its root's
+        context."""
+        if self._lazy_initialized:
+            return
+        self._lazy_initialized = True
+        homing = self.bucket.homing
+        homing.reset_sharded_params()
+        homing.init_extensions()
+        homing.check_materialized(self.bucket.log_name)
+        homing.refresh()
 
     def refresh(self) -> None:
-        """Called before an explicit unshard, to re-read parameters that
-        modules may have replaced."""
+        """Re-home parameters replaced since the last unshard, before an
+        explicit unshard."""
+        self.bucket.homing.refresh()
 
     def join(self, context: BucketCommContext, *, reshard_after_forward: bool) -> None:
         """Join the root module's context."""
         self.lazy_init()
         self.storage._reshard_after_forward = reshard_after_forward
-        if self.max_input_buffers is not None:
-            context.max_pending_reduce_grads = max(
-                context.max_pending_reduce_grads, self.max_input_buffers
-            )
+        context.max_pending_reduce_grads = max(
+            context.max_pending_reduce_grads, self.max_input_buffers
+        )
         old_context = self.bucket.context
         if old_context is not context:
             old_context.take_pending_unshard(None)
@@ -365,9 +385,16 @@ class ShardedModuleState(_State):
     def _lazy_init_engine(self) -> None:
         """Join every state's groups to one context, as FSDP2 shares the
         root's comm context."""
+        # The context share_comm_ctx gave, or the one the first group was built
+        # in, which the others join
         context = self._shared_engine_context
         if context is None:
-            context = BucketCommContext.for_device(self._device)
+            groups = [g for s in self._state_ctx.all_states for g in s._groups]
+            context = (
+                groups[0].bucket.context
+                if groups
+                else BucketCommContext.for_device(self._device)
+            )
         context.backward_start_callbacks.append(self._engine_backward_start)
         context.backward_end_callbacks.append(self._engine_backward_end)
         self._state_ctx.engine_context = context
@@ -389,8 +416,12 @@ class ShardedModuleState(_State):
 
     def _retires_pending_reductions(self, group: BucketGroup) -> bool:
         """Whether the group's reduce first retires the pending reductions
-        over the context's cap (see ``BucketRuntime``)."""
-        return True
+        over the context's cap (see ``BucketRuntime``): of the groups that
+        unshard on the same modules, only the last, whose post-backward
+        trigger wraps the others' so that it reduces first; the others'
+        reductions then overlap with its."""
+        later = self._groups[self._groups.index(group) + 1 :]
+        return all(other.modules != group.modules for other in later)
 
     def _engine_backward_start(self) -> None:
         """Fix the manual backward finalization mode until the backward
@@ -609,6 +640,31 @@ class ShardedModuleState(_State):
     def storages(self) -> list[ShardedBucketStorage]:
         return [group.storage for group in self._groups]
 
+    def _set_reduce_scatter_max_input_buffers(self, max_input_buffers: int) -> None:
+        # bool is an int subclass; reject it so True does not silently mean 1
+        if isinstance(max_input_buffers, bool) or not isinstance(
+            max_input_buffers, int
+        ):
+            raise TypeError(
+                "max_input_buffers must be an int, got "
+                f"{type(max_input_buffers).__name__}"
+            )
+        if max_input_buffers < 1:
+            raise ValueError(
+                f"max_input_buffers must be a positive int, got {max_input_buffers}"
+            )
+        for group in self._groups:
+            group.max_input_buffers = max_input_buffers
+        if (context := self._engine_context) is not None:
+            context.max_pending_reduce_grads = max(
+                (
+                    g.max_input_buffers
+                    for s in self._state_ctx.all_states
+                    for g in s._groups
+                ),
+                default=1,
+            )
+
     def _unshard(self, async_op: bool) -> list[BucketRuntime]:
         """Start (``async_op``) or finish the groups' unshards on the current
         stream, re-reading parameters replaced since (``BucketGroup.refresh``);
@@ -641,7 +697,7 @@ class ShardedModuleState(_State):
             )
         state_ctx.manual_backward_finalization = enabled
         # The next backward follows it even without a forward in between
-        if (context := self._engine_context or self._shared_engine_context) is not None:
+        if (context := self._engine_context) is not None:
             context.manual_backward_finalization = enabled
 
     def _finalize_backward(self, async_op: bool) -> GradientReductionHandle | None:
@@ -737,7 +793,7 @@ class ShardedModuleState(_State):
         if (
             context is not None
             and (pending := context.pending_finalization) is not None
-            and getattr(pending, "_state", None) is not None
+            and pending._state is not None
             and pending._state._state_ctx is not state_ctx
         ):
             raise RuntimeError(
@@ -745,7 +801,7 @@ class ShardedModuleState(_State):
                 f"another {self._state_name} root sharing the communication context"
             )
         if context is not None:
-            context.reset(drop_grads=True)
+            context.reset_iteration()
         for s in state_ctx.all_states:
             s._training_state = TrainingState.IDLE
             for param in (p for r in s.runtimes for p in r.sharded_params):

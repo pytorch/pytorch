@@ -1025,25 +1025,12 @@ class FSDPModule:
             recurse (bool): Whether to set for all FSDP submodules or just the
                 passed-in module.
         """
-        # bool is an int subclass; reject it so True does not silently mean 1.
-        if isinstance(max_input_buffers, bool) or not isinstance(
-            max_input_buffers, int
-        ):
-            raise TypeError(
-                "max_input_buffers must be an int, got "
-                f"{type(max_input_buffers).__name__}"
-            )
-        if max_input_buffers < 1:
-            raise ValueError(
-                f"max_input_buffers must be a positive int, got {max_input_buffers}"
-            )
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         for module in modules:
             if isinstance(module, FSDPModule):
-                state = module._get_fsdp_state()
-                _fsdp_engine.set_reduce_scatter_max_input_buffers(
-                    state, max_input_buffers
+                module._get_fsdp_state()._set_reduce_scatter_max_input_buffers(
+                    max_input_buffers
                 )
 
     def set_separate_reduce_scatter_group(
@@ -1233,14 +1220,10 @@ class FSDPModule:
     def _apply(
         self, fn: Callable[[torch.Tensor], torch.Tensor], recurse: bool = True
     ) -> Any:
-        # Reshard to ensure that sharded parameters are registered
-        self.reshard()
-        groups = self._get_fsdp_state()._fsdp_param_groups
-        saved = [group.homing.save_for_apply() for group in groups]
-        ret = super()._apply(fn, recurse=recurse)  # type: ignore[misc]
-        for group, grads in zip(groups, saved, strict=True):
-            group.homing.restore_after_apply(grads)
-        return ret
+        apply = super()._apply  # type: ignore[misc]
+        return module_ops.apply_to_params(
+            self._fsdp_runtimes(), lambda: apply(fn, recurse=recurse)
+        )
 
 
 def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:

@@ -42,7 +42,9 @@ class TestFlexShardAPI(TestCase):
         with single_rank_cuda_mesh() as mesh:
             _, model = flex_shard_transformer_model(mesh)
 
-            with self.assertRaisesRegex(ValueError, "Cannot apply flex_shard twice"):
+            with self.assertRaisesRegex(
+                AssertionError, "can only be applied to a module once"
+            ):
                 flex_shard_cuda(
                     model,
                     mesh,

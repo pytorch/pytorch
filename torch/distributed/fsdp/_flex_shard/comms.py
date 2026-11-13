@@ -15,11 +15,8 @@ from typing import Any, Literal
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
-from torch.distributed.fsdp._fully_shard._fsdp_api import (
-    _ReduceOp,
-    AllGather,
-    ReduceScatter,
-)
+
+from .api import _ReduceOp, AllGather, ReduceScatter
 
 
 class DefaultAllocMixin:

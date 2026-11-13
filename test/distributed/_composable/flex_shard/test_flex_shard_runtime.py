@@ -612,9 +612,9 @@ class TestFlexShardEagerRuntime(TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "injected backward failure"):
             model(x).sum().backward()
-        with self.assertRaisesRegex(RuntimeError, "a previous backward raised"):
+        with self.assertRaisesRegex(RuntimeError, "previous backward raised"):
             model(x)
-        with self.assertRaisesRegex(RuntimeError, "a previous backward raised"):
+        with self.assertRaisesRegex(RuntimeError, "previous backward raised"):
             model.reshard()
 
     def test_reshard_after_forward_holds_one_bucket(self):

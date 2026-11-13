@@ -7,22 +7,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import cast, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
-from torch.distributed.fsdp._fully_shard._fsdp_api import (
-    CPUOffloadPolicy,
-    GradientReductionHandle,
-    MixedPrecisionPolicy,
-)
+from torch.distributed._composable import contract
+from torch.distributed._composable_state import _get_module_state
 
 from . import module_ops
+from .api import CPUOffloadPolicy, GradientReductionHandle, MixedPrecisionPolicy
 from .bucket_comm import begin_explicit_bucket_unshard
-from .bucket_runtime import _bucket_runtimes, BucketCommContext, ParamOwnerRef
+from .bucket_runtime import BucketCommContext, ParamOwnerRef, ParamRepresentation
 from .bucket_storage import (
     _assign_params_to_buckets,
     _fsdp2_param_order,
+    _hook_module_fqns,
     BucketParamFQNsByIndex,
     BucketSpec,
     GradientReduceOp,
@@ -31,10 +30,11 @@ from .bucket_storage import (
     ShardedBucketStorage,
 )
 from .module_state import BucketGroup, ShardedModuleState
-from .param_homing import install_params, ParamHoming
+from .param_homing import build_bucket, ParamSource
 from .placements.shard import _engine_placements
-from .sharded_param import is_flex_shard_param
+from .sharded_param import is_flex_shard_param, set_sharding_info
 from .utils import (
+    _bucket_debug_fqn,
     _get_device_from_mesh,
     _get_managed_named_params,
     _get_shared_param_names,
@@ -46,6 +46,10 @@ from .utils import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.distributed.device_mesh import DeviceMesh
+
     from .bucket_runtime import BucketRuntime
     from .placement_contract import Placement
 
@@ -56,12 +60,73 @@ __all__ = [
 ]
 
 
-_SHARDED_BUCKET_STORAGES_ATTR = "_sharded_bucket_storages"
-_EAGER_HOOKS_INSTALLED_ATTR = "_flex_shard_eager_hooks_installed"
-_MAX_PENDING_REDUCE_GRADS_ATTR = "_flex_shard_max_pending_reduce_grads"
-# The module state that runs the buckets' hooks, created by flex_shard() and
-# initialized once the buckets have storage
-_STATE_ATTR = "_flex_shard_state"
+class FlexShardRepresentation(ParamRepresentation):
+    """flex_shard's parameters: their local tensors, with the sharding
+    metadata that flex_shard's checkpointing reads (``set_sharding_info``)."""
+
+    def __init__(self, mesh: DeviceMesh) -> None:
+        self.mesh = mesh
+
+    def new_sharded_param(
+        self, index: int, local: torch.Tensor, info: ParamInfo
+    ) -> nn.Parameter:
+        param = super().new_sharded_param(index, local, info)
+        self._set_sharding_info(param, info)
+        return param
+
+    def refresh_param(
+        self, index: int, sharded_param: nn.Parameter, info: ParamInfo
+    ) -> None:
+        # e.g. load_state_dict(assign=True) registered a plain parameter
+        if not is_flex_shard_param(sharded_param):
+            self._set_sharding_info(sharded_param, info)
+
+    def _set_sharding_info(self, param: nn.Parameter, info: ParamInfo) -> None:
+        set_sharding_info(
+            param,
+            placements=tuple(p._api_placement() for p in info.placements),
+            global_shape=info.global_shape,
+            global_stride=info.global_stride,
+            mesh=self.mesh,
+            outer_layout=info.outer_layout,
+        )
+
+
+class FlexShardState(ShardedModuleState):
+    """The state that ``flex_shard()`` puts on its module: its buckets, each
+    a group that unshards on the forward of its modules."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.bucket_storages: list[ShardedBucketStorage] = []
+
+    def add_buckets(self, bucket_storages: list[ShardedBucketStorage]) -> None:
+        """Run each bucket on the forward of its modules: those its patterns
+        name (``BucketSpec.patterns``), or the module that holds all its
+        parameters, casting their inputs and outputs as its mixed precision
+        policy says."""
+        self.bucket_storages = bucket_storages
+        module_positions = {
+            module: position
+            for position, module in enumerate(bucket_storages[0]._module.modules())
+        }
+        for storage in bucket_storages:
+            runtime = cast("BucketRuntime", storage.runtime)
+            modules = (
+                [
+                    _unwrap_checkpoint(storage._module.get_submodule(fqn))
+                    for fqn in storage._hook_module_fqns
+                ]
+                if storage._hook_module_fqns
+                else [runtime.forward_hook_module()]
+            )
+            runtime.module_position = min(module_positions[m] for m in modules)
+            casts = (None, None)
+            if (policy := storage._mp_policy) is not None:
+                input_dtype = policy.param_dtype if policy.cast_forward_inputs else None
+                casts = (input_dtype, policy.output_dtype)
+            group = BucketGroup(runtime, tuple(modules), named_by_modules=False)
+            self.add_group(group, casts)
 
 
 class FlexShardModule:
@@ -73,59 +138,20 @@ class FlexShardModule:
 
         Each takes per-bucket settings, e.g. ``set_requires_gradient_sync``.
         """
-        return getattr(self, _SHARDED_BUCKET_STORAGES_ATTR)
+        return self._state().bucket_storages
 
-    def to_empty(self, *, device, recurse: bool = True):
-        """Materialize FlexShard bucket storage when meta modules are initialized."""
-        result = cast(nn.Module, super()).to_empty(device=device, recurse=recurse)
-        self._materialize_after_to_empty()
-        return result
-
-    def _materialize_after_to_empty(self) -> None:
-        """Keep the parameters' data, which nn.Module.to_empty() gave storage of
-        their own, in their buckets' storage again."""
-        if all(p.device.type == "meta" for p in cast(nn.Module, self).parameters()):
-            return
-        for runtime in self._runtimes():
-            homing = cast(ParamHoming, runtime.representation.homing)
-            homing.reset_sharded_params()
-            homing.home()
-        self._install_runtime_if_materialized()
-
-    def _add_groups(self) -> None:
-        """Run each bucket on the forward of its modules, through the module
-        state (installed once all storage is materialized)."""
-        state = self._state()
-        runtimes = [
-            cast("BucketRuntime", s.runtime) for s in self.sharded_bucket_storages
-        ]
-        for runtime, modules, casts in _bucket_runtimes(runtimes):
-            group = BucketGroup(runtime, modules)
-            group.named_by_modules = False
-            state.add_group(group, casts)
-        state._shared_engine_context = runtimes[0].context
-
-    def _install_runtime_if_materialized(self) -> None:
-        """Install the buckets' hooks once all bucket storage is materialized:
-        their modules' forwards unshard them through the module lifecycle that
-        fully_shard runs on too."""
-        if getattr(self, _EAGER_HOOKS_INSTALLED_ATTR, False) or any(
-            s.byte_storage.is_meta for s in self.sharded_bucket_storages
-        ):
-            return
-        module = cast(nn.Module, self)
-        self._state().init(
-            (module,),
-            _get_device_from_mesh(self.sharded_bucket_storages[0]._mesh),
-            (None, None),
-            auto_reshard_after_forward=False,
-            root_module=module,
-            post_hook_always_call=True,
+    def _apply(
+        self, fn: Callable[[torch.Tensor], torch.Tensor], recurse: bool = True
+    ) -> Any:
+        # The buckets re-read the parameters that nn.Module._apply replaced
+        # (to_empty(), module.to(dtype)) and keep their data in their storage
+        apply = super()._apply  # type: ignore[misc]
+        return module_ops.apply_to_params(
+            self._runtimes(), lambda: apply(fn, recurse=recurse)
         )
-        setattr(self, _EAGER_HOOKS_INSTALLED_ATTR, True)
 
-    def _state(self) -> ShardedModuleState:
-        return getattr(self, _STATE_ATTR)
+    def _state(self) -> FlexShardState:
+        return cast(FlexShardState, _get_module_state(cast(nn.Module, self)))
 
     def _runtimes(self) -> list[BucketRuntime]:
         return self._state().runtimes
@@ -140,14 +166,9 @@ class FlexShardModule:
         forward until its backward; call this when that backward will not run.
         Until then, ``module.parameters()`` returns their unsharded params, so
         zero grads through the optimizer rather than ``module.zero_grad()``.
-        Grads accumulated without sync are kept.
+        Grads accumulated without sync are kept, in their unsharded dtype.
         """
-        for context in self._contexts():
-            context.reset()
-        # The backward that reshard() abandons no longer fixes the mode
-        state_ctx = self._state()._state_ctx
-        state_ctx.manual_backward_finalization_active = None
-        state_ctx.gradient_reduction_pending = False
+        module_ops.reshard(self._runtimes())
 
     def set_manual_backward_finalization(self, enabled: bool) -> None:
         """Set whether the caller finalizes backward, like FSDP2's
@@ -202,8 +223,6 @@ class FlexShardModule:
         using the unsharded params directly. A forward finishes its buckets'
         all-gathers without it.
         """
-        for context in self._contexts():
-            context.check_outside_backward("unshard")
         started = self._state()._unshard(async_op)
         return module_ops.ModuleUnshardHandle(started) if async_op else None
 
@@ -250,7 +269,8 @@ class FlexShardModule:
         return [
             bucket_storage
             for module in modules
-            for bucket_storage in getattr(module, _SHARDED_BUCKET_STORAGES_ATTR, [])
+            if isinstance(module, FlexShardModule)
+            for bucket_storage in module.sharded_bucket_storages
         ]
 
     def set_gradient_reduce_op(
@@ -372,40 +392,16 @@ class FlexShardModule:
             self._bucket_storages(recurse), reduce_scatter_unused_params
         )
 
-    def set_max_pending_reduce_grads(
-        self,
-        max_pending_reduce_grads: int = 1,
-        *,
-        recurse: bool = True,
-    ) -> None:
-        """Set retained reduce-grad results; 0 keeps all until post-backward.
-
-        The default of 1 matches FSDP2, which waits for the previous
-        reduce-scatter before packing the next bucket's gradients, so at most
-        one packed reduce-scatter input is alive.
-        """
-        if not isinstance(max_pending_reduce_grads, int) or isinstance(
-            max_pending_reduce_grads, bool
-        ):
-            raise ValueError(
-                "max_pending_reduce_grads must be a non-negative int, "
-                f"got {type(max_pending_reduce_grads).__name__}."
-            )
-        if max_pending_reduce_grads < 0:
-            raise ValueError(
-                "max_pending_reduce_grads must be non-negative, "
-                f"got {max_pending_reduce_grads}."
-            )
-
-        modules = cast(nn.Module, self).modules() if recurse else [self]
-        for module in modules:
-            if not isinstance(module, FlexShardModule):
-                continue
-            setattr(module, _MAX_PENDING_REDUCE_GRADS_ATTR, max_pending_reduce_grads)
-            for runtime in module._runtimes():
-                runtime.context.max_pending_reduce_grads = max_pending_reduce_grads
+    def set_reduce_scatter_max_input_buffers(self, max_input_buffers: int) -> None:
+        """Set how many packed gradient reduce-scatter inputs may be alive at
+        once, like FSDP2's ``set_reduce_scatter_max_input_buffers``: by default
+        1, so the next bucket's copy-in waits on the previous reduce-scatter;
+        more lets the copy-in write a fresh buffer instead, at the cost of
+        memory, which helps when the reduce-scatters are exposed."""
+        self._state()._set_reduce_scatter_max_input_buffers(max_input_buffers)
 
 
+@contract(state_cls=FlexShardState)  # type: ignore[misc]
 def flex_shard(
     module: nn.Module,
     buckets: list[BucketSpec],
@@ -477,7 +473,10 @@ def flex_shard(
         - Each parameter must have exactly one placement.
         - Each bucket must contain one original parameter dtype. Split mixed
           dtype parameters into separate buckets.
-        - Parameters on meta device will have uninitialized storage
+        - A module whose parameters are all on meta gets meta storage until
+          ``to_empty()``; parameters on meta while others are not must be
+          replaced (e.g. ``load_state_dict(assign=True)``) before the first
+          forward
     """
     inputs = _prepare_flex_shard_inputs(
         module,
@@ -490,16 +489,28 @@ def flex_shard(
         buckets,
     )
 
-    flex_shard_module = _attach_flex_shard_module_state(module, bucket_storages)
-    flex_shard_module.set_max_pending_reduce_grads()
-    flex_shard_module._add_groups()
+    return _install_state(module, flex_shard.state(module), bucket_storages)
 
-    # Install bucket unshard hooks for eager mode when the storage layout
-    # supports one collective per bucket. Meta modules are materialized later by
-    # TorchTitan's Trainer.to_empty() path, so defer hook installation until then.
-    flex_shard_module._install_runtime_if_materialized()
 
-    return flex_shard_module
+def _install_state(
+    module: nn.Module,
+    state: FlexShardState,
+    bucket_storages: list[ShardedBucketStorage],
+) -> FlexShardModule:
+    """Put ``state``, running ``bucket_storages``, on ``module``, which
+    becomes a ``FlexShardModule``."""
+    state.add_buckets(bucket_storages)
+    state.init(
+        (module,),
+        _get_device_from_mesh(bucket_storages[0]._mesh),
+        (None, None),
+        auto_reshard_after_forward=False,
+        root_module=module,
+        post_hook_always_call=True,
+    )
+    cls = type(module)
+    module.__class__ = type(cls.__name__, (FlexShardModule, cls), {})
+    return cast(FlexShardModule, module)
 
 
 def relayout_bucket(
@@ -576,29 +587,33 @@ def relayout_bucket(
     param_placements = _engine_placements(placement_fn(named_full_params, mesh))
     _validate_placements(param_placements, named_full_params)
     full_params = [param for _, param in named_full_params]
-    param_infos, total_bytes = ShardedBucketStorage.create_param_infos(
-        named_full_params,
-        mesh,
-        param_placements,
-        _mixed_precision_policy_of(infos, full_params),
+    build_bucket(
+        _param_sources(
+            bucket_storage._module,
+            named_full_params,
+            param_placements,
+            {info.fqn: list(info.shared_fqns) for info in infos},
+        ),
+        mesh=mesh,
+        module=bucket_storage._module,
+        device=_get_device_from_mesh(mesh),
+        context=runtime.context,
+        representation=runtime.representation,
+        mp_policy=_mixed_precision_policy_of(infos, full_params),
+        extension_mesh=mesh,
+        storage_options={
+            "reshard_after_forward": bucket_storage.reshard_after_forward,
+            "gradient_reduce_op": bucket_storage.gradient_reduce_op,
+            "pre_backward_hook": bucket_storage._pre_backward_hook,
+            "post_reduce_hook": bucket_storage._post_reduce_hook,
+            "gradient_divide_factor": bucket_storage.gradient_divide_factor,
+            "defer_post_backward": bucket_storage._defer_post_backward,
+            "hook_module_fqns": bucket_storage._hook_module_fqns,
+            "mp_policy": bucket_storage._mp_policy,
+        },
+        runtime=runtime,
     )
-    for info in infos:
-        param_infos[info.fqn].shared_fqns = info.shared_fqns
-    new_storage = ShardedBucketStorage(
-        torch.empty(0, dtype=torch.uint8, device=device),
-        param_infos,
-        mesh,
-        total_bytes,
-        bucket_storage._module,
-        reshard_after_forward=bucket_storage.reshard_after_forward,
-        gradient_reduce_op=bucket_storage.gradient_reduce_op,
-        pre_backward_hook=bucket_storage._pre_backward_hook,
-        post_reduce_hook=bucket_storage._post_reduce_hook,
-        gradient_divide_factor=bucket_storage.gradient_divide_factor,
-        defer_post_backward=bucket_storage._defer_post_backward,
-        hook_module_fqns=bucket_storage._hook_module_fqns,
-        mp_policy=bucket_storage._mp_policy,
-    )
+    new_storage = runtime.bucket_storage
     new_storage._requires_gradient_sync = bucket_storage._requires_gradient_sync
     new_storage._reshard_after_backward = bucket_storage._reshard_after_backward
     for storage in storages:
@@ -613,11 +628,11 @@ def relayout_bucket(
     new_storage._forward_prefetch = bucket_storage._forward_prefetch
     new_storage._backward_prefetch = bucket_storage._backward_prefetch
     storages[index] = new_storage
-    runtime.rebind_storage(new_storage)
-    new_storage.runtime = runtime
-    full = dict(named_full_params)
-    install_params(runtime, [full[info.fqn] for info in runtime.infos], device)
     return new_storage
+
+
+def _unwrap_checkpoint(module: nn.Module) -> nn.Module:
+    return getattr(module, "_checkpoint_wrapped_module", module)
 
 
 def _module_param(module: nn.Module, fqn: str) -> nn.Parameter:
@@ -657,16 +672,8 @@ def _mixed_precision_policy_of(
 
 def _check_not_already_flex_sharded(module: nn.Module) -> None:
     """Raise if applying FlexShard would create nested ownership."""
-    if getattr(module, _SHARDED_BUCKET_STORAGES_ATTR, None) is not None:
-        raise ValueError(
-            f"Module {type(module).__name__} already has ShardedBucketStorage. "
-            "Cannot apply flex_shard twice to the same module."
-        )
     for child_fqn, child in module.named_modules():
-        if (
-            child_fqn
-            and getattr(child, _SHARDED_BUCKET_STORAGES_ATTR, None) is not None
-        ):
+        if child_fqn and isinstance(child, FlexShardModule):
             raise ValueError(
                 "Nested flex_shard wrapping is not supported. "
                 f"Child module {child_fqn!r} is already FlexSharded. "
@@ -681,21 +688,6 @@ def _check_not_already_flex_sharded(module: nn.Module) -> None:
                 "Apply flex_shard once at the root module and express bucket "
                 "boundaries with BucketSpec FQN patterns."
             )
-
-
-def _attach_flex_shard_module_state(
-    module: nn.Module,
-    bucket_storages: list[ShardedBucketStorage],
-) -> FlexShardModule:
-    """Attach FlexShard ownership state and mixin accessors to a module."""
-    setattr(module, _SHARDED_BUCKET_STORAGES_ATTR, bucket_storages)
-    setattr(module, _EAGER_HOOKS_INSTALLED_ATTR, False)
-    setattr(module, _STATE_ATTR, ShardedModuleState())
-
-    cls = type(module)
-    if not issubclass(cls, FlexShardModule):
-        module.__class__ = type(cls.__name__, (FlexShardModule, cls), {})
-    return cast(FlexShardModule, module)
 
 
 @dataclass(frozen=True)
@@ -731,14 +723,11 @@ def _materialize_bucket_storages(
             bucket_named_params = _fsdp2_param_order(
                 module, bucket_spec.patterns, bucket_named_params
             )
-        bucket_placements = {fqn: inputs.param_placements[fqn] for fqn in bucket_fqns}
         bucket_storages.append(
-            ShardedBucketStorage.from_bucket(
+            build_flex_bucket(
                 module,
                 bucket_named_params,
-                bucket_placements,
-                bucket_spec.mesh,
-                inputs.device,
+                inputs.param_placements,
                 bucket_spec,
                 inputs.shared_param_names,
                 context,
@@ -746,6 +735,69 @@ def _materialize_bucket_storages(
         )
 
     return bucket_storages
+
+
+def build_flex_bucket(
+    module: nn.Module,
+    named_params: list[tuple[str, nn.Parameter]],
+    param_placements: dict[str, tuple[Placement, ...]],
+    bucket_spec: BucketSpec,
+    shared_names: dict[str, list[str]] | None = None,
+    context: BucketCommContext | None = None,
+) -> ShardedBucketStorage:
+    """One ``flex_shard`` bucket of ``named_params`` and its runtime in
+    ``context`` (a new one by default), keeping the parameters' shards in its
+    storage and installing sharded parameters that view them."""
+    mesh = bucket_spec.mesh
+    device = _get_device_from_mesh(mesh)
+    offload = bucket_spec.offload_policy
+    runtime = build_bucket(
+        _param_sources(module, named_params, param_placements, shared_names or {}),
+        mesh=mesh,
+        module=module,
+        device=device,
+        context=context or BucketCommContext.for_device(device),
+        representation=FlexShardRepresentation(mesh),
+        mp_policy=bucket_spec.mp_policy or MixedPrecisionPolicy(),
+        extension_mesh=mesh,
+        storage_options={
+            "reshard_after_forward": bucket_spec.reshard_after_forward,
+            "gradient_reduce_op": bucket_spec.gradient_reduce_op,
+            "pre_backward_hook": bucket_spec.pre_backward_hook,
+            "post_reduce_hook": bucket_spec.post_reduce_hook,
+            "gradient_divide_factor": bucket_spec.gradient_divide_factor,
+            "defer_post_backward": bucket_spec.defer_post_backward,
+            "hook_module_fqns": _hook_module_fqns(module, bucket_spec.patterns),
+            "fsdp2_compatible": bucket_spec.fsdp2_compatible,
+            "mp_policy": bucket_spec.mp_policy,
+        },
+        offload_policy=offload if isinstance(offload, CPUOffloadPolicy) else None,
+        debug_fqn=_bucket_debug_fqn(module, [fqn for fqn, _ in named_params]),
+    )
+    return runtime.bucket_storage
+
+
+def _param_sources(
+    module: nn.Module,
+    named_params: list[tuple[str, nn.Parameter]],
+    param_placements: dict[str, tuple[Placement, ...]],
+    shared_names: dict[str, list[str]],
+) -> list[ParamSource]:
+    sources = []
+    for fqn, param in named_params:
+        shared = tuple(shared_names.get(fqn, ()))
+        sources.append(
+            ParamSource(
+                param,
+                ParamOwnerRef.resolve(module, fqn),
+                tuple(ParamOwnerRef.resolve(module, name) for name in shared),
+                fqn,
+                param,
+                param_placements[fqn][0],
+                shared_fqns=shared,
+            )
+        )
+    return sources
 
 
 def _resolve_bucket_param_placements(

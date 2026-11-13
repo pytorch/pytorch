@@ -17,9 +17,7 @@ root's runtime at lazy init.
 
 from __future__ import annotations
 
-import functools
 import logging
-import weakref
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
@@ -28,15 +26,11 @@ import torch.nn as nn
 from torch.distributed.tensor import DTensor
 
 from .._flex_shard import module_ops
-from .._flex_shard.bucket_runtime import (
-    _reshard_buckets,
-    BucketCommContext,
-    ParamRepresentation,
-)
+from .._flex_shard.bucket_runtime import BucketCommContext, ParamRepresentation
 from .._flex_shard.bucket_storage import ParamMeta
 from .._flex_shard.module_ops import GroupMesh
 from .._flex_shard.module_state import BucketGroup
-from .._flex_shard.param_homing import build_homed_bucket, param_owners, ParamSource
+from .._flex_shard.param_homing import build_bucket, param_owners, ParamSource
 from .._flex_shard.placements.shard import Shard as EngineShard
 from .._flex_shard.placements.shard_all_gather import ShardAllGather
 from ._fsdp_api import CPUOffloadPolicy
@@ -96,7 +90,9 @@ class FSDPParamRepresentation(ParamRepresentation):
             param.grad_dtype = info.grad_dtype_override
         return param
 
-    def refresh_param(self, index: int, sharded_param: nn.Parameter) -> None:
+    def refresh_param(
+        self, index: int, sharded_param: nn.Parameter, info: ParamInfo
+    ) -> None:
         self.fsdp_params[index].refresh(sharded_param)
 
     def unsharded_param(self, index: int, full_param: torch.Tensor) -> torch.Tensor:
@@ -210,7 +206,7 @@ class FullyShardBucket(BucketGroup):
             fsdp_param._group = self
             fsdp_param._index = index
         replicate_info = mesh_info.replicate_info
-        runtime, self.homing = build_homed_bucket(
+        runtime = build_bucket(
             [
                 ParamSource(
                     param,
@@ -226,52 +222,37 @@ class FullyShardBucket(BucketGroup):
                         if fsdp_param._init_grad_dtype_override
                         else None,
                     ),
-                    fsdp_param.mp_policy,
-                    # The DTensor's local shape, which keeps the nonzero dims
-                    # of an empty shard (_get_dim_chunked_size)
-                    fsdp_param.sharded_size,
                 )
                 for index, (param, (owner, shared_owners), fsdp_param) in enumerate(
                     zip(params, owners, self.fsdp_params, strict=True)
                 )
             ],
-            mesh=self.mesh,
-            device=device,
+            mesh=self.mesh,  # type: ignore[arg-type]
             module=modules[0],
-            representation=representation,
-            extension_mesh=self.fsdp_params[0].shard_mesh_from_root,
+            device=device,
             context=new_engine_context(device),
+            representation=representation,
+            mp_policy=mp_policy,
+            extension_mesh=self.fsdp_params[0].shard_mesh_from_root,
+            storage_options={
+                "reshard_after_forward": post_forward_mesh_info is not None,
+                "fsdp2_compatible": True,
+            },
             offload_policy=offload_policy
             if isinstance(offload_policy, CPUOffloadPolicy)
             else None,
             replicate_group=replicate_info.replicate_process_group
             if replicate_info is not None
             else None,
-            reshard_after_forward=post_forward_mesh_info is not None,
             post_forward_group=self._post_forward_group(post_forward_mesh_info),
             logger=logging.getLogger("torch.distributed.fsdp.fully_shard"),
             log_name="FSDP",
         )
+        self.homing = runtime.homing
         for fsdp_param in self.fsdp_params:
             del fsdp_param.shard_source
         super().__init__(runtime, modules)
-        # FSDP2's set_reduce_scatter_max_input_buffers
-        self.max_input_buffers = 1
         self.has_spmd_types = any(p.is_spmd_types for p in self.fsdp_params)
-        self.bucket.context.buckets.append(self.bucket)
-        if len(modules) > 1:
-            self.bucket.group_modules = modules
-        # As FSDP2: state dicts read and load the sharded parameters, which a
-        # load with assign=True replaces
-        reshard_hook = functools.partial(_reshard_buckets, (self.bucket,))
-        for module in modules:
-            module.register_state_dict_pre_hook(reshard_hook)
-            module._register_load_state_dict_pre_hook(reshard_hook)
-        # A weak reference, so that a submodule kept alive does not keep the
-        # whole module alive
-        reload_hook = functools.partial(_reload_params, weakref.ref(self))
-        for module in {owner.module for owner, _ in owners}:
-            module.register_load_state_dict_post_hook(reload_hook)
 
     @property
     def all_gather(self) -> ShardAllGather:
@@ -317,36 +298,10 @@ class FullyShardBucket(BucketGroup):
             return None
         return post_forward_mesh_info.shard_process_group
 
-    def homed(self) -> bool:
-        return self.homing.homed()
-
-    def refresh(self) -> None:
-        """Re-home parameters replaced since the last unshard (see
-        ``ParamHoming``)."""
-        self.homing.refresh()
-
     def lazy_init(self) -> None:
-        """Re-read parameters replaced since construction and their mixed
-        precision dtypes, as FSDP2's group lazy init does, once."""
         if self._lazy_initialized:
             return
-        self._lazy_initialized = True
-        self.homing.reset_sharded_params()
-        self.homing.init_extensions()
-        meta = [
-            fsdp_param._display_name
-            for fsdp_param in self.fsdp_params
-            if fsdp_param.sharded_param.device.type == "meta"
-        ]
-        if meta:
-            raise RuntimeError(
-                "FSDP parameters should be materialized from meta device before "
-                f"training, but the following were still on meta device: {meta}\n"
-                "For example, call module.to_empty(device) to materialize to "
-                "device and call module.reset_parameters() on each module to "
-                "initialize values."
-            )
-        self.homing.refresh()
+        super().lazy_init()
         self._check_uniform_dtypes()
 
     def _check_uniform_dtypes(self) -> None:
@@ -371,7 +326,6 @@ class FullyShardBucket(BucketGroup):
     def join(self, context: BucketCommContext, *, reshard_after_forward: bool) -> None:
         """Join the root module's engine context, keying the parameters' infos
         by the FQNs that the root gave them."""
-        self.lazy_init()
         self.homing.rename(
             [
                 fsdp_param._param_fqn or info.fqn
@@ -381,14 +335,6 @@ class FullyShardBucket(BucketGroup):
             ]
         )
         super().join(context, reshard_after_forward=reshard_after_forward)
-
-
-def _reload_params(group_ref: weakref.ref[FullyShardBucket], *args: Any) -> None:
-    """Re-read a group's parameters after ``load_state_dict``, which may
-    replace them (``assign=True``); lazy init or the next explicit unshard
-    copies replaced data into the storage (``refresh``), as in FSDP2."""
-    if (group := group_ref()) is not None:
-        group.homing.reset_sharded_params()
 
 
 # FSDPModule methods on the engine #
@@ -416,17 +362,6 @@ def set_modules_to_prefetch(
         )
     ]
     module_ops.set_prefetch(state.runtimes, targets, forward=forward)
-
-
-def set_reduce_scatter_max_input_buffers(state: Any, max_input_buffers: int) -> None:
-    for bucket in state._fsdp_param_groups:
-        bucket.max_input_buffers = max_input_buffers
-    if state._engine_context is not None:
-        root_states = state._state_ctx.all_states
-        state._engine_context.max_pending_reduce_grads = max(
-            (b.max_input_buffers or 1 for s in root_states for b in s._groups),
-            default=1,
-        )
 
 
 def new_engine_context(device: torch.device) -> BucketCommContext:

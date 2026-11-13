@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from ..all_gather_layout import AllGatherLayout
     from ..bucket_runtime import ParamRepresentation
     from ..bucket_storage import ParamInfo, PlacementFn
+    from ..param_homing import ParamHoming
     from ..placement_contract import GradientReduction
     from .shard_all_gather import ParamAllGather
 
@@ -83,6 +84,7 @@ class Shard(Placement):
     refills_persistent_buffers_in_finish = True
     matches_fsdp2_collectives = True
     supports_cpu_offload = True
+    supports_own_param_storage = True
 
     @dataclass(frozen=True)
     class _ReduceGradLayout:
@@ -156,9 +158,12 @@ class Shard(Placement):
 
     @override
     def new_bucket_state(
-        self, infos: list[ParamInfo], representation: ParamRepresentation
+        self,
+        infos: list[ParamInfo],
+        representation: ParamRepresentation,
+        homing: ParamHoming | None,
     ) -> ShardAllGather:
-        return ShardAllGather(representation, len(infos))
+        return ShardAllGather(representation, homing, len(infos))
 
     def _check_shardable(self, fqn: str, shape: torch.Size) -> None:
         if not 0 <= self.dim < len(shape):
@@ -173,9 +178,11 @@ class Shard(Placement):
         dim_size = global_shape[self.dim]
         chunk = (dim_size + world_size - 1) // world_size
         start = chunk * rank
-        local_dim = min(dim_size, start + chunk) - min(dim_size, start)
         shape = list(global_shape)
-        shape[self.dim] = local_dim
+        shape[self.dim] = min(dim_size, start + chunk) - min(dim_size, start)
+        if math.prod(shape) == 0:
+            # An empty shard keeps the other dims, as a DTensor's local tensor
+            shape[self.dim] = 0
         return torch.Size(shape)
 
     @override
@@ -318,7 +325,9 @@ class Shard(Placement):
         # The collective's device, which differs from the storage's for CPU
         # offload
         device = tensors[0].device if device is None else device
-        all_gather = bucket_state or ShardAllGather(_PLAIN_REPRESENTATION, len(infos))
+        all_gather = bucket_state or ShardAllGather(
+            _PLAIN_REPRESENTATION, None, len(infos)
+        )
         layout = all_gather.layout
         with _record_copy_in_if_eager():
             # Each param's flattened inputs from its representation, or None
@@ -510,7 +519,7 @@ class Shard(Placement):
                 # A refill's outputs are persistent buffers, which the runtime
                 # re-allocated, but for those that a representation released
                 # (releases_all_gather_outputs) before their sizes were recorded
-                if refilled is None or all_gather.representation.defines_all_gathers():
+                if refilled is None or _defines_all_gathers(all_gather):
                     for param, numels, dtypes in zip(
                         params, state.param_numels, state.param_dtypes, strict=True
                     ):
@@ -836,15 +845,19 @@ def _copy_out_rank_chunks(
         torch._foreach_copy_(dsts, srcs)
 
 
+def _defines_all_gathers(all_gather: ShardAllGather) -> bool:
+    return all_gather.homing is not None and all_gather.homing.defines_all_gathers()
+
+
 def _record_all_gather_inputs(
     all_gather: ShardAllGather, infos: list[ParamInfo], world_size: int
 ) -> list[list[torch.Tensor] | None]:
     """Record each param's all-gather inputs for this unshard and return them
     flattened: those its representation gives, or None for its padded local
     shard."""
-    representation = all_gather.representation
+    homing = all_gather.homing
     custom_layout = not all_gather.layout._rank_major_output_only
-    if not representation.defines_all_gathers():
+    if homing is None or not homing.defines_all_gathers():
         # A local shard's output layout depends only on these
         key = (world_size, custom_layout)
         if all_gather.local_shards_key != key:
@@ -862,7 +875,7 @@ def _record_all_gather_inputs(
     param_inputs: list[list[torch.Tensor] | None] = []
     for index, (param, info) in enumerate(zip(all_gather.params, infos, strict=True)):
         param.name = info.fqn
-        inputs = representation.all_gather_inputs(index)
+        inputs = homing.all_gather_inputs(index)
         sharding = {
             "shard_world_size": world_size,
             "shard_dim": _shard_dim(info),
@@ -1063,15 +1076,15 @@ def _unsharded_tensors(
     representation builds from its outputs. A refill fills the outputs behind
     the tensors of the first unshard, which the representation may rebuild in
     place (FSDP2's ``fsdp_post_all_gather(..., out=...)``), and returns none."""
-    representation = all_gather.representation
-    defines_all_gathers = representation.defines_all_gathers()
+    representation, homing = all_gather.representation, all_gather.homing
+    defines_all_gathers = _defines_all_gathers(all_gather)
     if refill and not defines_all_gathers:
         return []
     tensors: list[torch.Tensor] = []
     for index, (param, info) in enumerate(zip(all_gather.params, infos, strict=True)):
         outputs = param.unsharded_outputs
         built = (
-            representation.post_all_gather(index, outputs, refill)
+            cast("ParamHoming", homing).post_all_gather(index, outputs, refill)
             if defines_all_gathers
             else None
         )
@@ -1113,7 +1126,7 @@ def _unsharded_tensors(
         tensors.append(unsharded_param)
     if defines_all_gathers:
         for index, param in enumerate(all_gather.params):
-            if representation.releases_all_gather_outputs(index):
+            if cast("ParamHoming", homing).releases_all_gather_outputs(index):
                 param.free_all_gather_outputs()
     return tensors
 

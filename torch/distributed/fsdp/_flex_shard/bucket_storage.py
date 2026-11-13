@@ -10,13 +10,12 @@ import fnmatch
 import functools
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
-from torch.distributed.fsdp._fully_shard._fsdp_api import CPUOffloadPolicy
 
 from .placement_contract import (
     get_global_layout,
@@ -29,13 +28,10 @@ from .utils import _get_single_placement
 
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
-    from torch.distributed.fsdp._fully_shard._fsdp_api import (
-        MixedPrecisionPolicy,
-        OffloadPolicy,
-    )
     from torch.distributed.tensor import Shard as DTensorShard
 
-    from .bucket_runtime import BucketCommContext, BucketRuntime
+    from .api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
+    from .bucket_runtime import BucketRuntime
     from .placement_contract import (
         BucketStorageLayout,
         GlobalLayout,
@@ -380,64 +376,6 @@ class ShardedBucketStorage:
         self._compute_device = compute_device
 
     @classmethod
-    def from_bucket(
-        cls,
-        module: nn.Module,
-        named_params: list[tuple[str, nn.Parameter]],
-        param_placements: dict[str, tuple[Placement, ...]],
-        mesh: DeviceMesh,
-        device: torch.device,
-        bucket_spec: BucketSpec,
-        shared_names: dict[str, list[str]] | None = None,
-        context: BucketCommContext | None = None,
-    ) -> ShardedBucketStorage:
-        """Create one bucket's storage and its runtime in ``context``, and keep
-        its parameters' shards in the storage, installing sharded parameters
-        that view them in their modules (see ``ParamHoming``)."""
-        param_infos, total_bytes = cls.create_param_infos(
-            named_params,
-            mesh,
-            param_placements,
-            bucket_spec.mp_policy,
-        )
-        for fqn, other_fqns in (shared_names or {}).items():
-            if fqn in param_infos:
-                param_infos[fqn].shared_fqns = tuple(other_fqns)
-        offload_policy = bucket_spec.offload_policy
-        bucket_storage = cls(
-            # ParamHoming.install allocates the storage and fills it
-            torch.empty(0, dtype=torch.uint8, device=device),
-            param_infos,
-            mesh,
-            total_bytes,
-            module,
-            reshard_after_forward=bucket_spec.reshard_after_forward,
-            gradient_reduce_op=bucket_spec.gradient_reduce_op,
-            pre_backward_hook=bucket_spec.pre_backward_hook,
-            post_reduce_hook=bucket_spec.post_reduce_hook,
-            gradient_divide_factor=bucket_spec.gradient_divide_factor,
-            defer_post_backward=bucket_spec.defer_post_backward,
-            hook_module_fqns=_hook_module_fqns(module, bucket_spec.patterns),
-            fsdp2_compatible=bucket_spec.fsdp2_compatible,
-            mp_policy=bucket_spec.mp_policy,
-        )
-        if isinstance(offload_policy, CPUOffloadPolicy):
-            bucket_storage.set_cpu_offload(offload_policy, torch.device(device))
-        from .bucket_runtime import BucketCommContext, BucketRuntime
-        from .param_homing import install_params
-        from .utils import _get_device_from_mesh
-
-        compute_device = _get_device_from_mesh(mesh)
-        runtime = bucket_storage.runtime = BucketRuntime.from_bucket_storage(
-            bucket_storage, context or BucketCommContext.for_device(compute_device)
-        )
-        params = dict(named_params)
-        install_params(
-            runtime, [params[info.fqn] for info in runtime.infos], compute_device
-        )
-        return bucket_storage
-
-    @classmethod
     def create_param_infos(
         cls,
         named_params: list[tuple[str, nn.Parameter]],
@@ -467,18 +405,20 @@ class ShardedBucketStorage:
             for fqn, param in named_params:
                 param_dtypes[fqn] = mp_policy._resolve_for_param(param).param_dtype
         reduce_dtype = None if mp_policy is None else mp_policy.reduce_dtype
-        # Mixed buckets alias one contiguous storage span per (placement, dtype)
-        # subgroup, so equal unsharded dtypes must be adjacent in the layout.
+        first_fqn = named_params[0][0]
+        placement = _get_single_placement(param_placements[first_fqn])
         # ParamInfo order must match layout order: FP8 pack plans index infos
         # by position.
-        if mp_policy is not None and mp_policy.param_dtype_override_fn is not None:
+        if (
+            placement.requires_dtype_grouped_layout
+            and mp_policy is not None
+            and mp_policy.param_dtype_override_fn is not None
+        ):
             groups: dict[torch.dtype, list[tuple[str, nn.Parameter]]] = {}
             for fqn, param in named_params:
                 dtype = param_dtypes[fqn] or param.dtype
                 groups.setdefault(dtype, []).append((fqn, param))
             named_params = [named for group in groups.values() for named in group]
-        first_fqn = named_params[0][0]
-        placement = _get_single_placement(param_placements[first_fqn])
         bucket_layout = placement.bucket_storage_layout(
             named_params,
             param_placements,
@@ -906,9 +846,9 @@ class ShardedBucketStorage:
         ``FlexShardModule.unshard`` documents the behavior and unshards every
         bucket. Eager only.
         """
-        context, bucket = self._runtime()
-        context.check_outside_backward("unshard")
-        bucket.unshard()
+        from . import module_ops
+
+        module_ops.unshard([self._runtime()], async_op=False)
 
     def reshard(self) -> None:
         """Reshard this bucket now, like FSDP2's ``FSDPModule.reshard()`` on
@@ -919,22 +859,17 @@ class ShardedBucketStorage:
         a backward still to run re-gathers the bucket in its pre-backward hook.
         Eager only.
         """
-        context, bucket = self._runtime()
-        context.check_outside_backward("reshard")
-        context.release_pending_unshard(bucket)
-        if bucket.is_unsharded:
-            bucket.reshard()
+        from . import module_ops
 
-    def _runtime(self) -> tuple[BucketCommContext, BucketRuntime]:
-        """This bucket's communication context and runtime, which exist once
-        its storage is materialized."""
-        runtime = self.runtime
-        if runtime is None or self._byte_storage.is_meta:
+        module_ops.reshard([self._runtime()])
+
+    def _runtime(self) -> BucketRuntime:
+        """This bucket's runtime, once its storage is materialized."""
+        if self._byte_storage.is_meta:
             raise RuntimeError(
-                "FlexShard: the bucket has no runtime until its storage is "
-                "materialized, e.g. by to_empty()."
+                "FlexShard: the bucket's storage is on meta until to_empty()."
             )
-        return runtime.context, runtime
+        return cast("BucketRuntime", self.runtime)
 
     def set_buckets_to_forward_prefetch(
         self, buckets: list[ShardedBucketStorage]
