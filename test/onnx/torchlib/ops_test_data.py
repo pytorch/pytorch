@@ -38,6 +38,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import functools
+import sys
 from typing import Any, Self, TYPE_CHECKING
 
 import extra_opinfo
@@ -45,7 +46,15 @@ import numpy as np
 import ops_test_common
 
 import torch
-from torch.onnx._internal.exporter._torchlib.ops import core as core_ops, nn as nn_ops
+from torch.onnx._internal.exporter._torchlib.ops import (
+    core as core_ops,
+    embedding as embedding_ops,
+    factories as factories_ops,
+    linalg as linalg_ops,
+    nn as nn_ops,
+    residual as residual_ops,
+    sequences as sequences_ops,
+)
 from torch.testing._internal import common_dtype, common_methods_invocations
 from torch.testing._internal.opinfo import (
     core as opinfo_core,
@@ -1277,6 +1286,699 @@ TESTED_TORCHLIB_OPS += (
 
 
 # Source-supported dtypes are test metadata, not exporter dispatch constraints.
+TESTED_TORCHLIB_OPS += (
+    (
+        TorchLibOpInfo(
+            "addbmm",
+            linalg_ops.aten_addbmm,
+            tolerance={torch.float32: (2e-5, 2e-5), torch.float16: (2e-1, 2e-2)},
+            supported_dtypes=_REAL_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "addmm",
+            linalg_ops.aten_addmm,
+            supported_dtypes=_REAL_DTYPES,
+        )
+        .xfail(
+            dtypes=(torch.int16, torch.int32, torch.int64),
+            reason="ONNX Runtime does not support int inputs to Gemm",
+        )
+        .xfail(
+            "decomposed",
+            dtypes=(torch.int16, torch.int32, torch.int64),
+            reason="ONNX Runtime does not support int inputs to Gemm",
+        )
+        .skip(
+            "decomposed",
+            matcher=lambda sample: (
+                torch.numel(sample.input) == 0
+                or torch.numel(sample.args[0]) == 0
+                or torch.numel(sample.args[1]) == 0
+            ),
+            reason="zero sized inputs cannot be compared",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "addmv",
+            linalg_ops.aten_addmv,
+            tolerance={torch.float16: (2e-3, 2e-2)},
+            supported_dtypes=_REAL_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "addr",
+            linalg_ops.aten_addr,
+            tolerance={torch.float16: (3e-3, 4e-3)},
+            supported_dtypes=_REAL_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "atleast_1d_Sequence",
+            sequences_ops.aten_atleast_1d_sequence,
+            supported_dtypes=_TENSOR_DTYPES,
+        ).skip(
+            matcher=lambda sample: not isinstance(sample.input, (list, tuple)),
+            reason="takes tensor sequences only",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "atleast_2d_Sequence",
+            sequences_ops.aten_atleast_2d_sequence,
+            supported_dtypes=_TENSOR_DTYPES,
+        ).skip(
+            matcher=lambda sample: not isinstance(sample.input, (list, tuple)),
+            reason="takes tensor sequences only",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "atleast_3d_Sequence",
+            sequences_ops.aten_atleast_3d_sequence,
+            supported_dtypes=_TENSOR_DTYPES,
+        ).skip(
+            matcher=lambda sample: not isinstance(sample.input, (list, tuple)),
+            reason="takes tensor sequences only",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "baddbmm",
+            linalg_ops.aten_baddbmm,
+            tolerance={torch.float16: (1e-3, 1e-2)},
+            supported_dtypes=_REAL_UINT8_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "bernoulli",
+            factories_ops.aten_bernoulli,
+            nondeterministic=True,
+            supported_dtypes=_FLOAT_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            # This string is a unique ID. In extra_opinfo.py, we
+            # also define test data for this ID with
+            # `opinfo_core.OpInfo("aten.bernoulli.p", ...)`.
+            "ops.aten.bernoulli.p",
+            factories_ops.aten_bernoulli_p,
+            # Skip comparison for the output of this op because it is a random tensor.
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.bernoulli.p_deterministic",
+            factories_ops.aten_bernoulli_p,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.blackman_window",
+            factories_ops.aten_blackman_window,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "bmm",
+            linalg_ops.aten_bmm,
+            supported_dtypes=_FLOAT_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "cat",
+            sequences_ops.aten_cat,
+            supported_dtypes=_TENSOR_DTYPES,
+        ).skip(
+            matcher=lambda sample: sample.input[0].equal(
+                torch.tensor([]).to(sample.input[0].device)
+            ),
+            reason="fixme: ORT aborts with zero-dim tensors. https://github.com/microsoft/onnxruntime/issues/16619",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "cat",
+            sequences_ops.aten_cat_complex,
+            complex=True,
+            supported_dtypes=_COMPLEX_DTYPES,
+        ).skip(
+            matcher=lambda sample: sample.input[0].equal(
+                torch.tensor([]).to(sample.input[0].device)
+            ),
+            reason="fixme: ORT aborts with zero-dim tensors. https://github.com/microsoft/onnxruntime/issues/16619",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "concat",
+            sequences_ops.aten_cat,
+            supported_dtypes=_TENSOR_DTYPES,
+        ).skip(
+            matcher=lambda sample: sample.input[0].equal(
+                torch.tensor([]).to(sample.input[0].device)
+            ),
+            reason="fixme: ORT aborts with zero-dim tensors. https://github.com/microsoft/onnxruntime/issues/16619",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "concatenate",
+            sequences_ops.aten_cat,
+            supported_dtypes=_TENSOR_DTYPES,
+        ).skip(
+            matcher=lambda sample: sample.input[0].equal(
+                torch.tensor([]).to(sample.input[0].device)
+            ),
+            reason="fixme: ORT aborts with zero-dim tensors. https://github.com/microsoft/onnxruntime/issues/16619",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "dot",
+            linalg_ops.aten_dot,
+            supported_dtypes=_FLOAT_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "empty",
+            factories_ops.aten_empty,
+            input_wrangler=_empty_input_wrangler,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "einsum",
+            linalg_ops.aten_einsum,
+            input_wrangler=_einsum_input_wrangler,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+        .xfail(
+            reason="fixme: PyTorch produces int64 output with int32 input",
+            dtypes=(torch.int32,),
+        )
+        .xfail(
+            reason="fixme: ONNX shape inference fails: https://github.com/onnx/onnx/issues/5739",
+            matcher=lambda sample: sample.args[0] == "...ik, ...j -> ij",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "fill",
+            factories_ops.aten_fill,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "full",
+            factories_ops.aten_full,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "full_like",
+            factories_ops.aten_full_like,
+            supported_dtypes=_TENSOR_DTYPES,
+        ).skip(
+            enabled_if=ops_test_common.IS_MACOS,
+            reason="fixme: memory allocation issue on CI",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "lift_fresh_copy",
+            linalg_ops.aten_lift_fresh_copy,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "linspace",
+            factories_ops.aten_linspace,
+            tolerance={torch.float16: (2e-2, 2e-3)},
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "matmul",
+            linalg_ops.aten_matmul,
+            # Windows requires a more relaxed tolerance
+            tolerance={torch.float32: (2e-5, 2e-5), torch.float16: (1e-2, 2e-2)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int32,
+                torch.int64,
+            ),
+        ).skip(
+            matcher=lambda sample: torch.numel(sample.input) == 0,
+            reason="values of matmul of [m, 0] and [0, n] matrices are undefined",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "matmul",
+            linalg_ops.aten_matmul_complex,
+            # Windows requires a more relaxed tolerance
+            tolerance={torch.complex64: (2e-5, 2e-5), torch.complex32: (1e-2, 1e-2)},
+            complex=True,
+            supported_dtypes=_COMPLEX_DTYPES,
+        ).skip(
+            matcher=lambda sample: torch.numel(sample.input) == 0,
+            reason="values of matmul of [m, 0] and [0, n] matrices are undefined",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "mm",
+            linalg_ops.aten_mm,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int32,
+                torch.int64,
+            ),
+        ).skip(
+            matcher=lambda sample: torch.numel(sample.input) == 0,
+            reason="values of matmul of [m, 0] and [0, n] matrices are undefined",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "mv",
+            linalg_ops.aten_mv,
+            tolerance={torch.float16: (3e-2, 1e-2)},
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "new_empty",
+            factories_ops.aten_new_empty,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "new_empty_strided",
+            factories_ops.aten_new_empty_strided,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "new_full",
+            factories_ops.aten_new_full,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "new_ones",
+            factories_ops.aten_new_ones,
+            supported_dtypes=_REAL_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "new_zeros",
+            factories_ops.aten_new_zeros,
+            supported_dtypes=_REAL_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "normal",
+            factories_ops.aten_normal,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+        .skip(
+            matcher=lambda sample: len(sample.args) > 0
+            and not isinstance(sample.args[0], float),
+            reason="ORT only accept float type for args[0] 'mean'",
+        )
+        .xfail(
+            variant_name="number_mean",
+            reason="This variant does not support dtype as an argument",
+            matcher=lambda sample: sample.kwargs.get("dtype") is not None,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.normal.float_Tensor",
+            factories_ops.aten_normal_float_tensor,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.normal.Tensor_float",
+            factories_ops.aten_normal_tensor_float,
+            nondeterministic=True,
+            supported_dtypes=_FLOAT_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.normal.Tensor_Tensor",
+            factories_ops.aten_normal_tensor_tensor,
+            nondeterministic=True,
+            supported_dtypes=_FLOAT_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ones",
+            factories_ops.aten_ones,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.rand",
+            factories_ops.aten_rand,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.rand_like",
+            factories_ops.aten_rand_like,
+            nondeterministic=True,
+            supported_dtypes=_FLOAT_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.randint",
+            factories_ops.aten_randint,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.randint.low",
+            factories_ops.aten_randint_low,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.randint_like",
+            factories_ops.aten_randint_like,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.randint_like.low_dtype",
+            factories_ops.aten_randint_like_low_dtype,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.randn",
+            factories_ops.aten_randn,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        ).xfail(dtypes=(torch.float16,), reason="fixme: Shape inference error")
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.randn_like",
+            factories_ops.aten_randn_like,
+            nondeterministic=True,
+            supported_dtypes=_FLOAT_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "repeat_interleave",
+            sequences_ops.aten_repeat_interleave_self_int,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+        .skip(
+            matcher=lambda sample: not isinstance(
+                sample.kwargs.get("repeats", None), int
+            ),
+            reason=("ignore cases when repeasts is a Tensor"),
+        )
+        .skip(dtypes=(torch.bool,), reason="bool not supported")
+        .skip(
+            matcher=lambda sample: sample.input.numel() == 0,
+            reason="fixme: conversion not implemented when input tensor is empty",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "repeat_interleave",
+            sequences_ops.aten_repeat_interleave_Tensor,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+        .skip(
+            matcher=lambda sample: isinstance(sample.kwargs.get("repeats", None), int),
+            reason=("ignore cases when repeasts is an int"),
+        )
+        .skip(dtypes=(torch.bool,), reason="bool not supported")
+        .skip(
+            matcher=lambda sample: sample.input.numel() == 0,
+            reason="fixme: conversion not implemented when input tensor is empty",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "resolve_conj",
+            linalg_ops.aten_resolve_conj,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "resolve_neg",
+            linalg_ops.aten_resolve_neg,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "split_with_sizes",
+            sequences_ops.aten_split_with_sizes,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "split",
+            sequences_ops.aten_split,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "stack",
+            sequences_ops.aten_stack,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "stack",
+            sequences_ops.aten_stack_complex,
+            complex=True,
+            supported_dtypes=_COMPLEX_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "tile",
+            sequences_ops.aten_tile,
+            supported_dtypes=_TENSOR_DTYPES,
+        ).skip(
+            matcher=lambda sample: (
+                any(dim == 0 for dim in sample.input.shape) or not sample.input.shape
+            ),
+            reason="fixme: Logic not implemented for size 0 inputs in op.Reshape",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "unbind",
+            sequences_ops.aten_unbind,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "zeros",
+            factories_ops.aten_zeros,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "arange_start_step",
+            factories_ops.aten_arange_start_step,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+        .skip(
+            matcher=lambda sample: len(sample.args) != 2,
+            reason="arange_start_step overload takes three arguments (input, start, step)",
+        )
+        .skip(
+            matcher=lambda sample: sample.kwargs.get("dtype") is None,
+            reason="dtype needs to be specified for non-float tensors",
+            dtypes=(torch.float16, torch.int64, torch.int32),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "arange_start",
+            factories_ops.aten_arange_start,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+        .skip(
+            matcher=lambda sample: len(sample.args) != 1,
+            reason="arange_start overload takes two arguments (input, start)",
+        )
+        .skip(
+            matcher=lambda sample: sample.kwargs.get("dtype") is None,
+            reason="dtype needs to be specified for non-float tensors",
+            dtypes=(torch.float16, torch.int64, torch.int32),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "arange",
+            factories_ops.aten_arange,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+        .xfail(
+            dtypes=(torch.int32,),
+            reason="fixme: output shape mismatch in edge cases. https://github.com/microsoft/onnxscript/issues/974",
+        )
+        .skip(
+            matcher=lambda sample: len(sample.args) != 0,
+            reason="arange overload takes single argument",
+        )
+        .xfail(
+            matcher=lambda sample: sample.kwargs.get("end") is not None,
+            reason="arange overload does not support positional 'end' argument",
+        )
+        .skip(
+            matcher=lambda sample: sample.kwargs.get("dtype") is None,
+            reason="dtype needs to be specified for non-float tensors",
+            dtypes=(torch.float16, torch.int64, torch.int32),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "contiguous",
+            linalg_ops.aten_contiguous,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "empty_like",
+            factories_ops.aten_empty_like,
+            nondeterministic=True,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.hamming_window",
+            factories_ops.aten_hamming_window,
+            tolerance={torch.float32: (8e-2, 6e-3)},
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.hann_window",
+            factories_ops.aten_hann_window,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "multinomial",
+            factories_ops.aten_multinomial,
+            nondeterministic=True,
+            supported_dtypes=_FLOAT_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ones_like",
+            factories_ops.aten_ones_like,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.tensor.bool",
+            factories_ops.aten_tensor_bool,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.tensor.float",
+            factories_ops.aten_tensor_float,
+            supported_dtypes=_TENSOR_DTYPES,  # Custom from extra_opinfo
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.tensor.int",
+            factories_ops.aten_tensor_int,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "zeros_like",
+            factories_ops.aten_zeros_like,
+            supported_dtypes=_TENSOR_DTYPES,
+        )
+    ),
+)
+
+TESTED_TORCHLIB_OPS += (
+    TorchLibOpInfo("chunk", sequences_ops.aten_chunk, supported_dtypes=_TENSOR_DTYPES),
+)
 
 
 def _embedding_bag_input_wrangler(
@@ -1299,6 +2001,692 @@ def _embedding_bag_input_wrangler(
 
 
 # Source-supported dtypes are test metadata, not exporter dispatch constraints.
+TESTED_TORCHLIB_OPS += (
+    (
+        TorchLibOpInfo(
+            "ops.aten._log_softmax",
+            residual_ops.aten__log_softmax,
+            tolerance={torch.float16: (1e-3, 1e-3)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._softmax",
+            residual_ops.aten__softmax,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "allclose",
+            residual_ops.aten_allclose,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "bilinear",
+            residual_ops.aten_bilinear,
+            tolerance={torch.float32: (2e-5, 2e-5)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "complex",
+            residual_ops.aten_complex,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "constant_pad_nd",
+            residual_ops.aten_constant_pad_nd,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "cross",
+            residual_ops.aten_cross,
+            tolerance={torch.float16: (6e-2, 2e-1)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        ).skip(
+            dtypes=(torch.float16 if sys.platform != "linux" else torch.complex64,),
+            reason="fixme: test is failing on windows and torch nightly",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "equal",
+            residual_ops.aten_equal,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.fake_quantize_per_channel_affine",
+            residual_ops.aten_fake_quantize_per_channel_affine,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).xfail(
+            reason="fixme: ONNX (De)QuantizeLinear only supports integer zero_point values",
+            matcher=lambda sample: sample.args[1].dtype != torch.int32,
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.fake_quantize_per_tensor_affine",
+            residual_ops.aten_fake_quantize_per_tensor_affine,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._grouped_mm",
+            residual_ops.aten_grouped_mm,
+            tolerance={torch.float32: (1e-5, 1e-5)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).skip(
+            enabled_if=not hasattr(torch.ops.aten, "_grouped_mm"),
+            reason="torch.ops.aten._grouped_mm is not available in this version of PyTorch",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "histc",
+            residual_ops.aten_histc,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+        .skip(
+            matcher=lambda sample: sample.kwargs.get("min") == sample.kwargs.get("max"),
+            reason="then min=sample.min(), max=sample.max(), torch.histc does not "
+            "define what happens when both are equal (1 sample with one element "
+            "for example). torch does something, maybe "
+            "something like zeros(bins)[bins // 2 + 1] = 1.",
+        )
+        .skip(
+            dtypes=(torch.float16,),
+            reason="we skip float16 because of https://github.com/pytorch/pytorch/issues/174668",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "logcumsumexp",
+            residual_ops.aten_logcumsumexp,
+            tolerance={torch.float16: (1e-2, 1e-1)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "logdet",
+            residual_ops.aten_logdet,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.native_dropout",
+            residual_ops.aten_native_dropout,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.dropout",
+            residual_ops.aten_dropout,
+            input_wrangler=_dropout_input_wrangler,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).skip(
+            matcher=lambda sample: len(sample.kwargs) == 0
+            or sample.kwargs.get("p", 0.0) > 0.0,
+            reason="dropout is random so the result not match",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.embedding_bag",
+            embedding_ops.aten_embedding_bag,
+            tolerance={torch.float32: (1e-4, 5e-4)},
+            compare_shape_only_for_output=(1, 2, 3),
+            input_wrangler=_embedding_bag_input_wrangler,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).skip(
+            dtypes=(torch.float16,),
+            reason="fixme: results mismatch in torch nightly.",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.embedding_bag.padding_idx",
+            embedding_ops.aten_embedding_bag_padding_idx,
+            tolerance={torch.float16: (1e-2, 1e-2)},
+            compare_shape_only_for_output=(1, 2, 3),
+            input_wrangler=_embedding_bag_input_wrangler,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.embedding_renorm",
+            embedding_ops.aten_embedding_renorm,
+            tolerance={torch.float16: (1e-2, 1e-2)},
+            compare_shape_only_for_output=(1, 2, 3),
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.embedding",
+            embedding_ops.aten_embedding,
+            input_wrangler=_embedding_input_wrangler,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.pixel_shuffle",
+            residual_ops.aten_pixel_shuffle,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+            ),
+        ).xfail(
+            dtypes=(torch.int32, torch.int64),
+            reason="fixme: ONNX Runtime does not support int32/64 inputs",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.pixel_unshuffle",
+            residual_ops.aten_pixel_unshuffle,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+            ),
+        )
+        .skip(
+            matcher=lambda sample: sample.input.numel() == 0,
+            reason="fixme: size 0 inputs are not handled yet",
+        )
+        .xfail(
+            dtypes=(torch.int32, torch.int64),
+            reason="fixme: ONNX Runtime does not support int32/64 inputs",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.selu",
+            residual_ops.aten_selu,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "polar",
+            residual_ops.aten_polar,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.prelu",
+            residual_ops.aten_prelu,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "sigmoid",
+            residual_ops.aten_sigmoid,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "signbit",
+            residual_ops.aten_signbit,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "softmax",
+            residual_ops.aten_softmax,
+            tolerance={torch.float32: (3.7e-5, 1.8e-4), torch.float16: (3e-4, 4e-4)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+        .xfail(
+            dtypes=(torch.float16,),
+            reason="fixme: ORT failed. https://github.com/microsoft/onnxruntime/issues/16438",
+            test_class_name="TestOutputConsistencyFullGraph",
+        )
+        .xfail(
+            variant_name="with_dtype",
+            dtypes=(torch.float16,),
+            reason="fixme: ORT failed. https://github.com/microsoft/onnxruntime/issues/16438",
+            test_class_name="TestOutputConsistencyFullGraph",
+        )
+        .skip(
+            matcher=lambda sample: len(sample.input.shape) == 0,
+            reason="fixme: SoftMax does not support empty tensor as input",
+        )
+        .skip(
+            variant_name="with_dtype",
+            matcher=lambda sample: len(sample.input.shape) == 0,
+            reason="fixme: SoftMax does not support empty tensor as input",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "tril",
+            residual_ops.aten_tril,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        ).xfail(
+            dtypes=(torch.int32,),
+            reason="fixme: ORT does not have an implementation of Trilu for int32.",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "triu",
+            residual_ops.aten_triu,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        ).xfail(
+            dtypes=(torch.int32,),
+            reason="fixme: ORT does not have an implementation of Trilu for int32.",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "grid_sampler_2d",
+            residual_ops.aten_grid_sampler_2d,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+        .skip(
+            # Torch implemented this using the cubic convolution algorithm with alpha=-0.75, might be different than ORT
+            matcher=lambda sample: sample.args[1] == 2,
+            reason="fixme: 'bicubic' mode in ORT implemented differently with Torch",
+        )
+        .skip(dtypes=(torch.float16,), reason="fixme: Accuracy is not high enough")
+    ),
+    (
+        TorchLibOpInfo(
+            "heaviside",
+            residual_ops.aten_heaviside,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "nn.functional.grid_sample",
+            residual_ops.aten_grid_sampler,
+            input_wrangler=_grid_sample_input_wrangler,
+            tolerance={torch.float16: (8e-2, 2e-3)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        ).skip(
+            # Torch implemented this using the cubic convolution algorithm with alpha=-0.75, might be different than ORT
+            matcher=lambda sample: (
+                sample.kwargs.get("mode") == "bicubic" or len(sample.args[0].shape) != 4
+            ),
+            reason="fixme: 'bicubic' mode in ORT implemented differently with Torch and only support 4D-tensor",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "roll",
+            residual_ops.aten_roll,
+            input_wrangler=_roll_input_wrangler,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "roll",
+            residual_ops.aten_roll_complex,
+            input_wrangler=_roll_input_wrangler,
+            complex=True,
+            supported_dtypes=(
+                torch.complex32,
+                torch.complex64,
+                torch.complex128,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.stft",  # Custom from extra_opinfo
+            residual_ops.aten_stft,
+            tolerance={torch.float32: (3.7e-5, 1.8e-4)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).xfail(
+            dtypes=(torch.float16,),
+            reason="RuntimeError: MKL FFT doesn't support tensors of type: Half",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._unique.default",
+            residual_ops.aten__unique,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._unique2.default",
+            residual_ops.aten__unique2,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten.unique_dim.default",
+            residual_ops.aten_unique_dim,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        ).skip(
+            device_type="cpu",
+            reason=(
+                "ops.aten.unique_dim.default returns different shapes for optional outputs on CPU/CUDA. "
+                "Our implementation is based on that for CUDA"
+            ),
+        )
+    ),
+)
 
 
 _NN_DTYPES_0 = (torch.float16, torch.float32, torch.float64, torch.bfloat16)
