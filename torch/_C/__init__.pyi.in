@@ -2315,10 +2315,13 @@ class _CppFakeTensorMode:
     def fake_tensor_converter(self) -> FakeTensorConverter: ...
     @property
     def shape_env(self) -> ShapeEnv | None: ...
+    @property
+    def _creation_traceback(self) -> Any: ...
     def __init__(
         self,
         converter: FakeTensorConverter,
         shape_env: ShapeEnv | None,
+        creation_traceback: Any = None,
     ) -> None: ...
 
 def _from_meta_and_device(

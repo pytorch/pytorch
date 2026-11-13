@@ -21,6 +21,9 @@ struct TensorImpl;
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
+  // CapturedTraceback keeps code locations, not frames or their fake tensors.
+  // Owned here so a recreated wrapper still reports the original creation.
+  std::shared_ptr<c10::SafePyObject> creation_traceback_;
   // Owns a weakref to the Python wrapper, which can be recreated while this
   // mode is alive. Accessed under fake_mode_pyobj_mutex_; see
   // Note [C++ FakeTensorMode Python object lifetime].

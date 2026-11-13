@@ -6095,6 +6095,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             mode = CppFakeTensorMode(shape_env=shape_env)
         self.assertTrue(mode.fake_tensor_converter.meta_converter.copy_data)
         self.assertIs(mode.shape_env, shape_env)
+        self.assertIn("test_cpp_fake_tensor_mode_init", mode.stack)
         defaults = CppFakeTensorMode()
         self.assertFalse(defaults.fake_tensor_converter.meta_converter.copy_data)
         self.assertIsNone(defaults.shape_env)
@@ -6120,6 +6121,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         shape_env = ShapeEnv()
         mode = CppFakeTensorMode(shape_env=shape_env)
         converter = mode.fake_tensor_converter
+        creation_traceback = mode._creation_traceback
         mode.epoch += 2
         epoch = mode.epoch
         mode.allow_meta = False
@@ -6140,6 +6142,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsInstance(rebuilt, CppFakeTensorMode)
         self.assertIs(rebuilt.fake_tensor_converter, converter)
         self.assertIs(rebuilt.shape_env, shape_env)
+        self.assertIs(rebuilt._creation_traceback, creation_traceback)
         self.assertEqual(rebuilt.epoch, epoch)
         self.assertFalse(rebuilt.allow_meta)
         self.assertFalse(rebuilt._allow_unsafe_data_ptr_access)

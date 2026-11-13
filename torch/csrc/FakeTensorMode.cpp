@@ -92,14 +92,17 @@ static int cpp_fake_tensor_mode_init(
   HANDLE_TH_ERRORS
   PyObject* converter;
   PyObject* shape_env;
-  static const char* names[] = {"converter", "shape_env", nullptr};
+  PyObject* creation_traceback = Py_None;
+  static const char* names[] = {
+      "converter", "shape_env", "creation_traceback", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "OO:_CppFakeTensorMode",
+          "OO|O:_CppFakeTensorMode",
           const_cast<char**>(names),
           &converter,
-          &shape_env)) {
+          &shape_env,
+          &creation_traceback)) {
     return -1;
   }
   TORCH_CHECK(converter != Py_None, "Expected a FakeTensorConverter");
@@ -125,6 +128,10 @@ static int cpp_fake_tensor_mode_init(
           Py_NewRef(converter), getPyInterpreter()),
       config.attr("fake_tensor_allow_meta").cast<bool>(),
       config.attr("fake_tensor_allow_unsafe_data_ptr_access").cast<bool>());
+  if (creation_traceback != Py_None) {
+    mode->creation_traceback_ = std::make_shared<c10::SafePyObject>(
+        Py_NewRef(creation_traceback), getPyInterpreter());
+  }
   auto weakref =
       py::reinterpret_steal<py::object>(PyWeakref_NewRef(obj, nullptr));
   if (!weakref) {
@@ -180,6 +187,11 @@ static PyObject* get_mode_pyobject(PyObject* self, void*) {
 }
 
 static PyGetSetDef mode_properties[] = {
+    {"_creation_traceback",
+     get_mode_pyobject<&c10::FakeTensorMode::creation_traceback_>,
+     nullptr,
+     nullptr,
+     nullptr},
     {"allow_meta",
      get_mode_field<&c10::FakeTensorMode::allow_meta_>,
      set_mode_field<&c10::FakeTensorMode::allow_meta_>,
