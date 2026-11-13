@@ -84,11 +84,15 @@ TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 /* Handles */
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
 // On CUDA, the public handle uses the BLAS library's default workspace unless
-// ATen workspace caching is explicitly enabled. On ROCm, ATen binds its
-// per-operation workspaces to separate handles, and each stream gets its own
-// public handle, bound at creation to a buffer from a caching-allocator pool
-// reserved for these buffers, at least as large as the arena rocBLAS would have
-// allocated.
+// ATen workspace caching is explicitly enabled. On ROCm with caching disabled,
+// ATen binds its per-operation workspaces to separate handles, and each
+// (thread, stream) gets its own public handle, bound at creation to a buffer
+// from a caching-allocator pool reserved for these buffers, at least as large as
+// the arena rocBLAS would have allocated. With caching enabled, ROCm returns
+// ATen's own handle for the (thread, stream), or under capture the thread's
+// handle for the device. On ROCm outside capture, run work on the handle only on
+// the stream it was returned for; see Note [hipblaslt handles] in
+// CublasHandlePool.cpp, which also says how to move it to another stream.
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(bool setup = true);
 
 // Internal scoped handle for ATen operations. When caching is disabled, it owns
@@ -125,23 +129,26 @@ class TORCH_CUDA_CPP_API CUDABlasHandleWithWorkspace {
 
 TORCH_CUDA_CPP_API CUDABlasHandleWithWorkspace
 getCurrentCUDABlasHandleWithWorkspace();
+// On ROCm, launch work on the handle only on the current stream; see
+// Note [hipblaslt handles] in CublasHandlePool.cpp.
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 #ifdef USE_ROCM
 // Like getCurrentCUDABlasLtHandle(), but returns nullptr instead of creating a
-// handle when the current thread has none for the current (device, stream) and
-// the pool has no spare. Safe to call under stream capture.
+// handle when the current thread has none for the current (device, stream), no
+// exited thread returned one for it, and the pool has no spare. Safe to call
+// under stream capture.
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandleIfAvailable();
 // hipblaslt handles are pooled per (device, stream) and cannot be created
 // while stream capture is active. Pre-stock the shared free list so other
 // threads (e.g. autograd workers) can reserve one mid-capture.
 TORCH_CUDA_CPP_API void ensureCublasLtHandlesAvailable(size_t n);
-// Under capture, getCurrentCUDABlasHandle() returns a capture handle: one per
-// (thread, device), with no rocBLAS arena, shared by every stream the thread
-// uses in the capture. Each request points it at the current stream and binds
-// that stream's workspace from the capture's memory pool. Once the public
-// handle has been requested on the current device, reserve this thread's
-// capture handle and pre-stock one spare for another thread, because creating
-// a handle is illegal under capture.
+// With caching disabled, under capture getCurrentCUDABlasHandle() returns a
+// capture handle: one per (thread, device), with no rocBLAS arena, shared by
+// every stream the thread uses in the capture. Each request points it at the
+// current stream and binds that stream's workspace from the capture's memory
+// pool. Once the public handle has been requested on the current device,
+// reserve this thread's capture handle and pre-stock one spare for another
+// thread, because creating a handle is illegal under capture.
 TORCH_CUDA_CPP_API void prepareCaptureCublasHandles();
 // Unbinds the capture handles used by this capture and frees their workspaces,
 // and the hipBLASLt workspaces getCUDABlasLtWorkspace handed out during it,
