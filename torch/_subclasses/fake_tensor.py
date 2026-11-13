@@ -202,9 +202,8 @@ class FakeTensorDeviceMismatchError(RuntimeError):
 def _resolve_device_conflict(
     func: OpOverload, common_device: torch.device, device: torch.device, /
 ) -> torch.device:
-    # The device FakeTensor._find_common_device keeps for two fake inputs on
-    # devices its other rules do not reconcile; the C++ fake fallback calls it
-    # too, through _resolve_device_conflict in c10/core/impl/PyInterpreter.h
+    # Keep in sync with ConcretePyInterpreterVTable::_resolve_device_conflict
+    # in torch/csrc/PyInterpreter.cpp.
 
     # if prefer_device_type is set, prefer that device type over others
     prefer_device_type = torch._functorch.config.fake_tensor_prefer_device_type
