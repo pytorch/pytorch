@@ -616,7 +616,7 @@ namespace {
   // Unlike pivoted LU, no super-linear (batch^1.5) scaling is needed because
   // cuSOLVER's nopiv algorithm has lower per-matrix overhead, keeping the
   // crossover n^2/batch roughly constant across batch sizes.
-  inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype, bool compute_pivots = true) {
+  inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, int64_t lda, const ScalarType& dtype, bool compute_pivots = true) {
     // Select a custom (pivoted) LU factorization kernel over cuSOLVER/cuBLAS.
     // The kernel is benchmarked on/tuned for A100, H100, L40S, GB200.
     if (m == n && batch <= 65535 && m >= 256
@@ -629,12 +629,17 @@ namespace {
     if (m != n) {
       // Try using custom kernel for batched inputs,
       // when m <= 1024, and m > 1024 only with the pivoted kernel.
+      // The kernel does int arithmetic on offsets and loop bounds, so it requires
+      // (lda >= m, so bounding lda bounds m too):
+      // - batch * lda: per-batch offsets into pivots and the permutation workspace;
+      // - lda * min(n, MAX_RECNB) + 1024: linearized rank-1 update index in the tall panel kernel;
+      // - n + 1024: column tiling of row swaps.
+      constexpr int64_t int_max = std::numeric_limits<int>::max();
       if ((1 < batch && batch <= 65535)
-        && (
-          (1 <= m && m <= 1024)
-          // large size m with pivots -- check that insures loops over grid (1024 threads) does not overflow
-          || (compute_pivots && m <= std::numeric_limits<int>::max() - 1024)
-        )
+        && ((1 <= m && m <= 1024) || compute_pivots)
+        && batch * lda <= int_max
+        && lda * std::min<int64_t>(n, 32) <= int_max - 1024
+        && n <= int_max - 1024
       ) {
         return SolverBackend::CUSTOM;
       }
@@ -727,7 +732,9 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
       lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
     }
 #else
-    const auto solver_backend = get_lu_factor_solver_backend(batch_size, m, n, input.scalar_type(), compute_pivots);
+    // Same lda as in lu_batched_blas3_kernel
+    const auto lda = std::max(input.stride(-1), std::max<int64_t>(1, m));
+    const auto solver_backend = get_lu_factor_solver_backend(batch_size, m, n, lda, input.scalar_type(), compute_pivots);
     switch (solver_backend) {
       case SolverBackend::CUSOLVER:
         lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
