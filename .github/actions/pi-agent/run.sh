@@ -51,6 +51,8 @@ while IFS= read -r skill; do
   [[ -z "$skill" ]] || skills+=(--skill "$skill")
 done <<< "$PI_SKILLS"
 export PI_ALLOWED_TOOLS="$tools"
+system_prompt=()
+[[ -z "$PI_APPEND_SYSTEM_PROMPT" ]] || system_prompt=(--append-system-prompt "$PI_APPEND_SYSTEM_PROMPT")
 
 # Ignore everything discoverable from the checkout (.pi/ config, extensions,
 # skills, AGENTS.md/CLAUDE.md): only files passed with -e and --skill load.
@@ -73,7 +75,7 @@ fi
 echo "pi $(pi --version) | amazon-bedrock/$PI_MODEL | thinking=$PI_THINKING | tools=$tools"
 started=$(date +%s)
 set +e
-pi --mode json "${isolation[@]}" "${extensions[@]}" ${skills[@]+"${skills[@]}"} \
+pi --mode json "${isolation[@]}" "${extensions[@]}" ${skills[@]+"${skills[@]}"} ${system_prompt[@]+"${system_prompt[@]}"} \
   --session-dir "$out/session" --provider amazon-bedrock --model "$PI_MODEL" \
   --thinking "$PI_THINKING" --tools "$tools" "@$out/prompt.md" 2> "$out/stderr.log" \
   | tee "$out/events.jsonl" \
@@ -131,8 +133,11 @@ elif [[ -n "$PI_RESULT_SCHEMA" && ! -s "$out/result.json" ]]; then
 fi
 
 # Claude-compatible logs must reflect the action's final outcome, not just pi's.
+structured_output=null
+[[ -n "$error" || ! -s "$out/result.json" ]] || structured_output=$(jq -c . "$out/result.json")
 jq -s --arg version "$(pi --version)" --arg model "$PI_MODEL" --argjson duration_ms "$duration_ms" \
-  --arg error "$error" -f "$PI_ACTION_PATH/claude-execution.jq" "$events" > "$out/execution.json" \
+  --arg error "$error" --argjson structured_output "$structured_output" \
+  -f "$PI_ACTION_PATH/claude-execution.jq" "$events" > "$out/execution.json" \
   || rm -f "$out/execution.json"
 
 {

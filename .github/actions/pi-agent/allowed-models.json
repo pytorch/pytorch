@@ -19,7 +19,7 @@
     },
     {
       "id": "global.openai.gpt-6.1-sol",
-      "use": "Default for first-pass and distributed issue triage"
+      "use": "Default for first-pass and distributed issue triage and Auto PR Triage"
     },
     {
       "id": "us.openai.gpt-6.1-sol",

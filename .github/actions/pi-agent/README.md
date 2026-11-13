@@ -50,10 +50,11 @@ steps:
 |---|---|
 | `--model` | `model` (from `allowed-models.json`) |
 | `--allowedTools` | `tools`, enforced per call by `tool-guard` |
+| `--system-prompt` | `append-system-prompt` (appended to pi's prompt, not a replacement) |
 | `--json-schema` → `structured_output` | `result-schema` → `structured_output` |
 | `--setting-sources ""` | always: nothing discoverable from the checkout loads |
 | skills discovered from `.claude/skills` | `skills:` (explicit paths only) |
-| execution file | `execution-file` output (same shape, for the review log inspector and `upload-claude-usage`), plus an artifact with `transcript.html`, `events.jsonl`, `result.json` |
+| execution file | `execution-file` output (same shape, including `structured_output`, for the review log inspector, `upload-claude-usage`, and Auto PR Triage), plus an artifact with `transcript.html`, `events.jsonl`, `result.json` |
 
 The step summary shows the outcome, token and cost totals, which tools were offered, used,
 and blocked, the result, and a link to the run artifact (open `transcript.html`).

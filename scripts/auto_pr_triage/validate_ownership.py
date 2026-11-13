@@ -30,28 +30,27 @@ from step_summary import print_log_json, summary_code, summary_prose
 def load_action_execution(path: Path) -> tuple[LLMResult, dict[str, Any]]:
     """Extract the action-validated LLM result and bounded LLM metadata."""
 
-    # The action writes no log when the SDK errors, e.g. after running out of
-    # structured-output retries, and then leaves its execution_file output empty.
+    # The action leaves its execution-file output empty when it wrote no log.
     if not path.is_file():
-        raise RuntimeError("Claude action wrote no execution log")
+        raise RuntimeError("LLM action wrote no execution log")
     messages = json.loads(path.read_text())
     if not isinstance(messages, list):
-        raise RuntimeError("Claude action execution log is not a JSON array")
+        raise RuntimeError("LLM action execution log is not a JSON array")
     result_messages = [
         message
         for message in messages
         if isinstance(message, dict) and message.get("type") == "result"
     ]
     if not result_messages:
-        raise RuntimeError("Claude action execution log has no result")
+        raise RuntimeError("LLM action execution log has no result")
     final = result_messages[-1]
     if final.get("subtype") != "success" or final.get("is_error") is True:
-        raise RuntimeError("Claude action did not produce a successful result")
+        raise RuntimeError("LLM action did not produce a successful result")
     structured = final.get("structured_output")
     if isinstance(structured, str):
         structured = json.loads(structured)
     if not isinstance(structured, dict):
-        raise RuntimeError("Claude action result has no structured output")
+        raise RuntimeError("LLM action result has no structured output")
     metadata = {
         key: final.get(key)
         for key in ["duration_ms", "num_turns", "total_cost_usd", "usage", "modelUsage"]
