@@ -579,6 +579,11 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     def test_parameter_subclass_with_torch_dispatch_gets_subclass_dispatch(
         self, mode_cls
     ):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         dispatch_calls = []
         fake_impl_calls = []
 
@@ -2460,6 +2465,11 @@ def forward(self, x_1):
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("layout", [torch.sparse_coo, torch.sparse_csr])
     def test_sparse_metadata_without_backend_kernel(self, mode_cls, layout):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         mode = mode_cls()
         meta = torch.eye(2).to_sparse(layout=layout).to("meta")
         sparse = self.fake_from_meta(mode, meta, "privateuseone:0")
