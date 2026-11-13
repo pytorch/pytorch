@@ -75,11 +75,11 @@ static inline __m128i cvtfp32_bf16(const __m256& src) {
 static inline __m128 cvtpd_ps_round_to_odd(const __m256d& x) {
   const __m128 f = _mm256_cvtpd_ps(x);
   const __m256d back = _mm256_cvtps_pd(f);
-  const __m256d abs = _mm256_castsi256_pd(_mm256_set1_epi64x(LLONG_MAX));
+  const __m256d sign = _mm256_set1_pd(-0.0);
   // Ordered comparisons, so NaN lanes are left alone. Where rounding to
   // nearest went away from zero, f is one ulp too large in magnitude.
   const __m256d away = _mm256_cmp_pd(
-      _mm256_and_pd(back, abs), _mm256_and_pd(x, abs), _CMP_GT_OQ);
+      _mm256_andnot_pd(sign, back), _mm256_andnot_pd(sign, x), _CMP_GT_OQ);
   const __m256d inexact = _mm256_cmp_pd(back, x, _CMP_NEQ_OQ);
   // Narrows 64-bit lane masks to the 32-bit lanes of f.
   const __m256i idx = _mm256_setr_epi32(0, 2, 4, 6, 0, 2, 4, 6);

@@ -2478,7 +2478,6 @@ test_vec256() {
   # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing vec256 instructions"
-    mkdir -p test/test-reports/vec256
     pushd build/bin
     vec256_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
     # The CPU's capability, not an ATEN_CPU_CAPABILITY override.
@@ -2500,8 +2499,9 @@ test_vec256() {
         continue
       fi
       # Find libc10 in the installed torch, as the build tree's RPATH doesn't
-      # point to it where jobs run from a copy of the workspace (XPU).
-      if ! LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH:-}" $vec256_exec --gtest_output=xml:../../test/test-reports/vec256/"$vec256_exec".xml; then
+      # point to it where jobs run from a copy of the workspace (XPU). Each
+      # capability reports to its own directory, which test stats key on.
+      if ! LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH:-}" $vec256_exec --gtest_output=xml:../../test/test-reports/vec256_"$capability"/"$vec256_exec".xml; then
         failed="$failed $vec256_exec"
       fi
       ran=$((ran + 1))
