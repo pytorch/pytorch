@@ -15,7 +15,7 @@ from test_native_torchlib import no_script
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_apis
-from torch.onnx._internal.exporter import _core, _custom_translation, _registration
+from torch.onnx._internal.exporter import _registration
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 from torch.onnx._internal.exporter._torchlib.ops import neural, nn, normalization
 from torch.testing._internal import common_utils
@@ -265,7 +265,6 @@ class TestNativeNeuralOps(common_utils.TestCase):
             torch.randn(2, 4, 6, 6, device=device),
             torch.randn(4, 4, 3, 3, device=device),
         )
-        registry = _registration.ONNXRegistry.from_torchlib(18)
         with (
             mock.patch.object(
                 onnxscript_apis,
@@ -274,12 +273,13 @@ class TestNativeNeuralOps(common_utils.TestCase):
             ),
             no_script(),
         ):
-            program = _core.export(
+            program = torch.onnx.export(
                 model,
                 args,
-                registry=registry,
+                dynamo=True,
                 optimize=optimize,
                 verbose=False,
+                opset_version=18,
                 dynamic_shapes=({0: torch.export.Dim("batch")}, None),
             )
         onnx.checker.check_model(program.model_proto, full_check=True)
@@ -304,8 +304,7 @@ class TestNativeNeuralOps(common_utils.TestCase):
         entries = [
             meta
             for meta in _torchlib_registry.get_torchlib_ops()
-            if isinstance(meta.onnx_function, _custom_translation.NativeTranslation)
-            and meta.onnx_function.function.__module__
+            if meta.onnx_function.function.__module__
             in (neural.__name__, normalization.__name__)
         ]
         self.assertEqual(len(entries), 75)

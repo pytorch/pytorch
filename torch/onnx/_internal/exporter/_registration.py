@@ -22,7 +22,6 @@ from typing import Literal, TYPE_CHECKING, TypeAlias
 
 import torch
 import torch._ops
-from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import _constants, _custom_translation
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
@@ -181,40 +180,6 @@ class ONNXRegistry:
                 target = _get_overload(target) or target
                 meta = dataclasses.replace(meta, fx_target=target)
             registry._register(target, meta)
-
-        # TODO(justinchuby): Remove this once torchlib is migrated to PyTorch
-        torchlib_ops = onnxscript_apis.get_torchlib_ops()
-
-        for torchlib_meta in torchlib_ops:
-            qualified_name = torchlib_meta.qualified_name
-            overload_func = torchlib_meta.function
-            try:
-                # NOTE: This is heavily guarded with try-except because we don't want
-                # to fail the entire registry population if one function fails.
-                target = _get_overload(qualified_name)
-                if target is None:
-                    continue
-                if any(
-                    isinstance(
-                        entry.onnx_function, _custom_translation.NativeTranslation
-                    )
-                    and entry.is_complex == torchlib_meta.is_complex
-                    and entry.opset_introduced <= opset_version
-                    for entry in registry.get_decomps(target)
-                ):
-                    continue
-
-                meta = OnnxDecompMeta(
-                    onnx_function=overload_func,
-                    fx_target=target,
-                    signature=None,
-                    is_custom=False,
-                    is_complex=torchlib_meta.is_complex,
-                )
-                registry._register(target, meta)
-            except Exception:
-                logger.exception("Failed to register '%s'. Skipped", qualified_name)
-                continue
 
         registry._cleanup_registry_based_on_opset_version()
         # Insert ascending versions at the front so the highest compatible

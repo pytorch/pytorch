@@ -31,40 +31,6 @@ from torch.testing._internal.common_utils import (
 class TestNativeRegistration(TestCase):
     hw_classification = HardwareClassification.CPU
 
-    def test_declared_symbolic_real_dtype_preserves_complex_meta_shape(self):
-        meta = torch.empty(3, dtype=torch.complex64)
-        declared = ir.Value(type=ir.TensorType(ir.DataType.FLOAT))
-        _core._set_shape_type(declared, meta, complex_to_float=True)
-        self.assertEqual(list(declared.shape), [3])
-        packed = ir.Value(type=ir.TensorType(ir.DataType.FLOAT))
-        _core._set_shape_type(packed, meta, complex_to_float=True, packed_complex=True)
-        self.assertEqual(list(packed.shape), [3, 2])
-
-    def test_graph_scoped_constant_cache(self):
-        class Add(torch.nn.Module):
-            def forward(self, x):
-                return (x + 2.0) * 2.0
-
-        programs = [
-            torch.onnx.export(
-                Add(),
-                (torch.ones(3),),
-                opset_version=18,
-                optimize=False,
-                verbose=False,
-            )
-            for _ in range(2)
-        ]
-        values = []
-        for program in programs:
-            nodes = list(program.model.graph)
-            add = next(node for node in nodes if node.op_type == "Add")
-            mul = next(node for node in nodes if node.op_type == "Mul")
-            self.assertIs(add.inputs[1], mul.inputs[1])
-            values.append(add.inputs[1])
-            onnx.checker.check_model(program.model_proto, full_check=True)
-        self.assertIsNot(values[0], values[1])
-
     def test_dynamic_repeat(self):
         class Repeat(torch.nn.Module):
             def forward(self, x, y):
@@ -104,6 +70,40 @@ class TestNativeRegistration(TestCase):
             del op, builder
         gc.collect()
         self.assertTrue(all(reference() is None for reference in references))
+
+    def test_graph_scoped_constant_cache(self):
+        class Add(torch.nn.Module):
+            def forward(self, x):
+                return (x + 2.0) * 2.0
+
+        programs = [
+            torch.onnx.export(
+                Add(),
+                (torch.ones(3),),
+                opset_version=18,
+                optimize=False,
+                verbose=False,
+            )
+            for _ in range(2)
+        ]
+        values = []
+        for program in programs:
+            nodes = list(program.model.graph)
+            add = next(node for node in nodes if node.op_type == "Add")
+            mul = next(node for node in nodes if node.op_type == "Mul")
+            self.assertIs(add.inputs[1], mul.inputs[1])
+            values.append(add.inputs[1])
+            onnx.checker.check_model(program.model_proto, full_check=True)
+        self.assertIsNot(values[0], values[1])
+
+    def test_declared_symbolic_real_dtype_preserves_complex_meta_shape(self):
+        meta = torch.empty(3, dtype=torch.complex64)
+        declared = ir.Value(type=ir.TensorType(ir.DataType.FLOAT))
+        _core._set_shape_type(declared, meta, complex_to_float=True)
+        self.assertEqual(list(declared.shape), [3])
+        packed = ir.Value(type=ir.TensorType(ir.DataType.FLOAT))
+        _core._set_shape_type(packed, meta, complex_to_float=True, packed_complex=True)
+        self.assertEqual(list(packed.shape), [3, 2])
 
     def test_symbolic_declared_output_shapes(self):
         class Symbolic(torch.nn.Module):
