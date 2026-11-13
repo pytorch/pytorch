@@ -64,7 +64,8 @@ struct TORCH_API ExperimentalConfig {
       bool expose_kineto_event_metadata = false,
       std::string custom_profiler_config = "",
       bool adjust_timestamps = false,
-      bool trace_only = false);
+      bool trace_only = false,
+      int64_t python_stack_active_steps = 0);
 
   bool verbose;
   /*
@@ -126,6 +127,11 @@ struct TORCH_API ExperimentalConfig {
   // materializeOpEvents. Only export_chrome_trace / save() will work;
   // accessing events() raises an error.
   bool trace_only;
+
+  // With with_stack=True and a schedule, record Python stacks only for the
+  // first N active steps of each profiling cycle. 0 records them for all
+  // active steps.
+  int64_t python_stack_active_steps;
 };
 
 struct TORCH_API ProfilerConfig {

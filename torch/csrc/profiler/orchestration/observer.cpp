@@ -22,7 +22,8 @@ ExperimentalConfig::ExperimentalConfig(
     bool expose_kineto_event_metadata,
     std::string custom_profiler_config,
     bool adjust_timestamps,
-    bool trace_only)
+    bool trace_only,
+    int64_t python_stack_active_steps)
     : verbose{verbose},
       performance_events(std::move(performance_events)),
       enable_cuda_sync_events{enable_cuda_sync_events},
@@ -33,7 +34,8 @@ ExperimentalConfig::ExperimentalConfig(
       expose_kineto_event_metadata{expose_kineto_event_metadata},
       custom_profiler_config(std::move(custom_profiler_config)),
       adjust_timestamps{adjust_timestamps},
-      trace_only{trace_only} {}
+      trace_only{trace_only},
+      python_stack_active_steps{python_stack_active_steps} {}
 
 ProfilerConfig::ProfilerConfig(
     ProfilerState state,

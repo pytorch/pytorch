@@ -68,8 +68,10 @@ class _ExperimentalConfig:
         custom_profiler_config: str = ...,
         adjust_timestamps: bool = ...,
         trace_only: bool = ...,
+        python_stack_active_steps: int = ...,
     ) -> None: ...
     trace_only: bool
+    python_stack_active_steps: int
 
 class ProfilerConfig:
     def __init__(

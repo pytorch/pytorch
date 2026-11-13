@@ -440,7 +440,8 @@ void initPythonBindings(PyObject* module) {
               bool /* expose_kineto_event_metadata */,
               std::string /* custom_profiler_config*/,
               bool /* adjust_timestamps */,
-              bool /* trace_only */
+              bool /* trace_only */,
+              int64_t /* python_stack_active_steps */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -457,7 +458,9 @@ void initPythonBindings(PyObject* module) {
           "    custom_profiler_config (string) : Used to pass some configurations to the custom profiler backend.\n"
           "    adjust_timestamps (bool) : whether to adjust timestamps for Vulkan events\n"
           "    trace_only (bool) : when True, skip building Python event objects during __exit__.\n"
-          "       Only export_chrome_trace() / save() will work; accessing events() raises an error.\n",
+          "       Only export_chrome_trace() / save() will work; accessing events() raises an error.\n"
+          "    python_stack_active_steps (int) : with with_stack=True and a schedule, record Python stacks\n"
+          "       only for the first N active steps of each profiling cycle. 0 records them for all active steps.\n",
           py::arg("verbose") = false,
           py::arg("performance_events") = std::vector<std::string>(),
           py::arg("enable_cuda_sync_events") = false,
@@ -468,7 +471,8 @@ void initPythonBindings(PyObject* module) {
           py::arg("expose_kineto_event_metadata") = false,
           py::arg("custom_profiler_config") = "",
           py::arg("adjust_timestamps") = false,
-          py::arg("trace_only") = false)
+          py::arg("trace_only") = false,
+          py::arg("python_stack_active_steps") = 0)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_perf_events;
@@ -488,13 +492,14 @@ void initPythonBindings(PyObject* module) {
                 p.expose_kineto_event_metadata,
                 p.custom_profiler_config,
                 p.adjust_timestamps,
-                p.trace_only);
+                p.trace_only,
+                p.python_stack_active_steps);
           },
           [](const py::tuple& t) { // __setstate__
             // Index 8 is a string only in the current layout, which tells it
             // apart from older layouts of the same length.
             TORCH_CHECK(
-                t.size() == 11 && py::isinstance<py::str>(t[8]),
+                t.size() == 12 && py::isinstance<py::str>(t[8]),
                 "Unrecognized _ExperimentalConfig state with ",
                 t.size(),
                 " values. Pickles from older PyTorch versions are not supported.");
@@ -517,11 +522,15 @@ void initPythonBindings(PyObject* module) {
                 t[7].cast<bool>(),
                 t[8].cast<std::string>(),
                 t[9].cast<bool>(),
-                t[10].cast<bool>());
+                t[10].cast<bool>(),
+                t[11].cast<int64_t>());
           }))
       .def_readwrite(
           "custom_profiler_config", &ExperimentalConfig::custom_profiler_config)
-      .def_readwrite("trace_only", &ExperimentalConfig::trace_only);
+      .def_readwrite("trace_only", &ExperimentalConfig::trace_only)
+      .def_readwrite(
+          "python_stack_active_steps",
+          &ExperimentalConfig::python_stack_active_steps);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(
