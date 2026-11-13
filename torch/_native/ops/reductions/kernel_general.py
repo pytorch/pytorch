@@ -359,8 +359,10 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
 # The route starts at the shortest measured win, R = 128 (reduce_ordered_col declines
 # the multirow plans of rows up to 32 for fp32 and 64 for 16-bit inputs anyway), and
 # stops at R = 8192, the longest looped row within reduce_ordered_col's replay cap of
-# tile.MAX_UNROLL leaves (see the compile timings there).
+# tile.MAX_UNROLL leaves (see the compile timings there). Each R compiles once per
+# mapping (see kernel_coltile.OrderedColConfig.min_blocks) and stride width.
 _ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+# kernel_coltile._ORDERED_COL_CONFIGS entries for other architectures are not routed.
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
 _ORDERED_COL_MAX_R = 8192
@@ -376,7 +378,8 @@ def _ordered_col_route_ok(view: torch.Tensor, trait: Any) -> bool:
     """Whether the ordered column kernel beats the indexed tree at this view's shape and
     output count. Callers check _ORDERED_COL_CCS and _ORDERED_COL_DTYPES."""
     B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
-    # reduce_ordered_col tiles WARP columns, so narrower views decline anyway.
+    # Narrow tiles are unmeasured on views narrower than a warp; reduce_ordered_col
+    # declines them too.
     if C < WARP:
         return False
     min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(trait.nfields, 3)]
@@ -783,11 +786,7 @@ def _reduce(
                     from . import kernel_coltile as ct
 
                     ordered = ct.reduce_ordered_col(
-                        trait,
-                        trait_key,
-                        col_view,
-                        out_dtypes,
-                        nouts,
+                        trait, trait_key, col_view, out_dtypes, nouts, cc=cc
                     )
                 if ordered is None:
                     ordered = _try_indexed_itree(

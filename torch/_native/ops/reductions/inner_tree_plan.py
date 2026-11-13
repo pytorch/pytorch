@@ -9,6 +9,7 @@ _K_MULTIROW_MAX_LOADS = 8
 # Looped-vs-split boundary on num_batches (kTwoKernelThreshold).
 _K_TWO_KERNEL_THRESHOLD = 3
 _K_TARGET_WARPS_PER_BLOCK = 8  # kTargetWarpsPerBlock
+_MAX_WARPS = 16  # warps per row
 
 
 def _previous_power_of_2(n: int) -> int:
@@ -64,12 +65,12 @@ def compute_inner_tree_params(
             for b in range(num_batches_est):
                 batch_start = b * threshold
                 batch_elements = min(threshold, n - batch_start)
-                total_ideal_warps += min(16, max(1, batch_elements // wle))
+                total_ideal_warps += min(_MAX_WARPS, max(1, batch_elements // wle))
             num_warps = max(1, total_ideal_warps // num_batches_est)
         else:
-            num_warps = min(16, max(1, threshold // wle))
+            num_warps = min(_MAX_WARPS, max(1, threshold // wle))
     else:
-        num_warps = min(16, max(1, n // wle))
+        num_warps = min(_MAX_WARPS, max(1, n // wle))
     num_warps = _previous_power_of_2(num_warps)
 
     loads_per_warp = _ceil_div(n, num_warps * wle)
