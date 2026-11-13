@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.utils._triton import has_triton_block_ptr, has_triton_stable_tma_api
 
 
 # Make the helper files in test/ importable
@@ -468,6 +469,39 @@ class TestNestedLaneForwarding(NestedLaneTestCase):
     hw_classification = HardwareClassification.CUDA
 
     @parametrize("persistent", [False, True])
+    def test_pair_lane_inputs_tensor_descriptor(self, device, persistent):
+        device_type = torch.device(device).type
+        if not has_triton_stable_tma_api() or not (
+            device_type == "xpu"
+            or (
+                device_type == "cuda"
+                and torch.cuda.get_device_capability(device)[0] >= 9
+            )
+        ):
+            self.skipTest("tensor descriptors are unavailable on this device")
+        with config.patch(
+            {
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
+            }
+        ):
+            source = self._check_pair_lane_inputs(
+                device, persistent, 2, "sub", "aligned"
+            )
+            self.assertRegex(
+                source, r"(?:tl\.make_tensor_descriptor|TensorDescriptor)\("
+            )
+
+    def test_pair_lane_inputs_block_ptr(self, device):
+        if not has_triton_block_ptr():
+            self.skipTest("Triton block pointers are unavailable")
+        with config.patch(
+            {"triton.use_block_ptr": True, "triton.use_tensor_descriptor": False}
+        ):
+            source = self._check_pair_lane_inputs(device, False, 2, "sub", "aligned")
+            self.assertIn("tl.make_block_ptr", source)
+
+    @parametrize("persistent", [False, True])
     @parametrize("source_before_reduction", [False, True])
     def test_source_lifetime(self, device, persistent, source_before_reduction):
         def fn(x):
@@ -499,6 +533,11 @@ class TestNestedLaneForwarding(NestedLaneTestCase):
         ],
     )
     def test_pair_lane_inputs(self, device, persistent, group_size, operation, pattern):
+        self._check_pair_lane_inputs(device, persistent, group_size, operation, pattern)
+
+    def _check_pair_lane_inputs(
+        self, device, persistent, group_size, operation, pattern
+    ):
         def fn(x):
             groups = realized_rms_groups(x, group_size)
             maximum = groups.abs().amax(-1)
@@ -531,6 +570,7 @@ class TestNestedLaneForwarding(NestedLaneTestCase):
         if pattern == "different_source":
             expected *= 2
         self.assertEqual(source.count("tl.split("), expected)
+        return source
 
     @parametrize("persistent", [False, True])
     @parametrize("dtype", [torch.float16, torch.bfloat16])

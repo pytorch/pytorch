@@ -19,6 +19,7 @@ from torch.utils._sympy.functions import (
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
+from ..runtime.tiling import get_pointwise_prefixes
 from ..utils import get_fused_kernel_name, get_kernel_metadata
 from ..virtualized import V
 from .block_analysis import BlockPatternMatcher
@@ -3332,8 +3333,8 @@ class PallasKernel(SIMDKernel):
 
         # Determine if this is a partial reduction (has pointwise dimensions)
         # or a full reduction to scalar
-        pointwise_prefixes = OrderedSet(["x", "y", "z0_"])
-        has_pointwise = any(p in self.numels for p in pointwise_prefixes)
+        pointwise_prefixes = OrderedSet(get_pointwise_prefixes(self.numels))
+        has_pointwise = bool(pointwise_prefixes)
         pointwise_numel: int | None = self._compute_prefix_numel(pointwise_prefixes)
         reduction_numel: int | None = self._compute_reduction_numel()
         n_reduction_dims = sum(

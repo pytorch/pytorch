@@ -5,6 +5,7 @@ import dataclasses
 import functools
 import importlib
 import math
+import re
 import unittest
 from collections.abc import Callable
 from typing import Any
@@ -126,18 +127,19 @@ class BlockDescriptorTestBase(InductorTestCase):
         return view
 
     def _assert_pointwise_ndims(self, code, num_dims: int) -> None:
-        pointwise_blocks = ["XBLOCK", "YBLOCK", "Z0_BLOCK"]
-        return self._assert_tiling_ndims(code, pointwise_blocks, num_dims)
+        pointwise_blocks = ["XBLOCK", "YBLOCK"] + [
+            f"Z{i}_BLOCK" for i in range(max(0, num_dims - 2))
+        ]
+        self.assertEqual(
+            set(re.findall(r"\b(?:XBLOCK|YBLOCK|Z\d+_BLOCK)\b", code)),
+            set(pointwise_blocks[:num_dims]),
+        )
 
     def _assert_reduction_ndims(self, code, num_dims: int) -> None:
-        reduction_blocks = ["R0_BLOCK", "R1_BLOCK", "R2_BLOCK"]
-        return self._assert_tiling_ndims(code, reduction_blocks, num_dims)
-
-    def _assert_tiling_ndims(self, code, blocks: list[str], num_dims: int) -> None:
-        for expected_block in blocks[:num_dims]:
-            self.assertIn(expected_block, code)
-        for unexpected_block in blocks[num_dims:]:
-            self.assertNotIn(unexpected_block, code)
+        self.assertEqual(
+            set(re.findall(r"\bR\d+_BLOCK\b", code)),
+            {f"R{i}_BLOCK" for i in range(num_dims)},
+        )
 
     def _get_lines_containing_substr(self, code: str, substr: str) -> str:
         return "\n".join(line for line in code.split("\n") if substr in line)
