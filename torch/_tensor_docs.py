@@ -5241,6 +5241,12 @@ Here are the ways to call ``to``:
     ``"to_nearest_even"`` round up. Infinities and NaN convert as without
     :attr:`round`, in every mode (NaN's sign and payload may differ).
 
+    The results are the same on CPU and CUDA, except that NaN may be encoded
+    differently (e.g. without its sign); when the device also changes, the
+    conversion runs on the CUDA device (the source, if both are). NaN can also
+    differ between ``round="to_nearest_even"`` and a conversion without
+    :attr:`round`.
+
     A device change, if any, is a separate transfer, and the result is never
     ``self``. A transfer to the CPU before converting there (from a device that
     cannot convert) is blocking, even with :attr:`non_blocking`. Like a plain
