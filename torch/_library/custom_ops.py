@@ -6,7 +6,7 @@ import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, overload, TypeAlias, Union
+from typing import Any, Literal, overload, TypeAlias, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -307,6 +307,7 @@ class CustomOpDef:
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
+        self._non_differentiable = False
         self._torch_dispatch_fns: dict[type, Callable] = {}
         self._vmap_fn: Callable | None = None
         self._autocast_dtype: dict[str, _dtype | None] = {}
@@ -654,15 +655,14 @@ class CustomOpDef:
 
     def register_autograd(
         self,
-        backward: Callable,
+        backward: Callable | Literal["non-differentiable"],
         /,
         *,
         setup_context: Callable | None = None,
     ) -> None:
-        r"""Register a backward formula for this custom op.
+        r"""Register a backward formula or declare this custom op non-differentiable.
 
-        In order for an operator to work with autograd, you need to register
-        a backward formula:
+        For a differentiable operator, register a backward formula:
         1. You must tell us how to compute gradients during the backward pass
         by providing us a "backward" function.
         2. If you need any values from the forward to compute gradients, you can
@@ -701,6 +701,13 @@ class CustomOpDef:
         If you need different autograd behavior on different devices, then we
         recommend creating two different custom operators, one for each device
         that needs different behavior, and switching between them at runtime.
+
+        Pass ``"non-differentiable"`` instead of a backward callable to declare
+        that the outputs do not require gradients, even when the inputs do.
+        No generated :class:`torch.autograd.Function` is invoked in this mode.
+        ``setup_context`` must be ``None``.
+        This mode requires a functional operator without aliased outputs.
+        Registering a backward callable again restores differentiable behavior.
 
         Examples:
             >>> import torch
@@ -747,21 +754,46 @@ class CustomOpDef:
             >>> y = numpy_mul(x, val=3.14)
             >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
             >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
+            >>>
+            >>> @torch.library.custom_op("mylib::nondiff_clone", mutates_args=())
+            >>> def nondiff_clone(x: Tensor) -> Tensor:
+            >>>     return x.clone()
+            >>>
+            >>> nondiff_clone.register_autograd("non-differentiable")
+            >>> nondiff_clone(torch.randn(3, requires_grad=True)).requires_grad
+            False
 
         """
+        non_differentiable = isinstance(backward, str)
+        if isinstance(backward, str):
+            autograd._validate_non_differentiable(backward, setup_context)
         schema = self._opoverload._schema
         if utils.is_out(self._opoverload):
             raise RuntimeError(
                 f"Cannot register autograd formula for operator tagged with "
                 f"torch.Tag.out: {self}. Out variants do not support autograd."
             )
-        if not utils.is_functional_schema(schema, allow_valid_view=True):
+        if not utils.is_functional_schema(
+            schema, allow_valid_view=not non_differentiable
+        ):
+            if non_differentiable:
+                raise RuntimeError(
+                    "Non-differentiable registration requires a functional "
+                    f"operator without aliased outputs, but got {schema}."
+                )
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
                 f"{self} with schema {schema}. Please create "
                 f"a functional operator and register an autograd formula for that."
             )
 
+        if isinstance(backward, str):
+            self._non_differentiable = True
+            self._backward_fn = None
+            self._setup_context_fn = None
+            return
+
+        self._non_differentiable = False
         self._backward_fn = backward
         self._setup_context_fn = setup_context
 
