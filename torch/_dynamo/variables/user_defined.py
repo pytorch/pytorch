@@ -1579,18 +1579,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
             except Exception as exc:
                 exc_type = type(exc)
                 # The observed exception is rebuilt as exc_type(*exc.args). That only
-                # reproduces exc when __init__ keeps its arguments as they are, which a
-                # user-defined __init__ (e.g. raised from Enum._missing_) may not do.
-                if (
-                    exc_type.__module__ != "builtins"
-                    and exc_type.__init__ is not BaseException.__init__
-                ):
+                # reproduces exc when __init__ keeps its arguments as they are, which
+                # holds for builtin exception types but not for every user-defined one
+                # (e.g. one raised from Enum._missing_).
+                if exc_type.__module__ != "builtins":
                     unimplemented(
                         gb_type="Constant-folded class call raised a user-defined exception",
                         context=f"{self.value} raised {exc_type}",
                         explanation="Dynamo rebuilds the exception from its args, which only "
                         "reproduces exceptions whose __init__ keeps its arguments as they are.",
-                        hints=graph_break_hints.SUPPORTABLE,
+                        hints=[*graph_break_hints.SUPPORTABLE],
                     )
                 raise_observed_exception(exc_type, tx, args=list(exc.args))
             return VariableTracker.build(tx, value)
