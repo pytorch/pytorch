@@ -1,9 +1,11 @@
+#include <ATen/Context.h>
 #include <ATen/FakeTensor.h>
 #include <ATen/FakeTensorDispatchTables.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
@@ -15,11 +17,24 @@
 // Note [C++ fake fallback]
 // The C++ counterpart of FakeTensorMode.__torch_dispatch__ for C++ fakes. It
 // runs an op whose tensor inputs are fakes of one mode on one device: the op
-// runs on the inputs' meta storage through its Meta kernel, and the new
-// outputs become fakes of that mode on that device, as Python's
-// wrap_meta_outputs_with_default_device_logic does. Python Meta registrations
+// runs on the inputs' meta storage through its Meta kernel (its sparse Meta
+// kernel for sparse inputs), and the new outputs become fakes of that mode on
+// that device, as Python's wrap_meta_outputs_with_default_device_logic does.
+// Python Meta registrations
 // that torch._meta_registrations installs as Meta kernels run here like C++
 // ones.
+//
+// Sparse invariant checks read index data that Meta tensors do not have. Like
+// Python, this fallback disables the process-wide Context setting around sparse
+// redispatch when it was enabled, restoring it on normal or exceptional exit.
+// This keeps the existing global policy without introducing a Context override.
+// The setting is a non-atomic optional<bool>, and this path can run without the
+// GIL. Concurrent reads/writes can race: A disables checks, B observes false
+// and skips suppression, then A restores true while B's kernel still runs.
+// Real sparse constructors on other threads may also see checks disabled.
+// The scope guard provides restoration for serial calls, not thread isolation.
+// A thread-safe policy would need a thread-local override integrated with the
+// Context getters/setters, or synchronization covering all readers and writers.
 //
 // The mode is uninstalled while this Meta-only fallback runs. It does not call
 // fake_try_*; callbacks that need an active mode must run outside that scope.
@@ -30,10 +45,10 @@
 //  - ops Python runs through a Python implementation (op_implementations,
 //    custom op fake kernels, prim metas, Python CompositeImplicitAutograd
 //    kernels; the fake_try_* callbacks in c10/core/impl/PyInterpreter.h);
-//  - ops Python decomposes under static shapes with a torch._decomp
-//    decomposition (FakeDispatchCategory::StaticShapeDecomp), which can
-//    disagree with the Meta kernel (log_sigmoid_forward's checks the device,
-//    which reads meta here);
+//  - ops without sparse inputs that Python decomposes under static shapes with
+//    a torch._decomp decomposition (FakeDispatchCategory::StaticShapeDecomp),
+//    which can disagree with the Meta kernel (log_sigmoid_forward's checks the
+//    device, which reads meta here);
 //  - CompositeImplicitAutograd ops, which reach this only below autograd:
 //    Python decomposes them with the mode active, so their sub-ops are
 //    fake-dispatched, and here they would run on the Meta key instead;
@@ -42,7 +57,8 @@
 //  - symbolic inputs (sizes, strides or scalars), for which Python decomposes
 //    most ops that lack a C++ Meta kernel supporting them;
 //  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors), or Any;
-//  - sparse inputs;
+//  - sparse inputs to ops without a sparse Meta kernel; unlike Meta, the sparse
+//    Meta keys have no backend fallback;
 //  - ops whose Meta kernel raises c10::NotImplementedError (as the Meta
 //    backend fallback does for an op without one), which Python then runs
 //    through maybe_run_unsafe_fallback (a Python Meta kernel's
@@ -275,6 +291,8 @@ void fakeFallback(
   }
 
   std::optional<c10::Device> device;
+  // The sparse inputs' Meta keys; Meta is added before redispatch.
+  c10::DispatchKeySet meta_keyset;
   for_each_tensor(
       stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
         if (!t.defined()) {
@@ -295,9 +313,6 @@ void fakeFallback(
         // Their Meta kernels would make tensors of the wrong TensorImpl type
         if (impl->is_quantized() || impl->is_nested() || impl->is_mkldnn()) {
           unsupported(op, "quantized, nested or mkldnn inputs");
-        }
-        if (impl->is_sparse() || impl->is_sparse_compressed()) {
-          unsupported(op, "sparse inputs");
         }
         if (impl->has_symbolic_sizes_strides()) {
           unsupported(op, "symbolic shapes");
@@ -330,7 +345,15 @@ void fakeFallback(
                   *fake_device,
                   ")"));
         }
+        if (impl->is_sparse()) {
+          meta_keyset = meta_keyset.add(c10::DispatchKey::SparseMeta);
+        } else if (impl->is_sparse_compressed()) {
+          meta_keyset = meta_keyset.add(c10::DispatchKey::SparseCsrMeta);
+        }
       });
+  const bool has_sparse_inputs =
+      meta_keyset.has(c10::DispatchKey::SparseMeta) ||
+      meta_keyset.has(c10::DispatchKey::SparseCsrMeta);
   if (!device.has_value()) {
     unsupported(op, "ops without fake tensor inputs");
   }
@@ -351,12 +374,20 @@ void fakeFallback(
     torch::jit::push(*stack, std::move(result));
     return;
   }
-  if (at::impl::fakeDispatchCategoriesHave(
-          categories, FakeDispatchCategory::StaticShapeDecomp) &&
-      !at::impl::fakeDispatchCategoriesHave(
-          categories, FakeDispatchCategory::Meta)) {
-    unsupported(op, "ops Python decomposes");
+  if (!has_sparse_inputs) {
+    // Python decomposes these only without sparse inputs
+    if (at::impl::fakeDispatchCategoriesHave(
+            categories, FakeDispatchCategory::StaticShapeDecomp) &&
+        !at::impl::fakeDispatchCategoriesHave(
+            categories, FakeDispatchCategory::Meta)) {
+      unsupported(op, "ops Python decomposes");
+    }
+  } else if (!op.hasComputedKernelForDispatchKey(
+                 meta_keyset.highestPriorityTypeId())) {
+    // Give a clearer error without constructing the dispatcher's kernel table.
+    unsupported(op, "sparse inputs to ops without a sparse Meta kernel");
   }
+  meta_keyset = meta_keyset.add(c10::DispatchKey::Meta);
 
   // As in Python, alias keeps its input's recorded dispatch keys (see Note
   // [C++ fake dispatch keys]), and other new Meta outputs have none.
@@ -366,8 +397,8 @@ void fakeFallback(
     output_dispatch_keys = self.unsafeGetTensorImpl()->fake_dispatch_keys();
   }
 
-  // Run the Meta kernel with the inputs reporting the meta device (see Note
-  // [C++ in_kernel_invocation]), as Python's in_kernel_invocation_manager
+  // Run the (sparse) Meta kernel with the inputs reporting the meta device (see
+  // Note [C++ in_kernel_invocation]), as Python's in_kernel_invocation_manager
   // does. Match _DisableTorchDispatch so nested ops bypass dispatch modes.
   c10::impl::ExcludeDispatchKeyGuard exclude_dispatch(c10::DispatchKeySet(
       {c10::DispatchKey::Fake,
@@ -376,12 +407,25 @@ void fakeFallback(
        c10::DispatchKey::PythonTLSSnapshot}));
   c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
   c10::impl::InKernelInvocationGuard in_kernel;
-  try {
-    op.redispatchBoxed(c10::DispatchKeySet(c10::DispatchKey::Meta), stack);
-  } catch (const c10::NotImplementedError& e) {
-    // Python runs these through maybe_run_unsafe_fallback
-    unsupported(
-        op, "ops without a working Meta kernel", e.what_without_backtrace());
+  {
+    // Uses global state; see Note [C++ fake fallback] for the concurrency limits.
+    const bool suppress_invariants = has_sparse_inputs &&
+        at::globalContext().checkSparseTensorInvariants().value_or(false);
+    auto restore_invariants = c10::make_scope_exit([suppress_invariants] {
+      if (suppress_invariants) {
+        at::globalContext().setCheckSparseTensorInvariants(true);
+      }
+    });
+    if (suppress_invariants) {
+      at::globalContext().setCheckSparseTensorInvariants(false);
+    }
+    try {
+      op.redispatchBoxed(meta_keyset, stack);
+    } catch (const c10::NotImplementedError& e) {
+      // Python runs these through maybe_run_unsafe_fallback
+      unsupported(
+          op, "ops without a working Meta kernel", e.what_without_backtrace());
+    }
   }
 
   // Note [In-place conversion of Meta outputs]
@@ -404,16 +448,30 @@ void fakeFallback(
   // object, so cross-mode reuse can fail and concurrent first conversions would
   // need synchronization. This is outside the dense ownership argument above;
   // no such retained-output pattern was established in the supported in-tree
-  // dense kernels. Sparse accessors returning stored component tensors also
-  // need a separate ownership analysis.
+  // dense kernels.
+  //
+  // COO _values/_indices are in-tree examples of retained outputs.
+  // _from_meta_and_device copies the outer sparse TensorImpl but shares its
+  // component TensorImpls with the caller's plain Meta tensor. These accessors
+  // return the stored components directly, so init_cpp_fake below also marks
+  // the caller's component fake. ADInplaceOrView calls Fake before as_view
+  // copies the result; that later copy cannot undo the shared mutation.
+  // The outer Meta tensor remains non-fake, so converting it again can succeed,
+  // but accessing the marked component through another mode or device fails
+  // the mode/device checks below. Concurrent first accesses to the same
+  // component also need synchronization. CSR accessors return .alias(), giving
+  // the fallback a separate TensorImpl and avoiding this component mutation.
   //
   // We keep the original TensorImpl instead of allocating a second wrapper.
-  // Shallow-copying each plain Meta output could protect a cached original,
+  // Shallow-copying retained outputs would protect their original TensorImpls
+  // without copying data. A per-call copy can address that isolation alone,
   // but preserving Python's converter identity across calls would also need
   // a per-mode memo, synchronized lookup/creation, and weak-reference lifetime
   // handling, including TensorImpl address reuse. Ordinary dense outputs do
-  // not require that machinery. Retained custom outputs are still converted
-  // in place; this does not promise Python's wrapping/memoization semantics.
+  // not require that machinery. The current allocation-saving choice also
+  // converts retained custom and COO outputs in place, accepting the mutation,
+  // cross-mode/device failures and concurrent-conversion limitation above.
+  // It does not provide Python's wrapping/memoization semantics.
   auto wrap_output = [&](const at::Tensor& t, bool is_alias) {
     if (!t.defined()) {
       return;
