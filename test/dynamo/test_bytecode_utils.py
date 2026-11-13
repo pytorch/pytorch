@@ -1,8 +1,10 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import contextlib
 import dis
 import sys
+import types
 import unittest
 
 import torch
@@ -360,6 +362,180 @@ def fn():
         for inst, exp in zip(insts, expected):
             self.assertIsNotNone(inst.exn_tab_entry)
             self.assertIs(inst.exn_tab_entry.target, insts[exp])
+
+    @skipIfNotPy312
+    def test_restore_conditional_jump_exception_entries(self):
+        create_instruction = bytecode_transformation.create_instruction
+        Entry = bytecode_transformation.InstructionExnTabEntry
+        handler = create_instruction("NOP")
+        # On 3.14, CPython emits NOT_TAKEN after each uncovered filter jump.
+        not_taken = ["NOT_TAKEN"] if sys.version_info >= (3, 14) else []
+
+        def covered_nop(target, depth=0, lasti=False):
+            inst = create_instruction("NOP")
+            inst.exn_tab_entry = Entry(inst, inst, target, depth, lasti)
+            return inst
+
+        def restore(
+            gap_opnames,
+            left=True,
+            right=True,
+            right_target=handler,
+            depth=0,
+            lasti=False,
+        ):
+            gap = [
+                create_instruction(name, target=handler)
+                if "JUMP" in name
+                else create_instruction(name)
+                for name in gap_opnames
+            ]
+            insts = list(gap)
+            if left:
+                insts.insert(0, covered_nop(handler))
+            if right:
+                insts.append(covered_nop(right_target, depth, lasti))
+            bytecode_transformation.restore_conditional_jump_exception_entries(
+                [*insts, handler]
+            )
+            return gap
+
+        for name in (
+            "POP_JUMP_IF_TRUE",
+            "POP_JUMP_IF_FALSE",
+            "POP_JUMP_IF_NONE",
+            "POP_JUMP_IF_NOT_NONE",
+        ):
+            with self.subTest(name):
+                gap = restore([name, *not_taken, "NOP", "JUMP_BACKWARD"])
+                self.assertEqual(
+                    gap[0].exn_tab_entry, Entry(gap[0], gap[0], handler, 0, False)
+                )
+                self.assertTrue(all(inst.exn_tab_entry is None for inst in gap[1:]))
+
+        gap = restore(["POP_JUMP_IF_FALSE", *not_taken, "POP_JUMP_IF_NONE"])
+        for inst in (gap[0], gap[-1]):
+            self.assertEqual(inst.exn_tab_entry, Entry(inst, inst, handler, 0, False))
+
+        jump = create_instruction("POP_JUMP_IF_FALSE", target=handler)
+        bytecode_transformation.restore_conditional_jump_exception_entries(
+            [covered_nop(handler, 1, True), jump, covered_nop(handler, 1, True)]
+        )
+        self.assertEqual(jump.exn_tab_entry, Entry(jump, jump, handler, 1, True))
+
+        # Only the gap between two covered instructions for the same handler
+        # is restored; a gap between different handlers is not.
+        other = create_instruction("NOP")
+        first = create_instruction("POP_JUMP_IF_FALSE", target=handler)
+        second = create_instruction("POP_JUMP_IF_FALSE", target=handler)
+        bytecode_transformation.restore_conditional_jump_exception_entries(
+            [
+                covered_nop(other),
+                first,
+                covered_nop(handler),
+                second,
+                covered_nop(handler),
+                handler,
+                other,
+            ]
+        )
+        self.assertIsNone(first.exn_tab_entry)
+        self.assertEqual(second.exn_tab_entry, Entry(second, second, handler, 0, False))
+
+        jump_and_nop = ["POP_JUMP_IF_FALSE", "NOP"]
+        for name, gap in [
+            (
+                "other target",
+                restore(jump_and_nop, right_target=create_instruction("NOP")),
+            ),
+            ("other depth", restore(jump_and_nop, depth=1)),
+            ("other lasti", restore(jump_and_nop, lasti=True)),
+            ("other opcode in gap", restore(["POP_JUMP_IF_FALSE", "POP_TOP"])),
+            ("leading gap", restore(jump_and_nop, left=False)),
+            ("trailing gap", restore(jump_and_nop, right=False)),
+        ]:
+            with self.subTest(name):
+                self.assertTrue(all(inst.exn_tab_entry is None for inst in gap))
+
+    @unittest.skipIf(sys.version_info[:2] != (3, 14), "requires Python 3.14")
+    def test_restore_conditional_jump_exception_entries_e2e(self):
+        def fn(ctx, xs, ys):
+            with ctx:
+                a = [x for x in xs if x >= 1]
+                b = [y for y in ys if y is not None]
+                c = [x for x in xs if not x]
+                d = [y for y in ys if y is None]
+            return a, b, c, d
+
+        def entry_at(tab, offset):
+            entry = next((e for e in tab if e.start <= offset <= e.end), None)
+            return entry and (entry.target, entry.depth, entry.lasti)
+
+        def filter_insts(code):
+            tab = bytecode_transformation.parse_exception_table(code.co_exceptiontable)
+            first_handler = min(entry.target for entry in tab)
+            insts = list(dis.get_instructions(code))
+            # The conditional jumps, plus remove_jump_if_none's LOAD_CONST/IS_OP.
+            indices = [
+                k
+                for k, inst in enumerate(insts)
+                if inst.offset < first_handler
+                and (
+                    inst.opname.startswith("POP_JUMP_IF_")
+                    or inst.opname == "IS_OP"
+                    or insts[k + 1].opname == "IS_OP"
+                )
+            ]
+            return tab, insts, indices
+
+        tab, insts, indices = filter_insts(fn.__code__)
+        uncovered = [
+            insts[k].opname for k in indices if entry_at(tab, insts[k].offset) is None
+        ]
+        # The None tests must be among them, so the IS_OP/POP_JUMP_IF_TRUE
+        # lowering's inheritance of the entries is checked below.
+        self.assertEqual(
+            sorted(uncovered),
+            [
+                "POP_JUMP_IF_FALSE",
+                "POP_JUMP_IF_NONE",
+                "POP_JUMP_IF_NOT_NONE",
+                "POP_JUMP_IF_TRUE",
+            ],
+            "CPython's exception table coverage of comprehension filter jumps "
+            "changed; check whether restore_conditional_jump_exception_entries "
+            "is still needed",
+        )
+
+        def nothing(*args):
+            pass
+
+        # Runs the pass, then remove_jump_if_none (whose IS_OP/POP_JUMP_IF_TRUE
+        # must inherit the entries), then compute_exception_table.
+        code, _ = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        tab, insts, indices = filter_insts(code)
+        self.assertEqual(len(indices), 8)
+        restored = set(indices)
+        neighbors = [
+            k
+            for k, inst in enumerate(insts)
+            if k not in restored
+            and inst.opname not in bytecode_transformation.UNCOVERED_IN_BLOCK_OPNAMES
+        ]
+        for k in indices:
+            with self.subTest(insts[k].opname, offset=insts[k].offset):
+                prev = max(j for j in neighbors if j < k)
+                next_ = min(j for j in neighbors if j > k)
+                entry = entry_at(tab, insts[k].offset)
+                self.assertIsNotNone(entry)
+                self.assertEqual(entry, entry_at(tab, insts[prev].offset))
+                self.assertEqual(entry, entry_at(tab, insts[next_].offset))
+        transformed = types.FunctionType(code, fn.__globals__)
+        args = ([0, 1, 2], [None, 1])
+        self.assertEqual(
+            transformed(contextlib.nullcontext(), *args),
+            fn(contextlib.nullcontext(), *args),
+        )
 
     @skipIfNotPy311
     def test_compute_exception_table_nested(self):

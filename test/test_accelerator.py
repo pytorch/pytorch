@@ -179,6 +179,13 @@ class TestAccelerator(TestCase):
         self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
         self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
 
+        with dst_prev_stream:
+            self.assertEqual(torch.accelerator.current_device_index(), dst_device)
+            self.assertEqual(torch.accelerator.current_stream(), dst_prev_stream)
+        self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
+        self.assertEqual(torch.accelerator.current_device_index(), src_device)
+        self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
+
     # Non-blocking MPS=>CPU copies currently return unpinned storage
     @xfailIfMPS
     def test_pin_memory_on_non_blocking_copy(self):
@@ -409,7 +416,9 @@ class TestAccelerator(TestCase):
         torch.accelerator.random.manual_seed_all(54321)
         count = torch.accelerator.device_count()
         expected = torch.accelerator.random.get_rng_state(0)
-        self.assertEqual(torch.accelerator.random.get_rng_state_all(), [expected] * count)
+        self.assertEqual(
+            torch.accelerator.random.get_rng_state_all(), [expected] * count
+        )
         torch.accelerator.random.seed_all()
         for device_idx in range(count):
             with torch.accelerator.device_index(device_idx):

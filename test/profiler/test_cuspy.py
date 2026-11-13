@@ -30,9 +30,8 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_CUDA_GRAPH_TOOLS_ID,
     TEST_CUPTI as TEST_CUPTI_PYTHON,
-    TEST_CUPTI_V13_3,
+    TEST_CUPTI_V13_5,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -43,28 +42,12 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def setUpModule():
-    # Priming leaves libkineto holding the single process-wide CUPTI subscriber, so a
-    # later cuspy session can't subscribe (MULTIPLE_SUBSCRIBERS). Release it
-    # via the documented cuptiFinalize hand-off -- Cuspy does not exist yet, so this is
-    # safe; libkineto re-subscribes on its next profile, so kineto tests are
-    # unaffected. See pylibcupti().finalize.
-    if initialize_kineto_with_cuda() and TEST_CUPTI_V13_3:
-        from torch.profiler._cuspy.cupti_python import pylibcupti
-
-        try:
-            pylibcupti().finalize()
-        except Exception:
-            pass
-
-
 def _isolated(test_fn):
     """Run a cuspy test in a fresh subprocess. Cuspy needs the single
     process-wide CUPTI subscriber, but libkineto grabs it for the process lifetime once
-    any kineto-CUDA profile runs (setUpModule's prime, or another test in a full run),
-    and decoded-record native state can leak between tests. Re-running the test alone in
-    a child gives it a clean process: setUpModule's finalize releases the child's own
-    prime, so Cuspy subscribes, with no cross-test interference."""
+    any kineto-CUDA profile runs, and decoded-record native state can leak between
+    tests. Re-running the test alone in a child gives it a clean process, so Cuspy
+    subscribes, with no cross-test interference."""
 
     @functools.wraps(test_fn)
     def wrapper(self):
@@ -98,6 +81,78 @@ def _fresh_event_node_recorder(test):
     return _EventNodeRecorder()
 
 
+# A minimal protobuf scanner for asserting on .pftrace output (the perfetto python lib is not
+# installed). Field numbers come from perfetto.h.
+
+
+def _pb_varint(b, i):
+    """Decode the varint at ``b[i]`` (7 bits per byte, LSB group first, high bit set on every
+    byte but the last); return ``(value, offset past it)``."""
+    s = r = 0
+    while True:
+        x = b[i]
+        i += 1
+        r |= (x & 0x7F) << s
+        if not x & 0x80:
+            return r, i
+        s += 7
+
+
+def _pb_fields(b):
+    """Split one message into ``[(field_no, wire_type, value)]``. Varints (wt 0) are decoded;
+    length-delimited fields (wt 2: strings, bytes, nested messages) are returned as raw bytes
+    for the caller to decode or recurse into; fixed32/fixed64 (wt 5/1) are skipped."""
+    i = 0
+    o = []
+    while i < len(b):
+        k, i = _pb_varint(b, i)
+        fn, wt = k >> 3, k & 7
+        if wt == 0:
+            v, i = _pb_varint(b, i)
+            o.append((fn, 0, v))
+        elif wt == 2:
+            n, i = _pb_varint(b, i)
+            o.append((fn, 2, b[i : i + n]))
+            i += n
+        elif wt == 5:
+            i += 4
+        elif wt == 1:
+            i += 8
+    return o
+
+
+def _pftrace_packets(path):
+    """The TracePackets (Trace field 1) of a gzipped .pftrace."""
+    with gzip.open(path, "rb") as f:
+        raw = f.read()
+    return [v for fn, _wt, v in _pb_fields(raw) if fn == 1]
+
+
+def _pftrace_render_stage_extra(packets):
+    """``{event_id: {name: value}}`` of each GpuRenderStageEvent's extra_data (TracePacket
+    field 53; event_id=1, extra_data=6; ExtraData.name=1, value=2)."""
+    per_stage: dict[int, dict[str, str]] = {}
+    for pkt in packets:
+        for fn, _wt, v in _pb_fields(pkt):
+            if fn != 53:
+                continue
+            event_id = 0
+            pairs: dict[str, str] = {}
+            for sfn, _swt, sv in _pb_fields(v):
+                if sfn == 1:
+                    event_id = sv
+                elif sfn == 6:
+                    ef = {
+                        efn: bytes(ev).decode()
+                        for efn, ewt, ev in _pb_fields(sv)
+                        if ewt == 2
+                    }
+                    if 1 in ef:
+                        pairs[ef[1]] = ef.get(2)
+            per_stage[event_id] = pairs
+    return per_stage
+
+
 @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
 class TestCuspyRecordsCUDA(TestCase):
     """Pure Cuspy + metadata unit tests (no GPU)."""
@@ -111,7 +166,7 @@ class TestCuspyRecordsCUDA(TestCase):
         cuspy_core._reset_for_test()
         self.addCleanup(cuspy_core._reset_for_test)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_cuspy_normalize_activities(self):
         # A registration request resolves to (kinds, per-kind field selection): a
         # bare kind iterable means "all fields"; a field map selects fields, with
@@ -189,7 +244,7 @@ class TestCuspyRecordsCUDA(TestCase):
         cuspy_core.configure(buffer_size=4096)
         self.assertEqual(cuspy_core.get_config()["buffer_size"], 2048)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_singleton_snapshots_config(self):
         # Cuspy() is the process-wide singleton: it returns the one instance,
         # built once from the configure() settings.
@@ -213,11 +268,11 @@ class TestCuspyRecordsCUDA(TestCase):
         self.assertEqual(m.background_flush_period_s, -1.0)
         self.assertEqual(m.background_drain_period_s, -1.0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_cuspy_use_approx_timestamps_config(self):
         # use_approx_timestamps is a configure() setting the singleton snapshots: OFF by
         # default (the per-subscriber callback only times device records correctly when
-        # Cuspy is the first CUPTI consumer), opt-in on. Constructing loads libcupti (>= 13.3).
+        # Cuspy is the first CUPTI consumer), opt-in on. Constructing loads libcupti (>= 13.5).
         from torch.profiler._cuspy import core as cuspy_core
         from torch.profiler._cuspy.core import Cuspy
 
@@ -226,7 +281,7 @@ class TestCuspyRecordsCUDA(TestCase):
         cuspy_core.configure(use_approx_timestamps=True)
         self.assertTrue(Cuspy()._timestamp_callback_enabled)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_cuspy_external_correlation_not_started(self):
         # External-correlation push/pop are no-ops until Cuspy is started (no
         # subscriber yet), returning None rather than touching CUPTI's global stack.
@@ -237,7 +292,7 @@ class TestCuspyRecordsCUDA(TestCase):
         self.assertIsNone(m.push_external_correlation_id())
         self.assertIsNone(m.pop_external_correlation_id())
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_kernel_latency_timestamps_track_the_field_union(self):
         # The per-subscriber latency-timestamp attribute is only wanted while some
         # observer selects the QUEUED kernel field. It used to latch on and never
@@ -295,7 +350,7 @@ class TestCuspyRecordsCUDA(TestCase):
         self.assertEqual(m.current_external_id(), 0)
         self.assertEqual(m.note_external_pop(), 0)  # empty -> 0
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_external_id_chain_and_gc(self):
         # The push-time active-id chain: with one kind CUPTI tags a kernel with only
         # the innermost id, so Cuspy snapshots the full active stack per id and
@@ -324,7 +379,7 @@ class TestCuspyRecordsCUDA(TestCase):
         self.assertNotIn(2, m._id_chains)
         self.assertIn(1, m._id_chains)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_drain_polls_pm_consumers(self):
         # Regression: PM-sampling frames must be pulled on the drain path. flush() and
         # the background drain loop both funnel through _drain_and_dispatch, so the PM
@@ -1787,8 +1842,7 @@ class TestCuspyRecordsCUDA(TestCase):
                 "channel": i64(0, 0),
                 "channel_type": i64(0, 0),
             },
-            # memcpy + memset on stream 9, non-overlapping (so the render-stage per-lane
-            # end-clamp is a no-op and durations stay exact for the compare).
+            # memcpy + memset on stream 9, non-overlapping.
             "gpu_memcpy": {
                 "start_ns": i64(5000),
                 "end_ns": i64(6000),
@@ -1881,6 +1935,7 @@ class TestCuspyRecordsCUDA(TestCase):
                 render,
                 counters,
                 compression,
+                metadata,
             ):
                 captured["tracks"] = tracks
                 captured["name_table"] = name_table
@@ -2076,6 +2131,7 @@ class TestCuspyRecordsCUDA(TestCase):
                 render,
                 counters,
                 compression,
+                metadata,
             ):
                 captured["render"] = render
                 return b""
@@ -2172,6 +2228,7 @@ class TestCuspyRecordsCUDA(TestCase):
             render,
             counters,
             compression,
+            metadata,
         ):
             captured["base_ns"] = base_ns_arg
             captured["name_table"] = name_table
@@ -2262,35 +2319,6 @@ class TestCuspyRecordsCUDA(TestCase):
         }
         window = {"columns": columns, "user_annotations": {}}
 
-        def rv(b, i):  # read a varint at offset i, return (value, next_offset)
-            s = r = 0
-            while True:
-                x = b[i]
-                i += 1
-                r |= (x & 0x7F) << s
-                if not x & 0x80:
-                    return r, i
-                s += 7
-
-        def flds(b):  # scan a message into [(field_no, wire_type, value)]
-            i = 0
-            o = []
-            while i < len(b):
-                k, i = rv(b, i)
-                fn, wt = k >> 3, k & 7
-                if wt == 0:
-                    v, i = rv(b, i)
-                    o.append((fn, 0, v))
-                elif wt == 2:
-                    n, i = rv(b, i)
-                    o.append((fn, 2, b[i : i + n]))
-                    i += n
-                elif wt == 5:
-                    i += 4
-                elif wt == 1:
-                    i += 8
-            return o
-
         with tempfile.TemporaryDirectory() as d:
             cpu_path = os.path.join(d, "cpu.json")
             with open(cpu_path, "wb") as f:
@@ -2299,34 +2327,113 @@ class TestCuspyRecordsCUDA(TestCase):
                 )
             out_path = os.path.join(d, "out.pftrace")
             merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
-            with gzip.open(out_path, "rb") as f:
-                raw = f.read()
+            packets = _pftrace_packets(out_path)
 
-        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
-
-        # Collect the extra_data (field 6) name/value pairs across all GPU render stages.
-        extra = {}
-        for pkt in packets:
-            for fn, _wt, v in flds(pkt):
-                if fn != 53:
-                    continue
-                for sfn, _swt, sv in flds(v):
-                    if sfn != 6:
-                        continue
-                    name = value = None
-                    for efn, _ewt, ev in flds(sv):
-                        if efn == 1:
-                            name = bytes(ev).decode()
-                        elif efn == 2:
-                            value = bytes(ev).decode()
-                    if name is not None:
-                        extra[name] = value
+        # The extra_data name/value pairs across all GPU render stages.
+        extra = {
+            k: v
+            for pairs in _pftrace_render_stage_extra(packets).values()
+            for k, v in pairs.items()
+        }
 
         # Each descriptor field is spread as its own extra_data entry: JSON strings keep
         # their raw value, numbers are stringified via dump().
         self.assertEqual(extra["Process Group Name"], "0")
         self.assertEqual(extra["dtype"], "bf16")
         self.assertEqual(extra["In msg nelems"], "1024")
+
+    def test_pftrace_keeps_overlap_and_chrome_metadata(self):
+        # The .pftrace export keeps what the chrome export of the same window carries: GPU
+        # render stages that overlap on a lane keep their exact CUPTI durations (not cut at the
+        # next op's start), and the chrome JSON's top-level fields are written as
+        # ChromeMetadata (name + json_value). Runs the REAL native encoder, gunzips, decodes
+        # the protobuf. No CUDA. Field numbers (perfetto.h): TracePacket.chrome_events=5,
+        # gpu_render_stage_event=53; ChromeEventBundle.metadata=2; ChromeMetadata.name=1,
+        # json_value=5; GpuRenderStageEvent.event_id=1, duration=2.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cuspy.trace import merge_trace_window_into_chrome_trace
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        # Two eager kernels on one (gpu, stream) lane: A [1000, 3000) overlaps B [2000, 2500).
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 2000),
+                "end_ns": i64(3000, 2500),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(50, 51),
+                "graph_id": i64(0, 0),
+                "graph_node_id": i64(0, 0),
+                "name": np.array(["k_a", "k_b"], dtype=object),
+                "annotation": np.array([None, None], dtype=object),
+                "metadata": np.array([None, None], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(32, 32),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+        distributed_info = {"backend": "nccl", "rank": 3, "world_size": 8}
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "baseTimeNanoseconds": 0,
+                            "distributedInfo": distributed_info,
+                            "traceName": "cpu.json",
+                            "traceEvents": [],
+                        }
+                    ).encode()
+                )
+            out_path = os.path.join(d, "out.pftrace")
+            merge_trace_window_into_chrome_trace(
+                cpu_path, out_path, window, trace_name="my_trace"
+            )
+            packets = _pftrace_packets(out_path)
+
+        dur_by_event: dict[int, int] = {}
+        chrome_md: dict[str, str] = {}
+        for pkt in packets:
+            for fn, _wt, v in _pb_fields(pkt):
+                if fn == 53:
+                    stage = {sfn: sv for sfn, swt, sv in _pb_fields(v) if swt == 0}
+                    dur_by_event[stage[1]] = stage[2]
+                elif fn == 5:
+                    for bfn, _bwt, bv in _pb_fields(v):
+                        if bfn == 2:
+                            md = {
+                                mfn: bytes(mv).decode()
+                                for mfn, _mwt, mv in _pb_fields(bv)
+                            }
+                            chrome_md[md[1]] = md[5]
+
+        # Row order is stable: row 0 (A) == event_id 1, row 1 (B) == event_id 2.
+        self.assertEqual(dur_by_event, {1: 2000, 2: 500})
+
+        self.assertEqual(json.loads(chrome_md["distributedInfo"]), distributed_info)
+        self.assertEqual(json.loads(chrome_md["baseTimeNanoseconds"]), 0)
+        self.assertNotIn("traceEvents", chrome_md)
+        # The export's traceName (as chrome sets it), not the CPU input's own.
+        self.assertEqual(json.loads(chrome_md["traceName"]), "my_trace")
 
     def test_pftrace_render_stage_spreads_graph_annotation(self):
         # A graph-node annotation (mark_kernels region -- e.g. a collective's process-group
@@ -2383,35 +2490,6 @@ class TestCuspyRecordsCUDA(TestCase):
         }
         window = {"columns": columns, "user_annotations": {}}
 
-        def rv(b, i):
-            s = r = 0
-            while True:
-                x = b[i]
-                i += 1
-                r |= (x & 0x7F) << s
-                if not x & 0x80:
-                    return r, i
-                s += 7
-
-        def flds(b):
-            i = 0
-            o = []
-            while i < len(b):
-                k, i = rv(b, i)
-                fn, wt = k >> 3, k & 7
-                if wt == 0:
-                    v, i = rv(b, i)
-                    o.append((fn, 0, v))
-                elif wt == 2:
-                    n, i = rv(b, i)
-                    o.append((fn, 2, b[i : i + n]))
-                    i += n
-                elif wt == 5:
-                    i += 4
-                elif wt == 1:
-                    i += 8
-            return o
-
         with tempfile.TemporaryDirectory() as d:
             cpu_path = os.path.join(d, "cpu.json")
             with open(cpu_path, "wb") as f:
@@ -2420,32 +2498,7 @@ class TestCuspyRecordsCUDA(TestCase):
                 )
             out_path = os.path.join(d, "out.pftrace")
             merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
-            with gzip.open(out_path, "rb") as f:
-                raw = f.read()
-
-        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
-
-        # Per render stage (keyed by event_id), collect its extra_data pairs.
-        per_stage: dict[int, dict] = {}
-        for pkt in packets:
-            for fn, _wt, v in flds(pkt):
-                if fn != 53:
-                    continue
-                event_id = 0
-                pairs: dict = {}
-                for sfn, _swt, sv in flds(v):
-                    if sfn == 1:
-                        event_id = sv
-                    elif sfn == 6:
-                        name = value = None
-                        for efn, _ewt, ev in flds(sv):
-                            if efn == 1:
-                                name = bytes(ev).decode()
-                            elif efn == 2:
-                                value = bytes(ev).decode()
-                        if name is not None:
-                            pairs[name] = value
-                per_stage[event_id] = pairs
+            per_stage = _pftrace_render_stage_extra(_pftrace_packets(out_path))
 
         # Row order (from _render_stage_cols) is stable: row 0 == event_id 1, row 1 == 2.
         # Row 0: annotation-only -> its fields spread (numbers stringified).
@@ -2537,35 +2590,6 @@ class TestCuspyRecordsCUDA(TestCase):
             "graph_deps": {gnid_b: [gnid_a]},  # B depends on A
         }
 
-        def rv(b, i):  # read a varint at offset i, return (value, next_offset)
-            s = r = 0
-            while True:
-                x = b[i]
-                i += 1
-                r |= (x & 0x7F) << s
-                if not x & 0x80:
-                    return r, i
-                s += 7
-
-        def flds(b):  # scan a message into [(field_no, wire_type, value)]
-            i = 0
-            o = []
-            while i < len(b):
-                k, i = rv(b, i)
-                fn, wt = k >> 3, k & 7
-                if wt == 0:
-                    v, i = rv(b, i)
-                    o.append((fn, 0, v))
-                elif wt == 2:
-                    n, i = rv(b, i)
-                    o.append((fn, 2, b[i : i + n]))
-                    i += n
-                elif wt == 5:
-                    i += 4
-                elif wt == 1:
-                    i += 8
-            return o
-
         with tempfile.TemporaryDirectory() as d:
             cpu_path = os.path.join(d, "cpu.json")
             with open(cpu_path, "wb") as f:
@@ -2576,20 +2600,17 @@ class TestCuspyRecordsCUDA(TestCase):
                 )
             out_path = os.path.join(d, "out.pftrace")
             merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
-            with gzip.open(out_path, "rb") as f:
-                raw = f.read()
-
-        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
+            packets = _pftrace_packets(out_path)
 
         # Collect the GPU render stages (field 53) as (event_id, [event_wait_ids]).
         render_stages = []
         for pkt in packets:
-            for fn, _wt, v in flds(pkt):
+            for fn, _wt, v in _pb_fields(pkt):
                 if fn != 53:
                     continue
                 event_id = 0
                 waits = []
-                for sfn, _swt, sv in flds(v):
+                for sfn, _swt, sv in _pb_fields(v):
                     if sfn == 1:
                         event_id = sv
                     elif sfn == 18:
@@ -2611,12 +2632,12 @@ class TestCuspyRecordsCUDA(TestCase):
         # at field 1). Node B is not linked from the launch; it is reached via its wait arrow.
         submission_id_sets = []
         for pkt in packets:
-            for fn, _wt, v in flds(pkt):
+            for fn, _wt, v in _pb_fields(pkt):
                 if fn != 11:
                     continue
-                for sfn, _swt, sv in flds(v):
+                for sfn, _swt, sv in _pb_fields(v):
                     if sfn == 3000:
-                        ids = [gv for gfn, _gwt, gv in flds(sv) if gfn == 1]
+                        ids = [gv for gfn, _gwt, gv in _pb_fields(sv) if gfn == 1]
                         submission_id_sets.append(set(ids))
         self.assertEqual(len(submission_id_sets), 1)
         self.assertEqual(submission_id_sets[0], {node_a_event_id})
@@ -2635,7 +2656,7 @@ class TestCuspyCUDA(TestCase):
         cuspy_core._reset_for_test()
         self.addCleanup(cuspy_core._reset_for_test)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_fence_enables_sync_transiently(self):
         # flush(sync=True) fences at a SYNCHRONIZATION sync point, enabled only for
         # the fence (even when no observer requested it) and disabled again after.
@@ -2659,7 +2680,7 @@ class TestCuspyCUDA(TestCase):
         self.assertLess(time.time() - start, 2.0)
         self.assertNotIn(sync, cuspy._enabled)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_TOOLS_ID,
         "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
@@ -2727,7 +2748,7 @@ class TestCuspyCUDA(TestCase):
         # The earlier graph is still absent -- arming does not retroactively record it.
         self.assertNotIn(before_exec_id, r.graph_event_nodes)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_TOOLS_ID,
         "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
@@ -2802,7 +2823,7 @@ class TestCuspyCUDA(TestCase):
                 recorded, [t for _, t in sorted(zip(d, recorded))]
             )  # depth order != node-id order
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_v2_columnar_collection(self):
         # End-to-end columnar collection: Cuspy turns on a per-activity field
         # selection, decodes each buffer against CUPTI's captured layout, and hands
@@ -2860,7 +2881,7 @@ class TestCuspyCUDA(TestCase):
             self.assertTrue(all(int(e) - int(s) >= 0 for s, e in zip(start, end)))
         self.assertTrue(any(len(n) > 0 for c in columns for n in c[int(Kernel.NAME)]))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_worker_loop_self_flush_delivers_without_caller_flush(self):
         # worker_loop() with a flush period set (self_flush): the native decode thread
         # drives cuptiActivityFlushAll on its cadence and decodes the completed buffers
@@ -2918,7 +2939,7 @@ class TestCuspyCUDA(TestCase):
         self.assertGreater(cuspy.stats()["buffers_completed"], 0)
         self.assertGreater(total, 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_worker_loop_no_self_flush_waits_for_caller_flush(self):
         # worker_loop() with no flush period (self_flush off): the decode thread blocks on
         # get_completed() and never self-flushes, so with a normal buffer nothing is
@@ -2968,7 +2989,7 @@ class TestCuspyCUDA(TestCase):
         self.assertGreater(cuspy.stats()["buffers_completed"], 0)
         self.assertGreater(after, 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_approx_timestamp_callback_engages_under_udr(self):
         # use_approx hands CUPTI a per-subscriber timestamp callback so records ride the
         # profiler's approx clock. Runs in a child that subscribes before any CUDA context
@@ -3010,7 +3031,7 @@ class TestCuspyCUDA(TestCase):
         )
         self.assertIn("OK", p.stdout)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_approx_timestamp_callback_engages_with_existing_context(self):
         # With a CUDA context already established, use_approx must still re-time DEVICE records
         # onto the approx clock. Reset the singleton so use_approx (snapshotted at construction)
@@ -3066,7 +3087,7 @@ class TestCuspyCUDA(TestCase):
             max(starts), 1e17, f"device records off the approx clock: {max(starts)}"
         )
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_noisy_apis_suppressed_at_collection(self):
         # disable_noisy_runtime_apis / disable_noisy_driver_apis (run inside activity_enable)
         # should keep the pure-noise cbids out of the records. Assert 0 records for them while
@@ -3151,7 +3172,7 @@ class TestCuspyCUDA(TestCase):
                 leaked_dr, {}, f"noisy driver cbids not suppressed: {leaked_dr}"
             )
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_singleton_flush_accessible(self):
         # A user can reach the process-wide Cuspy singleton through Cuspy()
         # and flush it: Cuspy() constructs/returns the one instance, and
@@ -3195,7 +3216,7 @@ class TestCuspyCUDA(TestCase):
         total = sum(len(c[int(Kernel.START)]) for c in columns)
         self.assertGreater(total, 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_multiple_observers(self):
         # Cuspy is the multiplexer: it enables the union of fields on its one
         # subscriber, then hands each observer only the columns it selected. Two
@@ -3258,7 +3279,7 @@ class TestCuspyCUDA(TestCase):
         self.assertGreater(a_count, 0)
         self.assertEqual(a_count, b_count)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_small_buffer_chain_no_deadlock(self):
         # A tiny buffer maximizes buffer-completion churn: the decode worker runs
         # constantly and the foreground + background (20ms) flushes drain, dispatch,
@@ -3347,7 +3368,7 @@ def _graph_node_created_key():
 # setUp imports Cuspy, which hard-imports the build-generated _cupti_stubs, so the
 # whole class has to be gated -- a method-level gate would still let setUp error out where
 # the stubs were not generated (see TEST_CUPTI in common_cuda).
-@unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+@unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
 class TestCuspyCallbackRegistryCUDA(TestCase):
     """Cuspy's shared *subscriber-callback* registry -- a separate axis from activity
     records: handlers fire synchronously on the application thread inside the CUDA call."""
@@ -3691,7 +3712,7 @@ cuspy_core.enable_hes_early()
             p.stderr,
         )
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_collection_smoke(self):
         from torch.profiler._cuspy import core as cuspy_core
@@ -3725,7 +3746,7 @@ cuspy_core.enable_hes_early()
         # must survive that: CUPTI can still own buffers it never returned.
         self.assertGreater(torch._C._profiler._cuspy.allocated_buffers(), 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_graph_host_node_collected_on_device(self):
         # End-to-end: a CUDA-graph host node (a CPU callback run as a graph node) is collected
@@ -3801,7 +3822,7 @@ cuspy_core.enable_hes_early()
         self.assertEqual(host[0]["name"], "HostNode: free")
         self.assertEqual(host[0]["args"]["host fn"], "free")
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_collection_repeated_lifecycle(self):
         from torch.profiler._cuspy import core as cuspy_core
@@ -3825,7 +3846,7 @@ cuspy_core.enable_hes_early()
 
             self.assertGreater(len(start), 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_multithread_runtime_thread_assignment(self):
         x1 = torch.randn(256, 256, device="cuda")
@@ -3904,7 +3925,7 @@ cuspy_core.enable_hes_early()
         self.assertGreater(len(launch_tids), 0)
         self.assertTrue(set(launch_tids).issubset(set(worker_tids)))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_runtime_thread_without_record_function(self):
         # Regression: CPU-side CUPTI records (cuda_runtime/cuda_driver) must land on the
@@ -3961,7 +3982,7 @@ cuspy_core.enable_hes_early()
         # phantom CUPTI-threadId lane).
         self.assertTrue(runtime_tids.issubset(cpu_tids))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_trace_has_expected_events(self):
         cfg = _ExperimentalConfig(
@@ -4019,6 +4040,7 @@ cuspy_core.enable_hes_early()
         self.assertIn("cuspy_region", user_names)
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @_isolated
     def test_cuspy_observer_registration_failure_is_graceful(self):
         from torch.profiler._cuspy import core as cuspy_core
 
@@ -4043,7 +4065,7 @@ cuspy_core.enable_hes_early()
         self.assertIn(str(error), logs.output[0])
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_zstd_export(self):
         import tempfile
@@ -4069,7 +4091,7 @@ cuspy_core.enable_hes_early()
             self.assertTrue(any(e.get("cat") == "kernel" for e in trace["traceEvents"]))
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_sync_export_default(self):
         # Default: the cuspy backend exports synchronously -- the merged file is
@@ -4094,7 +4116,7 @@ cuspy_core.enable_hes_early()
             )
             prof.wait_for_exports()  # no-op in sync mode
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_async_export_defers(self):
         # cuspy_async_export=true hands the export off: a background poll thread
@@ -4130,7 +4152,7 @@ cuspy_core.enable_hes_early()
                 ),
             )
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_record_shapes(self):
         cfg = _ExperimentalConfig(
@@ -4167,7 +4189,7 @@ cuspy_core.enable_hes_early()
         self.assertEqual(shaped_cpu_ops(record_shapes=False), [])
         self.assertGreater(len(shaped_cpu_ops(record_shapes=True)), 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_cuspy_matches_stock_op_and_kernel_names(self):
         # Run in a FRESH process. This test needs a stock (Kineto) CUDA baseline and
         # then a cuspy session, so it must start from a process that hasn't
@@ -4244,7 +4266,7 @@ cuspy_core.enable_hes_early()
         )
         self.assertIn("OK", p.stdout)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_cuspy_kineto_parity(self):
         # In a FRESH process (clean CUPTI), profile a couple of representative models
         # under stock (Kineto) and then the cuspy backend, eager AND graphed,
@@ -4453,7 +4475,7 @@ cuspy_core.enable_hes_early()
                 "Cuspy kernel metadata differs with HES enabled vs disabled",
             )
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @unittest.skipUnless(
         SM100OrLater,
         "cuda_driver (cuLaunchKernelEx) activity is only emitted by the cuBLAS "
@@ -4616,6 +4638,21 @@ class TestCuspyNative(TestCase):
         ptr_c, _ = do_request()
         self.assertNotEqual(ptr_c, ptr_b)
         self.assertEqual(pyprof._cuspy.allocated_buffers(), 2)
+
+        # After configure_buffers() with a new size, pooled buffers of the old size are
+        # freed rather than handed to CUPTI as the new size (CUPTI fills a buffer up to
+        # the reported size). 64 MiB is above glibc's largest mmap threshold, so the new
+        # buffer cannot land at either old address.
+        for ptr in (ptr_b, ptr_c):
+            do_complete(ptr)
+            pyprof._cuspy.get_completed()
+            pyprof._cuspy.return_buffer(ptr)
+        new_size = 64 * 1024 * 1024
+        pyprof._cuspy.configure_buffers(new_size)
+        ptr_d, size_d = do_request()
+        self.assertEqual(size_d, new_size)
+        self.assertNotIn(ptr_d, (ptr_b, ptr_c))
+        self.assertEqual(pyprof._cuspy.allocated_buffers(), 1)
 
     def test_cuspy_not_imported_without_active_session(self):
         # The optional Cuspy import chain (observers.profiler -> Cuspy ->
