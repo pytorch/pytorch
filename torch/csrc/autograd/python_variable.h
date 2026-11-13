@@ -87,7 +87,8 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
 // (parseIValuesToPyArgsKwargs): arguments [0, num_positional) positionally,
 // i.e. up to the last positional argument that isn't equal to its default,
 // and, as kwargs, the kwarg-only arguments (from kwarg_only_start on) that
-// aren't equal to their defaults.
+// aren't equal to their defaults. PyObject dispatch (python_dispatch.cpp)
+// passes them the same way without converting them to IValues.
 struct PythonKernelArgSplit {
   size_t num_positional;
   size_t kwarg_only_start;
