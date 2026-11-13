@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DeviceType.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/macros/Export.h>
@@ -8,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -55,13 +57,20 @@ struct C10_API FakeTensorMode {
   // across epochs; the memo bindings read it through the fake's mode.
   uint64_t epoch_ = 0;
 
+  // Whether ops also run on the real tensors the fakes carry.
+  bool propagate_real_tensors_ = false;
+
+  // Captured at mode creation so device resolution does not call Python.
+  std::optional<c10::DeviceType> prefer_device_type_ = std::nullopt;
+
   // Defined out of line, as both instantiate constant_storage_mapping_'s
   // destructor, which needs TensorImpl to be complete.
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
       bool allow_meta = true,
-      bool allow_unsafe_data_ptr_access = true);
+      bool allow_unsafe_data_ptr_access = true,
+      bool propagate_real_tensors = false);
   ~FakeTensorMode();
 
   // record the real constant a fake tensor was created from; the constant is
@@ -73,14 +82,16 @@ struct C10_API FakeTensorMode {
   void clear_constant(c10::TensorImpl* fake_impl) noexcept;
 
   // return the real constant a fake tensor was created from, or nullptr
-  const c10::intrusive_ptr<c10::TensorImpl>& get_constant(
-      c10::TensorImpl* fake_impl) const;
+  c10::intrusive_ptr<c10::TensorImpl> get_constant(
+      const c10::TensorImpl* fake_impl) const;
   // drop constant tracking for fake tensors aliasing this mutated storage
   void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
   // drop non-CPU constants, keeping cheap CPU ones for constant folding
   void clear_non_cpu_constants();
 
  private:
+  // Constants can be invalidated by native dispatch without the GIL.
+  mutable std::mutex constant_mutex_;
   // key = constant storage, values = all fake tensors that share this storage
   // (aliases)
   struct ConstantAliases {
