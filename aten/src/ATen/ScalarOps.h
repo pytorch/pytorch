@@ -3,6 +3,8 @@
 #include <ATen/Tensor.h>
 #include <c10/core/Scalar.h>
 
+#include <string_view>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
@@ -51,3 +53,12 @@ inline Tensor wrapped_scalar_tensor(
 }
 
 } // namespace at::native
+
+namespace at {
+
+// Whether Python numbers may bind to Tensor arguments of the functions and ops
+// of this name, without namespace or overload (add for aten::add.Tensor). The
+// Python argument parser and FakeTensorMode ask it.
+TORCH_API bool should_allow_numbers_as_tensors(std::string_view name);
+
+} // namespace at
