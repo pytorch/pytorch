@@ -144,6 +144,14 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
 
         return my_stream_handles[key];
     }
+
+    // Returns this thread's handle for (device, stream) without creating one,
+    // or nullptr if it has none.
+    Handle_t find(int device, void* stream) const
+    {
+        auto it = my_stream_handles.find(std::make_pair(device, stream));
+        return it == my_stream_handles.end() ? nullptr : it->second;
+    }
 #endif
 
     private:

@@ -1,5 +1,6 @@
 #include <ATen/Functions.h>
 #include <ATen/core/CachingHostAllocator.h>
+#include <ATen/xpu/MemPool.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGraph.h>
 #include <c10/xpu/XPUFunctions.h>
@@ -18,7 +19,7 @@ static bool _xpu_graphs_debug = false;
 
 MempoolId_t graph_pool_handle() {
   // set the second value by default
-  return c10::xpu::MemPool::graph_pool_handle();
+  return at::xpu::MemPool::graph_pool_handle();
 }
 
 XPUGraphImpl::XPUGraphImpl(const GraphImplArgs& args)
@@ -88,7 +89,7 @@ void XPUGraphImpl::capture_begin(
     // User did not ask us to share a mempool. Create graph pool handle using
     // is_user_created=false. Sets just the first value, to distinguish it from
     // MempoolId_ts created by graph_pool_handle().
-    mempool_id_ = c10::xpu::MemPool::graph_pool_handle(false);
+    mempool_id_ = at::xpu::MemPool::graph_pool_handle(false);
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 

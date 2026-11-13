@@ -23,7 +23,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch, TorchBindOpOverload
-from torch._subclasses.meta_utils import is_sparse_any
+from torch._subclasses.meta_utils import is_sparse_any, is_sparse_compressed
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
@@ -165,6 +165,7 @@ class FunctionalTensor(torch.Tensor):
             torch.ops.aten.sym_numel.default,
             torch.ops.aten.dim.default,
             torch.ops.prim.device.default,
+            torch.ops.prim.layout.default,
         }
     )
 
@@ -195,6 +196,13 @@ class FunctionalTensor(torch.Tensor):
             FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
         )
 
+        # Hand over the storage size instead of letting _make_wrapper_subclass
+        # recompute it: computeStorageNbytes walks the dimensions doing symbolic
+        # arithmetic, and elem already knows the answer. The storage exists only
+        # to track aliasing, and mirroring elem's is the faithful value. On a 4d
+        # symbolic tensor this takes the call from 144us to 21us.
+        storage_size = None if is_sparse_any(elem) else elem.untyped_storage().size()
+
         out = torch.Tensor._make_wrapper_subclass(
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
             # Calling the overload that has kwargs causes us to go down the first overload path,
@@ -214,8 +222,9 @@ class FunctionalTensor(torch.Tensor):
             elem.requires_grad,  # requires_grad
             None,  # dispatch_sizes_strides_policy
             False,  # dispatch_device
-            False,  # dispatch_layout
+            is_sparse_compressed(elem),  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
+            storage_size,  # storage_size
         )
         torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem

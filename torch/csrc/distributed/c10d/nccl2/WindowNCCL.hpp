@@ -21,9 +21,9 @@ class ProcessGroupNCCL;
 // ncclWaitSignal). Port of torchcomms' TorchCommWindowNCCL rebased onto
 // c10d::Window. Zero-copy: relies on the NCCL mempool hook
 // (NCCLCachingAllocatorHook + ProcessGroupNCCL::register_address) to register
-// every allocated segment; both the destination tensor (tensor_register /
-// new_window) and the source tensors (put) must be allocated from the NCCL
-// mempool -- torch.cuda.MemPool(backend.mem_allocator).
+// every allocated segment. tensor_register / new_window collectively upgrades
+// the destination segment to a symmetric window. Source tensors passed to put
+// must already reside in a collectively registered symmetric segment.
 //
 // signal() / wait_signal() use sigIdx=0, ctx=0 (the only values currently
 // accepted by NCCL). put() also emits a signal (ncclPutSignal cannot suppress
@@ -65,17 +65,22 @@ class WindowNCCL : public ::c10d::Window {
  private:
   void checkWindowAndThrow() const;
   void checkDeviceAndThrow(const at::Tensor& tensor) const;
+  void checkPeerRankAndThrow(int64_t rank) const;
+  void exchangePeerMetadata(
+      size_t local_offset,
+      size_t local_size,
+      at::ScalarType local_dtype);
 
   c10::intrusive_ptr<ProcessGroupNCCL> pg_;
   NcclApi* nccl_api_{nullptr};
   ncclComm_t nccl_comm_{nullptr};
 
-  // Destination window for this rank -- looked up from the mempool's segment
-  // registration table. peer_win_offset_ is the byte offset of the user's
-  // tensor within the segment's window.
+  // Destination window for this rank and each peer's logical tensor metadata.
+  // The NCCL window is collective, but tensor offsets and sizes may differ.
   ncclWindow_t win_{nullptr};
-  size_t peer_win_offset_{0};
-  size_t win_size_{0};
+  std::vector<size_t> peer_win_offsets_;
+  std::vector<size_t> peer_win_sizes_;
+  std::vector<at::ScalarType> peer_dtypes_;
   std::optional<at::Tensor> buf_tensor_;
 };
 

@@ -23,7 +23,7 @@ optimizer-specific optimizations and safety guarantees.
 import logging
 import weakref
 from collections.abc import Iterable
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._dynamo.variables.tensor import TensorVariable
@@ -41,16 +41,16 @@ from ..source import (
     GradSource,
 )
 from ..utils import GLOBAL_KEY_PREFIX, unpack_iterable
-from .base import VariableTracker
+from .base import GetSet, Method, readonly_setter, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .hashable import HashableTracker
 from .lists import ListVariable
-from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
@@ -108,70 +108,73 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self.tensor_to_source = tensor_to_source or {}
         self.static_tensor_names = static_tensor_names or set()
 
-    def call_method(
+    def _init_group(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "VariableTracker":
+    ) -> VariableTracker | None:
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
-        if name == "_init_group":
-            if not hasattr(self.value, "_init_group"):
-                # Fallback: if the optimizer does not have _init_group, trace normally
-                return super().call_method(tx, name, args, kwargs)
-            try:
-                self.graph_break_if_pending_mutation(tx)
-                self.move_step_if_cpu()
-                py_args, py_kwargs = self.get_python_args(*args, **kwargs)
-                ret_val = self.value._init_group(*py_args, **py_kwargs)
-                self.map_sources_and_install_guards(tx)
-                self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
-                # stash a weak_ptr to optimizer to invalidate code
-                # if the optimizer object dies
-                mangled_name = f"__optimizer_{id(self.value)}"
-                tx.store_global_weakref_by_id(mangled_name, self.value)
-                self.create_finalizer(tx)
-
-                # This is currently safe only because the only actual `ret_val`s returned
-                # by the `_init_group` of existing optimizers are properties that are invariant
-                # to the input tensors (e.g. dtype, layout). Changing these would trigger a
-                # recompilation and hence never result in the wrong specialization of `ret_val`.
-                return ConstantVariable.create(ret_val)
-            except (ArgMappingException, GuardInstallException) as _:
-                # trace normally if we can't map args or install guards correctly
-                pass
-
-        return super().call_method(tx, name, args, kwargs)
-
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        # Note: this allows us to intercept the call in call_method
-        # in the typical case, we return a UserMethodVariable
-        # which will directly inline
-        if name in ("_init_group"):
-            if not self.source:
-                raise AssertionError(
-                    "OptimizerVariable requires a source for getattro_impl"
-                )
-            return GetAttrVariable(
-                self,
-                name,
-                py_type=type(getattr(self.value, name)),
-                source=AttrSource(self.source, name),
-            )
-
-        if name == "param_groups":
-            from ..decorators import mark_static_address
-
+        if not hasattr(self.value, "_init_group"):
+            return None
+        try:
+            self.graph_break_if_pending_mutation(tx)
+            self.move_step_if_cpu()
+            py_args, py_kwargs = self.get_python_args(*args, **kwargs)
+            # Eager _init_group is not traced; it reads the live dict to
+            # place state["step"]. Temporarily set capturable=True so GPU
+            # steps land on device, then restore so the flag does not leak
+            # into eager (see OptimizerCapturableVariable for the trace path).
+            saved_capturables: list[tuple[dict[str, Any], bool]] = []
             for group in self.value.param_groups:
-                for p in group["params"]:
-                    mark_static_address(p, guard=True)
+                if not self._safe_to_set_capturable(group):
+                    continue
+                saved_capturables.append((group, group["capturable"]))
+                group["capturable"] = True
+            try:
+                ret_val = self.value._init_group(*py_args, **py_kwargs)
+            finally:
+                for group, orig in saved_capturables:
+                    group["capturable"] = orig
+            self.map_sources_and_install_guards(tx)
+            self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
+            # stash a weak_ptr to optimizer to invalidate code
+            # if the optimizer object dies
+            mangled_name = f"__optimizer_{id(self.value)}"
+            tx.store_global_weakref_by_id(mangled_name, self.value)
+            self.create_finalizer(tx)
 
-            self._set_capturable(tx)
+            # This is currently safe only because the only actual `ret_val`s returned
+            # by the `_init_group` of existing optimizers are properties that are invariant
+            # to the input tensors (e.g. dtype, layout). Changing these would trigger a
+            # recompilation and hence never result in the wrong specialization of `ret_val`.
+            return ConstantVariable.create(ret_val)
+        except (ArgMappingException, GuardInstallException):
+            # Decline so UDOV inlines _init_group if we can't map args or
+            # install guards correctly.
+            return None
 
-        return super().getattro_impl(tx, name)
+    # LOAD_ATTR of _init_group is bound to CallMethodVariable in UDOV so the
+    # call reaches this handler. A GetSet is not needed (and would hide the
+    # method from the type dict). Stock optimizers wrap _init_group with
+    # compiler.disable; inlining that wrapper graph-breaks.
+    tp_methods = {"_init_group": Method(_init_group)}
+
+    # param_groups only runs setup side effects (static addresses, capturable
+    # guards) and declines, falling through to the generic protocol.
+    def _get_param_groups(self, tx: "InstructionTranslatorBase") -> None:
+        from ..decorators import mark_static_address
+
+        for group in self.value.param_groups:
+            for p in group["params"]:
+                mark_static_address(p, guard=True)
+
+        self._set_capturable(tx)
+        return None
+
+    tp_getset = {
+        "param_groups": GetSet(_get_param_groups, readonly_setter),
+    }
 
     def graph_break_if_pending_mutation(self, tx: "InstructionTranslatorBase") -> None:
         # If there are pending mutations on a parameter (due to using closure)
@@ -192,35 +195,35 @@ class OptimizerVariable(UserDefinedObjectVariable):
                         hints=[],
                     )
 
+    def _safe_to_set_capturable(self, group: dict[str, Any]) -> bool:
+        # Live-dict flip is only for eager _init_group: GPU params need step on
+        # device. CPU must keep capturable=False so step matches eager.
+        all_uninitialized = True
+        all_gpu = True
+        for p in group.get("params", []):
+            all_gpu &= p.is_cuda or p.is_xpu
+            all_uninitialized &= p not in self.value.state
+        return "capturable" in group and all_uninitialized and all_gpu
+
     def _set_capturable(self, tx: "InstructionTranslatorBase") -> None:
         from . import LazyVariableTracker
 
-        # We only set capturable if params are on cuda
-        # and the state is not initialized
-        def safe_to_set_capturable(group: dict[str, Any]) -> bool:
-            all_uninitialized = True
-            all_gpu = True
-
-            for p in group.get("params", []):
-                all_gpu &= p.is_cuda or p.is_xpu
-                all_uninitialized &= p not in self.value.state
-
-            return "capturable" in group and all_uninitialized and all_gpu
-
-        # track indices to not set so we don't need to
-        # in the variable tracker realize the whole state
-        # we handle guarding the state specially
-        for group in self.value.param_groups:
-            if safe_to_set_capturable(group):
-                group["capturable"] = True
-
+        # Rewrite the VT only. Do not mutate the live param_groups dict; that
+        # leak is what issue 182706 is about. Tracing must see capturable=True
+        # for every group (including CPU) so adam()/radam() take the tensor
+        # path instead of .item(). Reconstruction uses orig_value.
         source = self.source and AttrSource(self.source, "param_groups")
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableTracker.build(tx, self.value.param_groups, source)
         )
         for param_group_vt in param_groups_vt.items:
             key = HashableTracker(ConstantVariable.create("capturable"))
-            param_group_vt.items[key] = ConstantVariable.create(True)
+            orig_vt = param_group_vt.items.get(key)
+            if orig_vt is None or isinstance(orig_vt, OptimizerCapturableVariable):
+                continue
+            param_group_vt.items[key] = OptimizerCapturableVariable(
+                value=True, orig_value=orig_vt.as_python_constant()
+            )
 
     def get_python_args(
         self, *args: Any, **kwargs: Any
@@ -239,7 +242,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 and isinstance(arg.source.base, AttrSource)
                 and arg.source.base.member == "param_groups"
             ):
-                return self.value.param_groups[arg.source.index]
+                return self.value.param_groups[cast(int, arg.source.index)]
 
             raise ArgMappingException
 
@@ -433,3 +436,29 @@ class OptimizerVariable(UserDefinedObjectVariable):
             weakref.finalize(value, clear_static_tensor_refs)
 
         tx.output.add_graph_finalizer(init_finalizer)
+
+
+class OptimizerCapturableVariable(VariableTracker):
+    """Trace-time capturable=True that reconstructs as the user's original value.
+
+    Optimizer step() branches on capturable. Tracing must take the True (tensor)
+    path even on CPU, or .item() graph-breaks. If this VT implemented
+    as_python_constant() as True, dict reconstruction would write True back into
+    the live param group. Omitting it forces reconstruct(), which emits orig_value.
+    """
+
+    _nonvar_fields = {"orig_value", *VariableTracker._nonvar_fields}
+
+    def __init__(self, value: bool, orig_value: bool, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+        self.orig_value = orig_value
+
+    def python_type(self) -> type:
+        return bool
+
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return ConstantVariable.create(self.value)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(ConstantVariable.create(self.orig_value))
