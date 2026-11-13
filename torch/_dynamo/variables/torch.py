@@ -83,6 +83,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     GlobalStateSource,
     ImportSource,
+    is_constant_source,
     SyntheticLocalSource,
     TensorProperty,
     TensorPropertySource,
@@ -587,8 +588,10 @@ class BaseTorchVariable(VariableTracker):
             install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
         elif inspect.isfunction(value):
             install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
-        elif inspect.isbuiltin(value) or isinstance(
-            value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+        elif (
+            inspect.isbuiltin(value)
+            or (inspect.ismethoddescriptor(value) and not is_constant_source(source))
+            or isinstance(value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket))
         ):
             install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif is_wrapper_or_member_descriptor(value) or isinstance(
@@ -673,8 +676,7 @@ class BaseTorchVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        result = hasattr(self.value, name)
-        return VariableTracker.build(tx, result)
+        return VariableTracker.build(tx, hasattr(self.value, name))  # type: ignore[return-value]
 
     def can_constant_fold_through(self) -> bool:
         if self.value in constant_fold_functions:
