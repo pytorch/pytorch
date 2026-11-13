@@ -4272,10 +4272,18 @@ class OrderedDictMethodsTests(DictMethodsTests):
         # Test KeyError
         self.assertRaises(KeyError, d.move_to_end, "f")
 
+    @make_dynamo_test
     def test_cmp_eq_order(self):
         a = self.thetype.fromkeys("abc")
         b = self.thetype.fromkeys("bca")
         self.assertFalse(a == b)
+        self.assertTrue(a != b)
+        self.assertTrue(a == self.thetype.fromkeys("abc"))
+        # Only odict_richcompare looks at order; dict_richcompare does not.
+        self.assertTrue(dict.__eq__(a, b))
+        self.assertFalse(dict.__ne__(a, b))
+        self.assertTrue(a == dict.fromkeys("bca"))
+        self.assertTrue(dict.fromkeys("bca") == a)
 
     @make_dynamo_test
     def test_binop_or_return_type(self):
