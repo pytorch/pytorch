@@ -910,7 +910,7 @@ def reduce_row_tile(
     isz = x.element_size()
     cfg = row_config(N, isz * 8)
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
-    # the measured optimum across 4/8/16/32.
+    # the measured optimum across 4/8/16/32. Single-field one-thread rows ignore it.
     if unroll is None:
         unroll = 16 if not ragged_vector and tile.vec_size(N, isz) == 1 else 4
     threads_per_row = (
