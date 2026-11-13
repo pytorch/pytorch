@@ -1068,6 +1068,23 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
                 self.assertTrue(statically_known_true(i0 < 4))
                 self.assertTrue(statically_known_true(i0 <= 5))
 
+    def test_static_eval_sees_guard_added_after_it(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 5, duck=False)
+        b = create_symint(shape_env, 6, duck=False)
+        self.assertFalse(statically_known_true(a != b))
+        self.assertTrue(a != b)
+        self.assertTrue(statically_known_true(a != b))
+
+        # simplify() of a Max is cached by the same version counter.
+        c = create_symint(shape_env, 6, duck=False)
+        d = create_symint(shape_env, 5, duck=False)
+        diff = c.node.expr - d.node.expr
+        query = sympy.Eq(Max(0, diff), diff)
+        self.assertIsNone(shape_env._maybe_evaluate_static(query))
+        self.assertTrue(c >= d)
+        self.assertEqual(shape_env._maybe_evaluate_static(query), sympy.true)
+
     def test_guard_refine_range(self):
         shape_env = ShapeEnv()
         for i, rel in enumerate(
