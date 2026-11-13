@@ -10,11 +10,11 @@ from cutlass import Int32
 import torch
 
 from ...cutedsl import launch as _L
-from ...cutedsl.dtypes import torch2cute
+from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from ...utils.device import check_current
 from . import tile
-from .kernel_general import _launch, _PART_TORCH, ReduceBlock
+from .kernel_general import _launch, ReduceBlock
 
 
 _compile = _L.compile_kernel
@@ -91,7 +91,7 @@ def reduce_col_tile(
         []
         if single
         else [
-            torch.empty(C * npar, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
+            torch.empty(C * npar, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
             for f in range(trait.nfields)
         ]
     )
