@@ -433,6 +433,32 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
             model(torch.randn(2, 8, device=device))
         self.assertEqual(get_data_ptrs(), data_ptrs)
 
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_load_state_dict_assign_after_forward(self):
+        # load_state_dict(assign=True) replaces the sharded parameters; forwards
+        # after it, also once training started, use the loaded values
+        torch.manual_seed(42)
+        model = MLP(8, device=device_type)
+        loaded = MLP(8, device=device_type)
+        fully_shard(model)
+        fully_shard(loaded)
+        reference = MLP(8, device=device_type)
+        reference.load_state_dict(
+            {k: v.full_tensor() for k, v in loaded.state_dict().items()}
+        )
+        inp = torch.randn(2, 8, device=device_type)
+        model(inp).sum().backward()
+        model.load_state_dict(
+            {k: v.detach().clone() for k, v in loaded.state_dict().items()},
+            assign=True,
+        )
+        for param in model.parameters():
+            self.assertIsInstance(param, DTensor)
+        self.assertEqual(model(inp), reference(inp))
+        model.zero_grad(set_to_none=True)
+        model(inp).sum().backward()
+        self.assertTrue(all(param.grad is not None for param in model.parameters()))
+
     @skip_if_lt_x_gpu(1)
     def test_rank0_offload_full_state_dict(self):
         # Construct a reference unsharded model on all ranks
