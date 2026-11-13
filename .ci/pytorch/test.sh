@@ -687,11 +687,12 @@ test_transport_rdma() {
     --verbose --upload-artifacts-while-running
 
   # Default UCX picks shared memory/cuda_ipc for same-host peers; UCX_TLS=rc forces RDMA.
+  # NIXL rejects UCX_TLS without cuda_copy when GPUs are present.
   time env TORCH_TEST_CUDA_TRANSPORT=1 UCX_TLS=rc,self,cuda_copy python test/run_test.py \
     --include distributed/test_transport_cuda_stream --verbose --upload-artifacts-while-running
   time env TORCH_TEST_NIXL=1 python test/run_test.py \
     --include distributed/test_transport_nixl_native --verbose --upload-artifacts-while-running
-  time env TORCH_TEST_NIXL=1 UCX_TLS=rc,self python test/run_test.py \
+  time env TORCH_TEST_NIXL=1 UCX_TLS=rc,self,cuda_copy python test/run_test.py \
     --include distributed/test_transport_nixl_native --verbose --upload-artifacts-while-running
 
   # MC_FORCE_HCA=1 fails instead of silently falling back to NVLink without an HCA.
