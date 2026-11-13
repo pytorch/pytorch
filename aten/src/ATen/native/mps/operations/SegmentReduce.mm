@@ -48,18 +48,8 @@ Tensor segment_reduce_mps(ReductionType reduction,
   SegmentReduceParams p{1,
                         static_cast<uint64_t>(offsets.size(axis) - 1),
                         static_cast<uint64_t>(data.size(axis)),
-                        0.0f,
+                        initial.has_value() ? initial->toFloat() : 0.0f,
                         initial.has_value()};
-  if (initial.has_value()) {
-    // Checked conversion preserves CPU/CUDA scalar overflow errors before GPU dispatch.
-    if (data.scalar_type() == kHalf) {
-      p.initial = static_cast<float>(initial->to<Half>());
-    } else if (data.scalar_type() == kBFloat16) {
-      p.initial = static_cast<float>(initial->to<BFloat16>());
-    } else {
-      p.initial = initial->toFloat();
-    }
-  }
   for (const auto d : c10::irange(axis + 1, data.dim())) {
     p.inner *= data.size(d);
   }

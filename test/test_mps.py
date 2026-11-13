@@ -14769,17 +14769,13 @@ class TestConsistency(TestCaseMPS):
         # MPS uses float32 intermediates for these ops, so the CPU reference
         # must also run in float32 to avoid comparing against less-precise
         # native half-precision CPU results.
-        use_float_ref = op.name in ["grid_sampler_2d", "grid_sampler_3d", "_segment_reduce"] or (
+        use_float_ref = op.name in ["grid_sampler_2d", "grid_sampler_3d"] or (
             op.name == "nn.functional.pad" and op.variant_test_name in ["reflect", "replicate", "replicate_negative"]
         )
         if use_float_ref and dtype is None and mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
             dtype = torch.float32
 
-        if op.name == "_segment_reduce" and dtype is not None:
-            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
-            cpu_sample.input = cpu_sample.input.detach().to(dtype).requires_grad_(mps_sample.input.requires_grad)
-        else:
-            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
+        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
@@ -15567,6 +15563,19 @@ class TestComplex(TestCase):
 class TestCommon(TestCase):
     exact_dtype = True
 
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("inner", [1, 2])
+    @parametrize("initial", [1.000244140625, 65536.0])
+    def test_segment_reduce_initial_opmath(self, device, dtype, inner, initial):
+        # Cancellation exposes premature rounding or overflow of initial.
+        data = torch.full((64, inner), -int(initial) / 64, dtype=dtype, device=device)
+        offsets = torch.tensor([0, 0, 64], device=device)
+        result = torch.segment_reduce(data, "sum", offsets=offsets, initial=initial)
+        expected = torch.tensor(
+            [[initial] * inner, [initial - int(initial)] * inner], dtype=dtype, device=device
+        )
+        self.assertEqual(result, expected)
+
     @dtypes(torch.bfloat16)
     @parametrize("inner", [1, 2])
     @parametrize("reduce", ["sum", "mean", "min", "max", "prod"])
@@ -15582,10 +15591,10 @@ class TestCommon(TestCase):
         data[1, segment_length + 2] = 0.
         boundaries = [1, 1 + segment_length, 1 + segment_length, axis_size]
         offsets = torch.tensor([boundaries] * 2, dtype=torch.int32, device=device)
-        reference = data.cpu().float()
+        reference = data.cpu()
         result = torch.segment_reduce(data, reduce, offsets=offsets, axis=1)
         expected = torch.segment_reduce(reference, reduce, offsets=offsets.cpu(), axis=1)
-        self.assertEqual(result, expected.to(dtype=dtype))
+        self.assertEqual(result, expected)
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
