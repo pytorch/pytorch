@@ -89,9 +89,11 @@ from ..utils import (
     deque_methods,
     deque_rev_iterator,
     dict_methods,
+    float_methods,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
+    int_methods,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_pybind11_enum_member,
@@ -106,6 +108,7 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
     set_methods,
+    str_methods,
     tensortype_to_dtype,
     tracked_repr,
     tuple_methods,
@@ -126,7 +129,12 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable
+from .constant import (
+    ConstantVariable,
+    FloatConstantVariable,
+    IntConstantVariable,
+    StrConstantVariable,
+)
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
@@ -5215,26 +5223,16 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
 
 _CONSTANT_BASE_TYPES = (int, float, str)
 
-_constant_base_methods: dict[type, set[Any]] = {
-    t: {m for m in t.__dict__.values() if callable(m)} for t in _CONSTANT_BASE_TYPES
-}
 
-
-class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
+class UserDefinedConstantVariable(UserDefinedObjectVariable):
     """
-    Represents user-defined objects that subclass immutable constant types
-    (int, float, str).
+    Base for user-defined objects that subclass immutable constant types
+    (int, float, str). Each builtin base has a subclass below that also
+    inherits the builtin's constant VT, so its slots and methods come through
+    the MRO, as for UserDefinedListVariable and ListVariable.
     """
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
-        super().__init__(value, **kwargs)
-        for base in type(value).__mro__:
-            if base in _CONSTANT_BASE_TYPES:
-                self._constant_base = base
-                self._base_methods = _constant_base_methods[base]
-                break
-        else:
-            raise AssertionError(f"No constant base type found in MRO of {type(value)}")
+    _constant_base: type
 
     def as_python_constant(self) -> Any:
         return self.value
@@ -5242,6 +5240,30 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
     def as_proxy(self) -> Any:
         # Put the plain builtin in the graph, not the user subclass instance.
         return self._constant_base(self.value)
+
+    @staticmethod
+    def cls_for(value_type: type) -> "type[UserDefinedConstantVariable]":
+        base = next(b for b in value_type.__mro__ if b in _CONSTANT_BASE_TYPES)
+        return {
+            int: UserDefinedIntVariable,
+            float: UserDefinedFloatVariable,
+            str: UserDefinedStrVariable,
+        }[base]
+
+
+class UserDefinedIntVariable(UserDefinedConstantVariable, IntConstantVariable):
+    _constant_base = int
+    _base_methods = int_methods
+
+
+class UserDefinedFloatVariable(UserDefinedConstantVariable, FloatConstantVariable):
+    _constant_base = float
+    _base_methods = float_methods
+
+
+class UserDefinedStrVariable(UserDefinedConstantVariable, StrConstantVariable):
+    _constant_base = str
+    _base_methods = str_methods
 
 
 class IntWrapperVariable(UserDefinedObjectVariable):
