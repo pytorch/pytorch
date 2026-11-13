@@ -94,6 +94,7 @@ from .bytecode_transformation import (
     Instruction,
     is_generator,
     is_jump_absolute,
+    UNCOVERED_IN_BLOCK_OPNAMES,
     unique_id_unbound_in,
 )
 from .code_context import code_context
@@ -1975,6 +1976,9 @@ class InstructionTranslatorBase(
                     )
                 e.skip_frame = True
                 raise
+            # Nested fallback would retain a caller resume on each loop iteration.
+            if self.parent is not None and self.parent.maybe_has_backedge():
+                self.raise_loop_graph_break(self.f_code, e)
             reason = (
                 "Encountered graph break that we cannot resume from. "
                 "Compiling up to the previous resumable state, "
@@ -2023,11 +2027,7 @@ class InstructionTranslatorBase(
             # are still in the same block. It is probably safe to do
             # this in 3.11, even though we haven't encountered this case before.
             # In 3.14+, NOT_TAKEN might also not be covered by an exn table entry.
-            if self.block_stack and inst.opname not in (
-                "NOP",
-                "JUMP_BACKWARD",
-                "NOT_TAKEN",
-            ):
+            if self.block_stack and inst.opname not in UNCOVERED_IN_BLOCK_OPNAMES:
                 # If we really escape from a block and the current
                 # instruction is not in another block, then there
                 # should be no other nested blocks that we are in.
@@ -2672,6 +2672,18 @@ class InstructionTranslatorBase(
         # A pre-existing global's tensor is not covered: syncing its dealloc
         # would need a guard on the tensor identity, which is not tracked.
         self._maybe_sync_dealloc_attr(target, name)
+        # The delete is committed. Remember it so later module-object or
+        # module-__dict__ accesses to the name graph-break instead of
+        # racing the replayed delete. The entry keeps the dict alive so its
+        # id() key cannot be reused.
+        entry = self.output.deleted_globals_by_dict.get(id(self.f_globals))
+        if entry is None:
+            self.output.deleted_globals_by_dict[id(self.f_globals)] = (
+                self.f_globals,
+                {name},
+            )
+        else:
+            entry[1].add(name)
 
     @functools.cached_property
     def _globals_dict_source(self) -> Source:
@@ -3474,20 +3486,26 @@ class InstructionTranslatorBase(
         self._load_attr(argval)
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
-        self._load_attr(inst.argval)
-        obj = self.pop()
         if sys.version_info >= (3, 13):
-            self.push(obj)
+            self._load_attr(inst.argval)
             self.PUSH_NULL(inst)
         else:
-            # always follow the NULL + fn convention, since if obj
-            # is actually a method, self is already bound to it, so it
-            # doesn't need to be passed in as an arg.
+            obj = self.pop()
+            # Push NULL before lookup so nested graph breaks preserve the call stack.
             self.PUSH_NULL(inst)
             self.push(obj)
+            self._load_attr(inst.argval)
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop().realize()
+        if isinstance(obj, variables.PythonModuleVariable) and not (
+            self.output.side_effects.has_pending_mutation_of_attr(obj, attr)
+        ):
+            # Above tp_getattro: its Unsupported is constant-folded to a stale
+            # read of the real module here for python-constant objects. With a
+            # pending on the module VT (e.g. an inlined delete), the read
+            # resolves through it instead.
+            self.output.check_deleted_global_read(obj.value.__dict__, attr)
         try:
             if not _is_skipped_constant_property(self, obj, attr):
                 result = generic_getattr(self, obj, attr)
@@ -5463,7 +5481,7 @@ class InstructionTranslatorBase(
 
     @staticmethod
     def raise_loop_graph_break(
-        code: types.CodeType, exc: Unsupported | UserError
+        code: types.CodeType, exc: Unsupported | UserError | StepUnsupported
     ) -> NoReturn:
         unimplemented(
             gb_type="graph break in loop",
@@ -6124,12 +6142,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"Avoid calling the function `{fn_qualname}`.",
             ]
             if "_dynamo" not in func.get_filename():
-                hints += [
-                    f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
-                    "to force tracing into the function. "
-                    "More graph breaks may occur as a result of attempting to trace into the function.",
-                    "Please file an issue to PyTorch.",
-                ]
+                if not trace_rules.is_weakref_finalize_registry_code(func.get_code()):
+                    hints.append(
+                        f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
+                        "to force tracing into the function. "
+                        "More graph breaks may occur as a result of attempting to trace into the function."
+                    )
+                hints.append("Please file an issue to PyTorch.")
             unimplemented(
                 gb_type="Attempted to inline function marked as skipped",
                 context=f"qualname: {fn_qualname}, name: {func.get_name()}, "
@@ -6436,7 +6455,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def _can_speculate_comprehension_nested(self) -> bool:
         """Check if comprehension speculation is allowed in this inlined context.
 
-        Unlike should_compile_partial_graph(), this skips the exception table entry check.
+        Unlike should_compile_partial_graph(), this skips the exception table entry
+        check for this frame; maybe_setup_comprehension_speculation does that check at
+        the comprehension's first prefix instruction instead.
         """
         if not config.nested_graph_breaks:
             return False

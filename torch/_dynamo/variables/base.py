@@ -2397,6 +2397,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return variables.ConstantVariable.create(
                 not isinstance(value, variables.DeletedVariable)
             )
+        if isinstance(self, variables.PythonModuleVariable) and not (
+            tx.output.side_effects.has_pending_mutation_of_attr(self, name)
+        ):
+            # Above tp_getattro: call_obj_hasattr would swallow an Unsupported
+            # raised there and report a generic break instead. With a pending
+            # on the module VT, the hasattr result resolves through it.
+            tx.output.check_deleted_global_read(self.value.__dict__, name)
         return None
 
     def call_obj_hasattr(

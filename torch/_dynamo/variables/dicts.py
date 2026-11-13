@@ -567,6 +567,29 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 f"cannot use '{key.python_qualified_name()}' as a dict key ({message})",
             )
 
+    def _check_deleted_global_dict_access(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: Any,
+        write: bool,
+    ) -> None:
+        # Registered globals dicts are tracked in id_to_variable under their
+        # real dict; this VT may wrap it without exposing the value itself.
+        output_graph = tx.output
+        if not output_graph.deleted_globals_by_dict:
+            return
+        id_to_variable = output_graph.side_effects.id_to_variable
+        for dict_id, (
+            globals_dict,
+            _,
+        ) in output_graph.deleted_globals_by_dict.items():
+            if id_to_variable.get(dict_id) is self:
+                if write:
+                    output_graph.check_deleted_global_write(globals_dict, name)
+                else:
+                    output_graph.check_deleted_global_read(globals_dict, name)
+                return
+
     def mp_subscript_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -574,6 +597,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
         # Unhashable key check happens inside HashableTracker (tp_hash_impl → TypeError).
+        if key.is_python_constant():
+            self._check_deleted_global_dict_access(
+                tx, key.as_python_constant(), write=False
+            )
         return self.getitem_const_raise_exception_if_absent(tx, key)
 
     def sq_contains_impl(
@@ -582,6 +609,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
+        if item.is_python_constant():
+            self._check_deleted_global_dict_access(
+                tx, item.as_python_constant(), write=False
+            )
         key = self._lookup_key(tx, item)
         value = self.items.get(key)
         contains = value is not None and type(value) is not variables.DeletedVariable
@@ -779,6 +810,16 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
+        if args or kwargs:
+            for k in kwargs:
+                self._check_deleted_global_dict_access(tx, k, write=True)
+            if args:
+                other = args[0]
+                if isinstance(other, ConstDictVariable) and other.is_python_constant():
+                    for k in other.as_python_constant():
+                        self._check_deleted_global_dict_access(tx, k, write=True)
+                else:
+                    self._check_deleted_global_dict_access(tx, None, write=True)
         # Mirrors CPython PyDict_Merge: if arg has keys(), iterate keys and
         # __getitem__; else treat arg as iterable of (key, value) pairs.
         # kwargs are always merged on top.
@@ -829,6 +870,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
+        if args[0].is_python_constant():
+            self._check_deleted_global_dict_access(
+                tx, args[0].as_python_constant(), write=True
+            )
         check_positional(tx, "setdefault", len(args), 1, 2)
         if (
             isinstance(self, OrderedDictVariable)
@@ -939,6 +984,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
         # value=None signals delete (CPython NULL sentinel).
         self.install_dict_keys_match_guard()
+        if value is not None and key.is_python_constant():
+            self._check_deleted_global_dict_access(
+                tx, key.as_python_constant(), write=True
+            )
         if isinstance(self, OrderedDictVariable):
             _guard_nan_key(key)
             hkey = HashableTracker(key)

@@ -205,6 +205,7 @@ _MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
     set.__getattribute__,
     frozenset.__getattribute__,
     int.__getattribute__,
+    float.__getattribute__,
     str.__getattribute__,
     list.__getattribute__,
     tuple.__getattribute__,
@@ -546,6 +547,16 @@ class SideEffects:
         mutation_kind: AttrMutationKind = AttrMutationKind.GENERIC_SETATTR,
         mutated_source: Source | None = None,
     ) -> None:
+        if (
+            not isinstance(value, variables.DeletedVariable)
+            and isinstance(item, variables.PythonModuleVariable)
+            and not self.has_pending_mutation_of_attr(item, name)
+        ):
+            # No pending on the module VT: the replayed delete races this
+            # write. With one (e.g. an inlined delete), the setattr chain
+            # orders them.
+            if output_graph := self.output_graph_weakref():
+                output_graph.check_deleted_global_write(item.value.__dict__, name)
         if not self.is_attribute_mutation(item):
             raise AssertionError(
                 f"Expected attribute mutation for {item} in store_attr"

@@ -299,7 +299,8 @@ struct Vectorized16 {
         &Vectorized<float>::lgamma);
   }
   Derived rsqrt() const {
-    return static_cast<const Derived*>(this)->sqrt().reciprocal();
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::rsqrt);
   }
   Derived pow(const Derived& exp) const {
     return static_cast<const Derived*>(this)->map2_with_vec_float_method(

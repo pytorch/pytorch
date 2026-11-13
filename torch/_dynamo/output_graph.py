@@ -61,6 +61,7 @@ import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx, Tensor
 from torch._C._dynamo import guards
+from torch._dynamo import graph_break_hints
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
@@ -786,6 +787,11 @@ class OutputGraph(OutputGraphCommon):
         self.compile_id: int = next(_compile_id_counter)
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
+        # Names deleted in this trace, keyed by id() of the globals dict they
+        # were deleted from; the entry keeps the dict alive so the id cannot
+        # be reused. Later module-object or module-__dict__ accesses to those
+        # names graph-break (see check_deleted_global_read/write).
+        self.deleted_globals_by_dict: dict[int, tuple[Any, set[str]]] = {}
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -1066,6 +1072,39 @@ class OutputGraph(OutputGraphCommon):
         self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
         self._cached_replayed_side_effect_source_refs: tuple[str, ...] | None = None
 
+    def _deleted_global_names(self, globals_dict: Any) -> set[str]:
+        entry = self.deleted_globals_by_dict.get(id(globals_dict))
+        return entry[1] if entry is not None else set()
+
+    # TODO(follow-up): replace these breaks with real support, ordering the
+    # module-object access against the replayed global delete.
+    def check_deleted_global_read(self, globals_dict: Any, name: str) -> None:
+        if name in self._deleted_global_names(globals_dict):
+            unimplemented(
+                gb_type="DELETE_GLOBAL followed by a module-object read",
+                context=f"name: {name}",
+                explanation=(
+                    "The replayed global delete unbinds the name, but this "
+                    "read would consult the real module, which still holds "
+                    "the pre-call value. Eager resume has to run the read "
+                    "instead."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+    def check_deleted_global_write(self, globals_dict: Any, name: str | None) -> None:
+        names = self._deleted_global_names(globals_dict)
+        if names and (name is None or name in names):
+            unimplemented(
+                gb_type="DELETE_GLOBAL followed by a module-object write",
+                context=f"name: {name}",
+                explanation=(
+                    "The replayed global delete runs after this write and "
+                    "unbinds the name. Eager resume has to order them instead."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
     def track_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
         self.local_generators.append(gen)
 
@@ -1317,10 +1356,12 @@ class OutputGraph(OutputGraphCommon):
         self,
         fn: Callable[..., Any],
         args: tuple[Any, ...],
-        ctor_arg_sources: tuple[Source | None, ...] | None = None,
+        ctor_arg_sources: tuple[Source | VariableTracker | None, ...] | None = None,
     ) -> VariableTracker:
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
+        Each arg is codegen'd from its entry in ctor_arg_sources (a Source, or a
+        VariableTracker that reconstructs it), or as a constant if that is None.
         """
         example_value = fn(*args)
         varname = self.new_var()
@@ -1342,7 +1383,11 @@ class OutputGraph(OutputGraphCommon):
         cg.store(varname)
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
-        self.synthetic_source_ctor_info[source] = (fn, args, ctor_arg_sources)
+        # invoke_subgraph re-creates synthetic inputs from these sources, which it
+        # can't do for a VariableTracker.
+        if not any(isinstance(s, VariableTracker) for s in ctor_arg_sources or ()):
+            sources = cast(tuple[Source | None, ...] | None, ctor_arg_sources)
+            self.synthetic_source_ctor_info[source] = (fn, args, sources)
         result = VariableTracker.build(self.root_tx, example_value, source)
         # Realize the VT because we will delete the guards on it in the next line.
         result = result.realize()
