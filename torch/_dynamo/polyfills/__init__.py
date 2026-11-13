@@ -470,7 +470,9 @@ def odict_update(
     # CPython's mutablemapping_update_arg in Objects/odictobject.c snapshots
     # exact dicts, but dispatches keys/__getitem__ and destination __setitem__.
     missing = object()
-    if type(data) is dict:
+    if type(data) is dict or (
+        torch._has_frozendict and type(data) is torch._frozendict
+    ):
         data = list(data.items())
     else:
         keys: Any = getattr(data, "keys", missing)
@@ -501,11 +503,25 @@ def odict_update(
         self[key] = value
 
 
+def _frozendict_fromkeys(seed: Any, iterable: Iterable[T], value: U | None, /) -> Any:
+    # CPython populates the seed with native order, cached hashes and frozen-specific errors.
+    class SeededFrozenDict(torch._frozendict):
+        def __new__(cls, *args):
+            return args[0] if args else seed
+
+    return SeededFrozenDict.fromkeys(iterable, value)
+
+
 def dict_fromkeys(
     cls: Callable[..., C], iterable: Iterable[T], value: U | None = None, /
 ) -> C:
     # Mirrors the subclass path in CPython's _PyDict_FromKeys.
     result: Any = cls()
+    if torch._has_frozendict and issubclass(type(result), torch._frozendict):
+        # CPython's _PyDict_FromKeys (Objects/dictobject.c) copies a frozen
+        # constructor result, then calls cls(populated_frozendict). Subclasses
+        # inheriting frozendict.__new__ therefore invoke __init__ twice.
+        return cls(_frozendict_fromkeys(result, iterable, value))
     for key in iterable:
         result[key] = value
     return result
