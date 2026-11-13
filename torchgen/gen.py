@@ -2072,6 +2072,7 @@ def gen_per_operator_headers(
             f"{name}_native.h",
             "NativeFunction.h",
             lambda: {
+                "root_name": name,
                 "extra_includes": (
                     f"#include <ATen/ops/{name}_meta.h>" if is_structured else []
                 ),

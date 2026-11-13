@@ -1,6 +1,6 @@
 #pragma once
 
-// ${generated_comment}
+// ${generated_comment} for ${root_name}
 
 #include <c10/core/Scalar.h>
 #include <c10/core/Storage.h>
