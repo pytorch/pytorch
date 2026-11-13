@@ -250,12 +250,22 @@ def fold_decoded(
     return reduce_fn(acc, val, _rotate(base_r, shift, rb), valid)
 
 
+# Rounds per partial-fold tree and the accumulators its roots rotate over.
+_PARTIAL_GROUP = 16
+_PARTIAL_ACCS = 4
+
+
 @cute.jit
 def fold_partials_run(
     trait, mIns, obase, rb, threads_per_block: cutlass.Constexpr, tidx, in_base
 ):
     """Grid-stride one output's partial tuples for stage 2.
     The loop stays dynamic because partial counts reach about 1e5.
+
+    Single-field traits fold each whole group of _PARTIAL_GROUP rounds as a tree whose
+    root goes to the next of _PARTIAL_ACCS accumulators in turn, so no serial chain spans
+    the run; leftover rounds fold serially into their own accumulator. Runs shorter than
+    one group keep the serial fold's bits.
     """
     combine_fn = trait.combine
     fdtypes = trait.fdtypes
@@ -263,6 +273,18 @@ def fold_partials_run(
     acc = trait.init()
     n_full = rb // threads_per_block
     r = tidx
+    if const_expr(nf == 1):
+        group, step = const_expr(_PARTIAL_GROUP), const_expr(threads_per_block)
+        accs = tuple(trait.init() for _ in range(_PARTIAL_ACCS))
+        ngroups = n_full // group
+        for _ in cutlass.range(ngroups):
+            rr = obase + cutlass.Int64(r)
+            leaves = [(fdtypes[0](mIns[0][rr + k * step]),) for k in range(group)]
+            root = _inner_tree_reduce(leaves, combine_fn)
+            # Rotating the tuple hands each root to the next accumulator.
+            accs = accs[1:] + (combine_fn(accs[0], root),)
+            r = r + group * step
+        n_full = n_full - ngroups * group
     for _ in cutlass.range(n_full):
         rr = obase + cutlass.Int64(r)
         # Bare range unrolls and keeps trait attribute access outside the dynamic loop.
@@ -272,7 +294,10 @@ def fold_partials_run(
     rr = (obase + cutlass.Int64(r)) if valid else in_base
     part = tuple(fdtypes[f](mIns[f][rr]) for f in range(nf))
     merged = combine_fn(acc, part)
-    return tuple((merged[f] if valid else acc[f]) for f in range(nf))
+    acc = tuple((merged[f] if valid else acc[f]) for f in range(nf))
+    if const_expr(nf == 1):
+        acc = _inner_tree_reduce([*accs, acc], combine_fn)
+    return acc
 
 
 @cute.jit

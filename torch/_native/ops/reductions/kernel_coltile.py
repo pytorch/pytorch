@@ -1,4 +1,5 @@
-# Column-reduction driver for tile.TileReduce, with launch policy and plan cache.
+# Column-reduction driver for tile.TileReduce, with launch policy and plan cache, plus the
+# PartialColumns stage-two kernel.
 # Threads own vectorized kept-axis outputs without lane merging. Splitting the reduced
 # axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
 # Inputs must be on the current device.
@@ -6,7 +7,9 @@
 from collections.abc import Sequence
 from typing import Any, NamedTuple
 
-from cutlass import Int32
+import cutlass
+import cutlass.cute as cute
+from cutlass import const_expr, Int32
 
 import torch
 
@@ -51,6 +54,9 @@ class ColConfig(NamedTuple):
     threads_per_block: int
     npar: int
     vec: int
+    partial_layout: str
+    combine_columns: int = 0
+    unroll: int = tile._ROLL_UNROLL
 
 
 def select_col_config(
@@ -64,7 +70,7 @@ def select_col_config(
     npar: int | None = None,
     vec: int | None = None,
 ) -> ColConfig:
-    """Select stage-one column geometry; explicit launch arguments override it.
+    """Select column geometry and partial layout; explicit launch arguments override the geometry.
 
     Whether a view reaches the column kernel at all is `kernel_general._col_route_ok`'s call.
     """
@@ -83,6 +89,7 @@ def select_col_config(
         threads if threads_per_block is None else threads_per_block,
         auto_npar if npar is None else npar,
         auto_vec if vec is None else vec,
+        "partition" if batches * columns >= _C_THREAD_STAGE2 else "column",
     )
     return cfg
 
@@ -103,6 +110,90 @@ def _col_geometry(
         if rows // npar >= _Q_VEC or vec == 1:
             return npar, vec
         vec //= 2
+
+
+class PartialColumns:
+    """Combine partition-major states while coalescing adjacent column loads.
+
+    TileReduce's combine mode folds each output's partitions serially in one thread. This
+    kernel strides thread groups over partitions and merges them in shared memory, a second
+    schedule that would otherwise add smem and branching to TileReduce's shared body.
+    """
+
+    def __init__(self, trait, tile_columns, nouts):
+        # The tuned widths; each tiles the 128-thread block exactly.
+        if tile_columns not in (8, 16, 32):
+            raise ValueError(f"combine_columns must be 8, 16 or 32, got {tile_columns}")
+        self.trait = trait
+        self.tile_columns = tile_columns
+        self.threads = 128
+        self.groups = self.threads // tile_columns
+        self.nouts = nouts
+
+    @property
+    def cache_sig(self):
+        return (self.tile_columns, self.nouts)
+
+    @cute.jit
+    def __call__(
+        self,
+        ins: list,
+        outs: list,
+        columns: Int32,
+        rows: Int32,
+        partitions: Int32,
+        stream,
+    ):
+        self.kernel(ins, outs, columns, rows, partitions).launch(
+            grid=[cute.ceil_div(columns, self.tile_columns), 1, 1],
+            block=[self.threads, 1, 1],
+            stream=stream,
+        )
+
+    @cute.kernel
+    def kernel(
+        self, ins: list, outs: list, columns: Int32, rows: Int32, partitions: Int32
+    ):
+        tx, _, _ = cute.arch.thread_idx()
+        bx, _, _ = cute.arch.block_idx()
+        lane = Int32(tx) % Int32(self.tile_columns)
+        group = Int32(tx) // Int32(self.tile_columns)
+        col = Int32(bx) * Int32(self.tile_columns) + lane
+        safe_col = col if col < columns else Int32(0)
+        trait = self.trait
+        combine, fdtypes = trait.combine, trait.fdtypes
+        nf = const_expr(trait.nfields)
+        identity = trait.init()
+        acc = identity
+        for p in cutlass.range(group, partitions, self.groups):
+            # select_col_config caps outputs * npar below 2^31.
+            offset = p * columns + safe_col
+            acc = combine(acc, tuple(fdtypes[f](ins[f][offset]) for f in range(nf)))
+        smem = cutlass.utils.SmemAllocator()
+        partials = [
+            smem.allocate_tensor(
+                fdtypes[f], cute.make_layout(self.threads), byte_alignment=8
+            )
+            for f in range(nf)
+        ]
+        for f in cutlass.range_constexpr(nf):
+            partials[f][tx] = acc[f]
+        cute.arch.barrier()
+        if group == Int32(0):
+            acc = identity
+            for g in cutlass.range_constexpr(self.groups):
+                offset = Int32(g * self.tile_columns) + lane
+                acc = combine(
+                    acc, tuple(fdtypes[f](partials[f][offset]) for f in range(nf))
+                )
+        # Keep the Python trait out of runtime branch state.
+        result = trait.project(acc, trait.acc(rows))
+        if (group == Int32(0)) & (col < columns):
+            if const_expr(self.nouts == 1):
+                outs[0][col] = outs[0].element_type(result)
+            else:
+                for f in cutlass.range_constexpr(self.nouts):
+                    outs[f][col] = outs[f].element_type(result[f])
 
 
 def reduce_col_tile(
@@ -232,7 +323,14 @@ def _reduce_col_tile(
     q, nrows = Int32(-(-R // npar)), Int32(R)
 
     single = npar == 1
-    pc = total >= _C_THREAD_STAGE2
+    if cfg.partial_layout not in ("partition", "column"):
+        raise ValueError(f"unknown partial layout {cfg.partial_layout!r}")
+    pc = cfg.partial_layout == "partition"
+    width = cfg.combine_columns
+    if width and not pc:
+        raise ValueError("combine_columns reads partition-major partials")
+    # Build the tiled combine first so an invalid width raises before stage one launches.
+    tiled = PartialColumns(trait, width, nouts) if width else None
     op = tile.TileReduce(
         trait,
         torch2cute[kernel_x.dtype],
@@ -244,6 +342,7 @@ def _reduce_col_tile(
         vec=vec,
         batched_col=x.dim() == 3,
         pc=pc,
+        unroll=cfg.unroll,
     )
     parts = (
         []
@@ -315,7 +414,34 @@ def _reduce_col_tile(
     if single:
         return tuple(outs)
 
-    # Fold npar partials and project with true R; use threads per column only when B * C fills the GPU.
+    if tiled is not None:
+        pdt = tuple(pp.dtype for pp in parts)
+        key2 = (
+            "coltile2t",
+            trait_key,
+            tuple(out_dtypes[:nouts]),
+            pdt,
+            device,
+        ) + tiled.cache_sig
+        build2 = lambda: _compile(  # noqa: E731
+            tiled,
+            [_L.fake_compact(torch2cute[pp.dtype], (_L.sym(),)) for pp in parts],
+            [
+                _L.fake_compact(torch2cute[out.dtype], (_L.sym(),))
+                for out in kernel_outs
+            ],
+            Int32(total),
+            nrows,
+            Int32(npar),
+            _stream(device),
+        )
+        ins = [_L.read_only(pp) for pp in parts]
+        cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")(
+            ins, kernel_outs, Int32(total), nrows, Int32(npar), _stream(device)
+        )
+        return tuple(outs)
+
+    # Fold npar partials and project with true R; partition-major partials use threads per column.
     if not pc:
         s2 = ReduceBlock(
             trait,
