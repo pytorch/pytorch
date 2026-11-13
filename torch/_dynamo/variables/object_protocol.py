@@ -11,6 +11,8 @@ import abc
 import collections
 import contextlib
 import enum
+import functools
+import inspect
 import operator
 import sys
 import types
@@ -28,12 +30,13 @@ from torch._C._dynamo import (
     PySequenceSlots,
     PyTypeSlots,
 )
-from torch._guards import TracingContext
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
+    ObservedAttributeError,
     ObservedTypeError,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     UnhandledDescriptorError,
@@ -189,14 +192,6 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 # Flag Include/object.h
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
-Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
-
-
-def type_is_immutable(obj_type: type, /) -> bool:
-    return bool(
-        type.__dict__["__flags__"].__get__(obj_type, type(obj_type))
-        & Py_TPFLAGS_IMMUTABLETYPE
-    )
 
 
 def type_disallows_instantiation(obj_type: type) -> bool:
@@ -2307,27 +2302,6 @@ def mro_attr_source(
     Guards absence in every skipped class, including a complete MRO miss.
     Returns None on a complete miss; callers decide whether that is an error.
     """
-    mro = get_type_mro_no_user_code(klass)
-    memoize = (
-        not TracingContext.get().guards_context.skip_install
-        and not is_from_skip_guard_source(klass_source)
-    )
-    if (
-        memoize
-        and not type_is_immutable(klass)
-        and id(klass) not in tx.output.guarded_mro_type_ids
-    ):
-        # TYPE_MATCH pins the class, not its bases. Cached owner sources require both.
-        mro_source = TypeMROSource(klass_source)
-        install_guard(mro_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
-        # The builtin metaclass always puts the already guarded class first.
-        first = 1 if type(klass) is type else 0
-        # A custom ancestor MRO can replace even an object tail at constant length.
-        for index in range(first, len(mro)):
-            install_guard(
-                GetItemSource(mro_source, index).make_guard(GuardBuilder.ID_MATCH)
-            )
-        tx.output.guarded_mro_type_ids.add(id(klass))
     for idx, (base, namespace) in enumerate(iter_mro_static_dicts(klass)):
         if not is_constant_source(klass_source):
             direct = not idx and base is klass
@@ -2357,15 +2331,14 @@ def mro_attr_source(
         # the descriptor: a descriptor shared by unrelated classes needs a
         # source through each one.
         cache_key = (id(base), name)
-        cached = tx.output.mro_source_cache.get(cache_key) if memoize else None
+        cached = tx.output.mro_source_cache.get(cache_key)
         if cached is not None:
             return cached
 
         source = DictGetItemSource(
             TypeDictSource(_mro_entry_source(klass, klass_source, idx)), name
         )
-        if memoize:
-            tx.output.mro_source_cache[cache_key] = source
+        tx.output.mro_source_cache[cache_key] = source
         return source
 
     guard_mro_absent(
@@ -2579,7 +2552,20 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Step 7: Attribute not found -- signal to caller to fall back.
+    # Step 7: Attribute not found. With generic tp_getattro, no instance
+    # __dict__ and no __getattr__, the MRO walk was the whole lookup, so this
+    # is CPython's AttributeError; otherwise signal the caller to fall back.
+    from .user_defined import _safe_c_slots
+
+    if (
+        py_type.__dictoffset__ == 0
+        and py_type.__getattribute__ in _safe_c_slots()
+        and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
+    ):
+        raise_attribute_error(
+            tx,
+            f"'{py_type.__name__}' object has no attribute '{name}'",
+        )
     raise _UnhandledDescriptorError(
         f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
     )
@@ -2628,12 +2614,7 @@ def generic_getattr(
 
     # Handle default for getattr(obj, name, default).
     if default is not _NO_DEFAULT:
-        hasattr_var = obj.call_obj_hasattr(tx, name)
-        if not hasattr_var.is_constant_match(True, False):
-            raise AssertionError(
-                f"hasattr_var must be a constant True or False, got {hasattr_var}"
-            )
-        if not hasattr_var.as_python_constant():
+        if not generic_hasattr_str(tx, obj, name):
             return default  # type: ignore[return-value]
 
     # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
@@ -2652,3 +2633,95 @@ def generic_getattr(
         raise
     except NotImplementedError:
         return variables.GetAttrVariable(obj, name, source=source)
+
+
+def generic_hasattr(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: VariableTracker,
+) -> ConstantVariable:
+    """Dynamo's PyObject_HasAttr: validate the name, then delegate.
+
+    https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1414
+    """
+    if not issubclass(name.python_type(), str):
+        raise_type_error(
+            tx, f"attribute name must be string, not '{name.python_type_name()}'"
+        )
+    attr_name = name.as_python_constant()
+    return ConstantVariable.create(generic_hasattr_str(tx, obj, attr_name))
+
+
+def generic_hasattr_str(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+) -> bool:
+    """Dynamo's PyObject_GetOptionalAttrString: call tp_getattro, suppress AttributeError.
+
+    CPython has no tp_hasattr slot. hasattr() is PyObject_GetOptionalAttr over
+    tp_getattro, so it cannot disagree with getattr();
+    https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1321
+    """
+    if type(obj).call_obj_hasattr is not VariableTracker.call_obj_hasattr:
+        try:
+            return obj.call_obj_hasattr(tx, name).as_python_constant()
+        except NotImplementedError:
+            pass
+
+    try:
+        # generic_getattr, not tp_getattro_impl, so pending in-frame stores
+        # and tp_getset/tp_members resolve the same way getattr() sees them.
+        # A typed GetAttrVariable is built only after a real getattr found the
+        # value, so it proves the attribute exists; an untyped one is a
+        # deferred read and no evidence, so fall through to the graph break.
+        # A lazy VT wraps a real value, and realizing it would install guards
+        # on a value hasattr never reads.
+        value = generic_getattr(tx, obj, name)
+        if (
+            isinstance(value, variables.LazyVariableTracker)
+            or not isinstance(value, variables.GetAttrVariable)
+            or value.py_type is not None
+        ):
+            # A lazy read installs no guards, so HASATTR keeps a True answer
+            # valid. Skip it when only a user __getattr__ found the name:
+            # HASATTR runs the real hasattr() when guards are built, which would
+            # call that __getattr__, and it may mutate the object
+            # (tempfile._TemporaryFileWrapper caches into __dict__). The traced
+            # __getattr__ already guarded its own reads.
+            found_by_user_getattr = (
+                isinstance(obj, variables.UserDefinedObjectVariable)
+                and isinstance(obj._check_for_getattr(), types.FunctionType)
+                and inspect.getattr_static(obj.value, name, NO_SUCH_SUBOBJ)
+                is NO_SUCH_SUBOBJ
+            )
+            if obj.source and not found_by_user_getattr:
+                install_guard(
+                    obj.source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
+            return True
+    except ObservedAttributeError:
+        tx.exn_vt_stack.clear_current_exception()
+        # No CPython analogue. A False answer rests on the attribute staying
+        # absent, and nothing else guards that.
+        if obj.source:
+            install_guard(
+                obj.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
+        return False
+    except NotImplementedError:
+        pass
+
+    unimplemented(
+        gb_type="Unsupported hasattr call",
+        context=f"generic_hasattr {obj} {name}",
+        explanation=f"Dynamo does not know how to trace the function `{obj.debug_repr()}`",
+        hints=[
+            f"Avoid calling `hasattr({obj.__class__.__name__}, {name})` in your code.",
+            *graph_break_hints.SUPPORTABLE,
+        ],
+    )
