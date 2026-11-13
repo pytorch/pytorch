@@ -1531,6 +1531,7 @@ def helper(x):
 
     def test_record_negative_offset_non_hip(self):
         kernel = self._pointwise_kernel()
+        self._graph.inputs_with_negative_as_strided_offset.add("arg0")
         with (
             patch.object(torch.version, "hip", None),
             patch.object(
@@ -1541,12 +1542,15 @@ def helper(x):
         self.assertFalse(kernel.negative_offset_found)
 
     @parametrize("rebased", [False, True])
-    def test_record_negative_offset_rebase(self, rebased):
+    @parametrize("index", [-6, None])
+    def test_record_negative_offset_rebase(self, rebased, index):
         kernel = self._pointwise_kernel()
         if rebased:
             self._graph.inputs_with_negative_as_strided_offset.add("arg0")
+        # None stands for an index only known at runtime, as in bucketize.
+        index = None if index is None else sympy.Integer(index)
         with patch.object(torch.version, "hip", "test"):
-            kernel._record_negative_offset("arg0", sympy.Integer(-6))
+            kernel._record_negative_offset("arg0", index)
         self.assertEqual(kernel.negative_offset_found, rebased)
 
     @parametrize("precomputed", [False, True])
@@ -1560,8 +1564,11 @@ def helper(x):
             offset = self._graph.sizevars.lookup_precomputed_size(offset)
         with kernel, patch.object(torch.version, "hip", "test"):
             x = kernel.range_trees[0].full_range().symbol()
-            kernel._record_negative_offset("arg0", x + offset)
-            self.assertFalse(kernel.negative_offset_found)
+            # x + offset - 2 has a negative term but is at least 5, which only
+            # the bounds analysis on the replaced precomputed size can show.
+            for index in (x + offset, x + offset - 2):
+                kernel._record_negative_offset("arg0", index)
+                self.assertFalse(kernel.negative_offset_found)
             kernel._record_negative_offset("arg0", x - offset)
             self.assertTrue(kernel.negative_offset_found)
 
@@ -1658,6 +1665,37 @@ def helper(x):
         actual = torch.arange(12, device=GPU_TYPE, dtype=torch.float32)
         _, code = run_and_get_code(torch.compile(fn, fullgraph=True), actual[6:], y)
         self.assertEqual(actual, expected)
+        self.assertEqual(" ".join(code).count("tt.pointer_range"), 0)
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch("triton.emit_pointer_range_32", True)
+    @parametrize("op", ["bucketize", "searchsorted_2d", "searchsorted_sorter"])
+    def test_pointer_range_negative_rebase_lookup(self, op):
+        self._skip_unless_annotation_is_literal()
+
+        def fn(x, values, boundaries):
+            view = x.as_strided((12,), (1,), 0)
+            if op == "bucketize":
+                return torch.bucketize(values, view)
+            if op == "searchsorted_2d":
+                return torch.searchsorted(view.view(2, 6), values.view(2, -1))
+            return torch.searchsorted(boundaries, values, sorter=view)
+
+        # The binary search reads the six storage elements before ``x``. For
+        # the sorter case they hold the order of the descending boundaries.
+        storage = torch.arange(18, device=GPU_TYPE)
+        if op == "searchsorted_sorter":
+            storage[:12] = torch.arange(11, -1, -1, device=GPU_TYPE)
+        else:
+            storage = storage.float()
+        x = storage[6:]
+        values = torch.linspace(-1, 12, 512, device=GPU_TYPE)
+        boundaries = torch.arange(11, -1, -1, device=GPU_TYPE, dtype=torch.float32)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), x, values, boundaries
+        )
+        self.assertEqual(actual, fn(x, values, boundaries))
         self.assertEqual(" ".join(code).count("tt.pointer_range"), 0)
 
     def _skip_unless_annotation_is_literal(self):

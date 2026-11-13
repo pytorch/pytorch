@@ -3623,7 +3623,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.has_load_with_contiguous_rdim = False
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
-        # AMD buffer ops reject negative offsets from the kernel pointer.
+        # Set on HIP when this kernel may access a graph input that as_strided
+        # rebased to a negative offset below its data pointer, which AMD buffer
+        # ops cannot address.
         self.negative_offset_found = False
 
     @property
@@ -5307,7 +5309,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             PartialAccumulate(name, reduction_type, val)
         )
 
-    def _record_negative_offset(self, name: str, index: sympy.Expr) -> None:
+    def _record_negative_offset(self, name: str, index: sympy.Expr | None) -> None:
+        """Set ``negative_offset_found`` if this access may go below ``name``'s pointer.
+
+        Only graph inputs that as_strided rebased to a negative offset on HIP are
+        checked; ``name`` may also be a mutation buffer of such an input. ``index``
+        is the offset from the data pointer, or ``None`` when it is only known at
+        runtime. A ``None`` index, or one whose lower bound cannot be determined,
+        counts as negative. The flag is never cleared.
+        """
         if torch.version.hip is None or self.negative_offset_found:
             return
         # A store into a mutated input names the mutation buffer, not the input.
@@ -5315,17 +5325,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             name = V.graph.scheduler.mutation_real_name.get(name, name)
         if name not in V.graph.inputs_with_negative_as_strided_offset:
             return
-
-        index = sympy.expand(index, identity=True)
-        if not index.free_symbols:
-            self.negative_offset_found = index < 0
+        if index is None:
+            self.negative_offset_found = True
             return
 
         index = sympy.expand(
             V.graph.sizevars.remove_precomputed_replacements(index), identity=True
         )
         if not index.free_symbols:
-            self.negative_offset_found = index < 0
+            self.negative_offset_found = bool(index < 0)
             return
 
         if not any(
@@ -5339,7 +5347,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             for var, size in self.var_ranges().items():
                 size_upper = bound_sympy(Max(size - 1, 0), shape_ranges).upper
                 var_ranges[var] = ValueRanges(0, size_upper)
-            self.negative_offset_found = bound_sympy(index, var_ranges).lower < 0
+            self.negative_offset_found = bool(bound_sympy(index, var_ranges).lower < 0)
         except Exception:
             # A negative term with unknown bounds cannot safely use unsigned offsets.
             self.negative_offset_found = True
@@ -5732,6 +5740,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # If we're trying to use a bucketize kernel, we should make sure that an
         # autotuning config with num_elements_per_warp=(warp_size) exists.
         self.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
+
+        # The search reads both lookup tensors at offsets known only at runtime.
+        self._record_negative_offset(boundaries[0], None)
+        if sorter:
+            self._record_negative_offset(sorter[0], None)
 
         boundaries_ptr = self.args.input(boundaries[0])
         boundary_size = self.index_to_str(boundaries[1])
@@ -8095,12 +8108,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return False
 
     def pointer_range_override(self) -> tuple[int, ...] | None:
-        """Suppress ``tt.pointer_range=32`` for incompatible HIP indexing.
+        """Suppress ``tt.pointer_range=32`` for incompatible HIP accesses.
 
-        On HIP the annotation lets the backend use buffer ops, and buffer atomics are
-        far slower than global ones under contention while negative offsets are
-        unsupported. ``()`` suppresses; ``None`` lets ``config_of`` decide, which is
-        also where the config flag is applied. Only valid once the kernel body exists.
+        On HIP the annotation lets the backend use buffer ops. Buffer atomics are far
+        slower than global ones under contention, and buffer ops cannot address memory
+        below the kernel pointer, which a negative as_strided rebase can require.
+        ``()`` suppresses; ``None`` lets ``config_of`` decide, which is also where the
+        config flag is applied. Only valid once the kernel body exists.
         """
         if torch.version.hip is not None and (
             self.atomic_add_found or self.negative_offset_found
@@ -8290,7 +8304,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self._filter_pdl(self.body)
 
-        # Computed after codegen_body() so self.atomic_add_found is accurate.
+        # Computed after codegen_body() so atomic_add_found and negative_offset_found
+        # are accurate.
         triton_meta["configs"] = [
             config_of(
                 signature,
