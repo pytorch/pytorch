@@ -172,6 +172,31 @@ class TestKernelColTile(TestCase):
                 )
                 self.assertEqual(got, ref)
 
+    @parametrize("rows,cols", [(64, 1000), (1000, 16)])
+    def test_fp32_column_sum_error_is_no_worse_than_aten(self, rows, cols):
+        """Sum fp32 columns with no more fp64-relative error than ATen, summed over a few
+        seeds."""
+        trait = T.SumOps(acc=cutlass.Float32)
+        ours = aten = 0.0
+        for seed in range(8):
+            gen = torch.Generator("cuda").manual_seed(seed)
+            x = torch.randn(rows, cols, device="cuda", generator=gen)
+            got = ct.reduce_col_tile(trait, "fp32_error", x, torch.float32)
+            with torch.backends.python_native.cutedsl.disabled():
+                ref = x.sum(0)
+            want = x.double().sum(0)
+            ours += (got.double() - want).abs().mean().item()
+            aten += (ref.double() - want).abs().mean().item()
+        self.assertLessEqual(ours, aten, f"CuTeDSL {ours:.3e} vs ATen {aten:.3e}")
+
+    def test_partial_tree_folds_every_partial_once(self):
+        # Stage 2 of a (2**20, 3) sum folds hundreds of partial rounds per thread, so whole
+        # trees run; small integers keep every partial sum exact.
+        x = torch.randint(-4, 5, (1 << 20, 3), device="cuda").float()
+        trait = T.SumOps(acc=cutlass.Float32)
+        got = ct.reduce_col_tile(trait, "partial_tree", x, torch.float32)
+        self.assertEqual(got, x.double().sum(0).float(), atol=0, rtol=0)
+
     def test_three_field_welford_launch(self):
         # Three fields select the otherwise untested high-register-pressure launch.
         x = torch.randn(4096, 256, device="cuda")
