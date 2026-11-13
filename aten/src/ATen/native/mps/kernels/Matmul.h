@@ -39,6 +39,12 @@ C10_METAL_CONSTEXPR uint32_t kMatmulKGroupsFullGrids = 2;
 // up to a full grid over kMatmulSplitGridShare of threadgroups.
 C10_METAL_CONSTEXPR uint32_t kMatmulSplitMinK = 1024;
 C10_METAL_CONSTEXPR uint32_t kMatmulSplitGridShare = 2;
+// Without such a split, a K from kMatmulSlabMinK of an output up to
+// kMatmulSlabMaxOutput elements runs in slabs of kMatmulSplitMinK on the tiles
+// without K groups: all tiles of a slab then read its operands from cache.
+C10_METAL_CONSTEXPR uint32_t kMatmulSlabMinK = 16384;
+C10_METAL_CONSTEXPR uint32_t kMatmulSlabMaxOutput = 256 * 256;
+C10_METAL_CONSTEXPR uint32_t kMatmulSlabMaxPlanes = 256;
 // x @ W.t() for up to kMatmulStagedMaxRows rows of x reads W once, fastest
 // in whole cache lines. matmul_mpp_staged copies kMatmulStepBytes of each row
 // of a block of W to threadgroup memory, in loads of kMatmulStagedLoadBytes.
