@@ -685,6 +685,24 @@ class Cuspy:
         self._started = True
 
     def stop(self) -> None:
+        """Stop collection; release early HES only when no consumers remain.
+
+        Closing the last activity observer retains early HES for later windows.
+        Call stop() explicitly after closing observers and callback handlers, before
+        tearing down CUDA or distributed communication, to release that subscription.
+        Calling it with a live consumer does not schedule a deferred release: call
+        it again after closing that consumer.
+        """
+        self._stop_collection()
+        with self._callback_lock:
+            if self._callbacks_registered and self._subscriber is not None:
+                self._cupti.disarm_user_defined_records(self._subscriber)
+                self._callbacks_registered = False
+            if not self._observers and not self._callback_handlers:
+                self._hes_enabled = False
+            self._release_subscriber_if_idle()
+
+    def _stop_collection(self) -> None:
         if not self._started:
             return
         # Stop the Python drain loop. The decode thread keeps running (and self-flushing
@@ -942,7 +960,7 @@ class Cuspy:
             self._observers.remove(obs)
             empty = not self._observers
         if empty:
-            self.stop()
+            self._stop_collection()
         else:
             self._apply_selection()
 

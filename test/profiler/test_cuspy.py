@@ -2711,8 +2711,8 @@ class TestCuspyHes(TestCase):
             patch.object(cuspy, "_drain_and_dispatch"),
         ):
             for _ in range(2):
-                cuspy.start()
-                cuspy.stop()
+                observer = cuspy.register([], lambda _columns: None)
+                cuspy.unregister(observer)
                 self.assertEqual(cuspy._subscriber, subscriber)
                 self.assertTrue(cuspy_core.is_hes_enabled())
         self.cupti.subscribe.assert_called_once()
@@ -2725,10 +2725,57 @@ class TestCuspyHes(TestCase):
         self.cupti.disarm_user_defined_records.assert_has_calls(
             [call(subscriber), call(subscriber)]
         )
-        cuspy_core._reset_for_test()
+        cuspy.stop()
         self.cupti.unsubscribe.assert_called_once_with(subscriber)
         self.assertFalse(cuspy_core.is_hes_enabled())
         self.assertFalse(cuspy_core.has_live_subscription())
+
+    @parametrize("started", [False, True])
+    def test_explicit_stop_releases_hes_before_distributed_teardown(self, started):
+        from torch.profiler._cuspy import core as cuspy_core
+
+        cuspy_core.enable_hes_early()
+        cuspy = cuspy_core.Cuspy()
+        with (
+            patch.object(cuspy._clock, "calibrate"),
+            patch.object(cuspy, "flush"),
+            patch.object(cuspy, "_drain_and_dispatch"),
+        ):
+            if started:
+                cuspy.start()
+            cuspy.stop()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertFalse(cuspy_core.has_live_subscription())
+        self.assertFalse(cuspy_core.is_hes_enabled())
+        self.assertFalse(cuspy._callbacks_registered)
+        self.cupti.finalize.assert_not_called()
+        cuspy.stop()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+
+    def test_explicit_stop_preserves_live_hes_callback_handler(self):
+        from torch.profiler._cuspy import core as cuspy_core
+
+        cuspy_core.enable_hes_early()
+        cuspy = cuspy_core.Cuspy()
+        handler = cuspy.register_callback_handler(0, 0, lambda *args: None)
+        self.addCleanup(cuspy.unregister_callback_handler, handler)
+        cuspy.arm_callback(0, 0)
+        trampoline = cuspy._callback_trampoline
+        cuspy.stop()
+        self.cupti.unsubscribe.assert_not_called()
+        self.assertEqual(cuspy._subscriber, 1234)
+        self.assertIs(cuspy._callback_trampoline, trampoline)
+        self.assertTrue(cuspy_core.is_hes_enabled())
+        self.cupti.enable_callback.assert_called_once_with(1234, 0, 0, True)
+        cuspy.unregister_callback_handler(handler)
+        self.cupti.enable_callback.assert_has_calls(
+            [call(1234, 0, 0, True), call(1234, 0, 0, False)]
+        )
+        self.cupti.unsubscribe.assert_not_called()
+        cuspy.stop()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertFalse(cuspy_core.has_live_subscription())
+        self.assertFalse(cuspy_core.is_hes_enabled())
 
     def test_partial_udr_failure_restores_shared_subscriber(self):
         import ctypes
@@ -2792,17 +2839,16 @@ class TestCuspyHes(TestCase):
             patch.object(cuspy, "flush"),
             patch.object(cuspy, "_drain_and_dispatch"),
         ):
-            cuspy.start()
+            observer = cuspy.register([], lambda _columns: None)
             cuspy._latency_enabled = True
-            cuspy.stop()
+            cuspy.unregister(observer)
             self.assertTrue(cuspy._latency_enabled)
-            cuspy.start()
-            cuspy._apply_selection()
+            observer = cuspy.register([], lambda _columns: None)
             self.cupti.enable_kernel_latency_timestamps.assert_called_once_with(
                 1234, False
             )
             self.assertFalse(cuspy._latency_enabled)
-            cuspy.stop()
+            cuspy.unregister(observer)
 
     def test_hes_initialization_pins_subscriber_against_callback_teardown(self):
         from torch.profiler._cuspy import core as cuspy_core
@@ -3947,6 +3993,9 @@ for _ in range(2):
         raise AssertionError("HES + UDR produced no kernel records")
     if collector._subscriber != subscriber:
         raise AssertionError("HES subscriber changed between collection sessions")
+collector.stop()
+if cuspy_core.has_live_subscription():
+    raise AssertionError("terminal stop retained the HES subscriber")
 """,
             ],
             text=True,
