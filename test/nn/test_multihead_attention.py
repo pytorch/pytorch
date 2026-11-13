@@ -739,6 +739,64 @@ class TestMultiheadAttentionNN(NNTestCase):
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4448")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "CrossRef disables the native fastpath")
+    @dtypes(torch.float32, torch.float64)
+    @parametrize_test("fastpath", [True, False])
+    @parametrize_test("need_weights", [True, False])
+    @parametrize_test("padding_mask", ["none", "bool", "float"])
+    def test_causal_hint_requires_attn_mask(self, device, dtype, fastpath, need_weights, padding_mask):
+        mha = nn.MultiheadAttention(8, 2, batch_first=True, device=device, dtype=dtype).eval()
+        query = torch.randn(1, 5, 8, device=device, dtype=dtype)
+        key_padding_mask = None
+        if padding_mask != "none":
+            key_padding_mask = torch.tensor([[False, False, False, False, True]], device=device)
+            if padding_mask == "float":
+                key_padding_mask = torch.zeros_like(query[..., 0]).masked_fill(key_padding_mask, -torch.inf)
+        with (
+            torch.no_grad(),
+            mock.patch("torch.backends.mha.get_fastpath_enabled", return_value=fastpath),
+            mock.patch("torch._native_multi_head_attention", wraps=torch._native_multi_head_attention) as native,
+        ):
+            mha(query, query, query, key_padding_mask=key_padding_mask, need_weights=need_weights)
+            self.assertEqual(native.call_count, int(fastpath and padding_mask != "float"))
+            native.reset_mock()
+            with self.assertRaisesRegex(RuntimeError, "Need attn_mask if specifying the is_causal hint"):
+                mha(
+                    query, query, query, is_causal=True,
+                    key_padding_mask=key_padding_mask, need_weights=need_weights,
+                )
+            native.assert_not_called()
+
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4448")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "CrossRef disables the native fastpath")
+    @dtypes(torch.float32, torch.float64)
+    @parametrize_test("need_weights", [True, False])
+    @parametrize_test("padding_mask", [True, False])
+    def test_causal_hint_with_attn_mask_fastpath(self, device, dtype, need_weights, padding_mask):
+        mha = nn.MultiheadAttention(8, 2, batch_first=True, device=device, dtype=dtype).eval()
+        query = torch.randn(1, 5, 8, device=device, dtype=dtype)
+        attn_mask = torch.ones(5, 5, dtype=torch.bool, device=device).triu(1)
+        key_padding_mask = None
+        if padding_mask:
+            key_padding_mask = torch.tensor([[False, False, False, False, True]], device=device)
+        with torch.no_grad():
+            with (
+                mock.patch("torch.backends.mha.get_fastpath_enabled", return_value=True),
+                mock.patch("torch._native_multi_head_attention", wraps=torch._native_multi_head_attention) as native,
+            ):
+                actual = mha(
+                    query, query, query, is_causal=True, attn_mask=attn_mask,
+                    key_padding_mask=key_padding_mask, need_weights=need_weights,
+                )
+                native.assert_called_once()
+            with mock.patch("torch.backends.mha.get_fastpath_enabled", return_value=False):
+                expected = mha(
+                    query, query, query, is_causal=True, attn_mask=attn_mask,
+                    key_padding_mask=key_padding_mask, need_weights=need_weights,
+                )
+        self.assertEqual(actual, expected)
+
     def test_multihead_self_attn_two_masks_fast_path(self, device):
         """
         Multihead self-attention should give the same result on the fast path (BetterTransformer) as on the slow path
