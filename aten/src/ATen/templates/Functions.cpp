@@ -3,6 +3,7 @@
 #include <ATen/Functions.h>
 #include <ATen/Utils.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/StorageImpl.h>
 
 namespace at {
 
@@ -38,7 +39,36 @@ Tensor TensorMaker::make_tensor() {
    }
 
    TORCH_CHECK(!resizeable_ || allocator_ != nullptr, "Must specify an allocator with allocator() if you want to use resizeable_storage()");
-   Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr), /*allocator=*/allocator_, /*resizable=*/resizeable_};
+
+   // Storage factories interpret a null DataPtr as an allocation request.
+   // A non-owning context marks an explicitly supplied empty buffer instead.
+   static char empty_buffer_context;
+   std::optional<DataPtr> empty_data_ptr;
+   if (data_ptr == nullptr) {
+     empty_data_ptr = std::move(data_ptr);
+     data_ptr = DataPtr{nullptr, &empty_buffer_context, detail::noopDelete, *device_};
+   }
+
+   Storage storage{c10::make_storage_impl(
+       c10::StorageImpl::use_byte_size_t{},
+       size_bytes,
+       std::move(data_ptr),
+       /*allocator=*/allocator_,
+       /*resizable=*/resizeable_,
+       device_)};
+
+   // Remove our marker if the factory kept it unchanged. Preserve any DataPtr
+   // replacement or context wrapping performed by a custom factory.
+   if (empty_data_ptr) {
+     const auto& storage_data_ptr =
+         storage.unsafeGetStorageImpl()->_mutable_data_ptr_no_checks();
+     if (storage_data_ptr.get() == nullptr &&
+         storage_data_ptr.get_context() == &empty_buffer_context &&
+         storage_data_ptr.get_deleter() == detail::noopDelete &&
+         storage_data_ptr.device() == empty_data_ptr->device()) {
+       storage.set_data_ptr_noswap(std::move(*empty_data_ptr));
+     }
+   }
 
    Tensor tensor = detail::make_tensor<TensorImpl>(
        std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
