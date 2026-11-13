@@ -659,6 +659,11 @@ class _KinetoProfile:
         package. Other paths are uncompressed (the ``cuspy`` backend defaults to
         gzip). Zstd is supported for Chrome JSON, not Cuspy's Perfetto format.
 
+        Raises :class:`RuntimeError` if Kineto cannot write the trace. Exports
+        that write the file from Python, such as compressed paths and
+        ``use_python_export``, raise :class:`OSError` instead, for example
+        :class:`FileNotFoundError` when the destination directory does not exist.
+
         ``cuda_graph_annotations`` bakes CUDA-graph kernel annotations into the trace:
         matching graphed work carries its annotation's fields in ``args``. Pass
         :func:`torch.cuda.graph_annotations.get_kernel_annotations` to use what
@@ -739,22 +744,32 @@ class _KinetoProfile:
         elif path.endswith((".gz", ".zst")):
             output_dir, output_name = os.path.split(path)
             trace_name = os.path.splitext(output_name)[0]
-            with tempfile.TemporaryDirectory() as tmpdir:
-                trace_path = os.path.join(tmpdir, trace_name)
-                self.profiler.export_chrome_trace(trace_path, self._trace_metadata)
+            # Compress next to the destination, then rename into place: a bad path fails before Kineto
+            # saves and consumes the trace, and a failed export leaves any existing file untouched.
+            partial_path = path + ".tmp"
+            try:
                 with (
-                    open(trace_path, "rb") as fin,
-                    trace_file_opener(path, "wb") as fout,
+                    trace_file_opener(partial_path, "wb") as fout,
+                    tempfile.TemporaryDirectory() as tmpdir,
                 ):
-                    shutil.copyfileobj(fin, fout)
-                # Kineto can write more files next to the JSON; move them out before `tmpdir` goes away.
-                for name in os.listdir(tmpdir):
-                    src = os.path.join(tmpdir, name)
-                    dst = os.path.join(output_dir, name)
-                    # `shutil.move` nests its source inside a destination directory.
-                    if name == trace_name or os.path.isdir(src) or os.path.isdir(dst):
-                        continue
-                    shutil.move(src, dst)
+                    trace_path = os.path.join(tmpdir, trace_name)
+                    self.profiler.export_chrome_trace(trace_path, self._trace_metadata)
+                    with open(trace_path, "rb") as fin:
+                        shutil.copyfileobj(fin, fout)
+                    # Kineto can write more files next to the JSON; move them out before `tmpdir` goes away.
+                    for name in os.listdir(tmpdir):
+                        src = os.path.join(tmpdir, name)
+                        dst = os.path.join(output_dir, name)
+                        # `shutil.move` nests its source inside a destination directory.
+                        is_dir = os.path.isdir(src) or os.path.isdir(dst)
+                        if name == trace_name or is_dir:
+                            continue
+                        shutil.move(src, dst)
+                os.replace(partial_path, path)
+            except BaseException:
+                if os.path.exists(partial_path):
+                    os.remove(partial_path)
+                raise
         else:
             self.profiler.export_chrome_trace(path, self._trace_metadata)
 

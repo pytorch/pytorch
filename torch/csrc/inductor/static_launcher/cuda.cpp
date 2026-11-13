@@ -218,27 +218,16 @@ std::pair<CUmodule, CUfunction> loadKernel(
   // This prevents us from setting shared memory above the maximum
 
 #if defined(USE_ROCM)
-  TORCH_CHECK_WITH(
-      OutOfMemoryError,
-      sharedMemBytes <= static_cast<uint32_t>(shared_optin),
-      "out of resource: ",
-      funcName,
-      " Required: ",
-      sharedMemBytes,
-      " Hardware limit:",
-      shared_optin,
-      " Reducing block sizes or `num_stages` may help.");
+  const auto sharedOptinLimit = static_cast<uint32_t>(shared_optin);
+  if (sharedMemBytes > sharedOptinLimit) {
+    torch::inductor::static_launcher::throwOutOfResourceError(
+        funcName.c_str(), sharedMemBytes, sharedOptinLimit);
+  }
 #else
-  TORCH_CHECK_WITH(
-      OutOfMemoryError,
-      shared_needed <= static_cast<uint32_t>(shared_limit),
-      "out of resource: ",
-      funcName,
-      " Required: ",
-      shared_needed,
-      " Hardware limit:",
-      shared_limit,
-      " Reducing block sizes or `num_stages` may help.");
+  if (shared_needed > static_cast<uint32_t>(shared_limit)) {
+    torch::inductor::static_launcher::throwOutOfResourceError(
+        funcName.c_str(), shared_needed, shared_limit);
+  }
 
   if (shared_limit > shared_optin) {
     AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncSetAttribute(
@@ -792,7 +781,7 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
   // Fast type check: inductor-generated tensors are always exact THPVariable
   // (or Parameter). Use CheckExact — a single Py_TYPE pointer comparison —
   // instead of THPVariable_Check which also calls PyObject_IsInstance.
-  if (C10_LIKELY(THPVariable_CheckExact(obj))) {
+  if (THPVariable_CheckExact(obj)) [[likely]] {
     auto tensor = THPVariable_Unpack(obj);
     TORCH_CHECK(
         tensor.defined(),
