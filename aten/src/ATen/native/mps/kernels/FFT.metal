@@ -50,17 +50,17 @@ constexpr uint comp_r1() {
 // k2] lands at v[(k2 + r2 k1) S]); tw holds W_R at stride ts
 template <uint R, uint S>
 inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
-  if (R == 2) {
+  if IF_CONSTEXPR (R == 2) {
     const float2 a = v[0], b = v[S];
     v[0] = a + b;
     v[S] = a - b;
-  } else if (R == 3) {
+  } else if IF_CONSTEXPR (R == 3) {
     const float2 s = v[S] + v[2 * S], d = v[S] - v[2 * S], t = v[0] - 0.5f * s;
     const float2 u = (inv ? kSin2Pi_3 : -kSin2Pi_3) * mul_i(d);
     v[0] = v[0] + s;
     v[S] = t + u;
     v[2 * S] = t - u;
-  } else if (R == 4) {
+  } else if IF_CONSTEXPR (R == 4) {
     const float2 a0 = v[0] + v[2 * S], a1 = v[0] - v[2 * S],
                  a2 = v[S] + v[3 * S];
     const float2 a3 = inv ? mul_i(v[S] - v[3 * S]) : -mul_i(v[S] - v[3 * S]);
@@ -68,7 +68,7 @@ inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
     v[2 * S] = a0 - a2;
     v[S] = a1 + a3;
     v[3 * S] = a1 - a3;
-  } else if (R == 5) {
+  } else if IF_CONSTEXPR (R == 5) {
     const float2 s1 = v[S] + v[4 * S], d1 = v[S] - v[4 * S],
                  s2 = v[2 * S] + v[3 * S], d2 = v[2 * S] - v[3 * S];
     const float sg = inv ? 1.0f : -1.0f;
@@ -82,7 +82,7 @@ inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
     v[4 * S] = t1 - u1;
     v[2 * S] = t2 + u2;
     v[3 * S] = t2 - u2;
-  } else if (R == 7) {
+  } else if IF_CONSTEXPR (R == 7) {
     const float2 s1 = v[S] + v[6 * S], d1 = v[S] - v[6 * S],
                  s2 = v[2 * S] + v[5 * S], d2 = v[2 * S] - v[5 * S];
     const float2 s3 = v[3 * S] + v[4 * S], d3 = v[3 * S] - v[4 * S];
@@ -101,7 +101,7 @@ inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
     v[5 * S] = t2 - u2;
     v[3 * S] = t3 + u3;
     v[4 * S] = t3 - u3;
-  } else if (comp_r1<R>() > 1) {
+  } else if IF_CONSTEXPR (comp_r1<R>() > 1) {
     constexpr uint r1 = comp_r1<R>(), r2 = R / r1;
 
     for (uint n2 = 0; n2 < r2; n2++) {
@@ -172,7 +172,7 @@ template <class I, class O, uint F, bool C, class index_t>
 inline float2 load_pt(Bufs<I, O> b, constant FFTParams<index_t>& p, uint e) {
   const index_t s = C ? 1 : p.in_stride;
 
-  if (!(F & kFFTExtendedLoads)) {
+  if IF_CONSTEXPR (!(F & kFFTExtendedLoads)) {
     return cast_to<float2>(b.in[index_t(e) * s]);
   }
 
@@ -205,14 +205,14 @@ inline void store_pt(
 
 template <bool P2, bool G>
 inline uint mod_ns(uint j, uint ns, float inv_ns) {
-  if (P2) {
+  if IF_CONSTEXPR (P2) {
     return j & (ns - 1);
   }
 
   int k = int(j) - int(ns) * int(float(j) * inv_ns);
   // Global stages reach j = 2^31, past float's exact integers: a second step
   // on the small remainder makes it exact
-  if (G) {
+  if IF_CONSTEXPR (G) {
     k -= int(ns) * int(float(k) * inv_ns);
   }
   k = k < 0 ? k + int(ns) : k;
