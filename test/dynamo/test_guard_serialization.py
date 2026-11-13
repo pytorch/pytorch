@@ -69,6 +69,7 @@ from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -4528,13 +4529,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "cfg": LockDict(lr=2)}, True)
         self._test_check_fn(ref, loaded, {"x": x, "cfg": LockDict(lr=3)}, False)
 
-    def test_closure_match(self):
+    @parametrize("caching_precompile", (False, True))
+    def test_closure_match(self, caching_precompile):
         def fn(x):
             # usage of this global function installs a CLOSURE_MATCH guard
             return global_func(x)
 
         x = torch.randn(3)
-        ref, loaded = self._test_serialization("CLOSURE_MATCH", fn, x)
+        with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+            ref, loaded = self._test_serialization("CLOSURE_MATCH", fn, x)
         self._test_check_fn(ref, loaded, {"x": x}, True)
         # The saved guard compares code by value rather than identity, so it
         # matches the loading process's own copy of the function.
@@ -4546,7 +4549,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"global_func": lambda x: x + 2}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
-    def test_closure_match_without_module_globals(self):
+    @parametrize("caching_precompile", (False, True))
+    def test_closure_match_without_module_globals(self, caching_precompile):
         namespace = {}
         exec("def global_func(x):\n    return x + 1\n", namespace)
 
@@ -4556,6 +4560,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # No importable module owns these globals, so a loading process has no
         # way to find the function's globals again.
         with (
+            torch._dynamo.config.patch(caching_precompile=caching_precompile),
             mock.patch.dict(globals(), {"global_func": namespace["global_func"]}),
             self.assertRaisesRegex(
                 PackageError, "CLOSURE_MATCH guard cannot be serialized."
@@ -5680,6 +5685,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             True,
         )
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed is not available"
+    )
     def test_ddp_module(self):
         import torch.distributed as dist
 
@@ -5798,6 +5806,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             True,
         )
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed is not available"
+    )
     def test_unserializable_sharded_tensor(self):
         import torch.distributed as dist
 
@@ -5850,6 +5861,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"inputs": Inputs(x, global_func_wrong_fqn)}, True
         )
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed is not available"
+    )
     def test_c10d_work(self):
         import torch.distributed as dist
 
@@ -5900,6 +5914,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"inputs": Inputs(x, weakref.ref(x))}, True)
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed is not available"
+    )
     def test_unused_process_group(self):
         import torch.distributed as dist
 
@@ -6165,6 +6182,10 @@ class TestGuardSerializationCUDA(TestGuardSerializationBase):
 
 class TestGuardSerializationAccelerator(TestGuardSerializationBase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(TestGuardSerializationBase.setUp)
+    setUpClass = classmethod(
+        preserves_device_selection(TestGuardSerializationBase.setUpClass.__func__)
+    )
 
     @onlyAccelerator
     @torch._dynamo.config.patch({"strict_precompile": True})
