@@ -155,7 +155,7 @@ class GraphBuilder:
             attributes={"value": tensor},
             output_types=[ir.TensorType(dtype)],
         )[0]
-        result.shape = tensor.shape
+        result.shape = ir.Shape(array.shape)
         result.const_value = tensor
         if cacheable:
             self._constants[key] = result
