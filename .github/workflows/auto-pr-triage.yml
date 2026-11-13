@@ -142,8 +142,9 @@ jobs:
       # Logs, the step summary, and these artifacts are visible to anyone who can
       # read this repository's Actions runs, so nothing here may hold secrets.
       # They hold PR content, checked-in config, and LLM output from a session
-      # with no tools or credential access. The full Claude transcript
-      # (execution.json) is uploaded only when the analysis action fails.
+      # whose only tool is submit_result and that has no credential access. The
+      # pi-agent action also uploads its own transcript artifact on every run;
+      # execution.json is copied here only when the analysis action fails.
       - name: Upload human-review result
         if: >-
           steps.history.outputs.should-run == 'true' &&
