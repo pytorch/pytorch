@@ -582,6 +582,45 @@ void CUDAGraph::begin_capture_to_while_node(
 }
 
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+static std::mutex free_conditional_body_streams_mutex;
+
+// Per device. Leaked on purpose: body streams are never destroyed.
+static std::vector<std::vector<cudaStream_t>>& free_conditional_body_streams() {
+  static auto* streams =
+      new std::vector<std::vector<cudaStream_t>>(c10::cuda::device_count());
+  return *streams;
+}
+
+CUDAGraph::ConditionalBodyStream::ConditionalBodyStream(c10::DeviceIndex device)
+    : device(device) {
+  {
+    std::lock_guard<std::mutex> lock(free_conditional_body_streams_mutex);
+    auto& streams = free_conditional_body_streams().at(device);
+    if (!streams.empty()) {
+      stream = streams.back();
+      streams.pop_back();
+      return;
+    }
+  }
+  c10::cuda::CUDAGuard device_guard(device);
+  AT_CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+}
+
+CUDAGraph::ConditionalBodyStream::~ConditionalBodyStream() {
+  if (!stream) {
+    return;
+  }
+  // reset() may release a stream whose body capture never ended. Keep such a
+  // stream out of the free list.
+  cudaStreamCaptureStatus status = cudaStreamCaptureStatusActive;
+  C10_CUDA_CHECK_WARN(cudaStreamIsCapturing(stream, &status));
+  if (status != cudaStreamCaptureStatusNone) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(free_conditional_body_streams_mutex);
+  free_conditional_body_streams().at(device).push_back(stream);
+}
+
 void CUDAGraph::begin_capture_to_conditional_node(
     const at::Tensor& scalar_cuda_pred_tensor,
     cudaGraphConditionalNodeType conditional_type) {
@@ -668,12 +707,9 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
 getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies));
 #endif
 
-  cudaStream_t raw_child_stream{};
-  AT_CUDA_CHECK(cudaStreamCreateWithFlags(
-      &raw_child_stream, cudaStreamNonBlocking));
-  CUDAStream child_stream =
-      getStreamFromExternal(raw_child_stream, capture_dev_);
-  conditional_node_raw_streams_.emplace(raw_child_stream);
+  conditional_node_raw_streams_.emplace(capture_dev_);
+  CUDAStream child_stream = getStreamFromExternal(
+      conditional_node_raw_streams_.top().stream, capture_dev_);
   conditional_graph_capture_ids_.push(0);
   conditional_node_handles_.push(handle);
 
