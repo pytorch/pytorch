@@ -662,6 +662,14 @@ test_python_smoke_b200() {
   assert_git_not_dirty
 }
 
+rdma_port_bytes() {
+  # port_*_data counters are in 4-byte units.
+  for port in /sys/class/infiniband/*/ports/*; do
+    [[ -e "${port}/counters/port_xmit_data" ]] || continue
+    echo "${port} $(cat "${port}/counters/port_xmit_data") $(cat "${port}/counters/port_rcv_data")"
+  done | sort
+}
+
 test_transport_rdma() {
   # NIXL and Mooncake transports over RoCE/RDMA on the NVIDIA GB300 runner.
   # CUDA jobs exclude GENERIC classes, which include the Mooncake tests; run them here.
@@ -673,11 +681,28 @@ test_transport_rdma() {
   python -c "import nixl, mooncake.engine"
 
   ls -l /dev/infiniband || true
+  # Skip xtrace for the per-GID loops.
+  set +x
   for port in /sys/class/infiniband/*/ports/*; do
     [[ -e "${port}" ]] || continue
     echo "${port}: $(cat "${port}/state" "${port}/link_layer" "${port}/rate" 2>/dev/null | tr '\n' ' ')"
+    # Non-zero GIDs with their RoCE version.
+    for gid in "${port}"/gids/*; do
+      local idx value
+      idx=$(basename "${gid}")
+      value=$(cat "${gid}" 2>/dev/null) || continue
+      [[ "${value}" == "0000:0000:0000:0000:0000:0000:0000:0000" ]] && continue
+      echo "  gid ${idx} ${value} $(cat "${port}/gid_attrs/types/${idx}" 2>/dev/null)"
+    done
   done
   nvidia-smi topo -m || true
+  echo "memlock: $(ulimit -l)"
+  # GPUDirect RDMA needs nvidia_peermem or dmabuf.
+  lsmod | grep -E 'peermem|^nvidia' || true
+  ls -l /dev/nvidia-caps /dev/nvidia-caps-imex-channels 2>&1 || true
+  nvidia-smi -q | grep -A3 -i fabric || true
+  rdma_port_bytes > /tmp/rdma_before
+  set -x
 
   time env TORCH_TEST_CUDA_TRANSPORT=1 python test/run_test.py \
     --include \
@@ -690,16 +715,21 @@ test_transport_rdma() {
 
   # Default UCX picks shared memory/cuda_ipc for same-host peers; UCX_TLS=rc forces RDMA.
   # NIXL rejects UCX_TLS without cuda_copy when GPUs are present.
-  time env TORCH_TEST_CUDA_TRANSPORT=1 UCX_TLS=rc,self,cuda_copy python test/run_test.py \
+  time env TORCH_TEST_CUDA_TRANSPORT=1 UCX_TLS=rc,self,cuda_copy UCX_PROTO_INFO=y python test/run_test.py \
     --include distributed/test_transport_cuda_stream --verbose --upload-artifacts-while-running
   time env TORCH_TEST_NIXL=1 python test/run_test.py \
     --include distributed/test_transport_nixl_native --verbose --upload-artifacts-while-running
-  time env TORCH_TEST_NIXL=1 UCX_TLS=rc,self,cuda_copy python test/run_test.py \
+  time env TORCH_TEST_NIXL=1 UCX_TLS=rc,self,cuda_copy UCX_PROTO_INFO=y python test/run_test.py \
     --include distributed/test_transport_nixl_native --verbose --upload-artifacts-while-running
 
   # MC_FORCE_HCA=1 fails instead of silently falling back to NVLink without an HCA.
   time env RUN_MOONCAKE_INTEGRATION=1 MC_FORCE_HCA=1 python test/run_test.py \
     --include distributed/test_transport_mooncake --verbose --upload-artifacts-while-running
+
+  # Non-zero deltas show traffic went through the NICs.
+  rdma_port_bytes > /tmp/rdma_after
+  echo "RDMA port bytes moved (xmit rcv):"
+  join /tmp/rdma_before /tmp/rdma_after | awk '{print $1, ($4-$2)*4, ($5-$3)*4}'
   assert_git_not_dirty
 }
 
