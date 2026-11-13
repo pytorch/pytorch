@@ -203,6 +203,20 @@ class TORCH_API Dispatcher final {
 
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
+
+  // Starts recording a call with guard, as call and callBoxed do; for code
+  // that dispatches without them but records like them (PyObject dispatch).
+  static void runRecordFunction(
+      at::RecordFunction& guard,
+      at::RecordFunction::schema_ref_t schema_ref,
+      DispatchKey dispatchKey,
+      DispatchKeySet dispatchKeySet);
+  static void runRecordFunction(
+      at::RecordFunction& guard,
+      at::RecordFunction::schema_ref_t schema_ref,
+      DispatchKey dispatchKey,
+      DispatchKeySet dispatchKeySet,
+      c10::ArrayRef<const c10::IValue> args);
   void callBoxedForDispatchKey(
       const OperatorHandle& op,
       DispatchKey dk,
@@ -361,17 +375,6 @@ class TORCH_API Dispatcher final {
   static int64_t sequenceNumberForRunningRecordFunction(
       DispatchKey dispatchKey,
       DispatchKeySet dispatchKeySet);
-  static void runRecordFunction(
-      at::RecordFunction& guard,
-      at::RecordFunction::schema_ref_t schema_ref,
-      DispatchKey dispatchKey,
-      DispatchKeySet dispatchKeySet);
-  static void runRecordFunction(
-      at::RecordFunction& guard,
-      at::RecordFunction::schema_ref_t schema_ref,
-      DispatchKey dispatchKey,
-      DispatchKeySet dispatchKeySet,
-      c10::ArrayRef<const c10::IValue> args);
 
 #ifdef FBCODE_CAFFE2
   static bool profilingOperatorEvents();
