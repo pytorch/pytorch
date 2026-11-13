@@ -1415,7 +1415,13 @@ bool ConcretePyInterpreterVTable::fake_try_prim_meta(
       op,
       stack,
       [&](const py::object& args, const py::dict& kwargs) {
-        return prim_meta_impl(*args, **kwargs);
+        py::object out = prim_meta_impl(*args, **kwargs);
+        TORCH_CHECK(
+            !out.is(py::handle(Py_NotImplemented)),
+            "prim_meta_impl for ",
+            op.operator_name(),
+            " returned NotImplemented");
+        return out;
       },
       /*convert=*/{},
       "prim_meta_impl");
