@@ -2446,7 +2446,7 @@ if TYPE_CHECKING:
     ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True, eq=False)
 class _BypassDispatchCache(Exception):
     """
     Signals cases that should skip FakeTensor caching.
