@@ -633,13 +633,13 @@ namespace {
       // (lda >= m, so bounding lda bounds m too):
       // - batch * lda: per-batch offsets into pivots and the permutation workspace;
       // - lda * min(n, MAX_RECNB) + 1024: linearized rank-1 update index in the tall panel kernel;
-      // - n + 1024: column tiling of row swaps.
+      // - n + SWP_WIDTH: column tile count of row swaps.
       constexpr int64_t int_max = std::numeric_limits<int>::max();
       if ((1 < batch && batch <= 65535)
         && ((1 <= m && m <= 1024) || compute_pivots)
         && batch * lda <= int_max
         && lda * std::min<int64_t>(n, 32) <= int_max - 1024
-        && n <= int_max - 1024
+        && n <= int_max - 4 // SWP_WIDTH
       ) {
         return SolverBackend::CUSTOM;
       }
