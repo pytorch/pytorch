@@ -39,10 +39,8 @@ WIN_CI_DIR = Path(__file__).resolve().parents[2] / "pytorch" / "windows"
 # build_pytorch.bat + internal/check_deps.bat.
 COMMON_BUILD_ENV: dict[str, str] = {
     "PYTORCH_BINARY_BUILD": "1",
-    "TH_BINARY_BUILD": "1",
     "BUILD_TEST": "0",
     "INSTALL_TEST": "0",
-    "MSSdk": "1",
     "DISTUTILS_USE_SDK": "1",
     # Ninja is forced for Windows builds via cmake.define.CMAKE_GENERATOR in
     # pyproject.toml (single source of truth), so it is not set here.
