@@ -7,6 +7,8 @@ on:
 permissions:
   id-token: write
   contents: read
+  # fetch_llm_selection.py reads the runs and an artifact of llm_td_selection.yml.
+  actions: read
 
 jobs:
 
@@ -71,6 +73,19 @@ jobs:
         with:
           name: llm_results
           path: .additional_ci_files/llm_results
+
+      - name: Download the LLM test selection
+        # llm_td_selection.yml only runs for PRs from this repository's branches.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        timeout-minutes: 12
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: uv run --no-project --python 3.12 tools/testing/target_determination/fetch_llm_selection.py
 
       - name: Do TD
         id: td

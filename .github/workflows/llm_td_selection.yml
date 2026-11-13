@@ -1,0 +1,95 @@
+name: llm-td-selection
+
+# The LLM's estimate of the test files a PR can break, for the LLMSelection heuristic
+# of target determination (tools/testing/target_determination/heuristics/llm_selection.py).
+# pull_request_target runs this file from the default branch, and the job checks out
+# main of pytorch and of test-infra, so the bedrock role is only ever handed to
+# reviewed code. The PR is read through git, never executed, and the model has no tools.
+# The target-determination job of each test workflow run fetches the selection of its
+# head from this workflow's run (fetch_llm_selection.py).
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  select:
+    # Forks get no selection: their PRs' text is written by anyone.
+    if: >-
+      github.repository_owner == 'pytorch' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: bedrock
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          fetch-depth: 0
+          filter: tree:0
+          persist-credentials: false
+
+      - name: Fetch the PR base and head
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: git fetch --no-tags --filter=tree:0 origin "$BASE_SHA" "$HEAD_SHA"
+
+      - name: Checkout test-infra
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: pytorch/test-infra
+          ref: main
+          path: test-infra
+          sparse-checkout: tools/torchci
+          persist-credentials: false
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.323
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+          aws-region: us-east-1
+
+      - name: Select
+        id: select
+        # The selection is one of TD's inputs: without it TD runs as before.
+        continue-on-error: true
+        timeout-minutes: 12
+        env:
+          CLAUDE_CODE_USE_BEDROCK: "1"
+          PYTHONPATH: ${{ github.workspace }}/test-infra/tools
+          # The PR's own base, so a ghstack PR is diffed against the PR below it.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 -P -m torchci.td.llm_select.selector \
+            --pytorch "$GITHUB_WORKSPACE" \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --out "$RUNNER_TEMP/llm_selection.json"
+
+      - name: Warn when there is no selection
+        if: steps.select.outcome == 'failure'
+        run: echo "::warning title=LLM TD selection::no selection; TD runs without the LLMSelection heuristic"
+
+      - name: Upload the selection
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: llm_selection_${{ github.event.pull_request.number }}_${{ github.event.pull_request.head.sha }}
+          overwrite: true
+          retention-days: 3
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/llm_selection.json
