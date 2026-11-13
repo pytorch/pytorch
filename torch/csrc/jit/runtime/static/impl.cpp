@@ -1401,7 +1401,7 @@ c10::IValue BlockRunner::run_impl_record_functions(
     IValueList&& args,
     const KeywordArgs& kwargs) {
   auto step_callbacks =
-      at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_MODEL);
+      at::getStepCallbacksUnlessEmptyInline(at::RecordScope::STATIC_RUNTIME_MODEL);
   if (step_callbacks.has_value()) [[unlikely]] {
     at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
@@ -1447,7 +1447,7 @@ c10::intrusive_ptr<c10::ivalue::Future> BlockRunner::
         IValueList&& args,
         const KeywordArgs& kwargs) {
   auto step_callbacks =
-      at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_MODEL);
+      at::getStepCallbacksUnlessEmptyInline(at::RecordScope::STATIC_RUNTIME_MODEL);
   if (step_callbacks.has_value()) [[unlikely]] {
     at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
@@ -2143,7 +2143,7 @@ void ProcessedNode::run() {
 #endif
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
-      at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_OP);
+      at::getStepCallbacksUnlessEmptyInline(at::RecordScope::STATIC_RUNTIME_OP);
   if (step_callbacks.has_value()) [[unlikely]] {
     at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
