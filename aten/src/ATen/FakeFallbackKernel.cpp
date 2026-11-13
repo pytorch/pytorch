@@ -341,7 +341,7 @@ void fakeFallback(
         if (!impl->is_wrapped_number() &&
             !(t.is_fake() && impl->fake_tensor_mode() == mode) &&
             (*c10::impl::getGlobalPyInterpreter())
-                ->fake_is_unrecognized_subclass(impl)) {
+                ->_check_for_subclass_arg(impl)) {
           unsupported(op, "tensor subclass inputs");
         }
       });
@@ -359,7 +359,7 @@ void fakeFallback(
             has_symbolic_number || impl->is_symbolic_wrapped_number();
       });
   // Python's whitelist uses the base name without namespace or overload.
-  const auto allows_numbers_as_tensors = [&op] {
+  const auto should_allow_numbers_as_tensors = [&op] {
     std::string_view name = op.operator_name().name;
     if (const auto end = name.rfind("::"); end != std::string_view::npos) {
       name.remove_prefix(end + 2);
@@ -384,7 +384,7 @@ void fakeFallback(
   };
   const bool makes_constant = !has_mode_fakes &&
       (is_lift ||
-       (!has_symbolic_number && allows_numbers_as_tensors() &&
+       (!has_symbolic_number && should_allow_numbers_as_tensors() &&
         !(is_to_copy &&
           (*stack)[arguments_begin].toTensor().device().is_meta()) &&
         !avoiding_device_init()));
@@ -412,7 +412,7 @@ void fakeFallback(
       }
       at::Tensor fake(
           (*c10::impl::getGlobalPyInterpreter())
-              ->to_meta_tensor(
+              ->from_real_tensor(
                   mode, constant.getIntrusivePtr(), /*make_constant=*/true));
       torch::jit::drop(*stack, num_arguments);
       torch::jit::push(*stack, std::move(fake));
@@ -423,7 +423,7 @@ void fakeFallback(
   if (is_lift && is_plain_tensor((*stack)[arguments_begin].toTensor())) {
     at::Tensor fake(
         (*c10::impl::getGlobalPyInterpreter())
-            ->to_meta_tensor(
+            ->from_real_tensor(
                 mode, (*stack)[arguments_begin].toTensor().getIntrusivePtr()));
     torch::jit::drop(*stack, num_arguments);
     torch::jit::push(*stack, std::move(fake));
@@ -462,7 +462,7 @@ void fakeFallback(
                             "'allow_non_fake_inputs'");
         }
         return at::Tensor(
-            interpreter->to_meta_tensor(mode, t.getIntrusivePtr()));
+            interpreter->from_real_tensor(mode, t.getIntrusivePtr()));
       });
 
   // Input devices in argument order, paired with whether each is a CPU scalar.
@@ -554,7 +554,7 @@ void fakeFallback(
       }
       const auto resolved =
           (*c10::impl::getGlobalPyInterpreter())
-              ->fake_resolve_device_conflict(op, *common_device, input_device);
+              ->_resolve_device_conflict(op, *common_device, input_device);
       if (resolved == input_device) {
         common_device = input_device;
         common_is_cpu_zero_dim = is_cpu_zero_dim;
@@ -701,14 +701,13 @@ void fakeFallback(
   // kernel. Unlike Python's wrapping, this also changes those retained tensors.
   std::optional<c10::Device> output_common_device;
   std::unordered_set<const c10::TensorImpl*> converted_outputs;
-  auto wrap_output = [&](const at::Tensor& t,
-                         bool is_alias) -> std::optional<at::Tensor> {
+  auto wrap = [&](const at::Tensor& t, bool is_alias) -> std::optional<at::Tensor> {
     if (!t.defined()) {
       return std::nullopt;
     }
     if (input_devices.empty()) {
       const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
-      if (!allows_numbers_as_tensors()) {
+      if (!should_allow_numbers_as_tensors()) {
         auto name = schema.name();
         name.replace(name.find("::"), 2, ".");
         interpreter->fake_raise_python_error(
@@ -720,7 +719,7 @@ void fakeFallback(
                 schema.overload_name().empty() ? "default"
                                                : schema.overload_name()));
       }
-      return at::Tensor(interpreter->to_meta_tensor(mode, t.getIntrusivePtr()));
+      return at::Tensor(interpreter->from_real_tensor(mode, t.getIntrusivePtr()));
     }
     if (!output_common_device.has_value()) {
       output_common_device = find_common_device(/*resolve=*/true);
@@ -768,7 +767,7 @@ void fakeFallback(
     const bool is_alias = schema.returns()[i].alias_info() != nullptr;
     replace_each_tensor(
         stack, returns_begin + i, 1, [&](const at::Tensor& t) {
-          return wrap_output(t, is_alias);
+          return wrap(t, is_alias);
         });
   }
 }

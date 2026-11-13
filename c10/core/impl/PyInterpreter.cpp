@@ -154,20 +154,19 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       c10::function_ref<bool()> /*step*/) const override {
     PANIC(fake_run_with_mode_entered);
   }
-  c10::Device fake_resolve_device_conflict(
+  c10::Device _resolve_device_conflict(
       const c10::OperatorHandle& /*op*/,
       c10::Device /*common_device*/,
       c10::Device /*device*/) const override {
-    PANIC(fake_resolve_device_conflict);
+    PANIC(_resolve_device_conflict);
   }
   void fake_raise_python_error(
       FakePythonError /*kind*/,
       const std::string& /*msg*/) const override {
     PANIC(fake_raise_python_error);
   }
-  bool fake_is_unrecognized_subclass(
-      const TensorImpl* /*self*/) const override {
-    PANIC(fake_is_unrecognized_subclass);
+  bool _check_for_subclass_arg(const TensorImpl* /*self*/) const override {
+    PANIC(_check_for_subclass_arg);
   }
   bool fake_has_plain_tensor_type(const TensorImpl* /*self*/) const override {
     PANIC(fake_has_plain_tensor_type);
@@ -213,11 +212,11 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       PyObject* /*real*/) const override {
     PANIC(fake_infer_from_real_out);
   }
-  c10::intrusive_ptr<TensorImpl> to_meta_tensor(
+  c10::intrusive_ptr<TensorImpl> from_real_tensor(
       const std::shared_ptr<FakeTensorMode>& /*mode*/,
       const c10::intrusive_ptr<TensorImpl>& /*real*/,
       bool /*make_constant*/) const override {
-    PANIC(to_meta_tensor);
+    PANIC(from_real_tensor);
   }
   bool allow_non_fake_inputs(
       const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {

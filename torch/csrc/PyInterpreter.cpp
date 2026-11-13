@@ -164,15 +164,14 @@ struct ConcretePyInterpreterVTable final
   bool fake_run_with_mode_entered(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       c10::function_ref<bool()> step) const override;
-  c10::Device fake_resolve_device_conflict(
+  c10::Device _resolve_device_conflict(
       const c10::OperatorHandle& op,
       c10::Device common_device,
       c10::Device device) const override;
   void fake_raise_python_error(
       c10::impl::FakePythonError kind,
       const std::string& msg) const override;
-  bool fake_is_unrecognized_subclass(
-      const c10::TensorImpl* self) const override;
+  bool _check_for_subclass_arg(const c10::TensorImpl* self) const override;
   bool fake_has_plain_tensor_type(const c10::TensorImpl* self) const override;
   bool fake_avoid_device_init(
       const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
@@ -200,7 +199,7 @@ struct ConcretePyInterpreterVTable final
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       PyObject* real) const override;
-  c10::intrusive_ptr<c10::TensorImpl> to_meta_tensor(
+  c10::intrusive_ptr<c10::TensorImpl> from_real_tensor(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       const c10::intrusive_ptr<c10::TensorImpl>& real,
       bool make_constant) const override;
@@ -1254,7 +1253,7 @@ bool ConcretePyInterpreterVTable::fake_run_with_mode_entered(
   return done;
 }
 
-c10::Device ConcretePyInterpreterVTable::fake_resolve_device_conflict(
+c10::Device ConcretePyInterpreterVTable::_resolve_device_conflict(
     const c10::OperatorHandle& op,
     c10::Device common_device,
     c10::Device device) const {
@@ -1278,7 +1277,7 @@ void ConcretePyInterpreterVTable::fake_raise_python_error(
   throw py::error_already_set();
 }
 
-bool ConcretePyInterpreterVTable::fake_is_unrecognized_subclass(
+bool ConcretePyInterpreterVTable::_check_for_subclass_arg(
     const c10::TensorImpl* self) const {
   py::gil_scoped_acquire gil;
   PyObject* obj = self->pyobj_slot()->load_pyobj();
@@ -1530,10 +1529,11 @@ bool ConcretePyInterpreterVTable::fake_infer_from_real_out(
 
 // Convert a real tensor to a C++ fake of mode through mode's converter
 // (FakeTensorConverter.from_real_tensor).
-c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
-    const std::shared_ptr<c10::FakeTensorMode>& mode,
-    const c10::intrusive_ptr<c10::TensorImpl>& real_impl,
-    bool make_constant) const {
+c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::
+    from_real_tensor(
+        const std::shared_ptr<c10::FakeTensorMode>& mode,
+        const c10::intrusive_ptr<c10::TensorImpl>& real_impl,
+        bool make_constant) const {
   py::gil_scoped_acquire gil;
   at::Tensor real(real_impl);
   py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
