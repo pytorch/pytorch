@@ -1291,6 +1291,26 @@
       ]
     }
   ],
+  "GB2806": [
+    {
+      "Gb_type": "bytearray store to an existing bytearray",
+      "Context": "bytearray: {self.source.name}",
+      "Explanation": "Dynamo leaves writes to bytearrays with a source to eager to preserve shared buffers and resize errors.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6677": [
+    {
+      "Gb_type": "bytearray store with non-constant value",
+      "Context": "value: {value.python_type_name()}",
+      "Explanation": "Dynamo only traces bytearray item and slice stores whose value is known at compile time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6012": [
     {
       "Gb_type": "Cannot trace user-defined __len__",
@@ -1889,6 +1909,16 @@
       "Gb_type": "Dynamic class creation with type",
       "Context": "type(name, bases, namespace)",
       "Explanation": "Dynamo does not support tracing class creation with type().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9322": [
+    {
+      "Gb_type": "bytearray.join() with unsupported item type",
+      "Context": "bytearray.join() item: {item}",
+      "Explanation": "Dynamo only supports joining bytes and bytearray items, got {item.python_type_name()}.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -2614,6 +2644,15 @@
     }
   ],
   "GB0150": [
+    {
+      "Gb_type": "Unsupported hasattr call",
+      "Context": "generic_hasattr {obj} {name}",
+      "Explanation": "Dynamo does not know how to trace the function `{obj.debug_repr()}`",
+      "Hints": [
+        "Avoid calling `hasattr({obj.__class__.__name__}, {name})` in your code.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Unsupported hasattr call",
       "Context": "call_obj_hasattr {self} {name}",
@@ -4868,6 +4907,26 @@
       "Gb_type": "C-level descriptor delete on user-defined object",
       "Context": "object={self}, name={name_str}, descriptor={descriptor}",
       "Explanation": "Dynamo does not yet model this C-level descriptor deleter for user-defined objects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1208": [
+    {
+      "Gb_type": "Unsupported generator frame f_back",
+      "Context": "{state}",
+      "Explanation": "f_back is only modeled for created or suspended generators.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0949": [
+    {
+      "Gb_type": "Unsupported generator frame attribute",
+      "Context": "frame.{name}",
+      "Explanation": "Dynamo does not model the frame attribute {name}.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
