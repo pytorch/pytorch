@@ -9,7 +9,7 @@ from collections.abc import Callable
 from datetime import timedelta
 from functools import wraps
 from typing import ParamSpec, TypeVar
-from unittest import mock, SkipTest
+from unittest import mock, skipIf, SkipTest
 
 import torch
 import torch.cuda
@@ -39,6 +39,7 @@ from torch.testing._internal.common_symmem import (
     gated_signal_pad_order,
 )
 from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     lazy_skip_if,
@@ -351,6 +352,7 @@ def _nccl_pad_op_launches(group, device) -> dict:
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 @skip_if_rccl_lt_2_30_4
 @skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
@@ -1640,6 +1642,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
 
 @requires_cuda_p2p_access()
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 @skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
     """NCCL symmetric memory over an nccl2-backed process group.
@@ -1956,12 +1959,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         # Delays this rank's next collective on the device. A rank that skips
         # the collective instead would leave its peer blocked in RCCL's
         # host-side enqueue, so the peer's work would never reach wait().
-        torch.cuda.synchronize(self.device)
-        start = time.monotonic()
-        torch.cuda._sleep(10**7)
-        torch.cuda.synchronize(self.device)
-        seconds_per_cycle = max(time.monotonic() - start, 1e-4) / 10**7
-        torch.cuda._sleep(int(seconds / seconds_per_cycle))
+        torch.cuda._sleep(int(seconds * 1000 * get_cycles_per_ms()))
 
     def _assert_stale(self, handle) -> None:
         # buffer_ptrs checks liveness without launching through the comm.
