@@ -137,12 +137,11 @@ class _ItreeArch(NamedTuple):
     # Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N;
     # 0 keeps _ITREE_THREAD_ELEMS.
     lowp_thread_elems: int = 0
-    # Derive Welford partial counts from the plan where tile.uniform_combine_ok holds and
-    # the combine stages a tile; skip staging the count.
-    uniform_count: bool = False
-    # With uniform_count, stage each partial's precomputed Chan weight in one row shared
-    # by the block; weights depend only on the partial index.
-    combine_weights: bool = False
+    # "counts" derives Welford partial counts from the plan where tile.uniform_combine_ok
+    # holds and the combine stages a tile, skipping the count's staging. "weights" also
+    # stages each partial's precomputed Chan weight in one row shared by the block;
+    # weights depend only on the partial index.
+    uniform_combine: Literal["off", "counts", "weights"] = "off"
 
 
 # Performance tuning is keyed by full compute capability. Each measured GPU has
@@ -215,8 +214,7 @@ _SM107_FULL_ITREE_ARCH = _ItreeArch(
     combine_max=2048,
     combine_unroll=128,
     lowp_thread_elems=32,
-    uniform_count=False,
-    combine_weights=False,
+    uniform_combine="off",
 )
 
 
@@ -237,7 +235,7 @@ def select_full_itree_arch(
     the device's _ITREE_ARCH row. Every field must be 32-bit, with _sm107_outputs.
     fp32 sums and argmax (int32 indices, an int64 output) take the profile; Welford
     traits with welford_outs != 0 (not return_mean) take a variant with
-    combine_unroll=64, uniform_count and combine_weights."""
+    combine_unroll=64 and uniform_combine="weights"."""
     if (
         cc not in _SM107_CCS
         or dtype not in _SM107_DTYPES
@@ -257,9 +255,7 @@ def select_full_itree_arch(
         return _SM107_FULL_ITREE_ARCH
     if nfields != 3 or welford_outs == 0:
         return None
-    return _SM107_FULL_ITREE_ARCH._replace(
-        combine_unroll=64, uniform_count=True, combine_weights=True
-    )
+    return _SM107_FULL_ITREE_ARCH._replace(combine_unroll=64, uniform_combine="weights")
 
 
 def _full_itree_arch(
@@ -418,11 +414,10 @@ class _ItreePlan(NamedTuple):
     combine_tile: int = 0
     combine_unroll: int = 0
     # Staged COMBINE only: every partial holds split[1] values (tile.uniform_combine_ok). The
-    # fold derives counts from it, so the count field is not staged.
-    uniform_count: bool = False
-    # With uniform_count, a row shared by the block holds the current tile's weights,
-    # 1 / (index + 1) for each partial's global index, in the count's slot.
-    combine_weights: bool = False
+    # fold derives counts from it, so the count field is not staged. With "weights", a row
+    # shared by the block holds the current tile's weights, 1 / (index + 1) for each
+    # partial's global index, in the count's slot.
+    uniform_combine: Literal["off", "counts", "weights"] = "off"
 
     @property
     def sig(self) -> tuple[Any, ...]:
@@ -442,8 +437,7 @@ class _ItreePlan(NamedTuple):
             self.combine_grp,
             self.combine_tile,
             self.combine_unroll,
-            self.uniform_count,
-            self.combine_weights,
+            self.uniform_combine,
         )
 
 
@@ -485,7 +479,7 @@ def itree_plan(
 
     if N < 1:
         return None
-    arch = _itree_arch(device) if arch is None else arch
+    # Only multirow and split plans read arch, so looped plans never query the device.
     kc = kchunk
     # Itemsize-only vec plus identity padding keeps the DAG independent of N divisibility.
     base_vec = tile.TRANSFER_ALIGNMENT // itemsize
@@ -507,7 +501,7 @@ def itree_plan(
             stage_rows=(
                 stage is not False
                 and N * itemsize >= _TMA_MIN_STRIDE
-                and arch.stage_rows
+                and (_itree_arch(device) if arch is None else arch).stage_rows
             ),
         )
     prm = compute_inner_tree_params(N, M, vec)
@@ -533,6 +527,7 @@ def itree_plan(
             prm.effective_loads,
             _ITREE_THREAD_ELEMS if thread_elems is None else thread_elems,
         )
+        arch = _itree_arch(device) if arch is None else arch
         stage_rpb = (
             math.gcd(prm.num_batches, arch.split_stage_rows)
             if (
@@ -639,14 +634,12 @@ def trait_itree_plan(
     arch: _ItreeArch | None = None,
 ) -> _ItreePlan | None:
     """Retune ragged looped plans whose arithmetic or storage favors less fusion."""
-    if N < 1:
-        return None
-    arch = _itree_arch(device) if arch is None else arch
     plan = itree_plan(N, M, itemsize, stage=stage, device=device, arch=arch)
     if plan is None or plan.shape != "looped" or all(tm.exact for tm in plan.tms):
         return plan
     from . import traits as T
 
+    arch = _itree_arch(device) if arch is None else arch
     elems = arch.lowp_thread_elems
     if (
         not elems
@@ -687,8 +680,6 @@ def itree_combine_plan(
     if arch.combine_async and arch.combine_rpb > WARP:
         # The async copy maps one warp's lanes onto a row's partials.
         raise ValueError("combine_async requires combine_rpb <= WARP")
-    if arch.combine_weights and not arch.uniform_count:
-        raise ValueError("combine_weights requires uniform_count")
     caps = _hw.caps(device)
     nbatch = itree.split[0]
     rpb = arch.combine_rpb
@@ -698,8 +689,9 @@ def itree_combine_plan(
         rpb = 1 << (live - 1).bit_length()
     grp = arch.combine_group_bytes // itemsize
     g = max(1, math.gcd(nbatch, grp)) if grp else 1
-    uniform = arch.uniform_count and tile.uniform_combine_ok(trait, itree.split)
-    weights = uniform and arch.combine_weights
+    mode = arch.uniform_combine
+    uniform = mode != "off" and tile.uniform_combine_ok(trait, itree.split)
+    weights = uniform and mode == "weights"
     # Uniform counts stage no count field; weights stage one row shared by the block.
     row_fields = nfields - 1 if uniform else nfields
     # A staged tile must DIVIDE the batch count -- a ragged last tile would need predication --
@@ -735,8 +727,7 @@ def itree_combine_plan(
         combine_grp=g,
         combine_tile=tile_n,
         combine_unroll=min(arch.combine_unroll, tile_n),
-        uniform_count=uniform and bool(tile_n),
-        combine_weights=uniform and weights and bool(tile_n),
+        uniform_combine=mode if uniform and tile_n else "off",
     )
 
 
