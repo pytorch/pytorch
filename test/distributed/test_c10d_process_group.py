@@ -16,6 +16,7 @@ from c10d_backend_common import (
     C10D_BACKENDS,
     C10dBackendTestContinuous,
     instantiate_backend_tests,
+    skip_unsupported,
 )
 
 from torch._C._distributed_c10d import WorkResult
@@ -90,8 +91,8 @@ class AbstractProcessGroupTest(C10dBackendTestContinuous):
 
         work = dist.all_reduce(tensor, async_op=True)
         work.wait()
-        if self.device_type == "cuda":
-            torch.cuda.synchronize()
+        if self.device_type != "cpu":
+            torch.accelerator.synchronize()
         duration = work._get_duration()
         self.assertGreater(duration, 0)
         self.assertTrue(math.isfinite(duration))
@@ -131,21 +132,23 @@ class AbstractProcessGroupTest(C10dBackendTestContinuous):
         dist.barrier()
 
     def test_work_wait_is_stream_ordered(self):
-        if self.device_type != "cuda":
-            self.skipTest(f"{self.backend_name} does not use CUDA")
+        if self.device_type == "cpu":
+            self.skipTest(f"{self.backend_name} does not use an accelerator")
         dist.all_reduce(torch.ones(1, device=self.device))
-        torch.cuda.synchronize()
-        torch.cuda._sleep(int(250 * get_cycles_per_ms()))
+        torch.accelerator.synchronize()
+        torch.get_device_module(self.device_type)._sleep(
+            int(250 * get_cycles_per_ms(self.device_type))
+        )
         work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
 
         work.wait()
 
-        self.assertFalse(torch.cuda.current_stream().query())
-        torch.cuda.synchronize()
+        self.assertFalse(torch.accelerator.current_stream().query())
+        torch.accelerator.synchronize()
 
     def test_work_result_future(self):
         if not self.supports_work_result:
-            self.skipTest(f"{self.backend_name} does not report work results")
+            skip_unsupported(self, "work results")
         work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
 
         result = work.get_future_result().wait()

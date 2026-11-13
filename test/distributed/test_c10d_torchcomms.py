@@ -9,7 +9,10 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
 from torch.testing._internal.common_utils import (
     find_free_port,
@@ -328,11 +331,11 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         os.environ["LOCAL_RANK"] = str(rank)
 
         store = dist.FileStore(rdvz_file, world_size)
-        device_id = torch.device(f"cuda:{rank}")
-        torch.cuda.set_device(rank)
+        device_id = torch.device(f"{cls.device_type}:{rank}")
+        torch.accelerator.set_device_index(rank)
 
         dist.init_process_group(
-            backend="nccl",
+            backend=dist.get_default_backend_for_device(cls.device_type),
             world_size=world_size,
             rank=rank,
             store=store,
@@ -352,8 +355,8 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
 
     def test_default_pg_has_cuda_backend(self):
         default_pg = dist.distributed_c10d._get_default_group()
-        cuda_be = default_pg._get_backend(torch.device("cuda"))
-        self.assertIsNotNone(cuda_be)
+        device_be = default_pg._get_backend(torch.device(self.device_type))
+        self.assertIsNotNone(device_be)
 
     def test_allreduce_on_auto_qualified_pg(self):
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
@@ -370,7 +373,7 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
     def test_bound_device_id_is_set(self):
         default_pg = dist.distributed_c10d._get_default_group()
         self.assertIsNotNone(default_pg.bound_device_id)
-        self.assertEqual(default_pg.bound_device_id.type, "cuda")
+        self.assertEqual(default_pg.bound_device_id.type, self.device_type)
 
     def test_monitored_barrier_on_multi_backend_group(self):
         # A device-bound world reports a multi-backend string from get_backend
@@ -390,6 +393,7 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
             wait_all_ranks=True,
         )
 
+    @onlyCUDA
     def test_new_group_nccl_lazy_builds_per_peer_group(self):
         # Passing backend="nccl-lazy" builds a per-peer, lazily-initialized
         # group (a dedicated comm + stream per send/recv peer) usable for P2P.
@@ -427,7 +431,9 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
 
         name = "tc_gate_stub"
         if name not in dist.Backend.backend_list:
-            dist.Backend.register_backend(name, _creator, devices=["cpu", "cuda"])
+            dist.Backend.register_backend(
+                name, _creator, devices=["cpu", self.device_type]
+            )
 
         ranks = list(range(self.world_size))
         g = dist.new_group(ranks=ranks, backend=name)
@@ -440,7 +446,10 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
 
 
 instantiate_device_type_tests(
-    TestC10dTorchCommsInitAutoQualify, globals(), only_for=["cuda"]
+    TestC10dTorchCommsInitAutoQualify,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
@@ -466,11 +475,11 @@ class TestC10dTorchCommsMixedBackends(C10dTorchCommsTestBase):
         os.environ["LOCAL_RANK"] = str(rank)
 
         store = dist.FileStore(rdvz_file, world_size)
-        device_id = torch.device(f"cuda:{rank}")
-        torch.cuda.set_device(rank)
+        device_id = torch.device(f"{cls.device_type}:{rank}")
+        torch.accelerator.set_device_index(rank)
 
         dist.init_process_group(
-            backend="cuda:nccl,cpu:fake",
+            backend=f"{cls.device_type}:{dist.get_default_backend_for_device(cls.device_type)},cpu:fake",
             world_size=world_size,
             rank=rank,
             store=store,
@@ -497,7 +506,7 @@ class TestC10dTorchCommsMixedBackends(C10dTorchCommsTestBase):
 
 
 instantiate_device_type_tests(
-    TestC10dTorchCommsMixedBackends, globals(), only_for=["cuda"]
+    TestC10dTorchCommsMixedBackends, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
 

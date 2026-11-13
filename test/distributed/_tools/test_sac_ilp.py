@@ -16,7 +16,12 @@ from torch.distributed._tools.mem_tracker import _ModState, MemTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.distributed._tools.sac_estimator import SACEstimator, SACStats
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfXpu,
+    TEST_XPU,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -153,6 +158,10 @@ class TestSACILP(TestCase):
 
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
+    @skipIfXpu(
+        msg="roofline runtime estimation is not enabled for xpu: "
+        "https://github.com/intel/torch-xpu-ops/issues/2340"
+    )
     def test_sac_ilp_case1(self):
         """
         This is a case where the memory budget is either binding or too tight,
@@ -197,6 +206,10 @@ class TestSACILP(TestCase):
 
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
+    @skipIfXpu(
+        msg="roofline runtime estimation is not enabled for xpu: "
+        "https://github.com/intel/torch-xpu-ops/issues/2340"
+    )
     def test_sac_ilp_case2(self):
         """
         This is a case where the memory budget is not binding, meaning that no
