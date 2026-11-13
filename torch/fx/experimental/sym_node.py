@@ -95,6 +95,14 @@ class SymNode:
     # Note [optimized_summation]: indicates that SymNode is an Add expression of the form
     # a + b + c + d... etc where all terms are unique symbols. This allows us to do some optimizations
     # for common patterns see _optimized_add.
+    #
+    # The flag describes the unresolved _expr. A replacement can turn expr into something
+    # that is no longer such a sum (s0 + s1 becomes 2*s1 after s0 -> s1), so only trust the
+    # flag together with expr when expr is _expr.
+    #
+    # The symbolic op memo replays a result's flag to every node whose operands resolve to
+    # the same expressions. That is sound only because _optimized_add is the sole place that
+    # sets the flag to True, and only for a result that is such a sum; keep it that way.
 
     # The unfortunate reason we have this here is because sympy sets  __slots__ = () for add expression,
     # so we cannot add the attribute directly to the sympy expression. Furthermore, we cannot use it as
@@ -115,7 +123,14 @@ class SymNode:
         self.shape_env = shape_env
         self.pytype = pytype
         self._optimized_summation = optimized_summation
+        # Memo for the `expr` property, i.e. shape_env.replace(self._expr).
+        # replace() depends only on shape_env.replacements and
+        # shape_env.var_to_range, so _expr_cache is valid iff both
+        # _replacements_version_counter == _expr_ver and
+        # _var_to_range_version_counter == _expr_range_ver. -1 means
+        # "never computed".
         self._expr_ver = -1
+        self._expr_range_ver = -1
         self._expr_cache: object | None = None
 
         # What's the difference between hint and constant?
@@ -233,10 +248,17 @@ class SymNode:
         ver = self.shape_env._replacements_version_counter
         if ver == 0:
             return self._expr
-        if self._expr_cache is not None and ver == self._expr_ver:
+        # replace() also depends on value ranges; see ShapeEnv._find.
+        range_ver = self.shape_env._var_to_range_version_counter
+        if (
+            self._expr_cache is not None
+            and ver == self._expr_ver
+            and range_ver == self._expr_range_ver
+        ):
             return self._expr_cache
         result = self.shape_env.replace(self._expr)
         self._expr_ver = ver
+        self._expr_range_ver = range_ver
         self._expr_cache = result
         return result
 
@@ -559,10 +581,10 @@ class SymNode:
         # NB: Only for integers!
         return SymNode(out, self.shape_env, int, out_hint, fx_node=fx_node)
 
-    def evaluate(self) -> bool | int | float:
+    def evaluate(self, size_oblivious: bool = False) -> bool | int | float:
         if self.shape_env is None:
             raise RuntimeError("shape_env is required to evaluate")
-        return self.shape_env.evaluate_sym_node(self)
+        return self.shape_env.evaluate_sym_node(self, size_oblivious)
 
     # You can manually trigger a guard with this function
     def guard_int(self, file: builtins.str, line: int) -> int:
@@ -621,6 +643,26 @@ class SymNode:
         if not self.is_bool():
             raise AssertionError("Expected bool type")
         return statically_known_true(SymBool(self))
+
+    def guard_size_oblivious(self, file: builtins.str, line: int) -> bool:
+        """
+        Like guard_bool, but if we encounter unbacked symbols, if those symbols
+        are size-like, we will treat them as >= 2 for the purposes of the analysis.
+
+        This CHANGES the runtime semantics, but all size-oblivious sites have been
+        audited to ensure that the runtime semantics don't change in a material way.
+        Acceptable runtime semantic changes are, e.g., squeeze() no longer dropping
+        an unbacked one size, or a tensor reporting as non-contiguous even if it's
+        contiguous if it would have been reported contiguous due to being empty.
+        """
+        # TODO: use the file/line for some useful diagnostic on why a
+        # guard occurred
+        r = self.evaluate(size_oblivious=True)
+        try:
+            return bool(r)
+        except Exception:
+            log.warning("Failed to convert to bool: %s", r)
+            raise
 
     def guard_or_false(self, file: builtins.str, line: int) -> bool:
         from torch.fx.experimental.symbolic_shapes import guard_or_false
@@ -1518,14 +1560,12 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         shape_env = self.shape_env
         cache = None
         cache_key = None
-        if shape_env is not None:
-            cache = shape_env._symop_cache
-            cache_key = (
-                method,
-                self._expr,
-                other._expr,
-                shape_env._replacements_version_counter,
-            )
+        # mod picks Mod or PythonMod from value ranges, so it isn't memoized.
+        if shape_env is not None and method != "mod":
+            cache_key = (method, self.expr, other.expr)
+            # Resolving the operands can bump the replacement version, which
+            # clears the memo, so fetch it afterwards.
+            cache = shape_env._get_symop_cache()
             cached = cache.get(cache_key)
             if cached is not None:
                 out, pytype, optimized_summation = cached
@@ -1567,8 +1607,8 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
                 (optimized_summation, out) = _optimized_add(
                     self.expr,
                     other.expr,
-                    self._optimized_summation,
-                    other._optimized_summation,
+                    self._optimized_summation and self.expr is self._expr,
+                    other._optimized_summation and other.expr is other._expr,
                 )
             elif method in ("eq", "ne", "ge", "gt", "le", "lt"):
                 import sympy
