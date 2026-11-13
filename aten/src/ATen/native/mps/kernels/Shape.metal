@@ -8,7 +8,7 @@ using namespace c10::metal;
 
 template <typename I, typename T_in, typename T_out>
 kernel void cat(
-    constant T_in* input [[buffer(0)]],
+    device const T_in* input [[buffer(0)]],
     device T_out* output [[buffer(1)]],
     constant CatSharedParams<I>& shared_params [[buffer(2)]],
     constant CatInputParams<I>& input_params [[buffer(3)]],
@@ -41,13 +41,13 @@ kernel void cat(
   output[output_offset] = static_cast<T_out>(input[input_offset]);
 }
 
-#define REGISTER_CAT_OP(I, T_in, T_out)                          \
-  template [[host_name("cat_" #I "_" #T_in "_" #T_out)]]         \
-  kernel void cat<I, T_in, T_out>(                               \
-      constant T_in * input [[buffer(0)]],                       \
-      device T_out * output [[buffer(1)]],                       \
-      constant CatSharedParams<I> & shared_params [[buffer(2)]], \
-      constant CatInputParams<I> & input_params [[buffer(3)]],   \
+#define REGISTER_CAT_OP(I, T_in, T_out)                         \
+  template [[host_name("cat_" #I "_" #T_in "_" #T_out)]]        \
+  kernel void cat<I, T_in, T_out>(                              \
+      device const T_in* input [[buffer(0)]],                   \
+      device T_out* output [[buffer(1)]],                       \
+      constant CatSharedParams<I>& shared_params [[buffer(2)]], \
+      constant CatInputParams<I>& input_params [[buffer(3)]],   \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_CAT_OP_ALL_INPUT_TYPES(I, T_out) \

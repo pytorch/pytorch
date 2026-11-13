@@ -23,7 +23,7 @@ torch._lazy.config.set_reuse_ir(True)
 
 @unittest.skipIf(IS_WINDOWS, "To be fixed")
 class TestLazyReuseIrDevice(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def testAdd(self, device):
         x = torch.randn(2, 3, 4, device=device)

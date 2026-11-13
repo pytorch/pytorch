@@ -447,7 +447,11 @@ def set_rotating_buffer_size(buffer_size: int) -> None:
 
 
 def get_rotating_buffer_size() -> int:
-    r"""Get the rotating buffer size in kilobytes."""
+    r"""Get the rotating buffer size in bytes.
+
+    A negative value passed to :func:`set_rotating_buffer_size` resolves to the
+    L2 cache size, which is what this returns in that case.
+    """
     return torch._C._cuda_tunableop_get_rotating_buffer_size()  # type: ignore[attr-defined]
 
 
@@ -459,8 +463,9 @@ def set_numerical_check_tolerances(
 
 
 def _clear_all() -> None:
-    r"""Drop all in-memory tuning results. Testing only: lets a test start from
-    an empty results manager instead of relying on globally disjoint shapes."""
+    r"""Drop all in-memory tuning results and close the results file. Testing
+    only: lets a test start from an empty results manager instead of relying on
+    globally disjoint shapes."""
     torch._C._cuda_tunableop_clear_all()  # type: ignore[attr-defined]
 
 

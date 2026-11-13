@@ -18,11 +18,12 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    preserves_device_selection,
     skipCPUIf,
     skipCUDAIf,
     skipGPUIf,
 )
-from torch.testing._internal.common_utils import parametrize, skipIfXpu
+from torch.testing._internal.common_utils import decorateIf, parametrize, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
@@ -30,6 +31,11 @@ from torch.utils._sympy.printers import PythonPrinter
 
 
 class TestUnbackedSymints(InductorTestCase):
+    setUp = preserves_device_selection(InductorTestCase.setUp)
+    setUpClass = classmethod(
+        preserves_device_selection(InductorTestCase.setUpClass.__func__)
+    )
+
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand(self, device):
@@ -181,6 +187,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @decorateIf(
+        unittest.skip("Triton kernel requires GPU"),
+        lambda params: params["device"] == "cpu",
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_kernel_grid(self, device):
@@ -574,6 +584,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @decorateIf(
+        unittest.skip("scaled_dot_product_flash_attention has no CPU backend"),
+        lambda params: params["device"] == "cpu",
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
@@ -600,6 +614,10 @@ class TestUnbackedSymints(InductorTestCase):
         x = torch.tensor([1.0, 0.0, 1.0, 0.0], device=device)
         torch.compile(fn, fullgraph=True)(x)
 
+    @decorateIf(
+        unittest.skip("scaled_dot_product_attention has no CPU backend"),
+        lambda params: params["device"] == "cpu",
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
@@ -677,6 +695,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @decorateIf(
+        unittest.skip("Combo kernels must be for GPU."),
+        lambda params: params["device"] == "cpu",
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     @inductor_config.patch({"combo_kernels": True, "benchmark_combo_kernel": True})
@@ -916,7 +938,7 @@ class TestUnbackedSymints(InductorTestCase):
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     def test_standalone_compile_reuses_fallback_unbacked_binding(self, device):
         from torch._inductor import standalone_compile
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
         from torch.fx.experimental.proxy_tensor import make_fx
 
         def fn(counts, x):
@@ -928,9 +950,9 @@ class TestUnbackedSymints(InductorTestCase):
         torch._dynamo.mark_dynamic(counts, 0, min=1, max=8)
         gm = make_fx(fn, tracing_mode="symbolic")(counts, x)
         fake_mode = next(
-            node.meta["val"].fake_mode
+            maybe_get_fake_mode(node.meta["val"])
             for node in gm.graph.nodes
-            if isinstance(node.meta.get("val"), FakeTensor)
+            if is_fake_tensor(node.meta.get("val"))
         )
 
         with (
@@ -1193,6 +1215,10 @@ class TestUnbackedSymints(InductorTestCase):
             ):
                 self.assertFalse(layout.is_stride_ordered([1, 0]))
 
+    @decorateIf(
+        unittest.skip("wrapper codegen unit test only needs one device"),
+        lambda p: p["device"] != "cpu",
+    )
     def test_python_wrapper_binds_symbol_from_compound_input_expr(self, device):
         if device != "cpu":
             self.skipTest("wrapper codegen unit test only needs one device")

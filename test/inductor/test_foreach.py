@@ -11,6 +11,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -963,6 +964,10 @@ class ForeachTests(TestCase):
         torch.compile(fn)(*args)
         return torch._inductor.metrics.ir_nodes_pre_fusion
 
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] != "cpu" and (not HAS_GPU),
+    )
     @parametrize("case", ("add", "mul_self", "sgd_momentum"))
     @parametrize("device", ("cpu", GPU_TYPE))
     def test_inplace_foreach_computed_into_target(self, device, case):
@@ -999,6 +1004,10 @@ class ForeachTests(TestCase):
         self.assertEqual(self._nodes_pre_fusion(fn, x, y), 1)
         self.assertEqual(x, x_eager)
 
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] != "cpu" and (not HAS_GPU),
+    )
     @parametrize("device", ("cpu", GPU_TYPE))
     def test_inplace_foreach_reads_target_elsewhere(self, device):
         # https://github.com/pytorch/pytorch/issues/198033: computed straight
@@ -1545,6 +1554,41 @@ class ForeachTests(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args_clone)
         self.assertEqual(actual, expected)
+
+    @requires_cuda_and_triton
+    def test_foreach_pow_int_fallback(self):
+        from torch._inductor import scheduler
+
+        def fn_inplace(t, e):
+            torch._foreach_pow_(t, e)
+            return t[0]
+
+        def fn_outplace(t, e):
+            res = torch._foreach_pow(t, e)
+            return res[0]
+
+        create_foreach_nodes_calls = 0
+        orig_create_foreach_nodes = scheduler.Scheduler.create_foreach_nodes
+
+        def create_foreach_nodes_spy(self):
+            nonlocal create_foreach_nodes_calls
+            create_foreach_nodes_calls += 1
+            return orig_create_foreach_nodes(self)
+
+        t = [torch.tensor([2], device=GPU_TYPE, dtype=torch.int32)]
+        e = [torch.tensor(3, device=GPU_TYPE, dtype=torch.int32)]
+        with mock.patch.object(
+            scheduler.Scheduler, "create_foreach_nodes", create_foreach_nodes_spy
+        ):
+            self.assertEqual(
+                fn_inplace([t[0].clone()], e),
+                torch.compile(fn_inplace)([t[0].clone()], e),
+            )
+            self.assertEqual(
+                fn_outplace([t[0].clone()], e),
+                torch.compile(fn_outplace)([t[0].clone()], e),
+            )
+        self.assertGreaterEqual(create_foreach_nodes_calls, 2)
 
 
 if __name__ == "__main__":

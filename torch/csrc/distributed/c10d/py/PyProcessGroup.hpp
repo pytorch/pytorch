@@ -26,6 +26,27 @@ class PyProcessGroup : public ProcessGroup {
           timeout);
     }
 
+    bool isCompleted() override {
+      PYBIND11_OVERRIDE_NAME(bool, Work, "is_completed", isCompleted);
+    }
+
+    void synchronize() override {
+      PYBIND11_OVERRIDE(void, Work, synchronize);
+    }
+
+    int sourceRank() const override {
+      PYBIND11_OVERRIDE_NAME(int, Work, "source_rank", sourceRank);
+    }
+
+    std::vector<at::Tensor> result() override {
+      PYBIND11_OVERRIDE(std::vector<at::Tensor>, Work, result);
+    }
+
+    void blockCurrentStream() override {
+      PYBIND11_OVERRIDE_NAME(
+          void, Work, "block_current_stream", blockCurrentStream);
+    }
+
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
       // We cannot use PYBIND11_OVERRIDE because:
       // 1. We have to >MANUALLY< unwrap the PyFutureWrapper and
@@ -42,6 +63,31 @@ class PyProcessGroup : public ProcessGroup {
       }
 
       return Work::getFuture();
+    }
+
+    bool hasFutureResult() const override {
+      pybind11::gil_scoped_acquire gil;
+      return static_cast<bool>(pybind11::get_override(
+          static_cast<const Work*>(this), "get_future_result"));
+    }
+
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override {
+      // Unwraps the PyFutureWrapper, as getFuture does.
+      pybind11::gil_scoped_acquire gil;
+      auto override = pybind11::get_override(
+          static_cast<const Work*>(this), "get_future_result");
+      if (!override) {
+        return Work::getFutureResult();
+      }
+      py::object o = override();
+      TORCH_CHECK_TYPE(
+          py::isinstance<torch::jit::PythonFutureWrapper>(o),
+          py::type::of(py::cast(static_cast<const Work*>(this)))
+              .attr("__qualname__")
+              .cast<std::string>(),
+          ".get_future_result() must return a torch.futures.Future, got ",
+          py::type::of(o).attr("__qualname__").cast<std::string>());
+      return o.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()->fut;
     }
   };
 
@@ -77,12 +123,69 @@ class PyProcessGroup : public ProcessGroup {
       pyWork_ = py::object();
     }
 
+    // Work::synchronize unregisters this holder, which is what ProcessGroup
+    // registered, from the work registry.
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
-      return work_->wait(timeout);
+      auto completed = work_->wait(timeout);
+      Work::synchronize();
+      return completed;
+    }
+
+    void synchronize() override {
+      work_->synchronize();
+      Work::synchronize();
+    }
+
+    bool isCompleted() override {
+      return work_->isCompleted();
+    }
+
+    bool isSuccess() const override {
+      return work_->isSuccess();
+    }
+
+    std::exception_ptr exception() const override {
+      return work_->exception();
+    }
+
+    int sourceRank() const override {
+      return work_->sourceRank();
+    }
+
+    std::vector<at::Tensor> result() override {
+      return work_->result();
+    }
+
+    void blockCurrentStream() override {
+      work_->blockCurrentStream();
+    }
+
+    void abort() override {
+      work_->abort();
     }
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
       return work_->getFuture();
+    }
+
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override {
+      return work_->getFutureResult();
+    }
+
+    bool hasFutureResult() const override {
+      return work_->hasFutureResult();
+    }
+
+    float getDuration() const override {
+      return work_->getDuration();
+    }
+
+    uint64_t getSequencenumber() const override {
+      return work_->getSequencenumber();
+    }
+
+    std::chrono::milliseconds getTimeout() const override {
+      return work_->getTimeout();
     }
 
    private:
