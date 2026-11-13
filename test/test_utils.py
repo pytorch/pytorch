@@ -667,7 +667,7 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-from torch.utils.collect_env import get_pretty_env_info
+from torch.utils.collect_env import _decode_output, get_pretty_env_info, run
 
 
 @unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
@@ -678,6 +678,31 @@ class TestCollectEnv(TestCase):
         self.assertIn("ROCm SDK used to build PyTorch:", info_output)
         self.assertIn("HIP used to build PyTorch:", info_output)
         self.assertNotIn("ROCM used to build PyTorch:", info_output)
+
+    def test_decode_output_prefers_platform_encoding(self):
+        # These GBK bytes are also valid UTF-8, so trying UTF-8 first would
+        # silently mis-decode output that the platform encoding decodes correctly.
+        raw = "专业".encode("gbk")
+        self.assertNotEqual(raw.decode("utf-8"), "专业")
+        self.assertEqual(_decode_output(raw, "cp936"), "专业")
+
+    def test_decode_output_replaces_undecodable_bytes(self):
+        self.assertEqual(_decode_output(b"\x81\xff name", "cp936"), "�� name")
+
+    # Issue 203948: powershell.exe can write UTF-8 while the OEM code page is a
+    # multi-byte one, which used to raise UnicodeDecodeError.
+    def test_run_falls_back_to_utf8(self):
+        caption = "Microsoft Windows 11 专业版"
+        with self.assertRaises(UnicodeDecodeError):
+            caption.encode().decode("cp936")
+        proc = mock.Mock(returncode=0)
+        proc.communicate.return_value = (caption.encode(), b"")
+        with (
+            mock.patch("torch.utils.collect_env.subprocess.Popen", return_value=proc),
+            mock.patch("torch.utils.collect_env.get_platform", return_value="linux"),
+            mock.patch("locale.getpreferredencoding", return_value="cp936"),
+        ):
+            self.assertEqual(run("cmd"), (0, caption, ""))
 
 
 class TestHipify(TestCase):
