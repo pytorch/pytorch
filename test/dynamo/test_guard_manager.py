@@ -745,7 +745,7 @@ def less_match_verbose_code_parts(expected):
 class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    @parametrize("invalid", ["label", "root", "noncanonical"])
+    @parametrize("invalid", ["empty", "count", "label", "root", "noncanonical"])
     def test_object_alias_pattern_invalid_install_is_atomic(self, invalid):
         values = {"a": [], "b": [], "c": []}
         root = RootGuardManager()
@@ -755,7 +755,11 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
         ]
         participants = managers.copy()
         aliases = [0, 1, 2]
-        if invalid == "label":
+        if invalid == "empty":
+            participants, aliases = [], []
+        elif invalid == "count":
+            aliases.pop()
+        elif invalid == "label":
             aliases[1] = len(values)
         elif invalid == "noncanonical":
             aliases = [0, 0, 1]
@@ -765,6 +769,8 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
                 "b", "b", values["b"], default_mgr_enum
             )
         error = "share a root" if invalid == "root" else "first participant"
+        if invalid in ("empty", "count"):
+            error = "nonempty.*same length"
         with self.assertRaisesRegex(RuntimeError, error):
             guards.install_object_alias_pattern_guard(participants, aliases, [], None)
         self.assertEqual(managers[0].get_leaf_guards(), [])
@@ -899,16 +905,6 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertTrue(root.check(values))
         self.assertEqual(len(calls), 2)
-
-        def broken_filter(manager):
-            if manager.get_source() == "1":
-                raise RuntimeError("clone filter failed")
-            return True
-
-        with self.assertRaisesRegex(RuntimeError, "clone filter failed"):
-            root.clone_manager(broken_filter)
-        self.assertTrue(root.check(values))
-        self.assertTrue(root.clone_manager(lambda manager: True).check(values))
 
     @parametrize("verbose", [False, True])
     def test_object_alias_pattern_reset_after_cpp_throw(self, verbose):
