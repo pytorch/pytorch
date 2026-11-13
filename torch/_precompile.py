@@ -438,9 +438,10 @@ class DynamoTracer:
     (``require_complete``: a bypassed or uncovered frame, a call that raised) or one
     whose dropped guards told captured variants apart or hang off a
     configuration-chosen slot or a mutable MRO base (``require_no_risky_drops``).
-    Keep mutable bases importable through stable module/name references. Other dropped guards,
-    such as the identity guards every model drops because they cannot be serialized,
-    are listed in the artifact rather than refused.
+    Keep mutable MRO bases and their metaclasses importable through stable
+    module/name references; nested namedtuple classes cannot be serialized by reference.
+    Other dropped guards, such as the identity guards every model drops because they
+    cannot be serialized, are listed in the artifact rather than refused.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
