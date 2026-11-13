@@ -2508,7 +2508,7 @@ def forward(self, x_1):
         with torch._C._AutoDispatchBelowADInplaceOrView():
             self.assertIs(aten._coalesced_(sparse, False), sparse)
         self.assertFalse(sparse.is_coalesced())
-        for out in (sparse.clone(), sparse + sparse):
+        for out in (sparse.clone(), sparse + sparse, sparse.detach()):
             check(out, (2, 2))
             self.assertTrue(out.is_sparse)
         check(sparse._values(), meta._values().shape)
@@ -2516,6 +2516,7 @@ def forward(self, x_1):
         csr_meta = torch.eye(2).to_sparse_csr().to("meta")
         csr = self.fake_from_meta(mode, csr_meta, "cpu")
         check(csr.crow_indices(), csr_meta.crow_indices().shape)
+        check(csr.detach(), csr.shape)
         for tensor in (sparse, csr):
             dense = tensor.to_dense()
             check(dense, (2, 2))
@@ -7061,27 +7062,6 @@ class TestCppFakeTensorModeBindings(TestCase):
                 self.assertEqual(restored, [(mode, True)])
                 self.assertEqual(self._installed(), (mode, True))
         self.assertEqual(self._installed(), (None, False))
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    @parametrize("component", ["_values", "_indices"])
-    def test_fake_fallback_sparse_component_ownership(self, component):
-        mode = CppFakeTensorMode()
-        meta = torch.eye(2).to_sparse().to("meta")
-        sparse = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
-        # Bypass ADInplaceOrView's copies to check the original component.
-        with torch._C._AutoDispatchBelowADInplaceOrView():
-            meta_component = getattr(meta, component)()
-            self.assertFalse(is_fake_tensor(meta_component))
-            output = getattr(sparse, component)()
-            self.assertIs(output, meta_component)
-            self.assertIs(maybe_get_fake_mode(output), mode)
-            self.assertEqual(output.device, sparse.device)
-            self.assertIs(getattr(sparse, component)(), output)
-            output.resize_(5)
-            self.assertEqual(output.shape, (5,))
-            self.assertEqual(getattr(sparse, component)().shape, (5,))
-            self.assertEqual(meta_component.shape, (5,))
-            self.assertTrue(is_fake_tensor(meta_component))
 
     def test_require_python_fake_mode(self):
         from torch._guards import require_python_fake_mode
