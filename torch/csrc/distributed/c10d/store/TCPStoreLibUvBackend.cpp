@@ -800,6 +800,19 @@ class UvClient : public UvTcpSocket {
   LibUVStoreDaemon* store;
   bool transportChecked = false;
   std::unique_ptr<TLSSession> tls;
+  uv_timer_t* handshakeTimer_ = nullptr;
+
+  void stopTLSHandshakeTimer() {
+    auto* timer = std::exchange(handshakeTimer_, nullptr);
+    if (timer == nullptr) {
+      return;
+    }
+    uv_close(reinterpret_cast<uv_handle_t*>(timer), [](uv_handle_t* handle) {
+      std::unique_ptr<uv_timer_t> timer(reinterpret_cast<uv_timer_t*>(handle));
+      auto client = c10::intrusive_ptr<UvClient>::reclaim(
+          static_cast<UvClient*>(uv_handle_get_data(handle)));
+    });
+  }
 
  protected:
   void processBuf(const uv_buf_t* buf, size_t nread) override {
@@ -868,6 +881,9 @@ class UvClient : public UvTcpSocket {
           break;
         }
         stream.append(uv_buf_init(chunk.release(), *n));
+      }
+      if (tls->handshakeComplete()) {
+        stopTLSHandshakeTimer();
       }
       flushTLS();
       parseCommands();
@@ -1381,6 +1397,34 @@ class UvClient : public UvTcpSocket {
     return c10::intrusive_ptr<UvClient>::reclaim_copy(this);
   }
 
+  void startTLSHandshakeTimer(uv_loop_t* loop) {
+    if (!store->tlsContext()) {
+      return;
+    }
+    auto timer = std::make_unique<uv_timer_t>();
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        uv_timer_init(loop, timer.get()) == 0,
+        "TCPStore TLS: cannot initialize handshake timer");
+    uv_handle_set_data(reinterpret_cast<uv_handle_t*>(timer.get()), this);
+    at::raw::intrusive_ptr::incref(this);
+    handshakeTimer_ = timer.release();
+    int res = uv_timer_start(
+        handshakeTimer_,
+        [](uv_timer_t* timer) {
+          auto* client = static_cast<UvClient*>(
+              uv_handle_get_data(reinterpret_cast<uv_handle_t*>(timer)));
+          C10D_DEBUG(
+              "TCPStore TLS handshake timed out for {}", client->address());
+          client->close();
+          client->stopTLSHandshakeTimer();
+        },
+        10000,
+        0);
+    TORCH_CHECK_WITH(
+        DistStoreError, res == 0, "TCPStore TLS: cannot start handshake timer");
+  }
+
   std::vector<uint8_t> encode(std::vector<uint8_t>&& data) override {
     if (isShuttingDown()) {
       return {};
@@ -1402,6 +1446,7 @@ class UvClient : public UvTcpSocket {
 
  protected:
   void onClose() override {
+    stopTLSHandshakeTimer();
     store->unregisterClient(iptr());
   }
 };
@@ -1411,6 +1456,7 @@ void LibUVStoreDaemon::onConnect(int status) {
   registerClient(client);
   try {
     tcpServer_->accept(client);
+    client->startTLSHandshakeTimer(&loop_);
     client->startRead();
   } catch (std::exception& e) {
     C10D_WARNING("Failed to accept client due to {}", e.what());
