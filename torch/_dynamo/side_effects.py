@@ -547,16 +547,18 @@ class SideEffects:
         mutation_kind: AttrMutationKind = AttrMutationKind.GENERIC_SETATTR,
         mutated_source: Source | None = None,
     ) -> None:
+        output_graph = self.output_graph_weakref()
         if (
-            not isinstance(value, variables.DeletedVariable)
+            output_graph is not None
+            and output_graph.deleted_globals_by_dict
+            and not isinstance(value, variables.DeletedVariable)
             and isinstance(item, variables.PythonModuleVariable)
             and not self.has_pending_mutation_of_attr(item, name)
         ):
             # No pending on the module VT: the replayed delete races this
             # write. With one (e.g. an inlined delete), the setattr chain
             # orders them.
-            if output_graph := self.output_graph_weakref():
-                output_graph.check_deleted_global_write(item.value.__dict__, name)
+            output_graph.check_deleted_global_write(item.value.__dict__, name)
         if not self.is_attribute_mutation(item):
             raise AssertionError(
                 f"Expected attribute mutation for {item} in store_attr"

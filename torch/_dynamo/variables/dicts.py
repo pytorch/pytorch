@@ -597,7 +597,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
         # Unhashable key check happens inside HashableTracker (tp_hash_impl → TypeError).
-        if key.is_python_constant():
+        if tx.output.deleted_globals_by_dict and key.is_python_constant():
             self._check_deleted_global_dict_access(
                 tx, key.as_python_constant(), write=False
             )
@@ -609,7 +609,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
-        if item.is_python_constant():
+        if tx.output.deleted_globals_by_dict and item.is_python_constant():
             self._check_deleted_global_dict_access(
                 tx, item.as_python_constant(), write=False
             )
@@ -704,6 +704,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         check_positional(tx, "get", len(args), 1, 2)
+        if tx.output.deleted_globals_by_dict and args[0].is_python_constant():
+            self._check_deleted_global_dict_access(
+                tx, args[0].as_python_constant(), write=False
+            )
         key = self._lookup_key(tx, args[0])
         value = self.items.get(key)
         if value is None or type(value) is variables.DeletedVariable:
@@ -724,6 +728,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if not self.is_mutable():
             return None
         check_positional(tx, "pop", len(args), 1, 2)
+        if tx.output.deleted_globals_by_dict and args[0].is_python_constant():
+            self._check_deleted_global_dict_access(
+                tx, args[0].as_python_constant(), write=True
+            )
         if not self.items and not isinstance(self, OrderedDictVariable):
             self.install_dict_keys_match_guard()
             if len(args) == 1:
@@ -810,7 +818,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if args or kwargs:
+        if tx.output.deleted_globals_by_dict and (args or kwargs):
             for k in kwargs:
                 self._check_deleted_global_dict_access(tx, k, write=True)
             if args:
@@ -870,11 +878,11 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if args[0].is_python_constant():
+        check_positional(tx, "setdefault", len(args), 1, 2)
+        if tx.output.deleted_globals_by_dict and args[0].is_python_constant():
             self._check_deleted_global_dict_access(
                 tx, args[0].as_python_constant(), write=True
             )
-        check_positional(tx, "setdefault", len(args), 1, 2)
         if (
             isinstance(self, OrderedDictVariable)
             and self.python_type() is not collections.OrderedDict
@@ -984,10 +992,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
         # value=None signals delete (CPython NULL sentinel).
         self.install_dict_keys_match_guard()
-        if value is not None and key.is_python_constant():
-            self._check_deleted_global_dict_access(
-                tx, key.as_python_constant(), write=True
-            )
+        if tx.output.deleted_globals_by_dict and key.is_python_constant():
+            self._check_deleted_global_dict_access(tx, key.as_python_constant(), True)
         if isinstance(self, OrderedDictVariable):
             _guard_nan_key(key)
             hkey = HashableTracker(key)

@@ -2404,26 +2404,6 @@
       ]
     }
   ],
-  "GB8424": [
-    {
-      "Gb_type": "DELETE_GLOBAL followed by a module-object read",
-      "Context": "name: {name}",
-      "Explanation": "The replayed global delete unbinds the name, but this read would consult the real module, which still holds the pre-call value. Eager resume has to run the read instead.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB3610": [
-    {
-      "Gb_type": "DELETE_GLOBAL followed by a module-object write",
-      "Context": "name: {name}",
-      "Explanation": "The replayed global delete runs after this write and unbinds the name. Eager resume has to order them instead.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB5821": [
     {
       "Gb_type": "register_post_accumulate_grad_hook on an intermediate tensor",
@@ -6391,6 +6371,26 @@
       "Context": "str(body_lifted_freevars)",
       "Explanation": "wrap_with_autocast expects no freevars.",
       "Hints": []
+    }
+  ],
+  "GB2259": [
+    {
+      "Gb_type": "DELETE_GLOBAL followed by a module-object read",
+      "Context": "name: {name}",
+      "Explanation": "The replayed global delete unbinds the name, but this read would consult the real module, which still holds the pre-call value. Eager resume has to run the read instead.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0876": [
+    {
+      "Gb_type": "DELETE_GLOBAL followed by a module-object write",
+      "Context": "name: {name}",
+      "Explanation": "The replayed global delete runs after this write and unbinds the name. Eager resume has to order them instead.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0335": [

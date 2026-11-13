@@ -3734,6 +3734,17 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             ]
         no_keywords(tx, "getattr", kwargs)
         check_positional(tx, "getattr", len(args), 2, 3)
+        if (
+            tx.output.deleted_globals_by_dict
+            and isinstance(args[0], variables.PythonModuleVariable)
+            and args[1].is_python_constant()
+        ):
+            # Above tp_getattro: the read below would return the stale
+            # pre-call value, or an Unsupported raised there gets folded to
+            # it here.
+            tx.output.check_deleted_global_read(
+                args[0].value.__dict__, args[1].as_python_constant()
+            )
         try:
             fold_constant = False
             if args[1].is_python_constant():

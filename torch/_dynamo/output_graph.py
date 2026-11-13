@@ -1072,14 +1072,11 @@ class OutputGraph(OutputGraphCommon):
         self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
         self._cached_replayed_side_effect_source_refs: tuple[str, ...] | None = None
 
-    def _deleted_global_names(self, globals_dict: Any) -> set[str]:
-        entry = self.deleted_globals_by_dict.get(id(globals_dict))
-        return entry[1] if entry is not None else set()
-
     # TODO(follow-up): replace these breaks with real support, ordering the
     # module-object access against the replayed global delete.
     def check_deleted_global_read(self, globals_dict: Any, name: str) -> None:
-        if name in self._deleted_global_names(globals_dict):
+        entry = self.deleted_globals_by_dict.get(id(globals_dict))
+        if entry is not None and name in entry[1]:
             unimplemented(
                 gb_type="DELETE_GLOBAL followed by a module-object read",
                 context=f"name: {name}",
@@ -1093,8 +1090,8 @@ class OutputGraph(OutputGraphCommon):
             )
 
     def check_deleted_global_write(self, globals_dict: Any, name: str | None) -> None:
-        names = self._deleted_global_names(globals_dict)
-        if names and (name is None or name in names):
+        entry = self.deleted_globals_by_dict.get(id(globals_dict))
+        if entry is not None and (name is None or name in entry[1]):
             unimplemented(
                 gb_type="DELETE_GLOBAL followed by a module-object write",
                 context=f"name: {name}",

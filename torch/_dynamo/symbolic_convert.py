@@ -3498,8 +3498,10 @@ class InstructionTranslatorBase(
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop().realize()
-        if isinstance(obj, variables.PythonModuleVariable) and not (
-            self.output.side_effects.has_pending_mutation_of_attr(obj, attr)
+        if (
+            self.output.deleted_globals_by_dict
+            and isinstance(obj, variables.PythonModuleVariable)
+            and not self.output.side_effects.has_pending_mutation_of_attr(obj, attr)
         ):
             # Above tp_getattro: its Unsupported is constant-folded to a stale
             # read of the real module here for python-constant objects. With a
