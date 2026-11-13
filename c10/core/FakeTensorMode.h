@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/DeviceType.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/macros/Export.h>
@@ -9,7 +8,6 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -65,9 +63,6 @@ struct C10_API FakeTensorMode {
   // Whether ops also run on the real tensors the fakes carry.
   bool propagate_real_tensors_ = false;
 
-  // Captured at mode creation so device resolution does not call Python.
-  std::optional<c10::DeviceType> prefer_device_type_ = std::nullopt;
-
   // Defined out of line, as both instantiate constant_storage_mapping_'s
   // destructor, which needs TensorImpl to be complete.
   FakeTensorMode(
@@ -88,7 +83,7 @@ struct C10_API FakeTensorMode {
 
   // return the real constant a fake tensor was created from, or nullptr
   c10::intrusive_ptr<c10::TensorImpl> get_constant(
-      const c10::TensorImpl* fake_impl) const;
+      c10::TensorImpl* fake_impl) const;
   // drop constant tracking for fake tensors aliasing this mutated storage
   void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
   // drop non-CPU constants, keeping cheap CPU ones for constant folding
