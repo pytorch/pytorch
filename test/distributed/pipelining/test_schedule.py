@@ -1701,9 +1701,14 @@ class ScheduleTest(TestCase):
             ScheduleDualPipeV,
         ],
     )
-    def test_zero_bubble_schedule_errors_with_compile(self, ScheduleClass):
+    @parametrize("compile_style", ["wrapper", "in_place_submodule"])
+    def test_zero_bubble_schedule_errors_with_compile(
+        self, ScheduleClass, compile_style
+    ):
         """
-        Test that zero bubble schedules raise an error when used with torch.compile.
+        Test that zero bubble schedules raise an error when used with torch.compile,
+        both for the torch.compile(module) wrapper and for module.compile(), which
+        compiles in place and creates no OptimizedModule.
         """
         store = FakeStore()
         torch.distributed.init_process_group(
@@ -1712,17 +1717,25 @@ class ScheduleTest(TestCase):
         n_stages = 1
         device = torch.device("cpu")
         model = MultiMLP(8, n_layers=n_stages)
-        # full_mod
-        compiled_model = torch.compile(model)
-        self.assertTrue(isinstance(compiled_model, OptimizedModule))
+        if compile_style == "wrapper":
+            # full_mod
+            stage_module = torch.compile(model)
+            self.assertTrue(isinstance(stage_module, OptimizedModule))
+        else:
+            # per-layer in-place compile
+            model.layers[0].compile()
+            stage_module = model
+            self.assertFalse(
+                any(isinstance(m, OptimizedModule) for m in stage_module.modules())
+            )
         stage = PipelineStage(
-            compiled_model,
+            stage_module,
             0,
             n_stages,
             device,
         )
         try:
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "torch.compile"):
                 ScheduleClass([stage], 2)
         finally:
             torch.distributed.destroy_process_group()
