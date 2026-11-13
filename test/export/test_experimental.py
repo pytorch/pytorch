@@ -846,7 +846,7 @@ def forward(self, args_0):
         finally:
             pytree._deregister_pytree_node(GlobalContext)
 
-    def test_dynamo_graph_capture_dict_keys_getitem(self):
+    def test_dynamo_graph_capture_const_dict_key_source(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 return x * 2

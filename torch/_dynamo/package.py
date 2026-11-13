@@ -291,12 +291,14 @@ class FunctionPicklerBase(pickle.Pickler):
 
     @staticmethod
     def _is_literal(value: object) -> bool:
-        # An always-picklable constant: the singletons and scalars dynamo treats
+        # An always-picklable constant: the singletons and builtin literals Dynamo treats
         # as constants, NOT every common_constant_type (torch.finfo/iinfo do not
         # pickle). The guard pickler carries these whether or not a guard reads
         # them: pruning buys nothing and, since _keep matches by id, would make
         # the rebuilt state depend on whether some unrelated guard happened to
         # register the interned value. The AOT pickler skips probing them.
+        # This includes numeric/string literals and torch.device, unlike is_identity_singleton,
+        # which requires shared identity rather than just safe serialization.
         if value is None or value is Ellipsis or value is NotImplemented:
             return True
         return type(value) in (

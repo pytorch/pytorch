@@ -1224,13 +1224,7 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_global("frozenset"),
-                ]
-            )
-        )
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "frozenset"))
         codegen.foreach([x.vt for x in self.set_items])
         codegen.extend_output(
             [
