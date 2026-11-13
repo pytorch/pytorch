@@ -9,7 +9,8 @@ during symbolic execution. Used by both ConstDictVariable and SetVariable.
 import functools
 import inspect
 import types
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextvars import ContextVar
 from typing import cast, TYPE_CHECKING
 
 import torch
@@ -55,6 +56,11 @@ _SAFE_KEY_EQUALITIES = (
     torch.Tensor.__eq__,
     torch.device.__eq__,
     torch.Size.__eq__,  # THPSize uses PyTuple_Type.tp_richcompare.
+)
+
+
+_identity_key_iteration: ContextVar[bool] = ContextVar(
+    "identity_key_iteration", default=False
 )
 
 
@@ -760,6 +766,22 @@ class HashableTracker:
     def __hash__(self) -> int:
         return self._hash
 
+    @staticmethod
+    def iter_keys_by_identity(
+        mapping: Iterable["HashableTracker"],
+    ) -> Iterator["HashableTracker"]:
+        # OrderedDict iteration compares known stored keys by identity, without callbacks.
+        iterator = iter(mapping)
+        while True:
+            token = _identity_key_iteration.set(True)
+            try:
+                key = next(iterator)
+            except StopIteration:
+                return
+            finally:
+                _identity_key_iteration.reset(token)
+            yield key
+
     def __eq__(self, other: object) -> bool:
         """
         Checks equality between two HashableTracker instances.
@@ -773,6 +795,8 @@ class HashableTracker:
         Returns:
             True if the underlying variable trackers are Python-equal, False otherwise
         """
+        if _identity_key_iteration.get():
+            return self is other
         if not isinstance(other, HashableTracker):
             return False
         if self.vt is other.vt:
