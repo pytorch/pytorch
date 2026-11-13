@@ -72,6 +72,7 @@ class _NormPartial(Partial):
     Converting from partial to replicate wants to ultimately get:
         Rank 0/1: [sqrt(t1^2 + t2^2 + t3^2 + t4^2)]
     This is achieved by: x^p -> allreduce sum -> x^(1/p).
+    For fp16/bf16 inputs these steps run in fp32 and the result is cast back.
     """
 
     norm_type: int | float = 2
@@ -94,18 +95,23 @@ class _NormPartial(Partial):
     ) -> torch.Tensor:
         if not isinstance(shard_spec, Shard):
             raise AssertionError(f"Expected Shard, got {type(shard_spec)}")
+        dtype = tensor.dtype
         tensor = self._pre_reduce_transform(tensor)
         reduced_tensor = super()._reduce_shard_value(tensor, mesh, mesh_dim, shard_spec)
-        return self._post_reduce_transform(reduced_tensor)
+        return self._post_reduce_transform(reduced_tensor).to(dtype)
 
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
+        dtype = tensor.dtype
         tensor = self._pre_reduce_transform(tensor)
         reduced_tensor = super()._reduce_value(tensor, mesh, mesh_dim)
-        return self._post_reduce_transform(reduced_tensor)
+        return self._post_reduce_transform(reduced_tensor).to(dtype)
 
     def _pre_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
+        # Raise fp16/bf16 norms to the power in fp32 so the power cannot overflow.
+        if tensor.dtype in (torch.float16, torch.bfloat16):
+            tensor = tensor.float()
         return tensor**self.norm_type
 
     def _post_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
@@ -1070,6 +1076,16 @@ POOL_SPATIAL_RANK: dict[torch._ops.OpOverload, int] = {
     aten.max_pool1d_with_indices.default: 1,
     aten.max_pool2d_with_indices.default: 2,
     aten.max_pool3d_with_indices.default: 3,
+    aten.max_unpool2d.default: 2,
+    aten.max_unpool3d.default: 3,
+    aten._adaptive_avg_pool2d_backward.default: 2,
+    aten._adaptive_avg_pool3d_backward.default: 3,
+    aten.avg_pool2d_backward.default: 2,
+    aten.avg_pool3d_backward.default: 3,
+    aten.adaptive_max_pool2d_backward.default: 2,
+    aten.adaptive_max_pool3d_backward.default: 3,
+    aten.max_pool2d_with_indices_backward.default: 2,
+    aten.max_pool3d_with_indices_backward.default: 3,
 }
 
 AVG_POOL_OPS = [
@@ -1837,6 +1853,9 @@ def interp_upsample_1out_1in_strategy(
         aten.max_unpool2d.default,
         aten.max_unpool3d.default,
         aten._adaptive_avg_pool2d_backward.default,
+        aten._adaptive_avg_pool3d_backward.default,
+        aten.avg_pool2d_backward.default,
+        aten.avg_pool3d_backward.default,
     ],
     schema_info=RuntimeSchemaInfo(1),
 )
@@ -1845,15 +1864,33 @@ def interp_pool_1out_2in_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # 1 output + 2 inputs = 3 placements; shard on batch (0) and channel (1)
-    return [
+    # 1 output + 2 inputs = 3 placements: [output, grad_output/self, self/indices]
+    input_meta = cast(TensorMeta, args_schema[0])
+    strategies: list[list[Placement | _ShardingPlaceholder]] = [
         [_ShardingPlaceholder(0)] * 3,
-        [_ShardingPlaceholder(1)] * 3,
     ]
+    spatial_rank = POOL_SPATIAL_RANK[op]
+    if len(input_meta.shape) >= spatial_rank + 2:
+        strategies.append([_ShardingPlaceholder(1)] * 3)
+    if op not in (aten.max_unpool2d.default, aten.max_unpool3d.default):
+        # The avg-pool backward ops are linear in grad_output and only read the
+        # shape of self, so P(sum/avg) pass through. max_unpool is excluded:
+        # overlapping windows give duplicate indices, and it overwrites rather
+        # than accumulates at them, so summing per-rank partial results would
+        # mix values from different duplicates.
+        for reduce_op in ("sum", "avg"):
+            p = Partial(reduce_op)
+            strategies.append([p, p, Replicate()])
+    return strategies
 
 
 @register_single_dim_strategy(
-    [aten.max_pool2d_with_indices_backward.default],
+    [
+        aten.max_pool2d_with_indices_backward.default,
+        aten.max_pool3d_with_indices_backward.default,
+        aten.adaptive_max_pool2d_backward.default,
+        aten.adaptive_max_pool3d_backward.default,
+    ],
     schema_info=RuntimeSchemaInfo(1),
 )
 def pool_backward_strategy(
@@ -1861,14 +1898,14 @@ def pool_backward_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # max_pool2d_with_indices_backward(grad_output, self, ..., indices) -> grad_input
+    # max_pool/adaptive_max_pool backward ops: (grad_output, self, ..., indices) -> grad_input
     # 1 output + 3 tensor inputs = 4 placements
-    # Order: [output, grad_output, self, indices]
     input_meta = cast(TensorMeta, args_schema[0])
     strategies: list[list[Placement | _ShardingPlaceholder]] = [
         [_ShardingPlaceholder(0)] * 4,
     ]
-    if len(input_meta.shape) >= 4:  # batched: (N, C, H, W)
+    spatial_rank = POOL_SPATIAL_RANK[op]
+    if len(input_meta.shape) >= spatial_rank + 2:
         strategies.append([_ShardingPlaceholder(1)] * 4)
     # The backward is linear in grad_output, so P(sum/avg) pass through.
     # indices must be replicated (integer positions, not reducible).

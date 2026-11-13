@@ -776,6 +776,8 @@ inductor_override_kwargs["xpu"] = {
         "grad_atol": 2e-3,
         "grad_rtol": 1e-3,
     },
+    # fp16 backward reduces over frames in a different order than eager.
+    ("stft", f16): {"grad_atol": 1e-2, "grad_rtol": 1e-3},
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
@@ -797,6 +799,11 @@ if TEST_WITH_ROCM:
             # Keep the forward tolerance unchanged and allow modest headroom only
             # for gradients. See https://github.com/pytorch/pytorch/issues/165296.
             ("__rpow__", f32): {"grad_atol": 1.5e-5, "grad_rtol": 2e-5},
+            # Inductor falls back to aten.max_pool3d_with_indices_backward, so
+            # both sides run the same kernel, which accumulates overlapping
+            # windows into grad_input with fp16 atomics. The accumulation order
+            # varies between runs and the results differ by up to ~2 fp16 ULPs.
+            ("nn.functional.max_pool3d", f16): {"grad_atol": 2e-4, "grad_rtol": 2e-3},
         }
     )
 
