@@ -62,6 +62,7 @@ from .variables import (
     BoolBuiltinVariable,
     BuiltinVariable,
     ByteArrayBuiltinVariable,
+    BytesBuiltinVariable,
     ComplexBuiltinVariable,
     DictBuiltinVariable,
     FloatBuiltinVariable,
@@ -83,6 +84,7 @@ from .variables import (
     SetAttrBuiltinVariable,
     SkipFunctionVariable,
     SparseTensorCreationSkipVariable,
+    StrBuiltinVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -4165,6 +4167,7 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 BUILTIN_CALLABLES = {
     bool: BoolBuiltinVariable,
     bytearray: ByteArrayBuiltinVariable,
+    bytes: BytesBuiltinVariable,
     complex: ComplexBuiltinVariable,
     dict: DictBuiltinVariable,
     float: FloatBuiltinVariable,
@@ -4174,6 +4177,7 @@ BUILTIN_CALLABLES = {
     iter: IterBuiltinVariable,
     list: ListBuiltinVariable,
     setattr: SetAttrBuiltinVariable,
+    str: StrBuiltinVariable,
 }
 
 
