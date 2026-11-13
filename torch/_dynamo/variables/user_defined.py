@@ -1668,9 +1668,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return variables.DictBuiltinVariable.call_custom_dict(
-                tx, dict, *args, **kwargs
-            )
+            return variables.DictBuiltinVariable.construct_dict(tx, *args, **kwargs)
         elif self.value is collections.deque:
             maxlen = variables.ConstantVariable.create(None)
 
@@ -5437,20 +5435,15 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # Inherited dict/OrderedDict __init__ populates the underlying storage
-        # (CPython dict_init == dict.update); defaultdict.__init__'s first arg
-        # is the default_factory and has its own path.  Mirrors call_method's
-        # __init__ handling.
-        if self._maybe_get_baseclass_method("__init__") in (
-            dict.__init__,
-            collections.OrderedDict.__init__,
-        ):
+        init = self._maybe_get_baseclass_method("__init__")
+        if init is collections.OrderedDict.__init__:
+            return OrderedDictVariable.tp_init_impl(self, tx, args, kwargs)
+        if init is dict.__init__:
             # dict_init calls the real C-level update directly, bypassing any
             # subclass override of update() -- self.call_method would
             # dispatch to an override if the subclass defines one, which is
             # wrong here (verified by CPython's test_override_update).
-            ConstDictVariable.call_method(self, tx, "update", args, kwargs)
-            return variables.ConstantVariable.create(None)
+            return ConstDictVariable.tp_init_impl(self, tx, args, kwargs)
         return super().tp_init_impl(tx, args, kwargs)
 
     def debug_repr(self) -> str:
@@ -5689,7 +5682,7 @@ class DefaultDictVariable(ConstDictVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        self.call_method(tx, "update", [other], {})
+        ConstDictVariable.dict_update(self, tx, [other], {})
         return self
 
     def tp_init_impl(

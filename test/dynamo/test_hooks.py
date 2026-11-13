@@ -691,6 +691,40 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(len(guards), len(pairs))
 
+    @parametrize("base_type", [dict, OrderedDict, defaultdict])
+    @parametrize("subclass", [False, True])
+    @parametrize("operation", ["construct", "update", "ior"])
+    def test_mapping_copies_guard_hook_keys(self, base_type, subclass, operation):
+        class Mapping(base_type):
+            pass
+
+        mapping_type = Mapping if subclass else base_type
+
+        def hook(module, args, result):
+            return result
+
+        module = torch.nn.Identity()
+        key = module.register_forward_hook(hook).id
+
+        def fn(x, module):
+            args = (None,) if base_type is defaultdict else ()
+            if operation == "construct":
+                result = mapping_type(*args, module._forward_hooks)
+            else:
+                result = mapping_type(*args)
+                if operation == "update":
+                    result.update(module._forward_hooks)
+                else:
+                    result |= module._forward_hooks
+            return x + (key in result)
+
+        x = torch.zeros(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, module), x + 1)
+        module = torch.nn.Identity()
+        module.register_forward_hook(hook)
+        self.assertEqual(compiled(x, module), x)
+
     def test_hook_dict_move_to_end_guard_keys(self):
         def hook(module, args, output):
             return output + 1
