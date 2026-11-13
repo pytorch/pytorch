@@ -113,7 +113,7 @@ namespace {
 // compatibility checks still use them for copies made inside the kernel.
 DispatchKeySet remove_fake_keys_in_kernel(DispatchKeySet key_set) {
   if (key_set.has(DispatchKey::Fake) &&
-      impl::FakeTensorModeTLS::in_kernel_invocation()) {
+      impl::FakeTensorModeTLS::in_kernel_invocation()) [[unlikely]] {
     key_set = key_set.remove(DispatchKey::Fake);
   }
   return key_set;

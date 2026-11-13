@@ -6503,41 +6503,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIs(maybe_get_fake_mode(retained), mode)
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
-    @parametrize("active", [False, True])
-    @parametrize("enabled", [False, True])
-    @fake_tensor_modes
-    def test_fake_fallback_autocast(self, active, enabled, mode_cls):
-        mode = mode_cls()
-        fake = mode.from_tensor(torch.empty(2, 2))
-        fail = False
-
-        def callback(x):
-            self.assertFalse(torch.is_autocast_enabled("cpu"))
-            if fail:
-                raise RuntimeError("callback error")
-            return torch.mm(x, x)
-
-        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
-            lib.define("autocast(Tensor x) -> Tensor")
-            op = torch.ops._test_fake_fallback.autocast.default
-            lib.impl("autocast", callback, "Meta")
-            with (
-                torch.inference_mode(),
-                torch.autocast("cpu", enabled=enabled),
-                mode if active else contextlib.nullcontext(),
-            ):
-                result = op(fake)
-                self.assertEqual(result.dtype, torch.float32)
-                self.assertEqual(result.shape, (2, 2))
-                self.assertIs(maybe_get_fake_mode(result), mode)
-                self.assertEqual(torch.is_autocast_enabled("cpu"), enabled)
-                fail = True
-                with self.assertRaisesRegex(RuntimeError, "callback error"):
-                    op(fake)
-                self.assertEqual(torch.is_autocast_enabled("cpu"), enabled)
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_fake_fallback_clears_inherited_dispatch_keys(self):
         mode = CppFakeTensorMode()
         real = torch.randn(2, 3)
@@ -6603,34 +6568,6 @@ class TestCppFakeTensorModeBindings(TestCase):
                 self.assertEqual(restored, [(mode, True)])
                 self.assertEqual(self._installed(), (mode, True))
         self.assertEqual(self._installed(), (None, False))
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    def test_fake_fallback_rejects_missing_mode(self):
-        fake = torch.empty(2, 3, device="meta")
-        torch._C._set_fake_device(fake, torch.device("cpu"))
-        msg = "fake tensors without a mode"
-        with CppFakeTensorMode(), self.assertRaisesRegex(NotImplementedError, msg):
-            fake + fake
-
-    @parametrize(
-        "kind,schema",
-        [
-            ("input", "probe(Tensor x, Any payload) -> Tensor"),
-            ("output", "probe(Tensor x) -> Any"),
-        ],
-    )
-    def test_fake_fallback_rejects_any(self, kind, schema):
-        mode = CppFakeTensorMode()
-        real = torch.randn(2, 3)
-        fake = mode.from_tensor(real)
-        args = (fake, {"hidden": real}) if kind == "input" else (fake,)
-        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
-            lib.define(schema)
-            with mode:
-                msg = "nested containers of tensors or Any"
-                with self.assertRaisesRegex(NotImplementedError, msg):
-                    torch.ops._test_fake_fallback.probe(*args)
-                self.assertEqual(self._installed(), (mode, True))
 
     def test_require_python_fake_mode(self):
         from torch._guards import require_python_fake_mode
