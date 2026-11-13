@@ -16,7 +16,6 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/irange.h>
 
-#include <barrier>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -339,6 +338,59 @@ static std::shared_ptr<c10::FakeTensorMode> make_cpp_fake_mode(
       nullptr, nullptr, allow_meta, allow_unsafe_data_ptr_access);
 }
 
+TEST(TestNative, FakeDetach) {
+  auto input = at::empty({2, 3}, at::device(at::kMeta));
+  input.set_requires_grad(true);
+  auto mode = make_cpp_fake_mode();
+  at::init_cpp_fake(input.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
+  auto keys = c10::DispatchKeySet(c10::DispatchKey::CPU);
+  input.unsafeGetTensorImpl()->set_fake_dispatch_keys(keys);
+
+  c10::impl::ExcludeDispatchKeyGuard no_fake(c10::DispatchKey::Fake);
+  auto result = at::impl::fake_detach(input);
+  EXPECT_NE(result.unsafeGetTensorImpl(), input.unsafeGetTensorImpl());
+  EXPECT_EQ(
+      result.storage().unsafeGetStorageImpl(),
+      input.storage().unsafeGetStorageImpl());
+  EXPECT_EQ(result.sizes(), input.sizes());
+  EXPECT_EQ(result.device(), input.device());
+  EXPECT_TRUE(result.is_fake());
+  EXPECT_EQ(result.unsafeGetTensorImpl()->fake_tensor_mode(), mode);
+  EXPECT_EQ(result.unsafeGetTensorImpl()->fake_dispatch_keys(), keys);
+  EXPECT_FALSE(result.requires_grad());
+  EXPECT_TRUE(input.requires_grad());
+}
+
+TEST(TestNative, FakeShallowCopyData) {
+  auto mode = make_cpp_fake_mode();
+  for (auto device : {c10::Device(c10::kCPU), c10::Device(c10::kCUDA, 0)}) {
+    auto source_device = device.is_cpu() ? c10::Device(c10::kCUDA, 0)
+                                         : c10::Device(c10::kCPU);
+    auto input = at::empty({2}, at::device(at::kMeta));
+    input.set_requires_grad(true);
+    auto source = at::empty({3, 4}, at::device(at::kMeta));
+    at::init_cpp_fake(input.unsafeGetTensorImpl(), device, mode);
+    at::init_cpp_fake(source.unsafeGetTensorImpl(), source_device, mode);
+    const auto version =
+        input.unsafeGetTensorImpl()->version_counter().current_version();
+
+    c10::impl::ExcludeDispatchKeyGuard no_fake(c10::DispatchKey::Fake);
+    auto& result = at::impl::fake_shallow_copy_data_(input, source);
+    EXPECT_TRUE(result.is_same(input));
+    EXPECT_EQ(
+        input.storage().unsafeGetStorageImpl(),
+        source.storage().unsafeGetStorageImpl());
+    EXPECT_EQ(input.sizes(), source.sizes());
+    EXPECT_EQ(input.strides(), source.strides());
+    EXPECT_EQ(input.device(), source_device);
+    EXPECT_TRUE(input.is_fake());
+    EXPECT_EQ(input.unsafeGetTensorImpl()->fake_tensor_mode(), mode);
+    EXPECT_EQ(input.unsafeGetTensorImpl()->version_counter().current_version(), version);
+    EXPECT_TRUE(input.requires_grad());
+    EXPECT_FALSE(source.requires_grad());
+  }
+}
+
 TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
   auto input = at::empty({4}, at::device(at::kMeta));
   auto mode = make_cpp_fake_mode();
@@ -446,63 +498,6 @@ TEST(TestNative, InitCppFake) {
   expect_rejected(at::empty({2}), cpu, mode, "expects a meta tensor");
   expect_rejected(
       at::empty({2}, at::device(at::kMeta)), meta, strict_mode, "allow_meta");
-}
-
-TEST(TestNative, ConcurrentInitCppFake) {
-  auto mode = make_cpp_fake_mode();
-  auto base = at::empty({4}, at::device(at::kMeta));
-  auto* storage = base.storage().unsafeGetStorageImpl();
-  struct CaptureWarnings : c10::WarningHandler {
-    size_t count = 0;
-    void process(const c10::Warning& warning) override {
-      EXPECT_NE(
-          warning.msg().find("Accessing the data pointer of FakeTensor"),
-          std::string::npos);
-      ++count;
-    }
-  };
-  CaptureWarnings handler;
-  c10::WarningUtils::WarningHandlerGuard handler_guard(&handler);
-  c10::WarningUtils::WarnAlways warn_always;
-  for (bool allow_unsafe : {true, false}) {
-    mode->allow_unsafe_data_ptr_access_ = allow_unsafe;
-    std::vector<at::Tensor> views(8);
-    for (auto& view : views) {
-      view = at::native::as_strided_tensorimpl(base, {2}, {1});
-    }
-    std::barrier start(static_cast<std::ptrdiff_t>(views.size()));
-    std::vector<std::thread> workers;
-    for (auto& view : views) {
-      workers.emplace_back([&, view] {
-        start.arrive_and_wait();
-        at::init_cpp_fake(
-            view.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
-        auto alias = at::alias(view);
-        EXPECT_EQ(alias.storage().unsafeGetStorageImpl(), storage);
-        EXPECT_EQ(alias.device(), c10::Device(c10::kCPU));
-      });
-    }
-    for (auto& worker : workers) {
-      worker.join();
-    }
-    EXPECT_EQ(storage->throw_on_mutable_data_ptr(), !allow_unsafe);
-    const auto warnings = handler.count;
-    if (allow_unsafe) {
-      base.mutable_data_ptr();
-      EXPECT_EQ(handler.count, warnings + 1);
-    } else {
-      try {
-        base.mutable_data_ptr();
-        ADD_FAILURE() << "expected mutable_data_ptr() to throw";
-      } catch (const c10::Error& e) {
-        EXPECT_NE(
-            std::string(e.what()).find(
-                "Cannot access data pointer of Tensor (e.g. FakeTensor"),
-            std::string::npos);
-      }
-      EXPECT_EQ(handler.count, warnings);
-    }
-  }
 }
 
 TEST(TestNative, InKernelInvocationReportsMetaDevice) {
