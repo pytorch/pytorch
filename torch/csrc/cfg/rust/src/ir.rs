@@ -68,6 +68,11 @@ pub enum Op {
     PopExcInfo(V),
     /// Whether exc matches the class, or tuple of classes, of an except clause.
     ExcMatch(V, V),
+    /// A special method looked up on the type, bound; for `with`.
+    LoadSpecial(V, u32),
+    /// exit(type(exc), exc, traceback): `__exit__` for a `with` body that
+    /// raised.
+    WithExceptStart { exit: V, exc: V },
     LoadAttr(V, u32),
     StoreAttr { obj: V, name: u32, val: V },
     StoreGlobal(u32, V),
@@ -225,6 +230,7 @@ impl Op {
             | Op::StoreSlot(_, a)
             | Op::PushExcInfo(a)
             | Op::PopExcInfo(a)
+            | Op::LoadSpecial(a, _)
             | Op::MakeCell(a)
             | Op::CellGet(a, _)
             | Op::StoreGlobal(_, a)
@@ -253,6 +259,7 @@ impl Op {
             | Op::DictUpdate(a, b)
             | Op::DictMerge(a, b)
             | Op::ExcMatch(a, b)
+            | Op::WithExceptStart { exit: a, exc: b }
             | Op::CellSet(a, b) => {
                 f(*a);
                 f(*b)
@@ -508,6 +515,8 @@ impl Function {
             Op::PushExcInfo(v) => format!("push_exc_info {}", n(v)),
             Op::PopExcInfo(v) => format!("pop_exc_info {}", n(v)),
             Op::ExcMatch(e, t) => format!("exc_match {} {}", n(e), n(t)),
+            Op::LoadSpecial(v, name) => format!("load_special {} '{}'", n(v), self.name_str(*name)),
+            Op::WithExceptStart { exit, exc } => format!("with_except_start {} {}", n(exit), n(exc)),
             Op::CellGet(c, name) => format!("cell_get {} '{}'", n(c), self.name_str(*name)),
             Op::CellSet(c, v) => format!("cell_set {} {}", n(c), n(v)),
             Op::MakeFunction { code, closure, .. } => {
