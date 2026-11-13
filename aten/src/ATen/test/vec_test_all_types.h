@@ -1310,8 +1310,9 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_multiply(Compl
     T x_imag = x.imag();
     T y_real = y.real();
     T y_imag = y.imag();
-#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
-    //check multiplication considering swap and fma
+#if defined(CPU_CAPABILITY_ZVECTOR)
+    // ZVECTOR fuses explicitly (fmadd); VSX's multiplication and addition are
+    // not contracted with -ffp-contract=off, like the branch below.
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
     T neg_imag = -y_imag;
@@ -1346,12 +1347,12 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 }
 
 
-// With FP16 vector arithmetic on aarch64 (outside SVE256 builds, which use
-// generic code), Vectorized<Half>'s fused operations are native fp16 FMAs, which
-// round once (the tests cover fmadd and fmsub); elsewhere, they compute in float
-// and round to float first.
+// With FP16 vector arithmetic on aarch64 (outside SVE256 and mobile builds,
+// which use generic code), Vectorized<Half>'s fused operations are native fp16
+// FMAs, which round once (the tests cover fmadd and fmsub); elsewhere, they
+// compute in float and round to float first.
 #if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) && \
-    !defined(CPU_CAPABILITY_SVE256)
+    !defined(CPU_CAPABILITY_SVE256) && !defined(C10_MOBILE)
 constexpr bool kNativeHalfFma = true;
 #else
 constexpr bool kNativeHalfFma = false;

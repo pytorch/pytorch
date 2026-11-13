@@ -60,9 +60,9 @@ c10::RoundingMode check_to_dtype_rounded(
     ScalarType dtype,
     std::string_view round) {
   TORCH_CHECK(
-      self.layout() == kStrided,
-      "rounding is only supported for strided tensors, but got ",
-      self.layout());
+      self.layout() == kStrided && !self.is_nested(),
+      "rounding is only supported for strided, non-nested tensors, but got ",
+      self.is_nested() ? "a nested tensor" : c10::str(self.layout()));
   check_rounded_conversion(self.scalar_type(), dtype);
   return parse_rounding_mode(round);
 }
