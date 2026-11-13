@@ -12,7 +12,7 @@ import torch
 import torch.fx.node
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
+from torch._dynamo.utils import counters, ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.user_kernel_hop import (
     get_user_kernel_hop_info,
@@ -240,6 +240,36 @@ def should_reinplace_index_put(node: torch.fx.Node) -> bool:
     )
 
 
+def _is_auto_functionalized_v2_base(node: object) -> bool:
+    """True if node is one of the updated bases auto_functionalized_v2 returns
+    after its op's own outputs, i.e. a buffer the op has written in place, and
+    that base is not a graph input."""
+    if not (isinstance(node, torch.fx.Node) and node.target is operator.getitem):
+        return False
+    af, index = node.args
+    if not (
+        isinstance(af, torch.fx.Node)
+        and af.target is torch.ops.higher_order.auto_functionalized_v2
+        and isinstance(index, int)
+    ):
+        return False
+    outputs = af.meta.get("val")
+    bases = af.kwargs.get("_all_bases", ())
+    if not isinstance(outputs, (tuple, list)) or not isinstance(bases, (tuple, list)):
+        return False
+    base_index = index - (len(outputs) - len(bases))
+    if base_index < 0:
+        return False
+    base = bases[base_index]
+    # Once the auto_functionalized_v2 node is reinplaced, a graph-input base IS
+    # the updated base, and the input's epilogue copy_ runs after the scatter.
+    # can_inplace() judges the getitem's own (cloned) storage and cannot see this.
+    return isinstance(base, torch.fx.Node) and _get_view_base(base).op not in (
+        "placeholder",
+        "get_attr",
+    )
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -263,6 +293,14 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
         return True
 
     if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
+        return True
+
+    # is_node_realized() does not count the updated bases of
+    # auto_functionalized_v2 as buffers, but the op has written them in place,
+    # so a functional scatter would copy the whole base to update one region.
+    if is_node_realized(node) and _is_auto_functionalized_v2_base(inp):
+        counters["inductor"]["reinplace_mutated_base_scatter"] += 1
+        log.debug("reinplacing scatter %s into an auto_functionalized_v2 base", node)
         return True
 
     # If the output is copied back into the input, this forces both to be

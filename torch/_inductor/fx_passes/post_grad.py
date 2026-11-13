@@ -1504,67 +1504,90 @@ def slice_noop(self, dim=0, start=None, end=None, step=1):
     return False
 
 
+def _clamp_slice_range(size, start, end):
+    """(start, end) of a step-1 slice with None filled in and, for a static
+    ``size``, negative and out-of-range bounds clamped as slicing does."""
+    start = 0 if start is None else start
+    end = 2**63 - 1 if end is None else end
+    if isinstance(size, int) and isinstance(start, int) and isinstance(end, int):
+        start = min(max(start + size if start < 0 else start, 0), size)
+        end = min(max(end + size if end < 0 else end, start), size)
+    return start, end
+
+
+def _src_range_of_self(self, src):
+    """The (dim, start, end) of ``self`` that ``src`` is an unmodified view of,
+    when ``src`` is ``split_with_sizes(self)[i]`` or ``slice(self)`` with step
+    1, else None."""
+    if src.target is operator.getitem and isinstance(src.args[0], torch.fx.Node):
+        split = src.args[0]
+        if (
+            split.target is not aten.split_with_sizes.default
+            or split.args[0] is not self
+        ):
+            return None
+        split_sizes = get_arg_value(split, 1, "split_sizes")
+        dim = get_arg_value(split, 2, "dim")
+        index = get_arg_value(src, 1)
+        if (
+            not isinstance(split_sizes, (list, tuple))
+            or not all(isinstance(size, int) for size in split_sizes)
+            or not isinstance(index, int)
+            or not 0 <= index < len(split_sizes)
+        ):
+            return None
+        start = sum(split_sizes[:index])
+        return dim, start, start + split_sizes[index]
+    if src.target is aten.slice.Tensor and src.args and src.args[0] is self:
+        step = get_arg_value(src, 4, "step")
+        if step not in (None, 1):
+            return None
+        return (
+            get_arg_value(src, 1, "dim"),
+            get_arg_value(src, 2, "start"),
+            get_arg_value(src, 3, "end"),
+        )
+    return None
+
+
 def _slice_scatter_noop_replacement(node):
     """Return ``self`` when ``src`` is exactly the slice being overwritten.
 
-    Functionalization can produce split/getitem/slice_scatter chains that copy
-    an unmodified view back to the same range of its base.  Replacing such a
-    scatter with the base avoids materializing the whole tensor.  Fall back to
-    the historical full-replacement behavior (replace with ``src``).
+    User code that copies an unmodified view of a tensor onto itself
+    (``v.copy_(v)``) is functionalized into a scatter of
+    ``split_with_sizes(self)[i]`` or ``self.slice(dim, a, b)`` back onto the
+    same range of ``self``. Replacing such a scatter with the base avoids
+    materializing the whole tensor. Fall back to the historical
+    full-replacement behavior (replace with ``src``).
     """
     self = get_arg_value(node, 0)
     src = get_arg_value(node, 1)
     if not isinstance(self, torch.fx.Node) or not isinstance(src, torch.fx.Node):
         return src
-    if src.target is not operator.getitem or not isinstance(src.args[0], torch.fx.Node):
+    src_range = _src_range_of_self(self, src)
+    if src_range is None:
         return src
-
-    split = src.args[0]
-    if split.target is not aten.split_with_sizes.default or split.args[0] is not self:
-        return src
-    split_sizes = get_arg_value(split, 1, "split_sizes")
-    split_dim = get_arg_value(split, 2, "dim")
-    index = get_arg_value(src, 1)
+    src_dim, src_start, src_end = src_range
     scatter_dim = get_arg_value(node, 2, "dim")
     start = get_arg_value(node, 3, "start")
     end = get_arg_value(node, 4, "end")
     step = get_arg_value(node, 5, "step")
-    if split_dim is None:
-        split_dim = 0
-    if scatter_dim is None:
-        scatter_dim = 0
-    if step is None:
-        step = 1
-    if (
-        not isinstance(split_sizes, (list, tuple))
-        or not all(isinstance(size, int) for size in split_sizes)
-        or not isinstance(index, int)
-        or not isinstance(split_dim, int)
-        or not isinstance(scatter_dim, int)
-        or (start is not None and not isinstance(start, int))
-        or (end is not None and not isinstance(end, int))
-        or (step is not None and not isinstance(step, int))
-    ):
-        return src
     self_val = self.meta.get("val")
-    if not isinstance(self_val, torch.Tensor):
+    if not isinstance(self_val, torch.Tensor) or self_val.dim() == 0:
         return src
     ndim = self_val.dim()
-    if ndim == 0:
+
+    def normalize(dim, start, end):
+        if not all(isinstance(v, (int, type(None))) for v in (dim, start, end)):
+            return None
+        dim = (dim or 0) % ndim
+        return (dim, *_clamp_slice_range(self_val.shape[dim], start, end))
+
+    src_key = normalize(src_dim, src_start, src_end)
+    scatter_key = normalize(scatter_dim, start, end)
+    if step not in (None, 1) or src_key is None or src_key != scatter_key:
         return src
-    split_dim %= ndim
-    scatter_dim %= ndim
-    if split_dim != scatter_dim or step != 1 or not 0 <= index < len(split_sizes):
-        return src
-    expected_start = sum(split_sizes[:index])
-    expected_end = expected_start + split_sizes[index]
-    if start is None:
-        start = 0
-    if end is None:
-        end = 2**63 - 1
-    if start == expected_start and end == expected_end:
-        return self
-    return src
+    return self
 
 
 @register_noop_decomp(aten.slice_scatter, _slice_scatter_noop_replacement)
@@ -1572,11 +1595,8 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
     if not -self.dim() <= dim < self.dim():
         return False
     dim %= self.dim()
-    if start is None:
-        start = 0
-    if end is None:
-        end = 2**63 - 1
     slice_scatter_dim_size = self.shape[dim]
+    start, end = _clamp_slice_range(slice_scatter_dim_size, start, end)
     full_replacement = (
         self.shape == src.shape
         and start == 0
