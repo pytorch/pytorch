@@ -1473,15 +1473,17 @@ def enable_hes_early() -> None:
         )
     from cuda.bindings import driver as cuda_driver  # pyrefly: ignore[missing-import]
 
-    rc = cuda_driver.cuInit(0)[0]
-    if rc != cuda_driver.CUresult.CUDA_SUCCESS:
-        raise RuntimeError(f"cuInit failed with rc={rc}")
-
+    # Arm HES before cuInit: on the R580 B200 hosts libcupti 13.5 rejects it with
+    # CUPTI_ERROR_UNKNOWN once the driver is initialized, even with no context yet.
     # Use the direct libcupti call (pylibcupti().activity_enable_hes), not
     # cupti-python's activity_enable_hw_trace(): after torch is imported, the
     # latter makes subsequent cuptiActivityRegisterCallbacks() fail with
     # CUPTI_ERROR_MULTIPLE_SUBSCRIBERS_NOT_SUPPORTED, while the direct call works.
     cupti_python.pylibcupti().activity_enable_hes()
+
+    rc = cuda_driver.cuInit(0)[0]
+    if rc != cuda_driver.CUresult.CUDA_SUCCESS:
+        raise RuntimeError(f"cuInit failed with rc={rc}")
     _hes_enabled = True
 
 
