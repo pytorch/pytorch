@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     is_navi3_arch,
     parametrize,
     patch_test_members,
+    preserves_unittest_skip_marks,
     subtest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
@@ -74,6 +75,7 @@ class _TestDecomposeAddMM(torch.nn.Module):
     }
 )
 @instantiate_parametrized_tests
+@preserves_unittest_skip_marks()
 class TestDecomposeMemMM(TestCase):
     def __init__(self, method_name="runTest", methodName="runTest"):
         super().__init__(method_name, methodName)
