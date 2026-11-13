@@ -58,6 +58,9 @@
 // made below autograd, while Python's FakeTensor keeps the requires_grad a Meta
 // kernel set on its meta output.
 //
+// TODO: Python CIA kernels written directly into py_kernels for ops without
+// native CIA kernels are not recorded in the tables. In-tree direct writers
+// (torch.export) override ops with native CIA kernels, which we always probe.
 
 namespace {
 
@@ -224,6 +227,9 @@ void fakeFallback(
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   const auto arguments_begin = stack->size() - num_arguments;
+  const bool metadata_copy = schema.overload_name().empty() &&
+      (schema.name() == "aten::detach" ||
+       schema.name() == "aten::shallow_copy_data_");
   if (c10::impl::PythonDispatcherTLS::get_state() != nullptr) {
     unsupported(op, "the Python dispatcher");
   }
@@ -314,7 +320,7 @@ void fakeFallback(
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
         if (!device.has_value()) {
           device = fake_device;
-        } else if (*device != *fake_device) {
+        } else if (!metadata_copy && *device != *fake_device) {
           // Including a zero-dim CPU tensor with others, which Python allows
           unsupported(
               op,
@@ -337,6 +343,23 @@ void fakeFallback(
   if (!device.has_value()) {
     unsupported(op, "ops without fake tensor inputs");
   }
+  if (metadata_copy) {
+    // These kernels only copy metadata. Run them on the fakes directly so
+    // shallow_copy_data_ never replaces an existing fake inside a Meta kernel.
+    c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
+        {c10::DispatchKey::Fake,
+         c10::DispatchKey::Python,
+         c10::DispatchKey::PreDispatch,
+         c10::DispatchKey::PythonTLSSnapshot}));
+    auto self = (*stack)[arguments_begin].toTensor();
+    auto result = schema.name() == "aten::detach"
+        ? at::impl::fake_detach(self)
+        : at::impl::fake_shallow_copy_data_(
+              self, (*stack)[arguments_begin + 1].toTensor());
+    torch::jit::drop(*stack, num_arguments);
+    torch::jit::push(*stack, std::move(result));
+    return;
+  }
   using at::impl::FakeDispatchCategory;
   const auto categories =
       at::impl::fakeDispatchTableCategories(op.operator_name());
@@ -347,14 +370,16 @@ void fakeFallback(
       !cpp_meta_supports_symint(op, categories)) {
     const bool has_cia =
         op.hasKernelForDispatchKey(c10::DispatchKey::CompositeImplicitAutograd);
+    // Probe every native CIA op too: export writes py_kernels directly,
+    // bypassing the registration hook that sets the PythonCIA bit.
     const bool try_decomp =
         (has(FakeDispatchCategory::StaticShapeDecomp) && !has_sparse_inputs) ||
-        has(FakeDispatchCategory::PythonCIA);
-    if (try_decomp || has_cia) {
+        has(FakeDispatchCategory::PythonCIA) || has_cia;
+    if (try_decomp) {
       const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
       auto decompose = [&] {
         bool has_python_cia = false;
-        if (try_decomp && interpreter->fake_try_decomp(
+        if (interpreter->fake_try_decomp(
                 op, stack, /*has_symbolic_sizes=*/false, &has_python_cia)) {
           return true;
         }
@@ -386,12 +411,10 @@ void fakeFallback(
   }
   meta_keyset = meta_keyset.add(c10::DispatchKey::Meta);
 
-  // As in Python, the outputs of alias and detach of a fake keep its recorded
-  // dispatch keys (see Note [C++ fake dispatch keys]), and other new outputs
-  // have none
+  // As in Python, alias keeps its input's recorded dispatch keys (see Note
+  // [C++ fake dispatch keys]), and other new Meta outputs have none.
   std::optional<c10::DispatchKeySet> output_dispatch_keys;
-  if (schema.overload_name().empty() &&
-      (schema.name() == "aten::alias" || schema.name() == "aten::detach")) {
+  if (schema.overload_name().empty() && schema.name() == "aten::alias") {
     const auto& self = (*stack)[arguments_begin].toTensor();
     output_dispatch_keys = self.unsafeGetTensorImpl()->fake_dispatch_keys();
   }
