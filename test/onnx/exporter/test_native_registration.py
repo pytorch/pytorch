@@ -105,6 +105,26 @@ class TestNativeRegistration(TestCase):
         gc.collect()
         self.assertTrue(all(reference() is None for reference in references))
 
+    def test_convolution_layer_norm_native_export(self):
+        class ConvolutionNorm(torch.nn.Module):
+            def forward(self, x, weight):
+                result = torch.nn.functional.conv1d(x, weight)
+                return torch.nn.functional.layer_norm(result, (3,))
+
+        model = ConvolutionNorm()
+        inputs = (torch.arange(4.0).reshape(1, 1, 4), torch.ones(2, 1, 2))
+        program = torch.onnx.export(
+            model, inputs, opset_version=18, optimize=False, verbose=False
+        )
+        proto = program.model_proto
+        onnx.checker.check_model(proto, full_check=True)
+        feed = {
+            value.name: tensor.numpy()
+            for value, tensor in zip(program.model.graph.inputs, inputs)
+        }
+        result = ReferenceEvaluator(proto).run(None, feed)[0]
+        self.assertEqual(torch.from_numpy(result), model(*inputs))
+
     def test_embedding_softmax_native_export(self):
         class EmbeddingSoftmax(torch.nn.Module):
             def forward(self, indices, weight):
