@@ -77,6 +77,7 @@ from ..utils import (
     extract_fake_example_value,
     get_fake_value,
     has_torch_function,
+    is_safe_constant,
     is_tensor_getset_descriptor,
     is_torch_class,
     istype,
@@ -343,6 +344,10 @@ def _try_computed_lazy_constant(
         ):
             any_unrealized = True
         elif not isinstance(arg, ConstantVariable):
+            return None
+        elif arg.source is None and not is_safe_constant(arg.as_python_constant()):
+            # Output bytecode recomputes the op from its operands, so each one
+            # must be loadable from a source or as a LOAD_CONST
             return None
     if not any_unrealized:
         return None
@@ -4209,6 +4214,11 @@ class StrBuiltinVariable(TypeVariable):
         if not args and not kwargs:
             return ConstantVariable.create("")
         if len(args) == 1 and not kwargs:
+            # str(a) on a lazy constant stays lazy; generic_str would realize
+            # it and guard on its value.
+            result = _try_computed_lazy_constant(str, args)
+            if result is not None:
+                return result
             return generic_str(tx, args[0])
         return constant_fold(self._fn, tx, args, kwargs)
 
