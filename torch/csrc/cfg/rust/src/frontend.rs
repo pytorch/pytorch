@@ -1125,12 +1125,21 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     for n in names_tuple.iter() {
         consts.push(unsafe { PyObj::from_borrowed(n.as_ptr()) });
     }
-    // A compiled function has no Python frame, so what looks at the frame of
-    // its caller would see the wrong one.
+    // A compiled function keeps its locals in registers, not in its frame, so
+    // what reads them through the frame would not find them. Where compiled
+    // functions have no frame at all, that goes for its globals and for
+    // walking the stack too.
     let names: Vec<String> = names_tuple.extract()?;
-    for name in ["locals", "globals", "vars", "dir", "eval", "exec", "_getframe", "currentframe"] {
+    for name in ["locals", "vars", "dir", "eval", "exec"] {
         if names.iter().any(|n| n == name) {
-            return unsupported(format!("{}() needs a Python frame of its own", name));
+            return unsupported(format!("{}() reads the local variables of the frame", name));
+        }
+    }
+    if !crate::capi::has_frames() {
+        for name in ["globals", "_getframe", "currentframe"] {
+            if names.iter().any(|n| n == name) {
+                return unsupported(format!("{}() needs a Python frame of its own", name));
+            }
         }
     }
     // super() without arguments finds its class and instance in the frame;
@@ -1139,7 +1148,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         let loads = instrs.iter().filter(|i| i.op == Bc::LoadGlobal && (i.arg >> 1) as usize == index).count();
         let attrs = instrs.iter().filter(|i| i.op == Bc::LoadSuperAttr).count();
         if loads != attrs {
-            return unsupported("super() needs a Python frame of its own");
+            return unsupported("super() without arguments reads the local variables of the frame");
         }
     }
     let varnames_tuple = code.getattr("co_varnames")?;

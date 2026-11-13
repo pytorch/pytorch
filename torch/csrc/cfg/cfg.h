@@ -82,7 +82,7 @@ struct TcfgTensorInfo {
   uint64_t key_set;
 };
 
-#define TCFG_API_VERSION 2
+#define TCFG_API_VERSION 3
 
 struct TcfgApi {
   uint32_t version;
@@ -124,6 +124,21 @@ struct TcfgApi {
   PyObject* (*tensor_box)(PyObject* unboxed);
   void (*tensor_retain)(PyObject* unboxed);
   void (*tensor_release)(PyObject* unboxed);
+
+  // Interpreter frames, so that whatever looks at the Python stack while a
+  // compiled function runs (a traceback, a warning, sys._getframe, the module
+  // a new class is attributed to) finds the function there. Both are null
+  // where the layout of CPython's frames is not known: anything but 3.12.
+  //
+  // Pushes a frame for func, a Python function, and makes it the current
+  // frame of the thread. *instr gets the address of the frame's instruction
+  // pointer and *code that of the first instruction of the function's code,
+  // so the caller can keep the pointer on what it is executing. Returns null
+  // with a Python error set when out of memory.
+  void* (*frame_push)(PyObject* func, uint16_t*** instr, uint16_t** code);
+  // Pops the frame, which must be the current one. A frame object that
+  // something still refers to (a traceback) takes the frame's contents over.
+  void (*frame_pop)(void* frame);
 };
 
 } // extern "C"
