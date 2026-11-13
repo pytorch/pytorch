@@ -269,10 +269,14 @@ def _snapshot(device=None, augment_with_fx_traces: bool = False):
         dict: a dictionary containing memory allocator state information.
     """
     acc = torch.accelerator.current_accelerator()
-    if acc is not None and acc.type == "xpu":
-        return torch.xpu.memory._snapshot(
-            device, augment_with_fx_traces=augment_with_fx_traces
+    device_type = acc.type if acc is not None else "cuda"
+    device_module = torch._utils._get_device_module(device_type)
+    snapshot_module = getattr(device_module, "memory", device_module)
+    if not hasattr(snapshot_module, "_snapshot"):
+        raise NotImplementedError(
+            f"_snapshot is not implemented for the '{device_type}' accelerator"
         )
-    return torch.cuda.memory._snapshot(
-        device, augment_with_fx_traces=augment_with_fx_traces
-    )
+    # Only forward augment_with_fx_traces when it is set: out-of-tree backends
+    # may implement _snapshot(device=None) without it.
+    kwargs = {"augment_with_fx_traces": True} if augment_with_fx_traces else {}
+    return snapshot_module._snapshot(device, **kwargs)
