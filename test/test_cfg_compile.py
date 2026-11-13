@@ -1603,7 +1603,7 @@ class TestCfgCallees(TestCase):
         target.__code__ = (lambda x, k=2: x - k).__code__
         self.assertEqual(compiled(3), -2)
 
-    def test_functions_made_per_call_stop_being_compiled(self):
+    def test_functions_made_per_call_share_one_compilation(self):
         def make():
             return lambda v: v + 1
 
@@ -1615,11 +1615,55 @@ class TestCfgCallees(TestCase):
 
         compiled = torch.cfg_compile(f, fallback=False)
         self.assertEqual(compiled(40), f(40))
-        compiled_names, interpreted = self.callees(compiled)
-        # The same code object in a new function each time: eight are
-        # compiled, next to make itself, and the rest run in the interpreter.
-        self.assertEqual(len(compiled_names), 9)
+        # make, and the lambda once for the forty functions made from it.
+        names, interpreted = self.callees(compiled)
+        self.assertEqual(
+            [name.rsplit(".", 1)[-1] for name in names], ["make", "<lambda>"]
+        )
         self.assertEqual(interpreted, [])
+
+    def test_functions_of_one_code_keep_their_closure_and_defaults(self):
+        def make(k):
+            def add(x, y=k * 10, *, z=k * 100):
+                return x + y + z + k
+
+            return add
+
+        def f(g, x):
+            return g(x)
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        adders = [make(k) for k in range(12)]
+        self.assertEqual([compiled(g, 1) for g in adders], [g(1) for g in adders])
+        self.assertEqual(len(self.callees(compiled)[0]), 1)
+
+    def test_what_a_closure_holds_dies_with_it(self):
+        class Counted:
+            alive = 0
+
+            def __init__(self):
+                Counted.alive += 1
+
+            def __del__(self):
+                Counted.alive -= 1
+
+        def outer():
+            held = Counted()
+
+            def inner():
+                return held
+
+            return inner() is held
+
+        def f(n):
+            return [outer() for _ in range(n)], Counted.alive
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        self.assertEqual(compiled(20), ([True] * 20, 0))
+        self.assertEqual(
+            [name.rsplit(".", 1)[-1] for name in self.callees(compiled)[0]],
+            ["outer", "inner"],
+        )
 
     def test_callees_off(self):
         def f(obj, x):
