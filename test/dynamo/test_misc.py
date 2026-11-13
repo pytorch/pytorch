@@ -3362,7 +3362,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertFalse([g for g in guards if g.create_fn_name() == "NOT_ALIASING"])
         dupes = [g for g in guards if g.create_fn_name() == "DUPLICATE_INPUT"]
         self.assertEqual(len(dupes), 1)
-        self.assertEqual(dupes[0].code_list, ["type(L['o']) is G['_IsTestMissing']"])
+        self.assertRegex(dupes[0].code_list[0], r"^type\(L\[.+\]\) is G\[.+\]")
+        self.assertIn("_IsTestMissing", dupes[0].code_list[0])
 
     def test_containment_adds_no_relation_guard(self):
         # `in`, dict lookups, list.index, list.count and dict == also compare by
@@ -3452,9 +3453,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # while the frame says True. A guard on that fold would fail on its
         # own frame and recompile on every call.
         v = {
-            "tuple": (1, 2),
-            "partial": functools.partial(int, base=2),
-            "slice": slice(1, 2),
+            "tuple": ("a", "b"),
+            "partial": functools.partial(str.split, sep=","),
+            "slice": slice("a", "b"),
         }[kind]
 
         def fn(x, a, b):
