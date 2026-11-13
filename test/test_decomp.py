@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -772,6 +773,46 @@ class TestDecomp(TestCase):
             # without this check, incorrect decomps at the python dispatcher level can still pass because
             # they're checking aten decomps at the torch_dispatch level
             self.assertEqual(decomp_out, non_decomp_out)
+
+    @onlyCPU
+    @dtypes(torch.float64)
+    @suppress_warnings
+    @parametrize("rnn_type", ["RNN_TANH", "RNN_RELU", "GRU", "LSTM"])
+    @parametrize("backend", ["decomp", "aot_eager"])
+    @parametrize("num_layers, training, bidirectional, batch_first, dropout", [
+        (3, True, False, False, 1.0),
+        (3, True, True, True, 1.0),
+        (1, True, False, False, 1.0),
+        (3, False, False, False, 1.0),
+        (3, True, False, False, 0.0),
+    ])
+    def test_rnn_interlayer_dropout(
+        self, device, dtype, rnn_type, backend, num_layers, training, bidirectional, batch_first, dropout
+    ):
+        kwargs = dict(num_layers=num_layers, dropout=dropout, bidirectional=bidirectional, batch_first=batch_first)
+        module_cls = getattr(torch.nn, rnn_type) if not rnn_type.startswith("RNN") else torch.nn.RNN
+        if rnn_type.startswith("RNN"):
+            kwargs["nonlinearity"] = rnn_type.split("_")[1].lower()
+        model = module_cls(3, 5, **kwargs).to(device=device, dtype=dtype).train(training)
+        with torch.no_grad():
+            for parameter in model.parameters():
+                parameter.fill_(0.1)
+        shape = (2, 4, 3) if batch_first else (4, 2, 3)
+        inp = torch.ones(shape, device=device, dtype=dtype, requires_grad=True)
+        grad_inputs = (inp, *model.parameters())
+        with torch.backends.mkldnn.flags(enabled=False):
+            expected = model(inp)
+            expected_grads = torch.autograd.grad(expected[0].sum(), grad_inputs)
+            if backend == "decomp":
+                with enable_python_dispatcher():
+                    actual = model(inp)
+            else:
+                torch._dynamo.reset()
+                with torch._dynamo.config.patch(allow_rnn=True):
+                    actual = torch.compile(model, backend="aot_eager", fullgraph=True)(inp)
+            actual_grads = torch.autograd.grad(actual[0].sum(), grad_inputs)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_grads, expected_grads)
 
     def test_batch_norm_unflatten_weight_bias(self, device):
         # https://github.com/pytorch/pytorch/issues/100970
