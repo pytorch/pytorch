@@ -61,3 +61,276 @@ jobs:
       - name: Record denied or unavailable assumption
         if: steps.credentials.outcome != 'success'
         run: echo 'arc_assumed=false'
+      - name: Probe fixed role IAM decisions
+        if: steps.credentials.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/204849'
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          ROLE = "arn:aws:iam::308535385114:role/arc"
+          TAG = "refs/tags/ciflow/inductor-cu126/204849"
+          ECR = "arn:aws:ecr:us-east-1:308535385114:repository/pytorch/ci-image"
+          ACTION_KEYS = {
+              "ecr:PutImage": "put_image",
+              "ecr:InitiateLayerUpload": "initiate_layer_upload",
+              "ecr:UploadLayerPart": "upload_layer_part",
+              "ecr:CompleteLayerUpload": "complete_layer_upload",
+              "s3:PutObject": "put_object",
+              "s3:GetObject": "get_object",
+              "s3:DeleteObject": "delete_object",
+          }
+          ECR_ACTIONS = tuple(list(ACTION_KEYS)[:4])
+          S3_ACTIONS = tuple(list(ACTION_KEYS)[4:])
+          DECISIONS = {"allowed", "explicitDeny", "implicitDeny"}
+
+
+          def groups(run_id):
+              return (
+                  ("ecr_ci_image", ECR_ACTIONS, ECR),
+                  (
+                      "artifact_own_run",
+                      S3_ACTIONS,
+                      "arn:aws:s3:::gha-artifacts/pytorch/pytorch/"
+                      + run_id
+                      + "/ci-security-policy-probe/never-created",
+                  ),
+                  (
+                      "gcc_shared_prefix",
+                      S3_ACTIONS,
+                      "arn:aws:s3:::gha-artifacts/gcc/linux-x86_64/"
+                      "gcc-toolset-11/ci-security-policy-probe-never-created",
+                  ),
+              )
+
+
+          def simulation_request(actions, resource):
+              return {
+                  "PolicySourceArn": ROLE,
+                  "ActionNames": list(actions),
+                  "ResourceArns": [resource],
+                  "MaxItems": 100,
+              }
+
+
+          def invoke(operation, request, allowed_requests, allow_get_role=False):
+              permitted = operation == "simulate-principal-policy" and request in allowed_requests
+              permitted |= (
+                  allow_get_role and operation == "get-role" and request == {"RoleName": "arc"}
+              )
+              if not permitted:
+                  return None, False, True
+              env = os.environ.copy()
+              env.update(
+                  AWS_MAX_ATTEMPTS="1",
+                  AWS_RETRY_MODE="standard",
+                  AWS_PAGER="",
+                  AWS_EC2_METADATA_DISABLED="true",
+                  AWS_CONFIG_FILE=os.devnull,
+                  AWS_SHARED_CREDENTIALS_FILE=os.devnull,
+              )
+              env.pop("AWS_PROFILE", None)
+              env.pop("AWS_DEFAULT_PROFILE", None)
+              try:
+                  completed = subprocess.run(
+                      [
+                          "aws",
+                          "iam",
+                          operation,
+                          "--cli-input-json",
+                          json.dumps(request),
+                          "--region",
+                          "us-east-1",
+                          "--output",
+                          "json",
+                          "--no-cli-pager",
+                          "--no-paginate",
+                          "--cli-connect-timeout",
+                          "2",
+                          "--cli-read-timeout",
+                          "5",
+                      ],
+                      stdin=subprocess.DEVNULL,
+                      capture_output=True,
+                      text=True,
+                      timeout=20,
+                      check=False,
+                      env=env,
+                  )
+                  if completed.returncode:
+                      denied = bool(
+                          re.search(
+                              r"\((?:AccessDenied|AccessDeniedException)\)", completed.stderr
+                          )
+                      )
+                      return None, denied, not denied
+                  if len(completed.stdout) > 2 * 1024 * 1024:
+                      return None, False, True
+                  payload = json.loads(completed.stdout)
+                  return (
+                      (payload, False, False)
+                      if isinstance(payload, dict)
+                      else (None, False, True)
+                  )
+              except (OSError, subprocess.TimeoutExpired, ValueError):
+                  return None, False, True
+
+
+          def parse_decisions(payload, actions, resource):
+              rows = payload.get("EvaluationResults")
+              if (
+                  payload.get("IsTruncated")
+                  or not isinstance(rows, list)
+                  or len(rows) != len(actions)
+              ):
+                  return None
+              parsed = {}
+              for row in rows:
+                  if not isinstance(row, dict):
+                      return None
+                  action, decision = row.get("EvalActionName"), row.get("EvalDecision")
+                  if (
+                      action not in actions
+                      or action in parsed
+                      or row.get("EvalResourceName") != resource
+                      or not isinstance(decision, str)
+                      or decision not in DECISIONS
+                  ):
+                      return None
+                  contexts = row.get("MissingContextValues", [])
+                  nested = row.get("ResourceSpecificResults", [])
+                  if (
+                      not isinstance(contexts, list)
+                      or not all(isinstance(x, str) for x in contexts)
+                      or not isinstance(nested, list)
+                      or len(nested) > 1
+                  ):
+                      return None
+                  if nested:
+                      item = nested[0]
+                      if (
+                          not isinstance(item, dict)
+                          or item.get("EvalResourceName") != resource
+                          or item.get("EvalResourceDecision") != decision
+                      ):
+                          return None
+                      other = item.get("MissingContextValues", [])
+                      if not isinstance(other, list) or not all(
+                          isinstance(x, str) for x in other
+                      ):
+                          return None
+                      contexts = contexts + other
+                  parsed[action] = (decision, bool(contexts))
+              return parsed if set(parsed) == set(actions) else None
+
+
+          def run_probe(call=invoke):
+              run_id = os.environ.get("GITHUB_RUN_ID", "")
+              scope_valid = (
+                  os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
+                  and os.environ.get("GITHUB_EVENT_NAME") == "push"
+                  and os.environ.get("GITHUB_REF") == TAG
+                  and re.fullmatch(r"[1-9][0-9]{0,19}", run_id) is not None
+              )
+              credentials_available = all(
+                  os.environ.get(key)
+                  for key in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
+              )
+              out = {
+                  "scope_valid": scope_valid,
+                  "credentials_available": credentials_available,
+                  "probe_error": not (scope_valid and credentials_available),
+              }
+              out.update(
+                  {
+                      "get_role_" + key: False
+                      for key in ("attempted", "allowed", "access_denied", "unknown")
+                  }
+              )
+              specs = groups(run_id if scope_valid else "0")
+              for name, actions, _ in specs:
+                  out.update(
+                      {
+                          name + "_" + key: False
+                          for key in (
+                              "api_allowed",
+                              "api_access_denied",
+                              "api_error",
+                              "decision_received",
+                              "missing_context",
+                          )
+                      }
+                  )
+                  out[name + "_unknown"] = True
+                  for action in actions:
+                      prefix = name + "_" + ACTION_KEYS[action] + "_"
+                      out.update(
+                          {
+                              prefix + key: False
+                              for key in (
+                                  "decision_received",
+                                  "allowed",
+                                  "explicit_deny",
+                                  "implicit_deny",
+                                  "missing_context",
+                              )
+                          }
+                      )
+                      out[prefix + "unknown"] = True
+              if not scope_valid or not credentials_available:
+                  return out
+              requests = [simulation_request(actions, resource) for _, actions, resource in specs]
+              fallback = False
+              for (name, actions, resource), request in zip(specs, requests):
+                  payload, denied, error = call("simulate-principal-policy", request, requests)
+                  fallback |= denied
+                  out[name + "_api_access_denied"] = denied
+                  out[name + "_api_error"] = error
+                  out["probe_error"] |= error
+                  if payload is None:
+                      continue
+                  out[name + "_api_allowed"] = True
+                  parsed = parse_decisions(payload, actions, resource)
+                  if parsed is None:
+                      out[name + "_api_error"] = True
+                      out["probe_error"] = True
+                      continue
+                  missing = any(item[1] for item in parsed.values())
+                  out[name + "_decision_received"] = True
+                  out[name + "_missing_context"] = missing
+                  out[name + "_unknown"] = missing
+                  for action, (decision, missing) in parsed.items():
+                      prefix = name + "_" + ACTION_KEYS[action] + "_"
+                      out[prefix + "decision_received"] = True
+                      out[prefix + "missing_context"] = missing
+                      out[prefix + "unknown"] = missing
+                      out[prefix + "allowed"] = decision == "allowed" and not missing
+                      out[prefix + "explicit_deny"] = decision == "explicitDeny"
+                      out[prefix + "implicit_deny"] = decision == "implicitDeny"
+              if fallback:
+                  out["get_role_attempted"] = True
+                  payload, denied, error = call(
+                      "get-role", {"RoleName": "arc"}, requests, allow_get_role=True
+                  )
+                  out["get_role_access_denied"] = denied
+                  role = payload.get("Role", {}) if payload is not None else {}
+                  valid = (
+                      isinstance(role, dict)
+                      and role.get("Arn") == ROLE
+                      and role.get("RoleName") == "arc"
+                  )
+                  out["get_role_allowed"] = valid
+                  out["get_role_unknown"] = not valid and not denied
+                  out["probe_error"] |= error or (payload is not None and not valid)
+              return out
+
+
+          if __name__ == "__main__":
+              result = run_probe()
+              print("CI_ARC_POLICY_AUDIT " + json.dumps(result, sort_keys=True))
+              raise SystemExit(1 if result["probe_error"] else 0)
+          PY
