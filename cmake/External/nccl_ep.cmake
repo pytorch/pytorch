@@ -28,9 +28,8 @@ if(NOT __NCCL_EP_INCLUDED)
   # Build nccl_ep for the same CUDA archs as the rest of PyTorch, dropping
   # anything below sm_90 since nccl_ep requires Hopper+. PyTorch disables
   # CMAKE_CUDA_ARCHITECTURES in favor of TORCH_CUDA_ARCH_LIST, so derive the arch
-  # list from there. If nothing qualifies (list unset, or a symbolic value like
-  # "Common"/"All"), pass no flag and let nccl_ep's CMakeLists pick its own
-  # CUDA-version default.
+  # list from there. If nothing qualifies, explicitly target sm_90 so CMake
+  # cannot select an older compiler-default architecture.
   if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
     # Usually only set in the environment (e.g. by setup.py), not as a cache var.
     set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
@@ -48,11 +47,11 @@ if(NOT __NCCL_EP_INCLUDED)
       list(APPEND __NCCL_EP_ARCHS "${__arch}")
     endif()
   endforeach()
-  set(__NCCL_EP_ARCH_ARG "")
-  if(__NCCL_EP_ARCHS)
-    list(REMOVE_DUPLICATES __NCCL_EP_ARCHS)
-    set(__NCCL_EP_ARCH_ARG "-DCMAKE_CUDA_ARCHITECTURES=${__NCCL_EP_ARCHS}")
+  if(NOT __NCCL_EP_ARCHS)
+    set(__NCCL_EP_ARCHS "90")
   endif()
+  list(REMOVE_DUPLICATES __NCCL_EP_ARCHS)
+  set(__NCCL_EP_ARCH_ARG "-DCMAKE_CUDA_ARCHITECTURES=${__NCCL_EP_ARCHS}")
 
   # Branch on how torch links NCCL (USE_NCCL_EP supports both):
   #  - USE_SYSTEM_NCCL=OFF (source/dev): torch statically embeds the submodule
