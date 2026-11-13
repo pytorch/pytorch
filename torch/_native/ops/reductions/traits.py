@@ -1,6 +1,7 @@
 # Reusable CuteDSL reduction traits and cross-thread helpers. leaf creates a one-element
 # accumulator, combine merges accumulators, and reduce performs a serial update. Tree folds
-# use leaf/combine, so leaf must include every element transform. Other names mirror
+# use leaf/combine, so leaf must include every element transform. has_combine_equal opts a
+# trait into combine_equal, a closed-form merge of equal-count states. Other names mirror
 # SharedReduceOps.h. Accumulator dtypes provide their identities. Scalar conditionals lower
 # only inside cute.jit methods; cute.arch.fmax suppresses NaNs, so traits handle them.
 
@@ -163,7 +164,14 @@ def _welford_denom(acc_dtype, nf, correction):
 class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
+    # has_combine_equal enables combine_equal's closed-form equal-count merges. The flag is
+    # not inherited: a subclass that keeps leaf, combine and their helpers must set it.
     nfields = 3
+    has_combine_equal = True
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        cls.has_combine_equal = vars(cls).get("has_combine_equal", False)
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)
@@ -179,7 +187,11 @@ class WelfordOps:
 
     @cute.jit
     def leaf(self, val, idx):
-        return (self.acc(val), self.acc(0.0), self.acc(1.0))
+        # The online update makes m2 NaN for +-inf (inf * (inf - inf)), and the leaf must
+        # agree: (v - v) ** 2 is +0.0 for finite v and NaN otherwise.
+        v = self.acc(val)
+        d = v - v
+        return (v, d * d, self.acc(1.0))
 
     @cute.jit
     def reduce(self, acc, val, idx, valid):
@@ -208,6 +220,19 @@ class WelfordOps:
             mean = ma + delta * nb_over_n
             m2 = m2a + m2b + delta * delta * na * nb_over_n
         return (mean, m2, nn)
+
+    @cute.jit
+    def combine_equal(self, a, b, count: cutlass.Constexpr):
+        """Combine two nonempty states that each hold `count` values.
+
+        a's and b's count fields are not read.
+        """
+        ma, m2a, _ = a
+        mb, m2b, _ = b
+        delta = mb - ma
+        mean = ma + delta * self.acc(0.5)
+        m2 = m2a + m2b + delta * delta * self.acc(count * 0.5)
+        return (mean, m2, self.acc(count * 2))
 
     @cute.jit
     def shfl_down(self, acc, offset):
@@ -753,6 +778,7 @@ def block_reduce(
 class VarMeanOps(WelfordOps):
     # Reuse Welford and project variance/std plus mean; correction and take_sqrt are unchanged.
     nouts = 2
+    has_combine_equal = True
 
     def __init__(self, correction=1, take_sqrt=False, acc=Float32):
         super().__init__(correction=correction, take_sqrt=take_sqrt, acc=acc)
