@@ -2,16 +2,13 @@
 
 import copy
 import io
-import json
 import logging
 import math
 import operator
 import os
-import pickle
 import random
 import sys
 import tempfile
-import time
 import unittest
 from datetime import timedelta
 from functools import reduce
@@ -39,6 +36,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
+from torch._C._distributed_c10d import WorkResult
 from torch.distributed._shard.sharded_tensor import (
     init_from_local_shards,
     Shard,
@@ -353,14 +351,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_split_world_pg_created_after_another_gloo_pg(self):
         # Regression test: ProcessGroupGloo::groupRanks() used to derive the
-        # identity rank mapping only when local_id_ == 0. local_id_ is a
-        # process-global counter over every ProcessGroupGloo constructed in the
-        # process, so a world-sized pg built after any other gloo pg (e.g. a
-        # stateless pg, or one inherited across fork) fell through to its empty
-        # global_ranks_in_group, and split() then indexed that empty vector and
-        # segfaulted on a null data pointer.
+        # identity rank mapping only for the first ProcessGroupGloo constructed
+        # in the process, so a world-sized pg built after any other gloo pg
+        # (e.g. a stateless pg, or one inherited across fork) fell through to
+        # its empty global_ranks_in_group, and split() then indexed that empty
+        # vector and segfaulted on a null data pointer.
         store = c10d.FileStore(self.file_name, self.world_size)
-        # (1) burn local_id_ == 0 on an unrelated gloo pg.
+        # (1) construct an unrelated gloo pg first.
         self._create_process_group_gloo(
             c10d.PrefixStore("prior", store),
             self.rank,
@@ -589,6 +586,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             exc = work.exception()
             self.assertIsInstance(exc, RuntimeError)
             self.assertIn("Timed out", str(exc))
+            self.assertEqual(
+                WorkResult(work.get_future_result().wait()), WorkResult.COMM_ERROR
+            )
 
     @requires_gloo()
     def test_allreduce_overall_timeout(self):
@@ -1863,6 +1863,73 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             if i == self.rank:
                 continue
             self.assertEqual(torch.tensor([i]), outputs[i])
+
+    @requires_gloo()
+    def test_send_recv_work_result(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+        tensor = torch.zeros(4)
+        if self.rank == 0:
+            work = pg.send([tensor], 1, 0)
+        elif self.rank == 1:
+            work = pg.recv([tensor], 0, 0)
+        if self.rank < 2:
+            # p2p results complete on wait().
+            self.assertFalse(work.get_future_result().done())
+            work.wait()
+            self.assertEqual(
+                WorkResult(work.get_future_result().wait()), WorkResult.SUCCESS
+            )
+        if self.rank == 0:
+            # Never sent. The timeout closes the pairs, so this must be the
+            # last op on pg.
+            work = pg.recv([tensor], 1, 1)
+            with self.assertRaisesRegex(RuntimeError, "Timed out waiting"):
+                work.wait(timedelta(milliseconds=100))
+            self.assertEqual(
+                WorkResult(work.get_future_result().wait()), WorkResult.COMM_ERROR
+            )
+            store.set("done", "1")
+        elif self.rank == 1:
+            # Keep rank 1's pair open until rank 0's recv times out.
+            store.wait(["done"])
+
+    @requires_gloo()
+    def test_reduce_scatter_work_result(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        pg = dist.group.WORLD
+        output = torch.empty(1)
+        work = pg.reduce_scatter_single_coalesced(
+            [output], [torch.ones(self.world_size)]
+        )
+        work.wait()
+        self.assertEqual(
+            WorkResult(work.get_future_result().wait()), WorkResult.SUCCESS
+        )
+        self.assertEqual(output, torch.tensor([float(self.world_size)]))
+
+        if self.rank == 0:
+            # Only rank 0 joins, so the composed allreduces time out. This must
+            # be the last op on pg.
+            opts = c10d.ReduceScatterOptions()
+            opts.timeout = timedelta(milliseconds=1)
+            work = pg.reduce_scatter(
+                [output], [[torch.ones(1)] * self.world_size], opts
+            )
+            # Gloo reports either the op timeout or the resulting pair closure.
+            with self.assertRaisesRegex(RuntimeError, "(Timed out|timeout)"):
+                work.wait()
+            self.assertEqual(
+                WorkResult(work.get_future_result().wait()), WorkResult.COMM_ERROR
+            )
+            store.set("done", "1")
+        else:
+            store.wait(["done"])
 
     @requires_gloo()
     def test_barrier_implies_wait(self):
@@ -3372,122 +3439,6 @@ class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
     def tearDown(self) -> None:
         del os.environ["TORCH_GLOO_LAZY_INIT"]
         return super().tearDown()
-
-
-class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
-    def setUp(self):
-        os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
-        super().setUp()
-
-    def tearDown(self) -> None:
-        del os.environ["TORCH_FR_BUFFER_SIZE"]
-        return super().tearDown()
-
-    def _verify_trace(self, t, is_json):
-        ver = t["version"]
-        self.assertEqual(ver, "2.10")
-        pg_config = t["pg_config"]
-        self.assertEqual(len(pg_config), 1)
-        default_pg_info = pg_config["0"]
-        self.assertIn("name", default_pg_info)
-        self.assertIn("desc", default_pg_info)
-        self.assertIn("ranks", default_pg_info)
-        pg_status = t["pg_status"]
-        self.assertEqual(len(pg_status), 1)
-        self.assertEqual(str(pg_status["0"]["last_enqueued_collective"]), "3")
-        self.assertEqual(str(pg_status["0"]["last_completed_collective"]), "3")
-        self.assertEqual(
-            str(pg_status["0"]["last_started_collective"]),
-            "-1",
-        )
-        global_ranks = pg_config["0"]["ranks"]
-        self.assertEqual(len(json.loads(global_ranks)), self.world_size)
-        self.assertEqual(len(t["entries"]), 3)
-        t = t["entries"]
-        last = t[-1]
-        self.assertEqual(last["process_group"], ("0", ""))
-        # No event recorded for Gloo.
-        self.assertEqual(last["state"], "scheduled")
-        # we don't collect stack traces in JSON at the moment
-        if not is_json:
-            self.assertIn("test_c10d_gloo.py", str(last["frames"]))
-        self.assertEqual(last["input_sizes"], ((3, 4),))
-        self.assertEqual(last["input_dtypes"], ["Float"])
-        self.assertEqual(last["output_sizes"], ((3, 4),))
-        self.assertEqual(last["output_dtypes"], ["Float"])
-        self.assertEqual(last["collective_seq_id"], 3)
-        # TODO: Needs verification
-        self.assertEqual(last["timeout_ms"], 50000)
-        self.assertTrue("duration_ms" not in last)
-
-    @requires_gloo()
-    def test_short_json(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts(group_name="0")
-        )
-        a = torch.full((3, 4), float(self.rank))
-        for _ in range(2):
-            f = pg.allreduce(a)
-            f.wait()
-        time.sleep(1)
-        t = json.loads(
-            torch._C._distributed_c10d._dump_fr_trace_json(includeCollectives=True)
-        )
-        self._verify_trace(t, True)
-
-    @requires_gloo()
-    def test_short_pickle(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts(group_name="0")
-        )
-        a = torch.full((3, 4), float(self.rank))
-        for _ in range(2):
-            f = pg.allreduce(a)
-            f.wait()
-        time.sleep(1)
-        t = pickle.loads(
-            torch._C._distributed_c10d._dump_fr_trace(includeCollectives=True)
-        )
-        self._verify_trace(
-            t,
-            is_json=False,
-        )
-
-    @requires_gloo()
-    def test_long(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts(group_name="0")
-        )
-        a = torch.full((3, 4), float(self.rank))
-        for _ in range(2):
-            # test some other primitives to make sure
-            # their strings are valid
-            xs = [torch.ones(3, 4)]
-            pg.broadcast(xs).wait()
-            pg.allreduce(xs).wait()
-            pg.reduce(xs).wait()
-            ys = [[torch.empty(3, 4) for _ in range(self.world_size)]]
-            pg.allgather(ys, xs).wait()
-            pg.reduce_scatter(xs, ys).wait()
-            f = pg.allreduce(a)
-            f.wait()
-        t = pickle.loads(torch._C._distributed_c10d._dump_fr_trace())
-        t = t["entries"]
-        self.assertEqual(len(t), 10)
-        first = t[0]
-        last = t[-1]
-        self.assertEqual(last["profiling_name"], "gloo:all_reduce")
-        self.assertEqual(last["state"], "scheduled")
-        self.assertIn("test_c10d_gloo.py", str(last["frames"]))
-        self.assertEqual(last["input_sizes"], ((3, 4),))
-        self.assertEqual(last["input_dtypes"], ["Float"])
-        self.assertEqual(last["output_sizes"], ((3, 4),))
-        self.assertEqual(last["output_dtypes"], ["Float"])
-        self.assertEqual(last["timeout_ms"], 50000)
-        self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):

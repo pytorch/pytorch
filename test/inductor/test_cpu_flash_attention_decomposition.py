@@ -1,10 +1,11 @@
 # Owner(s): ["oncall: cpu inductor"]
 import operator
+from unittest import mock
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config, cpu_vec_isa, metrics
-from torch._inductor.fx_passes.post_grad import pass_patterns
+from torch._inductor.fx_passes.post_grad import cpu_flash_attention_decomposition_pass
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -336,6 +337,20 @@ class CpuFlashAttentionDecompositionTests(TestCase):
         fn = sdpa(output_only=case != "logsumexp", **options)
         self.check(fn, q, k, v, rewritten=False, patches=patches, **compile_kwargs)
 
+    @parametrize("enabled", [False, True])
+    def test_pass_runs_only_when_enabled(self, device, enabled):
+        q, k, v = qkv(device, 1, 3, 1, 32, 64)
+        with (
+            config.patch("cpp.enable_cpu_flash_attention_decomposition", enabled),
+            mock.patch.object(
+                cpu_flash_attention_decomposition_pass,
+                "apply",
+                wraps=cpu_flash_attention_decomposition_pass.apply,
+            ) as apply,
+        ):
+            torch.compile(ATTENTION, fullgraph=True)(q, k, v)
+        self.assertEqual(apply.called, enabled)
+
     def test_gradients_keep_native(self, device):
         inputs = [x.requires_grad_() for x in qkv(device, 1, 3, 1, 32, 64)]
         reference_inputs = [x.detach().clone().requires_grad_() for x in inputs]
@@ -442,7 +457,10 @@ class CpuFlashAttentionDecompositionTests(TestCase):
     def test_mutation_between_operator_and_getitem(self, device, mutation):
         gm, fake_mode = self.make_attention_graph(device, mutation=mutation)
         with fake_mode:
-            self.assertEqual(pass_patterns[0].apply(gm.graph), 0 if mutation else 1)
+            self.assertEqual(
+                cpu_flash_attention_decomposition_pass.apply(gm.graph),
+                0 if mutation else 1,
+            )
         gm.recompile()
         q = torch.ones(1, 3, 1, 64, device=device)
         k = torch.ones(1, 3, 32, 64, device=device)
@@ -452,7 +470,7 @@ class CpuFlashAttentionDecompositionTests(TestCase):
     def test_nonzero_dropout_keeps_native_error(self, device):
         gm, fake_mode = self.make_attention_graph(device, dropout=0.1)
         with fake_mode:
-            self.assertEqual(pass_patterns[0].apply(gm.graph), 0)
+            self.assertEqual(cpu_flash_attention_decomposition_pass.apply(gm.graph), 0)
         q, k, v = qkv(device, 1, 3, 1, 32, 64)
         with self.assertRaisesRegex(RuntimeError, "do not support dropout"):
             gm(q, k, v)

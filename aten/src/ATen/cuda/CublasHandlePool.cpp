@@ -87,6 +87,15 @@
  * whose first rocBLAS operation runs inside a capture, such as an autograd
  * worker, still creates its per-(thread, device) internal handle there.
  *
+ * hipblasLtCreate zeroes the new handle's synchronizer with hipMemset, which
+ * returns before the zeroing runs: it is queued on the legacy stream, and no
+ * other stream is ordered after it. If it lands while a split-K kernel runs on
+ * the handle, that kernel can spin forever, or leave flags set that hang a
+ * later one. So creating a hipblaslt handle waits for the legacy stream, and
+ * so for everything queued on it before. Creating a rocBLAS handle synchronizes
+ * the device after creating its embedded hipblaslt handle, which covers that
+ * handle the same way.
+ *
  * A stream-keyed handle passes only to the next thread on its stream, whose
  * work is ordered after work queued on that stream alone, so outside capture,
  * callers must run work on a handle only on the stream it was returned for.
@@ -127,6 +136,16 @@ void createCublasLtHandle(cublasLtHandle_t *handle) {
       "captured. hipBLASLt handles are created per (thread, stream) on first "
       "use; run a hipBLASLt op on this thread and stream before capture begins.");
   TORCH_CUDABLAS_CHECK(cublasLtCreate(handle));
+  // It also zeroes the handle's synchronizer with a hipMemset still queued on
+  // the legacy stream; see Note [hipblaslt handles]. The raw call keeps this
+  // internal wait out of torch.cuda.set_sync_debug_mode.
+  const cudaError_t status =
+      C10_CUDA_ERROR_HANDLED(cudaStreamSynchronize(nullptr));
+  if (status != cudaSuccess) {
+    cublasLtDestroy(*handle);
+    *handle = nullptr;
+    AT_CUDA_CHECK(status);
+  }
 }
 
 void destroyCublasLtHandle(cublasLtHandle_t handle) {
@@ -798,7 +817,7 @@ static cublasHandle_t getCurrentCUDABlasHandleImpl(
 #if !defined(USE_ROCM)
   CUcontext pctx = nullptr;
   at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
-  if (C10_UNLIKELY(!pctx)) {
+  if (!pctx) [[unlikely]] {
     TORCH_WARN_ONCE("Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context...");
     at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, device);
     at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
@@ -969,7 +988,7 @@ CUDABlasHandleWithWorkspace::~CUDABlasHandleWithWorkspace() {
 #else
   const cublasStatus_t status = cublasSetStream(handle_, stream_);
 #endif
-  if (C10_UNLIKELY(status != CUBLAS_STATUS_SUCCESS)) {
+  if (status != CUBLAS_STATUS_SUCCESS) [[unlikely]] {
     // The handle may still refer to this allocation. Retain it rather than
     // leaving a dangling workspace pointer in a pooled handle. Destructors
     // cannot report this failure by throwing.
@@ -1083,7 +1102,7 @@ void releaseCaptureCublasWorkspaces(c10::CaptureId_t capture_id) {
       // A handle kept past the capture must not write into memory the graph
       // owns.
       const cublasStatus_t status = cublasSetWorkspace(handle, nullptr, 0);
-      if (C10_UNLIKELY(status != CUBLAS_STATUS_SUCCESS)) {
+      if (status != CUBLAS_STATUS_SUCCESS) [[unlikely]] {
         // Keep the allocations rather than leave the handle bound to freed
         // memory. It is bound to whichever stream's workspace it used last.
         for (auto& workspace : handle_workspaces) {

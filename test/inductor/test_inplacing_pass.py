@@ -7,13 +7,18 @@ import torch._inductor.config as inductor_config
 from functorch import make_fx
 from torch import Tensor
 from torch._dynamo.utils import ReinplaceCounters
+from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
 from torch._inductor import inductor_prims
+from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._inductor.fx_utils import FakeTensorUpdater, get_node_storage
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
+from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -633,6 +638,105 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         f(x)
         self.assertEqual(num_reinplacing_failures(), 0)
 
+    def test_with_effects_metadata_refresh_unbacked_symbols(self):
+        from torch._higher_order_ops.effects import with_effects
+
+        def f(x, y):
+            token = torch.ops.aten._make_dep_token()
+            return with_effects(token, aten.nonzero.default, x)[1]
+
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.ones(3, device=device), torch.ones(4, device=device)
+        )
+        updater = FakeTensorUpdater(gm)
+        wrapped = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is torch.ops.higher_order.with_effects
+        )
+        original_bindings = wrapped.meta.get("unbacked_bindings")
+        other_input = list(gm.graph.find_nodes(op="placeholder"))[1]
+        wrapped.update_arg(2, other_input)
+        fake_mode = detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            updater.incremental_update()
+            self.assertEqual(updater.incremental_update(), 0)
+        self.assertEqual(wrapped.meta.get("unbacked_bindings"), original_bindings)
+        self.assertEqual(fake_mode.shape_env.pending_fresh_unbacked_symbols, [])
+        gm.graph.lint()
+
+    @parametrize("refresh", ["full", "reinplace"])
+    def test_with_effects_index_put_alias_metadata(self, refresh):
+        from torch._higher_order_ops.effects import with_effects
+
+        def f(x, indices, values):
+            base = x.cos()
+            token = aten._make_dep_token.default()
+            token, result = with_effects(
+                token, aten.index_put.default, base, [indices], values
+            )
+            return (result.view(-1),)
+
+        inputs = (
+            torch.arange(8, device=device, dtype=torch.float32).reshape(2, 4),
+            torch.tensor([0], device=device),
+            torch.full((1, 4), 10.0, device=device),
+        )
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        wrapped = next(n for n in gm.graph.nodes if n.target is with_effects)
+        base = wrapped.args[2]
+        view = next(n for n in gm.graph.nodes if n.target is aten.view.default)
+        token = next(
+            n for n in wrapped.users if n.target is operator.getitem and n.args[1] == 0
+        )
+        self.assertNotEqual(
+            wrapped.meta["val"][1].untyped_storage()._cdata, get_node_storage(base)
+        )
+        updater = FakeTensorUpdater(gm)
+        if refresh == "reinplace":
+            reinplace_inplaceable_ops_core(gm.graph)
+            self.assertIs(view.args[0], base)
+        else:
+            wrapped.update_arg(1, aten.index_put_.default)
+        with V.set_fake_mode(detect_fake_mode([base.meta["val"]])):
+            updater.incremental_update()
+        self.assertIs(wrapped.args[1], aten.index_put_.default)
+        self.assertIsInstance(wrapped.meta["val"][0], FakeTensor)
+        self.assertIsInstance(wrapped.meta["val"][1], FakeTensor)
+        self.assertEqual(
+            wrapped.meta["val"][1].untyped_storage()._cdata, get_node_storage(base)
+        )
+        self.assertEqual(get_node_storage(view), get_node_storage(base))
+        self.assertEqual(token.meta["val"].shape, wrapped.meta["val"][0].shape)
+        with V.set_fake_mode(detect_fake_mode([base.meta["val"]])):
+            self.assertEqual(updater.incremental_update(), 0)
+        gm.graph.lint()
+
+    def test_with_effects_index_put_compilation(self):
+        from torch._higher_order_ops.effects import with_effects
+
+        def f(x, indices, values):
+            base = x.cos()
+            token = aten._make_dep_token.default()
+            token, result = with_effects(
+                token, aten.index_put.default, base, [indices], values
+            )
+            return (result.view(-1),)
+
+        inputs = (
+            torch.arange(8, device=device, dtype=torch.float32).reshape(2, 4),
+            torch.tensor([1], device=device),
+            torch.full((1, 4), 10.0, device=device),
+        )
+        original_inputs = tuple(x.clone() for x in inputs)
+        expected = f(*inputs)
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        wrapped = next(n for n in gm.graph.nodes if n.target is with_effects)
+        compiled = compile_fx_inner(gm, inputs)
+        self.assertIs(wrapped.args[1], aten.index_put_.default)
+        self.assertEqual(compiled(list(inputs)), expected)
+        self.assertEqual(inputs, original_inputs)
+
     def test_with_effects_reinplace(self):
         """Test that the reinplace pass correctly handles with_effects wrapped ops.
 
@@ -677,7 +781,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 token = torch.ops.aten._make_dep_token()
                 result = with_effects(token, my_add_functional._opoverload, x, y)
                 # with_effects returns (new_token, result_tensor)
-                return result[1]
+                return result[0], result[1]
 
             a = torch.randn(3, device=device)
             b = torch.randn(3, device=device)
@@ -703,7 +807,14 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             self.assertGreater(len(getitem_nodes_before), 0)
 
             # Run reinplace pass
+            updater = FakeTensorUpdater(gm)
+            fake_mode = detect_fake_mode(
+                [node.meta.get("val") for node in gm.graph.nodes]
+            )
             reinplace_inplaceable_ops_core(gm.graph)
+            with V.set_fake_mode(fake_mode):
+                updater.incremental_update()
+                self.assertEqual(updater.incremental_update(), 0)
 
             # Find the with_effects node after reinplace
             with_effects_nodes_after = [
@@ -715,7 +826,19 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
             # The inner op should now be the inplace version
             inner_op_after = with_effects_nodes_after[0].args[1]
+            self.assertIsNone(with_effects_nodes_after[0].meta["val"][1])
             self.assertEqual(inner_op_after, my_add_inplace._opoverload)
+            token_node = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is operator.getitem
+                and node.args == (with_effects_nodes_after[0], 0)
+            )
+            self.assertIsInstance(token_node.meta["val"], torch.Tensor)
+            self.assertEqual(
+                token_node.meta["val"].shape,
+                with_effects_nodes_after[0].meta["val"][0].shape,
+            )
 
             # Verify getitem nodes for result extraction are cleaned up
             # (getitem[i] for i >= 1 on with_effects should be removed or replaced)
@@ -805,7 +928,14 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             self.assertEqual(inner_op_before, my_swap_functional._opoverload)
 
             # Run reinplace pass
+            updater = FakeTensorUpdater(gm)
+            fake_mode = detect_fake_mode(
+                [node.meta.get("val") for node in gm.graph.nodes]
+            )
             reinplace_inplaceable_ops_core(gm.graph)
+            with V.set_fake_mode(fake_mode):
+                updater.incremental_update()
+                self.assertEqual(updater.incremental_update(), 0)
 
             # Find the with_effects node after reinplace
             with_effects_nodes_after = [
@@ -817,6 +947,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
             # The inner op should now be the inplace version
             inner_op_after = with_effects_nodes_after[0].args[1]
+            self.assertIsNone(with_effects_nodes_after[0].meta["val"][1])
             self.assertEqual(inner_op_after, my_swap_inplace._opoverload)
 
             # Verify getitem nodes for result extraction are cleaned up
@@ -905,7 +1036,14 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             self.assertEqual(inner_op_before, my_wait_functional._opoverload)
 
             # Run reinplace pass
+            updater = FakeTensorUpdater(gm)
+            fake_mode = detect_fake_mode(
+                [node.meta.get("val") for node in gm.graph.nodes]
+            )
             reinplace_inplaceable_ops_core(gm.graph)
+            with V.set_fake_mode(fake_mode):
+                updater.incremental_update()
+                self.assertEqual(updater.incremental_update(), 0)
 
             # Find the with_effects node after reinplace
             with_effects_nodes_after = [
@@ -917,6 +1055,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
             # The inner op should now be the inplace version
             inner_op_after = with_effects_nodes_after[0].args[1]
+            self.assertIsNone(with_effects_nodes_after[0].meta["val"][1])
             self.assertEqual(inner_op_after, my_wait_inplace._opoverload)
 
             # Verify getitem nodes for result extraction are cleaned up
