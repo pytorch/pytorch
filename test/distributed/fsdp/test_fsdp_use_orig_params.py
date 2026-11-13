@@ -1484,10 +1484,7 @@ class TestMultiTensorApply(TestCase):
 
 
 class TestMultiTensorApplyOnCPU(TestCase):
-    # This test guards a CPU `_foreach_` segfault and pins its tensors to the
-    # CPU by construction, so it lives in its own CPU class: keeping it in the
-    # ACCELERATOR class above would stop it from being generated (and run) on
-    # CPU-only hosts once `except_for="cpu"` filters that class out.
+    # Keep this CPU _foreach_ regression test available on CPU-only hosts.
     hw_classification = HardwareClassification.CPU
 
     def test_multi_tensor_apply_size0_tensors_cpu(self, device):
