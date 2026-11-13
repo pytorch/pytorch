@@ -355,7 +355,7 @@ class TestSumCuteDSLOverride(TestCase):
         index = x.get_device()
         out = torch.empty(4, device="cuda")
         with (
-            mock.patch.object(torch.cuda, "current_device", return_value=index + 1),
+            mock.patch.object(torch._C, "_cuda_getDevice", return_value=index + 1),
             mock.patch.object(torch.cuda, "device", device),
             mock.patch.object(cutedsl_impl, "_run", run),
         ):
