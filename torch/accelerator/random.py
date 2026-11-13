@@ -195,14 +195,65 @@ def seed_all() -> None:
     _lazy_call(cb)
 
 
+def get_rng_offset(device: Device = None, /) -> int:
+    r"""Return the RNG offset of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
+    on the specified device. The offset is the position within the random number sequence selected by the seed
+    (see :func:`torch.accelerator.random.initial_seed`).
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): The device to return the RNG offset of.
+            If not given, uses :func:`torch.accelerator.current_device_index` by default.
+
+    Returns:
+        int: the RNG offset of the default generator for the specified device.
+
+    .. warning::
+        This function eagerly initializes the accelerator runtime.
+    """
+    device_index = _get_device_index(device, optional=True)
+    default_generator = torch._C._accelerator_getDefaultGenerator(device_index)
+    return default_generator.get_offset()
+
+
+def set_rng_offset(offset: int, device: Device = None, /) -> None:
+    r"""Set the RNG offset of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
+    on the specified device, without changing the seed.
+    If :func:`torch.accelerator.current_accelerator` returns ``None``, this function may be a no-op. If the current
+    :ref:`accelerator<accelerators>` doesn't support RNG offsets, this function may also be a no-op.
+
+    Args:
+        offset (int): The desired RNG offset.
+        device (:class:`torch.device`, str, int, optional): The device to set the offset for.
+            If not given, uses :func:`torch.accelerator.current_device_index` by default.
+
+    .. note::
+        On accelerators that support lazy initialization, applying the offset may be deferred
+        until the runtime is initialized. See :ref:`lazy-initialization-and-fork-safety-note`.
+    """
+    device_index = _get_optional_device_index(device)
+
+    def cb() -> None:
+        idx = (
+            device_index
+            if device_index is not None
+            else torch.accelerator.current_device_index()
+        )
+        default_generator = torch._C._accelerator_getDefaultGenerator(idx)
+        default_generator.set_offset(offset)
+
+    _lazy_call(cb)
+
+
 __all__ = [
     "initial_seed",
+    "get_rng_offset",
     "get_rng_state",
     "get_rng_state_all",
     "manual_seed",
     "manual_seed_all",
     "seed",
     "seed_all",
+    "set_rng_offset",
     "set_rng_state",
     "set_rng_state_all",
 ]
