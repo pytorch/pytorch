@@ -27,7 +27,7 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 3;
+pub const TCFG_API_VERSION: u32 = 4;
 
 #[repr(C)]
 pub struct TcfgPyOp {
@@ -86,6 +86,7 @@ pub struct TcfgApi {
     >,
     pub frame_pop: Option<unsafe extern "C" fn(*mut std::ffi::c_void, Obj)>,
     pub frame_held: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>,
+    pub is_tracing: unsafe extern "C" fn() -> i32,
 }
 
 /// Whether compiled functions run under an interpreter frame of their own.

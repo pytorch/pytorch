@@ -68,7 +68,9 @@ def run_one(name, compiled):
     if compiled:
         for cls, method, fn in test_methods(suite):
             try:
-                setattr(cls, method, torch.cfg_compile(fn, fallback=False))
+                setattr(
+                    cls, method, torch.cfg_compile(fn, fallback=False, demote=False)
+                )
                 report["compiled"] += 1
             except torch.cfg_compile.Unsupported as e:
                 report["rejected"] += 1
