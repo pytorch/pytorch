@@ -164,10 +164,6 @@ struct ConcretePyInterpreterVTable final
   bool fake_run_with_mode_entered(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       c10::function_ref<bool()> step) const override;
-  c10::Device _resolve_device_conflict(
-      const c10::OperatorHandle& op,
-      c10::Device common_device,
-      c10::Device device) const override;
   bool fake_try_decomp(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
@@ -1056,10 +1052,6 @@ DEFINE_CACHED_PYTHON_IMPORT(
 DEFINE_CACHED_PYTHON_IMPORT(
     get_fake_tensor_tls,
     py::module::import("torch._subclasses.fake_tensor").attr("fake_tensor_tls"))
-DEFINE_CACHED_PYTHON_IMPORT(
-    get_resolve_device_conflict,
-    py::module::import("torch._subclasses.fake_tensor")
-        .attr("_resolve_device_conflict"))
 
 #undef DEFINE_CACHED_PYTHON_IMPORT
 
@@ -1237,16 +1229,6 @@ bool ConcretePyInterpreterVTable::fake_run_with_mode_entered(
   }
   py_mode.attr("__exit__")(py::none(), py::none(), py::none());
   return done;
-}
-
-c10::Device ConcretePyInterpreterVTable::_resolve_device_conflict(
-    const c10::OperatorHandle& op,
-    c10::Device common_device,
-    c10::Device device) const {
-  py::gil_scoped_acquire gil;
-  return get_resolve_device_conflict()(
-             getTorchApiFunction(op), common_device, device)
-      .cast<c10::Device>();
 }
 
 // Try a registered Python decomposition for op.
