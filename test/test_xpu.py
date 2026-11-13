@@ -166,8 +166,8 @@ class TestXpu(TestCase):
             device_capability["has_subgroup_matrix_multiply_accumulate"],
         )
         self.assertEqual(
-            device_properties.has_subgroup_matrix_multiply_accumulate_tensor_float32,
-            device_capability["has_subgroup_matrix_multiply_accumulate_tensor_float32"],
+            device_properties.has_subgroup_matrix_multiply_accumulate_tf32,
+            device_capability["has_subgroup_matrix_multiply_accumulate_tf32"],
         )
         self.assertEqual(
             device_properties.has_subgroup_2d_block_io,
@@ -293,6 +293,37 @@ if __name__ == "__main__":
         with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
             _parse_visible_devices("one, two", strict=True)
 
+        # ONEAPI_DEVICE_SELECTOR is not honored by Sysman; it overrides
+        # ZE_AFFINITY_MASK, returning [] or raising ValueError in strict mode
+        with patch.dict(
+            os.environ,
+            {"ZE_AFFINITY_MASK": "0, 1", "ONEAPI_DEVICE_SELECTOR": "level_zero:0"},
+            clear=True,
+        ):
+            self.assertEqual(torch.xpu._parse_visible_devices(), [])
+            with self.assertRaisesRegex(
+                ValueError, "Unsupported ONEAPI_DEVICE_SELECTOR format"
+            ):
+                torch.xpu._parse_visible_devices(strict=True)
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_info_api_raises_with_oneapi_device_selector(self):
+        torch.xpu._cached_zes_device_infos.clear()
+        with patch.dict(os.environ, {"ONEAPI_DEVICE_SELECTOR": "level_zero:0"}):
+            for api in (
+                torch.xpu.temperature,
+                torch.xpu.clock_rate,
+                torch.xpu.power_draw,
+                torch.xpu.utilization,
+                torch.xpu.memory_usage,
+                torch.xpu.device_memory_used,
+                torch.xpu.list_gpu_processes,
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "Unsupported ONEAPI_DEVICE_SELECTOR format"
+                ):
+                    api()
+
     def test_device_info_api_raises_import_error_without_pyzes(self):
         with unittest.mock.patch.dict("sys.modules", {"pyzes": None}):
             with self.assertRaisesRegex(ImportError, "pyzes is required"):
@@ -404,6 +435,7 @@ if __name__ == "__main__":
         current_device = torch.xpu.current_device()
         self.assertRegex(processes_info, rf"GPU:\s*{current_device}\b")
 
+    @unittest.skip("https://github.com/intel/torch-xpu-ops/issues/6131")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_device_count_respects_affinity_mask(self):
         def _run(mask: str) -> str:
@@ -431,6 +463,21 @@ print(f"{{r1}}, {{r2}}")
         if TEST_MULTIXPU:
             # Valid mask selecting device 1 on a multi-GPU system → both return 1
             self.assertEqual(_run("1"), "1, 1")
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_count_respects_oneapi_device_selector(self):
+        test_script = """\
+import torch
+print(f"{torch.xpu._device_count_zes()}, {torch.xpu.device_count()}")
+"""
+        env = {**os.environ, "ONEAPI_DEVICE_SELECTOR": "!*:gpu"}
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script], env=env)
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+        self.assertEqual(r, "-1, 0")
 
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
@@ -590,6 +637,14 @@ print(torch.xpu.is_initialized())
         self.assertEqual(high, s1.priority)
         self.assertEqual(torch.device("xpu:0"), s1.device)
 
+        # Streams of every priority must be usable, including the lowest one.
+        event = torch.xpu.Event()
+        for stream in (s0, s1):
+            event.record()
+            stream.wait_event(event)
+            stream.synchronize()
+            self.assertTrue(stream.query())
+
     def test_stream_event_repr(self):
         s = torch.xpu.current_stream()
         self.assertTrue("torch.xpu.Stream" in str(s))
@@ -621,6 +676,28 @@ print(torch.xpu.is_initialized())
         self.assertNotEqual(event.sycl_event, 0)
         self.assertNotEqual(event.event_id, 0)
         self.assertEqual(event.sycl_event, event.event_id)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    def test_multi_events_elapsed_time(self):
+        s0 = torch.xpu.current_stream(0)
+        s1 = torch.xpu.current_stream(1)
+
+        with s0:
+            start_event = torch.xpu.Event(enable_timing=True)
+            start_event.record()
+            _ = torch.randn(1000, device="xpu")
+
+        with s1:
+            end_event = torch.xpu.Event(enable_timing=True)
+            s0.synchronize()
+            end_event.record()
+
+        start_event.synchronize()
+        end_event.synchronize()
+        with self.assertRaisesRegex(
+            RuntimeError, "Both events must be on the same device"
+        ):
+            start_event.elapsed_time(end_event)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
@@ -843,7 +920,7 @@ print(torch.xpu.is_initialized())
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_sleep(self):
         # clock_rate() returns MHz; multiply by 1e6 to get ~1 second of device cycles.
-        cycles = torch.xpu.clock_rate() * 1_000_000
+        cycles = int(torch.xpu.clock_rate() * 1_000_000)
         # Some Xe GPU's bundled IGC is too old to support it.
         if not Xe2_Or_Later:
             with self.assertRaisesRegex(
@@ -1111,7 +1188,6 @@ print(torch.xpu.is_initialized())
 
     @unittest.skipIf(not HAS_PYZES, "requires pyzes")
     @unittest.skipIf(not Xe2_Or_Later, "not available")
-    @unittest.skip("See https://github.com/intel/torch-xpu-ops/issues/5015")
     @serialTest()
     def test_mem_get_info_with_pyzes(self):
         torch.xpu.synchronize()
@@ -1379,7 +1455,7 @@ print(torch.xpu.is_initialized())
             torch.xpu.memory.empty_cache()
             torch.xpu.memory._record_memory_history("state", stacks="python")
 
-            @torch.jit.script
+            @torch.jit._script.script
             def foo():
                 return torch.rand(311, 411, device="xpu")
 
@@ -3172,6 +3248,7 @@ class TestBlockStateAbsorption(TestCase):
         self.assertTrue(check(set()))
 
 
+@instantiate_parametrized_tests
 @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
 @unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
 @unittest.skipIf(
@@ -3184,8 +3261,8 @@ class TestBlockStateAbsorption(TestCase):
 )
 class TestXPUMultiprocessing(TestCase):
     @staticmethod
-    def _event_handle_importer_consumer(handle, p2c, c2p):
-        e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+    def _event_handle_importer_consumer(event_cls, handle, p2c, c2p):
+        e1 = event_cls.from_ipc_handle(torch.xpu.current_device(), handle)
         c2p.put(0)  # notify parent child is ready
         p2c.get()  # wait for record in parent
         e1.synchronize()
@@ -3193,10 +3270,10 @@ class TestXPUMultiprocessing(TestCase):
         p2c.get()  # wait for parent to finish
 
     @staticmethod
-    def _event_handle_exporter_consumer(handle, p2c, c2p):
+    def _event_handle_exporter_consumer(event_cls, handle, p2c, c2p):
         stream = torch.xpu.Stream()
         with stream:
-            e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+            e1 = event_cls.from_ipc_handle(torch.xpu.current_device(), handle)
             torch.xpu._sleep(200_000_000)  # spin for about 200 ms
             e1.record()
             c2p.put(0)
@@ -3209,8 +3286,15 @@ class TestXPUMultiprocessing(TestCase):
         event.synchronize()
         c2p.put(1)  # notify parent synchronization is done
 
-    def test_event_handle_importer(self):
-        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.xpu.Event, name="xpu_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_importer(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
 
         ctx = mp.get_context("spawn")
@@ -3218,7 +3302,7 @@ class TestXPUMultiprocessing(TestCase):
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=TestXPUMultiprocessing._event_handle_importer_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
 
@@ -3233,15 +3317,22 @@ class TestXPUMultiprocessing(TestCase):
         p2c.put(1)  # notify child to finish
         p.join()
 
-    def test_event_handle_exporter(self):
-        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.xpu.Event, name="xpu_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_exporter(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
 
         ctx = mp.get_context("spawn")
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=TestXPUMultiprocessing._event_handle_exporter_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
 
@@ -3253,8 +3344,15 @@ class TestXPUMultiprocessing(TestCase):
         p2c.put(0)  # notify child to finish
         p.join()
 
-    def test_event_multiprocess(self):
-        event = torch.xpu.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.xpu.Event, name="xpu_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_multiprocess(self, event_cls):
+        event = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(event.query())
 
         ctx = mp.get_context("spawn")
@@ -4042,6 +4140,37 @@ class TestMemPool(TestCase):
         # each thread should create a unique mempool, since
         # mempool id creation is atomic
         self.assertEqual(len(set(pool_ids)), 4)
+
+    @serialTest()
+    def test_nested_mempool(self):
+        torch.xpu.empty_cache()
+        pool1 = torch.xpu.MemPool()
+        pool2 = torch.xpu.MemPool()
+        pool3 = torch.xpu.MemPool()
+
+        data = []
+        nelem_1mb = 1024 * 1024 // 4
+
+        def allocate_data():
+            x = torch.empty(nelem_1mb * 20, device="xpu")
+            data.append(x)
+
+        with torch.xpu.use_mem_pool(pool1):
+            allocate_data()
+            with torch.xpu.use_mem_pool(pool2):
+                allocate_data()
+                with torch.xpu.use_mem_pool(pool3):
+                    allocate_data()
+                allocate_data()
+            allocate_data()
+
+        pool1_segments = torch.xpu.memory.memory_snapshot(pool1.id)
+        pool2_segments = torch.xpu.memory.memory_snapshot(pool2.id)
+        pool3_segments = torch.xpu.memory.memory_snapshot(pool3.id)
+
+        self.assertEqual(len(pool1_segments), 2)
+        self.assertEqual(len(pool2_segments), 2)
+        self.assertEqual(len(pool3_segments), 1)
 
     def test_mempool_empty_cache(self):
         torch.xpu.empty_cache()

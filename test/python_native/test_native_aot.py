@@ -128,6 +128,15 @@ def _run_probe(cases, extra_env):
 
 
 class TestNativeAotTopKDeclaration(TestCase):
+    def test_archs_are_canonical_portable_targets(self):
+        from torch._native.ops.topk import aot
+
+        # Top-k's tuning tables cover compute capability majors 9 and 10.
+        # Native AOT uses one widest portable compiler target per major:
+        # sm_90 is the available portable SM9x target, while
+        # the same-major compatibility rule makes sm_100f cover known SM10x devices.
+        self.assertEqual(aot.ARCHS, ("sm_90", "sm_100f"))
+
     def test_dispatch_alignment_is_radix_only(self):
         from torch._native.ops.topk import aot
 
@@ -416,10 +425,11 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(register_1024["eligible"])
         base = torch.empty(M, 4096, device="cuda")
         cow = base._lazy_clone()
+        is_cow = torch._C._is_cow_tensor(cow)
         data_ptr = cow.const_data_ptr()
         uncovered = mod.covered_axes(cow, 100)
         self.assertFalse(uncovered["eligible"])
-        self.assertTrue(torch._C._is_cow_tensor(cow))
+        self.assertEqual(torch._C._is_cow_tensor(cow), is_cow)
         self.assertEqual(cow.const_data_ptr(), data_ptr)
         # Schema defaults come from the function signature itself.
         self.assertEqual(

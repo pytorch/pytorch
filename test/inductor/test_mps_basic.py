@@ -11,9 +11,11 @@ import numpy as np
 import torch
 from torch._inductor import config as inductor_config
 from torch._inductor.codegen.mps import MetalKernel
+from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_mps_types_and
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -38,6 +40,8 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
 @instantiate_parametrized_tests
 class MPSBasicTests(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     is_dtype_supported = CommonTemplate.is_dtype_supported
     common = check_model_gpu
     device = "mps"
@@ -369,9 +373,30 @@ class MPSBasicTests(TestCase):
     def test_metal_kernel_device_type(self):
         self.assertEqual(MetalKernel.device_type, "mps")
 
+    def test_assert_async_message(self):
+        def fn(x):
+            torch._assert_async((x > 0).all(), "x must be positive")
+            return x * 2
+
+        with self.assertRaisesRegex(torch.AcceleratorError, "x must be positive"):
+            torch.compile(fn, fullgraph=True)(-torch.ones(3, device="mps"))
+            torch.mps.synchronize()
+
+    def test_error_header_not_shared_across_kernels(self):
+        def with_assert(x):
+            torch._assert_async((x > 0).all(), "x must be positive")
+            return x * 2
+
+        x = torch.ones(3, device="mps")
+        torch.compile(with_assert)(x)
+        _, (code,) = run_and_get_code(torch.compile(lambda x: x * 2), x)
+        self.assertNotIn("error_buf", code)
+
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
 class MPSBasicTestsAOTI(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     def check_model(self, m, inp, dynamic_shapes=None):
         res2 = m(*inp)
         ep = torch.export.export(m, inp, dynamic_shapes=dynamic_shapes)

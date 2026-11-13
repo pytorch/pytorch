@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/irange.h>
 #include <array>
 
 namespace at::vec {
@@ -58,7 +59,7 @@ class VectorizedN {
 #ifndef _MSC_VER
 #pragma unroll
 #endif
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       result.values[i] = op(values[i]);
     }
     return result;
@@ -71,7 +72,7 @@ class VectorizedN {
 #ifndef _MSC_VER
 #pragma unroll
 #endif
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       result.values[i] = op(values[i], other.values[i]);
     }
     return result;
@@ -86,7 +87,7 @@ class VectorizedN {
 #ifndef _MSC_VER
 #pragma unroll
 #endif
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       result.values[i] = op(values[i], other.values[i], other2.values[i]);
     }
     return result;
@@ -95,7 +96,7 @@ class VectorizedN {
   VectorizedN() = default;
 
   explicit VectorizedN(T val) {
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       values[i] = Vectorized<T>(val);
     }
   }
@@ -125,7 +126,7 @@ class VectorizedN {
       const VectorizedN<T, N>& a,
       const VectorizedN<T, N>& b) {
     VectorizedN<T, N> result;
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       result.values[i] =
           Vectorized<T>::template blend<mask>(a.values[i], b.values[i]);
     }
@@ -137,7 +138,7 @@ class VectorizedN {
       const VectorizedN<T, N>& b,
       const VectorizedN<T, N>& mask) {
     VectorizedN<T, N> result;
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       result.values[i] =
           Vectorized<T>::blendv(a.values[i], b.values[i], mask.values[i]);
     }
@@ -149,7 +150,7 @@ class VectorizedN {
       T base = static_cast<T>(0),
       step_t step = static_cast<step_t>(1)) {
     VectorizedN<T, N> result;
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       result.values[i] = Vectorized<T>::arange(base, step);
       base += step * Vectorized<T>::size();
     }
@@ -161,7 +162,7 @@ class VectorizedN {
       const VectorizedN<T, N>& b,
       int64_t count = size()) {
     VectorizedN<T, N> result;
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       if (count > 0) {
         result.values[i] = Vectorized<T>::set(
             a.values[i],
@@ -177,7 +178,7 @@ class VectorizedN {
 
   static VectorizedN<T, N> loadu(const void* ptr) {
     VectorizedN<T, N> result;
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       result.values[i] = Vectorized<T>::loadu(ptr);
       ptr = static_cast<const T*>(ptr) + Vectorized<T>::size();
     }
@@ -186,7 +187,7 @@ class VectorizedN {
 
   static VectorizedN<T, N> loadu(const void* ptr, int64_t count) {
     VectorizedN<T, N> result;
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       if (count > 0) {
         result.values[i] = Vectorized<T>::loadu(
             ptr, std::min(count, (int64_t)Vectorized<T>::size()));
@@ -200,14 +201,14 @@ class VectorizedN {
   }
 
   void store(void* ptr) const {
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       values[i].store(ptr);
       ptr = static_cast<T*>(ptr) + Vectorized<T>::size();
     }
   }
 
   void store(void* ptr, int count) const {
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       values[i].store(ptr, std::min(count, (int)Vectorized<T>::size()));
       ptr = static_cast<T*>(ptr) + Vectorized<T>::size();
       count -= Vectorized<T>::size();
@@ -218,7 +219,7 @@ class VectorizedN {
   }
 
   bool has_inf_nan() const {
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       if (values[i].has_inf_nan()) {
         return true;
       }
@@ -228,7 +229,7 @@ class VectorizedN {
 
   VectorizedN<T, N> map(T (*const f)(T)) const {
     VectorizedN<T, N> result;
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       result.values[i] = values[i].map(f);
     }
     return result;
@@ -236,7 +237,7 @@ class VectorizedN {
 
   VectorizedN<T, N> map(T (*const f)(const T&)) const {
     VectorizedN<T, N> result;
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       result.values[i] = values[i].map(f);
     }
     return result;
@@ -385,7 +386,7 @@ VECTORIZEDN_DEFINE_BINARY_OP_INPLACE_GLOBAL(operator>>=)
 template <typename T, int N, typename OpVec>
 inline T vec_reduce_all(const OpVec& vec_fun, VectorizedN<T, N> acc_vec) {
   Vectorized<T> vec_result = acc_vec[0];
-  for (int i = 1; i < N; i++) {
+  for (const auto i : c10::irange(1, N)) {
     vec_result = vec_fun(vec_result, acc_vec[i]);
   }
   return vec_reduce_all(vec_fun, vec_result);
@@ -394,7 +395,7 @@ inline T vec_reduce_all(const OpVec& vec_fun, VectorizedN<T, N> acc_vec) {
 template <typename T, int N>
 std::ostream& operator<<(std::ostream& stream, const VectorizedN<T, N>& vec_n) {
   stream << "vec_n[";
-  for (int i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     if (i != 0) {
       stream << ", ";
     }
