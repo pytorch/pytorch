@@ -20,7 +20,6 @@ std::vector<Tensor> _quantize_tensor_cuda(
       "torch._quantize_tensor requires an NVIDIA GPU with CUDA compute "
       "capability 10.0 or higher and the optional nvidia-cutlass-dsl and "
       "apache-tvm-ffi packages");
-  return {};
 }
 
 std::vector<Tensor> _quantize_tensor_dual_cuda(
@@ -36,7 +35,6 @@ std::vector<Tensor> _quantize_tensor_dual_cuda(
       "torch._quantize_tensor_dual requires an NVIDIA GPU with CUDA compute "
       "capability 10.0 or higher and the optional nvidia-cutlass-dsl and "
       "apache-tvm-ffi packages");
-  return {};
 }
 
 }  // namespace at::native
