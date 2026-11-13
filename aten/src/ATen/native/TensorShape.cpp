@@ -29,6 +29,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <c10/core/Contiguity.h>
 #include <c10/core/GradMode.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
@@ -1326,13 +1327,13 @@ static Tensor make_qtensor(
   return result;
 }
 
-// as_strided creates a new TensorImpl but shares the storage so for faketensor
-// we need to copy over the metadata like the device and also the faketensormode
-// pointer
+// Outside Meta kernels a view keeps its input's fake metadata. Inside a
+// kernel it is a new Meta output; see Note [C++ fake outputs inside Meta
+// kernels].
 static void maybe_copy_fake_tensor_metadata(
     const Tensor& self,
     TensorImpl* result) {
-  if (!self.is_fake()) {
+  if (!self.is_fake() || c10::impl::FakeTensorModeTLS::in_kernel_invocation()) {
     return;
   }
   auto fake_device = self.unsafeGetTensorImpl()->fake_device();
