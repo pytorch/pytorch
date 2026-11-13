@@ -3,6 +3,7 @@
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
 
+#include <cstring>
 #include <exception>
 #include <iostream>
 #include <string>
@@ -15,17 +16,26 @@
 // AOTInductorGetLastError(). Without this, exception messages (e.g.
 // "CUDA error: an illegal memory access was encountered") are lost when
 // the runtime boundary catches them and returns an error code.
-static thread_local std::string g_aoti_last_error;
+//
+// This must stay trivially destructible. A thread_local with a destructor
+// (e.g. std::string) registers a per-thread destructor in every thread that
+// calls into this DSO, and glibc then refuses to unload the DSO until all of
+// those threads exit: dlclose() becomes a no-op and every model reload leaks
+// the whole .so.
+constexpr size_t kAotiLastErrorCapacity = 1024;
+static thread_local char g_aoti_last_error[kAotiLastErrorCapacity];
 
 namespace {
+
+void set_aoti_last_error(const char* msg) noexcept {
+  std::strncpy(g_aoti_last_error, msg, kAotiLastErrorCapacity - 1);
+  g_aoti_last_error[kAotiLastErrorCapacity - 1] = '\0';
+}
 
 // Error reporting must not let a secondary exception cross the C ABI.
 AOTIRuntimeError record_aoti_runtime_exception(
     const std::exception& e) noexcept {
-  try {
-    g_aoti_last_error = e.what();
-  } catch (...) { // NOLINT(bugprone-empty-catch)
-  }
+  set_aoti_last_error(e.what());
   try {
     std::cerr << "Error: " << e.what() << '\n';
   } catch (...) { // NOLINT(bugprone-empty-catch)
@@ -34,10 +44,7 @@ AOTIRuntimeError record_aoti_runtime_exception(
 }
 
 AOTIRuntimeError record_unknown_aoti_runtime_exception() noexcept {
-  try {
-    g_aoti_last_error = "Unknown exception";
-  } catch (...) { // NOLINT(bugprone-empty-catch)
-  }
+  set_aoti_last_error("Unknown exception");
   try {
     std::cerr << "Unknown exception occurred.\n";
   } catch (...) { // NOLINT(bugprone-empty-catch)
@@ -49,7 +56,7 @@ AOTIRuntimeError record_unknown_aoti_runtime_exception() noexcept {
 
 #define AOTI_RUNTIME_TRY(...)                       \
   try {                                             \
-    g_aoti_last_error.clear();                      \
+    g_aoti_last_error[0] = '\0';                    \
     __VA_ARGS__                                     \
   } catch (const std::exception& e) {               \
     return record_aoti_runtime_exception(e);        \
@@ -765,7 +772,7 @@ AOTIRuntimeError AOTInductorSetPinnedAsyncConstantsCopyCpuThreads(
 
 AOTIRuntimeError AOTInductorGetLastError(
     const char** error_msg) {
-  *error_msg = g_aoti_last_error.c_str();
+  *error_msg = g_aoti_last_error;
   return AOTI_RUNTIME_SUCCESS;
 }
 

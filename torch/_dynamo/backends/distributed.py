@@ -629,7 +629,9 @@ class DDPOptimizer:
                     payload_fn=lambda: module.print_readable(print_output=False),
                 )
 
-        fake_mode = detect_fake_mode(example_inputs)
+        fake_mode = torch._guards.require_python_fake_mode(
+            detect_fake_mode(example_inputs)
+        )
         if fake_mode is None:
             fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
