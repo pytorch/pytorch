@@ -53,7 +53,6 @@
 - test/test_mkldnn.py
 
 "module: mkldnn":
-- third_party/ideep
 - third_party/oneDNN
 - cmake/Modules/FindMKLDNN.cmake
 - torch/csrc/jit/codegen/onednn/**

@@ -5,7 +5,6 @@
 
 #if AT_MKLDNN_ENABLED()
 
-#include <ideep.hpp>
 #include <dnnl.hpp>
 
 namespace at::native {

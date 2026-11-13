@@ -4,7 +4,6 @@
 #include <ATen/Config.h>
 
 #if AT_MKLDNN_ENABLED()
-#include <ideep.hpp>
 #include <dnnl.hpp>
 #include <ATen/native/mkldnn/detail/Attr.h>
 #include <ATen/native/mkldnn/detail/Tensor.h>

@@ -86,7 +86,6 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
 #include <ATen/native/mkldnn/detail/Binary.h>
 #include <ATen/native/mkldnn/detail/LayerNorm.h>
 #include <ATen/native/layer_norm.h>
-#include <ideep/abstract_types.hpp>
 
 namespace at::native {
 

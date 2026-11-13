@@ -91,7 +91,7 @@ provider = { path = "tools/metadata", module = "dependencies" }
 # Goal: ship exactly the git-tracked sources, minus repo/CI plumbing. The
 # sdist file walk applies gitignore semantics, and several vendored trees
 # commit files their own .gitignore matches (XNNPACK gen/ microkernels,
-# oneDNN *.cpp in third_party/oneDNN and ideep, protobuf *.pb.cc, clog under
+# oneDNN *.cpp in third_party/oneDNN, protobuf *.pb.cc, clog under
 # deps/); PyTorch's own .gitignore (gen, *.pb.h) also hits tracked third-party
 # files. The blanket includes below restore all of them.
 #
@@ -130,7 +130,7 @@ include = [
     # third_party/build/ is an in-tree CMake build dir (gitignored); un-include
     # it so a dirty checkout does not leak build output into the sdist. Anchored
     # like the .gitignore entry, so it does not touch tracked build/ dirs deeper
-    # in vendored trees (e.g. cutlass docs, ideep).
+    # in vendored trees (e.g. cutlass docs).
     "!third_party/build/**",
     "!**/.github/**",
     "!third_party/flatbuffers/java/**",
@@ -419,7 +419,6 @@ license-files = [
     "third_party/gemmlowp/gemmlowp/LICENSE",
     "third_party/gloo/LICENSE",
     "third_party/gloo/gloo/transport/uv/LICENSE.uvw",
-    "third_party/ideep/LICENSE",
     "third_party/llvm-openmp/LICENSE.txt",
     "third_party/mimalloc/LICENSE",
     "third_party/miniz-3.0.2/LICENSE",

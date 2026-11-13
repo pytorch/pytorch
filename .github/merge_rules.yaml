@@ -290,7 +290,6 @@
 
 - name: IDEEP
   patterns:
-  - third_party/ideep
   - third_party/oneDNN
   - cmake/Modules/FindMKLDNN.cmake
   approved_by:

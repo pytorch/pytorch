@@ -4058,7 +4058,7 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     cx = hidden[1].unsqueeze(0)
 
     batch_sizes: list[int] = []
-    mode = 2  # third_party/ideep/include/ideep/abstract_types.hpp: ideep::rnn_kind::LSTM = 2
+    mode = 2  # aten/src/ATen/native/mkldnn/detail/Utils.h: rnn_kind::LSTM = 2
     hidden_size = hx.size(2)
     num_layers = 1
 
