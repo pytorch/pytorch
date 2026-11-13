@@ -2994,9 +2994,8 @@ class AUTOGRAD_SAVED_TENSORS_HOOKS : public LeafGuard {
  * second invocation, it compares the saved value with the new value and
  * returns True if they do not alias.
  *
- * We have to be careful about resetting in case the other guards fail and we
- * have some state in the relational guard. This is done by virtual method
- * reset_state(). This is called by the RootGuardManager before it exits.
+ * RootGuardManager calls reset_state() before every exit, including success,
+ * rejection and exceptions, so a later check starts with no retained state.
  *
  */
 class RelationalGuard : public LeafGuard {
@@ -3010,8 +3009,7 @@ class RelationalGuard : public LeafGuard {
             std::move(verbose_code_parts),
             std::move(user_stack)) {}
 
-  // reset the relational guard state on guard failure. This is called by the
-  // guard manager.
+  // Reset per-check state after success, rejection, or an exception.
   virtual void reset_state() = 0;
 
   // Stateful guards can opt into clone-local state without changing explicit
@@ -3094,6 +3092,7 @@ class OBJECT_ALIAS_PATTERN : public RelationalGuard {
   size_t _alias;
 };
 
+/** Checks that object x is object y. */
 class OBJECT_ALIASING : public RelationalGuard {
  public:
   OBJECT_ALIASING(
@@ -4922,7 +4921,7 @@ GuardAccessor::GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
 /**
  * RootGuardManager is the root of the guard tree. This is primarily
  * constructed to hold the relational guard pointers so that we can reset the
- * state of those guards on guard failure. All the other important
+ * state of those guards after each check. All the other important
  * implementation is in GuardManager class.
  */
 
@@ -5162,7 +5161,7 @@ class RootGuardManager : public GuardManager {
   // }
 
  private:
-  // Reset the state of all the relational guards on failure.
+  // Reset the state of all relational guards after every exit.
   void _reset_relational_guard_state() {
     for (auto& guard : _relational_guard_resetters) {
       guard->reset_state();
@@ -5245,9 +5244,8 @@ class RootGuardManager : public GuardManager {
   // See set_compile_on_one_rank.
   bool _compile_on_one_rank = false;
 
-  // All the relational guards under this guard manager. We only use these
-  // when the guard evaluates to False. This ensures that guard state is reset
-  // on guard failure so that next invocation is clean.
+  // All relational guards under this manager reset after every check so the
+  // next invocation starts without receivers from the preceding invocation.
   std::vector<std::shared_ptr<RelationalGuard>> _relational_guard_resetters;
   // Used only while constructing one clone, never during guard evaluation.
   std::unordered_map<const void*, std::shared_ptr<void>>
@@ -8001,7 +7999,9 @@ void install_object_alias_pattern_guard(
     const std::vector<size_t>& aliases,
     py::object verbose_code_parts,
     py::object user_stack) {
-  TORCH_CHECK(!managers.empty() && managers.size() == aliases.size());
+  TORCH_CHECK(
+      !managers.empty() && managers.size() == aliases.size(),
+      "Alias guard managers and labels must be nonempty and have the same length");
   auto* root = managers[0]->get_root();
   // Validate the complete pattern before attaching any participant.
   for (size_t i = 0; i < managers.size(); ++i) {
