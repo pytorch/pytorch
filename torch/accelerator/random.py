@@ -71,6 +71,10 @@ def set_rng_state(new_state: Tensor, device: Device = None, /) -> None:
         On accelerators that support lazy initialization, applying the state may be deferred
         until the runtime is initialized. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
+    # Clone in case the state is applied later. Check the C++ flag since not every backend
+    # has a Python one. C++ initialized implies Python initialized, but not vice versa, so
+    # this may clone unnecessarily but never misses a needed clone. Backends without lazy
+    # init always report initialized, as the state is applied immediately.
     if not torch._C._accelerator_isInitialized():
         with torch._C._DisableFuncTorch():
             new_state = new_state.clone(memory_format=torch.contiguous_format)
