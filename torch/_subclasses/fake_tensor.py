@@ -977,6 +977,19 @@ def _from_tensor_shape_env(
     return shape_env
 
 
+@typing.final
+class CppFakeTensorMode(torch._C._CppFakeTensorMode):
+    # State belongs to C++; a collected wrapper can be recreated around it.
+    # See Note [C++ FakeTensorMode Python object lifetime].
+    __slots__ = ()
+
+    def __init__(self, *, shape_env: ShapeEnv | None = None) -> None:
+        import torch._functorch.config
+
+        copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
+        super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
+
+
 @functools.cache
 def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
     return torch._C._SchemaInfo(func._schema)
