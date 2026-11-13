@@ -133,8 +133,9 @@ struct TcfgApi {
   // Pushes a frame for func, a Python function, and makes it the current
   // frame of the thread. *instr gets the address of the frame's instruction
   // pointer and *code that of the first instruction of the function's code,
-  // so the caller can keep the pointer on what it is executing. Returns null
-  // with a Python error set when out of memory.
+  // so the caller can keep the pointer on what it is executing. The frame
+  // counts as one Python call against the recursion limit. Returns null with
+  // a Python error set: RecursionError, or MemoryError.
   void* (*frame_push)(PyObject* func, uint16_t*** instr, uint16_t** code);
   // Pops the frame, which must be the current one. A frame object that
   // something still refers to (a traceback) takes the frame's contents over.
