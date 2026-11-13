@@ -855,6 +855,29 @@ class TestShapeOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, "size is -1 but must be >= 0"):
             torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, -1, 1)
 
+    @onlyAccelerator
+    @largeTensorTest("1GB")
+    @dtypes(torch.bfloat16)
+    def test_chunk_cat_float_out(self, device, dtype):
+        # The first input of each case makes every chunk of the second unaligned.
+        # The 50M-element input is large enough that each thread casts 4 units on
+        # GPUs with up to 304 SMs. The 3-d inputs are chunked along dim 1.
+        # test_numerics_cast_alignments in test_fully_shard_comm.py sweeps the
+        # alignments through the same kernel.
+        make = partial(make_tensor, device=device, dtype=dtype)
+        num_chunks = 3
+        cases = [
+            ([make(num_chunks), make(8000, 3)], 0),
+            ([make(num_chunks), make(3 * 4194304 - 1, 4)], 0),
+            ([make(2, num_chunks, 3), make(2, 4001, 7)], 1),
+        ]
+        for tensors, dim in cases:
+            expected = torch._chunk_cat([t.float() for t in tensors], dim, num_chunks)
+            out = torch.full_like(expected, float("nan"))
+            torch._chunk_cat(tensors, dim, num_chunks, out=out)
+            msg = f"{dim} {[tuple(t.shape) for t in tensors]}"
+            self.assertEqual(out, expected, atol=0, rtol=0, msg=msg)
+
 
 class TestShapeOpsCPUOnly(TestCase):
     hw_classification = HardwareClassification.CPU

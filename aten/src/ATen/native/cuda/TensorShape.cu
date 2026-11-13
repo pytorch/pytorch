@@ -186,7 +186,12 @@ get_chunk_cat_metadata(
   // block_idx_to_tensor_idx cannot be reserved since the number of blocks is
   // data dependent
   std::vector<int64_t> block_idx_to_tensor_idx;
-  // Inline computing `chunk_size` to avoid redundant computation
+  const int64_t bytes_per_block = dst_elem_size == src_elem_size
+      ? detail::BYTES_PER_BLOCK
+      : detail::cast_bytes_per_block(
+            get_chunk_size(tensors, dim, num_chunks, dst_elem_size) *
+                num_chunks * leading_dim,
+            dst_elem_size);
   int64_t chunk_size = 0;
   for (const auto i : c10::irange(num_tensors)) {
     const at::Tensor& tensor = tensors[i];
@@ -200,7 +205,7 @@ get_chunk_cat_metadata(
     chunk_size += pad_tensor_chunk_size;
     // Number of blocks required to process this tensor chunk.
     const int64_t num_blocks =
-        detail::div_up(pad_tensor_chunk_size, detail::BYTES_PER_BLOCK);
+        detail::div_up(pad_tensor_chunk_size, bytes_per_block);
     num_blocks_per_tensor_chunk.push_back(num_blocks);
     start_block_idx_per_tensor_chunk.push_back(
         start_block_idx_per_tensor_chunk.back() + num_blocks);
@@ -542,9 +547,9 @@ Tensor& _chunk_cat_out_cuda(
   if (both_input_output_contiguous &&
       (tensors[0].dtype() == at::ScalarType::BFloat16) &&
       (out.dtype() == at::ScalarType::Float)) {
-    // _chunk_cat_out_cuda_contiguous should also support other types, thanks to
-    // static_cast_with_inter_type. Here, we dispatch to BFloat16 in and float32
-    // out since it is the only known use case.
+    // copy_chunk_with_pad can cast any 2-byte input into fp32, but only bf16
+    // is dispatched here. Other dtype pairs take the composite, which pads each
+    // input and concatenates them into out.
     detail::_chunk_cat_out_cuda_contiguous<float, BFloat16>(
         tensors,
         dim,

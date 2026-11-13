@@ -18,6 +18,7 @@ namespace {
 
 using at::native::detail::BLOCK_SIZE;
 using at::native::detail::BYTES_PER_BLOCK;
+using at::native::detail::cast_bytes_per_block;
 using at::native::detail::chunk_cat_cuda_kernel;
 using at::native::detail::div_up;
 using at::native::detail::pack_vecs;
@@ -80,19 +81,36 @@ void fused_chunk_cat(
   actual_tensor_sizes.reserve(num_tensors);
   pad_tensor_chunk_sizes.reserve(num_tensors);
   num_blocks_per_tensor_chunk.reserve(num_tensors);
+  // Padded chunk bytes of one slice of each tensor
+  std::vector<int64_t> slice_chunk_bytes;
+  slice_chunk_bytes.reserve(num_tensors);
+  int64_t cast_chunk_bytes = 0;
+  for (const auto i : c10::irange(num_tensors)) {
+    const auto sizes = tensors[i].sizes();
+    const int64_t dim = num_leading_dims.empty() ? 0 : num_leading_dims[i];
+    slice_chunk_bytes.push_back(
+        div_up(sizes[dim], num_chunks) *
+        c10::multiply_integers(sizes.slice(dim + 1)) * out.element_size());
+    if (tensors[i].scalar_type() != out_dtype) {
+      cast_chunk_bytes += c10::multiply_integers(sizes.slice(0, dim)) *
+          slice_chunk_bytes.back();
+    }
+  }
+  const int64_t cast_block_bytes =
+      cast_bytes_per_block(cast_chunk_bytes * num_chunks, out.element_size());
   int64_t chunk_size = 0;
   for (const auto i : c10::irange(num_tensors)) {
     const at::Tensor& tensor = tensors[i];
     const auto sizes = tensor.sizes();
     const int64_t dim = num_leading_dims.empty() ? 0 : num_leading_dims[i];
     const int64_t row_numel = c10::multiply_integers(sizes.slice(dim + 1));
-    const int64_t pad_tensor_chunk_size =
-        div_up(sizes[dim], num_chunks) * row_numel * out.element_size();
+    const int64_t pad_tensor_chunk_size = slice_chunk_bytes[i];
     const int64_t actual_tensor_size =
         sizes[dim] * row_numel * tensor.element_size();
-    const int64_t num_blocks = div_up(pad_tensor_chunk_size, BYTES_PER_BLOCK);
-    auto& blocks =
-        tensor.scalar_type() == out_dtype ? copy_blocks : cast_blocks;
+    const bool cast = tensor.scalar_type() != out_dtype;
+    const int64_t num_blocks = div_up(
+        pad_tensor_chunk_size, cast ? cast_block_bytes : BYTES_PER_BLOCK);
+    auto& blocks = cast ? cast_blocks : copy_blocks;
     // The cast launch below reads cast_dtype and writes fp32
     TORCH_INTERNAL_ASSERT(
         tensor.scalar_type() == out_dtype ||
