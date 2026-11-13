@@ -111,6 +111,7 @@ def is_hashable(x: VariableTracker) -> bool:
 
 
 class BuiltinMethodKeyTracker:
+    # Per-trace receiver relations and container summaries; never shared across traces.
     def __init__(self) -> None:
         self.receivers: dict[Source, object] = {}
         self.parents: dict[Source, Source] = {}
@@ -201,6 +202,7 @@ class BuiltinMethodKeyTracker:
 
 
 class KeySummary:
+    # Container-local dependencies; insertions update this cache and removals invalidate it.
     def __init__(
         self, tracker: BuiltinMethodKeyTracker, keys: Iterable["HashableTracker"]
     ) -> None:
@@ -490,25 +492,7 @@ class HashableTracker:
 
     _MISSING = object()
 
-    def __init__(self, vt: VariableTracker, *, known_hash: int | None = None) -> None:
-        if known_hash is not None:
-            if (
-                not isinstance(vt, variables.LazyVariableTracker)
-                or vt.is_realized()
-                or vt.peek_type() is not int
-                or type(known_hash) is not int
-                or hash(vt.peek_value()) != known_hash
-            ):
-                raise AssertionError(
-                    "known_hash requires an unrealized exact-int key with the matching hash"
-                )
-            # Only exact-int hook IDs use a hash from the source dictionary.
-            # Keep them lazy until user code observes the key or its hash.
-            self._key_types = ()
-            self.vt = vt
-            self._hash, self._hash_is_identity = known_hash, False
-            return
-        # We specialize SymNodes
+    def __init__(self, vt: VariableTracker) -> None:
         vt = specialize_symnode(_guard_lazy_key(vt))
         self.vt = vt
         if type(vt) is variables.ConstantVariable and (
@@ -605,9 +589,9 @@ class HashableTracker:
             kind = vt.python_type()
         except NotImplementedError:
             kind = None
-        tuple_storage = (
-            isinstance(vt, variables.TupleVariable)
-            and kind is not torch.Size
+        tuple_storage = isinstance(vt, variables.TupleVariable) and (
+            kind is tuple
+            or kind is not torch.Size
             and inspect.getattr_static(kind, "__eq__") is tuple.__eq__
             and inspect.getattr_static(kind, "__hash__") is tuple.__hash__
             and (
@@ -688,6 +672,7 @@ class HashableTracker:
 
     @functools.cached_property
     def equality_sources(self) -> tuple[tuple[Source, type], ...]:
+        # Computing dependencies also finalizes this key's custom-equality flags.
         from .object_protocol import type_is_immutable
 
         sources = []

@@ -81,7 +81,6 @@ from torch._subclasses.fake_tensor import (
     maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
-from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
 from torch.fx.experimental.dynamic_spec import (
@@ -257,8 +256,6 @@ from .dicts import (
     ConstDictVariable,
     DictKeysVariable,
     MappingProxyVariable,
-    NNModuleGlobalHooksDictVariable,
-    NNModuleGlobalHooksOrderedDictVariable,
     OrderedDictVariable,
 )
 from .distributed import WorldMetaClassVariable
@@ -953,7 +950,9 @@ def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
             context=str(error),
             explanation="This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
             hints=[
-                "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+.",
+                "Snapshots are not implemented on Python 3.16+. On older free-threaded "
+                "Python, empty OrderedDicts remain supported; nonempty ones require "
+                "Python 3.14.1+. Keep unsupported inputs outside fullgraph capture.",
             ],
             from_exc=error,
             skip_frame=True,
@@ -1222,22 +1221,7 @@ class VariableBuilder:
             if dup_guard is not None:
                 self.install_guards(dup_guard)
             elif (
-                isinstance(result, ConstDictVariable)
-                and any(
-                    isinstance(source, AttrSource)
-                    and source.member
-                    in (
-                        "_backward_hooks",
-                        "_backward_pre_hooks",
-                        "_forward_hooks",
-                        "_forward_pre_hooks",
-                        "_forward_hooks_with_kwargs",
-                        "_forward_pre_hooks_with_kwargs",
-                        "_forward_hooks_always_called",
-                    )
-                    for source in (self.source, result.source)
-                )
-                or is_from_attr_proxy_source(self.source)
+                is_from_attr_proxy_source(self.source)
                 or isinstance(self.source, MappingProxyMappingSource)
                 or (
                     result.source is not None
@@ -1249,9 +1233,10 @@ class VariableBuilder:
             ):
                 if result.source is None:
                     raise AssertionError("Tracked alias must have a source")
-                # make_dupe_guard cannot relate local and global sources, e.g.
-                # G._forward_hooks is m._forward_hooks. Reusing the tracker still
-                # requires both sources to resolve to that same object, so pin both.
+                # make_dupe_guard cannot relate local and global sources. Reusing
+                # the tracker still requires both sources to resolve to the same
+                # object (a base module, or the mapping behind a mappingproxy), so
+                # pin each source to its compile-time object.
                 install_guard(
                     self.source.make_guard(GuardBuilder.ID_MATCH),
                     result.source.make_guard(GuardBuilder.ID_MATCH),
@@ -1549,19 +1534,7 @@ class VariableBuilder:
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            global_hooks = istype(value, (dict, collections.OrderedDict)) and any(
-                value is getattr(torch.nn.modules.module, name)
-                for name in (
-                    "_global_forward_hooks_with_kwargs",
-                    "_global_forward_hooks_always_called",
-                    "_global_forward_pre_hooks",
-                    "_global_forward_hooks",
-                    "_global_backward_pre_hooks",
-                    "_global_backward_hooks",
-                )
-            )
-            if not (global_hooks and config.skip_nnmodule_hook_guards):
-                self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in dict.keys(value))
 
             # For all_const, we don't have to guard on anything yet. We guard on
@@ -1606,14 +1579,7 @@ class VariableBuilder:
 
             result = _build_dict_items(value, build_key_value)
 
-            if global_hooks:
-                flags_cls = (
-                    NNModuleGlobalHooksOrderedDictVariable
-                    if istype(value, collections.OrderedDict)
-                    else NNModuleGlobalHooksDictVariable
-                )
-                result = flags_cls(result, source=self.source)
-            elif istype(value, collections.defaultdict):
+            if istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
                 result = DefaultDictVariable(
                     result,  # type: ignore[arg-type]
@@ -4048,7 +4014,6 @@ class VariableBuilder:
             # when specialize_float=False
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda
             or torch._inductor.config.triton.cudagraphs
-            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or (
                 config.assume_static_by_default
                 and frame_state_entry.scalar is not auto_dynamic

@@ -7,7 +7,7 @@ from typing import Any, NamedTuple, Self
 
 import torch
 from torch import nan, nn, UntypedStorage
-from torch._guards import active_fake_mode
+from torch._guards import active_fake_mode, require_python_fake_mode
 from torch.distributed._tools.common_utils import get_untyped_storages
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
@@ -952,7 +952,7 @@ class SACEstimator(TorchDispatchMode):
         return self
 
     def __enter__(self) -> Self:  # type: ignore[no-untyped-def]
-        fake_mode = active_fake_mode()
+        fake_mode = require_python_fake_mode(active_fake_mode())
         if fake_mode is None:
             raise AssertionError("SAC Estimator should be called in FakeTensorMode")
         RuntimeEstimator.fake_mode = fake_mode
