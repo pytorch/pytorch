@@ -61,6 +61,9 @@ _COLLECTIVE_NAMES: dict[HookOpName, str] = {
     HookOpName.BARRIER: "barrier",
 }
 
+# Group lifecycle ops, which launch no collective kernels to annotate.
+_LIFECYCLE_OPS = (HookOpName.SPLIT, HookOpName.NEW_WINDOW, HookOpName.RECONFIGURE)
+
 # Ops whose outputs are their inputs, so the hook gets no output tensors.
 _IN_PLACE_OPS = (
     HookOpName.BROADCAST,
@@ -174,7 +177,9 @@ def register_collective_annotation_hooks(
     groups, such as async checkpointing's Gloo group, are never touched.
     """
 
-    def post_hook(_: PostHookArgs) -> None:
+    def post_hook(args: PostHookArgs) -> None:
+        if args.name in _LIFECYCLE_OPS:
+            return
         pop()
 
     for group in _pgs_to_annotate():
@@ -186,6 +191,8 @@ def register_collective_annotation_hooks(
             group: ProcessGroup = group,
             group_fields: CollectiveMetadata = group_fields,
         ) -> None:
+            if args.name in _LIFECYCLE_OPS:
+                return
             push(_nccl_collective_metadata(group, group_fields, args))
 
         group.register_pre_hook(id(annotator), pre_hook)
