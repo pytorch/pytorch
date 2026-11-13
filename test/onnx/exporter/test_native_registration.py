@@ -105,6 +105,22 @@ class TestNativeRegistration(TestCase):
         gc.collect()
         self.assertTrue(all(reference() is None for reference in references))
 
+    def test_pooling_gelu_native_export(self):
+        class PoolGelu(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.gelu(torch.nn.functional.avg_pool1d(x, 2))
+
+        model = PoolGelu()
+        inputs = (torch.arange(4.0).reshape(1, 1, 4),)
+        program = torch.onnx.export(
+            model, inputs, opset_version=18, optimize=False, verbose=False
+        )
+        proto = program.model_proto
+        onnx.checker.check_model(proto, full_check=True)
+        feed = {program.model.graph.inputs[0].name: inputs[0].numpy()}
+        result = ReferenceEvaluator(proto).run(None, feed)[0]
+        self.assertEqual(torch.from_numpy(result), model(*inputs))
+
     def test_convolution_layer_norm_native_export(self):
         class ConvolutionNorm(torch.nn.Module):
             def forward(self, x, weight):
