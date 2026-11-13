@@ -74,6 +74,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     DictGetItemSource,
     GetItemSource,
+    is_constant_source,
     RandomValueSource,
     TypeMROSource,
     TypeSource,
@@ -114,6 +115,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    attr_getset,
     AttrMutationKind,
     GetSet,
     Member,
@@ -190,6 +192,15 @@ def _safe_c_slots() -> OrderedSet[object]:
     return _SAFE_C_SLOTS
 
 
+def _normalize_custom_hash(value: int) -> int:
+    # slot_tp_hash preserves in-range Py_hash_t values, hashes overflowing
+    # integers, and reserves -1 for errors. Bypass int-subclass overrides.
+    value = int.__index__(value)
+    if not -sys.maxsize - 1 <= value <= sys.maxsize:
+        value = int.__hash__(value)
+    return -2 if value == -1 else value
+
+
 def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
     """Backward compat: returns the unified set (hash funcs are a subset)."""
     return _safe_c_slots()
@@ -245,9 +256,6 @@ def is_forbidden_context_manager(ctx: object) -> bool:
         f_ctxs.append(WarningsChecker)
     except ImportError:
         pass
-
-    if m := sys.modules.get("torch.testing._internal.jit_utils"):
-        f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
 
     return ctx in f_ctxs
 
@@ -390,6 +398,22 @@ class UserDefinedVariable(VariableTracker):
 class UserDefinedClassVariable(UserDefinedVariable):
     # pyrefly: ignore[bad-override]
     value: type[object]
+
+    tp_getset = {
+        "__name__": attr_getset("__name__", lambda vt: vt.value),
+        "__qualname__": attr_getset("__qualname__", lambda vt: vt.value),
+        "__module__": attr_getset("__module__", lambda vt: vt.value),
+        "__doc__": attr_getset("__doc__", lambda vt: vt.value),
+        # missing:
+        # "__bases__": GetSet(...),
+        # "__mro__": GetSet(...),
+        # "__abstractmethods__": GetSet(...),
+        # "__dict__": GetSet(...),
+        # "__text_signature__": GetSet(...),
+        # "__annotations__": GetSet(...),
+        # "__annotate__": GetSet(...),
+        # "__type_params__": GetSet(...),
+    }
 
     def __init__(self, value: type[object], **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -4070,6 +4094,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if result is not None:
             if (
                 self.source
+                and self._object_has_getattribute
                 and isinstance(self, variables.UnspecializedNNModuleVariable)
                 and hasattr(self.value, "__dict__")
                 and name not in self.value.__dict__
@@ -4310,19 +4335,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # the method's closure sourcelessly and SourcelessBuilder fails on
             # a captured tensor (test_modes.py,
             # test_nested_torch_function_mode).
-            # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
-            # off TypeSource is not tag-safe.
-            if var_source is not None and can_guard_class_function_code(tx, type_attr):
-                im_func = variables.UserFunctionVariable.create_with_source(
-                    type_attr, var_source
-                )
+            fn_source = var_source or (
+                self.source and AttrSource(TypeSource(self.source), name)
+            )
+            # A.m and a.m.__func__ must share one VT, so that a write to
+            # A.m.__defaults__ is seen by a.m, before or after a.m is read.
+            se = tx.output.side_effects
+            if fn_source and type_attr in se:
+                fn_vt = VariableTracker.build(tx, type_attr, fn_source)
             else:
-                im_func = VariableBuilder.create_internal_user_function(
-                    type_attr,
-                    source=var_source
-                    or (self.source and AttrSource(TypeSource(self.source), name)),
-                )
-            return variables.UserMethodVariable(im_func, self, source=source)
+                from .. import trace_rules
+
+                # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
+                # off TypeSource is not tag-safe.
+                guard_code = can_guard_class_function_code(tx, type_attr)
+                if var_source is not None and guard_code:
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        type_attr, var_source
+                    )
+                else:
+                    fn_vt = VariableBuilder.create_internal_user_function(
+                        type_attr, source=fn_source
+                    )
+                # Track only what the builder would build too, or a later
+                # global read of an allow_in_graph function inlines it.
+                if fn_source and trace_rules.lookup_callable(type_attr) is None:
+                    fn_vt = se.track_object_existing(type_attr, fn_vt)
+            if not isinstance(fn_vt, variables.BaseUserFunctionVariable):
+                raise AssertionError(f"expected a function VT for {name}, got {fn_vt}")
+            return variables.UserMethodVariable(fn_vt, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
@@ -4417,6 +4458,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         getattr_fn = self._check_for_getattr()
         if isinstance(getattr_fn, types.FunctionType):
+            if not self._object_has_getattribute:
+                if self.cls_source is not None and not is_constant_source(
+                    self.cls_source
+                ):
+                    mro_attr_source(tx, self.value_type, self.cls_source, name)
+                # Install before inlining so nested graph breaks preserve the guard.
+                # A traced deletion may leave the name present in the live dict.
+                if (
+                    self.source
+                    and not is_constant_source(self.source)
+                    and hasattr(self.value, "__dict__")
+                    and name not in self.value.__dict__
+                ):
+                    install_not_in_instance_dict_guard(self.source, name)
             if (
                 getattr_fn is unpatched_nn_module_getattr
                 and isinstance(self, variables.UnspecializedNNModuleVariable)
@@ -4562,7 +4617,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if isinstance(result, FakeIdVariable):
                     return result.as_python_constant(), True
                 if isinstance(result, variables.SymNodeVariable):
-                    return int(result.evaluate_expr()), False
+                    return _normalize_custom_hash(int(result.evaluate_expr())), False
                 # CPython's slot_tp_hash validates PyLong_Check(res):
                 # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9543-L9548
                 try:
@@ -4589,10 +4644,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             *graph_break_hints.USER_ERROR,
                         ],
                     )
-                # Normalize int subclasses to a plain int (mirrors CPython's
-                # own PyLong_AsSsize_t-style coercion in slot_tp_hash), since
-                # `ConstantVariable` only holds plain literal types.
-                return int(result.as_python_constant()), False
+                return _normalize_custom_hash(result.as_python_constant()), False
             try:
                 in_allowlist = type_hash in _safe_c_tp_hash_funcs()
             except TypeError:
@@ -5404,6 +5456,9 @@ class DefaultDictVariable(ConstDictVariable):
 
             default_factory = ConstantVariable.create(None)
         self.default_factory = default_factory
+
+    def python_type(self) -> type:
+        return collections.defaultdict
 
     @staticmethod
     def is_supported_factory(arg: VariableTracker) -> bool:

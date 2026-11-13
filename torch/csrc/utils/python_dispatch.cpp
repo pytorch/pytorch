@@ -355,7 +355,7 @@ struct PyObjectRedispatchFunc {
 
 // ORs the dispatch keys from `obj` into key_set
 static void pyobject_dispatch_collect_keys(PyObject* obj, uint64_t& key_set) {
-  if (C10_LIKELY(THPVariable_CheckExact(obj))) {
+  if (THPVariable_CheckExact(obj)) [[likely]] {
     key_set |=
         THPVariable_Unpack(obj).unsafeGetTensorImpl()->key_set().raw_repr();
     return;
@@ -1090,7 +1090,7 @@ static PyObject* pyobject_dispatch_normalize_result(
     const PyObjectDispatchSchema& info,
     PyObject* result,
     const char* source = "PythonKernelHolder") {
-  if (C10_LIKELY(info.returns_one_tensor && THPVariable_Check(result))) {
+  if (info.returns_one_tensor && THPVariable_Check(result)) [[likely]] {
     return result;
   }
   auto owned = py::reinterpret_steal<py::object>(result);
@@ -1253,7 +1253,7 @@ static PyObject* pyobject_dispatch_python_key(
   torch::jit::Stack record_inputs;
   std::optional<at::RecordFunction> record;
   if (auto step_callbacks =
-          at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION)) {
+          at::getStepCallbacksUnlessEmptyInline(at::RecordScope::FUNCTION)) {
     record.emplace(std::move(*step_callbacks));
     const char* name = c10::impl::TorchDispatchModeTLS::stack_len() > 0
         ? "PythonDispatchMode"
@@ -1314,7 +1314,7 @@ static PyObject* pyobject_dispatch_with_keyset(
     // For a top-level dispatch: every argument in schema order.
     PyObject* const* all_args = nullptr) {
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
-  if (C10_UNLIKELY(key_set.has(c10::DispatchKey::Python))) {
+  if (key_set.has(c10::DispatchKey::Python)) [[unlikely]] {
     bool run_kernel = false;
     // Only top-level calls have their arguments in the form __torch_dispatch__
     // gets; see pyobject_dispatch_python_key.
@@ -1389,7 +1389,7 @@ static PyObject* pyobject_dispatch_with_keyset(
         all_args,
         static_cast<Py_ssize_t>(self->schema_info->args.size()));
   }
-  if (C10_UNLIKELY(holder == nullptr || holder->with_op())) {
+  if (holder == nullptr || holder->with_op()) [[unlikely]] {
     return pyobject_dispatch_call_redispatch_cpp(
         self->cpp_redispatch_fn,
         key_set,
@@ -1417,11 +1417,11 @@ static PyObject* pyobject_dispatch_with_keyset(
   // Otherwise, just directly invoke the Python kernel.
   auto* kernel = holder->func(self->interpreter);
   TORCH_INTERNAL_ASSERT(kernel != nullptr);
-  if (C10_UNLIKELY(skip_torch_function)) {
+  if (skip_torch_function) [[unlikely]] {
     torch::consume_should_skip_torch_function();
   }
   PyObject* result = nullptr;
-  if (C10_UNLIKELY(holder->with_keyset())) {
+  if (holder->with_keyset()) [[unlikely]] {
     result = pyobject_dispatch_call_python_with_keyset(
         kernel, key_set, args, nargs, nkwargs, kwnames, op_args_start);
   } else {
@@ -1497,13 +1497,13 @@ static PyObject* pyobject_dispatch_vectorcall(
   // A __torch_function__ handler set the one-hop flag to skip
   // __torch_function__ for this call (torch.overrides); the C++ entry point
   // consumes it.
-  if (C10_UNLIKELY(torch::peek_should_skip_torch_function())) {
+  if (torch::peek_should_skip_torch_function()) [[unlikely]] {
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
-  if (C10_UNLIKELY(
-          pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 0))) {
+  if (pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 0))
+      [[unlikely]] {
     if (auto result = pyobject_dispatch_handle_torch_function(
             self, args, nargs, kwnames)) {
       return result.release().ptr();
@@ -1525,8 +1525,8 @@ static PyObject* pyobject_dispatch_vectorcall(
     // fast path handles, so calls it hands to the C++ Dispatcher are sampled
     // once, there.
     auto step_callbacks =
-        at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
-    if (C10_UNLIKELY(step_callbacks.has_value() && self->is_observed)) {
+        at::getStepCallbacksUnlessEmptyInline(at::RecordScope::FUNCTION);
+    if (step_callbacks.has_value() && self->is_observed) [[unlikely]] {
       return pyobject_dispatch_recorded(
           self,
           std::move(*step_callbacks),
@@ -1547,7 +1547,7 @@ static PyObject* pyobject_dispatch_vectorcall(
         0,
         all_args);
   };
-  if (C10_LIKELY(pyobject_dispatch_only_tensors(info, args, nargs, kwnames))) {
+  if (pyobject_dispatch_only_tensors(info, args, nargs, kwnames)) [[likely]] {
     return dispatch(args, args, nargs, nullptr);
   }
   PyObjectDispatchArgs normalized;
@@ -1594,13 +1594,13 @@ static PyObject* pyobject_redispatch_vectorcall(
     key_set = key_set & c10::after_autograd_keyset;
   }
   bool skip_torch_function = torch::peek_should_skip_torch_function();
-  if (C10_UNLIKELY(
-          !skip_torch_function &&
-          pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))) {
+  if (!skip_torch_function &&
+      pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))
+      [[unlikely]] {
     return pyobject_dispatch_call_redispatch_cpp(
         self->cpp_redispatch_fn, key_set, args, nargs, nkwargs, kwnames, 1);
   }
-  if (C10_UNLIKELY(skip_torch_function)) {
+  if (skip_torch_function) [[unlikely]] {
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
   return pyobject_dispatch_with_keyset(
