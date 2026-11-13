@@ -709,7 +709,7 @@ class TestSparse(TestSparseBase):
             _test_coalesce(t)  # this tests correctness
 
     @onlyAccelerator
-    @largeTensorTest("30GB", "cuda")
+    @largeTensorTest("30GB")
     @skipCUDAIf(not SM80OrLater and not TEST_WITH_ROCM, "CUDA capability < SM80 and not ROCM")
     @dtypes(torch.float)
     @skipIfMPS
