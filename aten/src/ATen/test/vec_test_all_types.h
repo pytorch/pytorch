@@ -1347,8 +1347,9 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 
 
 // With FP16 vector arithmetic on aarch64 (outside SVE256 builds, which use
-// generic code), Vectorized<Half>'s fmadd and fmsub are native fp16 FMAs, which
-// round once; the others compute in float and round to float first.
+// generic code), Vectorized<Half>'s fused operations are native fp16 FMAs, which
+// round once (the tests cover fmadd and fmsub); elsewhere, they compute in float
+// and round to float first.
 #if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) && \
     !defined(CPU_CAPABILITY_SVE256)
 constexpr bool kNativeHalfFma = true;
