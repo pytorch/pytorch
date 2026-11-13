@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import HardwareClassification, TestCas
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, skipIfMPS, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
     skipIfCrossRef, set_warn_always_context, decorateIf
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
@@ -4449,27 +4450,28 @@ class TestSparse(TestSparseBase):
 
 
 class TestSparseOneOff(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
-    def test_device_from_cpu(self, device):
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_cuda_from_cpu(self):
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.zeros(1, 4).long().to(device),
+            torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
                                     torch.randn(4, 4, 4),
                                     [3, 4, 4])
 
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.zeros(1, 4).long().to(device),
+            torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
                                     torch.randn(4, 4, 4, 0),
                                     [3, 4, 4, 0])
 
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.empty(1, 0).long().to(device),
+            torch.sparse_coo_tensor(torch.empty(1, 0).long().cuda(),
                                     torch.randn(0, 4, 4, 0),
                                     [0, 4, 4, 0])
 
