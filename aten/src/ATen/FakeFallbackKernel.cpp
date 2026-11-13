@@ -7,6 +7,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreterHooks.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
@@ -653,8 +654,6 @@ void fakeFallback(
       ? std::optional(c10::Device(c10::kCPU))
       : find_common_device(/*resolve=*/false);
   if (has(FakeDispatchCategory::OpImpl) || has_op_impl_predicate(op)) {
-    // Sparse constructors have dense inputs; keep their checks thread-local.
-    at::impl::SparseTensorInvariantChecksGuard checks_off(false);
     if ((*c10::impl::getGlobalPyInterpreter())
             ->fake_try_op_impl(op, stack, mode, common_device)) {
       return;
@@ -697,14 +696,16 @@ void fakeFallback(
          c10::DispatchKey::PythonTLSSnapshot}));
     c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
     c10::impl::InKernelInvocationGuard in_kernel;
-    // As in Python, sparse invariant checks, which read index data meta tensors
-    // lack, are off for a sparse Meta kernel; here on this thread only, where
-    // Python turns the process-wide setting off. Override unconditionally to
-    // avoid reading that setting, which another thread can change. This also
-    // suppresses the uninitialized-setting warning inside sparse Meta kernels.
-    std::optional<at::impl::SparseTensorInvariantChecksGuard> checks_off;
-    if (has_sparse_inputs) {
-      checks_off.emplace(false);
+    // Match Python's global suppression of checks that read sparse index data.
+    const bool suppress_invariants = has_sparse_inputs &&
+        at::globalContext().checkSparseTensorInvariants().value_or(false);
+    auto restore_invariants = c10::make_scope_exit([suppress_invariants] {
+      if (suppress_invariants) {
+        at::globalContext().setCheckSparseTensorInvariants(true);
+      }
+    });
+    if (suppress_invariants) {
+      at::globalContext().setCheckSparseTensorInvariants(false);
     }
     try {
       op.redispatchBoxed(meta_keyset, stack);
