@@ -1064,7 +1064,7 @@ DEFINE_CACHED_PYTHON_IMPORT(
 std::function<py::object(py::object)> make_fake_device_stamp(
     const c10::OperatorHandle& op,
     c10::Device common_device,
-    std::shared_ptr<c10::FakeTensorMode> mode) {
+    std::shared_ptr<c10::FakeTensorModeHandle> mode) {
   return [&op, common_device, mode = std::move(mode)](
              py::object obj) -> py::object {
     if (!THPVariable_Check(obj.ptr())) {
@@ -1082,8 +1082,7 @@ std::function<py::object(py::object)> make_fake_device_stamp(
         t.device(),
         " tensor; handlers must return Meta or fake tensors, see "
         "Note [C++ fake op_impl outputs]");
-    at::set_and_normalize_fake_device(t.unsafeGetTensorImpl(), common_device);
-    t.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+    at::init_cpp_fake(t.unsafeGetTensorImpl(), common_device, mode);
     return obj;
   };
 }
@@ -1183,7 +1182,7 @@ bool run_fake_python_callback(
 // The active FakeTensorMode and the CppFakeTensorMode Python object that
 // op-impl callbacks are invoked against.
 struct ActiveFakeMode {
-  std::shared_ptr<c10::FakeTensorMode> mode;
+  std::shared_ptr<c10::FakeTensorModeHandle> mode;
   py::object py_fake_mode;
 };
 
@@ -1423,7 +1422,7 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
   at::Tensor real(real_impl);
   auto active = get_active_fake_mode();
   auto converter = py::reinterpret_borrow<py::object>(
-      active.mode->fake_tensor_converter_->ptr(getPyInterpreter()));
+      active.mode->mode->fake_tensor_converter_->ptr(getPyInterpreter()));
 
   at::Tensor fake_tensor;
   {
@@ -1449,9 +1448,9 @@ bool ConcretePyInterpreterVTable::allow_non_fake_inputs() const {
   if (!override_val.is_none()) {
     return override_val.cast<bool>();
   }
-  auto mode = c10::impl::FakeTensorModeTLS::get_state();
-  TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
-  return mode->allow_non_fake_inputs_;
+  auto handle = c10::impl::FakeTensorModeTLS::get_state();
+  TORCH_CHECK(handle != nullptr, "FakeTensorMode must be active");
+  return handle->mode->allow_non_fake_inputs_;
 }
 
 PyObject* ConcretePyInterpreterVTable::fake_run_real_op(

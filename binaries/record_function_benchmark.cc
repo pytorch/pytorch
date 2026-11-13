@@ -51,7 +51,7 @@ float runPureRecordFunctionBench(int iter) {
   typedef std::chrono::microseconds us;
   std::chrono::time_point<clock> start_time = clock::now();
   for ([[maybe_unused]] const auto _ : c10::irange(iter)) {
-    auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::USER_SCOPE);
+    auto step_callbacks = at::getStepCallbacksUnlessEmptyInline(at::RecordScope::USER_SCOPE);
     if (step_callbacks.has_value()) {
       at::RecordFunction guard(std::move(*step_callbacks));
       guard.before("Test", -1);
