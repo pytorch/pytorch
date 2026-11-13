@@ -4705,9 +4705,12 @@ def _trilinear(
                 sizes[d] = t.shape[axis]
         return i1.new_zeros([sizes[d] for d in out_dims])
 
-    compute_dtype = utils.get_higher_dtype(utils.get_higher_dtype(i1, i2), i3)
-    if compute_dtype == torch.bool:
-        compute_dtype = torch.float32
+    promoted = torch.promote_types(torch.promote_types(i1.dtype, i2.dtype), i3.dtype)
+    torch._check(
+        utils.can_safe_cast_to(cast_to=result_dtype, cast_from=promoted),
+        lambda: f"result type {promoted} can't be cast to the desired output type {result_dtype}",
+    )
+    compute_dtype = torch.float32 if promoted == torch.bool else promoted
     i1, i2, i3 = (t.to(compute_dtype) for t in (i1, i2, i3))
 
     dims12 = [

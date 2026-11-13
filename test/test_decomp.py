@@ -1327,6 +1327,7 @@ class DecompOneOffTests(TestCase):
             subtest((torch.float32, torch.float64, torch.float32), name="f32_f64"),
             subtest((torch.float64, torch.float32, torch.float32), name="f64_f32"),
             subtest((torch.bool, torch.bool, torch.bool), name="bool"),
+            subtest((torch.float32, torch.int64, torch.int64), name="f32_i64"),
         ],
     )
     @parametrize("sumdim", [[], [1]])
@@ -1340,6 +1341,27 @@ class DecompOneOffTests(TestCase):
         expected = torch._trilinear(*args)
 
         self.assertEqual(actual, expected, exact_dtype=True)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "dtypes",
+        [
+            subtest((torch.int64, torch.float32), name="i64_f32"),
+            subtest((torch.bool, torch.float32), name="bool_f32"),
+            subtest((torch.float32, torch.complex64), name="f32_c64"),
+        ],
+    )
+    def test_trilinear_unsafe_cast(self, device, dtypes):
+        from torch._decomp.decompositions import _trilinear
+
+        a, b = (torch.randn(2, 3, device=device).to(dt) for dt in dtypes)
+        args = (a, b, b, [], [], [], [1], 1)
+
+        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+            torch._trilinear(*args)
+        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+            _trilinear(*args)
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
