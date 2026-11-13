@@ -2,7 +2,8 @@
 import collections
 import inspect
 import typing
-from types import GenericAlias
+from dataclasses import dataclass
+from types import GenericAlias, UnionType
 
 import torch
 from torch import device, dtype, Tensor, types
@@ -18,6 +19,55 @@ from .opaque_object import (
 # This is used as a negative test for
 # test_custom_ops.py::TestTypeConversion::test_type_eval.
 _TestTensor = torch.Tensor
+
+
+@dataclass(frozen=True)
+class _TupleInputSpec:
+    element_types: tuple[tuple[type, ...], ...]
+    variadic: bool = False
+
+    def prepare(
+        self,
+        value: list[Tensor | None] | tuple[Tensor | None, ...],
+        name: str,
+        op: str,
+    ) -> tuple[Tensor | None, ...]:
+        if not self.variadic and len(value) != len(self.element_types):
+            raise RuntimeError(
+                f"{op}: argument '{name}' must contain {len(self.element_types)} "
+                f"values, but got {len(value)}."
+            )
+        for index, element in enumerate(value):
+            expected = self.element_types[0] if self.variadic else self.element_types[index]
+            if not isinstance(element, expected):
+                types_str = " or ".join(typ.__name__ for typ in expected)
+                raise RuntimeError(
+                    f"{op}: argument '{name}' at index {index} expected "
+                    f"{types_str}, but got {type(element).__name__}."
+                )
+        return tuple(value)
+
+
+def _tuple_input_spec(args: tuple[object, ...]) -> _TupleInputSpec:
+    variadic = len(args) == 2 and args[1] is Ellipsis
+    if variadic:
+        args = args[:1]
+    element_types: list[tuple[type, ...]] = []
+    for arg in args:
+        members = (
+            typing.get_args(arg)
+            if typing.get_origin(arg) in (typing.Union, UnionType)
+            else (arg,)
+        )
+        runtime_types: list[type] = []
+        for member in members:
+            if member is None:
+                member = type(None)
+            if not isinstance(member, type):
+                raise TypeError(f"Unsupported tuple element annotation: {member}")
+            runtime_types.append(member)
+        element_types.append(tuple(runtime_types))
+    return _TupleInputSpec(tuple(element_types), variadic)
 
 
 @exposed_in("torch.library")
@@ -66,6 +116,21 @@ def infer_schema(
         >>> infer_schema(foo_impl, mutates_args={})
         (Tensor x) -> Tensor
     """
+    schema, _ = _infer_schema(
+        prototype_function, mutates_args=mutates_args, op_name=op_name, tags=tags
+    )
+    return schema
+
+
+def _infer_schema(
+    prototype_function: typing.Callable,
+    /,
+    *,
+    mutates_args,
+    op_name: str | None = None,
+    tags: torch.Tag | typing.Sequence[torch.Tag] | None = (),
+    allow_tensor_tuples: bool = False,
+) -> tuple[str, dict[str, _TupleInputSpec]]:
     UNKNOWN_MUTATES = "unknown"
     pf_globals = prototype_function.__globals__
     pf_locals = None
@@ -135,6 +200,7 @@ def infer_schema(
         return ty, False
 
     params = []
+    tuple_input_specs: dict[str, _TupleInputSpec] = {}
     seen_args = set()
     saw_kwarg_only_arg = False
     first_positional_arg_name = None
@@ -161,28 +227,33 @@ def infer_schema(
 
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if is_custom_class(annotation_type):
+            if typing.get_origin(annotation_type) is tuple:
+                list_type = tuple_to_list(annotation_type)
+                list_schema_type = SUPPORTED_PARAM_TYPES.get(list_type)
+                if allow_tensor_tuples and list_schema_type in ("Tensor[]", "Tensor?[]"):
+                    schema_type = list_schema_type
+                    tuple_input_specs[name] = _tuple_input_spec(
+                        typing.get_args(annotation_type)
+                    )
+                else:
+                    example_type_str = (
+                        f"For example, {list_type}.\n\n"
+                        if list_type in SUPPORTED_PARAM_TYPES
+                        else ""
+                    )
+                    error_fn(
+                        f"Parameter {name} has unsupported type {param.annotation}. "
+                        "We do not support Tuple inputs in schema. As a workaround, please try to use List instead. "
+                        f"{example_type_str}"
+                        f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
+                    )
+            elif is_custom_class(annotation_type):
                 schema_type = _resolve_opaque_type_info(annotation_type).class_name  # type: ignore[union-attr]
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
                     "as it is a ScriptObject. Please manually specify the schema "
                     "using the `schema=` kwarg with the actual type of the ScriptObject."
-                )
-            elif (
-                hasattr(annotation_type, "__origin__")
-                and annotation_type.__origin__ is tuple
-            ):
-                list_type = tuple_to_list(annotation_type)
-                example_type_str = "\n\n"
-                # Only suggest the list type if this type is supported.
-                if list_type in SUPPORTED_PARAM_TYPES:
-                    example_type_str = f"For example, {list_type}.\n\n"
-                error_fn(
-                    f"Parameter {name} has unsupported type {param.annotation}. "
-                    f"We do not support Tuple inputs in schema. As a workaround, please try to use List instead. "
-                    f"{example_type_str}"
-                    f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
                 )
             else:
                 error_fn(
@@ -295,8 +366,8 @@ def infer_schema(
             )
         ret = f"Tensor({first_positional_arg_alias}!)"
     if op_name is not None:
-        return f"{op_name}({', '.join(params)}) -> {ret}"
-    return f"({', '.join(params)}) -> {ret}"
+        return f"{op_name}({', '.join(params)}) -> {ret}", tuple_input_specs
+    return f"({', '.join(params)}) -> {ret}", tuple_input_specs
 
 
 def derived_types(
