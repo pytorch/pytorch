@@ -65,10 +65,8 @@ std::vector<int64_t> calc_strides(
       switch (memory_layout) {
         case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
           return calc_contiguous_strides(sizes);
-          break;
         case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
           return calc_channels_last_strides(sizes);
-          break;
         default:
           VK_THROW("Invalid memory format used to create vTensor!");
       }

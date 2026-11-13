@@ -10,6 +10,7 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
+from torch._guards import require_python_fake_mode
 from torch._higher_order_ops.map import _unstack_pytree
 from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
 from torch._subclasses.fake_tensor import (
@@ -109,7 +110,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             def make_val(
                 x: Argument,
             ) -> (
-                FakeTensor
+                torch.Tensor
                 | torch.SymInt
                 | torch.SymFloat
                 | torch.SymBool
@@ -119,7 +120,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 | str
                 | None
             ):
-                if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                if is_fake_tensor(x):
                     return x
                 elif isinstance(x, torch.Tensor):
                     if x.is_quantized:
@@ -336,11 +337,16 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         if (args := graph_module.meta.get("args", None)) is not None:
             return list(args)
 
-        def extract_input(node: torch.fx.Node) -> FakeTensor | None:
+        def extract_input(node: torch.fx.Node) -> torch.Tensor | None:
             if "val" in node.meta:
                 fake = node.meta["val"]
-                if hasattr(fake, "constant") and fake.constant is not None:
-                    return fake.constant
+                # SymInt, SymFloat and SymBool have a constant property too
+                if is_fake_tensor(fake):
+                    constant = maybe_get_fake_constant(fake)
+                else:
+                    constant = getattr(fake, "constant", None)
+                if constant is not None:
+                    return constant
                 return fake
             elif tensor_meta := node.meta.get("tensor_meta"):
                 if self.fake_tensor_mode is None:
@@ -488,7 +494,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     and fake_tensor_mode is not maybe_get_fake_mode(i)
                 ):
                     raise AssertionError("Multiple fake tensor mode detected.")
-                fake_tensor_mode = maybe_get_fake_mode(i)
+                fake_tensor_mode = require_python_fake_mode(maybe_get_fake_mode(i))
         if fake_tensor_mode is None:
             self.tracer.fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
             fake_tensor_mode = nullcontext()  # type: ignore[assignment]

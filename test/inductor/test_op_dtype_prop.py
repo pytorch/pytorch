@@ -585,7 +585,7 @@ class TestCase(InductorTestCase):
     def test_int64_symint_not_downcast_to_int32_index_expr(self, dynamic):
         def fn(x, hi):
             h = hi.item()
-            torch._check_is_size(h)
+            torch._check(h >= 0)
             torch._check(h > 2**31)
             return torch.randint(
                 0, h, (x.shape[0],), device=x.device, dtype=torch.int64

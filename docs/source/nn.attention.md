@@ -17,12 +17,31 @@
     :nosignatures:
 
     sdpa_kernel
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: autosummary/enum.rst
+
     SDPBackend
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
     register_flash_attention_impl
     activate_flash_attention_impl
     list_flash_attention_impls
     current_flash_attention_impl
     restore_flash_attention_impl
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    enable_cudnn_sdp_python
+    cudnn_sdp_python_enabled
+    is_cudnn_sdp_python_available
 ```
 
 ## Submodules

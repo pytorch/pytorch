@@ -1101,6 +1101,12 @@ This feature is a prototype and may have compatibility breaking changes in the f
 
 ```{eval-rst}
 .. py:module:: torch.utils.model_dump
+
+.. warning::
+    ``torch.utils.model_dump`` is deprecated and will be removed in a future
+    release. It is unsafe to use on untrusted models: inspecting a model can
+    execute arbitrary code stored in it. See the
+    `security policy <https://github.com/pytorch/pytorch/blob/main/SECURITY.md#torchscript-models>`_.
 ```
 
 ```{eval-rst}
@@ -1171,6 +1177,13 @@ This feature is a prototype and may have compatibility breaking changes in the f
 
 ```{eval-rst}
 .. py:module:: torch.version
+
+.. py:data:: xpu_ops_commit
+   :type: Optional[str]
+
+   Full torch-xpu-ops commit SHA used to build the XPU implementation.
+   ``None`` for non-XPU builds or when the SHA is unavailable, including
+   Python-only builds that use an external LibTorch without this metadata.
 ```
 
 % Compiler configuration module - documented in torch.compiler.config.md
