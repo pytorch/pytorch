@@ -1,14 +1,17 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
+import contextlib
 import importlib
 import json
 import os
+import warnings
 
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     _calculate_max_contiguous_elements,
+    _warn_skipped_fqns,
     _write_sub_tensor_to_file_optimized,
     consolidate_safetensors_files,
     consolidate_safetensors_files_on_every_rank,
@@ -166,7 +169,6 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
     def test_consolidate_with_two_ranks(self):
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
@@ -181,13 +183,35 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
 
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
 
-        fqn_to_index_mapping = {"dtensor": 1, "dtensor_col": 2}
-        consolidate_safetensors_files_on_every_rank(
-            checkpoint_dir, output_dir, fqn_to_index_mapping=fqn_to_index_mapping
-        )
+        # The mtp names were not saved. mtp.weight shares file 1 with dtensor, mtp.bias has
+        # file 3 to itself, and rank 0 reports both. The warning is an error here, so
+        # raising it before the final barrier would block the other ranks.
+        fqn_to_index_mapping = {
+            "dtensor": 1,
+            "dtensor_col": 2,
+            "mtp.weight": 1,
+            "mtp.bias": 3,
+        }
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", message="Skipping", category=UserWarning)
+            with (
+                self.assertRaisesRegex(
+                    UserWarning,
+                    r"^Skipping 2 tensor\(s\) .*: mtp\.bias, mtp\.weight\. ",
+                )
+                if self.rank == 0
+                else contextlib.nullcontext()
+            ):
+                consolidate_safetensors_files_on_every_rank(
+                    checkpoint_dir,
+                    output_dir,
+                    fqn_to_index_mapping=fqn_to_index_mapping,
+                )
 
-        file1_path = os.path.join(output_dir, "model-00001-of-00002.safetensors")
-        file2_path = os.path.join(output_dir, "model-00002-of-00002.safetensors")
+        file1_path = os.path.join(output_dir, "model-00001-of-00003.safetensors")
+        file2_path = os.path.join(output_dir, "model-00002-of-00003.safetensors")
+        file3_path = os.path.join(output_dir, "model-00003-of-00003.safetensors")
+        self.assertEqual(safetensors.torch.load_file(file3_path), {})
 
         loaded_dict = safetensors.torch.load_file(file1_path)
         self.assertEqual(loaded_dict.keys(), {"dtensor"})
@@ -205,8 +229,8 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
             self.assertEqual(
                 metadata["weight_map"],
                 {
-                    "dtensor": "model-00001-of-00002.safetensors",
-                    "dtensor_col": "model-00002-of-00002.safetensors",
+                    "dtensor": "model-00001-of-00003.safetensors",
+                    "dtensor_col": "model-00002-of-00003.safetensors",
                 },
             )
 
@@ -379,6 +403,23 @@ class TestConsolidateHFSafeTensorsNoProcessGroup(DTensorTestBase):
         expected_tensor[:, 3:5] = sub_tensor_data.view(3, 2)
 
         self.assertTrue(torch.equal(result_tensor, expected_tensor))
+
+    def test_warn_skipped_fqns(self) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            _warn_skipped_fqns("ckpt", {}, {})
+
+        mapping = dict.fromkeys((f"t{i:02d}" for i in range(21)), 1)
+        with self.assertWarnsRegex(
+            UserWarning,
+            r"^Skipping 21 tensor\(s\) .* in ckpt: t00, .*, t19, \.\.\. \(truncated\)\. ",
+        ):
+            _warn_skipped_fqns("ckpt", mapping, {})
+        del mapping["t20"]
+        with self.assertWarnsRegex(
+            UserWarning, r"^Skipping 20 tensor\(s\) .*: t00, .*, t19\. "
+        ):
+            _warn_skipped_fqns("ckpt", mapping, {})
 
 
 if __name__ == "__main__":
