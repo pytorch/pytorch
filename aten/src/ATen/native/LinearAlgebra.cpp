@@ -12,6 +12,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/int_mm_kernel.h>
+#include <ATen/native/cpu/SumKernel.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOps.h>
@@ -2887,33 +2888,24 @@ Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
   );
 }
 
-// The CPU cascade summation (see use_cascade_powsum) adds partial sums into its
+// The CPU cascade summation (cpu/SumKernel.h) can add partial sums into its
 // output, so reduce half and bfloat16 into a float temporary and round once at
 // the end. A single-element result is written once and needs no temporary.
-// Returns false when the kernel would not take that path.
 static bool cpu_powsum_in_float(const char* name, const Tensor& result, const Tensor& self,
                                 OptionalIntArrayRef dim, bool keepdim, double ord, bool is_norm) {
   const auto in_dtype = self.scalar_type();
-  const bool single_output = result.numel() == 1;
-  if (!self.is_cpu() || result.scalar_type() != in_dtype ||
-      !use_cascade_powsum(in_dtype, kFloat, ord, is_norm, single_output) ||
-      use_cascade_powsum(in_dtype, in_dtype, ord, is_norm, single_output)) {
+  if (!self.is_cpu() || !isReducedFloatingType(in_dtype) || result.scalar_type() != in_dtype ||
+      result.numel() == 1 || !cascade_powsum_supports(ord, is_norm)) {
     return false;
   }
   Tensor result_float = at::empty({0}, result.options().dtype(kFloat));
   auto iter = make_reduction(name, result_float, self, dim, keepdim, in_dtype, kFloat);
-  // The 2-norm takes its square root in the same pass that rounds to the result dtype.
-  const bool sqrt_after = is_norm && ord == 2.0;
-  if (is_norm && !sqrt_after) {
+  if (is_norm) {
     norm_stub(iter.device_type(), iter, ord);
   } else {
     powsum_stub(iter.device_type(), iter, ord);
   }
-  if (sqrt_after) {
-    at::sqrt_out(const_cast<Tensor&>(result), result_float);
-  } else {
-    result.copy_(result_float);
-  }
+  result.copy_(result_float);
   return true;
 }
 
