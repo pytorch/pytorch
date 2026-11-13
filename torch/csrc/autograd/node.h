@@ -175,9 +175,9 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
     at::ROCmBackwardPassGuard in_backward;
 #endif
 
-    auto step_callbacks =
-        at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
-    if (C10_UNLIKELY(step_callbacks.has_value())) {
+    auto step_callbacks = at::getStepCallbacksUnlessEmptyInline(
+        at::RecordScope::BACKWARD_FUNCTION);
+    if (step_callbacks.has_value()) [[unlikely]] {
       at::RecordFunction guard(std::move(*step_callbacks));
       // Using sequence number and thread id to correlate with
       // the forward pass function
