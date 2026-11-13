@@ -1596,6 +1596,81 @@ def forward(self, arg0_1):
     """,
         )
 
+    def test_mutation_through_expand(self):
+        def one_alias(x):
+            x.expand(2, *x.shape)[1, 0, 1].fill_(5)
+            return x + 1
+
+        def all_aliases(x):
+            x.expand(3, *x.shape)[:, 0].fill_(5)
+            return x + 1
+
+        def whole(x):
+            x.expand(3, *x.shape).fill_(5)
+            return x + 1
+
+        def unbroadcast(x):
+            x.expand(1, *x.shape)[0, 1, 0].add_(1)
+            return x + 1
+
+        def transposed(x):
+            x.t().expand(3, 2, 2).transpose(1, 2).view(3, 4)[:, 1].fill_(5)
+            return x + 1
+
+        def two_expands(x):
+            x.expand(2, *x.shape).unsqueeze(0).expand(3, 2, 2, 2)[:, 1, 1].fill_(5)
+            return x + 1
+
+        def partial(x):
+            # Only one broadcast copy is written; the other aliases keep their values.
+            first = torch.tensor([True, False]).view(2, 1, 1)
+            x.expand(2, *x.shape).masked_fill_(first, 5)
+            return x + 1
+
+        def split(x):
+            x.expand(2, *x.shape).split(1, dim=2)[1].fill_(5)
+            return x + 1
+
+        def dtype_view(x):
+            x.expand(2, *x.shape).view(torch.int32)[1, 0, 1].fill_(7)
+            return x + 1
+
+        def empty(x):
+            x.expand(0, *x.shape).fill_(5)
+            return x + 1
+
+        def conj(x):
+            x.expand(2, *x.shape).conj()[1, 0, 1].fill_(1 + 2j)
+            return x + 1
+
+        def complex_nan(x):
+            # assertEqual treats any complex NaN as equal, so compare the parts.
+            x.expand(2, *x.shape)[1, 0, 0].fill_(complex(float("nan"), 2))
+            return torch.view_as_real(x + 1)
+
+        def complex_split(x):
+            # x[0, 0]'s real and imaginary parts are written through different aliases.
+            mask = torch.isin(torch.arange(16), torch.tensor([0, 9])).view(2, 2, 2, 2)
+            torch.view_as_real(x.expand(2, *x.shape)).masked_fill_(mask, 9)
+            return torch.view_as_real(x + 1)
+
+        def signed_zero(x):
+            # assertEqual treats -0.0 as equal to 0.0, so compare bits.
+            x.expand(2, *x.shape)[1, 0, 1].fill_(-0.0)
+            return x.view(torch.int32).clone()
+
+        inp = torch.tensor([[float("inf"), 1.0], [2.0, 3.0]])
+        cinp = torch.tensor([[complex(float("nan"), 1), 1], [2, 3]])
+        special = torch.tensor([[float("nan"), 0.0], [2.0, 3.0]])
+        fns = [one_alias, all_aliases, whole, unbroadcast, transposed, two_expands]
+        fns += [partial, split, dtype_view, empty]
+        cases = [(f, inp) for f in fns]
+        cases += [(conj, cinp), (complex_nan, cinp), (complex_split, cinp)]
+        cases += [(signed_zero, special)]
+        for f, x in cases:
+            with self.subTest(f.__name__):
+                self.assert_functionalization(f, x.clone())
+
     def test_fill_(self):
         def f(x):
             y = x + x
@@ -2323,6 +2398,7 @@ def forward(self, arg0_1):
         "test_diagonal_mutated_input",
         "test_everything",
         "test_fill_",
+        "test_mutation_through_expand",
         "test_slice",
         "test_split",
         "test_split_with_sizes",
