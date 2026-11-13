@@ -138,3 +138,14 @@ inline py::object PyObject_FastGetAttrString(PyObject* obj, const char* name) {
   return py::reinterpret_steal<py::object>(res);
 #endif
 }
+
+// PyObject_FastGetAttrString with the name already a Python string. Pass an
+// interned one: CPython's type attribute cache matches names by identity, so
+// a lookup that makes a new string object every call always misses it.
+inline py::object PyObject_FastGetAttr(PyObject* obj, PyObject* name) {
+  PyObject* res = nullptr;
+  if (PyObject_GetOptionalAttr(obj, name, &res) == -1) {
+    PyErr_Clear();
+  }
+  return py::reinterpret_steal<py::object>(res);
+}
