@@ -342,9 +342,17 @@ class TestAccelerator(TestCase):
                     t = t.to(reference_dtype)
                     t = t.to(dtype)
 
+    def _run_script_in_subprocess(self, script):
+        # Use a fresh process since the runtime is already initialized here.
+        proc = subprocess.run(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+
     @unittest.skipIf(TEST_MPS, "MPS does not support lazy initialization")
     def test_set_rng_state_before_lazy_init(self):
-        # Use a fresh process since the runtime is already initialized here.
         state = torch.Generator(device=self.device_type).manual_seed(1234).get_state()
         count = torch.accelerator.device_count()
         script = f"""\
@@ -364,12 +372,25 @@ class TestAccelerator(TestCase):
             assert torch._C._accelerator_isInitialized()
             assert torch.equal(torch.accelerator.random.get_rng_state(0), expected)
             """
-        proc = subprocess.run(
-            [sys.executable, "-c", textwrap.dedent(script)],
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self._run_script_in_subprocess(script)
+
+    @unittest.skipIf(TEST_MPS, "MPS does not support lazy initialization")
+    def test_manual_seed_before_lazy_init(self):
+        script = """\
+            import torch
+            acc = torch.accelerator.current_accelerator()
+            mod = torch.get_device_module(acc)
+            torch.accelerator.random.seed_all()
+            torch.accelerator.random.manual_seed_all(1234)
+            assert not mod.is_initialized()
+            assert not torch._C._accelerator_isInitialized()
+            torch.empty(1, device=acc)
+            assert mod.is_initialized()
+            assert torch._C._accelerator_isInitialized()
+            for i in range(torch.accelerator.device_count()):
+                assert torch.accelerator.random.initial_seed(i) == 1234
+            """
+        self._run_script_in_subprocess(script)
 
     def test_random_generator_state(self):
         seeded_states = []
