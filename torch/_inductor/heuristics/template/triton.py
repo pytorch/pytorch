@@ -1748,11 +1748,13 @@ class ROCmGemmArchProfile:
     # XCD-local program order.
     cus_per_xcd: int | None = None
     # (BLOCK_M, BLOCK_N, BLOCK_K, num_warps) of persistent configs that are also
-    # offered with the XCD-local program order (NUM_XCDS).
+    # offered with the XCD-local program order (NUM_XCDS), for any MFMA size.
     xcd_remap_tiles: frozenset[tuple[int, int, int, int]] = frozenset()
     # The XCD-local order pays off once a row of A is shared by enough N tiles;
     # with fewer (tall-M, small N) it only costs HBM locality.
     min_n_tiles_for_xcd_remap: int = 8
+    # Extra choices added to the default ROCm mm/addmm/bmm pool (mm_configs).
+    extra_mm_configs: tuple[ROCmGemmConfig, ...] = ()
 
 
 _ROCM_DEFAULT_GEMM_PROFILE = ROCmGemmArchProfile()
@@ -1771,11 +1773,27 @@ _ROCM_GEMM_ARCH_PROFILES: dict[str, ROCmGemmArchProfile] = {
             ROCmGemmConfig(256, 128, 32, 2, 4, group_m=4),
             ROCmGemmConfig(256, 128, 64, 2, 8, group_m=4),
             ROCmGemmConfig(256, 256, 64, 2, 8, group_m=4),
+            # Large tiles with the 32x32 MFMA, which reads half as much LDS per
+            # flop as the 16x16 one, including the 256x256 4-warp tile. Those
+            # matching xcd_remap_tiles also get the XCD-local order.
+            ROCmGemmConfig(128, 128, 64, 2, 4, group_m=16, matrix_instr_nonkdim=32),
+            ROCmGemmConfig(128, 256, 32, 2, 4, group_m=16, matrix_instr_nonkdim=32),
+            ROCmGemmConfig(256, 128, 32, 2, 4, group_m=4, matrix_instr_nonkdim=32),
+            ROCmGemmConfig(256, 256, 32, 2, 4, group_m=4, matrix_instr_nonkdim=32),
         ),
         # More than two resident workgroups did not help on gfx950.
         persistent_max_workgroups_per_cu=2,
         cus_per_xcd=32,
         xcd_remap_tiles=frozenset([(128, 128, 64, 4), (128, 256, 32, 4)]),
+        # 32x32-MFMA versions of large tiles of mm_configs.
+        extra_mm_configs=(
+            ROCmGemmConfig(128, 128, 64, 2, 4, group_m=16, matrix_instr_nonkdim=32),
+            ROCmGemmConfig(128, 128, 64, 2, 8, group_m=8, matrix_instr_nonkdim=32),
+            ROCmGemmConfig(128, 256, 32, 2, 4, group_m=16, matrix_instr_nonkdim=32),
+            ROCmGemmConfig(128, 256, 64, 2, 8, group_m=4, matrix_instr_nonkdim=32),
+            ROCmGemmConfig(256, 128, 32, 2, 4, group_m=4, matrix_instr_nonkdim=32),
+            ROCmGemmConfig(256, 128, 64, 2, 8, group_m=4, matrix_instr_nonkdim=32),
+        ),
     ),
 }
 
@@ -1870,6 +1888,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmGemmConfig(256, 128, 64, self.default_num_stages, 8, group_m=4),
             ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
         ]
+        # Subclasses that swap mm_configs for another pool don't get the arch's
+        # extra_mm_configs.
+        self._default_mm_configs = self.mm_configs
 
         # Exhaustive search for mm configs. num_stages is deliberately not an axis
         # here: _filter_configs forces every config to self.default_num_stages, so
@@ -2161,6 +2182,15 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         for c in configs:
             c.num_stages = self.default_num_stages
         return super()._filter_configs(configs)
+
+    def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
+        extra = _rocm_gemm_arch_profile().extra_mm_configs
+        if extra and self.mm_configs is self._default_mm_configs:
+            return partial(
+                self.preprocess_mm_configs,
+                configs=self.mm_configs + _copy_configs(extra),
+            )
+        return super().get_mm_configs()
 
     def _finalize_mm_configs(
         self,
