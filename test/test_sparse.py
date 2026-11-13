@@ -2305,6 +2305,46 @@ class TestSparse(TestSparseBase):
             S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
             run_tests(S.requires_grad_(True), test_dim)
 
+    @coalescedonoff
+    @dtypes(torch.float64, torch.int32, torch.int64)
+    @dtypesIfMPS(torch.float32, torch.int32, torch.int64)
+    @parametrize("dim", [subtest([], name="list"), subtest((), name="tuple")])
+    @parametrize("kind", ["coo", "hybrid", "empty", "zero_extent"])
+    @parametrize("explicit_dtype", [False, True])
+    def test_sparse_sum_empty_dim(self, device, dtype, coalesced, dim, kind, explicit_dtype):
+        nnz = 0 if kind in ("empty", "zero_extent") else 3
+        size = (0, 3) if kind == "zero_extent" else (3, 3)
+        if kind == "hybrid":
+            size += (2,)
+        indices = (
+            torch.tensor([[0, 1, 1], [0, 1, 1]], device=device)
+            if nnz else torch.empty((2, 0), dtype=torch.int64, device=device)
+        )
+        values_size = (nnz, 2) if kind == "hybrid" else (nnz,)
+        values = torch.arange(
+            1, 1 + nnz * (2 if kind == "hybrid" else 1), dtype=dtype, device=device
+        ).reshape(values_size)
+        values.requires_grad_(dtype.is_floating_point)
+        sparse = torch.sparse_coo_tensor(indices, values, size)
+        if coalesced:
+            sparse = sparse.coalesce()
+        dense = sparse.to_dense().detach().requires_grad_(dtype.is_floating_point)
+        output_dtype = None
+        if explicit_dtype:
+            output_dtype = torch.float32 if dtype.is_floating_point else torch.int32
+
+        actual = torch.sparse.sum(sparse, dim=dim, dtype=output_dtype)
+        expected = dense.sum(dim=dim, dtype=output_dtype)
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual.shape, torch.Size([]))
+        self.assertEqual(actual.dtype, expected.dtype)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual, torch.sparse.sum(sparse, dtype=output_dtype))
+        if dtype.is_floating_point:
+            actual.backward()
+            expected.backward()
+            self.assertEqual(values.grad, dense.grad[tuple(indices)])
+
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v, dtype, device, coalesced):
         shape = shape_i + (shape_v)
         x1, _, _ = self._gen_sparse(len(shape_i), nnz_x1, shape, dtype, device, coalesced)
