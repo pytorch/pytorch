@@ -57,6 +57,12 @@ pub enum Op {
     ImportName { name: u32, fromlist: V, level: V },
     /// The attribute of a module named in `from module import name`.
     ImportFrom(V, u32),
+    /// Does nothing, but counts as a use of its operands: the objects local
+    /// variables were bound to, at the point where the interpreter's frame
+    /// would let go of them (the variable is rebound, or the function is
+    /// left). Without it a register is released after the last read of its
+    /// value, which a `__del__`, a weak reference or a buffer export can see.
+    Hold(Vec<V>),
     /// Reads a frame slot: a register that holds a local variable outside of
     /// SSA form, because an exception handler has to find its current value.
     /// The result is undefined if the slot is empty.
@@ -304,6 +310,7 @@ impl Op {
             | Op::BuildList(vs)
             | Op::BuildSet(vs)
             | Op::BuildMap(vs)
+            | Op::Hold(vs)
             | Op::BuildString(vs) => vs.iter().for_each(|v| f(*v)),
             Op::Call { callee, args, .. } => {
                 f(*callee);
@@ -523,6 +530,7 @@ impl Function {
                 format!("import_name '{}' {} {}", self.name_str(*name), n(fromlist), n(level))
             }
             Op::ImportFrom(m, name) => format!("import_from {} '{}'", n(m), self.name_str(*name)),
+            Op::Hold(vs) => format!("hold {}", self.values(vs)),
             Op::LoadSlot(s) => format!("load_slot {}", n(s)),
             Op::StoreSlot(s, v) => format!("store_slot {} {}", n(s), n(v)),
             Op::CaughtException => "caught_exception".to_string(),
