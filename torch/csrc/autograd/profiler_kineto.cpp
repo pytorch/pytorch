@@ -709,30 +709,20 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
   }
 }
 
-// Set this function to be unused as profiler implementation needs more
-// refactoring to support Python ops collection dynamic toggling
-#ifdef _MSC_VER
-#define UNUSED
-#else
-#define UNUSED __attribute__((unused))
-#endif
-static UNUSED void togglePythonCollectionDynamic(bool enable) {
-  std::shared_ptr<KinetoThreadLocalState> global_state =
-      KinetoThreadLocalState::getGlobal();
-  if (global_state) {
-    if (enable) {
-      global_state->resumePython();
-    } else {
-      global_state->pausePython();
-    }
+static void togglePythonCollectionDynamic(bool enable) {
+  std::shared_ptr<ProfilerStateBase> global_state =
+      ProfilerStateBase::getGlobal();
+  ProfilerStateBase* state =
+      global_state ? global_state.get() : ProfilerStateBase::getTLS();
+  // The legacy, NVTX and ITT profilers use the same state slot.
+  TORCH_CHECK(
+      state != nullptr && state->profilerType() == ActiveProfilerType::KINETO,
+      "Toggling Python stack collection requires an active Kineto profiler");
+  auto* kineto_state = static_cast<KinetoThreadLocalState*>(state);
+  if (enable) {
+    kineto_state->resumePython();
   } else {
-    KinetoThreadLocalState* tls_state = KinetoThreadLocalState::getTLS();
-    TORCH_CHECK(tls_state);
-    if (enable) {
-      tls_state->resumePython();
-    } else {
-      tls_state->pausePython();
-    }
+    kineto_state->pausePython();
   }
 }
 
@@ -773,6 +763,10 @@ void toggleCollectionDynamic(
       continue;
     }
   }
+}
+
+void stopPythonTracer() {
+  togglePythonCollectionDynamic(false);
 }
 
 void enableProfilerWithEventPostProcess(
