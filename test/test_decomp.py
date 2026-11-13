@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     is_iterable_of_tensors,
     run_tests,
@@ -575,6 +576,19 @@ comprehensive_failures = {
 }
 
 
+skip_cross_ref = decorateIf(
+    unittest.skip("Op and dtype excluded from decomposition cross-reference tests"),
+    lambda p: any(
+        key in CROSS_REF_EXCLUDE_SET
+        for key in (
+            (torch.device(p["device"]).type, p["dtype"], p["op"].name),
+            (None, p["dtype"], p["op"].name),
+            (None, None, p["op"].name),
+        )
+    ),
+)
+
+
 @unMarkDynamoStrictTest
 class TestDecomp(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -587,6 +601,7 @@ class TestDecomp(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     @ops(_decomp_test_ops)
+    @skip_cross_ref
     def test_quick(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=False)
 
@@ -595,6 +610,19 @@ class TestDecomp(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     @ops(_decomp_test_ops_core_autograd, allowed_dtypes=(torch.float64,))
+    @decorateIf(
+        unittest.skip(
+            "Op and dtype excluded from backward decomposition cross-reference tests"
+        ),
+        lambda p: any(
+            key in CROSS_REF_BACKWARD_EXCLUDE_SET
+            for key in (
+                (torch.device(p["device"]).type, p["dtype"], p["op"].name),
+                (None, p["dtype"], p["op"].name),
+                (None, None, p["op"].name),
+            )
+        ),
+    )
     def test_quick_core_backward(self, device, dtype, op):
         test_keys = [
             (torch.device(device).type, dtype, op.name),
@@ -623,6 +651,7 @@ class TestDecomp(TestCase):
     @skipOps(comprehensive_failures)
     @suppress_warnings
     @ops(op_db)
+    @skip_cross_ref
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
 
@@ -859,6 +888,11 @@ def forward(self, x_1, start_1):
     return convert_element_type""",
         )
 
+    @decorateIf(
+        unittest.skip("only runs on XPU and CUDA and PrivateUse1."),
+        lambda p: torch.device(p["device"]).type
+        not in ("xpu", "cuda", torch._C._get_privateuse1_backend_name()),
+    )
     def test_masked_fill(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
 

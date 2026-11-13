@@ -49,6 +49,9 @@ from torch.utils._debug_mode._calls import _TritonKernelCall
 from torch.utils._triton import has_triton_package
 
 
+_WRAPPER_LOG = "torch._inductor.codegen.wrapper"
+
+
 def _code_for(fn, *args, dynamic=None, **config_kwargs):
     torch._dynamo.reset()
     config_kwargs.setdefault("triton.autotune_at_compile_time", True)
@@ -114,6 +117,35 @@ def _spy_launches(record):
         mock.patch.object(CachingAutotuner, "run", run_spy),
     ):
         yield
+
+
+@contextlib.contextmanager
+def _launched_in_block():
+    """Yields the names of the kernels launched in the compile-time autotune block."""
+    launched = set()
+
+    def record(kernel, in_block):
+        if in_block:
+            launched.add(kernel.inductor_meta["kernel_name"])
+
+    with _spy_launches(record):
+        yield launched
+
+
+@contextlib.contextmanager
+def _spy_first_config():
+    """Yields the number of compiled configs left in each kernel that kept its first
+    config, recorded when it did."""
+    kept = []
+    use_first_config = CachingAutotuner.use_first_config
+
+    def keep(kernel, stream):
+        had_choices = use_first_config(kernel, stream)
+        kept.append(len(kernel.compile_results))
+        return had_choices
+
+    with mock.patch.object(CachingAutotuner, "use_first_config", keep):
+        yield kept
 
 
 @contextlib.contextmanager
@@ -298,6 +330,155 @@ class TestKernelConfigs(TestCase):
         ns = _load_from_file(code)
         self.assertEqual(ns["KERNEL_CONFIGS"], {})
         self.assertEqual(ns[kernel].heuristic_type, HeuristicType.POINTWISE)
+
+    @requires_gpu_and_triton
+    def test_a_kernel_with_a_device_assert_keeps_its_first_config(self):
+        # An index computed from the block's made-up inputs need not be in range, so
+        # the block does not launch a kernel that checks it on device. It keeps the
+        # kernel's first config instead, which the module then launches.
+        def fn(w, idx):
+            return w[idx + 32] * 2
+
+        w = torch.randn(64, 32, device=GPU_TYPE)
+        idx = torch.randint(-32, 32, (128,), device=GPU_TYPE)
+        with (
+            _launched_in_block() as launched,
+            _spy_first_config() as kept,
+            self.assertLogs(_WRAPPER_LOG, "WARNING") as logs,
+        ):
+            # The static launcher would drop the other compiled configs by itself.
+            result, code = _code_for(fn, w, idx, use_static_triton_launcher=False)
+        self.assertIn("tl.device_assert", code)
+        self.assertEqual(launched, set())
+        (warning,) = logs.output
+        self.assertIn("Did not autotune 1 Triton kernel(s)", warning)
+        self.assertIn("autotune_at_compile_time=False", warning)
+        # One compiled config is left, so there is nothing to tune at a launch.
+        self.assertEqual(kept, [1])
+        self.assertEqual(result, fn(w, idx))
+        ns = _load_from_file(code)
+        (kernel,) = _kernels(code)
+        self.assertEqual(set(ns["KERNEL_CONFIGS"]), {kernel})
+        self.assertEqual(ns[kernel].heuristic_type, HeuristicType.FIXED)
+
+    @requires_gpu_and_triton
+    @parametrize("case", ["input", "int32_input", "dynamic_size", "constant"])
+    def test_a_device_assert_on_an_input_index_is_tuned(self, case):
+        # The block fills integer inputs and constants with zeros, and index zero is
+        # in range of a size known to be positive, so it still tunes the kernels
+        # whose bounds checks read such an index as is, with or without the wrap of
+        # negative indices.
+        def fn(w, idx):
+            return w[idx] * 2, torch.nn.functional.embedding(idx, w[:, :16])
+
+        class WithIndexConstant(torch.nn.Module):
+            def __init__(self, idx):
+                super().__init__()
+                self.register_buffer("idx", idx)
+
+            def forward(self, w):
+                return fn(w, self.idx)
+
+        w = torch.randn(64, 32, device=GPU_TYPE)
+        idx = torch.randint(0, 64, (128,), device=GPU_TYPE)
+        model, args, kwargs = {
+            "input": (fn, (w, idx), {}),
+            "int32_input": (lambda w, idx: fn(w, idx.long()), (w, idx.int()), {}),
+            "dynamic_size": (fn, (w, idx), {"dynamic": True}),
+            "constant": (WithIndexConstant(idx), (w,), {"freezing": True}),
+        }[case]
+        with (
+            _launched_in_block() as launched,
+            torch.no_grad(),
+            self.assertNoLogs(_WRAPPER_LOG, "WARNING"),
+        ):
+            result, code = _code_for(model, *args, **kwargs)
+        self.assertEqual(code.count("tl.device_assert"), 2)
+        self.assertEqual(launched, _kernels(code))
+        self.assertEqual(result, model(*args))
+
+    @requires_gpu_and_triton
+    def test_a_device_assert_on_an_unchecked_gather_is_not_launched(self):
+        # On zeros, idx + 4 reads past the end of ids, and _unsafe_index does not
+        # check it, so the index into w can be anything in the block.
+        def fn(w, ids, idx):
+            return w[torch.ops.aten._unsafe_index(ids, [idx + 4])] * 2
+
+        w = torch.randn(64, 32, device=GPU_TYPE)
+        ids = torch.randint(0, 64, (4,), device=GPU_TYPE)
+        idx = torch.randint(-4, 0, (128,), device=GPU_TYPE)
+        with _spy_first_config() as kept:
+            result, code = _code_for(fn, w, ids, idx)
+        self.assertIn("tl.device_assert", code)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(result, fn(w, ids, idx))
+
+    @requires_gpu_and_triton
+    def test_a_device_assert_on_an_empty_dimension_is_not_launched(self):
+        # Index zero is out of range for the empty table. The branch that reads it
+        # never runs, but the block would launch its kernel on zeros.
+        def fn(w, idx, pred):
+            return torch.cond(
+                pred,
+                lambda w, idx: torch.nn.functional.embedding(idx, w),
+                lambda w, idx: torch.zeros(idx.numel(), w.shape[-1], device=w.device),
+                (w, idx),
+            )
+
+        w = torch.randn(0, 32, device=GPU_TYPE)
+        idx = torch.zeros(128, dtype=torch.int64, device=GPU_TYPE)
+        pred = torch.tensor(False, device=GPU_TYPE)
+        with _spy_first_config() as kept:
+            result, code = _code_for(fn, w, idx, pred)
+        self.assertIn("tl.device_assert", code)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(result, fn(w, idx, pred))
+
+    @requires_gpu_and_triton
+    def test_an_assert_compiled_out_is_tuned(self):
+        # Without indirect indexing asserts, Triton compiles out every device assert,
+        # so the block launches the kernel with the assert on its made-up inputs too.
+        def fn(x, ids):
+            torch._assert_async((ids > 0).all(), "ids must be positive")
+            return x * ids
+
+        x = torch.randn(64, device=GPU_TYPE)
+        ids = torch.ones(64, dtype=torch.int64, device=GPU_TYPE)
+        with _launched_in_block() as launched:
+            result, code = _code_for(fn, x, ids, assert_indirect_indexing=False)
+        self.assertIn("tl.device_assert", code)
+        self.assertEqual(launched, _kernels(code))
+        self.assertEqual(result, fn(x, ids))
+
+    @requires_gpu_and_triton
+    def test_a_multi_kernel_with_a_device_assert_tunes_on_first_launch(self):
+        # A multi-kernel picks its sub-kernel by benchmarking the sub-kernels at
+        # its first launch, on real inputs. The block leaves it alone, so that
+        # each sub-kernel can still tune there.
+        def fn(w, idx):
+            return w[idx + 64].sum(-1)
+
+        w = torch.randn(64, 3000, device=GPU_TYPE)
+        idx = torch.full((128,), -64, device=GPU_TYPE)
+        tune = CachingAutotuner.autotune_to_one_config
+        with (
+            _launched_in_block() as launched,
+            mock.patch.object(
+                CachingAutotuner,
+                "autotune_to_one_config",
+                autospec=True,
+                side_effect=tune,
+            ) as tuned,
+            self.assertNoLogs(_WRAPPER_LOG, "WARNING"),
+        ):
+            # max_autotune, so that the sub-kernels have configs to choose between
+            cfg = {"triton.multi_kernel": 1, "max_autotune": True}
+            result, code = _code_for(fn, w, idx, autotune_local_cache=False, **cfg)
+        self.assertIn("multi_kernel", code)
+        self.assertIn("tl.device_assert", code)
+        self.assertEqual(launched, set())
+        tuned.assert_called()
+        self.assertEqual(result, fn(w, idx))
 
     @requires_gpu_and_triton
     def test_bundled_autotune_cache_key_ignores_the_winners(self):
