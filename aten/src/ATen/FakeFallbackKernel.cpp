@@ -62,7 +62,6 @@
 // So that ops do not give results Python's FakeTensorMode would not, it raises
 // NotImplementedError where Python runs something other than these,
 // apart from the known divergences in the TODOs below:
-//  - handlers that allocate unbacked sizes;
 //  - ops run under the Python dispatcher, whose Python-dispatcher-only Meta
 //    registrations do not run here;
 //  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors), or Any;
@@ -261,7 +260,9 @@ bool _is_tensor_constructor(const c10::FunctionSchema& schema) {
 }
 
 bool has_op_impl_predicate(const c10::OperatorHandle& op) {
-  return _is_tensor_constructor(op.schema()) ||
+  return op.hasTag(at::Tag::dynamic_output_shape) ||
+      op.hasTag(at::Tag::data_dependent_output) ||
+      _is_tensor_constructor(op.schema()) ||
       (op.operator_name().name.starts_with("aten::_foreach_") &&
        op.hasComputedKernelForDispatchKey(c10::DispatchKey::Meta));
 }
@@ -275,10 +276,17 @@ bool cpp_meta_supports_symint(
 }
 
 bool is_plain_tensor(const at::Tensor& t) {
-  return t.defined() && !t.is_fake() &&
-      !t.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python) &&
-      (*c10::impl::getGlobalPyInterpreter())
-          ->fake_has_plain_tensor_type(t.unsafeGetTensorImpl());
+  if (!t.defined() || t.is_fake()) {
+    return false;
+  }
+  const auto* impl = t.unsafeGetTensorImpl();
+  // Fresh native outputs have no Python object and need no type callback.
+  // Otherwise check the exact type: Parameters and subclasses without
+  // __torch_dispatch__ also lack the Python dispatch key.
+  return !impl->key_set().has(c10::DispatchKey::Python) &&
+      (impl->pyobj_slot()->load_pyobj() == nullptr ||
+       (*c10::impl::getGlobalPyInterpreter())
+           ->fake_has_plain_tensor_type(impl));
 }
 
 // FakeTensorMode.may_turn_const with CONSTANT_NUMEL_LIMIT == 1.
@@ -388,11 +396,11 @@ void fakeFallback(
       const auto& device =
           (*stack)[arguments_begin + *schema.argumentIndexWithName("device")];
       return device.isDevice() && !device.toDevice().is_cpu() &&
-          (*c10::impl::getGlobalPyInterpreter())->fake_avoid_device_init(mode);
+          mode->avoid_device_init_;
     }
     return schema.name() == "prims::device_put" &&
         schema.overload_name().empty() &&
-        (*c10::impl::getGlobalPyInterpreter())->fake_avoid_device_init(mode);
+        mode->avoid_device_init_;
   };
   const bool makes_constant = !has_mode_fakes &&
       (is_lift ||
@@ -745,24 +753,6 @@ void fakeFallback(
       (*c10::impl::getGlobalPyInterpreter())
           ->run_fake_impl(op, stack, mode, /*real=*/nullptr)) {
     return;
-  }
-  // Integer indexing works without unbacked sizes; bool indexing calls nonzero.
-  const bool is_index_tensor =
-      schema.name() == "aten::index" && schema.overload_name() == "Tensor";
-  const bool has_repeat_interleave_output_size =
-      schema.name() == "aten::repeat_interleave" &&
-      schema.overload_name() == "Tensor" &&
-      ((*stack)[arguments_begin + 1].isInt() ||
-       (*stack)[arguments_begin + 1].isSymInt());
-  const bool allocates_unbacked = schema.name() == "aten::_spdiags" ||
-      schema.name() == "aten::_pack_padded_sequence" ||
-      (schema.name() == "aten::_padded_dense_to_jagged_forward" &&
-       (*stack)[arguments_begin + 2].isNone());
-  if (allocates_unbacked ||
-      (!is_index_tensor && !has_repeat_interleave_output_size &&
-       (op.hasTag(at::Tag::dynamic_output_shape) ||
-        op.hasTag(at::Tag::data_dependent_output)))) {
-    unsupported(op, "ops with data-dependent outputs");
   }
   // Constructors finalize their own output devices.
   const auto common_device = input_devices.empty()

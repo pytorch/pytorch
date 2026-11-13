@@ -168,10 +168,6 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   bool fake_has_plain_tensor_type(const TensorImpl* /*self*/) const override {
     PANIC(fake_has_plain_tensor_type);
   }
-  bool fake_avoid_device_init(
-      const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
-    PANIC(fake_avoid_device_init);
-  }
   void invalidate_written_to_constants(
       const c10::OperatorHandle& /*op*/,
       const torch::jit::Stack& /*stack*/,

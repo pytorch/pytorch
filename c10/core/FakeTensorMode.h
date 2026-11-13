@@ -38,6 +38,13 @@ struct C10_API FakeTensorMode {
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
 
+  // Snapshot of _avoid_device_init() at construction. We assume backend
+  // availability stays stable for the mode's lifetime; rechecking it is not
+  // worth acquiring the GIL and crossing into Python on each relevant op.
+  // Create a new mode after changing backend availability. Python reads this
+  // same value, including when its wrapper is recreated.
+  bool avoid_device_init_ = false;
+
   // Snapshot of fake_tensor_prefer_device_type at mode construction. Later
   // config changes do not affect this mode. Kept as a string to preserve
   // Python's substring matching of device types.
@@ -48,6 +55,9 @@ struct C10_API FakeTensorMode {
   // thread-local override used by dynamo's nonstrict_trace, takes precedence,
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
+
+  // Temporary scalar-output override, as in Python's FakeTensorMode.
+  bool allow_scalar_outputs_ = false;
 
   // Default used by from_tensor when its static_shapes argument is None.
   bool static_shapes_ = shape_env_ == nullptr;
