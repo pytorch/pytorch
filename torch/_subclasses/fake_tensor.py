@@ -1599,41 +1599,44 @@ def allow_non_fake_inputs_temporarily(
         fake_mode.allow_non_fake_inputs = previous
 
 
-@contextlib.contextmanager
-def in_kernel_invocation_manager(
-    fake_mode: FakeTensorMode | CppFakeTensorMode,
-) -> Generator[None, None, None]:
-    # See: note [Fake Tensor Dispatch Keys]
-    # A CppFakeTensorMode has no in_kernel_invocation flag: C++ fakes read the
-    # thread-local one _InKernelInvocation sets below. That flag can be set
-    # without the Meta include (by a bare _InKernelInvocation), so for a C++
-    # mode only the Meta include implies the flag.
-    python_mode = None if isinstance(fake_mode, CppFakeTensorMode) else fake_mode
-    prev_in_kernel = python_mode is not None and python_mode.in_kernel_invocation
-    meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-    if python_mode is not None:
-        if meta_in_tls != prev_in_kernel:
-            raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
-    elif meta_in_tls and not torch._C._in_kernel_invocation():
-        raise AssertionError(
-            "the Meta TLS dispatch key is included outside a kernel invocation"
+class in_kernel_invocation_manager:
+    # A class with a single C++ guard, rather than a @contextmanager around
+    # several: it's entered on every FakeTensorMode cache hit.
+    __slots__ = ("python_mode", "prev_in_kernel", "guard")
+
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
+        # A CppFakeTensorMode has no in_kernel_invocation flag: C++ fakes read
+        # the thread-local one the guard sets. That flag can be set without the
+        # Meta include (by a bare _InKernelInvocation), so for a C++ mode only
+        # the Meta include implies the flag.
+        self.python_mode = (
+            None if isinstance(fake_mode, CppFakeTensorMode) else fake_mode
         )
 
-    # _InKernelInvocation makes C++ fakes report meta here too, see Note
-    # [C++ in_kernel_invocation].
-    with torch._C._DisableTorchDispatch(), torch._C._InKernelInvocation():
+    def __enter__(self) -> None:
+        # See: note [Fake Tensor Dispatch Keys]
+        python_mode = self.python_mode
+        meta_in_tls = torch._C._meta_in_tls_dispatch_include()
+        if python_mode is not None:
+            prev_in_kernel = self.prev_in_kernel = python_mode.in_kernel_invocation
+            if meta_in_tls != prev_in_kernel:
+                raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
+        elif meta_in_tls and not torch._C._in_kernel_invocation():
+            raise AssertionError(
+                "the Meta TLS dispatch key is included outside a kernel invocation"
+            )
+        # Disables __torch_dispatch__, sets the thread-local flag that makes
+        # C++ fakes report meta (see Note [C++ in_kernel_invocation]), and adds
+        # Meta to the TLS include set.
+        self.guard = torch._C._MetaKernelInvocationGuard()
+        self.guard.__enter__()
         if python_mode is not None:
             python_mode.in_kernel_invocation = True
-        # Unfortunately _set_meta_in_tls_dispatch_include(False) can leave
-        # `Dense` turned on (because it's implied by `Meta`)
-        with torch._C._PreserveDispatchKeyGuard():
-            torch._C._set_meta_in_tls_dispatch_include(True)
-            try:
-                yield
-            finally:
-                if python_mode is not None:
-                    python_mode.in_kernel_invocation = prev_in_kernel
-                # torch._C._set_meta_in_tls_dispatch_include(prev_in_kernel)
+
+    def __exit__(self, *exc_info: object) -> None:
+        if self.python_mode is not None:
+            self.python_mode.in_kernel_invocation = self.prev_in_kernel
+        self.guard.__exit__(*exc_info)
 
 
 # Return if the function allows Python numbers to bind to Tensors
