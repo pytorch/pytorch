@@ -11626,11 +11626,11 @@ class TestLinalgCudaOnly(TestCase):
         eps = torch.finfo(dtype).eps
 
         # low batch regime shapes
-        bsl = (1, 4, 8) if pivot else (16,)
+        bsl = (4, 8) if pivot else (16,)
         nsl = (259, 513, 1024, 1027)
 
         # high batch regime shapes
-        bsh = (1, 150, 550)
+        bsh = (150, 550)
         nsh = (257,)
 
         shapes = itertools.chain(itertools.product(bsl, nsl), itertools.product(bsh, nsh))

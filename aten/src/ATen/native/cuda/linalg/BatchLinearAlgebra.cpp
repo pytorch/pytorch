@@ -627,18 +627,13 @@ namespace {
 
     // cuBLAS does not support rectangular inputs.
     if (m != n) {
-      // Try using custom kernel for batched inputs,
-      // when m <= 1024, and m > 1024 only with the pivoted kernel.
-      // The kernel does int arithmetic on offsets and loop bounds, so it requires
-      // (lda >= m, so bounding lda bounds m too):
-      // - batch * lda: per-batch offsets into pivots and the permutation workspace;
-      // - lda * min(n, MAX_RECNB) + 1024: linearized rank-1 update index in the tall panel kernel;
-      // - n + SWP_WIDTH: column tile count of row swaps.
+      // Custom kernel for m <= 1024 and batch >= 4 (pivoted) or batch >= 16 (nopiv).
+      // Based on benchmarks extended from the square case (note, they agree)
+      // TODO: explore m > 1024
       constexpr int64_t int_max = std::numeric_limits<int>::max();
-      if ((1 < batch && batch <= 65535)
-        && ((1 <= m && m <= 1024) || compute_pivots)
-        && batch * lda <= int_max
-        && lda * std::min<int64_t>(n, 32) <= int_max - 1024
+      if ((compute_pivots ? batch >= 4 : batch >= 16) && batch <= 65535
+        && (1 <= m && m <= 1024)
+        && lda <= int_max
         && n <= int_max - 4 // SWP_WIDTH
       ) {
         return SolverBackend::CUSTOM;
