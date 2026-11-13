@@ -23,6 +23,7 @@ import torch.utils.data.datapipes as dp
 from torch import multiprocessing as mp
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
     skipCUDAIf,
@@ -2983,6 +2984,26 @@ except RuntimeError as e:
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
+class TestSamplerDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # https://github.com/pytorch/pytorch/issues/125844
+    @dtypes(torch.float, torch.half, torch.long)
+    def test_weighted_random_sampler_device_weights(self, device, dtype):
+        from torch.utils.data import WeightedRandomSampler
+
+        weights = torch.tensor([1, 0, 3, 4], device=device, dtype=dtype)
+
+        def draw():
+            generator = torch.Generator(device=device).manual_seed(0)
+            return list(WeightedRandomSampler(weights, 16, generator=generator))
+
+        draws = draw()
+        self.assertEqual(len(draws), 16)
+        self.assertNotIn(1, draws)
+        self.assertEqual(draws, draw())
+
+
 class TestDataLoaderDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -4061,6 +4082,9 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertEqual(expected_data, data)
 
 
+instantiate_device_type_tests(
+    TestSamplerDevice, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_device_type_tests(TestDataLoaderDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestDataLoaderMultiProcessing)
 instantiate_device_type_tests(
