@@ -37,9 +37,9 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
-    isRocmArchAnyOf,
-    NAVI4_ARCH,
+    MI350_ARCH,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfTorchDynamo,
     run_tests,
     decorateIf,
@@ -3871,12 +3871,15 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
     @tf32_off()
-    @skipIfRocm
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
+    @setSdpaBackendsToDefaultFinally
     @parametrize("enable_gqa", [False, True])
     def test_mqa_singleton_head_broadcast(self, device, enable_gqa):
         """Singleton KV heads should use fused attention with either GQA mode."""
+        if TEST_WITH_ROCM:
+            # TODO: Enable GQA/MQA for CK backend
+            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
         make_tensor = partial(
             torch.randn, device=device, dtype=torch.float32, requires_grad=True
         )
@@ -3906,9 +3909,9 @@ class TestSDPAAccelerator(NNTestCase):
             self.assertEqual(actual_grad, expected_grad, atol=1e-4, rtol=1e-4)
 
     @tf32_off()
-    @skipIfRocm
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
+    @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.float32, torch.float16])
     @parametrize(
         "num_query_heads,num_kv_heads,is_causal,use_attn_mask,q_layout,k_layout,v_layout",
@@ -3931,6 +3934,9 @@ class TestSDPAAccelerator(NNTestCase):
         v_layout,
     ):
         """Map query heads to KV groups while keeping masks query-head indexed."""
+        if TEST_WITH_ROCM:
+            # TODO: Enable GQA/MQA for CK backend
+            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
         query = make_strided_sdpa_input(
             (2, num_query_heads, 16, 32), q_layout, device, dtype
         )
@@ -3990,11 +3996,14 @@ class TestSDPAAccelerator(NNTestCase):
                 rtol=grad_tolerance,
             )
 
-    @skipIfRocm
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
+    @setSdpaBackendsToDefaultFinally
     def test_mem_efficient_attention_gqa_dropout(self, device):
         """GQA should preserve query-head dropout and mask semantics."""
+        if TEST_WITH_ROCM:
+            # TODO: Enable GQA/MQA for CK backend
+            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
         batch, num_query_heads, num_kv_heads = 2, 6, 2
         group_size = num_query_heads // num_kv_heads
         query = make_strided_sdpa_input(
@@ -4145,7 +4154,6 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=4e-4)
 
-    @skipIfRocm(msg="AOTriton bottom-right causal attention writes NaN into fully masked rows when another process shares the GPU")
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -4223,12 +4231,12 @@ class TestSDPAAccelerator(NNTestCase):
         )
 
     @tf32_off()
-    @skipIfRocm(msg="ROCm mem-efficient attention does not support window_size")
     @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_forward'")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Memory efficient attention is not supported on this system",
     )
+    @setSdpaBackendsToDefaultFinally
     @parametrize(
         "causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT]
     )
@@ -4238,6 +4246,9 @@ class TestSDPAAccelerator(NNTestCase):
         lambda p: p['head_dim'] > 64 and (not MEM_EFF_CAPABILITY_MATCHES_SM80),
     )
     def test_mem_efficient_causal_window(self, device, causal_variant, head_dim):
+        if TEST_WITH_ROCM:
+            # CK mem-efficient attention does not support window_size; pin AOTriton.
+            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
         if head_dim > 64 and not MEM_EFF_CAPABILITY_MATCHES_SM80:
             self.skipTest("large head dimensions require SM80 or later")
         torch.manual_seed(42)
@@ -4408,7 +4419,6 @@ class TestSDPAAccelerator(NNTestCase):
         )
 
     @onlyCUDA
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     @tf32_off()
     def test_mem_efficient_varlen_large_batch(self, device):
@@ -5255,11 +5265,14 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual_grad, expected_grad)
 
-    @skipIfRocm
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    @setSdpaBackendsToDefaultFinally
     def test_mem_efficient_attention_vmap_gqa_backward(self, device):
         """Exercise GQA backward with a per-query-head mask under vmap."""
+        if TEST_WITH_ROCM:
+            # TODO: Enable GQA/MQA for CK backend
+            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
         vmap_batch, batch, num_query_heads, num_kv_heads = 3, 2, 6, 2
         make_tensor = partial(
             torch.randn,
@@ -5862,9 +5875,14 @@ class TestSDPAAccelerator(NNTestCase):
                                           torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
 
     @onlyCUDA
-    @skipIfRocm  # CK's mem-efficient backward ignores deterministic mode
+    # AOTriton's fp32 forward is not run-to-run deterministic on gfx950.
+    @skipIfRocmArch(MI350_ARCH)
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
+    @setSdpaBackendsToDefaultFinally
     def test_mem_eff_backwards_determinism(self, device):
+        if TEST_WITH_ROCM:
+            # CK's mem-efficient backward ignores deterministic mode; pin AOTriton.
+            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
         # Without deterministic mode this shape uses num_splits_key > 1, whose grad_q accumulation order is racy
         shape = (1, 1, 4096, 64)
         query, key, value = (torch.rand(shape, device=device, requires_grad=True) for _ in range(3))
@@ -6677,9 +6695,6 @@ class TestSDPAAccelerator(NNTestCase):
                         fudge_factors['grad_query'] = 1100.0
                 if dtype == torch.float32:
                     fudge_factors['grad_key'] = 90.0
-                # AOTriton bf16 grad_query error on gfx120x is ~6x gfx110x/gfx1151: ROCm/aotriton#259
-                if dtype == torch.bfloat16 and isRocmArchAnyOf(NAVI4_ARCH):
-                    fudge_factors['grad_query'] = max(fudge_factors['grad_query'], 520.0)
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),

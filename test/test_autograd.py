@@ -15,6 +15,7 @@ import random
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 import time
 import unittest
@@ -19270,6 +19271,135 @@ class TestAutogradCudaOnly(TestCase):
                 torch.cuda.memory._record_memory_history(None)
 
 
+@skipIfTorchDynamo("compiled autograd rejects disallow_implicit_grad_accumulation")
+class TestDisallowImplicitGradAccumulation(TestCase):
+    def test_raises_instead_of_summing(self, device):
+        a = torch.randn(3, device=device, requires_grad=True)
+        x = a.sin()
+        loss = (x * 2 + x * 3).sum()
+        msg = "summed implicitly into output 0 of SinBackward0"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            loss.backward(disallow_implicit_grad_accumulation=True)
+        x = a.sin()
+        loss = (x * 2 + x * 3).sum()
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(loss, a, disallow_implicit_grad_accumulation=True)
+        # Without the flag, gradients are summed as usual.
+        (a.sin() * 2 + a.sin() * 3).sum().backward()
+        self.assertEqual(a.grad, 5 * a.cos())
+
+    def test_message(self, device):
+        def message(fn):
+            with self.assertRaises(RuntimeError) as cm:
+                fn().sum().backward(disallow_implicit_grad_accumulation=True)
+            # Wrapped so the expected message is easy to review.
+            return textwrap.fill(
+                str(cm.exception), 80, break_long_words=False, break_on_hyphens=False
+            )
+
+        a = torch.randn(3, device=device, requires_grad=True)
+        x = a.sin()
+        self.assertExpectedInline(
+            message(lambda: x * x),
+            """\
+Gradients would be summed implicitly into output 0 of SinBackward0 (shape [3],
+dtype float): it already received a gradient, and MulBackward0 produced another.
+backward was run with disallow_implicit_grad_accumulation=True, which raises
+instead of accumulating the gradient contributions of a tensor used more than
+once. To accumulate them yourself, use a custom autograd Function whose forward
+returns the tensor once per use and whose backward sums their gradients. See
+https://pytorch.org/docs/main/notes/autograd.html#disallow-implicit-grad-accumulation
+for an example. Run under torch.autograd.detect_anomaly() to print the forward
+traceback of the operation that produced this gradient.""",
+        )
+        self.assertExpectedInline(
+            message(lambda: a * a),
+            """\
+Gradients would be summed implicitly into a leaf tensor of shape [3] and dtype
+Float: it already received a gradient, and MulBackward0 produced another.
+backward was run with disallow_implicit_grad_accumulation=True, which raises
+instead of accumulating the gradient contributions of a tensor used more than
+once. To accumulate them yourself, use a custom autograd Function whose forward
+returns the tensor once per use and whose backward sums their gradients. See
+https://pytorch.org/docs/main/notes/autograd.html#disallow-implicit-grad-accumulation
+for an example. Run under torch.autograd.detect_anomaly() to print the forward
+traceback of the operation that produced this gradient.""",
+        )
+
+    def test_leaf(self, device):
+        a = torch.randn(3, device=device, requires_grad=True)
+        msg = r"leaf tensor of shape \[3\] and dtype Float"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            (a * 2 + a * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+
+    def test_no_sum_no_error(self, device):
+        a = torch.randn(3, device=device, requires_grad=True)
+        w1 = torch.randn(3, device=device, requires_grad=True)
+        w2 = torch.randn(3, device=device, requires_grad=True)
+        # A use whose result never reaches the loss, and a use only for logging.
+        x = a.sin()
+        unused = x * 2
+        x.sum().item()
+        (x * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+        # Each backward call delivers one gradient per node input.
+        x = a.sin()
+        l1, l2 = (x * 2).sum(), (x * 3).sum()
+        l1.backward(retain_graph=True, disallow_implicit_grad_accumulation=True)
+        l2.backward(disallow_implicit_grad_accumulation=True)
+        # x's node is not on the path to w1, so it does not run.
+        x = a.sin()
+        loss = (x * w1 + x * w2).sum()
+        torch.autograd.grad(loss, w1, disallow_implicit_grad_accumulation=True)
+        # A leaf whose previous graph is still alive.
+        loss = None
+        for _ in range(2):
+            loss = (w1 * 2).sum()
+            loss.backward(disallow_implicit_grad_accumulation=True)
+        del unused
+
+    @parametrize("use_reentrant", [False, True])
+    def test_checkpoint(self, device, use_reentrant):
+        a = torch.randn(3, device=device, requires_grad=True)
+        x = a.sin()
+        out = checkpoint(lambda t: t.cos().exp(), x, use_reentrant=use_reentrant)
+        out.sum().backward(disallow_implicit_grad_accumulation=True)
+        self.assertEqual(a.grad, -a.sin().cos().exp() * a.sin().sin() * a.cos())
+        # With use_reentrant=True this sum happens in the recomputation's own
+        # backward, so it raises only if that backward inherits the flag.
+        out = checkpoint(lambda t: t * t, a.sin(), use_reentrant=use_reentrant)
+        with self.assertRaisesRegex(RuntimeError, "summed implicitly"):
+            out.sum().backward(disallow_implicit_grad_accumulation=True)
+
+    def test_torch_function_kwargs(self, device):
+        # The flag reaches __torch_function__ only when set, so overrides
+        # written against the signatures without it keep working.
+        backward_fns = (
+            torch.Tensor.backward,
+            torch.autograd.backward,
+            torch.autograd.grad,
+        )
+        dispatched_kwargs = []
+
+        class Recorder(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func in backward_fns:
+                    dispatched_kwargs.append(kwargs)
+                    return None
+                return super().__torch_function__(func, types, args, kwargs)
+
+        a = torch.randn(3, device=device, requires_grad=True)
+        x = (a * 2).as_subclass(Recorder)
+        for flag in (False, True):
+            x.backward(disallow_implicit_grad_accumulation=flag)
+            torch.autograd.backward(x, disallow_implicit_grad_accumulation=flag)
+            torch.autograd.grad(x, a, disallow_implicit_grad_accumulation=flag)
+        flags = [
+            k.get("disallow_implicit_grad_accumulation") for k in dispatched_kwargs
+        ]
+        self.assertEqual(flags, [None] * 3 + [True] * 3)
+
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
@@ -19299,6 +19429,7 @@ instantiate_device_type_tests(
     TestSelectiveActivationCheckpointCudaOnly, globals(), only_for="cuda"
 )
 instantiate_device_type_tests(TestInputGradBuffers, globals())
+instantiate_device_type_tests(TestDisallowImplicitGradAccumulation, globals())
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)
