@@ -219,6 +219,9 @@ void fakeFallback(
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   const auto arguments_begin = stack->size() - num_arguments;
+  const bool metadata_copy = schema.overload_name().empty() &&
+      (schema.name() == "aten::detach" ||
+       schema.name() == "aten::shallow_copy_data_");
   if (c10::impl::PythonDispatcherTLS::get_state() != nullptr) {
     unsupported(op, "the Python dispatcher");
   }
@@ -260,7 +263,7 @@ void fakeFallback(
   using at::impl::FakeDispatchCategory;
   const auto categories =
       at::impl::fakeDispatchTableCategories(op.operator_name());
-  if (cpp_fake_not_implemented(op, categories)) {
+  if (!metadata_copy && cpp_fake_not_implemented(op, categories)) {
     unsupported(op, "ops with a Python fake implementation");
   }
   if (op.hasKernelForDispatchKey(c10::DispatchKey::CompositeImplicitAutograd)) {
@@ -318,7 +321,7 @@ void fakeFallback(
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
         if (!device.has_value()) {
           device = fake_device;
-        } else if (*device != *fake_device) {
+        } else if (!metadata_copy && *device != *fake_device) {
           // Including a zero-dim CPU tensor with others, which Python allows
           unsupported(
               op,
@@ -341,6 +344,23 @@ void fakeFallback(
   if (!device.has_value()) {
     unsupported(op, "ops without fake tensor inputs");
   }
+  if (metadata_copy) {
+    // These kernels only copy metadata. Run them on the fakes directly so
+    // shallow_copy_data_ never replaces an existing fake inside a Meta kernel.
+    c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
+        {c10::DispatchKey::Fake,
+         c10::DispatchKey::Python,
+         c10::DispatchKey::PreDispatch,
+         c10::DispatchKey::PythonTLSSnapshot}));
+    auto self = (*stack)[arguments_begin].toTensor();
+    auto result = schema.name() == "aten::detach"
+        ? at::impl::fake_detach(self)
+        : at::impl::fake_shallow_copy_data_(
+              self, (*stack)[arguments_begin + 1].toTensor());
+    torch::jit::drop(*stack, num_arguments);
+    torch::jit::push(*stack, std::move(result));
+    return;
+  }
   if (!has_sparse_inputs) {
     // Python decomposes these only without sparse inputs
     if (at::impl::fakeDispatchCategoriesHave(
@@ -356,12 +376,10 @@ void fakeFallback(
   }
   meta_keyset = meta_keyset.add(c10::DispatchKey::Meta);
 
-  // As in Python, the outputs of alias and detach of a fake keep its recorded
-  // dispatch keys (see Note [C++ fake dispatch keys]), and other new outputs
-  // have none
+  // As in Python, alias keeps its input's recorded dispatch keys (see Note
+  // [C++ fake dispatch keys]), and other new Meta outputs have none.
   std::optional<c10::DispatchKeySet> output_dispatch_keys;
-  if (schema.overload_name().empty() &&
-      (schema.name() == "aten::alias" || schema.name() == "aten::detach")) {
+  if (schema.overload_name().empty() && schema.name() == "aten::alias") {
     const auto& self = (*stack)[arguments_begin].toTensor();
     output_dispatch_keys = self.unsafeGetTensorImpl()->fake_dispatch_keys();
   }
