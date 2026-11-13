@@ -1004,11 +1004,14 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     # See Note [C++ FakeTensorMode Python object lifetime].
     __slots__ = ()
 
-    def __init__(self, *, shape_env: ShapeEnv | None = None) -> None:
+    def __init__(
+        self, *, shape_env: ShapeEnv | None = None, allow_non_fake_inputs: bool = False
+    ) -> None:
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
+        self.allow_non_fake_inputs = allow_non_fake_inputs
 
     @property
     def avoid_device_init(self) -> bool:
@@ -1445,7 +1448,7 @@ def init_gpu_context(device: torch.device) -> None:
 # property (it has no deleter). Save and restore the value instead.
 @contextlib.contextmanager
 def allow_non_fake_inputs_temporarily(
-    fake_mode: FakeTensorMode | None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None,
 ) -> Generator[None, None, None]:
     if fake_mode is None:
         yield

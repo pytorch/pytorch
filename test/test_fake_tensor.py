@@ -130,9 +130,11 @@ if CPP_FAKETENSOR:
         allow_non_fake_inputs=False,
         **kwargs,
     ):
-        if not allow_fallback_kernels or allow_non_fake_inputs or kwargs:
+        if not allow_fallback_kernels or kwargs:
             raise NotImplementedError("CppFakeTensorMode has no such options yet")
-        return CppFakeTensorMode(shape_env=shape_env)
+        return CppFakeTensorMode(
+            shape_env=shape_env, allow_non_fake_inputs=allow_non_fake_inputs
+        )
 
     FakeTensorModeCls = CppFakeTensorMode
 else:
