@@ -11,6 +11,7 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyAccelerator,
 )
 from torch.testing._internal.common_dtype import float8_types_and
@@ -18,7 +19,9 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
     run_tests,
+    serialTest,
     skipIfTorchDynamo,
+    slowTest,
     TestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -231,18 +234,24 @@ def _all_inputs(src, dst):
 class TestRoundedConversion(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def assertSameValues(self, actual, expected, inputs):
-        actual = actual.cpu().double()
-        expected = expected.cpu()
+    def assertSameValues(self, actual, expected, inputs, dtype=torch.float64):
+        # dtype must represent all values of actual and expected exactly.
+        actual = actual.cpu().to(dtype)
+        expected = expected.cpu().to(dtype)
         nan = expected.isnan()
-        self.assertEqual(actual.isnan(), nan)
-        bad = ~nan & (
-            (actual != expected) | (torch.signbit(actual) != torch.signbit(expected))
+        bad = (actual.isnan() != nan) | (
+            ~nan
+            & (
+                (actual != expected)
+                | (torch.signbit(actual) != torch.signbit(expected))
+            )
         )
         if bad.any():
-            i = bad.nonzero()[0].item()
+            i = bad.view(torch.uint8).argmax().item()
+            x = inputs[i].item()
+            x = f"0x{x & 0xFFFFFFFF:08x}" if isinstance(x, int) else repr(x)
             self.fail(
-                f"{int(bad.sum())} mismatches, e.g. input {inputs[i].item()!r} -> "
+                f"{int(bad.sum())} mismatches, e.g. input {x} -> "
                 f"{actual[i].item()!r}, expected {expected[i].item()!r}"
             )
 
@@ -601,6 +610,40 @@ class TestRoundedConversion(TestCase):
         targets = [n.target for n in ep.graph.nodes if n.op == "call_function"]
         self.assertIn(torch.ops.aten._to_dtype_rounded.default, targets)
         self.assertEqual(ep.module()(x), M()(x), atol=0, rtol=0)
+
+    @onlyAccelerator
+    @slowTest
+    @serialTest()
+    @largeTensorTest("6GB", device="cpu")
+    @largeTensorTest("2GB")
+    @dtypes(
+        torch.float16,
+        torch.bfloat16,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float8_e8m0fnu,
+        torch.float8_e5m3fnu,
+    )
+    def test_exhaustive_float32(self, device, dtype):
+        # Every float32 input, comparing the accelerator (which uses hardware
+        # instructions where available, and NVIDIA's emulations of some of
+        # them, e.g. for e8m0 before sm_100) with the CPU's software conversion.
+        # On ROCm, the float16 destination uses HIP's intrinsics (and bfloat16
+        # with ROCm 7.2+), and the others the software conversion.
+        chunk = 1 << 28
+        for start in range(-(1 << 31), 1 << 31, chunk):
+            x = torch.arange(chunk, dtype=torch.int32).add_(start).view(torch.float32)
+            x_dev = x.to(device)
+            for mode in MODES:
+                with self.subTest(mode=mode):
+                    # The inputs as bits, which also tell NaNs apart.
+                    self.assertSameValues(
+                        x_dev.to(dtype, round=mode),
+                        x.to(dtype, round=mode),
+                        x.view(torch.int32),
+                        dtype=torch.float32,
+                    )
+            del x_dev
 
     @onlyAccelerator
     def test_cross_device(self, device):
