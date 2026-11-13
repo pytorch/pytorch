@@ -48,18 +48,6 @@ if not TEST_CUTEDSL:
 from torch._native.ops.reductions import cutedsl_impl, kernel_rowtile as rt, ordered
 
 
-@contextlib.contextmanager
-def _aot_disabled():
-    from torch import _native
-
-    enabled = _native.aot_enabled()
-    try:
-        _native.set_aot_enabled(False)
-        yield
-    finally:
-        _native.set_aot_enabled(enabled)
-
-
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestSumCuteDSLOverride(TestCase):
@@ -311,7 +299,7 @@ class TestSumCuteDSLOverride(TestCase):
             return [k for k in rt._CACHE if k[0] in tags and k[7] == index]
 
         rt._CACHE.clear()
-        with torch.cuda.device(0), _aot_disabled():
+        with torch.cuda.device(0):
             for (m, n), shape_tags in cases:
                 x0 = torch.ones(m, n, device="cuda:0")
                 x0[:, 0] = 2
@@ -386,15 +374,17 @@ class TestSumCuteDSLOverride(TestCase):
     def test_declined_calls_reach_the_reduction_overrides(self):
         """sum.dim_IntList calls this family declines fall through to the CuTeDSL
         reduction overrides, which record one replay entry, rather than to ATen."""
-        from torch._native.ops.reductions import kernel_general as kg, overrides as ov
+        from test_reductions_cutedsl import _overrides_inactive
 
-        if torch.cuda.get_device_capability()[0] not in ov._ARCH_MAJORS:
-            self.skipTest("the reduction overrides serve SM90 and SM100-family only")
+        from torch._native.ops.reductions import kernel_general as kg
+
+        reason = _overrides_inactive()
+        if reason is not None:
+            self.skipTest(reason)
         x = self._make_order_sensitive_input(128, 8192, torch.float32)
         self.assertFalse(cutedsl_impl._cond(x, [0, 1]))
         kg._REPLAYS.clear()
-        with _aot_disabled():
-            got = torch.sum(x, (0, 1))
+        got = torch.sum(x, (0, 1))
         self.assertEqual(len(kg._REPLAYS), 1)
         with torch.backends.python_native.cutedsl.disabled():
             ref = torch.sum(x, (0, 1))
@@ -436,10 +426,7 @@ class TestSumCuteDSLOverride(TestCase):
         x = torch.arange(10, device="cuda", dtype=torch.float32).reshape(10, 1)
         out = torch.empty(1, device="cuda").expand(10)
         into = getattr(ordered, f"{op}_into")
-        with (
-            _aot_disabled(),
-            mock.patch.object(ordered, f"{op}_into", wraps=into) as run,
-        ):
+        with mock.patch.object(ordered, f"{op}_into", wraps=into) as run:
             getattr(torch, op)(x, 1, out=out)
         self.assertEqual(run.call_count, 0)
 
@@ -463,10 +450,9 @@ class TestSumCuteDSLOverride(TestCase):
         x = torch.empty(m, n + pad, device="cuda")[:, :n]
         x.copy_(values)
         want = getattr(values, op)(dim=1)
-        with (
-            _aot_disabled(),
-            mock.patch.object(rt, "reduce_row_itree", wraps=rt.reduce_row_itree) as run,
-        ):
+        with mock.patch.object(
+            rt, "reduce_row_itree", wraps=rt.reduce_row_itree
+        ) as run:
             got = getattr(x, op)(dim=1)
         self.assertEqual(run.call_count, 1)
         self.assertEqual(got.view(torch.int32), want.view(torch.int32))
@@ -509,10 +495,7 @@ class TestSumCuteDSLOverride(TestCase):
                         _served.append(_real(*a, **k))
                         return _served[-1]
 
-                    with (
-                        _aot_disabled(),
-                        mock.patch.object(rt, "reduce_row_itree", spy),
-                    ):
+                    with mock.patch.object(rt, "reduce_row_itree", spy):
                         got = x.sum(dim=1)
                     torch.cuda.synchronize()
                     self.assertEqual(
@@ -553,10 +536,7 @@ class TestSumCuteDSLOverride(TestCase):
                         _served.append(_real(*a, **k))
                         return _served[-1]
 
-                    with (
-                        _aot_disabled(),
-                        mock.patch.object(rt, "reduce_row_itree", spy),
-                    ):
+                    with mock.patch.object(rt, "reduce_row_itree", spy):
                         got = getattr(x, op)(dim=1)
                     torch.cuda.synchronize()
                     # [True] means called and accepted; [] or [False] would fall back.
@@ -628,8 +608,7 @@ class TestSumCuteDSLOverride(TestCase):
         x = self._make_prod_input(128, 8192, torch.float32)
         with torch.backends.python_native.cutedsl.disabled():
             ref = x.prod(dim=1)
-        with _aot_disabled():
-            got = x.prod(dim=1)
+        got = x.prod(dim=1)
         self.assertFalse(torch.equal(got, ref))
 
     @parametrize("dtype", [torch.float16, torch.bfloat16])
@@ -649,7 +628,6 @@ class TestSumCuteDSLOverride(TestCase):
                 with torch.backends.python_native.cutedsl.disabled():
                     ref = x.prod(dim=1)
                 with (
-                    _aot_disabled(),
                     mock.patch.object(
                         ordered,
                         "prod_into",
@@ -664,10 +642,9 @@ class TestSumCuteDSLOverride(TestCase):
 
     def test_prod_override_out_variant(self):
         x = self._make_prod_input(128, 8192, torch.float32)
+        ref = x.prod(dim=1)
         out = torch.empty(128, device="cuda", dtype=torch.float32)
-        with _aot_disabled():
-            ref = x.prod(dim=1)
-            torch.prod(x, dim=1, out=out)
+        torch.prod(x, dim=1, out=out)
         # The out= path runs the same kernel as the functional path.
         torch.testing.assert_close(out, ref, rtol=0, atol=0)
 

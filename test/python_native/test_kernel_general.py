@@ -113,7 +113,7 @@ class TestKernelGeneral(TestCase):
         before = (set(kg._PLAN), set(kg._COMPILE_CACHE))
         # One GPU has no other device, so pretend another one is current.
         other = x.get_device() + 1
-        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+        with mock.patch.object(torch._C, "_cuda_getDevice", return_value=other):
             with self.assertRaisesRegex(AssertionError, "is current"):
                 kg.reduce_dim(trait, "bydevice", x, [0, 2], torch.float32)
         self.assertEqual((set(kg._PLAN), set(kg._COMPILE_CACHE)), before)
@@ -401,10 +401,8 @@ class TestKernelGeneral(TestCase):
     def test_family_kernels_are_listed(self):
         # New kernels must be listed here deliberately: TileReduce is the shared body for every
         # axis, PartialColumns folds partition-major column partials, and _OrderedColReduce
-        # preserves the row inner-tree order down columns. aot_kernel.py holds native-AOT's
-        # inner-tree multirow, looped, split-partial and accumulate kernels. Glob files and
-        # match qualified or annotated decorators so new drivers and spellings cannot evade
-        # the check.
+        # preserves the row inner-tree order down columns. Glob files and match
+        # qualified or annotated decorators so new drivers and spellings cannot evade the check.
         # Runtime introspection cannot distinguish @cute.kernel from @cute.jit wrappers.
         root = pathlib.Path(reductions.__file__).parent
         deco = re.compile(r"@(?:\w+\.)*cute\.kernel\b")
@@ -414,8 +412,7 @@ class TestKernelGeneral(TestCase):
             for line in path.read_text().splitlines()
             if deco.match(line.strip())
         )
-        allowed = {"tile.py": 1, "kernel_coltile.py": 2, "aot_kernel.py": 4}
-        self.assertEqual(found, allowed)
+        self.assertEqual(found, {"tile.py": 1, "kernel_coltile.py": 2})
 
     # 4095 over 64 threads leaves leftover subtrees and a 63-value tail load with one masked
     # lane; count == block is a single load, and 200 over 128 one whole load and a tail.
@@ -523,6 +520,8 @@ class TestKernelGeneral(TestCase):
         [
             ("uniform", 64),
             ("uniform", 4095),
+            # Element 4095 is the rightmost leaf of thread 63's 64-leaf tree.
+            ("uniform", 4096),
             ("inner_tree", 127),
             ("inner_tree", 4096),
             ("ordered_col", 513),
@@ -758,13 +757,17 @@ class TestKernelGeneral(TestCase):
 
         opted = tree | dict(trait=OptedIn(acc=cutlass.Float32))
         self.assertEqual(kg.ReduceBlock(**opted).tile.uniform_tree_loads, 1024 // 128)
-        hint = "(WelfordOps subclasses must set has_combine_equal = True themselves)"
-        equal = "a trait with has_combine_equal, got {} " + hint
+        hint = (
+            "(the flag is not inherited; a WelfordOps subclass that keeps leaf, combine "
+            "and their helpers may set has_combine_equal = True to opt in)"
+        )
+        welford = "a trait with has_combine_equal, got {} " + hint
+        no_method = "a trait with combine_equal, got FlaggedSum, which sets has_combine_equal without it"
         for bad, reason in (
-            (dict(trait=trait), equal.format("SumOps")),
-            (dict(trait=FlaggedSum(acc=cutlass.Float32)), equal.format("FlaggedSum")),
-            (dict(trait=OwnCombine(acc=cutlass.Float32)), equal.format("OwnCombine")),
-            (dict(trait=KeepsOptIn(acc=cutlass.Float32)), equal.format("KeepsOptIn")),
+            (dict(trait=trait), "a trait with has_combine_equal, got SumOps"),
+            (dict(trait=FlaggedSum(acc=cutlass.Float32)), no_method),
+            (dict(trait=OwnCombine(acc=cutlass.Float32)), welford.format("OwnCombine")),
+            (dict(trait=KeepsOptIn(acc=cutlass.Float32)), welford.format("KeepsOptIn")),
             (dict(count=0, red_pairs=((0, 1),)), f"{span} 0"),
             (dict(count=64, red_pairs=((64, 1),)), f"{span} 64"),
             (dict(count=cap + 1, red_pairs=((cap + 1, 1),)), f"{span} {cap + 1}"),

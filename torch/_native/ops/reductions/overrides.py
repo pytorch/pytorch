@@ -21,8 +21,9 @@ symbol. cutedsl.disabled() does the same as enabled = False while its block runs
 (process-wide), along with native AOT for every DSL.
 
 Builds with the native-AOT reduction kernels (aot.py) also serve covered calls from them,
-including out= calls of the overloads above (mean.dtype_out as a full reduction), which
-then follow PYTORCH_NATIVE_INNER_TREE. Only torch._native.set_aot_enabled(False),
+including out= calls of the overloads above (mean.dtype_out as a full reduction), except
+while PYTORCH_NATIVE_INNER_TREE is set, or PYTORCH_SUM_INNER_TREE for sum and prod,
+since the kernels have no inner-tree order. Only torch._native.set_aot_enabled(False),
 TORCH_DISABLE_NATIVE_AOT=1 and cutedsl.disabled() turn those kernels off;
 cutedsl.enabled = False, disable_operations and TORCH_DISABLE_NATIVE_JIT=1 do not.
 
@@ -121,14 +122,15 @@ def _out_ok(self: torch.Tensor, dtype: torch.dtype | None) -> bool:
 
 def _base_cond(self: torch.Tensor, dim: _Dim) -> bool:
     # A condition must decline unsupported calls without raising. Cheap metadata checks
-    # come first; numel and the data pointer need a real tensor (not fake, meta or
-    # functional).
+    # come first, so unserved GPUs decline right after the dtype. Only const_data_ptr
+    # needs real storage, but numel() also follows is_traced: on a symbolic-shape fake
+    # tensor it would add a guard.
     return (
         self.dtype in _SUPPORTED_DTYPES
+        and cap.device_ok(self, _ARCH_MAJORS)
         and _dims_ok(dim, self.dim())
         and not self.is_neg()
         and not cap.is_traced(self)
-        and cap.device_ok(self, _ARCH_MAJORS)
         and self.numel() != 0
         # Conservative: the kernels narrow their loads for lower alignment, but served
         # calls are measured and tested from 16-byte aligned bases only.
