@@ -1,11 +1,9 @@
 // Basic functions on sparse tensors
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/Layout.h>
-#include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/SparseTensorUtils.h>
@@ -60,8 +58,6 @@
 #include <ATen/ops/_sparse_mask_projection_native.h>
 #include <ATen/ops/sparse_resize_and_clear_native.h>
 #include <ATen/ops/sparse_resize_native.h>
-#include <ATen/ops/to_dense_native.h>
-#include <ATen/ops/to_sparse_native.h>
 #include <ATen/ops/unique_dim.h>
 #include <ATen/ops/values_native.h>
 #include <ATen/ops/view_as_real.h>
@@ -672,7 +668,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
     const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
-    scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
+    scalar_t* newValues_ptr = newValues.mutable_data_ptr<scalar_t>();
     for (const auto j : c10::irange(nnz)) {
       int64_t pos = indicesPermutationAccessor[j];
       int64_t curr = indicesBufferAccessor[j];

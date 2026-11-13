@@ -17,11 +17,18 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 class TestTensorIteratorBuild(TestCase):
     """Build-pipeline tests that don't depend on a particular device type."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_lifetime_owns_operands(self):
         # Core claim: the iterator wraps operands with the *owning*
@@ -142,7 +149,9 @@ class TestTensorIteratorBuild(TestCase):
             TensorIterator(outputs=[None], const_inputs=[a, b])
 
 
-class TestTensorIterator(TestCase):
+class TestTensorIteratorDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize(
         "shape_a,shape_b,expected",
         [
@@ -369,8 +378,7 @@ class TestTensorIterator(TestCase):
         self.assertEqual(it.numel, 3)
 
 
-instantiate_device_type_tests(TestTensorIterator, globals())
-
+instantiate_device_type_tests(TestTensorIteratorDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

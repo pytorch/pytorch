@@ -2,6 +2,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 
+#include <c10/util/irange.h>
 #include <torch/nativert/executor/ExecutionFrame.h>
 
 namespace torch::nativert {
@@ -114,7 +115,7 @@ void ExecutionFrame::updateMovableOutputs() {
   const size_t num_outputs = outputs.size();
 
   c10::FastSet<ValueId> seen;
-  for (size_t i = 0; i < num_outputs; i++) {
+  for (const auto i : c10::irange(num_outputs)) {
     auto idx = num_outputs - 1 - i;
     if (const Value* const* valuePtr = std::get_if<Value*>(&outputs[idx]);
         valuePtr && *valuePtr) {
@@ -127,8 +128,7 @@ void ExecutionFrame::updateMovableOutputs() {
           3. the value will be moved in a later (right-more) output
       */
 
-      if (!seen.insert(id).second || persistent_[id] ||
-          inputs.find(id) != inputs.end()) {
+      if (!seen.insert(id).second || persistent_[id] || inputs.contains(id)) {
         moveable_output_mask_[idx] = false;
       }
     }

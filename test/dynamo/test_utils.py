@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import gc
 import json
 import os
 import pprint
@@ -14,8 +15,13 @@ import torch._inductor.config as inductor_config
 import torch.compiler.config as compiler_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    preserves_device_selection,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     IS_MACOS,
     TEST_WITH_ASAN,
@@ -28,6 +34,8 @@ _IS_WINDOWS = sys.platform == "win32"
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cleanup_hook_tolerates_missing_name(self):
         # During interpreter shutdown the scope's module __dict__ may already be
         # cleared before the weakref callback fires the hook. The hook must not
@@ -42,6 +50,93 @@ class TestUtils(TestCase):
         hook2 = utils.CleanupHook.create(scope, "myglobal", object())
         hook2()
         self.assertNotIn("myglobal", scope)
+
+    def test_tabulate_no_deferred_import(self):
+        # Ensure tabulate does not attempt deferred imports during shutdown or execution
+        # (issue #201962).
+        import builtins
+
+        real_import = builtins.__import__
+        imported = []
+
+        def tracking_import(name, *args, **kwargs):
+            if name == "tabulate":
+                imported.append(name)
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch("builtins.__import__", side_effect=tracking_import):
+            res = utils.tabulate([("metric", 1.23)], ("header1", "header2"))
+            self.assertIsInstance(res, str)
+            self.assertEqual(
+                imported, [], "tabulate() attempted deferred import of tabulate"
+            )
+
+    def test_tabulate_with_and_without_package(self):
+        rows = [("metric1", 1.0), ("metric2", 2.0)]
+        headers = ("Metric", "Value")
+
+        # Test fallback format when tabulate is not available
+        with mock.patch.object(utils, "_tabulate", None):
+            res = utils.tabulate(rows, headers)
+            self.assertEqual(res, "Metric, Value\nmetric1, 1.0\nmetric2, 2.0")
+
+        # Test delegating to tabulate when available
+        mock_tab = mock.MagicMock()
+        mock_tab.tabulate.return_value = "formatted table"
+        with mock.patch.object(utils, "_tabulate", mock_tab):
+            res = utils.tabulate(rows, headers)
+            self.assertEqual(res, "formatted table")
+            mock_tab.tabulate.assert_called_once_with(rows, headers=headers)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=12345)
+    def test_deferred_full_gc(self):
+        saved = gc.get_threshold()
+        try:
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 12345)
+                # Nested compiles share the outermost adjustment.
+                with utils.deferred_full_gc():
+                    self.assertEqual(gc.get_threshold()[2], 12345)
+                self.assertEqual(gc.get_threshold()[2], 12345)
+            self.assertEqual(gc.get_threshold(), saved)
+            # gen0 and gen1 are left alone, so they keep collecting.
+            self.assertEqual(gc.get_threshold()[:2], saved[:2])
+        finally:
+            gc.set_threshold(*saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=12345)
+    def test_deferred_full_gc_restores_on_exception(self):
+        # A depth counter left above zero would silently turn the feature into a
+        # no-op for the rest of the process and pin the raised threshold.
+        saved = gc.get_threshold()
+        try:
+            with self.assertRaises(RuntimeError):
+                with utils.deferred_full_gc():
+                    raise RuntimeError("boom")
+            self.assertEqual(gc.get_threshold(), saved)
+            self.assertEqual(utils._gc_threshold_depth, 0)
+            # The next one still installs the threshold.
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 12345)
+        finally:
+            gc.set_threshold(*saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=None)
+    def test_deferred_full_gc_disabled(self):
+        saved = gc.get_threshold()
+        with utils.deferred_full_gc():
+            self.assertEqual(gc.get_threshold(), saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=100)
+    def test_deferred_full_gc_does_not_lower_threshold(self):
+        saved = gc.get_threshold()
+        try:
+            gc.set_threshold(saved[0], saved[1], 5000)
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 5000)
+            self.assertEqual(gc.get_threshold()[2], 5000)
+        finally:
+            gc.set_threshold(*saved)
 
     def test_nan(self):
         a = torch.Tensor([float("nan")])
@@ -63,18 +158,18 @@ class TestUtils(TestCase):
 
     def test_larger_multiplier_for_smaller_tensor(self):
         """
-        Tensor numel between (10, 500]
+        Tensor numel between (10, 1000)
         """
-        N = 100
+        N = 512
         fp64_ref = torch.full([N], 0.0, dtype=torch.double)
         a = torch.full([N], 1.0)
-        tol = 4 * 1e-2
+        tol = 1e-3
         self.assertTrue(utils.same(a, a * 2, fp64_ref=fp64_ref, tol=tol))
-        self.assertFalse(utils.same(a, a * 4, fp64_ref=fp64_ref, tol=tol))
+        self.assertFalse(utils.same(a, a * 7.57, fp64_ref=fp64_ref, tol=tol))
         self.assertTrue(
             utils.same(
                 a,
-                a * 4,
+                a * 7.57,
                 fp64_ref=fp64_ref,
                 use_larger_multiplier_for_smaller_tensor=True,
                 tol=tol,
@@ -341,6 +436,24 @@ class TestUtils(TestCase):
         self.assertIsInstance(parsed, dict)
         self.assertNotIn("ignore_logging_functions", parsed)
 
+    def test_enumerate_items_with_dict_position_snapshots(self):
+        # VariableBuilder wraps a dict by consuming this generator lazily inside
+        # dict(...). When the dict is a frame-globals dict, Dynamo can add or
+        # drop generated globals (e.g. __resume_at removed by a CleanupHook) on
+        # it mid-iteration. A live items view would raise "dictionary changed
+        # size during iteration"; the snapshot must tolerate the mutation.
+        d = {f"k{i}": i for i in range(8)}
+        d["__resume_at_stale"] = -1
+
+        out = {}
+        for idx, (_, k, v) in enumerate(utils.enumerate_items_with_dict_position(d)):
+            if idx == 1:
+                del d["__resume_at_stale"]
+            out[k] = v
+
+        self.assertEqual(out["k0"], 0)
+        self.assertEqual(len(out), 9)
+
 
 class TestModel(torch.nn.Module):
     def __init__(self):
@@ -355,6 +468,8 @@ class TestDynamoTimed(TestCase):
     """
     Test utilities surrounding dynamo_timed.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1299,10 +1414,12 @@ class TestDynamoTimed(TestCase):
 
 
 class TestTimedSync(TestCase):
-    def test_timed_syncs_on_accelerator(self, device):
-        if torch.device(device).type == "cpu":
-            self.skipTest("sync only triggered for non-CPU devices")
+    hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(TestCase.setUp)
+    setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
 
+    @onlyAccelerator
+    def test_timed_syncs_on_accelerator(self, device):
         from torch._dynamo.utils import timed
 
         called = []
@@ -1325,6 +1442,8 @@ class TestInductorConfigParsingForLogging(TestCase):
     """
     Test for parsing inductor config for logging in CompilationMetrics.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     class TestObject:
         def __init__(self, a, b):
@@ -1371,27 +1490,54 @@ class TestInductorConfigParsingForLogging(TestCase):
             """"name": "Value is not JSON serializable", "some": true}, """
             """"some": {"name": "Value is not JSON serializable", "some": true}}"""
         )
-        mocked_inductor_config.get_config_copy.return_value = test_mock_config
+        get_copy = mocked_inductor_config.get_serializable_config_copy
+        get_copy.return_value = test_mock_config
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
         self.assertEqual(inductor_config_json, expected)
 
         expected = "{}"
-        mocked_inductor_config.get_config_copy.return_value = {obj: obj}
+        get_copy.return_value = {obj: obj}
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
         self.assertEqual(inductor_config_json, expected)
 
         expected = "Inductor Config is not JSON serializable"
-        mocked_inductor_config.get_config_copy.return_value = obj
+        get_copy.return_value = obj
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
         self.assertEqual(inductor_config_json, expected)
 
         expected = None
-        mocked_inductor_config.get_config_copy.return_value = None
+        get_copy.return_value = None
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
         self.assertEqual(inductor_config_json, expected)
 
+    def test_inductor_config_logging_does_not_copy_custom_passes(self):
+        # Custom passes can hold arbitrary objects, such as FX graphs and the fake
+        # tensors in their metadata. Logging only serializes the config, so it
+        # must not deep-copy them.
+        from torch._inductor.custom_graph_pass import CustomGraphPass
+
+        copied = []
+
+        class RecordingPass(CustomGraphPass):
+            def __call__(self, graph):
+                pass
+
+            def uuid(self):
+                return None
+
+            def __deepcopy__(self, memo):
+                copied.append(self)
+                return self
+
+        with inductor_config.patch(post_grad_custom_pre_pass=RecordingPass()):
+            inductor_config_json = utils._scrubbed_inductor_config_for_logging()
+        self.assertEqual(copied, [])
+        self.assertNotIn("post_grad_custom_pre_pass", json.loads(inductor_config_json))
+
 
 class TestFunctorchConfigParsingForLogging(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_functorch_config_jsonify(self):
         functorch_config_json = utils._functorch_config_for_logging()
         self.assertIsInstance(functorch_config_json, str)
@@ -1405,15 +1551,31 @@ class TestFunctorchConfigParsingForLogging(TestCase):
         self.assertNotIn("TYPE_CHECKING", parsed)
         self.assertNotIn("_save_config_ignore", parsed)
 
+    def test_functorch_config_logging_does_not_copy_joint_custom_pass(self):
+        copied = []
+
+        class RecordingPass:
+            def __call__(self, graph, joint_inputs):
+                return graph
+
+            def __deepcopy__(self, memo):
+                copied.append(self)
+                return self
+
+        with torch._functorch.config.patch(joint_custom_pass=RecordingPass()):
+            functorch_config_json = utils._functorch_config_for_logging()
+        self.assertEqual(copied, [])
+        self.assertNotIn("joint_custom_pass", json.loads(functorch_config_json))
+
     @mock.patch("torch._dynamo.utils.torch._functorch.config")
     def test_functorch_config_none(self, mocked_config):
-        mocked_config.get_config_copy.side_effect = AttributeError
+        mocked_config.get_serializable_config_copy.side_effect = AttributeError
         result = utils._functorch_config_for_logging()
         self.assertIsNone(result)
 
     @mock.patch("torch._dynamo.utils.torch._functorch.config")
     def test_functorch_config_runtime_error(self, mocked_config):
-        mocked_config.get_config_copy.side_effect = RuntimeError
+        mocked_config.get_serializable_config_copy.side_effect = RuntimeError
         result = utils._functorch_config_for_logging()
         self.assertIsNone(result)
 

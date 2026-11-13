@@ -76,7 +76,7 @@ def higher_order_cond(
     )
 
     # ONNX Runtime complains about duplicate output names if we don't rename them.
-    # But the doesn't seem to be an actual violation of SSA form without renaming.
+    # But there doesn't seem to be an actual violation of SSA form without renaming.
     for func_out, out in zip(true_func.outputs, then_node.outputs):
         out.name = f"{func_out.name}_{true_func.name}"
     for func_out, out in zip(false_func.outputs, else_node.outputs):
@@ -136,7 +136,7 @@ def higher_order_scan(
     )
 
     # ONNX Runtime complains about duplicate output names if we don't rename them.
-    # But the doesn't seem to be an actual violation of SSA form without renaming.
+    # But there doesn't seem to be an actual violation of SSA form without renaming.
     for func_out, out in zip(body_func.outputs, body_node.outputs):
         out.name = f"{func_out.name}_{body_func.name}"
 

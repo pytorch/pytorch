@@ -112,6 +112,11 @@ static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
 static std::vector<std::string> TORCH_NCCL_RETHROW_CUDA_ERRORS = {
     "TORCH_NCCL_RETHROW_CUDA_ERRORS"};
 
+// Whether a NCCL timeout tears the process down even when
+// TORCH_NCCL_RETHROW_CUDA_ERRORS is off (default false)
+static std::vector<std::string> TORCH_NCCL_TEARDOWN_ON_TIMEOUT = {
+    "TORCH_NCCL_TEARDOWN_ON_TIMEOUT"};
+
 // The maximum number of events we store in the flight recorder's ring buffer.
 // (One event could be the start or end of a collective, for example).
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
@@ -180,15 +185,6 @@ enum ErrorHandlingMode {
 #define PRINT_COLLECTIVE_HASH_SIGNATURE(phase, opType, numel, hashValue)      \
   LOG(WARNING) << logPrefix() << "Hash of " << phase << " to NCCL " << opType \
                << " with size " << numel << " is " << hashValue;
-
-// If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
-// caching allocator safety for tensors used on both user-facing and
-// internal comm streams.
-// Instead, it stashes live references to those tensors until after
-// user-facing streams are synced with comm streams.
-// See stashed_for_allocator_safety_ below.
-static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
-    "TORCH_NCCL_AVOID_RECORD_STREAMS"};
 
 // If set, ProcessGroupNCCL registers postAlloc and preFree hooks to cuda cache
 // allocator so that whenever a tensor is allocated or freed, ProcessGroupNCCL
@@ -383,6 +379,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // instead of the tensor output.
     c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
 
+    bool hasFutureResult() const override {
+      return true;
+    }
+
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
@@ -488,7 +488,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // give a more descriptive message when representing the Work as a string.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
-    // TORCH_NCCL_AVOID_RECORD_STREAMS implementation helper.
+    // Stashing implementation helper.
     // Stores references to participating non-output tensors (ie inputs,
     // flattened intermediates).
     // We'll clear this list in synchronizeStream, just after user-facing
@@ -572,6 +572,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // `_process_group_color` in `distributed_c10d.py`.
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
 
+    // nccl2 only: create the communicator on the first operation instead of
+    // when the device is bound. Such a group can't be split from until its
+    // first operation.
+    bool lazy_init{false};
+
    private:
     // Keeps clone()'s strdup'ed config.netName alive; see clone().
     std::shared_ptr<const char> owned_net_name_;
@@ -591,16 +596,27 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Run desync debug. This function is called by watchdog at time of timeout.
     void run();
 
-    // Log work start to store.
+    // Buffer a work start for the next flush().
     void logWorkStart(WorkNCCL& work);
 
-    // Log work end to store.
+    // Buffer a work end for the next flush().
     void logWorkEnd(WorkNCCL& work);
+
+    // Publish buffered start/end updates. Each trace key retains only its
+    // latest value, so one write per key per pass replaces one per work. Normal
+    // watchdog passes call this after releasing workMetaListMutex_. Timeout and
+    // error reporting may call it while holding the mutex so state is published
+    // before the report or dump.
+    void flush();
 
    private:
     // Whether desync debug is enabled.
     // If false, all functions are no-op.
     bool enabled_{false};
+
+    // Buffered until flush().
+    std::optional<std::pair<uint64_t, std::string>> pendingStart_;
+    std::optional<std::pair<uint64_t, std::string>> pendingEnd_;
 
     // From ProcessGroupNCCL
     int rank_;
@@ -756,6 +772,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Whether the NCCL watchdog should rethrow CUDA errors.
     bool rethrowCUDAErrors_ = false;
 
+    // Opt-in for the timeout teardown below. Read once at construction.
+    bool tearDownOnTimeout_ = false;
+
+    // Whether a NCCL timeout exception should be rethrown in Watchdog::run()
+    // to terminate the process. Written in runLoop() and read in run()'s catch,
+    // which runs it, so both touch it from the single watchdog thread.
+    bool rethrowTimeoutException_ = false;
+
     std::exception_ptr watchDogException_ = nullptr;
 
     // Condition Variable for watchdog thread sleep
@@ -848,9 +872,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<Work> endCoalescing() override;
 
-  void startTimeEstimate();
+  void startTimeEstimate() override;
 
-  float endTimeEstimate();
+  float endTimeEstimate() override;
 
   // For specifying a composite optype, such as ALLGATHER and REDUCE_SCATTER
   c10::intrusive_ptr<Work> endCoalescing(OpType optype);
@@ -988,6 +1012,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void waitForPendingWorks() override;
 
   void enableCollectivesTiming() override;
+  bool collectivesTimingEnabled() const override {
+    return enableTiming_.load();
+  }
 
   c10::intrusive_ptr<Backend> split(
       const c10::intrusive_ptr<Store>& store,
@@ -1019,7 +1046,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void performNocolorSplit(at::Device device);
 
   // If all comms on this PG are fully initialized, return true.
-  bool isInitialized();
+  bool isInitialized() override;
 
   ErrorType getError() override;
 
@@ -1475,9 +1502,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Flag to enable the print of hash value of input/output of collectives for
   // verification.
   std::atomic<bool> enableCollectiveHashDebug_;
-
-  // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
-  bool avoidRecordStreams_ = false;
 
   // The number of active ncclGroupStart() calls. This counter will be increased
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()

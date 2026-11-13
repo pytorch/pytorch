@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Config.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
@@ -365,28 +364,28 @@ void addmv_out_sparse_csr(
     const Tensor& result) {
   auto cont_values = mat.values().contiguous();
   if (mat.layout() == kSparseBsr) {
-    addmv_sparse_bsr(cont_values.data_ptr<scalar_t>(),
-        mat.crow_indices().data_ptr<idx_t>(),
-        mat.col_indices().data_ptr<idx_t>(),
+    addmv_sparse_bsr(cont_values.const_data_ptr<scalar_t>(),
+        mat.crow_indices().const_data_ptr<idx_t>(),
+        mat.col_indices().const_data_ptr<idx_t>(),
         mat.size(0),
         mat.values().size(1),
         mat.values().size(2),
-        vec.data_ptr<scalar_t>(),
+        vec.const_data_ptr<scalar_t>(),
         vec.stride(0),
         alpha.to<scalar_t>(),
         beta.to<scalar_t>(),
-        result.data_ptr<scalar_t>(),
+        result.mutable_data_ptr<scalar_t>(),
         result.stride(0));
   } else {
-    addmv_sparse_csr(cont_values.data_ptr<scalar_t>(),
-        mat.crow_indices().data_ptr<idx_t>(),
-        mat.col_indices().data_ptr<idx_t>(),
+    addmv_sparse_csr(cont_values.const_data_ptr<scalar_t>(),
+        mat.crow_indices().const_data_ptr<idx_t>(),
+        mat.col_indices().const_data_ptr<idx_t>(),
         mat.size(0),
-        vec.data_ptr<scalar_t>(),
+        vec.const_data_ptr<scalar_t>(),
         vec.stride(0),
         alpha.to<scalar_t>(),
         beta.to<scalar_t>(),
-        result.data_ptr<scalar_t>(),
+        result.mutable_data_ptr<scalar_t>(),
         result.stride(0));
   }
 }

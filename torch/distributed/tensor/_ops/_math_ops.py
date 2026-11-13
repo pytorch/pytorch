@@ -72,6 +72,7 @@ class _NormPartial(Partial):
     Converting from partial to replicate wants to ultimately get:
         Rank 0/1: [sqrt(t1^2 + t2^2 + t3^2 + t4^2)]
     This is achieved by: x^p -> allreduce sum -> x^(1/p).
+    For fp16/bf16 inputs these steps run in fp32 and the result is cast back.
     """
 
     norm_type: int | float = 2
@@ -94,18 +95,23 @@ class _NormPartial(Partial):
     ) -> torch.Tensor:
         if not isinstance(shard_spec, Shard):
             raise AssertionError(f"Expected Shard, got {type(shard_spec)}")
+        dtype = tensor.dtype
         tensor = self._pre_reduce_transform(tensor)
         reduced_tensor = super()._reduce_shard_value(tensor, mesh, mesh_dim, shard_spec)
-        return self._post_reduce_transform(reduced_tensor)
+        return self._post_reduce_transform(reduced_tensor).to(dtype)
 
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
+        dtype = tensor.dtype
         tensor = self._pre_reduce_transform(tensor)
         reduced_tensor = super()._reduce_value(tensor, mesh, mesh_dim)
-        return self._post_reduce_transform(reduced_tensor)
+        return self._post_reduce_transform(reduced_tensor).to(dtype)
 
     def _pre_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
+        # Raise fp16/bf16 norms to the power in fp32 so the power cannot overflow.
+        if tensor.dtype in (torch.float16, torch.bfloat16):
+            tensor = tensor.float()
         return tensor**self.norm_type
 
     def _post_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
@@ -264,7 +270,7 @@ def common_reduction_strategy(
         is_reduction_linear = reduction_linear
         if reduction_op == "avg":
             output_spec = op_spec.output_spec
-            local_shape = list(output_spec.tensor_meta.shape)  # type:ignore[union-attr]
+            local_shape = output_spec.tensor_meta.shape  # type:ignore[union-attr]
             for dim in reduce_dims:
                 if not is_tensor_evenly_shardable_on_dim(local_shape, output_spec, dim):
                     is_reduction_linear = False
@@ -923,6 +929,24 @@ def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
         return NormReduction(norm_type)
 
 
+def _dim_keepdim_from_schema(
+    op: torch._ops.OpOverload, args_schema: tuple[Any, ...]
+) -> tuple[Any, bool]:
+    """Read dim and keepdim from the positions op's schema gives them.
+
+    The _foreach_*.Scalar overloads reduce each tensor fully and have neither:
+    their schema is (self, ord, dtype), so a positional read would take dtype for dim.
+    """
+    names = [arg.name for arg in op._schema.arguments]
+    dim = None
+    keepdim = False
+    if "dim" in names and len(args_schema) > names.index("dim"):
+        dim = args_schema[names.index("dim")]
+    if "keepdim" in names and len(args_schema) > names.index("keepdim"):
+        keepdim = args_schema[names.index("keepdim")]
+    return dim, keepdim
+
+
 @register_single_dim_strategy(
     [aten.linalg_vector_norm.default, aten.norm.Scalar],
     schema_info=RuntimeSchemaInfo(1),
@@ -949,8 +973,7 @@ def vector_norm_single_dim_strategy(
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     if not isinstance(norm_type, (int, float, str)):
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
-    dim = args_schema[2] if len(args_schema) > 2 else None
-    keepdim = args_schema[3] if len(args_schema) > 3 else False
+    dim, keepdim = _dim_keepdim_from_schema(op, args_schema)
     dims = _infer_reduction_dims(dim, ndim)
 
     return _reduction_single_dim_strategy(
@@ -987,8 +1010,7 @@ def powsum_single_dim_strategy(
         raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
     ndim = len(input_meta.shape)
 
-    dim = args_schema[2] if len(args_schema) > 2 else None
-    keepdim = args_schema[3] if len(args_schema) > 3 else False
+    dim, keepdim = _dim_keepdim_from_schema(op, args_schema)
     dims = _infer_reduction_dims(dim, ndim)
 
     return _reduction_single_dim_strategy(
@@ -1931,12 +1953,13 @@ def _adjust_group_norm_scalars(
     for d in local_shape[2:]:
         hxw_local *= d
     args = list(schema.args_schema)
-    # Find scalar arg positions: tensor slots (DTensorSpec or None for optionals)
-    # precede N, C, HxW. Count both to find the offset.
-    num_tensor_args = sum(isinstance(a, (DTensorSpec, type(None))) for a in args)
-    args[num_tensor_args] = n_local
-    args[num_tensor_args + 1] = c_local
-    args[num_tensor_args + 2] = hxw_local
+    arg_indices = {arg.name: i for i, arg in enumerate(schema.op._schema.arguments)}
+    for name, value in zip(
+        ("N", "C", "HxW"),
+        (n_local, c_local, hxw_local),
+        strict=True,
+    ):
+        args[arg_indices[name]] = value
     return OpSchema(schema.op, tuple(args), schema.kwargs_schema)
 
 
@@ -2033,6 +2056,32 @@ def group_norm_strategy(
     return [placements]
 
 
+@register_single_dim_strategy(
+    [aten.native_group_norm_backward.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def group_norm_backward_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    # native_group_norm_backward(grad_out, input, mean, rstd, weight?,
+    #                            N, C, HxW, group, output_mask)
+    output_mask = args_schema[-1]
+    placements: list[Placement | _ShardingPlaceholder | None] = [
+        _ShardingPlaceholder(0) if output_mask[0] else None,
+        Partial("sum") if output_mask[1] else None,
+        Partial("sum") if output_mask[2] else None,
+        _ShardingPlaceholder(0),  # grad_out
+        _ShardingPlaceholder(0),  # input
+        _ShardingPlaceholder(0),  # mean
+        _ShardingPlaceholder(0),  # rstd
+    ]
+    if args_schema[4] is not None:
+        placements.append(Replicate())
+    return [placements]
+
+
 # Register scalar shape adjuster for group_norm so the sharding propagator
 # rewrites the N/C/HxW args to local values when the input is sharded.
 from torch.distributed.tensor._api import DTensor
@@ -2040,4 +2089,7 @@ from torch.distributed.tensor._api import DTensor
 
 DTensor._op_dispatcher.sharding_propagator.op_to_scalar_shape_adjuster[
     aten.native_group_norm.default
+] = _adjust_group_norm_scalars
+DTensor._op_dispatcher.sharding_propagator.op_to_scalar_shape_adjuster[
+    aten.native_group_norm_backward.default
 ] = _adjust_group_norm_scalars

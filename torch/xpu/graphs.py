@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import typing
 from collections.abc import Callable
-from typing import overload, TYPE_CHECKING, TypeAlias
-from typing_extensions import ParamSpec, Self, TypeVar
+from typing import overload, Self, TYPE_CHECKING, TypeAlias
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch import Tensor
@@ -59,7 +59,7 @@ class XPUGraph(_XPUGraph):
             ``capture_end`` and the underlying modifiable command graph will be
             destroyed. Note that the executable command graph will not be
             instantiated at the end of ``capture_end`` in this
-            case. Instead, it will be instantiated via an explicit called
+            case. Instead, it will be instantiated via an explicit call
             to ``instantiate`` or automatically on the first call to
             ``replay`` if ``instantiate`` was not already called. Calling
             ``instantiate`` manually before ``replay`` is recommended to

@@ -39,9 +39,6 @@ struct OperatorRegistry {
   // registered a second time. Registering an op multiple times is
   // fragile because it might depend on static initialization order
   // which one is picked at runtime.
-#ifdef C10_MOBILE
-  std::unordered_set<c10::OperatorName> registered_operator_names;
-#endif
 
   // XXX - caller must be holding exclusive lock
   void registerPendingOperators() {
@@ -69,14 +66,6 @@ struct OperatorRegistry {
  public:
   void registerOperator(Operator&& op) {
     std::unique_lock<std::shared_mutex> guard(lock);
-#ifdef C10_MOBILE
-    TORCH_INTERNAL_ASSERT(
-        0 == registered_operator_names.count(op.schema().operator_name()),
-        "Tried to register operator \"",
-        op.schema(),
-        "\" to JIT but the operator name was already registered before. Please add or change the overload name.");
-    registered_operator_names.insert(op.schema().operator_name());
-#endif
     to_register.push_back(std::make_shared<Operator>(std::move(op)));
   }
 
@@ -85,14 +74,6 @@ struct OperatorRegistry {
     auto sig = canonicalSchemaString(schema);
 
     std::unique_lock<std::shared_mutex> guard(lock);
-#ifdef C10_MOBILE
-    TORCH_INTERNAL_ASSERT(
-        1 == registered_operator_names.count(schema.operator_name()),
-        "Tried to remove operator ",
-        schema,
-        " from JIT but it wasn't found.");
-    registered_operator_names.erase(schema.operator_name());
-#endif
     // Try removing from pending operators list first
     auto pending_it = to_register.begin();
     while (pending_it != to_register.end() && (*pending_it)->schema() != schema)
@@ -297,8 +278,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       c10::namespaces::onnx,
   };
 
-  return handled.count(sym) || unneeded.count(sym) ||
-      !required_namespaces.count(sym.ns());
+  return handled.contains(sym) || unneeded.contains(sym) ||
+      !required_namespaces.contains(sym.ns());
 }
 
 } // anonymous namespace
@@ -378,7 +359,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::AutogradAdd,
   };
 
-  return handled.count(symbol) || purposefully_not_handled.count(symbol);
+  return handled.contains(symbol) || purposefully_not_handled.contains(symbol);
 }
 
 void registerOperator(Operator&& op) {

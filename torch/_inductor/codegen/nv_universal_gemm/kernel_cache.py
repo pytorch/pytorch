@@ -18,9 +18,15 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import torch
+from torch._inductor import config
+from torch._inductor.kernel.gemm_epilogue_codegen import get_cutedsl_epilogue_schema
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
+
+DENSE_EFC_TILE_NS = (64, 128, 160, 192, 224, 256)
+_SCALED_PREFETCH_MODE = "autotune"
 
 
 @functools.cache
@@ -37,7 +43,7 @@ def _device_target(cc: int) -> Any:
     return TargetSm.ensure(f"{cc}a")
 
 
-def _epilogue_args_signature(epilogue_args: Any) -> tuple:
+def _epilogue_args_signature(epilogue_args: object) -> tuple:
     """Extract a hashable signature of epilogue args for cache keying.
 
     Two callers with the same `(efc_kernel_name, epilogue_source)` but
@@ -52,11 +58,28 @@ def _epilogue_args_signature(epilogue_args: Any) -> tuple:
     tensors = getattr(epilogue_args, "tensors", None)
     if not tensors:
         return ()
-    sig: list[tuple] = []
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    schema = get_cutedsl_epilogue_schema(getattr(epilogue_args, "epilogue_fn", None))
+    scalar_broadcast_names = tuple(
+        sorted(schema.scalar_broadcast_names) if schema is not None else ()
+    )
+    sig: list[tuple] = [("scalar_broadcast_names", scalar_broadcast_names)]
     for name, val in tensors.items():
         if torch.is_tensor(val):
             sig.append(
                 (name, "tensor", val.dtype, tuple(val.shape), tuple(val.stride()))
+            )
+        elif isinstance(val, TensorWrapper):
+            sig.append(
+                (
+                    name,
+                    "tensor_wrapper",
+                    str(val.dtype),
+                    tuple(val.shape),
+                    tuple(val.stride),
+                    getattr(val, "_alignment_bytes", None),
+                )
             )
         else:
             sig.append((name, type(val).__name__))
@@ -74,7 +97,7 @@ _cache_lock = threading.RLock()
 _kernel_by_name_cache: dict[str, Any] | None = None
 
 
-def _operand_dtype_str(operand: Any) -> str | None:
+def _operand_dtype_str(operand: object) -> str | None:
     """Best-effort cutlass dtype name for a kernel operand or args operand."""
     dtype = getattr(operand, "dtype", None)
     if dtype is None:
@@ -123,7 +146,7 @@ def _get_kernel_cache() -> dict[str, Any]:
     return cache
 
 
-def _operand_sig(operand: Any) -> tuple | None:
+def _operand_sig(operand: object) -> tuple | None:
     """Hashable (dtype, shape, stride, scale-sig, mode, swizzle) signature."""
     if operand is None:
         return None
@@ -149,7 +172,7 @@ def _operand_sig(operand: Any) -> tuple | None:
     return (dtype, tuple(shape), tuple(stride), scale_sig, mode, swizzle)
 
 
-def _partition_sig(args: Any) -> tuple | None:
+def _partition_sig(args: object) -> tuple | None:
     """Signature capturing everything `supports(args)` depends on, or None if
     it can't be fully determined (falls back to a non-memoized scan)."""
     a = _operand_sig(getattr(args, "A", None))
@@ -193,9 +216,61 @@ def _args_query_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     metadata_filter = (
         (lambda md: "EFC" in md.operator_class.__name__) if efc_only else None
     )
-    return cutlass.operators.get_operators(
-        args=args, target_sm=f"{cc}a", metadata_filter=metadata_filter
+    return _filter_supported(
+        _replace_dense_efc_with_vendored(
+            cutlass.operators.get_operators(
+                args=args, target_sm=f"{cc}a", metadata_filter=metadata_filter
+            )
+        ),
+        args,
+        cc,
     )
+
+
+def _replace_dense_efc_with_vendored(kernels: Any) -> list[Any]:
+    from cutlass.operators.providers.cutedsl.gemm.sm100_static_persistent_efc import (
+        PersistentDenseGemmEFCOperator,
+    )
+
+    from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
+        VendoredDenseGemmEFCOperator,
+    )
+
+    result = []
+    seen_names: OrderedSet[str] = OrderedSet()
+    for kernel in kernels:
+        if kernel.metadata.operator_class is not PersistentDenseGemmEFCOperator:
+            if kernel.metadata.operator_name not in seen_names:
+                seen_names.add(kernel.metadata.operator_name)
+                result.append(kernel)
+            continue
+        design = kernel.metadata.design
+        tile_m, tile_n, tile_k = design.tile_shape
+        for vendored_tile_n in OrderedSet((tile_n, *DENSE_EFC_TILE_NS)):
+            if vendored_tile_n < tile_n:
+                continue
+            operator_name = kernel.metadata.operator_name.replace(
+                "cutedsl.PersistentDenseGemmEFCOperator",
+                "inductor_vendored.VendoredDenseGemmEFCOperator",
+                1,
+            ).replace(
+                f"tile{tile_m}x{tile_n}x{tile_k}",
+                f"tile{tile_m}x{vendored_tile_n}x{tile_k}",
+                1,
+            )
+            metadata = dataclasses.replace(
+                kernel.metadata,
+                operator_name=operator_name,
+                operator_class=VendoredDenseGemmEFCOperator,
+                design=dataclasses.replace(
+                    design, tile_shape=(tile_m, vendored_tile_n, tile_k)
+                ),
+            )
+            if operator_name in seen_names:
+                continue
+            seen_names.add(operator_name)
+            result.append(VendoredDenseGemmEFCOperator(metadata))
+    return result
 
 
 def _filter_supported(kernels: Any, args: Any, cc: int) -> list[Any]:
@@ -235,7 +310,11 @@ def _manifest_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
             for kernel in kernels
             if "EFC" in kernel.metadata.operator_class.__name__
         )
-    return _filter_supported(kernels, args, cc)
+    return _filter_supported(
+        _replace_dense_efc_with_vendored(_filter_supported(kernels, args, cc)),
+        args,
+        cc,
+    )
 
 
 def _blockscaled_provider_classes() -> list[Any]:
@@ -266,11 +345,21 @@ def _blockscaled_provider_classes() -> list[Any]:
 
 
 @functools.cache
-def _blockscaled_operators() -> tuple:
-    """Generate the architecture-neutral block-scaled operator pool."""
+def _blockscaled_operators(prefetch_mode: str, use_pdl: bool) -> tuple:
+    """Generate a block-scaled operator pool for one generation policy."""
     ops: list[Any] = []
     for cls in _blockscaled_provider_classes():
-        ops.extend(cls.generate_operators(lambda md: True, args=None))
+        generate_for_policy = getattr(cls, "generate_operators_for_policy", None)
+        if generate_for_policy is not None:
+            ops.extend(
+                generate_for_policy(
+                    lambda md: True,
+                    prefetch_mode=prefetch_mode,
+                    use_pdl=use_pdl,
+                )
+            )
+        else:
+            ops.extend(cls.generate_operators(lambda md: True, args=None))
     return tuple(ops)
 
 
@@ -313,7 +402,9 @@ def _scaled_metadata_type_signature(metadata: Any) -> tuple:
 
 
 @functools.cache
-def _blockscaled_manifest(cc: int, type_signature: tuple):
+def _blockscaled_manifest(
+    cc: int, type_signature: tuple, prefetch_mode: str, use_pdl: bool
+):
     """Build a block-scaled manifest for one operand type recipe.
 
     The provider set is generated without a concrete target to preserve its
@@ -326,14 +417,21 @@ def _blockscaled_manifest(cc: int, type_signature: tuple):
     manifest.add_operators(
         [
             op
-            for op in _blockscaled_operators()
+            for op in _blockscaled_operators(prefetch_mode, use_pdl)
             if _scaled_metadata_type_signature(op.metadata) == type_signature
         ]
     )
     return manifest
 
 
-def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
+def _scaled_candidates(
+    args: Any,
+    cc: int,
+    efc_only: bool,
+    *,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
+) -> list[Any]:
     """Compatible operators for a scaled GEMM via direct block-scaled enumeration.
 
     get_operators(args=...) derives operand configs from the args and
@@ -347,7 +445,16 @@ def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
         VendoredDenseBlockScaledGemmKernel,
     )
 
-    manifest = _blockscaled_manifest(cc, _scaled_operand_type_signature(args))
+    if prefetch_mode is None:
+        prefetch_mode = _SCALED_PREFETCH_MODE
+    if use_pdl is None:
+        use_pdl = config.nvgemm_pdl == "1"
+    manifest = _blockscaled_manifest(
+        cc,
+        _scaled_operand_type_signature(args),
+        prefetch_mode,
+        use_pdl,
+    )
     if manifest.operators:
         out = manifest.filter_operators(
             args=args,
@@ -383,6 +490,7 @@ def partition_compatible_kernels(
     efc_only: bool = False,
     candidate_source: Literal["args", "scaled", "manifest"] = "manifest",
     classifier_key: str | None = None,
+    scaled_use_pdl: bool | None = None,
 ) -> list[list[Any]]:
     """Partition the operators compatible with `args` into N buckets.
 
@@ -393,11 +501,29 @@ def partition_compatible_kernels(
       - "scaled"   scaled GEMM: direct block-scaled sub-provider enumeration
       - "manifest" fallback (e.g. grouped GEMM): full-manifest scan
     `efc_only` restricts to epilogue-fusion-capable kernels (the addmm/bias
-    path). Results are memoized per (shape, cc, num_buckets, efc_only, source).
+    path). Results are memoized per shape and selection policy. Scaled GEMM
+    entries also include the generation policy because it changes the operator
+    pool.
     """
     sig = _partition_sig(args)
+    generation_policy = (
+        (
+            _SCALED_PREFETCH_MODE,
+            config.nvgemm_pdl == "1" if scaled_use_pdl is None else scaled_use_pdl,
+        )
+        if candidate_source == "scaled"
+        else None
+    )
     cache_key = (
-        (sig, cc, num_buckets, efc_only, candidate_source, classifier_key)
+        (
+            sig,
+            cc,
+            num_buckets,
+            efc_only,
+            candidate_source,
+            classifier_key,
+            generation_policy,
+        )
         if sig is not None and classifier_key is not None
         else None
     )
@@ -409,7 +535,13 @@ def partition_compatible_kernels(
     if candidate_source == "args":
         candidates = _args_query_candidates(args, cc, efc_only)
     elif candidate_source == "scaled":
-        candidates = _scaled_candidates(args, cc, efc_only)
+        candidates = _scaled_candidates(
+            args,
+            cc,
+            efc_only,
+            prefetch_mode=_SCALED_PREFETCH_MODE,
+            use_pdl=scaled_use_pdl,
+        )
     elif candidate_source == "manifest":
         candidates = _manifest_candidates(args, cc, efc_only)
     else:
@@ -445,10 +577,30 @@ def get_kernel_by_name(kernel_name: str) -> Any:
     kernel = _ops_by_name.get(kernel_name)
     if kernel is not None:
         return kernel
-    return _get_kernel_cache().get(kernel_name)
+    cache = _get_kernel_cache()
+    kernel = cache.get(kernel_name)
+    if kernel is None and "VendoredDenseGemmEFCOperator" in kernel_name:
+        upstream_name = kernel_name.replace(
+            "inductor_vendored.VendoredDenseGemmEFCOperator",
+            "cutedsl.PersistentDenseGemmEFCOperator",
+            1,
+        )
+        upstream = cache.get(upstream_name)
+        if upstream is not None:
+            kernel = _replace_dense_efc_with_vendored((upstream,))[0]
+            _ops_by_name[kernel_name] = kernel
+    return kernel
 
 
-def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
+def get_kernel_by_name_via_args(
+    kernel_name: str,
+    args: Any,
+    cc: int,
+    *,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
+    kernel_output_dtype: torch.dtype | str | None = None,
+) -> Any:
     """Fast single-kernel lookup via an args-filtered get_operators query.
 
     Passing concrete `args` (a cutlass RuntimeArguments) plus the device target
@@ -462,7 +614,9 @@ def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
     _ops_by_name, so the ~50ms cost is paid once per distinct operator (not once
     per lookup) and is amortized across all configs and shapes a persistent
     worker handles. Returns None if no operator matches the name (caller then
-    falls back to the full manifest).
+    falls back to the full manifest). ``kernel_output_dtype`` preserves the
+    base GEMM output type when a scheduler-fused epilogue changes the final
+    output tensor's dtype.
     """
     import cutlass.operators
 
@@ -470,24 +624,59 @@ def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
     if cached is not None:
         return cached
 
-    ops = cutlass.operators.get_operators(args=args, target_sm=f"{cc}a")
+    query_out = args.out
+    if isinstance(kernel_output_dtype, str):
+        kernel_output_dtype = getattr(torch, kernel_output_dtype)
+    if kernel_output_dtype is not None and query_out.dtype != kernel_output_dtype:
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        # A scheduler-fused epilogue may change D's dtype. Candidate generation
+        # selected the base GEMM using its original output dtype, so recover
+        # that metadata without allocating device memory.
+        with FakeTensorMode():
+            query_out = torch.empty_strided(
+                tuple(query_out.shape),
+                tuple(query_out.stride),
+                dtype=kernel_output_dtype,
+                device="cuda",
+            )
+
+    query_args = args
+    if "VendoredDenseGemmEFCOperator" in kernel_name:
+        from cutlass.operators.arguments import GemmArguments
+
+        query_args = GemmArguments(
+            args.A,
+            args.B,
+            query_out,
+            accumulator_type=args.accumulator_type,
+        )
+    ops = _replace_dense_efc_with_vendored(
+        cutlass.operators.get_operators(args=query_args, target_sm=f"{cc}a")
+    )
     for op in ops:
         # setdefault: keep an already-cached (possibly already-compiled) object
         # rather than replacing it with a fresh instance from this query.
         _ops_by_name.setdefault(op.metadata.operator_name, op)
     if (
         kernel_name not in _ops_by_name
-        and "VendoredDenseBlockScaledGemmEFC" in kernel_name
+        and "VendoredDenseBlockScaledGemm" in kernel_name
     ):
         from cutlass.operators.arguments import GemmArguments
 
         base_args = GemmArguments(
             args.A,
             args.B,
-            args.out,
+            query_out,
             accumulator_type=args.accumulator_type,
         )
-        scaled_ops = _scaled_candidates(base_args, cc, efc_only=False)
+        scaled_ops = _scaled_candidates(
+            base_args,
+            cc,
+            efc_only=False,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
+        )
         log.debug(
             "Scaled by-name fallback found %d candidates for %s",
             len(scaled_ops),
@@ -503,7 +692,7 @@ def ensure_cache_initialized() -> None:
     _get_kernel_cache()
 
 
-_efc_epilogue_cache: dict[tuple[str, str, tuple], Any] = {}
+_efc_epilogue_cache: dict[tuple[str, str, tuple, tuple], Any] = {}
 
 
 def clear_cache() -> None:
@@ -575,6 +764,8 @@ def _meta_epilogue_metadata(epilogue_args: Any) -> Any:
             )
         else:
             fake_kwargs[name] = val
+    if get_cutedsl_epilogue_schema(epilogue_args.epilogue_fn) is not None:
+        return EpilogueMetadata.from_args(epilogue_args.with_tensors(fake_kwargs))
     fake_args = EpilogueArguments(epilogue_args.epilogue_fn, **fake_kwargs)
     accum = epilogue_args.traced_epilogue.example_inputs["accum"]
     fake_args.trace(accum.shape, accum.element)
@@ -586,6 +777,7 @@ def get_efc_kernel_with_epilogue(
     epilogue_args: Any,
     epilogue_source: str = "",
     base_kernel: Any | None = None,
+    specialization: tuple = (),
 ) -> Any:
     """Get (or create and cache) an EFC kernel bound to a specific epilogue.
 
@@ -602,6 +794,7 @@ def get_efc_kernel_with_epilogue(
         efc_kernel_name,
         epilogue_source,
         _epilogue_args_signature(epilogue_args),
+        specialization,
     )
 
     with _cache_lock:

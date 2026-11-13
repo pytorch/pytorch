@@ -40,19 +40,19 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
 
   std::string key = "renorm_" + scalarToMetalTypeString(self);
   MPSStream* mpsStream = getCurrentMPSStream();
-  id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
   id<MTLComputePipelineState> renormPSO = lib.getPipelineStateForFunc(key);
 
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       // this function call is a no-op if MPSProfiler is not enabled
-      getMPSProfiler().beginProfileKernel(renormPSO, key, {norm});
+      getMPSProfiler().beginProfileKernel(renormPSO, key, {norm}, mpsStream);
 
+      auto computeEncoder = mpsStream->commandEncoder();
       [computeEncoder setComputePipelineState:renormPSO];
       mtl_setArgs(computeEncoder, norm, factor, maxnorm.to<float>());
       mtl_dispatch1DJob(computeEncoder, renormPSO, norm.numel());
 
-      getMPSProfiler().endProfileKernel(renormPSO);
+      getMPSProfiler().endProfileKernel(renormPSO, mpsStream);
     }
   });
   at::mul_outf(self, factor, const_cast<Tensor&>(out));

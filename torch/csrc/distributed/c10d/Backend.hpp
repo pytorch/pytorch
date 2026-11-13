@@ -127,6 +127,32 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // not initialized until reconfigure() is called. Backends that support
     // fault tolerance honor this; others ignore it.
     bool enable_reconfigure = false;
+
+    // Holds the Python object of a Python subclass of Backend.Options while
+    // C++ references it, so its Python attributes survive; see
+    // PyBackendOptions.
+    c10::impl::PyObjectSlot* pyobj_slot() {
+      return &pyobj_slot_;
+    }
+
+    const c10::impl::PyObjectSlot* pyobj_slot() const {
+      return &pyobj_slot_;
+    }
+
+    void incref_pyobject() const noexcept final;
+    void decref_pyobject() const noexcept final;
+    bool try_incref_pyobject() const noexcept final;
+
+   private:
+    // A copy is a distinct C++ object and gets its own Python object, if any.
+    struct CopyResetPyObjectSlot : c10::impl::PyObjectSlot {
+      CopyResetPyObjectSlot() = default;
+      CopyResetPyObjectSlot(const CopyResetPyObjectSlot& /* other */) {}
+      CopyResetPyObjectSlot& operator=(const CopyResetPyObjectSlot&) = delete;
+      ~CopyResetPyObjectSlot() = default;
+    };
+
+    CopyResetPyObjectSlot pyobj_slot_;
   };
 
   explicit Backend(int rank, int size);
@@ -158,12 +184,36 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  // Most backends initialize their communication resources eagerly. Backends
+  // with lazy initialization must override this method so split() callers can
+  // verify that the parent communicator exists.
+  virtual bool isInitialized() {
+    return true;
+  }
+
   virtual bool supportsCoalescing() const {
     return false;
   }
 
+  // Experimental collective time-estimation API. Backends that return true
+  // must simulate collectives issued between startTimeEstimate() and
+  // endTimeEstimate(), which returns the estimated duration in microseconds.
   virtual bool supportsTimeEstimation() const {
     return false;
+  }
+
+  virtual void startTimeEstimate() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support time estimation"));
+  }
+
+  virtual float endTimeEstimate() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support time estimation"));
   }
 
   virtual bool supportsShrinking() const {
@@ -247,7 +297,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   //
   // Abort hooks are invoked before the backend aborts on a timeout or error,
   // letting users capture debug information. Hooks are keyed by an opaque
-  // hook_id so they can be individually unregistered.
+  // hook_id so they can be individually unregistered. Backends that implement
+  // them must advertise it via supportsAbortHooks, so a caller can tell "this
+  // backend has no abort hooks" from a registration that genuinely failed.
+  virtual bool supportsAbortHooks() const {
+    return false;
+  }
+
   virtual void registerAbortHook(int64_t /* hook_id */, AbortHook /* hook */) {
     TORCH_CHECK(
         false,
@@ -631,6 +687,18 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " is missing implementation of enableCollectivesTiming.");
   }
 
+  // Whether Works constructed after this returns report getDuration() once
+  // complete without throwing. Called on the issuing thread for every op
+  // FlightRecorderHook records, so it must be cheap and safe against a
+  // concurrent enableCollectivesTiming(). When true the hook holds each Work
+  // until its result to read duration_ms.
+  virtual bool collectivesTimingEnabled() const {
+    return false;
+  }
+
+  // The caller namespaces each child's rendezvous keys, but the Store may use
+  // the parent's live connection. Implementations that block while holding or
+  // mutate connection-global state, such as the timeout, must clone it first.
   virtual c10::intrusive_ptr<Backend> split(
       const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
@@ -642,6 +710,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " is missing implementation of split.");
   }
 
+  // Merge implementations receive a Store owned by their caller. They must
+  // retain or clone it as required by their initialization and connection-state
+  // semantics.
   virtual c10::intrusive_ptr<Backend> merge(
       const c10::intrusive_ptr<Store>& store,
       const c10::intrusive_ptr<Options>& opts,
@@ -790,6 +861,14 @@ template <class T>
 struct TargetTraits<
     T,
     std::enable_if_t<std::is_base_of_v<c10d::Backend, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<
+        std::is_base_of_v<c10d::Backend::Options, std::remove_cv_t<T>>>> {
   static constexpr bool can_have_pyobject = true;
 };
 #endif

@@ -9,6 +9,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/native/ElementwiseRefMeta.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -253,7 +254,7 @@ TORCH_META_FUNC2(copysign, Tensor) (
 TORCH_META_FUNC(heaviside) (
   const Tensor& self, const Tensor& other
 ) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex() &&
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex() && !other.is_complex() &&
               (maybe_get_output().defined() ? !maybe_get_output().is_complex() : true),
               "heaviside is not yet implemented for complex tensors.");
   TORCH_CHECK(self.dtype() == other.dtype() &&
@@ -331,22 +332,22 @@ CREATE_BINARY_META_FUNC(igammac)
 CREATE_BINARY_META_FUNC(nextafter)
 
 TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
+  TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(minimum) (const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
+  TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(fmax) (const Tensor& self, const Tensor& other) {
-    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
+    TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
     build_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
-    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
+    TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
     build_binary_op(maybe_get_output(), self, other);
 }
 
@@ -1654,6 +1655,134 @@ Tensor special_xlogy(const Scalar& x, const Tensor& y) {
 
 Tensor special_xlogy(const Tensor& x, const Scalar& y) {
   return at::xlogy(x, y);
+}
+
+// add.Tensor meta kernel
+Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other) || alpha.isSymInt();
+  if (symbolic) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  // Python fake's ref gets no alpha when it equals the schema default (the int 1,
+  // compared by type and value), and otherwise checks and applies it.
+  if (!alpha.isSymbolic() && alpha.type() == kLong && alpha.toLong() == 1) {
+    return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
+  }
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic, [&](ScalarType compute_dtype) {
+    if (compute_dtype != kBool) {
+      check_alpha_type(alpha, compute_dtype);
+    }
+    return std::optional<Scalar>(alpha);
+  });
+}
+
+// sub.Tensor meta kernel
+Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other) || alpha.isSymInt();
+  if (symbolic) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  const auto alpha_fn = [&](ScalarType compute_dtype) -> std::optional<Scalar> {
+    // Unlike refs.add, refs.sub rejects two bool tensors and checks alpha against
+    // a bool computation dtype too.
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        self.unsafeGetTensorImpl()->is_wrapped_number() || other.unsafeGetTensorImpl()->is_wrapped_number() ||
+            compute_dtype != kBool,
+        "Subtraction, the `-` operator, with two bool tensors is not supported. "
+        "Use the `^` or `logical_xor()` operator instead.");
+    // refs.sub applies alpha only when alpha != 1, which guards for a SymInt or
+    // SymFloat alpha. A SymBool alpha != 1 folds to True without a guard.
+    bool apply_alpha = true;
+    if (alpha.isSymInt()) {
+      apply_alpha = alpha.toSymInt().sym_ne(1).guard_bool(__FILE__, __LINE__);
+    } else if (alpha.isSymFloat()) {
+      apply_alpha = alpha.toSymFloat().sym_ne(1.0).guard_bool(__FILE__, __LINE__);
+    } else if (alpha.isComplex()) {
+      apply_alpha = alpha.toComplexDouble() != c10::complex<double>(1, 0);
+    } else if (!alpha.isSymBool()) {
+      apply_alpha = alpha.toDouble() != 1;
+    }
+    if (!apply_alpha) {
+      return std::nullopt;
+    }
+    check_alpha_type(alpha, compute_dtype);
+    return alpha;
+  };
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic, alpha_fn);
+}
+
+// mul.Tensor meta kernel
+Tensor mul_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  if (symbolic) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
+}
+
+// div.Tensor meta kernel
+Tensor div_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  if (symbolic) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::INT_TO_FLOAT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::INT_TO_FLOAT, symbolic);
+}
+
+// Mirrors meta_binop_inplace_alpha, which ignores alpha. A wrapped number's
+// dtype matches the Python type the checks see there.
+Tensor& add__Tensor_meta(Tensor& self, const Tensor& other, const Scalar& /*alpha*/) {
+  const auto self_dtype = self.scalar_type();
+  const auto other_dtype = other.scalar_type();
+  TORCH_CHECK(
+      !(isIntegralType(self_dtype, /*includeBool=*/false) && isFloatingType(other_dtype)),
+      "Promotion of int.add/sub_(float) in in-place ops are not possible due to element size change.");
+  TORCH_CHECK(
+      self_dtype != kBool || other_dtype == kBool,
+      "Promotion of bool.add/sub_(others) in in-place ops are not possible due to element size change.");
+  if (!other.unsafeGetTensorImpl()->is_wrapped_number()) {
+    check_inplace_broadcast(self.sym_sizes(), other.sym_sizes());
+  }
+  return self;
+}
+
+// Python fake runs the refs for the ops below, under FakeTensorMode for
+// symbolic inputs and as the Meta kernel otherwise.
+Tensor bitwise_and_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  return elementwise_binary_ref_meta("bitwise_and", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
+}
+
+Tensor le_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  return elementwise_binary_ref_meta(
+      "le", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
+Tensor le_Scalar_meta(const Tensor& self, const Scalar& other) {
+  const bool symbolic = is_symbolic_operand(self) || other.isSymInt();
+  return elementwise_binary_ref_meta(
+      "le", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
+Tensor eq_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  return elementwise_binary_ref_meta(
+      "eq", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
+Tensor ne_Scalar_meta(const Tensor& self, const Scalar& other) {
+  const bool symbolic = is_symbolic_operand(self) || other.isSymInt();
+  return elementwise_binary_ref_meta(
+      "ne", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
 }
 
 } // namespace at::native

@@ -1,8 +1,11 @@
 # Owner(s): ["module: inductor"]
+from unittest import mock
+
 import torch
 from torch._inductor.codegen.aoti_hipify_utils import maybe_hipify_code_wrapper
 from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 TEST_CODES = [
@@ -26,6 +29,8 @@ HIP_CODES = [
 
 
 class TestCppWrapperHipify(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_hipify_basic_declaration(self) -> None:
         if len(TEST_CODES) != len(HIP_CODES):
             raise AssertionError(
@@ -38,7 +43,10 @@ class TestCppWrapperHipify(TestCase):
 
     def test_hipify_aoti_driver_header(self) -> None:
         cuda_codegen = get_device_op_overrides("cuda")
-        header = cuda_codegen.kernel_driver()
+        with mock.patch.object(
+            cuda_codegen, "cpp_kernel_launch_supports_pdl", return_value=False
+        ):
+            header = cuda_codegen.kernel_driver()
         expected = """
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
@@ -83,6 +91,9 @@ class TestCppWrapperHipify(TestCase):
                         sharedMemBytes
                     ))
                 }
+                if (sharedMemBytes > 49152) {
+                    CUDA_DRIVER_CHECK(hipFuncSetCacheConfig(func, hipFuncCachePreferShared))
+                }
                 return func;
             }
 
@@ -104,6 +115,9 @@ class TestCppWrapperHipify(TestCase):
                         hipFuncAttributeMaxDynamicSharedMemorySize,
                         sharedMemBytes
                     ))
+                }
+                if (sharedMemBytes > 49152) {
+                    CUDA_DRIVER_CHECK(hipFuncSetCacheConfig(func, hipFuncCachePreferShared))
                 }
                 return func;
             }
