@@ -141,6 +141,23 @@ class TestKernelColTile(TestCase):
                 )
                 self.assertEqual(got, ref)
 
+    @parametrize("rows,cols", [(64, 1000), (1000, 16)])
+    def test_fp32_column_sum_error_is_no_worse_than_aten(self, rows, cols):
+        """Sum fp32 columns with no more fp64-relative error than ATen, summed over a few
+        seeds."""
+        trait = T.SumOps(acc=cutlass.Float32)
+        ours = aten = 0.0
+        for seed in range(8):
+            gen = torch.Generator("cuda").manual_seed(seed)
+            x = torch.randn(rows, cols, device="cuda", generator=gen)
+            got = ct.reduce_col_tile(trait, "fp32_error", x, torch.float32)
+            with torch.backends.python_native.cutedsl.disabled():
+                ref = x.sum(0)
+            want = x.double().sum(0)
+            ours += (got.double() - want).abs().mean().item()
+            aten += (ref.double() - want).abs().mean().item()
+        self.assertLessEqual(ours, aten, f"CuTeDSL {ours:.3e} vs ATen {aten:.3e}")
+
     def test_three_field_welford_launch(self):
         # Three fields select the otherwise untested high-register-pressure launch.
         x = torch.randn(4096, 256, device="cuda")
