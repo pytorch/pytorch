@@ -70,6 +70,7 @@ from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MUL
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
 )
 from torch.testing._internal.common_distributed import (
@@ -575,8 +576,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 class TestFullyShardChunkCatMixedDtype(TestCase):
     def test_numerics(self, device):
         bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
-        # Dim-0 sizes that need padding, multi-dim, and one large enough to
-        # span several blocks per chunk
+        # Dim-0 sizes that need padding, multi-dim, and one large enough for
+        # the vectorized cast
         sizes = [(5, 3), (7,), (2049, 2, 2)]
         # On CUDA: the fused kernel, a composite fallback, then the fused kernel
         # casting fp16
@@ -599,6 +600,50 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
             self.assertEqual(out, expected, atol=0, rtol=0)
             # Autograd must see the in-place write to out
             self.assertGreater(out._version, version)
+
+    @onlyCUDA
+    def test_numerics_cast_alignments(self, device):
+        # The fp32 input shifts the destination alignment of every chunk, and the
+        # source alignment changes from chunk to chunk. Each chunk of the
+        # low-precision input spans several cast blocks, and its last chunk is
+        # one row, i.e. `width` elements, short. The (8, 1000) input with 5
+        # chunks has a last chunk that is all padding.
+        for dtype, num_chunks in itertools.product(
+            (torch.bfloat16, torch.float16), (3, 5)
+        ):
+            base = torch.randn(num_chunks * 8012 + 8, device=device, dtype=dtype)
+            cases = []
+            for dst_offset, width in itertools.product(range(1, 5), range(1, 12)):
+                num_rows = num_chunks * (8001 // width + 1) - 1
+                offset = (width + dst_offset) % 8
+                flat = base[offset : offset + num_rows * width]
+                cases.append((dst_offset, flat.view(num_rows, width)))
+            cases.append((1, torch.randn(8, 1000, device=device, dtype=dtype)))
+            for dst_offset, low_precision in cases:
+                tensors = [
+                    torch.randn(num_chunks * dst_offset, device=device),
+                    low_precision,
+                ]
+                expected = torch._chunk_cat([t.float() for t in tensors], 0, num_chunks)
+                out = torch.full_like(expected, float("nan"))
+                torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, num_chunks, out=out)
+                msg = f"{dtype} {num_chunks} {dst_offset} {tuple(low_precision.shape)}"
+                self.assertEqual(out, expected, atol=0, rtol=0, msg=msg)
+
+    @onlyCUDA
+    @largeTensorTest("1GB")
+    def test_numerics_cast_several_units_per_thread(self, device):
+        # 50M bf16 elements are enough for each thread to cast 4 units on GPUs
+        # with up to 304 SMs. The fp32 input makes every chunk unaligned.
+        num_chunks = 3
+        tensors = [
+            torch.randn(num_chunks, device=device),
+            torch.randn(3 * 4194304 - 1, 4, device=device, dtype=torch.bfloat16),
+        ]
+        expected = torch._chunk_cat([t.float() for t in tensors], 0, num_chunks)
+        out = torch.full_like(expected, float("nan"))
+        torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, num_chunks, out=out)
+        self.assertEqual(out, expected, atol=0, rtol=0)
 
     def test_numerics_with_leading_dims(self, device):
         bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
@@ -892,6 +937,39 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         with torch.inference_mode():
             for _ in range(2):
                 self.assertEqual(model(inp), ref_model(inp))
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_unshard_casts_once(self):
+        # Unsharding casts the shards straight into the unsharded parameters
+        mesh = init_device_mesh(
+            device.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )["shard"]
+        model = fully_shard(
+            nn.Linear(16, 33, device=device),
+            mesh=mesh,
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        ops = []
+
+        class RecordOps(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        with RecordOps():
+            model.unshard()
+        # One copy for each of the weight and bias, and no separate casts
+        self.assertNotIn(torch.ops.aten._to_copy.default, ops)
+        self.assertEqual(ops.count(torch.ops.aten.copy_.default), 2)
+        for fsdp_param in model._get_fsdp_state()._fsdp_param_group.fsdp_params:
+            self.assertEqual(
+                fsdp_param.unsharded_param,
+                fsdp_param.sharded_param.to_local().to(torch.bfloat16),
+                atol=0,
+                rtol=0,
+            )
 
     @skip_if_lt_x_gpu(1)
     def test_copy_fns(self):
