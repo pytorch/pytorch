@@ -10,18 +10,20 @@ The birds-eye view is 1) we create an SM-localized GreenContext object and then
 barest form, this works as follows:
 
 ```python
-  dev = torch.cuda.current_device()
-  dom_id = 0
-  (ctx,) = torch.cuda.GreenContext.split(locality_domain_ids=(dom_id,), device_id=dev)
-  allocator = torch.cuda.LocalizedAllocator(dom_id, device=dev)
-  with torch.cuda.device(dev):
+import torch
+
+dev = torch.cuda.current_device()
+dom_id = 0
+(ctx,) = torch.cuda.GreenContext.split(locality_domain_ids=(dom_id,), device_id=dev)
+allocator = torch.cuda.LocalizedAllocator(dom_id, device=dev)
+with torch.cuda.device(dev):
     pool = torch.cuda.MemPool(allocator.allocator())
 
-  with torch.cuda.use_mem_pool(pool, device=dev):
-    foo = torch.randn((64,8), device='cuda')
-  (bar,) = torch.cuda.execute_on_streams(
+with torch.cuda.use_mem_pool(pool, device=dev):
+    foo = torch.randn(64, 8, device=f"cuda:{dev}")
+(bar,) = torch.cuda.execute_on_streams(
     (ctx.Stream(),), torch.nn.functional.relu, (foo,)
-  )
+)
 ```
 
 This example allocates a localized tensor `foo` entirely on locality domain 0
@@ -31,16 +33,19 @@ execute only on locality domain 0, and thus all of its memory reads are local.
 Mixing up the data and compute localization is possible:
 
 ```python
-  allocator2 = torch.cuda.LocalizedAllocator(1, device=dev)
-  with torch.cuda.device(dev):
+import torch
+
+dev = torch.cuda.current_device()
+allocator2 = torch.cuda.LocalizedAllocator(1, device=dev)
+with torch.cuda.device(dev):
     pool2 = torch.cuda.MemPool(allocator2.allocator())
 
-  with torch.cuda.use_mem_pool(pool2, device=dev):
-    foo = torch.randn((64, 8), device='cuda')
-  (ctx,) = torch.cuda.GreenContext.split(locality_domain_ids=(0,), device_id=dev)
-  (bar,) = torch.cuda.execute_on_streams(
+with torch.cuda.use_mem_pool(pool2, device=dev):
+    foo = torch.randn(64, 8, device=f"cuda:{dev}")
+(ctx,) = torch.cuda.GreenContext.split(locality_domain_ids=(0,), device_id=dev)
+(bar,) = torch.cuda.execute_on_streams(
     (ctx.Stream(),), torch.nn.functional.relu, (foo,)
-  )
+)
 ```
 
 This _succeeds_, but the kernel runs entirely on SMs associated with locality
@@ -55,14 +60,20 @@ We introduce the new torch.cuda.localize API to enable automatic localization
 of entire networks. Usage is simple:
 
 ```python
-  mod: torch.nn.Module = ...
-  inference: bool = torch.is_inference_mode_enabled()
-  mod = torch.cuda.localize(mod, mark_static_halves=inference)
-  mod(...)
+import torch
+
+mod = torch.nn.Linear(256, 256, device="cuda").eval()
+x = torch.randn(8, 256, device="cuda")
+
+with torch.inference_mode():
+    mod = torch.cuda.localize(mod)
+    compiled_mod = torch.compile(mod, mode="reduce-overhead")
+    out = compiled_mod(x)
 ```
 
-We strongly encourage users to `torch.compile(..., mode='reduce-overhead')` the
-resulting module.
+Localization and subsequent forward calls must run inside `torch.inference_mode()`.
+Keep `TORCH_CUBLAS_WORKSPACE_CACHE` unset or `0` before starting the process.
+We strongly encourage compiling the localized module with `mode="reduce-overhead"`, as shown above.
 
 The internal `_register_localizable_op` helper can register custom operations
 prior to invoking `torch.cuda.localize`; it is not a public API.
@@ -88,12 +99,14 @@ tensor, so that downstream ops are none the wiser about what happened.
 
 For every localizable op, we do considerable additional work:
 
-* An event is enqueued in the main stream;
-* Two green streams each wait on that 'main' event;
+* An event is enqueued in the caller stream;
+* Two green streams each wait on that caller event;
 * Two kernel launches instead of one;
 * Each green stream records an event on their localized green stream;
-* The main stream waits on both green events; and
-* A concatenate operation produces a non-localized tensor.
+* The caller stream waits on both green events;
+* A concatenate operation produces a non-localized tensor; and
+* The green streams wait for the caller to finish consuming their outputs before
+  reusing the branch buffers.
 
 This can add 10--50 microseconds of additional latency per localizable op. If
 the op was already running in ~10us, these overheads will dominate performance.
