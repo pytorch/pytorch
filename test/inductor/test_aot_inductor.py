@@ -1799,6 +1799,45 @@ class AOTInductorTestsTemplate:
                 gc.collect()
                 self.assertEqual(count_weight_mappings(), 0)
 
+    @unittest.skipUnless(
+        sys.platform == "linux" and os.path.exists("/proc/self/maps"),
+        "requires /proc/self/maps",
+    )
+    def test_wrapper_so_unmapped_on_model_delete(self):
+        # Running the model touches the runtime's thread_locals on this thread.
+        # If any of them had a destructor, glibc would pin the wrapper .so and
+        # every reload of a model in a long-lived process would leak it.
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU coverage is sufficient")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        example_inputs = (torch.randn(4, device=self.device),)
+        ep = torch.export.export(Model(), example_inputs)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            package_path = os.path.join(tmp_dir, "model.pt2")
+            torch._inductor.aoti_compile_and_package(ep, package_path=package_path)
+            with zipfile.ZipFile(package_path) as package:
+                (wrapper_name,) = [
+                    pathlib.PurePosixPath(info.filename).name
+                    for info in package.infolist()
+                    if info.filename.endswith(".wrapper.so")
+                ]
+
+            def count_wrapper_mappings() -> int:
+                with open("/proc/self/maps") as maps:
+                    return sum(f"/{wrapper_name}" in line for line in maps)
+
+            runner = torch._inductor.aoti_load_package(package_path)
+            runner(*example_inputs)
+            self.assertGreater(count_wrapper_mappings(), 0)
+
+            del runner
+            gc.collect()
+            self.assertEqual(count_wrapper_mappings(), 0)
+
     def test_large_mmaped_weights_on_disk(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
