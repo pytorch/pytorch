@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -14,20 +15,17 @@ namespace c10 {
 
 struct TensorImpl;
 
-// same as Python's FakeTensorMode
-// storing shape env and converter from Python, we'll use these later
-// to implement sym ints, real tensor conversion, etc
-// this doesn't have caching because we're not implementing it
+// State shared by C++ fake tensors and Python mode wrappers.
 // no in_kernel_invocation flag; that state is thread-local in C++
 // (see Note [C++ in_kernel_invocation] in FakeTensorModeTLS.h)
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
-  // Owns a Python weakref to this mode's Python wrapper (CppFakeTensorMode),
-  // not the wrapper itself. See
-  // Note [C++ FakeTensorMode Python wrapper lifetime] in
-  // torch/csrc/FakeTensorMode.cpp.
+  // Owns a weakref to the Python wrapper, which can be recreated while this
+  // mode is alive. Accessed under fake_mode_pyobj_mutex_; see
+  // Note [C++ FakeTensorMode Python object lifetime].
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+  std::mutex fake_mode_pyobj_mutex_;
 
   // The fields below are plain, like a Python FakeTensorMode's attributes, and
   // must not be changed while another thread is using the mode.
@@ -85,12 +83,6 @@ struct C10_API FakeTensorMode {
   };
   std::unordered_map<c10::StorageImpl*, ConstantAliases>
       constant_storage_mapping_;
-};
-
-// Indirection shared by fakes and saved dispatch state. Python ownership
-// will be attached here without changing their storage types again.
-struct C10_API FakeTensorModeHandle {
-  std::shared_ptr<FakeTensorMode> mode;
 };
 
 } // namespace c10
