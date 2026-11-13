@@ -30,6 +30,9 @@ if TYPE_CHECKING:
     from torch._inductor.runtime.triton_compat import Config
 
 
+MAX_PERSISTENT_BLOCK_NUMEL = 4096
+
+
 # ------------------------------------------------------------------
 # Helpers (moved from triton_heuristics.py, only used by reduction)
 # ------------------------------------------------------------------
@@ -420,7 +423,6 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         xnumel = size_hints["x"]
         rnumel = get_total_reduction_numel(size_hints)
 
-        MAX_PERSISTENT_BLOCK_NUMEL = 4096
         warp_size = triton_meta["device"].warp_size_or_default
 
         if triton_meta.get("native_matmul"):
@@ -838,7 +840,11 @@ class XPUReductionHeuristic(ReductionHeuristic):
             "num_store", 0
         )
         x_block = 8
-        if xnumel // x_block < 128 or loads_and_stores >= 5:
+        if (
+            xnumel // x_block < 128
+            or loads_and_stores >= 5
+            or x_block * rnumel > MAX_PERSISTENT_BLOCK_NUMEL
+        ):
             x_block = 1
         return [
             triton_config_reduction(
