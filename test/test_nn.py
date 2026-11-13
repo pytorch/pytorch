@@ -7860,8 +7860,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     def test_normalize_default_eps(self, device, dtype):
-        # The default eps is 1e-12, which rounds to zero in float16
-        eps = torch.finfo(dtype).eps if dtype == torch.float16 else 1e-12
+        eps = torch.finfo(dtype).eps
         rows = [[0, 0], [eps / 4, 0], [3, 4]]
         x = torch.tensor(rows, dtype=dtype, device=device, requires_grad=True)
         expected = torch.tensor([[0, 0], [0.25, 0], [0.6, 0.8]], dtype=dtype, device=device)

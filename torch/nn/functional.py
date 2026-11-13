@@ -6201,8 +6201,8 @@ def normalize(
         p (float): the exponent value in the norm formulation. Default: 2
         dim (int or tuple of ints): the dimension to reduce. Default: 1
         eps (float, optional): small value to avoid division by zero. If not specified,
-            uses ``torch.finfo(torch.float16).eps`` when the norm is ``torch.float16``,
-            where 1e-12 rounds to zero, and 1e-12 otherwise. Default: ``None``
+            uses the machine epsilon of the norm's dtype, ``torch.finfo(dtype).eps``.
+            Default: ``None``
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
@@ -6212,8 +6212,7 @@ def normalize(
         )
     norm = input.norm(p, dim, keepdim=True)
     if eps is None:
-        # 1e-12 rounds to zero in float16 and would not clamp anything
-        eps = torch.finfo(norm.dtype).eps if norm.dtype == torch.float16 else 1e-12
+        eps = torch.finfo(norm.dtype).eps
     if out is None:
         denom = norm.clamp_min(eps).expand_as(input)
         return input / denom
