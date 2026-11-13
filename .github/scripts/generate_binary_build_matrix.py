@@ -26,7 +26,7 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
 CUDA_ARCHES = ["13.2", "13.4", "13.5"]
-CUDA_WINDOWS_ARCHES = ["13.2", "13.4"]
+CUDA_WINDOWS_ARCHES = ["13.2", "13.4", "13.5"]
 CUDA_STABLE = "13.2"
 # Only consumed by generate_docker_release_matrix.py, whose Dockerfile installs
 # an already-published torch nightly. A CUDA version belongs here only once its
@@ -119,6 +119,12 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
             "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
             "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
+        ),
+        "windows": (
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.5.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-pathfinder>=1.8.5; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cudnn-cu13==9.27.0.42; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Windows' and platform_machine == 'AMD64'"
         ),
     },
     # dependency on latest patch version for (major, minor)
