@@ -62,11 +62,8 @@ def _query_to_dict(query: str) -> dict[str, str]:
 
 
 def _get_use_libuv_from_query_dict(query_dict: dict[str, str]) -> bool:
-    # libuv is the default backend for TCPStore. To enable the non-libuv backend,
-    # user can explicitly specify ``use_libuv=0`` in the URL parameter.
-    if sys.platform == "win32":
-        #  PyTorch is built without libuv support on windows, so default to 0
-        return query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "0")) == "1"
+    # libuv is the only TCPStore backend. ``use_libuv=0`` (or ``USE_LIBUV=0``)
+    # is deprecated and ignored; TCPStore warns when it is set.
     return query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "1")) == "1"
 
 
@@ -183,9 +180,6 @@ def _create_c10d_store(
 
     The TCPStore server is assumed to be hosted
     on ``hostname:port``.
-
-    By default, the TCPStore server uses the asynchronous implementation
-    ``LibUVStoreDaemon`` which utilizes libuv.
 
     If ``torchelastic_use_agent_store()`` is ``True`` *and* ``hostname:port`` is
     the agent's own ``MASTER_ADDR:MASTER_PORT``, then it is assumed that the
