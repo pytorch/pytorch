@@ -664,6 +664,8 @@ test_python_smoke_b200() {
 
 test_transport_rdma() {
   # NIXL and Mooncake transports over RoCE/RDMA on the NVIDIA GB300 runner.
+  # CUDA jobs exclude GENERIC classes, which include the Mooncake tests; run them here.
+  export PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION=
   # nixl-cu13 depends on torch, so install it without deps to keep the built torch.
   pip_install --no-deps nixl==1.5.2 nixl-cu13==1.5.2
   pip_install mooncake-transfer-engine-cuda13==0.3.14
