@@ -1500,5 +1500,152 @@ class TestCfgGraphTransforms(TestCase):
         )
 
 
+class CalleeScale:
+    def __init__(self, k):
+        self.k = k
+
+    def __call__(self, x):
+        return x * self.k
+
+    def twice(self, x, bias=0):
+        return self(x) * 2 + bias
+
+
+def callee_fact(n):
+    return 1 if n <= 1 else n * callee_fact(n - 1)
+
+
+def callee_raises(x):
+    return x + callee_missing_name  # noqa: F821
+
+
+@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
+class TestCfgCallees(TestCase):
+    """Python functions called from compiled code are compiled in turn."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def callees(self, compiled):
+        stats = compiled.stats()
+        return stats["compiled_callees"], stats["interpreted_callees"]
+
+    def test_functions_of_other_modules_are_compiled(self):
+        def f(x):
+            return torch.nn.functional.dropout(x, p=0.0, training=False) + 1
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        x = torch.randn(3)
+        for _ in range(3):
+            self.assertEqual(compiled(x), f(x))
+        self.assertEqual(self.callees(compiled), (["dropout"], []))
+
+    def test_methods_and_callable_objects(self):
+        def f(obj, x):
+            bound = obj.twice
+            return obj.twice(x) + bound(x, bias=1) + obj(x)
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        obj, x = CalleeScale(3), torch.randn(3)
+        for _ in range(3):
+            self.assertEqual(compiled(obj, x), f(obj, x))
+        self.assertEqual(
+            self.callees(compiled), (["CalleeScale.__call__", "CalleeScale.twice"], [])
+        )
+
+    def test_star_args_calls(self):
+        def target(a, b=2, *rest, scale=1):
+            return (a + b + len(rest)) * scale
+
+        def f(args, kwargs):
+            return target(*args, **kwargs) + target(*args)
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        for args, kwargs in (((1,), {}), ((1, 5, 7, 8), {"scale": 3})):
+            self.assertEqual(compiled(args, kwargs), f(args, kwargs))
+        self.assertEqual(len(self.callees(compiled)[0]), 1)
+
+    def test_unsupported_callee_runs_in_the_interpreter(self):
+        def generator(n):
+            yield from range(n)
+
+        def f(n):
+            return sum(generator(n))
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        self.assertEqual([compiled(4), compiled(5)], [6, 10])
+        compiled_names, interpreted = self.callees(compiled)
+        self.assertEqual(compiled_names, [])
+        self.assertEqual(len(interpreted), 1)
+
+    def test_recursion_and_modules(self):
+        compiled = torch.cfg_compile(callee_fact, fallback=False, inline=False)
+        self.assertEqual(compiled(6), 720)
+        self.assertEqual(self.callees(compiled)[0], ["callee_fact"])
+
+        def run(module, x):
+            return module.forward(x) + module(x)
+
+        linear = torch.nn.Linear(3, 2)
+        compiled = torch.cfg_compile(run, fallback=False)
+        x = torch.randn(4, 3)
+        for _ in range(3):
+            self.assertEqual(compiled(linear, x), run(linear, x))
+        self.assertIn("Linear.forward", self.callees(compiled)[0])
+
+    def test_changed_function_is_compiled_again(self):
+        def target(x, k=2):
+            return x * k
+
+        def f(x):
+            return target(x)
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        self.assertEqual(compiled(3), 6)
+        target.__defaults__ = (5,)
+        self.assertEqual(compiled(3), 15)
+        target.__code__ = (lambda x, k=2: x - k).__code__
+        self.assertEqual(compiled(3), -2)
+
+    def test_functions_made_per_call_stop_being_compiled(self):
+        def make():
+            return lambda v: v + 1
+
+        def f(n):
+            total = 0
+            for i in range(n):
+                total += make()(i)
+            return total
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        self.assertEqual(compiled(40), f(40))
+        compiled_names, interpreted = self.callees(compiled)
+        # The same code object in a new function each time: eight are
+        # compiled, the rest run in the interpreter. make itself creates a
+        # function, which the frontend does not support.
+        self.assertEqual(len(compiled_names), 8)
+        self.assertEqual(len(interpreted), 1)
+
+    def test_callees_off(self):
+        def f(obj, x):
+            return obj.twice(x)
+
+        compiled = torch.cfg_compile(f, fallback=False, callees=False)
+        self.assertEqual(compiled(CalleeScale(2), 3), 12)
+        self.assertEqual(self.callees(compiled), ([], []))
+
+    def test_error_in_callee_has_both_frames(self):
+        def f(x):
+            return callee_raises(x)
+
+        compiled = torch.cfg_compile(f, fallback=False, inline=False)
+        try:
+            compiled(torch.ones(2))
+        except NameError:
+            frames = traceback.extract_tb(sys.exc_info()[2])
+        else:
+            self.fail("expected NameError")
+        self.assertEqual([frame.name for frame in frames[-2:]], ["f", "callee_raises"])
+
+
 if __name__ == "__main__":
     run_tests()
