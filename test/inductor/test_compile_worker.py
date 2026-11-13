@@ -15,6 +15,7 @@ from concurrent.futures.process import BrokenProcessPool
 from threading import Event
 from unittest.mock import patch
 
+import torch
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
     _recv_msg,
@@ -30,6 +31,7 @@ from torch._inductor.compile_worker.subproc_pool import (
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
@@ -37,9 +39,13 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
+from torch.utils._triton import has_triton_package
+from torch.utils.cpp_extension import CUDA_HOME
 
 
 class TestCompileWorker(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def make_pool(self, size):
         return SubprocPool(size)
 
@@ -345,6 +351,8 @@ class TestCompileWorkerWithTimer(TestCompileWorker):
 
 
 class TestSubprocPoolCallbackSafety(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_done_callback_can_submit_job(self):
         code = textwrap.dedent(
@@ -554,6 +562,8 @@ def _run_callback(future, job_id, pickler):
 
 @instantiate_parametrized_tests
 class TestSubprocMainResultDelivery(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Drive SubprocMain's result callback in-process against a fake pool, so the
     # two escapes in the pre-send work can be reproduced directly. Running the
     # callback here rather than through a real sidecar is what lets these tests
@@ -671,6 +681,8 @@ class TestSubprocMainResultDelivery(TestCase):
 
 
 class TestSubprocPoolResultHandling(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # The job submitted in these tests is one that never finishes, so the
     # sidecar has no real reply to race the payload injected for it. That lets
     # the read thread keep running, so the follow-up jobs below are ordinary
@@ -786,6 +798,8 @@ class TestSubprocPoolResultHandling(TestCase):
 
 
 class TestCompileWorkerWatchdog(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # The sidecar runs a watchdog that, every interval (shortened to 1s here via
     # env), reports jobs still running past that interval to the parent, which
     # turns them into a "compile_worker_status" structured-trace artifact -- so a
@@ -982,6 +996,8 @@ class TestCompileWorkerWatchdog(TestCase):
 
 
 class TestTimer(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basics(self):
         done = Event()
 
@@ -1302,6 +1318,7 @@ class TestSubprocessEnv(TestCase):
                 else:
                     os.environ[key] = value
 
+    @unittest.skipIf(not has_triton_package(), "triton not available")
     def test_worker_compile_triton_clears_libdevice_path(self):
         try:
             from triton import knobs
@@ -1377,21 +1394,29 @@ class TestSubprocessEnv(TestCase):
 
 
 class TestSetTritonLibdevicePath(TestCase):
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
     def test_emulate_precision_casts_sets_libdevice_path(self):
         """Test eager numerics mode sets libdevice path for CUDA libdevice calls."""
         self._test_libdevice_path_with_compilation()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch({"compile_threads": 1, "eager_numerics.use_pytorch_libdevice": True})
     def test_libdevice_path_no_subprocess(self):
         """Test libdevice path is set with compile_threads=1 (no subprocess)."""
         self._test_libdevice_path_with_compilation()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch("eager_numerics.use_pytorch_libdevice", True)
     def test_libdevice_path_default_threads(self):
         """Test libdevice path is set with default compile_threads (subprocess)."""
         self._test_libdevice_path_with_compilation()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch(
         {
             "eager_numerics.use_pytorch_libdevice": True,
@@ -1422,6 +1447,8 @@ class TestSetTritonLibdevicePath(TestCase):
         compiled_result = torch.compile(torch.pow)(base, exp)
         self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
     def test_erf_bitwise_precision_with_emulate_precision_casts(self):
         """Test that erf matches eager bitwise when eager numerics mode is active."""
