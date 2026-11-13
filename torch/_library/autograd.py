@@ -13,18 +13,21 @@ from . import utils
 class InfoProtocol(Protocol):
     _backward_fn: Callable | None
     _setup_context_fn: Callable | None
+    _prepare_inputs_fn: Callable | None
 
 
 @dataclasses.dataclass
 class Info:
     _backward_fn: Callable | None
     _setup_context_fn: Callable | None
+    _prepare_inputs_fn: Callable | None = None
 
 
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
     schema = op._schema
+    prepare_inputs = info._prepare_inputs_fn
     is_out_op = utils.is_out(op)
     has_kwarg_only_args = utils.has_kwarg_only_args(op._schema)
     num_positional_args = sum(not a.kwarg_only for a in schema.arguments)
@@ -125,14 +128,21 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     )
 
     if has_tensorlist_like_args:
-        Generated = supports_tensorlist(Generated)
+        Generated = supports_tensorlist(
+            Generated, allow_none_tuple_grads=prepare_inputs is not None
+        )
 
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
+        grad_args: tuple[Any, ...] | list[Any] = args
+        if prepare_inputs is not None:
+            args, keyword_only_args = prepare_inputs(args, keyword_only_args)
+            if _C.is_grad_enabled():
+                grad_args, _ = _pytree.tree_flatten(args, not_list_of_tensor)
         if is_out_op:
             if _C.is_grad_enabled() and _C._any_requires_grad(
-                *args, **keyword_only_args
+                *grad_args, **keyword_only_args
             ):
                 raise RuntimeError(
                     f"{op._opname}(): functions with out=... arguments don't "
@@ -141,7 +151,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                 )
             return redispatch_no_grad(keyset, args, keyword_only_args)
 
-        if _C.is_grad_enabled() and _C._any_requires_grad(*args):
+        if _C.is_grad_enabled() and _C._any_requires_grad(*grad_args):
             result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
         else:
             result = redispatch_no_grad(keyset, args, keyword_only_args)
@@ -150,14 +160,12 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     return autograd_impl
 
 
-def supports_tensorlist(cls: Any) -> Any:
-    r"""supports_tensorlist(cls) -> Any
-
-    Allow an autograd.Function class to support tensor-list inputs and outputs.
+def supports_tensorlist(cls: Any, *, allow_none_tuple_grads: bool = False) -> Any:
+    """Allow an autograd.Function class to support tensor-list inputs and outputs.
 
     Regular autograd.Function has a constraint that it only directly supports autograd for
     Tensors. Applying @supports_tensorlist enables an autograd.Function to support
-    autograd for List[Tensor] inputs and outputs, and List[Optional[Tensor]] inputs.
+    autograd for List[Tensor] inputs and outputs.
     """
     orig_forward = cls.forward
     orig_backward = cls.backward
@@ -166,7 +174,6 @@ def supports_tensorlist(cls: Any) -> Any:
     @dataclass
     class TensorListMetadata:
         input_spec: _pytree.TreeSpec
-        allow_none_grad: tuple[bool, ...] = ()
         output_spec: _pytree.TreeSpec | None = None
         result_is_tuple: bool | None = None
 
@@ -223,17 +230,15 @@ def supports_tensorlist(cls: Any) -> Any:
 
         if not isinstance(grad_inputs, tuple):
             grad_inputs = (grad_inputs,)
-        # Optional tensor lists were previously opaque inputs, whose gradients
-        # could be represented by a single None.
-        if len(grad_inputs) == len(metadata.allow_none_grad):
+        input_specs = metadata.input_spec.children() if allow_none_tuple_grads else ()
+        if allow_none_tuple_grads and len(grad_inputs) == len(input_specs):
             grad_inputs = tuple(
                 _pytree.tree_unflatten([None] * spec.num_leaves, spec)
-                if grad is None and allow_none and spec.type is list
+                if grad is None and spec.type is tuple
                 else grad
-                for grad, allow_none, spec in zip(
+                for grad, spec in zip(
                     grad_inputs,
-                    metadata.allow_none_grad,
-                    metadata.input_spec.children(),
+                    input_specs,
                     strict=True,
                 )
             )
@@ -254,16 +259,8 @@ def supports_tensorlist(cls: Any) -> Any:
         return tuple(flat_grad_inputs + [None])
 
     def new_apply(*args):
-        flat_args, input_spec = _pytree.tree_flatten(
-            args, is_leaf=not_list_of_optional_tensor
-        )
-        metadata = TensorListMetadata(
-            input_spec,
-            allow_none_grad=tuple(
-                isinstance(arg, list) and any(value is None for value in arg)
-                for arg in args
-            ),
-        )
+        flat_args, input_spec = _pytree.tree_flatten(args, is_leaf=not_list_of_tensor)
+        metadata = TensorListMetadata(input_spec)
         result = orig_apply(*flat_args, metadata)  # type: ignore[misc]
         if metadata.output_spec is None:
             raise AssertionError("metadata.output_spec must not be None")

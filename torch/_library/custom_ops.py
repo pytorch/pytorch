@@ -234,10 +234,34 @@ def custom_op(
         >>> y = torch.randn(3)
         >>> out = weighted_sum([x, y], [0.3, 0.7])
 
-    Tuple input annotations are also supported when their elements can be
-    represented by a dispatcher list type. Fixed-length tuples have their length
-    and per-position element types checked before real or fake implementations
-    run. As with other sequence inputs, the dispatcher passes lists to kernels.
+    When the schema is inferred, tuple input annotations containing only
+    :class:`torch.Tensor` and optional tensors are also supported. Python kernels,
+    fake implementations, setup-context callbacks, vmap rules, and torch_dispatch rules
+    registered through this API receive tuples. Fixed lengths and per-position
+    element types are checked before these implementations run. Lists passed to
+    a tuple-annotated input are converted to tuples.
+    Backward formulas must return gradients with the same tuple structure as
+    the inputs, including one outer tuple entry per operator argument.
+
+    For example::
+
+        >>> @torch.library.custom_op("mylib::tuple_add", mutates_args=())
+        >>> def tuple_add(xs: tuple[Tensor, Tensor]) -> Tensor:
+        >>>     return xs[0] + xs[1]
+        >>>
+        >>> def backward(ctx, grad):
+        >>>     return ((grad, grad),)
+        >>>
+        >>> tuple_add.register_autograd(backward)
+        >>> x = torch.randn(3, requires_grad=True)
+        >>> result = tuple_add((x, x))
+
+    Tuple contracts are attached to the Python custom-op registration, not to the
+    dispatcher schema, which uses list types. An explicit ``schema`` overrides
+    input annotations and retains dispatcher list semantics. Public
+    :func:`torch.library.infer_schema` and :func:`torch.library.triton_op` do not
+    support tuple input annotations. To execute a serialized graph containing a
+    tuple-annotated operator, register its original Python definition first.
 
     """
 
@@ -253,6 +277,7 @@ def custom_op(
                 fn,
                 mutates_args=mutates_args,
                 tags=normalized_tags,
+                allow_tensor_tuples=True,
             )
         else:
             schema_str = schema
@@ -322,6 +347,10 @@ class CustomOpDef:
         self._init_fn = fn
         self._tuple_input_specs: dict[str, "_TupleInputSpec"] = (
             {} if tuple_input_specs is None else tuple_input_specs
+        )
+        self._tuple_input_positions: tuple[tuple[int, str, "_TupleInputSpec"], ...] = ()
+        self._prepare_inputs_fn: Callable | None = (
+            self._prepare_tuple_inputs if self._tuple_input_specs else None
         )
 
         self._backend_fns: dict[str | None, Callable] = {}
@@ -437,24 +466,21 @@ class CustomOpDef:
 
         return wrapped_fn
 
-    def _check_tuple_inputs(
+    def _prepare_tuple_inputs(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> None:
-        if not self._tuple_input_specs:
-            return
-        schema = self._opoverload._schema
-        args, kwargs = utils.fill_defaults(schema, args, kwargs)
-        for argument, value in utils.zip_schema(schema, args, kwargs):
-            spec = self._tuple_input_specs.get(argument.name)
-            if spec is not None:
-                spec.validate(value, argument.name, self._qualname)
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        prepared = list(args)
+        for index, name, spec in self._tuple_input_positions:
+            prepared[index] = spec.prepare(args[index], name, self._qualname)
+        return tuple(prepared), kwargs
 
     def _make_backend_impl(self, device_type: str | None) -> Callable[..., object]:
         """Makes the dispatcher kernel for device_type, which runs the function
         registered for it and checks the result against the schema."""
 
         def backend_impl(*args, **kwargs):
-            self._check_tuple_inputs(args, kwargs)
+            if self._prepare_inputs_fn is not None:
+                args, kwargs = self._prepare_inputs_fn(args, kwargs)
             result = self._backend_fns[device_type](*args, **kwargs)
 
             def get_module():
@@ -673,9 +699,11 @@ class CustomOpDef:
         def register(fn):
             if torch_dispatch_class not in self._torch_dispatch_fns:
 
-                def inner(*args, **kwargs):
+                def inner(mode, op, types, args, kwargs):
+                    if self._prepare_inputs_fn is not None:
+                        args, kwargs = self._prepare_inputs_fn(args, kwargs or {})
                     return self._torch_dispatch_fns[torch_dispatch_class](
-                        *args, **kwargs
+                        mode, op, types, args, kwargs
                     )
 
                 self._lib._register_torch_dispatch_rule(
@@ -832,10 +860,16 @@ class CustomOpDef:
             tags=_with_pt2_compliant_tag(tags),
         )
         self._opoverload = utils.lookup_op(self._qualname)
+        self._tuple_input_positions = tuple(
+            (index, argument.name, self._tuple_input_specs[argument.name])
+            for index, argument in enumerate(self._opoverload._schema.arguments)
+            if argument.name in self._tuple_input_specs
+        )
 
     def _register_fake_dispatcher_impl(self) -> None:
         def fake_impl(*args, **kwargs):
-            self._check_tuple_inputs(args, kwargs)
+            if self._prepare_inputs_fn is not None:
+                args, kwargs = self._prepare_inputs_fn(args, kwargs)
             if self._abstract_fn is None:
                 if utils.can_generate_trivial_fake_impl(self._opoverload):
                     return utils.generate_trivial_fake_impl(
@@ -1013,6 +1047,8 @@ class CustomOpDef:
             if need_register:
 
                 def wrapped_func(keyset, *args, **kwargs):
+                    if self._prepare_inputs_fn is not None:
+                        args, kwargs = self._prepare_inputs_fn(args, kwargs)
                     interpreter = retrieve_current_functorch_interpreter()
                     return custom_function_call_vmap_helper(
                         # pyrefly: ignore[bad-argument-type]

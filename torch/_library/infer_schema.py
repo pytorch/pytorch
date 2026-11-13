@@ -24,23 +24,34 @@ _TestTensor = torch.Tensor
 @dataclass(frozen=True)
 class _TupleInputSpec:
     element_types: tuple[tuple[type, ...], ...]
+    variadic: bool = False
 
-    def validate(self, value: list[object], name: str, op: str) -> None:
-        if len(value) != len(self.element_types):
+    def prepare(
+        self,
+        value: list[Tensor | None] | tuple[Tensor | None, ...],
+        name: str,
+        op: str,
+    ) -> tuple[Tensor | None, ...]:
+        if not self.variadic and len(value) != len(self.element_types):
             raise RuntimeError(
                 f"{op}: argument '{name}' must contain {len(self.element_types)} "
                 f"values, but got {len(value)}."
             )
-        for index, (element, expected) in enumerate(zip(value, self.element_types)):
+        for index, element in enumerate(value):
+            expected = self.element_types[0] if self.variadic else self.element_types[index]
             if not isinstance(element, expected):
                 types_str = " or ".join(typ.__name__ for typ in expected)
                 raise RuntimeError(
                     f"{op}: argument '{name}' at index {index} expected "
                     f"{types_str}, but got {type(element).__name__}."
                 )
+        return tuple(value)
 
 
 def _tuple_input_spec(args: tuple[object, ...]) -> _TupleInputSpec:
+    variadic = len(args) == 2 and args[1] is Ellipsis
+    if variadic:
+        args = args[:1]
     element_types: list[tuple[type, ...]] = []
     for arg in args:
         members = (
@@ -50,17 +61,13 @@ def _tuple_input_spec(args: tuple[object, ...]) -> _TupleInputSpec:
         )
         runtime_types: list[type] = []
         for member in members:
+            if member is None:
+                member = type(None)
             if not isinstance(member, type):
                 raise TypeError(f"Unsupported tuple element annotation: {member}")
             runtime_types.append(member)
-            if member is int:
-                runtime_types.append(torch.SymInt)
-            elif member is float:
-                runtime_types.append(torch.SymFloat)
-            elif member is bool:
-                runtime_types.append(torch.SymBool)
         element_types.append(tuple(runtime_types))
-    return _TupleInputSpec(tuple(element_types))
+    return _TupleInputSpec(tuple(element_types), variadic)
 
 
 @exposed_in("torch.library")
@@ -72,9 +79,7 @@ def infer_schema(
     op_name: str | None = None,
     tags: torch.Tag | typing.Sequence[torch.Tag] | None = (),
 ) -> str:
-    r"""infer_schema(prototype_function, /, *, mutates_args, op_name=None, tags=()) -> str
-
-    Parses the schema of a given function with type hints. The schema is inferred from the
+    r"""Parses the schema of a given function with type hints. The schema is inferred from the
     function's type hints, and can be used to define a new operator.
 
     We make the following assumptions:
@@ -87,8 +92,6 @@ def infer_schema(
       | it assumes that all inputs to the operator are being mutated.
 
     Callers (e.g. the custom ops API) are responsible for checking these assumptions.
-    Tuple inputs are represented as list types in the schema. Callers are also
-    responsible for checking fixed tuple lengths and per-position element types.
 
     Args:
         prototype_function: The function from which to infer a schema for from its type annotations.
@@ -126,6 +129,7 @@ def _infer_schema(
     mutates_args,
     op_name: str | None = None,
     tags: torch.Tag | typing.Sequence[torch.Tag] | None = (),
+    allow_tensor_tuples: bool = False,
 ) -> tuple[str, dict[str, _TupleInputSpec]]:
     UNKNOWN_MUTATES = "unknown"
     pf_globals = prototype_function.__globals__
@@ -225,15 +229,22 @@ def _infer_schema(
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if typing.get_origin(annotation_type) is tuple:
                 list_type = tuple_to_list(annotation_type)
-                if list_type in SUPPORTED_PARAM_TYPES:
-                    schema_type = SUPPORTED_PARAM_TYPES[list_type]
-                    tuple_args = typing.get_args(annotation_type)
-                    if not (len(tuple_args) == 2 and tuple_args[1] is Ellipsis):
-                        tuple_input_specs[name] = _tuple_input_spec(tuple_args)
+                list_schema_type = SUPPORTED_PARAM_TYPES.get(list_type)
+                if allow_tensor_tuples and list_schema_type in ("Tensor[]", "Tensor?[]"):
+                    schema_type = list_schema_type
+                    tuple_input_specs[name] = _tuple_input_spec(
+                        typing.get_args(annotation_type)
+                    )
                 else:
+                    example_type_str = (
+                        f"For example, {list_type}.\n\n"
+                        if list_type in SUPPORTED_PARAM_TYPES
+                        else ""
+                    )
                     error_fn(
-                        f"Parameter {name} has unsupported tuple type {param.annotation}. "
-                        "Its elements cannot be represented by a supported list type. "
+                        f"Parameter {name} has unsupported type {param.annotation}. "
+                        "We do not support Tuple inputs in schema. As a workaround, please try to use List instead. "
+                        f"{example_type_str}"
                         f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
                     )
             elif is_custom_class(annotation_type):
@@ -354,8 +365,9 @@ def _infer_schema(
                 "torch.Tag.inplace requires the return annotation to be torch.Tensor."
             )
         ret = f"Tensor({first_positional_arg_alias}!)"
-    prefix = "" if op_name is None else op_name
-    return f"{prefix}({', '.join(params)}) -> {ret}", tuple_input_specs
+    if op_name is not None:
+        return f"{op_name}({', '.join(params)}) -> {ret}", tuple_input_specs
+    return f"({', '.join(params)}) -> {ret}", tuple_input_specs
 
 
 def derived_types(

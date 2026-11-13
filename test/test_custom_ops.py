@@ -50,6 +50,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -3138,27 +3139,68 @@ class TestCustomOpAPI(TestCase):
             (tuple[Tensor, Optional[Tensor]], "Tensor?[]"),
             (tuple[Tensor, ...], "Tensor[]"),
             (tuple[Optional[Tensor], ...], "Tensor?[]"),
-            (tuple[int, int], "SymInt[]"),
-            (tuple[float, float], "float[]"),
-            (tuple[bool, bool], "bool[]"),
+            (tuple[Tensor, None], "Tensor?[]"),
+            (Tuple[Tensor, None], "Tensor?[]"),
         ),
     )
-    def test_infer_schema_tuple_inputs(self, annotation, schema):
+    def test_custom_op_tuple_input_schemas(self, annotation, schema):
         def fn(xs: annotation) -> Tensor:
             raise NotImplementedError
 
+        op = torch.library.custom_op("_torch_testing::tuple_schema", fn, mutates_args=())
         self.assertEqual(
-            torch.library.infer_schema(fn, mutates_args=()),
-            f"({schema} xs) -> Tensor",
+            str(op._opoverload._schema),
+            f"_torch_testing::tuple_schema({schema} xs) -> Tensor",
         )
 
-    @parametrize("annotation", (tuple[int, float], tuple[Tensor, int], tuple[str]))
-    def test_infer_schema_unsupported_tuple_inputs(self, annotation):
+    @parametrize("api", ("infer_schema", "legacy", "triton"))
+    def test_tuple_inference_boundary(self, api):
+        def fn(xs: tuple[Tensor, Tensor]) -> Tensor:
+            return xs[0].clone()
+
+        with self.assertRaisesRegex(ValueError, "We do not support Tuple inputs"):
+            if api == "infer_schema":
+                torch.library.infer_schema(fn, mutates_args=())
+            elif api == "legacy":
+                custom_ops.custom_op("_torch_testing::fn")(fn)
+            else:
+                torch.library.triton_op("_torch_testing::fn", mutates_args=())(fn)
+
+    @parametrize(
+        "annotation",
+        (
+            tuple[int, int],
+            tuple[float, float],
+            tuple[bool, bool],
+            tuple[int, float],
+            tuple[Tensor, int],
+            tuple[str],
+        ),
+    )
+    def test_custom_op_unsupported_tuple_inputs(self, annotation):
         def fn(xs: annotation) -> Tensor:
             raise NotImplementedError
 
-        with self.assertRaisesRegex(ValueError, "unsupported tuple type"):
-            torch.library.infer_schema(fn, mutates_args=())
+        with self.assertRaisesRegex(ValueError, "unsupported type"):
+            torch.library.custom_op("_torch_testing::tuple_unsupported", fn, mutates_args=())
+
+    def test_tuple_explicit_schema_retains_list_semantics(self):
+        @torch.library.custom_op(
+            "_torch_testing::tuple_explicit",
+            mutates_args=(),
+            schema="(Tensor[] xs) -> Tensor",
+        )
+        def fn(xs: tuple[Tensor, Tensor]) -> Tensor:
+            self.assertIsInstance(xs, list)
+            return xs[0].clone()
+
+        @fn.register_fake
+        def _(xs):
+            self.assertIsInstance(xs, list)
+            return xs[0].clone()
+
+        result = fn((torch.randn(3),))
+        self.assertEqual(result.shape, (3,))
 
     @parametrize("use_list", (False, True))
     @parametrize("optional", (False, True))
@@ -3170,7 +3212,15 @@ class TestCustomOpAPI(TestCase):
         def fn(xs: tuple[Tensor, Optional[Tensor]]) -> Tensor:
             nonlocal called
             called = True
-            return torch.empty(1)
+            self.assertIsInstance(xs, tuple)
+            return (xs + (xs[0],))[0].clone()
+
+        @fn.register_fake
+        def _(xs):
+            self.assertIsInstance(xs, tuple)
+            return xs[0].clone()
+
+        fn.register_autograd(lambda ctx, grad: ((grad, None),))
 
         xs = (
             torch.randn(3, requires_grad=requires_grad),
@@ -3178,7 +3228,8 @@ class TestCustomOpAPI(TestCase):
         )
         result = fn(list(xs) if use_list else xs)
         self.assertTrue(called)
-        self.assertEqual(result.shape, (1,))
+        self.assertEqual(result.shape, xs[0].shape)
+        self.assertEqual(result.requires_grad, requires_grad)
 
         called = False
         with self.assertRaisesRegex(RuntimeError, "argument 'xs'.*2 values.*1"):
@@ -3189,61 +3240,37 @@ class TestCustomOpAPI(TestCase):
             fn((None, xs[0]))
         self.assertFalse(called)
 
-    def test_custom_op_tuple_inputs_autograd(self):
-        @torch.library.custom_op("_torch_testing::tuple_autograd", mutates_args=())
-        def fn(xs: tuple[Tensor, Optional[Tensor]]) -> Tensor:
+    def test_custom_op_tuple_inputs_keyword_restriction(self):
+        def fn(x: Tensor, *, xs: tuple[Tensor, Tensor]) -> Tensor:
             return xs[0].clone()
 
-        called = False
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor"):
+            torch.library.custom_op("_torch_testing::tuple_keyword", fn, mutates_args=())
 
-        def backward(ctx, grad):
-            nonlocal called
-            called = True
-            return [grad, None]
-
-        fn.register_autograd(backward)
-        x = torch.randn(3, requires_grad=True)
-        torch.autograd.grad(fn((x, None)).sum(), x)
-        self.assertTrue(called)
-
-    @parametrize("requires_grad", (False, True))
-    @parametrize("none_first", (False, True))
-    def test_tuple_optional_tensor_requires_grad(self, requires_grad, none_first):
-        x = torch.randn(3, requires_grad=requires_grad)
-        values = [None, x] if none_first else [x, None]
-        self.assertEqual(torch._C._any_requires_grad(values), requires_grad)
-        self.assertEqual(torch._C._any_requires_grad(values=values), requires_grad)
-        self.assertFalse(torch._C._any_requires_grad([None, None]))
-        self.assertFalse(torch._C._any_requires_grad([x, 1]))
-
-    @parametrize("unused_grad", (False, True))
-    @parametrize("all_none", (False, True))
-    def test_optional_tensorlist_unused_gradient(self, unused_grad, all_none):
-        @torch.library.custom_op("_torch_testing::optional_unused", mutates_args=())
-        def fn(x: Tensor, unused: list[Optional[Tensor]]) -> Tensor:
-            return x.clone()
-
-        def backward(ctx, grad):
-            return grad, None
-
-        fn.register_autograd(backward)
-        x = torch.randn(3, requires_grad=True)
-        value = None if all_none else torch.randn(3, requires_grad=unused_grad)
-        unused = [value, None]
-        (grad,) = torch.autograd.grad(fn(x, unused).sum(), x)
-        self.assertEqual(grad.shape, x.shape)
-
-    def test_custom_op_tuple_inputs_keyword(self):
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @parametrize("frontend", ("custom_op", "opoverload"))
+    def test_tuple_unwrapped_kernel_validation(self, frontend):
         @torch.library.custom_op("_torch_testing::tuple_keyword", mutates_args=())
-        def fn(x: Tensor, *, size: tuple[int, int]) -> Tensor:
-            return x.new_empty(size)
+        def fn(xs: tuple[Tensor, Tensor]) -> Tensor:
+            return xs[0].clone()
 
-        x = torch.randn(3)
-        self.assertEqual(fn(x, size=(2, 3)).shape, (2, 3))
-        with self.assertRaisesRegex(RuntimeError, "argument 'size'.*2 values.*1"):
-            fn(x, size=(2,))
+        op = fn if frontend == "custom_op" else fn._opoverload
+        with torch.library._scoped_library("_torch_testing", "IMPL") as lib:
+            lib.impl("tuple_keyword", lambda xs: xs[0].clone(), "CPU")
+            with self.assertRaisesRegex(RuntimeError, "argument 'xs'.*2 values.*1"):
+                op((torch.randn(3),))
 
-    @parametrize("mode", ("fake", "compile"))
+    @parametrize(
+        "mode",
+        (
+            "fake",
+            subtest(
+                "compile",
+                name="compile",
+                decorators=[skipIfTorchDynamo("recursive dynamo"), requires_compile],
+            ),
+        ),
+    )
     @parametrize("optional", (False, True))
     def test_custom_op_tuple_inputs_fake_and_compile(self, mode, optional):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -3254,6 +3281,7 @@ class TestCustomOpAPI(TestCase):
 
         @fn.register_fake
         def _(xs):
+            self.assertIsInstance(xs, tuple)
             return torch.empty_like(xs[0])
 
         x = torch.randn(3)
@@ -3271,31 +3299,68 @@ class TestCustomOpAPI(TestCase):
             result = torch.compile(fn, backend="aot_eager", fullgraph=True)(xs)
         self.assertEqual(result.shape, x.shape)
 
-    def test_custom_op_tuple_inputs_symbolic(self):
-        @torch.library.custom_op("_torch_testing::tuple_symbolic", mutates_args=())
-        def fn(x: Tensor, size: tuple[int, int]) -> Tensor:
-            return x.new_empty(size)
-
-        @fn.register_fake
-        def _(x, size):
-            return x.new_empty(size)
-
-        def f(x):
-            return fn(x, (x.shape[0], x.shape[1]))
-
-        x = torch.randn(3, 4)
-        result = torch.compile(f, backend="aot_eager", fullgraph=True, dynamic=True)(x)
-        self.assertEqual(result.shape, x.shape)
-
     def test_custom_op_tuple_inputs_string_annotations(self):
         @torch.library.custom_op("_torch_testing::tuple_string", mutates_args=())
         def fn(xs: "tuple[Tensor, Optional[Tensor]]") -> Tensor:
-            return torch.empty(1)
+            self.assertIsInstance(xs, tuple)
+            return xs[0].clone()
+
+        @fn.register_fake
+        def _(xs):
+            return xs[0].clone()
 
         result = fn((torch.randn(3), None))
-        self.assertEqual(result.shape, (1,))
+        self.assertEqual(result.shape, (3,))
         with self.assertRaisesRegex(RuntimeError, "argument 'xs'.*2 values.*1"):
             fn((torch.randn(3),))
+
+    @skipIfTorchDynamo("TorchDispatchMode registration is tested directly")
+    def test_custom_op_tuple_torch_dispatch(self):
+        from torch.utils._python_dispatch import BaseTorchDispatchMode
+
+        class Mode(BaseTorchDispatchMode):
+            pass
+
+        @torch.library.custom_op("_torch_testing::tuple_dispatch", mutates_args=())
+        def fn(xs: tuple[Tensor, Tensor]) -> Tensor:
+            return xs[0].clone()
+
+        called = False
+
+        @fn.register_torch_dispatch(Mode)
+        def _(mode, op, types, args, kwargs):
+            nonlocal called
+            called = True
+            self.assertIsInstance(args[0], tuple)
+            return (args[0] + (args[0][0],))[0].clone()
+
+        x = torch.randn(3)
+        with torch._C._AutoDispatchBelowAutograd(), Mode():
+            self.assertEqual(fn((x, x)).shape, x.shape)
+            self.assertTrue(called)
+            called = False
+            with self.assertRaisesRegex(RuntimeError, "argument 'xs'.*2 values.*1"):
+                fn((x,))
+            self.assertFalse(called)
+
+    @skipIfTorchDynamo("vmap registration is tested directly")
+    def test_custom_op_tuple_vmap_validation(self):
+        @torch.library.custom_op("_torch_testing::tuple_vmap_validation", mutates_args=())
+        def fn(xs: tuple[Tensor, Tensor]) -> Tensor:
+            return xs[0].clone()
+
+        called = False
+
+        @fn.register_vmap
+        def _(info, in_dims, xs):
+            nonlocal called
+            called = True
+            self.assertIsInstance(xs, tuple)
+            return xs[0].clone(), in_dims[0][0]
+
+        with self.assertRaisesRegex(RuntimeError, "argument 'xs'.*2 values.*1"):
+            torch.vmap(fn)((torch.randn(4, 3),))
+        self.assertFalse(called)
 
     @parametrize(
         "tags, opname",
@@ -7117,6 +7182,190 @@ class TestOpProfiles(TestCase):
             loaded = read_profiles_from_yaml(yaml_str)
 
 
+class TestTensorTupleDevices(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("layout", ("both", "none_first", "none_last"))
+    @parametrize("variadic", (False, True))
+    @parametrize(
+        "mode",
+        (
+            "eager",
+            subtest(
+                "compile",
+                name="compile",
+                decorators=[skipIfTorchDynamo("recursive dynamo"), requires_compile],
+            ),
+        ),
+    )
+    def test_tuple_autograd(self, device, layout, variadic, mode):
+        annotation = (
+            tuple[Optional[Tensor], ...]
+            if variadic
+            else tuple[Optional[Tensor], Optional[Tensor]]
+        )
+
+        @torch.library.custom_op("_torch_testing::tuple_autograd", mutates_args=())
+        def fn(xs: annotation) -> Tensor:
+            return torch.stack([value for value in xs if value is not None]).sum(0)
+
+        @fn.register_fake
+        def _(xs):
+            return torch.stack([value for value in xs if value is not None]).sum(0)
+
+        def setup_context(ctx, inputs, output):
+            self.assertIsInstance(inputs[0], tuple)
+            ctx.present = tuple(value is not None for value in inputs[0])
+
+        def backward(ctx, grad):
+            self.assertEqual(ctx.needs_input_grad, (ctx.present,))
+            return (tuple(grad if present else None for present in ctx.present),)
+
+        fn.register_autograd(backward, setup_context=setup_context)
+        x = torch.randn(3, device=device, requires_grad=True)
+        y = torch.randn(3, device=device, requires_grad=True)
+        xs = (x, y) if layout == "both" else (None, x) if layout == "none_first" else (x, None)
+        op = fn if mode == "eager" else torch.compile(fn, backend="aot_eager", fullgraph=True)
+        result = op(xs)
+        self.assertEqual(result, x + y if layout == "both" else x)
+        inputs = (x, y) if layout == "both" else (x,)
+        gradients = torch.autograd.grad(result.sum(), inputs)
+        self.assertEqual(gradients, tuple(torch.ones_like(value) for value in inputs))
+
+    @parametrize(
+        "layout",
+        (
+            "optional",
+            "distinct",
+            subtest(
+                "repeated",
+                name="repeated",
+                decorators=[
+                    skipIfTorchDynamo(
+                        "Baseline compiled autograd cannot accumulate multiple None gradients"
+                    )
+                ],
+            ),
+        ),
+    )
+    @parametrize(
+        "mode",
+        (
+            "eager",
+            subtest(
+                "compile",
+                name="compile",
+                decorators=[skipIfTorchDynamo("recursive dynamo"), requires_compile],
+            ),
+        ),
+    )
+    def test_tuple_unused_gradient(self, device, layout, mode):
+        @torch.library.custom_op("_torch_testing::tuple_unused_gradient", mutates_args=())
+        def fn(x: Tensor, unused: tuple[Optional[Tensor], Optional[Tensor]]) -> Tensor:
+            return x.clone()
+
+        @fn.register_fake
+        def _(x, unused):
+            return x.clone()
+
+        fn.register_autograd(lambda ctx, grad: (grad, None))
+        x = torch.randn(3, device=device, requires_grad=True)
+        y = torch.randn(3, device=device, requires_grad=True)
+        z = torch.randn(3, device=device, requires_grad=True)
+        unused = (y, None) if layout == "optional" else (y, y) if layout == "repeated" else (y, z)
+        op = fn if mode == "eager" else torch.compile(fn, backend="aot_eager", fullgraph=True)
+        result = op(x, unused)
+        gradients = torch.autograd.grad(result.sum(), (x, y), allow_unused=True)
+        self.assertEqual(gradients, (torch.ones_like(x), None))
+
+    def test_tuple_optional_list_compatibility(self, device):
+        @torch.library.custom_op("_torch_testing::tuple_compat_opaque", mutates_args=())
+        def opaque(xs: list[Optional[Tensor]]) -> Tensor:
+            return xs[0].clone()
+
+        @opaque.register_fake
+        def _(xs):
+            return xs[0].clone()
+
+        x = torch.randn(3, device=device, requires_grad=True)
+        unused = torch.randn(3, device=device, requires_grad=True)
+        result = opaque([x, None])
+        self.assertFalse(result.requires_grad)
+        self.assertIsNone(result.grad_fn)
+        self.assertEqual(result, x)
+
+        @torch.library.custom_op("_torch_testing::tuple_compat_mixed", mutates_args=())
+        def mixed(x: Tensor, xs: list[Optional[Tensor]]) -> Tensor:
+            return x.clone()
+
+        @mixed.register_fake
+        def _(x, xs):
+            return x.clone()
+
+        def backward(ctx, grad):
+            self.assertEqual(ctx.needs_input_grad, (True, False))
+            return grad, None
+
+        mixed.register_autograd(backward)
+        gradients = torch.autograd.grad(
+            mixed(x, [unused, None]).sum(), (x, unused), allow_unused=True
+        )
+        self.assertEqual(gradients, (torch.ones_like(x), None))
+
+        @torch.library.custom_op(
+            "_torch_testing::tuple_compat_out",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def out_op(xs: list[Optional[Tensor]], *, out: Tensor) -> Tensor:
+            out.copy_(xs[0])
+            return out
+
+        @out_op.register_fake
+        def _(xs, *, out):
+            return out
+
+        out = torch.empty_like(x)
+        result = out_op([x, None], out=out)
+        self.assertIs(result, out)
+        self.assertFalse(result.requires_grad)
+        self.assertEqual(result, x)
+
+    @skipIfTorchDynamo("recursive dynamo")
+    @requires_compile
+    def test_tuple_dynamic_compile(self, device):
+        @torch.library.custom_op("_torch_testing::tuple_dynamic_compile", mutates_args=())
+        def fn(xs: tuple[Tensor, Tensor]) -> Tensor:
+            return xs[0] + xs[1]
+
+        @fn.register_fake
+        def _(xs):
+            self.assertIsInstance(xs, tuple)
+            return xs[0] + xs[1]
+
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
+        x = torch.randn(3, 4, device=device)
+        self.assertEqual(compiled((x, x)), x + x)
+        y = torch.randn(5, 6, device=device)
+        self.assertEqual(compiled((y, y)), y + y)
+
+    @skipIfTorchDynamo("vmap registration is tested directly")
+    def test_tuple_vmap(self, device):
+        @torch.library.custom_op("_torch_testing::tuple_vmap", mutates_args=())
+        def fn(xs: tuple[Tensor, Tensor]) -> Tensor:
+            return xs[0] + xs[1]
+
+        @fn.register_vmap
+        def _(info, in_dims, xs):
+            self.assertIsInstance(xs, tuple)
+            self.assertIsInstance(in_dims[0], tuple)
+            return xs[0] + xs[1], in_dims[0][0]
+
+        x = torch.randn(4, 3, device=device)
+        self.assertEqual(torch.vmap(fn)((x, x)), x + x)
+
+
+instantiate_device_type_tests(TestTensorTupleDevices, globals(), allow_xpu=True)
 only_for = ("cpu", "cuda", "xpu")
 instantiate_device_type_tests(
     TestCustomOpTesting, globals(), only_for=only_for, allow_xpu=True
