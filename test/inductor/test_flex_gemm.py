@@ -9603,6 +9603,8 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
             actual[:valid], eager[:valid], expected, self.K
         )
 
+    # Grouped GLU (two main outputs per group) needs an SM100/SM110 QuACK config.
+    @unittest.skipIf(SM120OrLater, "SM100 config required")
     @parametrize(
         "case",
         (
