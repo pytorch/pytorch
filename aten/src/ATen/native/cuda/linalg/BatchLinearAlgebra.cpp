@@ -617,9 +617,19 @@ namespace {
   // cuSOLVER's nopiv algorithm has lower per-matrix overhead, keeping the
   // crossover n^2/batch roughly constant across batch sizes.
   inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, int64_t lda, const ScalarType& dtype, bool compute_pivots = true) {
+    // The custom kernel does int arithmetic on offsets and loop bounds, so it requires
+    // (lda >= m, so bounding lda bounds m too):
+    // - batch * lda: per-batch offsets into pivots and the permutation workspace;
+    // - lda * min(n, MAX_RECNB) + 1024: linearized rank-1 update index in the tall panel kernel;
+    // - n + SWP_WIDTH: column tile count of row swaps.
+    constexpr int64_t int_max = std::numeric_limits<int>::max();
+    const bool custom_fits_int = batch * lda <= int_max
+      && lda * std::min<int64_t>(n, 32) <= int_max - 1024
+      && n <= int_max - 4; // SWP_WIDTH
+
     // Select a custom (pivoted) LU factorization kernel over cuSOLVER/cuBLAS.
     // The kernel is benchmarked on/tuned for A100, H100, L40S, GB200.
-    if (m == n && batch <= 65535 && m >= 256
+    if (m == n && batch <= 65535 && m >= 256 && custom_fits_int
       && ((compute_pivots && batch >= 4) || (!compute_pivots && batch >= 16 && m <= 1024))
     ) {
       return SolverBackend::CUSTOM;
@@ -630,11 +640,9 @@ namespace {
       // Custom kernel for m <= 1024 and batch >= 4 (pivoted) or batch >= 16 (nopiv).
       // Based on benchmarks extended from the square case (note, they agree)
       // TODO: explore m > 1024
-      constexpr int64_t int_max = std::numeric_limits<int>::max();
       if ((compute_pivots ? batch >= 4 : batch >= 16) && batch <= 65535
         && (1 <= m && m <= 1024)
-        && lda <= int_max
-        && n <= int_max - 4 // SWP_WIDTH
+        && custom_fits_int
       ) {
         return SolverBackend::CUSTOM;
       }
