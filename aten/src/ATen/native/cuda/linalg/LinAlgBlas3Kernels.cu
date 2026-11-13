@@ -667,7 +667,7 @@ batched_panel_colserial_fused_kernel(
     // 1. Pivot find (warp-shuffle reduction)
     auto my_max = static_cast<real_t>(-1);
     auto my_idx = -1;
-    for (int i = k + tid; i < m; i += BS) {
+    for (size_t i = k + tid; i < m; i += BS) {
       auto v = std::abs(A[LinOff(i, k, lda)]);
       if (v > my_max) {
         my_max = v;
@@ -703,7 +703,7 @@ batched_panel_colserial_fused_kernel(
     __syncthreads();
 
     if (std::abs(sdiag) != 0) {
-      for (int i = k + 1 + tid; i < m; i += BS) {
+      for (size_t i = k + 1 + tid; i < m; i += BS) {
         A[LinOff(i, k, lda)] /= sdiag;
       }
     }
