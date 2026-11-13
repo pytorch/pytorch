@@ -20,8 +20,8 @@ inline T rms_norm_apply(T x, opmath_t<T> inv, T w) {
 
 template <typename T>
 [[kernel]] void rms_single_row(
-    constant T* x,
-    constant T* w,
+    device const T* x,
+    device const T* w,
     device T* out,
     constant float& eps,
     constant uint& axis_size,
@@ -90,8 +90,8 @@ template <typename T>
 
 template <typename T>
 [[kernel]] void rms_looped(
-    constant T* x,
-    constant T* w,
+    device const T* x,
+    device const T* w,
     device T* out,
     constant float& eps,
     constant uint& axis_size,
@@ -168,8 +168,8 @@ template <typename T>
 #define instantiate_rms_single_row(itype)                     \
   template [[host_name("rms_norm_" #itype)]] [[kernel]] void  \
   rms_single_row<itype>(                                      \
-      constant itype* x,                                      \
-      constant itype* w,                                      \
+      device const itype* x,                                      \
+      device const itype* w,                                      \
       device itype* out,                                      \
       constant float& eps,                                    \
       constant uint& axis_size,                               \
@@ -182,8 +182,8 @@ template <typename T>
 #define instantiate_rms_looped(itype)                               \
   template [[host_name("rms_norm_looped_" #itype)]] [[kernel]] void \
   rms_looped<itype>(                                                \
-      constant itype* x,                                            \
-      constant itype* w,                                            \
+      device const itype* x,                                            \
+      device const itype* w,                                            \
       device itype* out,                                            \
       constant float& eps,                                          \
       constant uint& axis_size,                                     \

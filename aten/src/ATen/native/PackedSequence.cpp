@@ -97,7 +97,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
     if (l > prev_l) {
       auto current_batch_size = batch_size - i;
       steps.push_back(input.slice(0, prev_l, l).slice(1, 0, current_batch_size).contiguous().view(step_shape));
-      for (int64_t j = 0; j < (l - prev_l); ++j) {
+      for ([[maybe_unused]] const auto _ : c10::irange(l - prev_l)) {
         (*batch_sizes++) = current_batch_size;
       }
       prev_l = l;
