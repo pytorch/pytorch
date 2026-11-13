@@ -300,9 +300,10 @@ inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivatio
 }
 
 // Activation epilogue suffix for a TunableOp key, as a labelled "_act_<name>"
-// pair like the existing _ld_, _compute_ and _swz_ tokens. Empty for None so
-// that plain addmm / F.linear keep the keys they have today. No default case:
-// a new epilogue has to be named here, or two of them would share one key.
+// token like the existing _ld_, _compute_ and _swz_ ones. Empty for None rather
+// than a literal _None, so the token appears only where an epilogue does. There
+// is no default case on purpose, so adding an epilogue without naming it here
+// cannot quietly share a key with an existing one.
 inline const char* epilogue_signature(const at::cuda::blas::GEMMAndBiasActivationEpilogue& value) {
   switch (value) {
     case at::cuda::blas::GEMMAndBiasActivationEpilogue::None:
@@ -317,10 +318,12 @@ inline const char* epilogue_signature(const at::cuda::blas::GEMMAndBiasActivatio
 }
 
 // Bias presence for a TunableOp key, spelled like ScaledGemmParams' _bias_None.
-// With an activation set, CUDA also takes a 2-D self and calls with a null
-// bias, selecting a plain RELU/GELU epilogue instead of the _BIAS one. Empty
-// when a bias is present, so existing keys are unchanged; ROCm rejects a 2-D
-// self, so it never emits this token.
+// The pointer is null exactly when use_bias_ptr_lt is false in Blas.cpp. On
+// CUDA the term that reaches a key is self not being 1-D; the other two either
+// keep the call off this path or are rejected outright while TunableOp is on,
+// so they emit nothing. cuBLASLt then gets a plain epilogue and beta 1 instead
+// of the _BIAS one and beta 0, so the two need separate keys. Empty when a bias
+// is present. ROCm never emits it.
 inline const char* bias_signature(const void* bias) {
   return bias == nullptr ? "_bias_None" : "";
 }

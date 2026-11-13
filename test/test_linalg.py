@@ -10622,7 +10622,11 @@ class TestLinalgCudaOnly(TestCase):
                 if result[0].startswith("GemmAndBiasTunableOp")
             ]
             if not params_signatures:
-                self.skipTest("_addmm_activation did not use the Lt GemmAndBias path")
+                # CUDA always takes the Lt path here, so an empty result is a
+                # real failure rather than an unsupported configuration.
+                if torch.version.hip:
+                    self.skipTest("_addmm_activation did not use the Lt GemmAndBias path")
+                self.fail("_addmm_activation did not use the Lt GemmAndBias path")
             relu = [s for s in params_signatures if s.endswith("_act_RELU")]
             gelu = [s for s in params_signatures if s.endswith("_act_GELU")]
             self.assertEqual(
@@ -10632,21 +10636,26 @@ class TestLinalgCudaOnly(TestCase):
             self.assertEqual(
                 relu[0][:-len("RELU")], gelu[0][:-len("GELU")])
 
-            # With an activation set, CUDA also takes a 2-D self, which calls
-            # with bias == nullptr and asks cuBLASLt for a plain RELU epilogue
-            # instead of the _BIAS one. ROCm rejects a 2-D self here.
+            # A self that is not 1-D leaves the bias pointer null on CUDA: any
+            # 2-D shape broadcastable to (M, N) once an epilogue is set, and a
+            # contiguous (1, N) even without one. They pick a plain epilogue and
+            # beta 1 instead of the _BIAS one. ROCm keeps a 2-D self off this path.
             if not torch.version.hip:
                 torch._addmm_activation(
                     torch.randn(M, N, device=device, dtype=dtype), x, w, use_gelu=False)
-                no_bias = [
+                torch.addmm(torch.randn(1, N, device=device, dtype=dtype), x, w)
+                no_bias = sorted(
                     result[1]
                     for result in torch.cuda.tunable.get_results()
                     if result[0].startswith("GemmAndBiasTunableOp")
                     and result[1].endswith("_bias_None")
-                ]
+                )
+                # The no-activation one must not borrow the plain addmm key.
                 self.assertEqual(
-                    len(no_bias), 1, f"expected one bias-free entry, got {no_bias}")
-                self.assertEqual(no_bias[0], relu[0] + "_bias_None")
+                    no_bias,
+                    sorted([relu[0] + "_bias_None",
+                            relu[0][:-len("_act_RELU")] + "_bias_None"]),
+                    f"expected a bias-free entry with RELU and one without, got {no_bias}")
 
             # DynamicSignature() builds the wildcard key and has to carry the
             # epilogue too, so it keeps matching the concrete key token for token.
@@ -10671,9 +10680,14 @@ class TestLinalgCudaOnly(TestCase):
                     if result[0].startswith("GemmAndBiasTunableOp")
                     and "*" in result[1] and result[1].endswith("_bias_None")
                 ]
+                # Both tokens, in order: a wildcard key that kept only one of
+                # them would still be the wrong length to match its concrete key.
                 self.assertEqual(
                     len(wildcard_no_bias), 1,
                     f"expected one bias-free wildcard entry, got {wildcard_no_bias}")
+                self.assertTrue(
+                    wildcard_no_bias[0].endswith("_act_GELU_bias_None"),
+                    wildcard_no_bias[0])
 
     @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
     @setBlasBackendsToDefaultFinally
@@ -10689,7 +10703,7 @@ class TestLinalgCudaOnly(TestCase):
             torch.cuda.tunable.set_max_tuning_duration(1)
             torch.cuda.tunable.set_max_tuning_iterations(1)
 
-            # Record the two epilogues without tuning them.
+            # Record without tuning: both epilogues, plus the bias-free keys on CUDA.
             torch.cuda.tunable.tuning_enable(False)
             torch.cuda.tunable.record_untuned_enable(True)
 
@@ -10702,14 +10716,46 @@ class TestLinalgCudaOnly(TestCase):
             bias = torch.randn(N, device=device, dtype=dtype)
             torch._addmm_activation(bias, x, w.t(), use_gelu=False)
             torch._addmm_activation(bias, x, w.t(), use_gelu=True)
-            # A bias == nullptr record has to be replayed with a 2-D self too.
+            expected_tokens = ["_act_GELU", "_act_RELU"]
+            # A bias == nullptr record has to be replayed with a 2-D self too,
+            # both with an epilogue and, for a (1, N) self, without one.
             if not torch.version.hip:
                 torch._addmm_activation(
                     torch.randn(M, N, device=device, dtype=dtype), x, w.t(), use_gelu=False)
+                torch._addmm_activation(
+                    torch.randn(M, N, device=device, dtype=dtype), x, w.t(), use_gelu=True)
+                torch.addmm(torch.randn(1, N, device=device, dtype=dtype), x, w.t())
+                expected_tokens += [
+                    "_act_RELU_bias_None", "_act_GELU_bias_None", "_bias_None"]
 
+            # Check what was recorded rather than that anything was: the file is
+            # made by the first untuned record of any op, so a run that fell off
+            # the Lt path leaves it holding GemmTunableOp rows, which replay fine
+            # and make _compare_untuned_tuned_entries() pass without reaching
+            # this code.
             untuned_filename = get_tunableop_untuned_filename()
-            if not os.path.exists(untuned_filename):
-                self.skipTest("_addmm_activation did not use the Lt GemmAndBias path")
+            recorded = []
+            if os.path.exists(untuned_filename):
+                with open(untuned_filename) as untuned_file:
+                    recorded = [
+                        line.strip().split(",")[1]
+                        for line in untuned_file
+                        if line.startswith("GemmAndBiasTunableOp")
+                    ]
+            if not recorded:
+                # As above: on CUDA nothing recorded is a regression, not an
+                # unsupported configuration.
+                if torch.version.hip:
+                    self.skipTest("_addmm_activation did not use the Lt GemmAndBias path")
+                self.fail("_addmm_activation did not use the Lt GemmAndBias path")
+            # Both tokens, so that _act_RELU_bias_None is not counted as either
+            # _act_RELU or a bias-only record.
+            def tokens_of(key):
+                act = next((a for a in ("_act_RELU", "_act_GELU") if a in key), "")
+                return act + ("_bias_None" if key.endswith("_bias_None") else "")
+            self.assertEqual(
+                sorted(tokens_of(key) for key in recorded), sorted(expected_tokens),
+                f"unexpected set of recorded keys: {recorded}")
 
             # Tune them offline and check every recorded key got filled.
             torch.cuda.tunable.tuning_enable(True)
