@@ -250,6 +250,9 @@ def select_ordered_col_config(
         )
     elif sm107 and full_tiles and rows is not None:
         # select_col_config hands SM107 views off at 256, 1024 or 4096 columns only.
+        # Bands of shapes rather than measured anchors: direct reduce_ordered_col calls
+        # can reach unmeasured views, such as bf16 65536 x 1024 or fp32 at 256 columns
+        # and 32 or 128 MiB.
         if rows == 65536 and columns == 1024 and nfields != 2:
             cfg = cfg._replace(tile_columns=16, full_tiles=True)
         elif column_anchor:

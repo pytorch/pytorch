@@ -24,9 +24,10 @@ def _arch_ok(idx: int, majors: tuple[int, ...]) -> bool:
     # Device capability is immutable; memoize it with the caller's accepted set in the key.
     try:
         major, _ = torch.cuda.get_device_capability(idx)
-    except RuntimeError:
-        # Fake CUDA tensors can reach here on CPU-only systems, where the query raises.
-        # Capability conditions must decline rather than propagate the error.
+    except (RuntimeError, AssertionError):
+        # Fake CUDA tensors can reach here on CPU-only systems, where the query raises,
+        # or with an index past the device count ("Invalid device id"). Capability
+        # conditions must decline rather than propagate the error.
         return False
     return major in majors
 

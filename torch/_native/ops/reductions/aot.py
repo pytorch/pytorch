@@ -28,7 +28,6 @@ ARCHS = _DATA.ARCHS
 CORE_OPS = _DATA.CORE_OPS
 DTYPES = _DATA.DTYPES
 ROW_CLASSES = _DATA.ROW_CLASSES
-ORDER_SENSITIVE_TRAITS = _DATA.ORDER_SENSITIVE_TRAITS
 
 
 _DTYPE_CPP = {
@@ -37,45 +36,12 @@ _DTYPE_CPP = {
     "float32": "at::kFloat",
 }
 _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
-# Covered sum/prod calls bypass cutedsl_impl's adapter, which PYTORCH_SUM_INNER_TREE
-# rolls out, so calls that adapter would order honour it here too. The adapter reads the
-# variable once at import; this reads it per call.
 _SUM_INNER_TREE_ENV = "PYTORCH_SUM_INNER_TREE"
-_SUM_ROLLOUT_TRAITS = frozenset(("sum", "prod"))
-_INT32_MAX = 2**31 - 1
 
 
 def _env_enabled(name) -> bool:
     # "" and "0" are off; any other value, including "strict", requests the order.
     return os.environ.get(name, "") not in ("", "0")
-
-
-def _rollout_takes(trait, dim, dtype, n, m, itemsize) -> bool:
-    """Whether the PYTORCH_SUM_INNER_TREE adapter takes this covered call: one reduced
-    dim, no dtype= and Int32-safe batches (cutedsl_impl._base_cond_ok)."""
-    one_dim = isinstance(dim, int) or (dim is not None and len(dim) == 1)
-    batches = -(-n // (32 * (16 // itemsize)))
-    return (
-        trait in _SUM_ROLLOUT_TRAITS
-        and dtype is None
-        and one_dim
-        and m * batches <= _INT32_MAX
-    )
-
-
-def _inner_tree_cpp(trait, style) -> str:
-    gate = f'_naot_reduction_env_enabled("{_INNER_TREE_ENV}")'
-    if trait not in _SUM_ROLLOUT_TRAITS:
-        return gate
-    # The same conditions as _rollout_takes, over the prelude's locals.
-    conds = ["!dtype.has_value()", "out_st == st"]
-    if style != "int":
-        conds.append("dim.has_value() && dim->size() == 1")
-    batches = "(N + 32 * vec - 1) / (32 * vec)"
-    conds.append(f"M * ({batches}) <= std::numeric_limits<int32_t>::max()")
-    conds.append(f'_naot_reduction_env_enabled("{_SUM_INNER_TREE_ENV}")')
-    rollout = " &&\n           ".join(conds)
-    return f"{gate} ||\n          ({rollout})"
 
 
 def _out_dtypes(dtype, has_dtype):
@@ -222,6 +188,12 @@ class _RowReduction:
         self._trait = trait
         self._has_dtype = has_dtype
         self._dim_style = dim_style
+        # There are no inner-tree callables, so calls decline while a variable that
+        # orders them on the JIT route is set: cutedsl_impl's adapter also orders sum
+        # and prod under PYTORCH_SUM_INNER_TREE.
+        self._order_envs = (_INNER_TREE_ENV,)
+        if trait in ("sum", "prod"):
+            self._order_envs += (_SUM_INNER_TREE_ENV,)
 
     def kernel_precompile_grid(self):
         points = []
@@ -235,7 +207,6 @@ class _RowReduction:
                             "dtype": dtype,
                             "out_dtype": out_dtype,
                             "row_class": row_class,
-                            "order": "linear",
                         }
                     )
                 points.append(
@@ -244,32 +215,8 @@ class _RowReduction:
                         "trait": self._trait,
                         "dtype": dtype,
                         "out_dtype": out_dtype,
-                        "order": "linear",
                     }
                 )
-                if self._trait in ORDER_SENSITIVE_TRAITS:
-                    for path in ("itree_multirow", "itree_looped"):
-                        for loads in _DATA.INNER_TREE_LOADS:
-                            points.append(
-                                {
-                                    "path": path,
-                                    "trait": self._trait,
-                                    "dtype": dtype,
-                                    "out_dtype": out_dtype,
-                                    "loads": loads,
-                                    "order": "inner_tree",
-                                }
-                            )
-                    points.append(
-                        {
-                            "path": "itree_split",
-                            "trait": self._trait,
-                            "dtype": dtype,
-                            "out_dtype": out_dtype,
-                            "loads": 2 if _DATA.DTYPE_BYTES[dtype] == 2 else 4,
-                            "order": "inner_tree",
-                        }
-                    )
         return points
 
     def covered_axes(self, self_t, dim=None, keepdim=False, *, dtype=None):
@@ -285,30 +232,16 @@ class _RowReduction:
         out_dtype = self_t.dtype if not self._has_dtype or dtype is None else dtype
         out_dtype_name = names.get(out_dtype)
         geometry = _row_geometry(self_t, dim, self._dim_style)
-        ordered = _env_enabled(_INNER_TREE_ENV)
+        ordered = any(_env_enabled(name) for name in self._order_envs)
         row_class = None
-        loads = None
         path = None
-        if geometry is not None and dtype_name is not None:
+        if geometry is not None and dtype_name is not None and not ordered:
             n, m, reduce_all = geometry
-            itemsize = self_t.element_size()
-            rollout = _rollout_takes(self._trait, dim, dtype, n, m, itemsize)
-            ordered = ordered or (rollout and _env_enabled(_SUM_INNER_TREE_ENV))
             row_class = _DATA.row_class(dtype_name, n, m, reduce_all)
             if row_class is not None:
                 path = "row"
             elif _DATA.xcta_ok(dtype_name, n, m):
                 path = "xcta"
-            if ordered and self._trait not in ORDER_SENSITIVE_TRAITS:
-                # No inner-tree callables: leave ordered requests to the JIT overrides.
-                path = None
-            if ordered and path is not None:
-                spec = _DATA.inner_tree_spec(dtype_name, n, m)
-                if spec is None:
-                    path = None
-                else:
-                    path, loads = spec
-                    row_class = None
         eligible = (
             self_t.is_cuda
             and self_t.is_contiguous()
@@ -323,8 +256,6 @@ class _RowReduction:
             "dtype": self_t.dtype,
             "out_dtype": out_dtype,
             "row_class": row_class,
-            "loads": loads,
-            "order": "inner_tree" if ordered else "linear",
         }
 
     def cpp_helpers(self):
@@ -333,65 +264,6 @@ inline bool _naot_reduction_env_enabled(const char* name) {
   const char* value = std::getenv(name);
   return value != nullptr && value[0] != '\\0' &&
       !(value[0] == '0' && value[1] == '\\0');
-}
-
-inline int64_t _naot_previous_power_of_2(int64_t value) {
-  int64_t result = 1;
-  while (result <= value / 2) result *= 2;
-  return result;
-}
-
-inline int64_t _naot_next_power_of_2(int64_t value) {
-  int64_t result = 1;
-  while (result < value) result *= 2;
-  return result;
-}
-
-struct _NaotInnerTreePlan {
-  int64_t shape;
-  int64_t loads;
-  int64_t warps;
-  int64_t batches;
-};
-
-inline _NaotInnerTreePlan _naot_inner_tree_plan(
-    int64_t n, int64_t m, int64_t itemsize) {
-  constexpr int64_t warp = 32;
-  constexpr int64_t threshold = 8192;
-  const int64_t vec = 16 / itemsize;
-  const int64_t vectors = (n + vec - 1) / vec;
-  if (vectors <= 8) {
-    return {1, _naot_next_power_of_2(vectors), 1, 1};
-  }
-
-  const int64_t wle = warp * vec;
-  int64_t warps = 1;
-  if (n > threshold) {
-    const int64_t estimated_batches = (n + threshold - 1) / threshold;
-    if (estimated_batches <= 3) {
-      int64_t ideal_warps = 0;
-      for (int64_t b = 0; b < estimated_batches; ++b) {
-        const int64_t elements = std::min(threshold, n - b * threshold);
-        ideal_warps += std::min<int64_t>(16, std::max<int64_t>(1, elements / wle));
-      }
-      warps = std::max<int64_t>(1, ideal_warps / estimated_batches);
-    } else {
-      warps = std::min<int64_t>(16, std::max<int64_t>(1, threshold / wle));
-    }
-  } else {
-    warps = std::min<int64_t>(16, std::max<int64_t>(1, n / wle));
-  }
-  warps = _naot_previous_power_of_2(warps);
-
-  int64_t loads = _naot_next_power_of_2((n + warps * wle - 1) / (warps * wle));
-  const int64_t max_loads =
-      _naot_previous_power_of_2(std::max<int64_t>(1, threshold / (wle * warps)));
-  loads = std::min(loads, max_loads);
-  const int64_t batch_elements = loads * wle * warps;
-  const int64_t batches = (n + batch_elements - 1) / batch_elements;
-  if (batches <= 3) return {2, loads, warps, batches};
-  if (batches > (std::numeric_limits<int32_t>::max() / m)) return {0, 0, 0, 0};
-  return {3, loads, warps, batches};
 }
 """
 
@@ -424,13 +296,11 @@ inline _NaotInnerTreePlan _naot_inner_tree_plan(
           (out->scalar_type() != out_st || !out->is_contiguous() ||
            reinterpret_cast<uintptr_t>(out->const_data_ptr()) % 16 != 0)) return false;
     """
-        gate = _inner_tree_cpp(self._trait, self._dim_style)
-        if self._trait in ORDER_SENSITIVE_TRAITS:
-            order = f"const bool inner_tree = {gate};"
-        else:
-            # No inner-tree callables: leave ordered requests to the JIT overrides.
-            order = f"if ({gate}) return false;\n      const bool inner_tree = false;"
+        ordered = " || ".join(
+            f'_naot_reduction_env_enabled("{name}")' for name in self._order_envs
+        )
         return f"""
+      if ({ordered}) return false;
       const auto st = self.scalar_type();
       if (!({dtype_accept})) return false;
       if (self.dim() < 1 || !self.is_contiguous()) return false;
@@ -438,11 +308,6 @@ inline _NaotInnerTreePlan _naot_inner_tree_plan(
       {out}
       {_geometry_cpp(self._dim_style)}
       {_classifier_cpp()}
-      {order}
-      const auto itree = inner_tree
-          ? _naot_inner_tree_plan(N, M, self.element_size())
-          : _NaotInnerTreePlan{{0, 0, 0, 0}};
-      if (inner_tree && itree.shape == 0) return false;
     """
 
     def cpp_covers(self):
@@ -456,13 +321,6 @@ inline _NaotInnerTreePlan _naot_inner_tree_plan(
             f"st == {_DTYPE_CPP[spec['dtype']]} && "
             f"out_st == {_DTYPE_CPP[spec['out_dtype']]}"
         )
-        if spec["order"] == "inner_tree":
-            shapes = {"itree_multirow": 1, "itree_looped": 2, "itree_split": 3}
-            return (
-                f"{common} && inner_tree && itree.shape == {shapes[spec['path']]} && "
-                f"itree.loads == {spec['loads']}"
-            )
-        common = f"{common} && !inner_tree"
         if spec["path"] == "xcta":
             return f"{common} && use_xcta"
         threads_per_row, threads_per_block = ROW_CLASSES[spec["row_class"]]
@@ -473,40 +331,6 @@ inline _NaotInnerTreePlan _naot_inner_tree_plan(
         )
 
     def cpp_launch(self, spec, launch_fn):
-        if spec["order"] == "inner_tree":
-            common = """
-      auto self_2d = self.view({M, N});
-      auto out_1d = out.view({M});
-"""
-            if spec["path"] == "itree_multirow":
-                return (
-                    common
-                    + f"""
-      {launch_fn}(self_2d, out_1d, static_cast<int32_t>(N),
-                  static_cast<int32_t>(M), at::cuda::getCurrentCUDAStream());
-"""
-                )
-            if spec["path"] == "itree_looped":
-                return (
-                    common
-                    + f"""
-      {launch_fn}(self_2d, out_1d, static_cast<int32_t>(N),
-                  static_cast<int32_t>(M), static_cast<int32_t>(itree.warps),
-                  static_cast<int32_t>(itree.batches),
-                  at::cuda::getCurrentCUDAStream());
-"""
-                )
-            return (
-                common
-                + f"""
-      const int32_t part_count = static_cast<int32_t>(itree.batches);
-      const int32_t rows = static_cast<int32_t>(M);
-      auto part = self.new_empty({{M * itree.batches}},
-                                 self.options().dtype(at::kFloat));
-      {launch_fn}(self_2d, part, out_1d, rows, part_count,
-                  static_cast<int32_t>(N), at::cuda::getCurrentCUDAStream());
-"""
-            )
         if spec["path"] == "xcta":
             subrow = int(_DATA.XCTA_SUBROW)
             return f"""

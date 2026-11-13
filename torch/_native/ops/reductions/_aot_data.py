@@ -16,8 +16,6 @@ CORE_OPS = (
 
 DTYPES = ("float16", "bfloat16", "float32")
 DTYPE_BYTES = {"float16": 2, "bfloat16": 2, "float32": 4}
-ORDER_SENSITIVE_TRAITS = frozenset(("sum", "mean", "prod"))
-INNER_TREE_LOADS = (1, 2, 4, 8)
 
 ROW_CLASSES = {
     "t32_b128": (32, 128),
@@ -31,63 +29,6 @@ _MAX_ROW_BYTES = 192 * 1024
 _MAX_LOADS = 65
 XCTA_SUBROW = 8192
 _XCTA_MAX_PARTIALS = 1 << 22
-_INNER_TREE_THRESHOLD = 8192
-_INNER_TREE_MULTIROW_LOADS = 8
-_INNER_TREE_MAX_BATCHES = 3
-_INNER_TREE_WARP = 32
-_INNER_TREE_TARGET_WARPS = 8
-
-
-def _previous_power_of_2(n):
-    return 1 << (n.bit_length() - 1)
-
-
-def _next_power_of_2(n):
-    return 1 << (n - 1).bit_length()
-
-
-def inner_tree_spec(dtype, n, m):
-    """Return the runtime-generic inner-tree shape and load class."""
-    itemsize = DTYPE_BYTES.get(dtype)
-    if itemsize is None or n < 1 or m < 1:
-        return None
-    vec = 16 // itemsize
-    num_vecs = -(-n // vec)
-    if num_vecs <= _INNER_TREE_MULTIROW_LOADS:
-        return "itree_multirow", _next_power_of_2(num_vecs)
-
-    wle = _INNER_TREE_WARP * vec
-    if n > _INNER_TREE_THRESHOLD:
-        estimated_batches = -(-n // _INNER_TREE_THRESHOLD)
-        if estimated_batches <= _INNER_TREE_MAX_BATCHES:
-            ideal_warps = sum(
-                min(
-                    16,
-                    max(
-                        1,
-                        min(_INNER_TREE_THRESHOLD, n - b * _INNER_TREE_THRESHOLD)
-                        // wle,
-                    ),
-                )
-                for b in range(estimated_batches)
-            )
-            warps = max(1, ideal_warps // estimated_batches)
-        else:
-            warps = min(16, max(1, _INNER_TREE_THRESHOLD // wle))
-    else:
-        warps = min(16, max(1, n // wle))
-    warps = _previous_power_of_2(warps)
-
-    loads = _next_power_of_2(-(-n // (warps * wle)))
-    max_loads = _previous_power_of_2(max(1, _INNER_TREE_THRESHOLD // (wle * warps)))
-    loads = min(loads, max_loads)
-    batch_elements = loads * wle * warps
-    batches = -(-n // batch_elements)
-    if batches <= _INNER_TREE_MAX_BATCHES:
-        return "itree_looped", loads
-    if m * batches >= 2**31:
-        return None
-    return "itree_split", loads
 
 
 def row_class(dtype, n, m, reduce_all=False):

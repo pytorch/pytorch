@@ -22,7 +22,7 @@ R = TypeVar("R")
 def check_current(index: int) -> None:
     # Plans compile on the current device, so a plan keyed under another device would be
     # handed to that device's later calls.
-    current = torch.cuda.current_device()
+    current = torch._C._cuda_getDevice()
     if index != current:
         raise AssertionError(f"input on cuda:{index}, but cuda:{current} is current")
 
