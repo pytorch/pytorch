@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/native/Pool.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -109,7 +108,7 @@ TORCH_META_FUNC(avg_pool2d_backward) (
 ) {
   // checked_convert below only guards against int overflow; non-positive
   // kernel/stride and negative padding are caught downstream in
-  // pooling_output_shape / avg_pool2d_backward_shape_check with more specific messages.
+  // pooling_output_shape / pool2d_backward_shape_check with more specific messages.
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
@@ -130,7 +129,6 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
 
   /* sizes */
-  const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
   const int64_t nInputPlane = input.size(-3); // number of channels (or colors)
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
@@ -138,11 +136,11 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
 
   auto memory_format = input.suggest_memory_format();
-  avg_pool2d_backward_shape_check(
+  pool2d_backward_shape_check(
     input,
     gradOutput_,
-    nbatch,
-    kH, kW, dH, dW, padH, padW,
+    /*indices=*/std::nullopt,
+    kH, kW, dH, dW, padH, padW, 1, 1,
     nInputPlane,
     inputHeight, inputWidth,
     outputHeight, outputWidth,

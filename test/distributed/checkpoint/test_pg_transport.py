@@ -595,13 +595,7 @@ class TestPGTransportEdgeCases(TestCase):
         self.pg.send = MagicMock(return_value=self.mock_work)
         self.pg.recv = MagicMock(return_value=self.mock_work)
 
-    # This was gated on `HAS_ACCELERATOR`, which is
-    # `TEST_CUDA or TEST_HPU or TEST_XPU` and so does not recognise PrivateUse1.
-    # No capability is declared in its place: the test mocks the process group
-    # outright, so what it needs is an accelerator device to exist, not a working
-    # distributed backend. `instantiate_device_type_tests(..., except_for="cpu", allow_xpu=True)`
-    # below already guarantees that, generating this test only for accelerator
-    # device classes.
+    # Requires an accelerator device; the process group is mocked.
     @unittest.skipIf(not TEST_ACCELERATOR, "No accelerator")
     def test_send_checkpoint_with_cpu_tensors(self, device):
         """Test send_checkpoint with CPU tensors when device is accelerator."""

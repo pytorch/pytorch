@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_cmath.py b/test/cpython/v3_13/test_cmath.py
-index a96a5780b31..37fb665d97d 100644
+index a96a5780b31b6f134d74ce5e196d177953d67821..6b6b62fc65e60cfc9ee83b638409baf017830378 100644
 --- a/test/cpython/v3_13/test_cmath.py
 +++ b/test/cpython/v3_13/test_cmath.py
 @@ -1,5 +1,58 @@
@@ -71,7 +71,13 @@ index a96a5780b31..37fb665d97d 100644
      # list of all functions in cmath
      test_functions = [getattr(cmath, fname) for fname in [
              'acos', 'acosh', 'asin', 'asinh', 'atan', 'atanh',
-@@ -66,6 +119,39 @@ class CMathTests(ComplexesAreIdenticalMixin, unittest.TestCase):
+@@ -61,11 +114,45 @@ class CMathTests(ComplexesAreIdenticalMixin, unittest.TestCase):
+     test_functions.append(lambda x : cmath.log(14.-27j, x))
+ 
+     def setUp(self):
++        super().setUp()
+         self.test_values = open(test_file, encoding="utf-8")
+ 
      def tearDown(self):
          self.test_values.close()
  
@@ -111,7 +117,7 @@ index a96a5780b31..37fb665d97d 100644
      def rAssertAlmostEqual(self, a, b, rel_err = 2e-15, abs_err = 5e-323,
                             msg=None):
          """Fail if the two floating-point numbers are not almost equal.
-@@ -590,4 +676,4 @@ class IsCloseTests(test_math.IsCloseTests):
+@@ -590,4 +677,4 @@ class IsCloseTests(test_math.IsCloseTests):
  
  
  if __name__ == "__main__":

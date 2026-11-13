@@ -225,4 +225,22 @@ std::string get_cxx_flags() {
   #endif
 }
 
+std::pair<std::string, std::string> get_cxx_compiler() {
+  // The versions show_config() prints. clang also defines __GNUC__ (as 4.2), and
+  // clang-cl _MSC_VER, so clang comes first.
+#if defined(__clang_major__)
+  return {
+      "clang",
+      std::to_string(__clang_major__) + '.' + std::to_string(__clang_minor__) +
+          '.' + std::to_string(__clang_patchlevel__)};
+#elif defined(_MSC_VER)
+  return {"msvc", std::to_string(_MSC_FULL_VER)};
+#elif defined(__GNUC__)
+  return {
+      "gcc", std::to_string(__GNUC__) + '.' + std::to_string(__GNUC_MINOR__)};
+#else
+  return {"", ""};
+#endif
+}
+
 }

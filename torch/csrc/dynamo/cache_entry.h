@@ -29,7 +29,7 @@ and the optimized code.
 The FrameState is a PyDict that enables sharing between different frames. This
 is used to detect dynamism in automatic dynamic shapes.
 
-These two are encapsulated into a ExtraState.
+These two are encapsulated into an ExtraState.
 */
 
 typedef struct CacheEntry CacheEntry;
@@ -78,12 +78,6 @@ C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
 #endif
-
-// Returns borrowed reference
-PyCodeObject* CacheEntry_get_code(CacheEntry* e);
-
-// Returns borrowed string representation of CompileContext
-const char* CacheEntry_get_trace_annotation(CacheEntry* e);
 
 // Returns a borrowed reference to CacheEntry as a PyObject
 // Warning: lifetime is controlled by C++

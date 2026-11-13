@@ -146,8 +146,8 @@ class ExpandingArrayWithOptionalElem
   /// parameter of the `ExpandingArrayWithOptionalElem`).
   /*implicit*/ ExpandingArrayWithOptionalElem(T single_size)
       : ExpandingArray<D, std::optional<T>>(0) {
-    for (const auto i : c10::irange(this->values_.size())) {
-      this->values_[i] = single_size;
+    for (auto& value : this->values_) {
+      value = single_size;
     }
   }
 
