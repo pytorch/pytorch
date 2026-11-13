@@ -101,7 +101,7 @@ class C10_API SymbolicShapeMeta {
   // Accessors to cached derived properties
   // DO NOT call with mutables_ lock held
   const SymInt& numel() const {
-    if (C10_UNLIKELY(!has_numel())) {
+    if (!has_numel()) [[unlikely]] {
       init_numel();
     }
     return numel_;
@@ -117,56 +117,56 @@ class C10_API SymbolicShapeMeta {
   }
 
   const SymBool& is_contiguous() const {
-    if (C10_UNLIKELY(!has_is_contiguous())) {
+    if (!has_is_contiguous()) [[unlikely]] {
       init_is_contiguous();
     }
     return is_contiguous_;
   }
 
   const SymBool& is_channels_last_contiguous() const {
-    if (C10_UNLIKELY(!has_is_channels_last_contiguous())) {
+    if (!has_is_channels_last_contiguous()) [[unlikely]] {
       init_is_channels_last_contiguous();
     }
     return is_channels_last_contiguous_;
   }
 
   const SymBool& is_channels_last_3d_contiguous() const {
-    if (C10_UNLIKELY(!has_is_channels_last_3d_contiguous())) {
+    if (!has_is_channels_last_3d_contiguous()) [[unlikely]] {
       init_is_channels_last_3d_contiguous();
     }
     return is_channels_last_3d_contiguous_;
   }
 
   const SymBool& is_channels_last() const {
-    if (C10_UNLIKELY(!has_is_channels_last())) {
+    if (!has_is_channels_last()) [[unlikely]] {
       init_is_channels_last();
     }
     return is_channels_last_;
   }
 
   const SymBool& is_channels_last_3d() const {
-    if (C10_UNLIKELY(!has_is_channels_last_3d())) {
+    if (!has_is_channels_last_3d()) [[unlikely]] {
       init_is_channels_last_3d();
     }
     return is_channels_last_3d_;
   }
 
   const SymBool& is_non_overlapping_and_dense() const {
-    if (C10_UNLIKELY(!has_is_non_overlapping_and_dense())) {
+    if (!has_is_non_overlapping_and_dense()) [[unlikely]] {
       init_is_non_overlapping_and_dense();
     }
     return is_non_overlapping_and_dense_;
   }
 
   IntArrayRef materialized_sizes() const {
-    if (C10_UNLIKELY(!has_materialized_sizes())) {
+    if (!has_materialized_sizes()) [[unlikely]] {
       init_materialized_sizes();
     }
     return IntArrayRef(materialized_sizes_);
   }
 
   IntArrayRef materialized_strides() const {
-    if (C10_UNLIKELY(!has_materialized_strides())) {
+    if (!has_materialized_strides()) [[unlikely]] {
       init_materialized_strides();
     }
     return IntArrayRef(materialized_strides_);

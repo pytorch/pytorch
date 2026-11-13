@@ -90,6 +90,10 @@ TORCH_CUDA_ARCH_LIST_TABLE: dict[str, dict[str, set[int]]] = {
         "x86_64": {75, 80, 86, 90, 100, 120},
         "aarch64": {80, 90, 100, 110, 120},
     },
+    "13.5": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
 }
 
 # Architectures we additionally emit PTX for on nightly/dev builds
@@ -501,6 +505,8 @@ def main() -> None:
         # the wheel layout), so no MAGMA_HOME/USE_MAGMA handling is needed here.
         rocm_home = discover_rocm_home()
         env_out["ROCM_HOME"] = rocm_home
+        # Keep ROCM_PATH consistent with ROCM_HOME for tools that read only it.
+        env_out["ROCM_PATH"] = rocm_home
         # DESIRED_CUDA is "rocmX.Y.Z" -- normalize so build_amd.py and
         # downstream tools see the rocm-prefixed form (matches build_rocm.sh).
         desired = os.environ.get("DESIRED_CUDA", "")
