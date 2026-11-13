@@ -54,6 +54,45 @@ class TestKernelRowTile(TestCase):
             out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
         )
 
+    # (65536, 128) takes one thread per row, staged through TMA.
+    @parametrize("rows,columns,tpr", ((64, 1000, None), (65536, 128, 1)))
+    def test_fp32_row_sum_error_is_no_worse_than_aten(self, rows, columns, tpr):
+        """Sum fp32 rows with no more mean absolute error against the fp64 sum than
+        ATen, summed over a few seeds."""
+        trait, f32 = T.SumOps(acc=cutlass.Float32), [torch.float32]
+        kw = {"threads_per_row": tpr, "use_tma": tpr == 1}
+        ours = aten = 0.0
+        for seed in range(8):
+            gen = torch.Generator("cuda").manual_seed(seed)
+            x = torch.randn(rows, columns, device="cuda", generator=gen)
+            (got,) = rt.reduce_row_tile(trait, "fp32_error", x, f32, **kw)
+            with torch.backends.python_native.cutedsl.disabled():
+                ref = x.sum(1)
+            want = x.double().sum(1)
+            ours += (got.double() - want).abs().mean().item()
+            aten += (ref.double() - want).abs().mean().item()
+        self.assertLessEqual(ours, aten, f"CuTeDSL {ours:.3e} vs ATen {aten:.3e}")
+
+    # 100 columns end in a partial wave of vectors.
+    @parametrize("columns", (96, 100))
+    @parametrize("dist", ("randn", "rand"))
+    def test_fp32_one_thread_rows_match_aten(self, columns, dist):
+        """One thread per row folds rows narrower than 128 elements in ATen's
+        association, so fp32 sums match it bitwise."""
+        gen = torch.Generator("cuda").manual_seed(0)
+        x = getattr(torch, dist)(65536, columns, device="cuda", generator=gen)
+        (got,) = rt.reduce_row_tile(
+            T.SumOps(acc=cutlass.Float32),
+            "fp32_one_thread",
+            x,
+            [torch.float32],
+            threads_per_row=1,
+            use_tma=False,
+        )
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = x.sum(1)
+        self.assertEqual(got, ref, atol=0, rtol=0)
+
     def test_one_kernel_per_vec_class(self):
         trait = T.SumOps(acc=cutlass.Float32)
         rt._CACHE.clear()
@@ -360,6 +399,25 @@ class TestKernelRowTile(TestCase):
                     out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
                 )
 
+    @parametrize(
+        "dtype,columns",
+        ((torch.float32, 100), (torch.float32, 124), (torch.float16, 200)),
+    )
+    def test_one_thread_row_partial_group(self, dtype, columns):
+        # 25 whole vectors leave one past the last full group of 32 elements, and 31 a
+        # seven-vector tail. Integer sums are exact, so a dropped or repeated vector shows
+        # bitwise.
+        x = torch.randint(1, 9, (4096, columns), device="cuda").to(dtype)
+        (got,) = rt.reduce_row_tile(
+            self._sum_trait(),
+            "tpr1_groups",
+            x,
+            [torch.float32],
+            threads_per_row=1,
+            use_tma=False,
+        )
+        self.assertEqual(got, x.double().sum(dim=1).float(), atol=0, rtol=0)
+
     def test_narrow_row_ragged_m(self):
         # Nonmultiple M exercises the partial tile and TMA zero-fill.
         for m in (1, 3, 8191, 65537):
@@ -547,6 +605,238 @@ class TestKernelRowTile(TestCase):
             trait, "nw2", x, [torch.float32], threads_per_row=64, threads_per_block=64
         )
         self.assertEqual(got, torch.full((8,), 384.0, device="cuda"))
+
+    def test_rolled_lane_accumulators_combine_in_order(self):
+        """Combine whole-vector lane accumulators: each one holds some row's result,
+        index ties across them keep the first column, NaN wins from any of them, and
+        Welford counts stay exact."""
+        # 4104 fp16 columns are 513 whole 8-wide vectors, so every power-of-two
+        # threads_per_row leaves the last wave masked. Index traits keep 4 accumulators
+        # and fold column c into accumulator c % 4.
+        rows, columns = 33, 4096 + 8
+        x = torch.randn(rows, columns, device="cuda", dtype=torch.float16)
+        r = torch.arange(rows, device="cuda")
+        # Row r plants its maximum in accumulator r % 4 and a tie in the next one.
+        # Row 32 plants in vector 512, the masked last wave.
+        first = r * 128 + r % 4
+        x[r, first] = 10.0
+        x[r, first + 5] = 10.0
+        nan_rows = torch.arange(4, 8, device="cuda")
+        x[nan_rows, first[nan_rows] + 2] = float("nan")
+        want = first.clone()
+        want[nan_rows] += 2
+        finite = torch.ones(rows, dtype=torch.bool, device="cuda")
+        finite[nan_rows] = False
+        (idx,) = rt.reduce_row_tile(
+            T.ArgMaxOps(acc=cutlass.Float32), "rolled_argmax", x, [torch.int32]
+        )
+        self.assertEqual(idx, want.to(torch.int32))
+        vals, idx = rt.reduce_row_tile(
+            T.MinDimOps(acc=cutlass.Float32),
+            "rolled_min_dim",
+            -x,
+            [torch.float32, torch.int32],
+            nouts=2,
+        )
+        self.assertEqual(idx, want.to(torch.int32))
+        self.assertTrue(vals[nan_rows].isnan().all())
+        self.assertEqual(vals[finite], torch.full((rows - 4,), -10.0, device="cuda"))
+        y = torch.randn(rows, columns, device="cuda", dtype=torch.float16)
+        trait = T.WelfordOps(acc=cutlass.Float32)
+        mean, _, count = rt.reduce_row_tile(
+            trait, "rolled_welford", y, [torch.float32] * trait.nfields, final=False
+        )
+        want_count = torch.full((rows,), float(columns), device="cuda")
+        self.assertEqual(count, want_count, atol=0, rtol=0)
+        self.assertEqual(mean, y.double().mean(dim=1).float(), atol=1e-4, rtol=1e-4)
+
+    def _assert_keyed_width(self, trait_key, width):
+        # Row-tile keys hold six fields before TileReduce.cache_sig, whose 13th keys N for
+        # ragged vectors and 0 for every other runtime fold, whole vector rows included.
+        self.assertEqual({k[18] for k in rt._CACHE if k[1] == trait_key}, {width})
+
+    @parametrize(
+        "dtype,columns",
+        (
+            (torch.float32, 4097),  # vec 4, 8-warp block merge
+            (torch.float16, 4095),  # vec 8, 2 warps x 2 rows per block
+            (torch.bfloat16, 1001),  # vec 8, single-warp rows, 4 rows per block
+            (torch.float64, 2049),  # vec 2
+            (torch.float16, 5),  # prefix clamped to n, no full vector group
+            (torch.float16, 11),  # rows with and without one full group
+            (torch.float64, 1),  # vec 2, no full vector group
+            (torch.float32, 4098),  # even N: residues 0 and 2 only
+            (torch.float16, 4096),  # whole vectors: the rolled path
+        ),
+    )
+    def test_ragged_vector_edges_and_interior(self, dtype, columns):
+        """Combine scalar row edges with aligned vector loads across the interior."""
+        # Odd N cycles r * N mod vec through every residue. Integer values make the sum
+        # exact, so a dropped or repeated element shows bitwise. 33 rows leave dead
+        # threads in the last block where blocks hold several rows; fp32 4097 and 4098
+        # and fp64 2049 put one row per block.
+        x = torch.randint(1, 9, (33, columns), device="cuda").to(dtype)
+        out = torch.float64 if dtype == torch.float64 else torch.float32
+        acc = cutlass.Float64 if dtype == torch.float64 else cutlass.Float32
+        rt._CACHE.clear()
+        (got,) = rt.reduce_row_tile(
+            T.SumOps(acc=acc),
+            "ragged_vector",
+            x,
+            [out],
+            order="linear",
+            ragged_vector=True,
+        )
+        self.assertEqual(got, x.double().sum(dim=1).to(out), atol=0, rtol=0)
+        self._assert_keyed_width("ragged_vector", 0 if columns == 4096 else columns)
+
+    @parametrize(
+        "dtype,columns,threads_per_row",
+        ((torch.float16, 4095, None), (torch.bfloat16, 203, 1)),
+    )
+    def test_ragged_vector_index_traits(self, dtype, columns, threads_per_row):
+        # Plant each row's extrema across the scalar prefix, the first and last vector
+        # groups, and the scalar tail so the returned columns check every index source.
+        rows = 33
+        x = torch.randn(rows, columns, device="cuda", dtype=dtype)
+        r = torch.arange(rows, device="cuda")
+        head = (r // 2) % 16
+        tail = columns - 1 - head
+        even = r % 2 == 0
+        x[r, torch.where(even, head, tail)] = 10.0
+        x[r, torch.where(even, tail, head)] = -10.0
+        rt._CACHE.clear()
+        (idx,) = rt.reduce_row_tile(
+            T.ArgMaxOps(acc=cutlass.Float32),
+            "ragged_argmax",
+            x,
+            [torch.int32],
+            threads_per_row=threads_per_row,
+            ragged_vector=True,
+        )
+        self.assertEqual(idx, x.argmax(dim=1).to(torch.int32))
+        vals, idx = rt.reduce_row_tile(
+            T.MinDimOps(acc=cutlass.Float32),
+            "ragged_min_dim",
+            x,
+            [torch.float32, torch.int32],
+            nouts=2,
+            threads_per_row=threads_per_row,
+            ragged_vector=True,
+        )
+        want = x.min(dim=1)
+        self.assertEqual(vals, want.values.float())
+        self.assertEqual(idx, want.indices.to(torch.int32))
+        for key in ("ragged_argmax", "ragged_min_dim"):
+            self._assert_keyed_width(key, columns)
+
+    def test_ragged_vector_welford_partials(self):
+        # Raw Welford counts must equal N exactly; any edge element dropped or repeated
+        # moves it.
+        rows, columns = 33, 4095
+        x = torch.randn(rows, columns, device="cuda", dtype=torch.bfloat16)
+        trait = T.WelfordOps(acc=cutlass.Float32)
+        rt._CACHE.clear()
+        mean, m2, count = rt.reduce_row_tile(
+            trait,
+            "ragged_welford",
+            x,
+            [torch.float32] * trait.nfields,
+            final=False,
+            ragged_vector=True,
+        )
+        want = torch.full((rows,), float(columns), device="cuda")
+        self.assertEqual(count, want, atol=0, rtol=0)
+        self._assert_keyed_width("ragged_welford", columns)
+        xd = x.double()
+        self.assertEqual(mean, xd.mean(dim=1).float(), atol=1e-4, rtol=1e-4)
+        var = m2 / (columns - 1)
+        self.assertEqual(var, xd.var(dim=1).float(), atol=1e-4, rtol=1e-4)
+
+    def test_ragged_vector_plans_are_keyed_by_width(self):
+        # Unlike runtime folds, ragged vectors bake N: one plan per width, any M.
+        trait = T.SumOps(acc=cutlass.Float32)
+        rt._CACHE.clear()
+        for rows, columns in ((64, 2049), (64, 2051), (7, 2049)):
+            x = torch.randint(1, 9, (rows, columns), device="cuda").float()
+            (got,) = rt.reduce_row_tile(
+                trait, "ragged_width", x, [torch.float32], ragged_vector=True
+            )
+            self.assertEqual(got, x.sum(dim=1), atol=0, rtol=0)
+        mine = [k for k in rt._CACHE if "ragged_width" in k]
+        self.assertEqual(len(mine), 2, f"expected one plan per width, got {mine}")
+        # Whole-vector widths fall back to the rolled path's one plan per vector class.
+        for columns in (2048, 2052):
+            x = torch.randint(1, 9, (64, columns), device="cuda").float()
+            (got,) = rt.reduce_row_tile(
+                trait, "ragged_whole", x, [torch.float32], ragged_vector=True
+            )
+            self.assertEqual(got, x.sum(dim=1), atol=0, rtol=0)
+        mine = [k for k in rt._CACHE if "ragged_whole" in k]
+        self.assertEqual(len(mine), 1, f"expected one plan per vec class, got {mine}")
+
+    def test_ragged_vector_rejects_inner_tree_and_tma(self):
+        trait = T.SumOps(acc=cutlass.Float32)
+        # A whole width: the contract holds for every N, not only ragged ones.
+        x = torch.randn(64, 32, device="cuda")
+        with self.assertRaisesRegex(ValueError, "require the linear order"):
+            rt.reduce_row_tile(
+                trait,
+                "ragged_itree",
+                x,
+                [torch.float32],
+                order="inner_tree",
+                ragged_vector=True,
+            )
+        # 4096 is whole with a TMA-aligned stride; 4097 is ragged, and the ragged check
+        # must fire before TMA's own check rejects its 16388-byte row stride.
+        f32 = [torch.float32]
+        for n in (4096, 4097):
+            x = torch.randn(64, n, device="cuda")
+            with self.subTest(n=n):
+                with self.assertRaisesRegex(ValueError, "cannot use TMA"):
+                    rt.reduce_row_tile(
+                        trait, "ragged_tma", x, f32, use_tma=True, ragged_vector=True
+                    )
+
+    @parametrize(
+        "axis,kwargs,msg",
+        (
+            ("col", {"vec": 8}, "require the row axis"),
+            ("row", {"order": "inner_tree"}, "require the linear order"),
+            ("row", {"use_tma": True}, "cannot use TMA"),
+            ("row", {"combine": True}, "cannot combine partials"),
+        ),
+        name_fn=lambda axis, kwargs, msg: "_".join(
+            [axis] + [f"{k}_{v}" for k, v in kwargs.items()]
+        ),
+    )
+    def test_ragged_vector_tile_rejects(self, axis, kwargs, msg):
+        trait = T.SumOps(acc=cutlass.Float32)
+        with self.assertRaisesRegex(ValueError, msg):
+            rt.tile.TileReduce(
+                trait, cutlass.Float16, axis, 4095, ragged_vector=True, **kwargs
+            )
+
+    def test_ragged_vector_tile_rejects_empty_rows(self):
+        trait, f16 = T.SumOps(acc=cutlass.Float32), cutlass.Float16
+        with self.assertRaisesRegex(ValueError, "nonempty rows"):
+            rt.tile.TileReduce(trait, f16, "row", 0, ragged_vector=True)
+
+    def test_ragged_vector_rejects_misaligned_rows(self):
+        """Refuse empty rows and rows not starting at r * N from an aligned base."""
+        trait = T.SumOps(acc=cutlass.Float32)
+        base = torch.randn(34, 4100, device="cuda")
+        cases = (
+            (base.flatten()[1:4098].view(1, 4097), "16-byte aligned base"),
+            (base[:, :4097], "packed at stride N"),
+            (base[:, :0], "nonempty rows"),
+        )
+        for x, msg in cases:
+            with self.subTest(msg=msg), self.assertRaisesRegex(ValueError, msg):
+                rt.reduce_row_tile(
+                    trait, "ragged_misaligned", x, [torch.float32], ragged_vector=True
+                )
 
 
 instantiate_parametrized_tests(TestKernelRowTile)

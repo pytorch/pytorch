@@ -858,10 +858,16 @@ def reduce_row_tile(
     unroll: int | None = None,
     use_tma: bool | None = None,
     order: Literal["linear", "inner_tree"] | None = None,
+    ragged_vector: bool = False,
 ) -> tuple[torch.Tensor, ...]:
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`.
 
-    x's device must be current.
+    x's device must be current. `ragged_vector` asks for aligned wide loads with scalar
+    edges (one kernel per N) and rejects empty rows, order="inner_tree" and use_tma=True
+    for every N. Rows of whole 16-byte vectors otherwise fall through to normal path
+    selection; ragged rows need a contiguous, 16-byte aligned input and raise ValueError
+    on any other rather than fall back. For ragged N, a row's scalar prefix depends on
+    its index, so identical rows can round differently.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
@@ -874,6 +880,11 @@ def reduce_row_tile(
     # order="inner_tree" selects the tree here, and it raises rather than use another DAG.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
+    # Rows of whole vectors have no edges; normal path selection folds them with one
+    # kernel per vector class rather than one per width.
+    if ragged_vector:
+        vec = tile.ragged_vector_width(N, x.element_size(), order, use_tma)
+        ragged_vector = N % vec != 0
     itree = None
     if order == "inner_tree" and final and threads_per_row is None:
         itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
@@ -884,11 +895,24 @@ def reduce_row_tile(
         )
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts)
-    cfg = row_config(N, x.element_size() * 8)
+    # Row edges come from the logical row offset, so rows must start at r * N from a
+    # 16-byte aligned base.
+    full_align = _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT)
+    if ragged_vector and not x.is_contiguous():
+        raise ValueError(
+            f"ragged vectors require rows packed at stride N (a contiguous input), got {x.stride()=}"
+        )
+    if ragged_vector and full_align != tile.TRANSFER_ALIGNMENT:
+        raise ValueError(
+            f"ragged vectors require a {tile.TRANSFER_ALIGNMENT}-byte aligned base, "
+            f"got {full_align}-byte alignment"
+        )
+    isz = x.element_size()
+    cfg = row_config(N, isz * 8)
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
-    # the measured optimum across 4/8/16/32.
+    # the measured optimum across 4/8/16/32. Single-field one-thread rows ignore it.
     if unroll is None:
-        unroll = 16 if tile.vec_size(N, x.element_size()) == 1 else 4
+        unroll = 16 if not ragged_vector and tile.vec_size(N, isz) == 1 else 4
     threads_per_row = (
         max(WARP, cfg.threads_per_row) if threads_per_row is None else threads_per_row
     )
@@ -900,15 +924,13 @@ def reduce_row_tile(
     threads_per_block -= (
         threads_per_block % threads_per_row
     )  # rows_per_block must be whole
-    isz = x.element_size()
-    tma_base_aligned = (
-        _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT) == tile.TRANSFER_ALIGNMENT
-    )
+    tma_base_aligned = full_align == tile.TRANSFER_ALIGNMENT
     tma_stride_bytes = x.stride(0) * isz
     tma_stride_aligned = tma_stride_bytes % tile.TRANSFER_ALIGNMENT == 0
     if use_tma is None:
         use_tma = (
             threads_per_row == 1
+            and not ragged_vector
             and tma_base_aligned
             and tma_stride_aligned
             and tma_ok(N, isz, M, x.device)
@@ -932,23 +954,27 @@ def reduce_row_tile(
         final=final,
         unroll=unroll,
         use_tma=use_tma,
+        ragged_vector=ragged_vector,
     )
 
     # Final projects nouts; stage 1 stores one raw buffer per field.
     ndst = nouts if final else trait.nfields
     outs = [torch.empty(M, device=x.device, dtype=dt) for dt in out_dtypes[:ndst]]
-    nchunks = Int32(N // op.vec)
-    nwaves = Int32(math.ceil((N // op.vec) / threads_per_row))
+    # fold_row_aligned derives its own groups and waves.
+    nvec = N // op.vec
+    nchunks = None if ragged_vector else Int32(nvec)
+    nwaves = None if ragged_vector else Int32(math.ceil(nvec / threads_per_row))
     # Declare alignment to retain wide loads (worth 3x), narrowed for storage offsets
-    # outside TMA. Runtime folds share a vector class; TMA bakes its box width.
+    # outside TMA and ragged vectors. Both bake N; other runtime folds share a vector
+    # class.
     align = (
         tile.TRANSFER_ALIGNMENT
-        if use_tma
-        else _L.supported_alignment(x, tile.align_bytes(N, isz))
+        if use_tma or ragged_vector
+        else min(full_align, tile.align_bytes(N, isz))
     )
 
     def _fake():
-        # TMA bakes N; runtime folds share a vector class.
+        # TMA and ragged vectors bake N; other runtime folds share a vector class.
         if use_tma:
             fake_in = cute.runtime.make_fake_tensor(
                 dt,
@@ -960,11 +986,9 @@ def reduce_row_tile(
                 assumed_align=align,
             )
         else:
+            cols = N if ragged_vector else _L.sym(op.vec)
             fake_in = _L.fake_compact(
-                dt,
-                (_L.sym(), _L.sym(op.vec)),
-                stride_order=(1, 0),
-                align=align,
+                dt, (_L.sym(), cols), stride_order=(1, 0), align=align
             )
         return _row_args(
             [fake_in],
