@@ -4,7 +4,7 @@ from typing import Any, NamedTuple
 import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, require_python_fake_mode
 from torch._prims_common import is_contiguous_for_memory_format_or_false
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx._compatibility import compatibility
@@ -137,6 +137,8 @@ class ShapeProp(torch.fx.Interpreter):
         super().__init__(gm)
         if fake_mode is None:
             fake_mode = detect_fake_mode()
+        fake_mode = require_python_fake_mode(fake_mode)
+        self.fake_mode = fake_mode
         if fake_mode is not None:
             from torch._dynamo.utils import deepcopy_to_fake_tensor
 
@@ -150,10 +152,8 @@ class ShapeProp(torch.fx.Interpreter):
             #
             # See torch/_inductor/overrides.py for where this is called upstream of fusion.
             self.fake_module = deepcopy_to_fake_tensor(self.module, fake_mode)
-            self.fake_mode = fake_mode
         else:
             self.fake_module = None
-            self.fake_mode = None
 
         self.real_module = self.module
 
