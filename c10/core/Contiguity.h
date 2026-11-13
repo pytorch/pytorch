@@ -55,8 +55,9 @@ inline static bool _is_contiguous_or_false(
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
     const auto& size_d = sizes[d];
-    // A size-1 dim only matters when its stride is wrong, so check the stride
-    // first to avoid guarding on size_d == 1 when it is not needed.
+    // A dim of size 1 is contiguous for any stride, so when the stride already
+    // statically matches, the size question decides nothing and must not add a
+    // guard. Ask it only when the stride does not match.
     const bool stride_matches =
         TORCH_STATICALLY_KNOWN_TRUE(sym_eq(strides[d], expected_stride)) ||
         TORCH_STATICALLY_KNOWN_TRUE(sym_eq(strides[d], expected_stride_max));

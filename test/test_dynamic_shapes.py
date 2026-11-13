@@ -4442,6 +4442,9 @@ class TestGuardsExpressions(TestCase):
         self.assertExpectedInline(str(bad_stride), """(False, ['Ne((s97//16), 1)'])""")
         size_one = check(16, lambda c: ((c, 8), (7, 1)))
         self.assertExpectedInline(str(size_one), """(True, ['Eq((s97//16), 1)'])""")
+        # c's stride matches, so c == 1 is recorded by the outer stride check.
+        moved = check(16, lambda c: ((3, c, 8), (8, 8, 1)))
+        self.assertExpectedInline(str(moved), """(True, ['Eq(8, 8*((s97//16)))'])""")
 
     def test_remove_symbols_without_guarding(self):
         from torch._functorch.partitioners import _remove_symbols_without_guarding
