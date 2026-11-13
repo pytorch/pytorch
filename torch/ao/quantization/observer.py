@@ -1056,6 +1056,14 @@ class HistogramObserver(UniformQuantizationObserverBase):
             is_dynamic=is_dynamic,
             **kwargs,
         )
+        if (
+            self.qscheme == torch.per_tensor_symmetric
+            and self.reduce_range
+            and self.dtype == torch.quint8
+        ):
+            raise NotImplementedError(
+                "Cannot reduce range for symmetric quantization for quint8"
+            )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.bins = bins
         self.register_buffer("histogram", torch.zeros(self.bins, **factory_kwargs))
