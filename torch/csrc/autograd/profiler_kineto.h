@@ -220,6 +220,10 @@ TORCH_API void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities);
 
+// Stops Python stack tracing for the rest of the profiling session. CPU and
+// device activity collection continue. Resuming is not supported.
+TORCH_API void stopPythonTracer();
+
 TORCH_API void startMemoryProfile();
 TORCH_API void stopMemoryProfile();
 TORCH_API void exportMemoryProfile(const std::string& path);
