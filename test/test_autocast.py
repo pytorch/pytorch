@@ -474,8 +474,10 @@ class TestTorchAutocastDevice(TestCase):
             (out2.mean() + out4.mean()).backward()
 
 
-instantiate_device_type_tests(TestAutocastDevice, globals(), allow_mps=True)
-instantiate_device_type_tests(TestTorchAutocastDevice, globals())
+instantiate_device_type_tests(
+    TestAutocastDevice, globals(), allow_mps=True, allow_xpu=True
+)
+instantiate_device_type_tests(TestTorchAutocastDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

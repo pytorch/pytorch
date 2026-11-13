@@ -12,8 +12,12 @@ import sympy
 import torch
 import torch.fx as fx
 from sympy.core.relational import is_ge, is_gt, is_le, is_lt
-from torch.testing._internal.common_device_type import skipIf
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -23,6 +27,7 @@ from torch.testing._internal.common_utils import (
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
+    IntTrueDiv,
     Max as TorchSymMax,
     Min as TorchSymMin,
     LShift,
@@ -228,6 +233,22 @@ class TestNumbers(TestCase):
         self.assertIs(max(int_oo, sympy.oo), sympy.oo)
         self.assertTrue(-int_oo > -sympy.oo)
         self.assertIs(min(-int_oo, -sympy.oo), -sympy.oo)
+
+        # oo is "bigger" than int_oo, so mixing them in +/- gives the float
+        # infinity. https://github.com/pytorch/pytorch/issues/195464
+        oo = sympy.oo
+        self.assertIs(int_oo + oo, oo)
+        self.assertIs(int_oo + -oo, -oo)
+        self.assertIs(int_oo - oo, -oo)
+        self.assertIs(int_oo - -oo, oo)
+        self.assertIs(-int_oo + oo, oo)
+        self.assertIs(-int_oo + -oo, -oo)
+        self.assertIs(-int_oo - oo, -oo)
+        self.assertIs(-int_oo - -oo, oo)
+        # and + commutes
+        for a in (int_oo, -int_oo):
+            for b in (oo, -oo):
+                self.assertIs(a + b, b + a)
 
 
 class TestCppPrinter(TestCase):
@@ -620,6 +641,8 @@ class TestValueRanges(TestCase):
 
 
 class TestSympyInterp(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
@@ -738,10 +761,25 @@ class TestSympyInterp(TestCase):
                     gm(*args),
                 )
 
+    def test_python_interp_fx_int_truediv(self):
+        x = sympy.Symbol("x", integer=True)
+        y = sympy.Symbol("y", integer=True)
+        expr = IntTrueDiv(x, y)
+
+        def trace_f(px, py):
+            return sympy_interp(PythonReferenceAnalysis, {x: px, y: py}, expr)
+
+        gm = fx.symbolic_trace(trace_f)
+        self.assertEqual(gm(7, 2), 3.5)
+
+class TestSympyInterpDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
-    def test_tensor_interp(self, fn):
+    def test_tensor_interp(self, device, fn):
         # Skip operations not implemented or not applicable for tensors
         if fn in ("div", "truncdiv", "int_truediv", "mod", "round_decimal"):
             return
@@ -776,7 +814,9 @@ class TestSympyInterp(TestCase):
             with self.subTest(args=args):
                 tensor_args = [
                     torch.tensor(
-                        a, dtype=torch.double if isinstance(a, float) else torch.int64
+                        a,
+                        dtype=torch.double if isinstance(a, float) else torch.int64,
+                        device=device,
                     )
                     for a in args
                 ]
@@ -860,6 +900,8 @@ class TestSympySolve(TestCase):
             Eq(FloorDiv(a, b), c),
             # Result is a 'sympy.Or'.
             Ne(FloorDiv(a, b), c),
+            # Relational operation over booleans, not arithmetic expressions.
+            Eq(Eq(a, 0, evaluate=False), Eq(b, 0, evaluate=False), evaluate=False),
         ]
 
         for case in cases:
@@ -1320,6 +1362,7 @@ class TestCCodePrinting(TestCase):
 
 instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)
+instantiate_device_type_tests(TestSympyInterpDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestSympySolve)
 
 

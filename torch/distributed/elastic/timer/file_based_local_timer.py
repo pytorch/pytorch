@@ -134,7 +134,7 @@ class FileTimerClient(TimerClient):
 
     @_retry(max_retries=10, sleep_time=0.1)
     def _open_non_blocking(self) -> io.TextIOWrapper | None:
-        # The server may have crashed or may haven't started yet.
+        # The server may have crashed or may not have started yet.
         # In such case, calling open() in blocking model blocks the client.
         # To avoid such issue, open it in non-blocking mode, and an OSError will
         # be raised if the server is not there.
@@ -150,7 +150,7 @@ class FileTimerClient(TimerClient):
             ) from e
         with file:
             json_request = request.to_json()
-            # Write request with no greater than select.PIPE_BUF is guarantee to be atomic.
+            # Write request with no greater than select.PIPE_BUF is guaranteed to be atomic.
             if len(json_request) > select.PIPE_BUF:
                 raise RuntimeError(
                     f"FileTimerRequest larger than {select.PIPE_BUF} bytes "

@@ -146,7 +146,7 @@ void Work::blockCurrentStream() {
       c10d::cuda::block_stream(std::chrono::milliseconds(0));
 
   getFuture()->addCallback(
-      [handle](c10::ivalue::Future& future) { handle->abort(); });
+      [handle](c10::ivalue::Future& /*future*/) { handle->abort(); });
 }
 
 void Work::abort() {
@@ -157,7 +157,11 @@ c10::intrusive_ptr<c10::ivalue::Future> Work::getFuture(){
     TORCH_CHECK(false, "Work::getFuture not implemented.")}
 
 c10::intrusive_ptr<c10::ivalue::Future> Work::getFutureResult() {
-  TORCH_CHECK(false, "Work::getFutureResult not implemented.")
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "Work::getFutureResult not implemented.")
+}
+
+bool Work::hasFutureResult() const {
+  return false;
 }
 
 void Work::finish(std::exception_ptr exception) {

@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import gc
 import os
 import sys
 import unittest
@@ -506,7 +507,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             self.assertEqual(wrapper.supports_splitting, unwrapped.supports_splitting)
             self.assertEqual(wrapper.supports_coalescing, unwrapped.supports_coalescing)
             self.assertEqual(
-                wrapper.supports_time_estimate, unwrapped.supports_time_estimate
+                wrapper._supports_time_estimate, unwrapped._supports_time_estimate
             )
             self.assertEqual(
                 wrapper.supports_tensor_alloc(device),
@@ -699,6 +700,46 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
                 end = (r + 1) * in_shapes[i][0]
                 expected[start:end] = torch.ones(in_shapes[i]) * (r + 1)
             self.assertTrue(torch.allclose(output, expected))
+
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collective_fingerprint_advisory_fields_do_not_mismatch(self):
+        # https://github.com/pytorch/pytorch/issues/97469
+        pg = self._create_wrapper_pg(with_new_group=True)
+        gc_was_enabled = gc.isenabled()
+        try:
+            # Create divergent tracked GC state across ranks.
+            if self.rank == 0:
+                gc.disable()
+                before = gc.get_count()
+                self._gc_hold = [[] for _ in range(500)]
+                self.assertNotEqual(before, gc.get_count())
+            else:
+                gc.collect()
+
+            tensor = torch.ones(8) * (self.rank + 1)
+            pg.allreduce([tensor]).wait()
+
+            with self.assertRaisesRegex(RuntimeError, ".*") as cm:
+                if self.rank == 0:
+                    pg.allreduce([tensor])
+                else:
+                    pg.reduce([tensor])
+            self._validate_error(
+                exception=cm.exception,
+                op_type="ALLREDUCE" if self.rank == 0 else "REDUCE",
+                rank=self.rank,
+                tensor=tensor,
+            )
+            err = str(cm.exception)
+            self.assertIn("PythonGcCounts=", err)
+            self.assertIn("SteadyClockTimeMs=", err)
+        finally:
+            if hasattr(self, "_gc_hold"):
+                del self._gc_hold
+            if gc_was_enabled:
+                gc.enable()
+            else:
+                gc.disable()
 
     @with_dist_debug_levels(levels=["DETAIL"])
     def test_allgather_into_tensor_coalesced_op_mismatch_debug_mode(self):

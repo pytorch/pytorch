@@ -1,21 +1,16 @@
 #include <torch/csrc/autograd/engine.h>
 
 #include <torch/csrc/autograd/anomaly_mode.h>
-#include <torch/csrc/autograd/autograd.h>
-#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/dynamo/compiled_autograd.h>
 
 #include <ATen/Context.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/DeviceGuard.h>
-#include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -29,6 +24,7 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
@@ -40,6 +36,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -113,6 +110,9 @@ static thread_local bool checkpoint_valid = true;
 
 // Number of nested reentrant backwards calls currently on this thread
 static thread_local int current_depth = 0;
+
+// Whether the current node call has exposed an input gradient buffer.
+static thread_local bool input_grad_buffer_exposed = false;
 
 // For all device threads (i.e. CUDA, XLA), total_depth represents the total
 // nested
@@ -415,6 +415,61 @@ const std::unordered_set<Node*>* get_current_graph_task_nodes_in_graph() {
 
 int get_current_graph_task_id() {
   return current_graph_task ? current_graph_task->id_ : -1;
+}
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+variable_list get_current_input_grad_buffers(Node* node) {
+  auto graph_task = current_graph_task;
+  TORCH_CHECK(
+      graph_task,
+      "input_grad_buffers can only be accessed while autograd is executing "
+      "backward()");
+  auto current_node = get_current_node();
+  TORCH_CHECK(
+      current_node && current_node.get() == node,
+      "input_grad_buffers can only be accessed from the currently executing "
+      "autograd.Function backward()");
+  // Final callbacks run while the GraphTask mutex is held. During reentrant
+  // backward, current_node can still refer to the suspended outer node, so
+  // reject post-processing before acquiring that mutex below.
+  TORCH_CHECK(
+      !graph_task->future_completed_.load(),
+      "input_grad_buffers cannot be accessed during backward post-processing");
+  TORCH_CHECK(
+      !graph_task->thread_locals_.get_grad_mode(),
+      "input_grad_buffers does not support create_graph=True");
+  TORCH_CHECK(
+      !AnomalyMode::is_enabled(),
+      "input_grad_buffers does not support anomaly detection");
+  TORCH_CHECK(
+      !at::globalContext().overrideStaleCaptureStream(),
+      "input_grad_buffers does not support "
+      "set_override_stale_capture_stream(True)");
+
+  const auto opt_producer_stream = node->stream();
+
+  variable_list result(node->next_edges().size());
+  std::lock_guard<std::mutex> lock(graph_task->mutex_);
+  for (const auto i : c10::irange(node->next_edges().size())) {
+    const auto& next = node->next_edge(i);
+    if (!next.is_valid()) {
+      continue;
+    }
+    auto input_buffer_it = graph_task->not_ready_.find(next.function.get());
+    if (input_buffer_it == graph_task->not_ready_.end()) {
+      continue;
+    }
+
+    auto& input_buffer = input_buffer_it->second;
+    const auto opt_consumer_stream =
+        input_buffer.opt_overridden_consumer_stream.has_value()
+        ? input_buffer.opt_overridden_consumer_stream
+        : next.function->stream();
+    result[i] = input_buffer.get_for_direct_accumulation(
+        next.input_nr, opt_producer_stream, opt_consumer_stream);
+    input_grad_buffer_exposed |= result[i].defined();
+  }
+  return result;
 }
 
 bool get_current_graph_task_keep_graph() {
@@ -1048,20 +1103,26 @@ void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
-  return validate_outputs_impl(edges, grads, format_error);
+  validate_outputs_impl(edges, grads, format_error);
 }
 
 void validate_outputs(
     const std::vector<std::optional<InputMetadata>>& input_metadata,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
-  return validate_outputs_impl(input_metadata, grads, format_error);
+  validate_outputs_impl(input_metadata, grads, format_error);
 }
 
 static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
     InputBuffer& inputBuffer) {
+  const bool previous_input_grad_buffer_exposed =
+      std::exchange(input_grad_buffer_exposed, false);
+  auto restore_input_grad_buffer_exposure =
+      c10::make_scope_exit([previous_input_grad_buffer_exposed]() {
+        input_grad_buffer_exposed = previous_input_grad_buffer_exposed;
+      });
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
@@ -1105,6 +1166,42 @@ static variable_list call_function(
   // NOLINTNEXTLINE(bugprone-use-after-move)
   return call_post_hooks(fn, std::move(outputs), inputs, has_post_hooks);
 }
+
+namespace {
+// The error for a disallowed implicit gradient accumulation into output
+// `output_nr` of `slot_fn`, triggered by a gradient from `producer`.
+std::string implicit_grad_accumulation_error(
+    Node* slot_fn,
+    uint32_t output_nr,
+    const Node& producer) {
+  std::ostringstream msg;
+  msg << "Gradients would be summed implicitly into ";
+  auto* acc = dynamic_cast<AccumulateGrad*>(slot_fn);
+  if (acc != nullptr && acc->variable.defined()) {
+    msg << "a leaf tensor of shape " << acc->variable.sym_sizes()
+        << " and dtype " << acc->variable.scalar_type();
+  } else {
+    msg << "output " << output_nr << " of " << slot_fn->name();
+    if (output_nr < slot_fn->num_inputs() &&
+        !slot_fn->input_metadata(output_nr).is_nested_tensor()) {
+      const auto& meta = slot_fn->input_metadata(output_nr);
+      msg << " (shape " << meta.shape_as_dim_vector() << ", dtype "
+          << meta.options().dtype() << ")";
+    }
+  }
+  msg << ": it already received a gradient, and " << producer.name()
+      << " produced another. backward was run with "
+      << "disallow_implicit_grad_accumulation=True, which raises instead of "
+      << "accumulating the gradient contributions of a tensor used more than "
+      << "once. To accumulate them yourself, use a custom autograd Function "
+      << "whose forward returns the tensor once per use and whose backward "
+      << "sums their gradients. See "
+      << "https://pytorch.org/docs/main/notes/autograd.html#disallow-implicit-grad-accumulation "
+      << "for an example. Run under torch.autograd.detect_anomaly() to print "
+      << "the forward traceback of the operation that produced this gradient.";
+  return msg.str();
+}
+} // namespace
 
 void Engine::evaluate_function(
     std::shared_ptr<GraphTask>& graph_task,
@@ -1268,6 +1365,13 @@ void Engine::evaluate_function(
     } else {
       // The function already has a buffer
       auto& input_buffer = not_ready_it->second;
+      if (C10_UNLIKELY(graph_task->disallow_implicit_grad_accumulation_) &&
+          output.defined() && input_buffer.buffer[next.input_nr].defined()) {
+        TORCH_CHECK(
+            false,
+            implicit_grad_accumulation_error(
+                next.function.get(), next.input_nr, fn));
+      }
 
       input_buffer.add(
           next.input_nr,
@@ -1372,7 +1476,12 @@ auto Engine::execute(
     bool keep_graph,
     bool create_graph,
     bool accumulate_grad,
-    const edge_list& outputs) -> variable_list {
+    const edge_list& outputs,
+    bool disallow_implicit_grad_accumulation) -> variable_list {
+  TORCH_CHECK(
+      !input_grad_buffer_exposed,
+      "Calling backward or grad reentrantly after accessing a non-None "
+      "ctx.input_grad_buffers entry is not supported");
   validate_outputs(
       root_edges,
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -1416,6 +1525,12 @@ auto Engine::execute(
       /* reentrant_depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
       /* cpu_ready_queue */ local_ready_queue,
       /* graph_roots */ std::move(temp_roots));
+  // A backward started while another runs (e.g. reentrant checkpoint)
+  // inherits the setting.
+  graph_task->disallow_implicit_grad_accumulation_ =
+      disallow_implicit_grad_accumulation ||
+      (current_graph_task &&
+       current_graph_task->disallow_implicit_grad_accumulation_);
 
   // If we receive a single root, skip creating extra root node
   bool skip_dummy_node = root_edges.size() == 1 && compiled_autograd == nullptr;
@@ -1439,6 +1554,9 @@ auto Engine::execute(
     TORCH_CHECK_NOT_IMPLEMENTED(
         num_threads_in_compiled_autograd.load() == 0,
         "Re-entrant into Compiled Autograd from a parent Compiled Autograd call is not yet supported. Consider disabling Compiled Autograd on the re-entrant call.");
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        !graph_task->disallow_implicit_grad_accumulation_,
+        "disallow_implicit_grad_accumulation=True is not supported with Compiled Autograd.");
     // Allows us to assert no other threads are in backwards
     CompiledAutogradThreadingDebugCheck _thread_check;
     // see [Note: Compiled Autograd]

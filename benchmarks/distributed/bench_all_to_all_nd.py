@@ -236,7 +236,6 @@ class AllToAllNdBenchmark(MultiProcContinuousTest):
             schedule=step_schedule,
             record_shapes=True,
             with_stack=True,
-            with_modules=True,
         ) as prof:
             for _ in range(profile_steps):
                 symm_mem.all_to_all_nd(

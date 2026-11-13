@@ -132,7 +132,7 @@ void c10_cuda_check_implementation(
       ? c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().has_failed()
       : false;
 
-  if (C10_LIKELY(cuda_error == cudaSuccess && !cuda_kernel_failure)) {
+  if (cuda_error == cudaSuccess && !cuda_kernel_failure) [[likely]] {
     return;
   }
 

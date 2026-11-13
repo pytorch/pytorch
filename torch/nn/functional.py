@@ -1,6 +1,7 @@
 """Functional interface."""
 
 import dataclasses
+import enum
 import importlib
 import math
 import warnings
@@ -36,6 +37,22 @@ from torch.overrides import (
 # Set visibility of the bound enums to this module
 ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
+
+
+class ScalingAlgorithm(enum.IntEnum):
+    r"""Algorithm used to compute and encode block scales for :func:`quantize_tensor`."""
+
+    MXFP_E8M0_RU = 0
+    r"""MXFP E8M0 round-up scaling, described in `Algorithm 1
+    <https://arxiv.org/pdf/2506.08027>`_.
+
+    The block's maximum absolute input value, divided by the largest
+    representable quantized value, is rounded up to E8M0. If any input in the
+    block is ``NaN`` or ``+/-Inf``, the scale is E8M0 ``NaN`` (byte ``0xff``).
+    An all-zero block instead receives the smallest E8M0 scale,
+    :math:`2^{-127}` (byte ``0x00``), because E8M0 has no zero encoding.
+    """
+
 
 if TYPE_CHECKING:
     from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
@@ -1125,6 +1142,16 @@ def lp_pool3d(
     padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool3d` for details.
+
+    Args:
+        input (Tensor): the input tensor.
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the pooling window.
+        stride (int or tuple of int, optional): the stride between windows.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -1174,6 +1201,16 @@ def lp_pool2d(
     padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool2d` for details.
+
+    Args:
+        input (Tensor): the input tensor.
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the pooling window.
+        stride (int or tuple of int, optional): the stride between windows.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -1220,6 +1257,16 @@ def lp_pool1d(
     padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool1d` for details.
+
+    Args:
+        input (Tensor): the input tensor.
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int): the size of the pooling window.
+        stride (int or tuple of int, optional): the stride between windows.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -3701,6 +3748,63 @@ def binary_cross_entropy_with_logits(
     )
 
 
+def _linear_cross_entropy_chunked_applies(
+    input: Tensor,
+    linear_weight: Tensor,
+    target: Tensor,
+    linear_bias: Tensor | None,
+    reduction: str,
+    label_smoothing: float,
+    options: "LinearCrossEntropyOptions | None",
+    *,
+    warn: bool = True,
+) -> bool:
+    """Whether :func:`linear_cross_entropy` routes to the chunked custom ops.
+
+    Warns when ``options`` was supplied but cannot be honoured, so a caller
+    whose options are being ignored hears about it. Kept as one function
+    because the answer is needed in more than one place: the dispatch below,
+    that warning, and the OpInfo sample filter for the native overrides, which
+    has to predict which samples ever reach the ops -- that caller passes
+    ``warn=False``, since it is asking rather than dispatching.
+    """
+    if options is None:
+        return False
+    # K-dim loss falls back: the chunked op softmaxes over the full
+    # linear_weight.shape[0], not per-position over num_classes.
+    out_features = linear_weight.shape[1:-1]
+    # The chunked op has no gradient slot for the target, so a probability
+    # target requiring grad falls back to the reference path.
+    logits_shape = (*input.shape[:-1], linear_weight.shape[0], *out_features)
+    chunkable_prob_target = (
+        target.shape == logits_shape
+        and target.dtype == input.dtype
+        and not (target.requires_grad and torch.is_grad_enabled())
+    )
+    applies = (
+        reduction in {"mean", "sum", "none"}
+        and label_smoothing == 0.0
+        and (target.dtype == torch.int64 or chunkable_prob_target)
+        and not out_features
+        and not torch.jit.is_tracing()
+    )
+    if not applies and warn:
+        warnings.warn(
+            "linear_cross_entropy: ``options`` ignored; chunked path needs "
+            "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
+            " == int64 (or a probability target with dtype matching input and"
+            " requires_grad == False), out_features == (). Got "
+            f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
+            f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
+            f", tracing={torch.jit.is_tracing()}"
+            f", target.requires_grad={target.requires_grad}"
+            f", linear_bias.shape="
+            f"{tuple(linear_bias.shape) if linear_bias is not None else None}.",
+            stacklevel=3,
+        )
+    return applies
+
+
 def linear_cross_entropy(
     input: Tensor,
     linear_weight: Tensor,
@@ -3717,11 +3821,19 @@ def linear_cross_entropy(
 
     The statement::
 
-      loss = linear_cross_entropy(input, linear_weight, target, **kwargs)
+      loss = linear_cross_entropy(
+          input, linear_weight, target, linear_bias=linear_bias, **kwargs
+      )
 
     is equivalent to the following reference implementation of linear_cross_entropy::
 
-      logits = linear(input, linear_weight)
+      C, *out_features, in_features = linear_weight.shape
+      logits = linear(
+          input,
+          linear_weight.reshape(-1, in_features),
+          None if linear_bias is None else linear_bias.reshape(-1),
+      )
+      logits = logits.reshape(*input.shape[:-1], C, *out_features)
       loss = cross_entropy(logits, target, **kwargs)
 
     provided that :attr:`ignore_index` is not explicitly set to `None`
@@ -3735,10 +3847,10 @@ def linear_cross_entropy(
         linear_weight (Tensor) : linear weight.
         target (Tensor) : Ground truth class indices or class probabilities.
             With ``options != None``, class probabilities use the chunked
-            path for ``reduction`` ``'mean'`` / ``'sum'`` when the target
-            dtype matches the ``input`` dtype and the target does not
-            require grad; other probability-target configurations fall
-            back to the reference implementation with a warning
+            path when the target dtype matches the ``input`` dtype and the
+            target does not require grad; other probability-target
+            configurations fall back to the reference implementation with a
+            warning
             (gradients w.r.t. the target are only available on the
             reference path).
         linear_bias (Tensor, optional): bias added to the linear
@@ -3747,7 +3859,8 @@ def linear_cross_entropy(
             With ``options != None``, K-dimensional bias
             (``out_features != ()``) falls back to the reference
             implementation with a warning; the chunked path supports
-            only ``(C,)``-shaped bias. Default: ``None``.
+            ``(C,)``-shaped bias with both class-index and probability
+            targets. Default: ``None``.
         weight (Tensor, optional): a manual rescaling weight given to each class.
         reduction (str, optional): Specifies the reduction to apply to
             the output: ``'none'`` | ``'mean'`` |
@@ -3806,7 +3919,9 @@ def linear_cross_entropy(
         The reference path (``options=None``) supports all of the above.
 
     Shape:
-        - Input: :math:`(in_features)` or :math:`(N, in\_features)`.
+        - Input: :math:`(in_features)` or :math:`(N, in\_features)`. There is
+          no :math:`(B, T, in\_features)` form: flatten sequence inputs to
+          :math:`(N, in\_features)` with target :math:`(N)`.
         - Linear weight: :math:`(C, in\_features)` or :math:`(C, d_1,
           ..., d_K, in\_features)` with :math:`K \geq 1` in the case of
           K-dimensional loss.  Note: multi-dimensional weights (K > 0)
@@ -3889,47 +4004,11 @@ def linear_cross_entropy(
             "ignore_index cannot be specified when target contains probabilities"
         )
     ignore_index = ignore_index if ignore_index is not None else -100
-
-    # Probability targets chunk on the scalar reductions only; the chunked
-    # op has no gradient slot for the target, so a target requiring grad
-    # falls back to the reference path.
-    chunkable_prob_target = (
-        target_contains_probabilities
-        and reduction in {"mean", "sum"}
-        and target.dtype == input.dtype
-        and not (target.requires_grad and torch.is_grad_enabled())
-    )
-    # K-dim loss falls back: the chunked op softmaxes over the full
-    # linear_weight.shape[0], not per-position over num_classes.
-    if options is not None and (
-        out_features
-        or reduction not in {"mean", "sum", "none"}
-        or label_smoothing != 0.0
-        or (target.dtype != torch.int64 and not chunkable_prob_target)
-        or torch.jit.is_tracing()
-    ):
-        warnings.warn(
-            "linear_cross_entropy: ``options`` ignored; chunked path needs "
-            "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
-            " == int64 (or a probability target with reduction in {'mean','sum'},"
-            " dtype matching input, and requires_grad == False), out_features"
-            " == (). Got "
-            f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
-            f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
-            f", tracing={torch.jit.is_tracing()}"
-            f", target.requires_grad={target.requires_grad}"
-            f", linear_bias.shape="
-            f"{tuple(linear_bias.shape) if linear_bias is not None else None}.",
-            stacklevel=2,
-        )
-
-    if (
-        options is not None
-        and reduction in {"mean", "sum", "none"}
-        and label_smoothing == 0.0
-        and (target.dtype == torch.int64 or chunkable_prob_target)
-        and not out_features
-        and not torch.jit.is_tracing()
+    # ``options is not None`` is redundant with the predicate, which returns
+    # False for None -- it is here so the type checker narrows ``options`` for
+    # the ``_adjust`` call below.
+    if options is not None and _linear_cross_entropy_chunked_applies(
+        input, linear_weight, target, linear_bias, reduction, label_smoothing, options
     ):
         if input.dim() == 2:
             num_batches = input.shape[0]
@@ -5263,8 +5342,13 @@ def interpolate(  # noqa: F811
             )
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
+        # Use the native path only for non-HIP CUDA; preserve fallbacks elsewhere.
         if not torch.jit.is_scripting():
-            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+            if (
+                not input.is_cpu
+                and not (input.is_cuda and torch.version.hip is None)
+                and torch.are_deterministic_algorithms_enabled()
+            ):
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
@@ -5284,7 +5368,9 @@ def interpolate(  # noqa: F811
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
         if not torch.jit.is_scripting():
-            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+            if (
+                input.device.type not in ("cpu", "mps")
+            ) and torch.are_deterministic_algorithms_enabled():
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
@@ -5309,6 +5395,22 @@ def interpolate(  # noqa: F811
                 align_corners,
                 scale_factors,
             )
+        # Use two nested guards so TorchScript does not analyze the runtime
+        # deterministic-algorithms query or the dynamic import below.
+        if not torch.jit.is_scripting():
+            # Select the decomposition during forward so autograd records its
+            # deterministic backward. The native CPU backward is deterministic.
+            if (
+                input.device.type not in ("cpu", "mps")
+            ) and torch.are_deterministic_algorithms_enabled():
+                # The decomposition accumulates through deterministic index_put.
+                # Import it lazily: a top-level import creates a cycle, while a
+                # nested import statement is unsupported by TorchScript.
+                return importlib.import_module(
+                    "torch._decomp.decompositions"
+                ).upsample_bicubic2d_vec(
+                    input, output_size, align_corners, scale_factors
+                )
         return torch._C._nn.upsample_bicubic2d(
             input,
             # pyrefly: ignore [bad-argument-type]
@@ -5519,8 +5621,8 @@ def grid_sample(
     which are used to interpolate the output value ``output[n, :, h, w]``.
     In the case of 5D inputs, ``grid[n, d, h, w]`` specifies the
     ``x``, ``y``, ``z`` pixel locations for interpolating
-    ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest`` or
-    ``bilinear`` interpolation method to sample the input pixels.
+    ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest``,
+    ``bilinear`` or ``bicubic`` interpolation method to sample the input pixels.
 
     :attr:`grid` specifies the sampling pixel locations normalized by the
     :attr:`input` spatial dimensions. Therefore, it should have most values in
@@ -5559,10 +5661,11 @@ def grid_sample(
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
             ``'bilinear'`` | ``'nearest'`` | ``'bicubic'``. Default: ``'bilinear'``
-            Note: ``mode='bicubic'`` supports only 4-D input.
             When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
             used internally will actually be trilinear. However, when the input is 4-D,
-            the interpolation mode will legitimately be bilinear.
+            the interpolation mode will legitimately be bilinear. Likewise
+            ``mode='bicubic'`` is tricubic on a 5-D input, the separable cubic kernel
+            extended over the third axis; CPU, XPU and CUDA, ROCm included, implement the 5-D case.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -7133,10 +7236,10 @@ def grouped_mm(
 
     Computes a grouped matrix multiply that shares weight shapes across experts but
     allows jagged token counts per expert, which is common in Mixture-of-Experts
-    (MoE) layers. Both ``mat_a`` and ``mat_b`` must be 2D or 3D tensors that already
-    satisfy the physical layout restrictions of grouped GEMM kernels (e.g., row-major
-    ``mat_a`` and column-major ``mat_b`` for FP8 inputs). Inputs are currently
-    expected to be ``torch.bfloat16`` values on CUDA devices with :math:`SM \ge 80`.
+    (MoE) layers. Both ``mat_a`` and ``mat_b`` must be 2D or 3D tensors that satisfy
+    the physical layout restrictions of grouped GEMM kernels. Inputs may be
+    ``torch.float16``, ``torch.bfloat16``, or ``torch.float32`` values. CUDA
+    execution is supported on devices with :math:`SM \ge 80`.
 
     Args:
         mat_a: Left operand. When 2D, its leading dimension is sliced into groups
@@ -7154,11 +7257,9 @@ def grouped_mm(
             of group ``i`` and ``offs[-1]`` must be strictly less than the total
             length of that operand's sliced dimension; elements beyond ``offs[-1]``
             are ignored.
-        bias: Optional tensor that is added to the grouped outputs. Bias is not
-            jagged and must be broadcastable to the result shape of each group.
-        out_dtype: Optional dtype that controls the accumulation/output dtype.
-            Passing ``torch.float32`` accumulates BF16 inputs in FP32 while keeping
-            the grouped GEMM API non-differentiable.
+        bias: Reserved for future use. It must currently be ``None``.
+        out_dtype: Optional output dtype. When provided, it must match the dtype of
+            ``mat_a``.
 
     Returns:
         A tensor containing the concatenated results of each per-group GEMM with
@@ -7192,6 +7293,222 @@ def _enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
     return [li.value for li in l]
 
 
+def quantize_tensor(
+    input: Tensor,
+    *,
+    dim: tuple[int, int],
+    scaling_type: ScalingType,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: ScalingAlgorithm,
+    swizzle_type: SwizzleType,
+    scaling_type_use_square_block_size: bool = False,
+) -> tuple[Tensor, Tensor]:
+    r"""quantize_tensor(input, *, dim, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor]
+
+    Subdivide ``input`` into 2D regions of ``scaling_type`` along the axes
+    specified in ``dim``, then quantize according to ``scaling_algorithm``
+    and ``qdata_dtype`` and return ``(qdata, scale)`` for use with
+    :func:`scaled_mm`.
+    Currently supported formats: ``mxfp8``. See the code samples at the bottom
+    of this docblock for how to configure supported formats.
+
+    A swizzled scale layout is modeled as packed ``[1, L]`` over the requested
+    quantization dims, with ``L`` being swizzle-specific.  For example, for an input
+    of shape ``(B, M, K)`` and ``dim=(1, 2)`` and
+    ``swizzle_type=SwizzleType.SWIZZLE_32_4_4``, the output scale shape will be
+    ``(B, 1, ceil_div(M, 128) * ceil_div(K, 128) * 32 * 16)``.
+
+    Both outputs preserve the axis positions of the input. For both outputs,
+    the quantization axes from ``dim`` form contiguous slices when viewed
+    in ``dim=(outer, inner)`` order, with the inner dim varying the fastest
+    and outer next-fastest. For example:
+
+    - ``mxfp8`` unswizzled quantization of input shaped ``(M, K)`` with
+      strides ``(K, 1)`` and ``dim=(0, 1)`` will result in ``qdata`` with
+      shape ``(M, K)`` and strides ``(K, 1)``, and ``scale`` with
+      shape ``(M, K // 32)`` and strides ``(K // 32, 1)``.
+    - ``mxfp8`` swizzled quantization of input shaped ``(M, K)`` with
+      strides ``(K, 1)`` and ``dim=(1, 0)`` will result in ``qdata`` with
+      shape ``(M, K)`` and strides ``(1, M)``, and ``scale`` with
+      shape ``(L, 1)`` and strides ``(1, L)``, with ``L`` being
+      swizzle-specific.
+    - ``mxfp8`` swizzled quantization of input shaped ``(K, M)`` with
+      strides ``(1, K)`` and ``dim=(0, 1)`` will result in ``qdata`` with
+      shape ``(K, M)`` and strides ``(M, 1)``, and ``scale`` with
+      shape ``(1, L)`` and strides ``(L, 1)``, with ``L`` being
+      swizzle-specific.
+    - ``mxfp8`` swizzled quantization of input shaped ``(B, K, N)`` with
+      strides ``(N * K, 1, K)`` and ``dim=(2, 1)`` will result in ``qdata``
+      with shape ``(B, K, N)`` and strides ``(N * K, 1, K)`` and ``scale``
+      with shape ``(B, L, 1)`` and strides ``(L, 1, L)``, with ``L`` being
+      swizzle-specific.
+
+    Automatic autograd is not supported for this op, users are encouraged to define
+    their own derivative.
+
+    This implementation currently requires an NVIDIA SM100 or newer GPU and the optional
+    ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages. The hardware support may
+    expand in the future.
+
+    Args:
+        input (Tensor): Tensor with at least two dimensions and dtype
+          ``float16``, ``bfloat16``, or ``float32``.
+        dim (tuple[int, int]): Ordered outer and inner quantization axes.
+        scaling_type (ScalingType): The size of the local region corresponding to
+          a single inner scale, as well as the layout of the output inner scale.
+          Currently supported values: ``ScalingType.BlockWise1x32``.
+        qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
+          data. Currently supported values: ``torch.float8_e4m3fn``. Special value
+          handling is format dependent. For example, for ``mxfp8`` an input
+          ``NaN`` or ``Inf`` makes every quantized value sharing its scale ``NaN``;
+          all-zero blocks quantize to zero.
+        scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
+          local region of the ``input`` (with its size specified by ``scaling_type``)
+          to the inner scale and inverse inner scale corresponding to that region.
+          Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
+        swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
+          Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
+          ``SwizzleType.SWIZZLE_32_4_4``.
+        scaling_type_use_square_block_size (bool, optional): When ``True``,
+          modify the size of the local region corresponding to a single scale
+          value to be a square (for example, modify ``1x32`` to be ``32x32``).
+          Note that the output scale size is still controlled by ``scaling_type``
+          and ``swizzle_type``. If this flag is ``True``, currently only
+          ``SwizzleType.SWIZZLE_32_4_4`` is supported. Default: ``False``.
+
+    Returns:
+        tuple[Tensor, Tensor]: Quantized data in the logical input shape and
+          scales with the dtype and layout honoring the ``scaling_algorithm``,
+          ``scaling_type``, and ``swizzle_type`` settings. For example, for
+          ``mxfp8`` on a 2D tensor with ``dim=(0, 1)``, unswizzled scales have
+          shape ``(rows, cols // 32)``; swizzled scales have shape ``(1, L)``, where
+          ``L = 512 * ceil(rows / 128) * ceil(cols / 128)``. Batch axes retain
+          their positions in both results.
+
+    Examples::
+
+        >>> # xdoctest: +SKIP("requires NVIDIA SM100+ and CuTeDSL")
+        >>> import torch
+        >>> import torch.nn.functional as F
+        >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        >>> mxfp8_kwargs = dict(
+        ...     scaling_type=F.ScalingType.BlockWise1x32,
+        ...     qdata_dtype=torch.float8_e4m3fn,
+        ...     scaling_algorithm=F.ScalingAlgorithm.MXFP_E8M0_RU,
+        ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
+        ... )
+        >>> # mxfp8 dim-k with swizzled scales
+        >>> qdata_k, scale_k = F.quantize_tensor(x, dim=(-2, -1), **mxfp8_kwargs)
+        >>> # mxfp8 dim-m on the same tensor
+        >>> qdata_m, scale_m = F.quantize_tensor(x, dim=(-1, -2), **mxfp8_kwargs)
+        >>> # mxfp8 dim-k with scales shared over 32x32 blocks
+        >>> qdata_square, scale_square = F.quantize_tensor(
+        ...     x, dim=(-2, -1), **mxfp8_kwargs, scaling_type_use_square_block_size=True
+        ... )
+        >>> # mxfp8 dim-k with unswizzled scales
+        >>> plain_kwargs = {**mxfp8_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
+        >>> qdata_plain, scale_plain = F.quantize_tensor(x, dim=(-2, -1), **plain_kwargs)
+    """
+    # TODO(future PR): add torch.export support for the native quantization op.
+    outputs = torch.ops.aten._quantize_tensor.default(
+        input,
+        dim=dim,
+        scaling_type=scaling_type.value,
+        qdata_dtype=qdata_dtype,
+        scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
+        swizzle_type=swizzle_type.value,
+        scaling_type_use_square_block_size=scaling_type_use_square_block_size,
+    )
+    return outputs[0], outputs[1]
+
+
+def quantize_tensor_dual(
+    input: Tensor,
+    *,
+    dim: tuple[int, int],
+    scaling_type: ScalingType,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: ScalingAlgorithm,
+    swizzle_type: SwizzleType,
+    scaling_type_use_square_block_size: bool = False,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    r"""quantize_tensor_dual(input, *, dim, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
+
+    Subdivide ``input`` into 2D regions of ``scaling_type`` along the axes
+    specified in ``dim`` as well as ``dim[::-1]``, then quantize according to
+    ``scaling_algorithm`` and ``qdata_dtype`` and return
+    ``(qdata0, scale0, qdata1, scale1)`` for use with :func:`scaled_mm`.
+
+    See :func:`quantize_tensor` to quantize along only one direction.
+
+    Automatic autograd is not supported for this op, users are encouraged to define
+    their own derivative.
+
+    This implementation currently requires an NVIDIA SM100 or newer GPU and the optional
+    ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages. The hardware support may
+    expand in the future.
+
+    Args:
+        input (Tensor): Tensor with at least two dimensions and dtype
+          ``float16``, ``bfloat16``, or ``float32``.
+        dim (tuple[int, int]): Ordered outer and inner quantization axes.
+        scaling_type (ScalingType): The size of the local region corresponding to
+          a single inner scale, as well as the layout of the output inner scale.
+          Currently supported values: ``ScalingType.BlockWise1x32``.
+        qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
+          data. Currently supported values: ``torch.float8_e4m3fn``. Special value
+          handling is format dependent. For example, for ``mxfp8`` an input
+          ``NaN`` or ``Inf`` makes every quantized value sharing its scale ``NaN``;
+          all-zero blocks quantize to zero.
+        scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
+          local region of the ``input`` (with its size specified by ``scaling_type``)
+          to the inner scale and inverse inner scale corresponding to that region.
+          Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
+        swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
+          Currently supported values: ``SwizzleType.SWIZZLE_32_4_4``.
+        scaling_type_use_square_block_size (bool, optional): When ``True``,
+          modify the size of the local region corresponding to a single scale
+          value to be a square (for example, modify ``1x32`` to be ``32x32``).
+          Note that the output scale size is still controlled by ``scaling_type``
+          and ``swizzle_type``. Note: currently only ``False`` is supported.
+          Default: ``False``.
+
+    Returns:
+        tuple[Tensor, Tensor, Tensor, Tensor]: ``(qdata, scale, qdata_reverse, scale_reverse)``.
+          For example, for input of shape ``(M, K)`` and the
+          ``mxfp8`` format, both quantized tensors have shape ``(M, K)``.
+          When ``dim=(0, 1)``, the dim-K result is contiguous; the dim-M result has strides
+          ``(1, M)``. Their E8M0 scales have shapes ``(1, L)`` and
+          ``(L, 1)``, respectively, where
+          ``L = 512 * ceil(M / 128) * ceil(K / 128)``.
+
+    Examples::
+
+        >>> # xdoctest: +SKIP("requires NVIDIA SM100+ and CuTeDSL")
+        >>> import torch
+        >>> import torch.nn.functional as F
+        >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        >>> mxfp8_kwargs = dict(
+        ...     scaling_type=F.ScalingType.BlockWise1x32,
+        ...     qdata_dtype=torch.float8_e4m3fn,
+        ...     scaling_algorithm=F.ScalingAlgorithm.MXFP_E8M0_RU,
+        ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
+        ... )
+        >>> # mxfp8 dim-km with swizzled scales
+        >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, dim=(-2, -1), **mxfp8_kwargs)
+    """
+    outputs = torch.ops.aten._quantize_tensor_dual.default(
+        input,
+        dim=dim,
+        scaling_type=scaling_type.value,
+        qdata_dtype=qdata_dtype,
+        scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
+        swizzle_type=swizzle_type.value,
+        scaling_type_use_square_block_size=scaling_type_use_square_block_size,
+    )
+    return outputs[0], outputs[1], outputs[2], outputs[3]
+
+
 def scaled_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -7213,6 +7530,21 @@ def scaled_mm(
     Applies a scaled matrix-multiply, mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
+    Packed MNxK4 scaling uses matching ``BlockWise1x32`` or ``BlockWise1x128`` recipes
+    with ``SWIZZLE_MN_K4`` on both inputs. Inputs must be ``float8_e4m3fn`` or
+    ``float8_e5m2``, with at least one ``float8_e4m3fn`` input.
+    It requires cuBLASLt 13.8.1 or later
+    (bundled with CUDA 13.4) on SM10.x/SM11.x, and supports bfloat16, float16, and
+    float32 outputs. Bias requires bfloat16 or float16 output with matching dtype.
+    ``use_fast_accum`` is forwarded to cuBLASLt for MNxK4.
+    MNxK4 requires row-major ``mat_a`` and column-major ``mat_b``.
+    Scales are contiguous ``float8_e8m0fnu`` tensors with 16-byte-aligned data pointers.
+    For block size ``B`` (32 or 128) and outer extent ``O`` (M for A, N for B),
+    the physical row-major byte order is ``[ceil(K / (4 * B)), round_up(O, 4), 4]``:
+    four consecutive K-block scales are packed together for each outer position.
+    Each scale buffer has ``16 * ceil(O / 4) * ceil(K / (4 * B))`` elements.
+    M need not be a multiple of four; K and N must be divisible by 16. Padding entries are ignored.
+
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
         scale_recipe_a: Enum describing how mat_a has been scaled
@@ -7222,8 +7554,11 @@ def scaled_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         output_dtype: dtype used for the output tensor
-        contraction_dim: describe which dimensions are :math:`K` in the matmul.
-        use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+        contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
+            dimensions are also accepted).
+        use_fast_accum: Request tensor-core fast accumulation for supported recipes.
+            Hopper ``BlockWise1x128``/``BlockWise128x128`` require ``False``;
+            MNxK4 forwards the flag to cuBLASLt.
     """
 
     scale_a = _expand_single_value(scale_a)
@@ -7251,6 +7586,133 @@ def scaled_mm(
     return out
 
 
+def scaled_addmm(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor:
+    r"""Compute a scaled matrix product and add it to ``input``.
+
+    The result is
+
+    .. math::
+        \mathrm{out} = \beta\,\mathrm{input} +
+        \alpha\,\mathrm{scaled\_mm}(\mathrm{mat1}, \mathrm{mat2}).
+
+    The scaling recipes and swizzles have the same meaning as in
+    :func:`scaled_mm`. ``input`` must be a canonically contiguous, 16-byte-aligned
+    matrix with shape ``(mat1.size(0), mat2.size(1))`` and dtype ``float16``, ``bfloat16``, or
+    ``float32``. The result has the dtype of ``input``; there is no separate
+    output dtype. CUDA recipes are supported when their selected implementation
+    uses cuBLASLt; non-cuBLAS fallbacks and ROCm are not supported.
+
+    Args:
+        input: Matrix accumulated into the scaled matrix product.
+        mat1: Left matrix operand.
+        mat2: Right matrix operand.
+        scale_a: Tensor containing decoding scaling factors for ``mat1``.
+        scale_recipe_a: Scaling recipe for ``mat1``.
+        scale_b: Tensor containing decoding scaling factors for ``mat2``.
+        scale_recipe_b: Scaling recipe for ``mat2``.
+        swizzle_a: Swizzling pattern, if any, for ``scale_a``.
+        swizzle_b: Swizzling pattern, if any, for ``scale_b``.
+        contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
+            dimensions are also accepted).
+        use_fast_accum: Whether to enable tensor-core fast accumulation.
+        beta: Multiplier for ``input``.
+        alpha: Multiplier for the scaled matrix product.
+
+    .. note::
+        Fusing the addition removes an intermediate output rounding step, so
+        the result need not be bitwise equal to a separate scaled matrix
+        multiply followed by an addition.
+    """
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
+
+    return torch._scaled_addmm(
+        input,
+        mat1,
+        mat2,
+        scale_a,
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
+        scale_b,
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
+        contraction_dim,
+        beta=beta,
+        alpha=alpha,
+        use_fast_accum=use_fast_accum,
+    )
+
+
+def scaled_addmm_(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor:
+    r"""In-place version of :func:`scaled_addmm`.
+
+    This function accumulates in ``input.dtype`` (``float16``, ``bfloat16``, or
+    ``float32``), preserves the storage of ``input``, and returns ``input``. A
+    serialized WGRAD loop can create the first contribution with
+    :func:`scaled_mm`, then use ``scaled_addmm_`` for later contributions.
+
+    .. warning::
+        In-place accumulation is not safe for concurrent writers. Callers must
+        serialize writes or provide external coordination.
+    """
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
+
+    return torch._scaled_addmm_(
+        input,
+        mat1,
+        mat2,
+        scale_a,
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
+        scale_b,
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
+        contraction_dim,
+        beta=beta,
+        alpha=alpha,
+        use_fast_accum=use_fast_accum,
+    )
+
+
 def scaled_grouped_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -7273,6 +7735,41 @@ def scaled_grouped_mm(
     Applies a grouped scaled matrix-multiply, grouped_mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
+    When ``scale_recipe_a`` and ``scale_recipe_b`` are each the single recipe ``TensorWise``,
+    each float32 scale contains either a single value shared by all groups
+    or one value per group in a contiguous 1D tensor. Each input may use either scale layout.
+    Both inputs must be ``float8_e4m3fn`` or ``float8_e5m2``, with at least one ``float8_e4m3fn`` input.
+    At most 1024 groups are supported.
+    TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored.
+    It supports bfloat16, float16, and float32 outputs.
+
+    Hopper block scaling requires CUDA 13.4 or later on SM9.x and supports recipe pairs
+    1x128/1x128, 1x128/128x128, and 128x128/1x128 with float32 scales and two
+    ``float8_e4m3fn`` inputs. Each group packs
+    its scales separately. For outer extent ``O`` (M for A, N for B), let ``L = ceil(K / 128)``.
+    A 1x128 group stores ``O * L`` values with the outer dimension contiguous; a 128x128
+    group stores ``round_up(L, 4) * ceil(O / 128)`` values with the padded K-block dimension
+    contiguous. Scales are contiguous, with 16-byte-aligned group starts. A 3D operand uses
+    shape ``(groups, values_per_group)``; a 2D operand uses a 1D tensor concatenating
+    the flattened group scales in offset order, covering only the groups selected by ``offs``. M and N must be multiples
+    of 4. These recipes support bfloat16, float16, and float32 outputs and require
+    ``use_fast_accum=False``. Swizzle metadata must be omitted or ``NO_SWIZZLE``.
+
+    Packed MNxK4 scaling uses the recipes, byte order, element count, and alignment
+    described in :func:`scaled_mm`, independently for each group. A 3D operand uses
+    scale shape ``(groups, elements_per_group)``; a 2D operand concatenates each
+    group's flattened scale buffer in offset order. Each group starts at a 16-byte
+    boundary. Per-group M need not be a multiple of four. K and the total N
+    dimension must be divisible by 16, including when ``offs`` splits N. Group output
+    starts must be 16-byte aligned: starting N offsets must be multiples of 8
+    for bfloat16/float16 output or 4 for float32 output. Invalid group output
+    alignment triggers a device assertion. It requires
+    cuBLASLt 13.8.1 or later (bundled with CUDA 13.4) on SM10.x/SM11.x and accepts
+    bfloat16, float16, and float32 outputs. ``use_fast_accum`` is forwarded to cuBLASLt
+    for MNxK4.
+
+    Other recipes require bfloat16 output.
+
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
         scale_recipe_a: Enum describing how mat_a has been scaled
@@ -7282,9 +7779,13 @@ def scaled_grouped_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         offs: optional offsets into the source tensors denoting group start indices
-        output_dtype: dtype used for the output tensor
+        output_dtype: output dtype; the cuBLASLt recipes described above (including ``TensorWise``
+          alone on both inputs) accept bfloat16, float16, or float32; other recipes require bfloat16
         contraction_dim: describe which dimensions are :math:`K` in the matmul.
-        use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+        use_fast_accum: Request tensor-core fast accumulation for cuBLASLt recipes
+            (including MNxK4) and CUDA RowWise scaling. Hopper
+            ``BlockWise1x128``/``BlockWise128x128`` require ``False``.
+            MSLK recipes and ROCm ignore this flag.
     """
 
     scale_a = _expand_single_value(scale_a)

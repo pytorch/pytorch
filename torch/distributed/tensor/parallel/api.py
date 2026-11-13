@@ -22,7 +22,7 @@ def parallelize_module(  # type: ignore[return]
     Apply Tensor Parallelism in PyTorch by parallelizing modules or sub-modules based on a user-specified plan.
 
     We parallelize module or sub_modules based on a parallelize_plan. The parallelize_plan contains
-    :class:`ParallelStyle`, which indicates how user wants the module or sub_module
+    :class:`~torch.distributed.tensor.parallel.ParallelStyle`, which indicates how user wants the module or sub_module
     to be parallelized.
 
     User can also specify different parallel style per module fully qualified name (FQN).
@@ -36,11 +36,11 @@ def parallelize_module(  # type: ignore[return]
         device_mesh (:class:`DeviceMesh`, optional):
             Object which describes the mesh topology of devices for the DTensor.
             If not specified, the call must be under a DeviceMesh context.
-        parallelize_plan (Union[:class:`ParallelStyle`, Dict[str, :class:`ParallelStyle`]], optional):
+        parallelize_plan (Union[:class:`~torch.distributed.tensor.parallel.ParallelStyle`, Dict[str, :class:`~torch.distributed.tensor.parallel.ParallelStyle`]], optional):
             The plan used to parallelize the module. It can be either a
-            :class:`ParallelStyle` object which contains how we prepare
+            :class:`~torch.distributed.tensor.parallel.ParallelStyle` object which contains how we prepare
             input/output for Tensor Parallelism or it can be a dict of module
-            FQN and its corresponding :class:`ParallelStyle` object. If not
+            FQN and its corresponding :class:`~torch.distributed.tensor.parallel.ParallelStyle` object. If not
             specified, the call will do nothing at the moment.
     Keyword args:
         src_data_rank (int, optional): the rank of the source data for the logical/global tensor, it is used by
@@ -53,7 +53,11 @@ def parallelize_module(  # type: ignore[return]
 
     Example::
         >>> # xdoctest: +SKIP("distributed")
-        >>> from torch.distributed.tensor.parallel import parallelize_module, ColwiseParallel
+        >>> from torch.distributed.tensor.parallel import (
+        ...     ColwiseParallel,
+        ...     parallelize_module,
+        ...     RowwiseParallel,
+        ... )
         >>> from torch.distributed.device_mesh import init_device_mesh
         >>>
         >>> # Define the module.

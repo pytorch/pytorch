@@ -365,7 +365,7 @@ static Tensor& c2_argmin_out(
 }
 
 static at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
-  if (C10_UNLIKELY(!self.is_quantized())) {
+  if (!self.is_quantized()) [[unlikely]] {
     // fallback to dequantize_cpu equivalent case: make sure out is at::kFloat
     DCHECK(out.scalar_type() == kFloat);
     return at::native::to_copy_out(out, self, false, false, std::nullopt);
@@ -785,8 +785,8 @@ std::vector<at::Tensor> unsqueezeVarStackInputs(
     const int64_t dim) {
   std::vector<at::Tensor> result;
   result.reserve(inputs.size());
-  for (const auto i : c10::irange(inputs.size())) {
-    result.push_back(at::native::unsqueeze(inputs[i], dim));
+  for (const auto& input : inputs) {
+    result.push_back(at::native::unsqueeze(input, dim));
   }
   return result;
 }

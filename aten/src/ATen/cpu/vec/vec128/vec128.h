@@ -11,7 +11,15 @@
 #include <ATen/cpu/vec/vec128/vec128_half_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_int_aarch64.h>
 #include <ATen/cpu/vec/vec128/vec128_uint_aarch64.h>
+
+#include <ATen/cpu/vec/vec128/vec128_cast_neon.h>
 #endif
 
 #include <ATen/cpu/vec/vec128/vec128_convert.h>
+#endif
+
+#if defined(CPU_CAPABILITY_ZVECTOR)
+// clang-format off
+#include <ATen/cpu/vec/vec128/zarch/vec128_zarch.h>
+// clang-format on
 #endif

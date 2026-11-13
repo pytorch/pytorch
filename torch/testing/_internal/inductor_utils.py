@@ -12,8 +12,10 @@ from subprocess import CalledProcessError
 import torch
 import torch._inductor.config as config
 
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
+    _device_is_available,
     get_gpu_shared_memory,
     get_gpu_type,
     GPU_TYPES,
@@ -23,15 +25,22 @@ from torch._inductor.utils import (
 )
 from torch.utils._helion import has_helion
 from torch.utils._pallas import has_pallas_package, has_tpu_pallas
-from torch.utils._triton import has_triton
+from torch.utils._triton import (
+    has_triton,
+    has_triton_block_ptr,
+    has_triton_cpu_backend,
+)
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     IS_CI,
     IS_WINDOWS,
     LazyVal,
+    NOTEST_CPU,
+    TEST_INDUCTOR_RUN_CPU,
     TestCase,
 )
 
@@ -58,18 +67,12 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+# Respect triton_disable_device_detection when probing the CPU backend.
+TRITON_HAS_CPU = has_triton(include_cpu=True) and has_triton_cpu_backend()
 
 HAS_PALLAS = LazyVal(has_pallas_package)
 
 HAS_HELION = has_helion()
-
-if HAS_TRITON:
-    import triton
-
-    TRITON_HAS_CPU = "cpu" in triton.backends.backends
-else:
-    TRITON_HAS_CPU = False
-
 
 HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
@@ -84,26 +87,60 @@ HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
 
-HAS_MULTIGPU = any(
-    getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
-    for gpu in GPU_TYPES
-)
+
+def running_on_tdm_device() -> bool:
+    """Return whether the active ROCm device and Triton support gfx1250 TDM."""
+    if not torch.version.hip or not HAS_CUDA_AND_TRITON:
+        return False
+    try:
+        from torch._inductor.utils import _gfx1250_device_prereqs
+
+        device = torch.device("cuda", torch.cuda.current_device())
+        return _gfx1250_device_prereqs(device)
+    except Exception:
+        return False
+
+
+def _is_multigpu(gpu: str) -> bool:
+    # Resolve through the DeviceInterface registry: GPU_TYPES may include
+    # out-of-tree backends with no torch.<gpu> module (getattr would raise)
+    # or with partially-implemented interfaces (base methods raise
+    # NotImplementedError).
+    if not _device_is_available(gpu):
+        return False
+    try:
+        return get_interface_for_device(gpu).device_count() >= 2
+    except NotImplementedError:
+        return False
+
+
+HAS_MULTIGPU = any(_is_multigpu(gpu) for gpu in GPU_TYPES)
 
 _desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
 RUN_GPU = HAS_GPU and any(
     is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases
 )
 
+# PYTORCH_TEST_INDUCTOR_RUN_CPU=1 runs the CPU tests even when
+# PYTORCH_TESTING_DEVICE_ONLY_FOR leaves CPU out (but not when
+# PYTORCH_TESTING_DEVICE_EXCEPT_FOR excludes it). CI sets it for the
+# nogpu_NO_AVX2 job, which runs a CUDA build (so ONLY_FOR=cuda) on a machine
+# without a GPU.
+# test_cpu_cpp_wrapper keeps its own check, which ignores the flag.
 RUN_CPU = LazyVal(
     lambda: HAS_CPU
-    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+    and (
+        any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+        or (TEST_INDUCTOR_RUN_CPU and not NOTEST_CPU)
+    )
 )
 
 HAS_TPU = LazyVal(has_tpu_pallas)
 # TPU is a privateuse1 backend that isn't in _desired_test_bases (it requires
 # runtime initialization before the test base is registered). Check the env var
-# directly, matching the same semantics as RUN_CPU/RUN_GPU: when the env var is
-# unset, run if the hardware is available; when set, only run if "tpu" is listed.
+# directly, matching RUN_GPU's ONLY_FOR semantics: when the env var is unset, run
+# if the hardware is available; when set, only run if "tpu" is listed. Unlike
+# RUN_GPU, it ignores PYTORCH_TESTING_DEVICE_EXCEPT_FOR.
 RUN_TPU = LazyVal(
     lambda: HAS_TPU
     and (
@@ -150,6 +187,11 @@ def skipDeviceIf(cond, msg, *, device):
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)
 
+            add_skip_condition(
+                inner,
+                lambda cls: type(device) is str and vars(cls).get("_device_at_collection") == device,
+                msg,
+            )
             return inner
 
     else:
@@ -177,6 +219,12 @@ requires_gpu = functools.partial(
 )
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
+# Only run tests that assert Triton block-pointer codegen where the frontend API
+# still exists (removed in triton-lang/triton#10833); elsewhere Inductor falls back
+# to masked indexing, so there is nothing to assert.
+requires_block_ptr = unittest.skipUnless(
+    has_triton_block_ptr(), "requires Triton block-pointer API"
+)
 
 
 def requires_gpu_with_enough_memory(min_mem_required):
@@ -373,10 +421,7 @@ def _quantize_blockwise(
     scale_expanded = scale.repeat_interleave(min_outer, dim=0).repeat_interleave(
         min_inner, dim=1
     )
-    x_fp8 = _to_fp8_saturated(
-        x / scale_expanded,  # Ensures that scaling doesn't cause inf/nan values
-        float8_dtype,
-    )
+    x_fp8 = _to_fp8_saturated(x * scale_expanded, float8_dtype)
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
 

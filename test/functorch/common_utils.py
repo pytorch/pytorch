@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
-import logging
 import os
 import unittest
 from collections import namedtuple
@@ -659,28 +658,17 @@ def saved_tensors_hooks_to_gm(
 
 
 @contextmanager
-def capture_codegen_source(artifact_name):
-    trace_log = logging.getLogger("torch.__trace")
+def capture_codegen_source(source_name):
+    from torch._functorch._aot_autograd.codegen import capture_generated_sources
+
+    generated = []
     captured: list[str] = []
-
-    class _ArtifactHandler(logging.Handler):
-        def emit(self, record):
-            metadata = getattr(record, "metadata", {})
-            if (
-                "artifact" in metadata
-                and metadata["artifact"].get("name") == artifact_name
-            ):
-                payload = getattr(record, "payload", None)
-                if payload is not None:
-                    captured.append(payload)
-
-    handler = _ArtifactHandler()
-    handler.setLevel(logging.DEBUG)
-    old_level = trace_log.level
-    trace_log.setLevel(logging.DEBUG)
-    trace_log.addHandler(handler)
-    try:
-        yield captured
-    finally:
-        trace_log.removeHandler(handler)
-        trace_log.setLevel(old_level)
+    with capture_generated_sources(generated):
+        try:
+            yield captured
+        finally:
+            captured.extend(
+                source.source
+                for source in generated
+                if source.artifact_name == source_name
+            )

@@ -2,7 +2,7 @@ import typing
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Generic, overload, TypeAlias, TypeVar
-from typing_extensions import ParamSpec, TypeIs, TypeVarTuple, Unpack
+from typing_extensions import ParamSpec, TypeIs, TypeVarTuple
 
 import torch
 import torch.fx.node
@@ -17,17 +17,20 @@ _P = ParamSpec("_P")
 _Ts = TypeVarTuple("_Ts")
 
 
-def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
+def is_graphable(val: object) -> bool:
     """Definition: a graphable type is a type that is an acceptable input/output type to a FX node."""
-    return isinstance(
-        val, (*torch.fx.node.base_types, FakeScriptObject)
-    ) or is_custom_class(type(val))
+    return (
+        val is None
+        or isinstance(val, (*torch.fx.node.base_types, FakeScriptObject))
+        or is_custom_class(type(val))
+    )
 
 
 def is_graphable_type(typ: type[object]) -> bool:
     """Return whether the given type is graphable."""
     return (
-        issubclass(typ, torch.fx.node.base_types)
+        typ is type(None)
+        or issubclass(typ, torch.fx.node.base_types)
         or is_custom_class(typ)
         or issubclass(typ, FakeScriptObject)
     )
@@ -48,9 +51,7 @@ def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
     return flat_args, spec
 
 
-def from_graphable(
-    flat_args: tuple[Unpack[_Ts]], spec: pytree.TreeSpec
-) -> pytree.PyTree:
+def from_graphable(flat_args: tuple[*_Ts], spec: pytree.TreeSpec) -> pytree.PyTree:
     """The inverse of to_graphable."""
     stuff = pytree.tree_unflatten(flat_args, spec)
     return stuff
@@ -83,7 +84,7 @@ _OpTypes = (
 _op_types = typing.get_args(_OpTypes)
 
 
-_Base: TypeAlias = torch.fx.node.BaseArgumentTypes
+_Base: TypeAlias = torch.fx.node.BaseArgumentTypes | None
 # pyrefly bug: pyrefly is complaining: Expected a type form, got instance of `Literal['_FXOutput']
 # pyrefly: ignore[not-a-type]
 _FXOutput = _Base | Sequence["_FXOutput"]
@@ -97,7 +98,7 @@ class FlatApply(HigherOrderOperator):
         self,
         func: _OpTypes | pytree.TreeSpec,
         in_spec: pytree.TreeSpec,
-        *flat_args: Unpack[_Ts],
+        *flat_args: *_Ts,
         # If True then the output is checked to be valid. If False then it is up
         # to the caller to ensure the output is appropriate.
         checked_output: bool = True,
@@ -154,7 +155,7 @@ def is_valid_output(x: object) -> bool:
 def impl(
     func: _OpTypes | pytree.TreeSpec,
     in_spec: pytree.TreeSpec,
-    flat_args: tuple[Unpack[_Ts]],
+    flat_args: tuple[*_Ts],
     checked_output: bool,
 ) -> _FXOutput:
     if isinstance(func, pytree.TreeSpec):

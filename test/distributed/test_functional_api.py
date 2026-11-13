@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+import pickle
+import subprocess
 import sys
 import unittest
 from functools import partial, wraps
@@ -404,6 +406,26 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(torch.tensor([8], device=device), res[1])
 
 
+class TestPublicAPI(TestCase):
+    def test_public_module(self):
+        import torch.distributed.functional_collectives as funcol
+
+        for name in funcol.__all__:
+            obj = getattr(funcol, name)
+            self.assertIs(obj, getattr(ft_c, name))
+            self.assertEqual(obj.__module__, funcol.__name__)
+            self.assertIs(pickle.loads(pickle.dumps(obj)), obj)
+
+    def test_private_import_loads_public_module(self):
+        # FX codegen resolves functions by their __module__ path.
+        code = (
+            "import torch.distributed._functional_collectives as ft_c; "
+            "import torch; "
+            "assert torch.distributed.functional_collectives.wait_tensor is ft_c.wait_tensor"
+        )
+        subprocess.check_call([sys.executable, "-c", code])
+
+
 class TestMetaCollectives(TestCase):
     def test_all_reduce(self):
         x = torch.rand((2, 3, 4), device="meta")
@@ -528,7 +550,7 @@ elif TEST_XPU:
 def exit_if_lt_x_accelerators(x):
     if torch.accelerator.is_available():
         if torch.accelerator.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{x}"].exit_code)
 
 
 def with_comms(func=None):
@@ -540,7 +562,7 @@ def with_comms(func=None):
         if (
             BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL
         ) and torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
         kwargs["device"] = DEVICE
         self.pg = self.create_pg(device=DEVICE)

@@ -33,6 +33,8 @@ static_inputs_log = torch._logging.getArtifactLogger(
 OutputType = list[int | torch.Tensor | None]
 ModelType = Callable[[list[InputType]], OutputType]
 
+_CUDAGRAPH_SUPPORTED_DEVICE_TYPES = frozenset(OrderedSet(["cuda"]))
+
 
 def cudagraph_trees_generation_cloning() -> Literal["user_visible"] | None:
     mode = config.triton.cudagraph_trees_generation_cloning
@@ -188,6 +190,8 @@ class WrappedFunction:
     constants: tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
+    cudagraph_managed_input_rerecord_limit: int
+    cudagraph_managed_input_rerecord_action: Literal["copy", "skip"]
     kernel_free_cudagraph: bool = False
     user_visible_output_idxs: frozenset[int] = dataclasses.field(
         default_factory=frozenset
@@ -307,19 +311,14 @@ def check_for_mutation(
     inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> str | None:
-    # doesn't work for non-trees because the warmup run would apply mutation twice
-    if torch._inductor.config.triton.cudagraph_trees:
-        # checking if mutation is only on parameters/static inputs
-        mutation_indices: Sequence[int] = [
-            idx
-            for idx in func.mutated_input_idxs
-            if not (
-                idx in func.static_input_idxs
-                or is_cuda_graph_recorded_tensor(inputs[idx])  # type: ignore[arg-type]
-            )
-        ]
-    else:
-        mutation_indices = func.mutated_input_idxs
+    # Only the tree manager calls this, and tree wrappers allow mutation of static
+    # inputs and cudagraph-recorded tensors regardless of triton.cudagraph_trees.
+    mutation_indices = [
+        idx
+        for idx in func.mutated_input_idxs
+        if idx not in func.static_input_idxs
+        and not is_cuda_graph_recorded_tensor(inputs[idx])  # type: ignore[arg-type]
+    ]
 
     static_inputs_log.debug(
         "check mutation static input indices: %s", func.static_input_idxs
@@ -360,7 +359,7 @@ def check_multiple_devices_or_any_cpu_nodes(
 
     if (
         len(device_node_mapping) == 1
-        and next(iter(device_node_mapping.keys())).type == "cuda"
+        and next(iter(device_node_mapping)).type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES
     ):
         return None
 

@@ -102,9 +102,7 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   HANDLE_TH_ERRORS
   auto type = THPStreamClass;
   THPObjectPtr ptr(type->tp_alloc(type, 0));
-  if (!ptr) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(ptr);
 
   THPStream* self = reinterpret_cast<THPStream*>(ptr.get());
   self->stream_id = stream.id();
@@ -297,7 +295,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
       static_cast<c10::DeviceType>(self->device_type);
 
   // No operation is performed if the stream does not belong to an accelerator.
-  if (C10_UNLIKELY(!at::accelerator::isAccelerator(stream_device_type))) {
+  if (!at::accelerator::isAccelerator(stream_device_type)) [[unlikely]] {
     return Py_NewRef(_self);
   }
 
@@ -308,15 +306,13 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   // stream and device so that they can be restored in __exit__.
   //
   // The stack is stored as a Python list where each entry is either:
-  //   - Py_None: no-op enter (stream was already current);
+  //   - Py_None: no-op enter (stream and its device were already current);
   //   - dict:    {_ctx_stream, _ctx_device_index} saved before switching.
   //
   // self->context is initialized lazily as a PyList on first __enter__.
   if (!self->context) {
     auto list = THPObjectPtr(PyList_New(0));
-    if (!list) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(list);
     self->context = list.release();
   }
 
@@ -325,12 +321,11 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
       static_cast<c10::DeviceIndex>(self->device_index);
   c10::Stream cur_stream = at::accelerator::getCurrentStream(stream_device_idx);
 
-  // If the stream is already current, push None as a no-op sentinel.
+  // If the stream is already current on the current device, push None as a
+  // no-op sentinel.
   if (cur_stream.id() == self->stream_id &&
-      cur_stream.device_index() == stream_device_idx) {
-    if (PyList_Append(self->context, Py_None) < 0) {
-      throw python_error();
-    }
+      stream_device_idx == cur_device_idx) {
+    TORCH_CHECK_PYTHON(PyList_Append(self->context, Py_None) >= 0);
     return Py_NewRef(_self);
   }
 
@@ -347,19 +342,13 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
       THPObjectPtr(THPUtils_packDeviceIndex(cur_device_idx));
   auto ctx_stream = THPObjectPtr(THPStream_Wrap(cur_stream));
   auto dict = THPObjectPtr(PyDict_New());
-  if (!dict) {
-    throw python_error();
-  }
-  if (PyDict_SetItemString(
-          dict.get(), "_ctx_device_index", ctx_device_index.get()) < 0) {
-    throw python_error();
-  }
-  if (PyDict_SetItemString(dict.get(), "_ctx_stream", ctx_stream.get()) < 0) {
-    throw python_error();
-  }
-  if (PyList_Append(self->context, dict.get()) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(dict);
+  TORCH_CHECK_PYTHON(
+      PyDict_SetItemString(
+          dict.get(), "_ctx_device_index", ctx_device_index.get()) >= 0);
+  TORCH_CHECK_PYTHON(
+      PyDict_SetItemString(dict.get(), "_ctx_stream", ctx_stream.get()) >= 0);
+  TORCH_CHECK_PYTHON(PyList_Append(self->context, dict.get()) >= 0);
   return Py_NewRef(_self);
   END_HANDLE_TH_ERRORS
 }
@@ -369,8 +358,8 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   auto self = reinterpret_cast<THPStream*>(_self);
 
   // No operation is performed if the stream does not belong to an accelerator.
-  if (C10_UNLIKELY(!at::accelerator::isAccelerator(
-          static_cast<c10::DeviceType>(self->device_type)))) {
+  if (!at::accelerator::isAccelerator(
+          static_cast<c10::DeviceType>(self->device_type))) [[unlikely]] {
     Py_RETURN_NONE;
   }
 
@@ -381,22 +370,19 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
 
   // Sentinel: this __enter__ was a no-op, nothing to restore.
   if (Py_IsNone(top)) {
-    if (PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) <
-        0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(
+        PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) >=
+        0);
     Py_RETURN_NONE;
   }
 
   PyObject* py_stream = nullptr;
-  if (PyDict_GetItemStringRef(top, "_ctx_stream", &py_stream) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyDict_GetItemStringRef(top, "_ctx_stream", &py_stream) >= 0);
   auto ctx_stream = THPObjectPtr(py_stream);
   PyObject* py_device_index = nullptr;
-  if (PyDict_GetItemStringRef(top, "_ctx_device_index", &py_device_index) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyDict_GetItemStringRef(top, "_ctx_device_index", &py_device_index) >= 0);
   auto ctx_device_index = THPObjectPtr(py_device_index);
   TORCH_INTERNAL_ASSERT(
       ctx_stream.get(), "ctx_stream should be present on the context dict.");
@@ -414,9 +400,8 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   if (static_cast<c10::DeviceIndex>(self->device_index) != prev_device_index) {
     at::accelerator::setDeviceIndex(prev_device_index);
   }
-  if (PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) >= 0);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -545,7 +530,5 @@ static PyTypeObject THPStreamType = {
 void THPStream_init(PyObject* module) {
   THPStreamClass = &THPStreamType;
   Py_SET_TYPE(&THPStreamType, &PyType_Type);
-  if (PyModule_AddType(module, &THPStreamType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPStreamType) >= 0);
 }

@@ -472,7 +472,7 @@ class TestSegmentReductions(TestCase):
                         initial = 1000
                     elif reduce == 'max':
                         initial = -1000
-                    segment_reduce_args = {x, reduce}
+                    segment_reduce_args = (x, reduce)
                     segment_reduce_kwargs = dict(axis=dim, unsafe=True, initial=initial)
                     if mode == 'lengths':
                         segment_reduce_kwargs[mode] = lengths
@@ -568,6 +568,17 @@ class TestSegmentReductions(TestCase):
         nd_data = torch.arange(12, dtype=torch.float, device=device).reshape(2, 6)
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch._segment_reduce(nd_data, 'sum', lengths=nd_lengths, axis=1, unsafe=False)
+
+    @dtypes(torch.half, torch.bfloat16)
+    def test_reduced_precision_accumulation(self, device, dtype):
+        # See https://github.com/pytorch/pytorch/issues/204045
+        lengths = torch.tensor([4096], device=device)
+        offsets = torch.tensor([0, 4096], device=device)
+        # 1-D and N-D outputs take different code paths on CUDA
+        for shape, reduction, kwargs in product(((4096,), (4096, 2)), ("sum", "mean"), ({"lengths": lengths}, {"offsets": offsets})):
+            data = torch.ones(shape, dtype=dtype, device=device)
+            actual = torch.segment_reduce(data, reduction, **kwargs)
+            self.assertEqual(actual, data.float().sum(0, keepdim=True).div_(4096 if reduction == "mean" else 1).to(dtype))
 
 
 

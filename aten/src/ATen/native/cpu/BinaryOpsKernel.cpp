@@ -659,18 +659,31 @@ void ne_kernel(TensorIteratorBase& iter) {
   }
 }
 
+// std::min and std::max return their first argument when the two compare equal,
+// so they keep the sign of a zero; a hardware min/max does not. Restore `a`
+// where both operands are zeros -- their bitwise or is +-0, which still
+// compares equal to zero.
+template <typename scalar_t>
+Vectorized<scalar_t> keep_zero_sign(
+    const Vectorized<scalar_t>& res,
+    const Vectorized<scalar_t>& a,
+    const Vectorized<scalar_t>& b) {
+  const auto both_zero = (a | b) == Vectorized<scalar_t>(scalar_t(0));
+  return Vectorized<scalar_t>::blendv(res, a, both_zero);
+}
+
 void maximum_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [](bool a, bool b) -> bool { return a || b; });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "maximum_cpu", [&]() {
+    AT_DISPATCH_V2(iter.dtype(), "maximum_cpu", AT_WRAP([&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
           [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
             return at::vec::maximum(a, b);
           });
-    });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -688,7 +701,7 @@ void maximum_kernel(TensorIteratorBase& iter) {
                 }
               },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-                return at::vec::maximum(a, b);
+                return keep_zero_sign(at::vec::maximum(a, b), a, b);
               });
         });
   }
@@ -698,14 +711,14 @@ void minimum_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [](bool a, bool b) -> bool { return a && b; });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cpu", [&]() {
+    AT_DISPATCH_V2(iter.dtype(), "minimum_cpu", AT_WRAP([&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
           [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
             return at::vec::minimum(a, b);
           });
-    });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -723,7 +736,7 @@ void minimum_kernel(TensorIteratorBase& iter) {
                 }
               },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-                return at::vec::minimum(a, b);
+                return keep_zero_sign(at::vec::minimum(a, b), a, b);
               });
         });
   }
