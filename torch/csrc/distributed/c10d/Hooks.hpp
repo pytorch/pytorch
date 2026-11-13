@@ -6,17 +6,23 @@
 #include <vector>
 
 #include <ATen/core/Tensor.h>
+#include <c10/core/Device.h>
 #include <c10/util/intrusive_ptr.h>
 
+#include <torch/csrc/distributed/c10d/Window.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 namespace c10d {
+
+class ProcessGroup;
 
 // Identifies the operation a pre/post hook is firing for. One value per
 // dispatcher op rather than per collective family: the flight recorder writes
 // the name into the trace and the analyzer keys its size rules off it, so
 // folding e.g. every allgather variant into ALLGATHER would report an
 // _allgather_base as a plain all_gather and apply the wrong check to it.
+// SPLIT, NEW_WINDOW and RECONFIGURE are group lifecycle ops, not dispatcher
+// ops; they fire with no tensors.
 // Consumers that only care about the family (NanCheckHook) can ignore the
 // extra values.
 enum class HookOpName : uint8_t {
@@ -40,6 +46,7 @@ enum class HookOpName : uint8_t {
   REDUCE_SCATTER_BASE,
   REDUCE_SCATTER_TENSOR_COALESCED,
   ALLTOALL_BASE,
+  RECONFIGURE,
   UNKNOWN,
 };
 
@@ -52,6 +59,9 @@ struct PreHookArgs {
   int64_t root = -1;
   // Correlates a pre-hook call with its matching post-hook call.
   int64_t op_id = 0;
+  // Device type (index unset) the op was dispatched for, set only for barrier;
+  // unset for other ops, including tensorless lifecycle ops.
+  std::optional<c10::Device> device;
 };
 
 using PreHook = std::function<void(const PreHookArgs&)>;
@@ -63,6 +73,10 @@ struct PostHookArgs {
   // Work handle for the issued operation; may be null for synchronous ops.
   c10::intrusive_ptr<Work> work;
   int64_t op_id = 0;
+  // New group for SPLIT; null on ranks not in it and for other ops.
+  c10::intrusive_ptr<ProcessGroup> group;
+  // New window for NEW_WINDOW; null for other ops.
+  c10::intrusive_ptr<Window> window;
 };
 
 using PostHook = std::function<void(const PostHookArgs&)>;
@@ -78,31 +92,5 @@ using PostHook = std::function<void(const PostHookArgs&)>;
 // failure, so a hook that returned early on "already ran" would let the process
 // die mid-capture. The hook's own one-shot has to block, not skip.
 using AbortHook = std::function<void()>;
-
-// Arguments passed to a completion hook, fired when the backend establishes
-// that an operation has finished.
-struct CompletionHookArgs {
-  // Correlates completion with PostHookArgs::work.
-  uint64_t completionKey = 0;
-  // The backend's own measurement of the op in ms, or nullopt if it does not
-  // time its collectives. The backend supplies it because only the backend
-  // knows whether timing is on -- Work::getDuration() throws when it is not,
-  // so a consumer could only find out by provoking an exception per op.
-  std::optional<float> duration_ms;
-};
-
-// Completion hook - called by a backend when it establishes that an operation
-// completed *successfully*. A backend already learns this to garbage collect
-// its work queue, so pushing it out saves every consumer from re-deriving the
-// same fact by polling Work::isCompleted() on everything it has issued.
-//
-// Failed and timed-out work deliberately fires nothing. Work::isCompleted() is
-// true for those too, and a consumer that took them for completed would erase
-// the one fact a post-mortem needs: that the collective never finished.
-//
-// Fires once per Work. May run on the backend's watchdog thread and with
-// backend locks held, so the hook must be short, must not take the GIL, and
-// must not call back into the backend.
-using CompletionHook = std::function<void(const CompletionHookArgs&)>;
 
 } // namespace c10d
