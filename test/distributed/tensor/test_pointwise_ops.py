@@ -507,6 +507,25 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(input_tensor3, dt_input3.full_tensor())
 
     @with_comms
+    def test_clamp_tensor_backward(self):
+        """Two-sided clamp with tensor bounds backpropagates through DTensor."""
+        device_mesh = self.build_device_mesh()
+        x = torch.arange(32, dtype=torch.float32, device=self.device_type)
+        x = (x / 8 - 2).reshape(8, 4)
+        lo = torch.full_like(x, -1.0)
+        hi = torch.full_like(x, 1.0)
+
+        ref = x.clone().requires_grad_()
+        torch.clamp(ref, lo, hi).sum().backward()
+
+        for placements in ([Shard(0)], [Shard(1)], [Replicate()]):
+            dx = distribute_tensor(x, device_mesh, placements).requires_grad_()
+            dlo = distribute_tensor(lo, device_mesh, placements)
+            dhi = distribute_tensor(hi, device_mesh, placements)
+            torch.clamp(dx, dlo, dhi).sum().backward()
+            self.assertEqual(dx.grad.full_tensor(), ref.grad)
+
+    @with_comms
     def test_inplace_op_partial_to_replicate(self):
         # test that in-place operations that require redistribution raise an error
         # to preserve aliasing semantics (issue #163374)

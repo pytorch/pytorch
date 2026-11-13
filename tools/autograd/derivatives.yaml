@@ -422,6 +422,11 @@
   min, max: clamp_backward_min_max(grad, self, min, max, grad_input_mask)
   result: clamp_jvp(self_p, self_t, min_p, min_t, max_p, max_t)
 
+- name: _clamp_tensor_backward(Tensor grad_output, Tensor self, Tensor min, Tensor max) -> Tensor
+  grad_output: _clamp_tensor_backward(grad, self, min, max)
+  self, min, max: non_differentiable
+  result: _clamp_tensor_backward(grad_output_t, self, min, max)
+
 - name: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
   result: auto_element_wise

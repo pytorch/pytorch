@@ -1511,6 +1511,22 @@
   structured_delegate: clamp.Tensor_out
   tags: [core, pointwise]
 
+- func: _clamp_tensor_backward.grad_input(Tensor grad_output, Tensor self, Tensor min, Tensor max, *, Tensor(a!) grad_input) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: _clamp_tensor_backward_out
+    CompositeExplicitAutograd: _clamp_tensor_backward_out_default
+
+- func: _clamp_tensor_backward(Tensor grad_output, Tensor self, Tensor min, Tensor max) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function
+  structured_delegate: _clamp_tensor_backward.grad_input
+  dispatch:
+    CompositeExplicitAutograd: _clamp_tensor_backward_default
+  tags: pointwise
+
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
