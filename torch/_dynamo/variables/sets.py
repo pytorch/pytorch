@@ -256,11 +256,6 @@ class BaseSetVariable(VariableTracker):
             kwargs["source"] = None
         return super().clone(**kwargs)
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self.python_type(), name))
-
     def install_set_contains_guard(
         self, tx: "InstructionTranslatorBase", key: HashableTracker, contains: bool
     ) -> None:
@@ -314,13 +309,8 @@ class BaseSetVariable(VariableTracker):
         if isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
-            storage = (
-                other.materialize_keys()
-                if isinstance(other, ConstDictVariable)
-                else other.items
-            )
-            guard_key_collisions(self.items, storage)
-            yield from storage
+            guard_key_collisions(self.items, other.items)
+            yield from other.items.keys()
             return
 
         for item in lazily_unpack(tx, other):
@@ -337,12 +327,7 @@ class BaseSetVariable(VariableTracker):
         if isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
-            storage = (
-                other.materialize_keys()
-                if isinstance(other, ConstDictVariable)
-                else other.items
-            )
-            keys = list(storage)
+            keys = list(other.items.keys())
         else:
             keys = [HashableTracker(x) for x in unpack_iterable(tx, other)]
         guard_key_collisions(self.items, keys)
@@ -1480,10 +1465,7 @@ class DictKeySetVariable(BaseSetVariable):
         if isinstance(vt, ConstDictVariable):
             vt.install_dict_order_guard(tx)
         if isinstance(vt, (BaseSetVariable, ConstDictVariable)):
-            storage = (
-                vt.materialize_keys() if isinstance(vt, ConstDictVariable) else vt.items
-            )
-            items: list[Any] = list(storage)
+            items: list[Any] = list(vt.items.keys())
         else:
             items = unpack_iterable(tx, vt)
         return SetVariable(items, mutation_type=ValueMutationNew())

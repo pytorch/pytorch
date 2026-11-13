@@ -2676,14 +2676,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         # path (do-not-rehash-dict-keys).
         if isinstance(args[0], variables.ConstDictVariable):
             args[0].install_dict_order_guard(tx)
-            items = list(args[0].materialize_keys())
-        elif isinstance(
+        if isinstance(
             args[0],
             (
                 variables.SetVariable,
                 variables.FrozensetVariable,
                 variables.DictKeySetVariable,
                 variables.OrderedSetVariable,
+                variables.ConstDictVariable,
             ),
         ):
             items = list(args[0].items.keys())
@@ -2869,9 +2869,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 explanation=f"Dynamo doesn't have a rule to determine the type of argument {arg}",
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
-        if isinstance(arg, variables.NNModuleHooksDictVariable) and arg.source:
-            # Explicit isinstance observes the registry type, unlike internal slot dispatch.
-            install_guard(arg.source.make_guard(GuardBuilder.TYPE_MATCH))
         isinstance_type = isinstance_type_var.as_python_constant()
         # An AsyncCollectiveTensor (ACT) input's tensor-class guard is relaxed
         # (see VariableBuilder.wrap_tensor): the cache entry does not discriminate
@@ -3599,13 +3596,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
-            storage = (
-                args[0].materialize_keys()
-                if isinstance(args[0], ConstDictVariable)
-                else args[0].items
-            )
             return ConstDictVariable(
-                dict.fromkeys(storage, value),
+                dict.fromkeys(args[0].items.keys(), value),  # type: ignore[arg-type]
                 mutation_type=ValueMutationNew(),
             )
         return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args, **kwargs)
@@ -3844,23 +3836,10 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
             ]
         if len(args) != 2 or kwargs:
             raise_observed_exception(TypeError, tx)
+        from .object_protocol import generic_hasattr
+
         obj, attr = args
-        if not attr.is_python_constant():
-            raise_observed_exception(TypeError, tx)
-        attr_name = attr.as_python_constant()
-        if not isinstance(attr_name, str):
-            raise_type_error(
-                tx, f"attribute name must be string, not '{attr.python_type_name()}'"
-            )
-        result = obj.call_obj_hasattr(tx, attr_name)
-        if result is None:
-            unimplemented(
-                gb_type="hasattr() on unsupported type",
-                context=f"hasattr({obj}, {attr})",
-                explanation=f"hasattr() is not supported on type {obj.python_type_name()}",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return result
+        return generic_hasattr(tx, obj, attr)
 
 
 class SetAttrBuiltinVariable(BaseBuiltinVariable):

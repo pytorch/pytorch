@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
     from torch.types import IntLikeType
 
 
@@ -315,102 +315,6 @@ class Guard:
             return self.create_fn.func
         else:
             return self.create_fn
-
-    def with_source(
-        self,
-        source: Source,
-        /,
-        *,
-        create_fn: Callable[[GuardBuilderBase, Guard], None] | None = None,
-    ) -> Guard:
-        """Copy a guard for rebuilding, without derived export metadata or cached hash."""
-        return dataclasses.replace(
-            self,
-            originating_source=source,
-            create_fn=self.create_fn if create_fn is None else create_fn,
-            guard_types=None,
-            code_list=None,
-            obj_weakref=None,
-            guarded_class_weakref=None,
-            _hash=None,
-        )
-
-    def remap_sources(self, remap_source: Callable[[Source], Source], /) -> Guard:
-        """Remap explicit source dependencies; return self when nothing changes."""
-
-        def remap(value: Any) -> Any:
-            if isinstance(value, Source):
-                return remap_source(value)
-            if type(value) is tuple:
-                items = tuple(remap(item) for item in value)
-                return value if all(a is b for a, b in zip(value, items)) else items
-            return value
-
-        source = remap(self.originating_source)
-        create_fn = self.create_fn
-        if isinstance(create_fn, functools.partial):
-            args = tuple(remap(arg) for arg in create_fn.args)
-            keywords = {key: remap(value) for key, value in create_fn.keywords.items()}
-            if any(a is not b for a, b in zip(args, create_fn.args)) or any(
-                value is not create_fn.keywords[key] for key, value in keywords.items()
-            ):
-                create_fn = functools.partial(create_fn.func, *args, **keywords)
-        if source is self.originating_source and create_fn is self.create_fn:
-            return self
-        return self.with_source(source, create_fn=create_fn)
-
-    def source_dependencies(self) -> OrderedSet[Source]:
-        """Explicit sources, including ancestors and source-valued partial payloads."""
-        sources: OrderedSet[Source] = OrderedSet()
-
-        def collect(value: Any) -> None:
-            if isinstance(value, Source):
-                if value in sources:
-                    return
-                sources.add(value)
-                if dataclasses.is_dataclass(value):
-                    for field in dataclasses.fields(value):
-                        collect(getattr(value, field.name))
-            elif type(value) is tuple:
-                for item in value:
-                    collect(item)
-
-        collect(self.originating_source)
-        if isinstance(self.create_fn, functools.partial):
-            collect(self.create_fn.args)
-            collect(tuple(self.create_fn.keywords.values()))
-        return sources
-
-    def is_equivalent_to(self, other: Guard, /) -> bool:
-        """Prove equivalence for known payload types; keep unfamiliar payloads distinct."""
-
-        def same_payload(a: Any, b: Any) -> bool:
-            if a is b:
-                return True
-            if type(a) is not type(b):
-                return False
-            if isinstance(a, Source) or type(a) in (str, int, bool, bytes, type(None)):
-                return a == b
-            if type(a) is tuple:
-                return len(a) == len(b) and all(
-                    same_payload(x, y) for x, y in zip(a, b)
-                )
-            if type(a) is dict:
-                return a.keys() == b.keys() and all(same_payload(a[k], b[k]) for k in a)
-            return False
-
-        if (
-            self.originating_source != other.originating_source
-            or self._force_dict_keys_match != other._force_dict_keys_match
-            or self.inner_create_fn() is not other.inner_create_fn()
-        ):
-            return False
-        return same_payload(
-            getattr(self.create_fn, "args", ()), getattr(other.create_fn, "args", ())
-        ) and same_payload(
-            getattr(self.create_fn, "keywords", {}),
-            getattr(other.create_fn, "keywords", {}),
-        )
 
     @property
     def name(self) -> str:
@@ -926,8 +830,6 @@ class InvokeSubgraphReuseEntry:
     # stamp_out_subgraph uses this to return only the user-visible slice.
     num_user_outputs: int = 0
 
-    shape_guards: list[tuple[Any, bool]] = dataclasses.field(default_factory=list)
-
 
 @dataclass
 class InvokeSubgraphReuseCondition:
@@ -946,9 +848,6 @@ class InvokeSubgraphReuseCondition:
     # handler is a pre-resolved GuardCheckSpec from GUARD_VALUE_DISPATCH.
     guards: list[tuple[Source, GuardCheckSpec, object, Guard]]
 
-    # Structural dependencies are shared across candidate checks, not runtime values.
-    guard_dependencies: list[OrderedSet[Source]]
-
     # TreeSpec from pytree.tree_flatten of the (args, kwargs) structure.
     # On cache hit, we verify the new call has the same treespec.
     treespec: pytree.TreeSpec | None = None
@@ -957,9 +856,6 @@ class InvokeSubgraphReuseCondition:
     # On cache hit, we check if any modified VT's source is a base of one
     # of these to detect mutations on captured variables.
     traced_sources: OrderedSet[Source] = dataclasses.field(default_factory=OrderedSet)
-
-    # Order annotations required by guard source chains and additional dependencies.
-    guard_on_key_order: set[Source] = dataclasses.field(default_factory=set)
 
 
 class InvokeSubgraphCache(HopSubgraphCache):
@@ -1667,19 +1563,21 @@ class ChainedSource(Source):
         return result
 
 
-def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
+def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | CppFakeTensorMode | None:
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
     heuristically detect the fake mode via the following sources, in order of
     priority:
 
-        - Currently active fake mode on stack
+        - Currently active fake mode, Python or C++
         - Fake mode associated with passed in tensors (inputs does not
           have to be flattened)
+
+    The result can be a CppFakeTensorMode; see Note [Fake mode lookups and
+    CppFakeTensorMode] in torch/_subclasses/fake_tensor.py.
     """
     from torch._subclasses.fake_tensor import (
-        FakeTensorMode,
         get_plain_tensors,
         is_fake_tensor,
         maybe_get_fake_mode,
@@ -1695,11 +1593,8 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
 
     fake_modes = []
 
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
-
-    for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
-        if isinstance(m, FakeTensorMode):
-            fake_modes.append((m, "active fake mode", i))
+    if (m := active_fake_mode()) is not None:
+        fake_modes.append((m, "active fake mode", 0))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
@@ -1731,16 +1626,41 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         return None
 
 
-def active_fake_mode() -> FakeTensorMode | None:
+def active_fake_mode() -> FakeTensorMode | CppFakeTensorMode | None:
     """
-    Inspects the dispatch mode stack for an active fake mode and returns it.
-    Returns None if no fake mode is active.
+    Returns the active fake mode, or None if no fake mode is active. It can be
+    a CppFakeTensorMode; see Note [Fake mode lookups and CppFakeTensorMode] in
+    torch/_subclasses/fake_tensor.py.
     """
-    from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+    # A FakeTensorMode is an infra mode, so it can only be in the FAKE slot;
+    # _get_dispatch_mode(FAKE) falls back to an installed C++ mode's
+    # CppFakeTensorMode when that slot is empty.
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
 
-    for _, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
-        if isinstance(m, FakeTensorMode):
-            return m
 
-    return None
+def require_python_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode | None,
+    /,
+) -> FakeTensorMode | None:
+    """
+    Returns mode unchanged if it is a FakeTensorMode or None.
+
+    Use it on a fake mode that must be a Python FakeTensorMode, for example to
+    call from_tensor or is_our_fake on it or to pass it on to code typed for
+    FakeTensorMode: a result of detect_fake_mode, active_fake_mode or
+    maybe_get_fake_mode, or a mode the caller was given. Callers narrow the
+    lookups with it so that they keep getting a Python FakeTensorMode when a
+    lookup finds a C++ mode.
+
+    Raises:
+        RuntimeError: if mode is a CppFakeTensorMode, which does not have all of
+            FakeTensorMode's interface.
+    """
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+    if isinstance(mode, CppFakeTensorMode):
+        raise RuntimeError(
+            "This needs a Python torch._subclasses.fake_tensor.FakeTensorMode; "
+            "a CppFakeTensorMode is not supported here yet"
+        )
+    return mode

@@ -953,93 +953,6 @@ class LockHolder:
         self.lock = threading.Lock()
 
 
-class DictionaryToken:
-    pass
-
-
-class InstanceReducedDict(dict):
-    def __init__(self, token):
-        if not isinstance(token, DictionaryToken):
-            raise TypeError("InstanceReducedDict requires a DictionaryToken")
-        super().__init__(token=token)
-
-
-class DictionaryProtocolMeta(type):
-    def __getattribute__(cls, name):
-        if name in ("__reduce__", "__reduce_ex__"):
-            return getattr(object, name)
-        return super().__getattribute__(name)
-
-
-class ClassReducedDict(InstanceReducedDict):
-    def __reduce_ex__(self, protocol):
-        return type(self), (self["token"],)
-
-
-class MetaclassReducedDict(ClassReducedDict, metaclass=DictionaryProtocolMeta):
-    pass
-
-
-class DictionaryProtocolPropertyMeta(type):
-    __reduce__ = property(lambda cls: object.__reduce__)
-    __reduce_ex__ = property(lambda cls: object.__reduce_ex__)
-
-
-class PropertyMetaclassReducedDict(
-    ClassReducedDict, metaclass=DictionaryProtocolPropertyMeta
-):
-    pass
-
-
-class DictionaryNamespaceMeta(type):
-    def __getattribute__(cls, name):
-        namespace = super().__getattribute__(name)
-        if name == "__dict__":
-            namespace = dict(namespace)
-            namespace["__reduce_ex__"] = object.__reduce_ex__
-        return namespace
-
-
-class NamespaceMetaclassReducedDict(
-    ClassReducedDict, metaclass=DictionaryNamespaceMeta
-):
-    pass
-
-
-class NamespaceReducedDict(InstanceReducedDict):
-    @property
-    def __dict__(self):
-        return {}
-
-
-class PlainNamespaceDict(dict):
-    pass
-
-
-class InheritedNamespaceReducedDict(PlainNamespaceDict, NamespaceReducedDict):
-    def __init__(self, token):
-        InstanceReducedDict.__init__(self, token)
-
-
-class DictionaryReducerDescriptor:
-    def __get__(self, owner, cls=None):
-        if owner is None:
-            return object.__reduce_ex__
-        return InstanceDictReducer(owner)
-
-
-class DescriptorReducedDict(InstanceReducedDict):
-    __reduce_ex__ = DictionaryReducerDescriptor()
-
-
-class InstanceDictReducer:
-    def __init__(self, owner):
-        self.owner = owner
-
-    def __call__(self, *args):
-        return type(self.owner), (self.owner["token"],)
-
-
 class LockDict(dict):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1659,25 +1572,7 @@ class _ODictSubclass(collections.OrderedDict):
     def __setattr__(self, name, value):
         if name == "__dict__":
             raise AssertionError("State restoration must bypass __setattr__")
-        if name == "slot" and isinstance(dict.get(self, "b"), _Missing):
-            raise AssertionError("Slot restoration must retain dictionary values")
         super().__setattr__(name, value)
-
-
-class _DictStateLookup(dict):
-    def __getattribute__(self, name):
-        if name == "__setstate__" and isinstance(dict.get(self, "b"), _Missing):
-            raise AssertionError("State lookup must retain dictionary values")
-        return object.__getattribute__(self, name)
-
-
-class _DictStateGetattr(dict):
-    __getattr__ = _DictStateLookup.__getattribute__
-
-
-class _ODictNoKeys(_ODictSubclass):
-    def keys(self):
-        raise AssertionError("State traversal must bypass keys overrides")
 
 
 class _NormalizingODict(collections.OrderedDict):
@@ -3377,52 +3272,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "left": left, "right": left}, False)
         self._test_check_fn(ref, loaded, {"x": x, "left": [], "right": []}, True)
 
-    @parametrize("hooks_name", ["_forward_hooks", "_forward_pre_hooks"])
-    @parametrize("global_flags", [False, True])
-    def test_native_hook_membership_dependencies(self, hooks_name, global_flags):
-        def install_membership_guard(ctx):
-            from torch._dynamo.guards import GuardBuilder, install_guard
-            from torch._dynamo.source import GlobalSource
-
-            module_source = (
-                ctx.get_local("module")
-                ._i_will_not_complain_if_bc_breaks_VariableTracker()
-                .source
-            )
-            flags_source = (
-                GlobalSource("HOOK_FLAGS_FOR_SERIALIZATION")
-                if global_flags
-                else ctx.get_local("flags")
-                ._i_will_not_complain_if_bc_breaks_VariableTracker()
-                .source
-            )
-            install_guard(
-                module_source.make_guard(
-                    functools.partial(
-                        GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS,
-                        hooks_name=hooks_name,
-                        flags_source=flags_source,
-                    )
-                )
-            )
-
-        def fn(x, module, flags):
-            comptime(install_membership_guard)
-            return x + 1 if module is module and flags is flags else x
-
-        x, module, flags = torch.ones(1), torch.nn.Identity(), {2: True}
-        getattr(module, hooks_name).update({1: None, 2: None})
-        with mock.patch.dict(globals(), {"HOOK_FLAGS_FOR_SERIALIZATION": flags}):
-            ref, loaded = self._test_serialization(
-                "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module, flags
-            )
-            inputs = {"x": x, "module": module, "flags": flags}
-            self._test_check_fn(ref, loaded, inputs, True)
-            flags[1] = flags.pop(2)
-            self._test_check_fn(ref, loaded, inputs, False)
-            flags[2] = flags.pop(1)
-            self._test_check_fn(ref, loaded, inputs, True)
-
     @parametrize("reordered", [False, True])
     def test_native_ordered_dict_order(self, reordered):
         def install_order_guard(ctx):
@@ -4637,96 +4486,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, inputs([4, 4]), True)
         self._test_check_fn(ref, loaded, inputs([8, 8]), False)
 
-    @parametrize("inner_tensor", [False, True])
-    def test_implicit_dictionary_bystander_keeps_shared_tensor_subclass_metadata(
-        self, inner_tensor
-    ):
-        def fn(module, x):
-            return x + len(tuple(module.mapping)) + hasattr(module, "mapping")
-
-        def inputs(blocks):
-            module = torch.nn.Module()
-            x = SubclassWithMeta(torch.ones(3), extra=blocks)
-            module.mapping = {"unused": x.a if inner_tensor else blocks}
-            return {"module": module, "x": x}
-
-        kinds = ["HASATTR", "TENSOR_SUBCLASS_METADATA_MATCH"]
-        if not inner_tensor:
-            kinds.append("TENSOR_MATCH")
-        ref, loaded = self._test_serialization(
-            kinds,
-            fn,
-            *inputs([4, 4]).values(),
-        )
-        self._test_check_fn(ref, loaded, inputs([4, 4]), True)
-        self._test_check_fn(ref, loaded, inputs([8, 8]), False)
-        state = load_guards_state(self._cached_guards_state).output_graph
-        self.assertIn(
-            "L['module'].mapping", {source.name for source in state.guard_on_key_order}
-        )
-
-    def test_implicit_dictionary_order_alias_keeps_its_ancestors(self):
-        def fn(holder, module, x):
-            return (
-                x
-                + len(tuple(holder.cfg))
-                + len(tuple(module.mapping))
-                + hasattr(module, "mapping")
-            )
-
-        def inputs():
-            module = torch.nn.Module()
-            module.mapping = {"unused": threading.Lock()}
-            holder = LockHolder(2)
-            holder.cfg = module.mapping
-            return {"holder": holder, "module": module, "x": torch.ones(1)}
-
-        ref, loaded = self._test_serialization(
-            ("HASATTR", "TENSOR_MATCH"), fn, *inputs().values()
-        )
-        self._test_check_fn(ref, loaded, inputs(), True)
-        invalid = inputs()
-        del invalid["module"].mapping
-        self._test_check_fn(ref, loaded, invalid, False)
-        state = load_guards_state(self._cached_guards_state).output_graph
-        self.assertIs(
-            state.local_scope["holder"].cfg, state.local_scope["module"].mapping
-        )
-        self.assertIsInstance(state.local_scope["holder"].lock, _Missing)
-
-    @parametrize(
-        "mapping_type",
-        [_ODictSubclass, _ODictNoKeys, _DictStateLookup, _DictStateGetattr],
-    )
-    def test_implicit_dictionary_bystander_keeps_shared_subclass_state(
-        self, mapping_type
-    ):
-        def fn(x, owner, other):
-            return x + len(owner), tuple(other)
-
-        def inputs():
-            shared = ["saved"]
-            owner = mapping_type(a=1, b=shared)
-            owner.tag = "saved"
-            owner.slot = owner
-            return {"x": torch.ones(1), "owner": owner, "other": {"unused": shared}}
-
-        ref, loaded = self._test_serialization(
-            ("TYPE_MATCH", "DICT_KEYS_MATCH", "TENSOR_MATCH"),
-            fn,
-            *inputs().values(),
-        )
-        self._test_check_fn(ref, loaded, inputs(), True)
-        invalid = inputs()
-        invalid["other"] = {"changed": invalid["other"]["unused"]}
-        self._test_check_fn(ref, loaded, invalid, False)
-        state = load_guards_state(self._cached_guards_state).output_graph
-        owner = state.local_scope["owner"]
-        self.assertEqual(owner["b"], ["saved"])
-        self.assertIs(owner["b"], state.local_scope["other"]["unused"])
-        self.assertIs(owner.slot, owner)
-        self.assertEqual(owner.tag, "saved")
-
     def test_tensor_subclass_ctx_dict_key_is_kept_whole(self):
         def fn(x, stage):
             return x * stage.lr
@@ -4801,87 +4560,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, inputs(3), True)
         self._test_check_fn(ref, loaded, inputs(4), False)
 
-    @parametrize("iterate", [False, True])
-    @parametrize(
-        "mapping_type",
-        [
-            dict,
-            LockDict,
-            collections.OrderedDict,
-            functools.partial(collections.defaultdict, list),
-        ],
-    )
-    def test_dictionary_keys_prune_unused_values(self, iterate, mapping_type):
-        def fn(x, cfg):
-            return x + len(cfg), tuple(cfg) if iterate else None
-
-        owner = mapping_type(a=threading.Lock(), b=threading.Lock())
-        if mapping_type is collections.OrderedDict:
-            owner.unused = threading.Lock()
-        cfg = owner
-        x = torch.ones(1)
-        ref, loaded = self._test_serialization(
-            (
-                "TYPE_MATCH",
-                "SEQUENCE_LENGTH",
-                "DICT_KEYS_MATCH",
-                "ORDERED_DICT_ORDER_MATCH",
-            ),
-            fn,
-            x,
-            cfg,
-        )
-        self._test_check_fn(ref, loaded, {"x": x, "cfg": cfg}, True)
-        owner["c"] = owner.pop("b")
-        self._test_check_fn(ref, loaded, {"x": x, "cfg": cfg}, False)
-
-    @parametrize(
-        "protocol",
-        [
-            "__reduce__",
-            "__reduce_ex__",
-            "metaclass",
-            "metaclass_property",
-            "descriptor",
-            "metaclass_dict",
-            "instance_dict",
-            "inherited_dict",
-        ],
-    )
-    def test_dictionary_reducer_keeps_constructor_values(self, protocol):
-        def fn(x, cfg):
-            return x + len(cfg)
-
-        def make():
-            if protocol == "metaclass":
-                return MetaclassReducedDict(DictionaryToken())
-            if protocol == "metaclass_property":
-                return PropertyMetaclassReducedDict(DictionaryToken())
-            if protocol == "descriptor":
-                return DescriptorReducedDict(DictionaryToken())
-            if protocol == "metaclass_dict":
-                return NamespaceMetaclassReducedDict(DictionaryToken())
-            if protocol == "instance_dict":
-                cfg = NamespaceReducedDict(DictionaryToken())
-                cfg.__reduce_ex__ = InstanceDictReducer(cfg)
-                return cfg
-            if protocol == "inherited_dict":
-                cfg = InheritedNamespaceReducedDict(DictionaryToken())
-                cfg.__reduce_ex__ = InstanceDictReducer(cfg)
-                return cfg
-            cfg = InstanceReducedDict(DictionaryToken())
-            setattr(cfg, protocol, InstanceDictReducer(cfg))
-            return cfg
-
-        x = torch.ones(1)
-        cfg = make()
-        ref, loaded = self._test_serialization(
-            ("TYPE_MATCH", "SEQUENCE_LENGTH"), fn, x, cfg
-        )
-        self._test_check_fn(ref, loaded, {"x": x, "cfg": make()}, True)
-        cfg["extra"] = None
-        self._test_check_fn(ref, loaded, {"x": x, "cfg": cfg}, False)
-
     def test_a_dict_subclass_keeps_its_items_when_pruned(self):
         def fn(x, cfg):
             return x * cfg["lr"]
@@ -4892,13 +4570,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "cfg": LockDict(lr=2)}, True)
         self._test_check_fn(ref, loaded, {"x": x, "cfg": LockDict(lr=3)}, False)
 
-    def test_closure_match(self):
+    @parametrize("caching_precompile", (False, True))
+    def test_closure_match(self, caching_precompile):
         def fn(x):
             # usage of this global function installs a CLOSURE_MATCH guard
             return global_func(x)
 
         x = torch.randn(3)
-        ref, loaded = self._test_serialization("CLOSURE_MATCH", fn, x)
+        with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+            ref, loaded = self._test_serialization("CLOSURE_MATCH", fn, x)
         self._test_check_fn(ref, loaded, {"x": x}, True)
         # The saved guard compares code by value rather than identity, so it
         # matches the loading process's own copy of the function.
@@ -4910,7 +4590,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"global_func": lambda x: x + 2}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
-    def test_closure_match_without_module_globals(self):
+    @parametrize("caching_precompile", (False, True))
+    def test_closure_match_without_module_globals(self, caching_precompile):
         namespace = {}
         exec("def global_func(x):\n    return x + 1\n", namespace)
 
@@ -4920,6 +4601,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # No importable module owns these globals, so a loading process has no
         # way to find the function's globals again.
         with (
+            torch._dynamo.config.patch(caching_precompile=caching_precompile),
             mock.patch.dict(globals(), {"global_func": namespace["global_func"]}),
             self.assertRaisesRegex(
                 PackageError, "CLOSURE_MATCH guard cannot be serialized."
@@ -5433,211 +5115,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             False,
         )
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
-
-    @parametrize("with_kwargs", [False, True])
-    def test_forward_pre_hook_membership(self, with_kwargs):
-        def hook(module, args, *rest):
-            return ((args[0] + 1,), rest[0]) if rest else (args[0] + 1,)
-
-        def make_module(flag):
-            module = torch.nn.Identity()
-            module.register_forward_pre_hook(hook, with_kwargs=flag)
-            return module
-
-        def fn(x, module):
-            return module(x)
-
-        x = torch.ones(2)
-        ref, loaded = self._test_serialization(
-            "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, make_module(with_kwargs)
-        )
-        for flag in (with_kwargs, not with_kwargs):
-            self._test_check_fn(
-                ref, loaded, {"x": x, "module": make_module(flag)}, flag == with_kwargs
-            )
-
-    @parametrize("flag_name", ["with_kwargs", "always_call"])
-    def test_nn_module_hook_membership(self, flag_name):
-        def hook(module, args, *rest):
-            return rest[-1] + 1
-
-        def make_module(flags):
-            module = torch.nn.Identity()
-            for flag in flags:
-                module.register_forward_hook(hook, **{flag_name: flag})
-            return module
-
-        def fn(x, module):
-            flags = getattr(
-                module,
-                "_forward_hooks_with_kwargs"
-                if flag_name == "with_kwargs"
-                else "_forward_hooks_always_called",
-            )
-            return x + sum(
-                index + 1
-                for index, (key, _) in enumerate(module._forward_hooks.items())
-                if key in flags
-            )
-
-        x = torch.ones(2)
-        module = make_module((False, True))
-        ref, loaded = self._test_serialization(
-            "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module
-        )
-        self.assertIn("== (False, True)", str(ref))
-        self.assertIn("== (False, True)", str(loaded))
-        for flags in ((False, True), (True, False)):
-            self._test_check_fn(
-                ref,
-                loaded,
-                {"x": x, "module": make_module(flags)},
-                flags == (False, True),
-            )
-
-        first, second = module._forward_hooks
-        flags = getattr(
-            module,
-            "_forward_hooks_with_kwargs"
-            if flag_name == "with_kwargs"
-            else "_forward_hooks_always_called",
-        )
-        flags[first] = flags.pop(second)
-        self._test_check_fn(
-            ref,
-            loaded,
-            {"x": x, "module": module},
-            False,
-        )
-        flags[second] = flags.pop(first)
-        module._forward_hooks.move_to_end(first)
-        self._test_check_fn(
-            ref,
-            loaded,
-            {"x": x, "module": module},
-            True,
-        )
-
-    def test_nested_region_hook_secondary_source(self):
-        @torch.compiler.nested_compile_region
-        def region(x, module, box):
-            return x + sum(key in box.flags for key in module._forward_hooks)
-
-        def fn(x, module, first, second):
-            return region(x, module, first), region(x, module, second)
-
-        module = torch.nn.Identity()
-        module._forward_hooks.update({1: None, 2: None})
-        first = types.SimpleNamespace(flags=collections.OrderedDict({1: True}))
-        second = types.SimpleNamespace(flags=collections.OrderedDict({1: True}))
-        x = torch.ones(2)
-        with mock.patch.object(
-            torch.nn.modules.module, "_global_forward_hooks_with_kwargs", first.flags
-        ):
-            ref, loaded = self._test_serialization(
-                "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module, first, second
-            )
-            inputs = {
-                "x": x,
-                "module": module,
-                "first": first,
-                "second": second,
-                "region": region,
-            }
-            self._test_check_fn(ref, loaded, inputs, True)
-            second.flags.clear()
-            self._test_check_fn(ref, loaded, inputs, False)
-
-    @parametrize("global_flags", [False, True])
-    @parametrize("populated", [False, True])
-    def test_nested_region_hook_membership(self, global_flags, populated):
-        def hook(module, args, *rest):
-            return rest[-1] * 10 + len(rest)
-
-        first, second = torch.nn.Identity(), torch.nn.Identity()
-        for module in (first, second):
-            module._forward_hooks.update({1: hook, 2: hook})
-            if populated:
-                module._forward_hooks_with_kwargs[1] = True
-        flags = (
-            collections.OrderedDict({7: True})
-            if populated
-            else collections.OrderedDict()
-        )
-        if global_flags:
-            second._forward_hooks = collections.OrderedDict({3: hook, 4: hook})
-
-        @torch.compiler.nested_compile_region
-        def region(x, module, flags):
-            if global_flags:
-                return x + sum(key in flags for key in module._forward_hooks)
-            return module(x)
-
-        def fn(x, first, second):
-            return region(x, first, flags), region(x, second, flags)
-
-        x = torch.ones(2)
-        registry_name = "_global_forward_hooks_with_kwargs"
-        with mock.patch.object(torch.nn.modules.module, registry_name, flags):
-            ref, loaded = self._test_serialization(
-                "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, first, second
-            )
-            inputs = {"x": x, "first": first, "second": second, "flags": flags}
-            self._test_check_fn(ref, loaded, inputs, True)
-            if global_flags:
-                with mock.patch.object(
-                    torch.nn.modules.module, registry_name, collections.OrderedDict()
-                ):
-                    flags[3] = True
-                    self._test_check_fn(ref, loaded, inputs, False)
-            else:
-                second._forward_hooks_with_kwargs.clear()
-                second._forward_hooks_with_kwargs[2] = True
-                self._test_check_fn(ref, loaded, inputs, False)
-
-    @parametrize("flag_name", ["with_kwargs", "always_call"])
-    @parametrize("replace_registry", [False, True])
-    def test_global_hook_membership(self, flag_name, replace_registry):
-        def hook(module, args, *rest):
-            return rest[-1]
-
-        handle = torch.nn.modules.module.register_module_forward_hook(
-            hook, **{flag_name: True}
-        )
-        self.addCleanup(handle.remove)
-        flags = getattr(
-            torch.nn.modules.module,
-            "_global_forward_hooks_with_kwargs"
-            if flag_name == "with_kwargs"
-            else "_global_forward_hooks_always_called",
-        )
-
-        def fn(x, module):
-            return x + sum(key in flags for key in module._forward_hooks)
-
-        x = torch.ones(2)
-        module = torch.nn.Identity()
-        local_handle = module.register_forward_hook(hook)
-        ref, loaded = self._test_serialization(
-            "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module
-        )
-        inputs = {"x": x, "module": module, "flags": flags}
-        self._test_check_fn(ref, loaded, inputs, True)
-        registry_name = (
-            "_global_forward_hooks_with_kwargs"
-            if flag_name == "with_kwargs"
-            else "_global_forward_hooks_always_called"
-        )
-        with mock.patch.object(
-            torch.nn.modules.module,
-            registry_name,
-            collections.OrderedDict() if replace_registry else flags,
-        ):
-            self._test_check_fn(ref, loaded, inputs, True)
-            module._forward_hooks[handle.id] = module._forward_hooks.pop(
-                local_handle.id
-            )
-            self._test_check_fn(ref, loaded, inputs, False)
 
     @torch._dynamo.config.patch("skip_nnmodule_hook_guards", False)
     def test_empty_nn_module_hooks_dict(self):

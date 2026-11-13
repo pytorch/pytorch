@@ -657,12 +657,16 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     # G['D']['a'] certifies that one item, while the name a load can substitute
     # is D, whose every other key the graph would then read live and unchecked.
     # get_global_source_name would walk such a source up to D.
-    # Order roots alone add no names: they select dictionary manager types but
-    # do not certify every value. A root with its own kept GlobalSource guard
-    # is still included below. Serialized
-    # global_scope also carries roots reached through aliases, shape_env_sources
-    # and DUPLICATE_INPUT's source_b, which need not have their own value guard.
-    # DUPLICATE_INPUT can even record a root before its optimizer-source early return.
+    # guard_on_key_order is deliberately not unioned in, even though a
+    # dict-order check roots a global: guard_filter_fn never prunes that set, so
+    # a name only it contributes is precisely a name no surviving guard checks
+    # the value of. On the default aot_compile filter, which drops every global
+    # guard, an iterated global dict is exactly that shape.
+    # Narrower than the serialized global_scope for the same reason: the
+    # serializer also fills that from a ShapeEnvSource guard's shape_env_sources
+    # and from DUPLICATE_INPUT's source_b -- names whose value no guard checks,
+    # and which DUPLICATE_INPUT records before its optimizer-source early return,
+    # so an optimizer-rooted pair records one with no guard installed at all.
     from .source import GlobalSource
 
     return {
@@ -673,11 +677,10 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
 
 
 def _recorded_guard_globals(guards_state: "GuardsState") -> set[str]:
-    """Global names required to rebuild or check the retained guard tree."""
-    # Wider than their originating_sources: global_scope also carries retained
-    # order roots used to select manager types during rebuilding, even if no
-    # runtime guard reads the root directly. It also carries a DUPLICATE_INPUT's
-    # source_b and a cpp-form SHAPE_ENV guard's
+    """Every global name the kept guards read at check time."""
+    # Wider than their originating_sources: the serialized global_scope is the
+    # serializer's own record of the names the kept guards resolve, so it also
+    # carries a DUPLICATE_INPUT's source_b and a cpp-form SHAPE_ENV guard's
     # shape_env_sources. A SHAPE_ENV guard installed as a Python lambda reads
     # its G['NAME'] operands from the same scope, and none of them reaches
     # global_scope -- shape_env_sources is filled from the cpp code parts alone
@@ -1977,11 +1980,10 @@ class AOTCompiledModel:
             if (i, kind, enabled) in warned:
                 continue
             if enabled:
-                advice = f"Fix or drop input [{i}]: its guard check raised."
+                advice = f"Fix or drop input [{i}]."
             else:
                 advice = (
-                    f"Input [{i}] opted out of guard checks; "
-                    "fix or drop its failing guard artifact."
+                    f"Input [{i}] opted out of guard checks; fix or drop that input."
                 )
             log.warning(
                 "AOT compiled input [%d]'s guard check raised %s: %s; "

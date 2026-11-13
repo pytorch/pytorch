@@ -78,10 +78,7 @@ from .dicts import (
     DictViewVariable,
     DunderDictVariable,
     MappingProxyVariable,
-    NNModuleHookFlagsDictVariable,
-    NNModuleHookFlagsOrderedDictVariable,
     NNModuleHooksDictVariable,
-    NNModuleHooksOrderedDictVariable,
     OrderedDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
