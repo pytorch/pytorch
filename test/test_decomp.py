@@ -1302,16 +1302,44 @@ class DecompOneOffTests(TestCase):
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
-    def test_trilinear_dim_expanded_by_all_inputs(self, device):
-        # (i1.unsqueeze(expand1) * i2.unsqueeze(expand2) * i3.unsqueeze(expand3)).sum(sumdim)
+    @parametrize(
+        "dims",
+        [
+            subtest(([0], [0], [0], [2], 1), name="out_dim"),
+            subtest(([0], [0], [0], [0], 0), name="unroll_dim"),
+        ],
+    )
+    def test_trilinear_dim_expanded_by_all_inputs(self, device, dims):
         from torch._decomp.decompositions import _trilinear
 
         x = torch.randn(2, 3, device=device)
 
-        actual = _trilinear(x, x, x, [0], [0], [0], [2], 1)
-        expected = (x * x * x).sum(1).unsqueeze(0)
+        actual = _trilinear(x, x, x, *dims)
+        expected = torch._trilinear(x, x, x, *dims)
 
         self.assertEqual(actual, expected)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "dtypes",
+        [
+            subtest((torch.float32, torch.float64, torch.float32), name="f32_f64"),
+            subtest((torch.float64, torch.float32, torch.float32), name="f64_f32"),
+            subtest((torch.bool, torch.bool, torch.bool), name="bool"),
+        ],
+    )
+    @parametrize("sumdim", [[], [1]])
+    def test_trilinear_dtypes(self, device, dtypes, sumdim):
+        from torch._decomp.decompositions import _trilinear
+
+        a, b, c = (torch.randn(2, 3, device=device).to(dt) for dt in dtypes)
+        args = (a, b, c, [], [], [], sumdim, 1)
+
+        actual = _trilinear(*args)
+        expected = torch._trilinear(*args)
+
+        self.assertEqual(actual, expected, exact_dtype=True)
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef

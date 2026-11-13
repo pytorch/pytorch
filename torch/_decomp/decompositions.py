@@ -4669,7 +4669,7 @@ def _canonicalize_trilinear(dims: list[int], total_dim: int) -> tuple[int, ...]:
 
 
 @register_decomposition([aten._trilinear.default, aten._trilinear.out])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def _trilinear(
     i1: Tensor,
     i2: Tensor,
@@ -4680,6 +4680,7 @@ def _trilinear(
     sumdim: list[int],
     unroll_dim: int = 1,
 ) -> Tensor:
+    result_dtype = i1.dtype
     total_dim = i1.dim() + len(expand1)
     torch._check(
         unroll_dim >= 0 and unroll_dim < total_dim,
@@ -4694,23 +4695,32 @@ def _trilinear(
     dims1 = [d for d in range(total_dim) if d not in _expand1]
     dims2 = [d for d in range(total_dim) if d not in _expand2]
     dims3 = [d for d in range(total_dim) if d not in _expand3]
+    out_dims = [d for d in range(total_dim) if d not in _sumdim]
+
+    all_expanded = set(_expand1) & set(_expand2) & set(_expand3)
+    if unroll_dim in all_expanded or any(d in all_expanded for d in out_dims):
+        sizes = [0] * total_dim
+        for t, dims in ((i1, dims1), (i2, dims2), (i3, dims3)):
+            for axis, d in enumerate(dims):
+                sizes[d] = t.shape[axis]
+        return i1.new_zeros([sizes[d] for d in out_dims])
+
+    compute_dtype = utils.get_higher_dtype(utils.get_higher_dtype(i1, i2), i3)
+    if compute_dtype == torch.bool:
+        compute_dtype = torch.float32
+    i1, i2, i3 = (t.to(compute_dtype) for t in (i1, i2, i3))
 
     dims12 = [
         d
         for d in range(total_dim)
         if (d in dims1 or d in dims2) and not (d in _sumdim and d in _expand3)
     ]
-    out_dims = [d for d in range(total_dim) if d not in _sumdim]
-    present_out_dims = [d for d in out_dims if d in dims12 or d in dims3]
-
     result = torch.einsum(i1, dims1, i2, dims2, dims12)
-    result = torch.einsum(result, dims12, i3, dims3, present_out_dims)
+    result = torch.einsum(result, dims12, i3, dims3, out_dims)
 
-    for pos, d in enumerate(out_dims):
-        if d not in present_out_dims:
-            result = result.unsqueeze(pos)
-
-    return result
+    if result_dtype == torch.bool:
+        return result != 0
+    return result.to(result_dtype)
 
 
 def _compute_scale(in_size, out_size, align_corners, scale=None):
