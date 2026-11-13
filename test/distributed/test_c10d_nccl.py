@@ -148,7 +148,11 @@ elif device_type == "xpu":
 
 def _pg_options():
     # is_high_priority_stream and _timeout. Only the NCCL one has .config.
-    pg_cls = c10d.ProcessGroupXCCL if device_type == "xpu" else c10d.ProcessGroupNCCL
+    if device_type != "xpu":
+        return c10d.ProcessGroupNCCL.Options()
+    # TORCH_DIST_USE_XCCL2=1 routes the "xccl" backend to ProcessGroupXCCL2.
+    use_xccl2 = os.environ.get("TORCH_DIST_USE_XCCL2") == "1"
+    pg_cls = c10d.ProcessGroupXCCL2 if use_xccl2 else c10d.ProcessGroupXCCL
     return pg_cls.Options()
 
 
