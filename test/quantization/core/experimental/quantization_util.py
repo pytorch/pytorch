@@ -94,9 +94,9 @@ def load_model(model_file):
 
 def print_size_of_model(model):
     if isinstance(model, torch.jit.RecursiveScriptModule):
-        torch.jit.save(model, "temp.p")
+        torch.jit._serialization.save(model, "temp.p")
     else:
-        torch.jit.save(torch.jit.script(model), "temp.p")
+        torch.jit._serialization.save(torch.jit._script.script(model), "temp.p")
     print("Size (MB):", os.path.getsize("temp.p") / 1e6)
     os.remove("temp.p")
 

@@ -18,10 +18,25 @@ dnnl::memory make_onednn_memory(
     dnnl::engine& engine,
     void* ptr);
 
-TORCH_XPU_API dnnl::memory make_onednn_memory(
+// Overload for Input-only arguments(see uxlfoundation/oneDNN#4843).
+inline dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
-    const void* ptr);
+    const void* ptr) {
+  TORCH_CHECK(
+      ptr != nullptr || md.get_size() == 0,
+      "make_onednn_memory: null pointer passed for Input-only argument");
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return make_onednn_memory(md, engine, const_cast<void*>(ptr));
+}
+
+// This version is used for grouped matmul.
+// see https://uxlfoundation.github.io/oneDNN/dev_guide_grouped_mem.html
+dnnl::memory make_onednn_grouped_memory(
+    dnnl::memory::desc md,
+    dnnl::engine& engine,
+    void* ptr,
+    void* offs_ptr);
 
 // Keep non-static and non-inline
 bool set_onednn_verbose(int level);
