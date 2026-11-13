@@ -310,6 +310,11 @@ if(USE_FLASH_ATTENTION)
         CK_TILE_FMHA_FWD_APPENDKV_API=1
         CK_TILE_FMHA_FWD_PAGEDKV_API=1
         __GCC_HAVE_DWARF2_CFI_ASM=1
+        # Newer composable_kernel defaults ck_tile to its unified MMA framework,
+        # which needs a single GPU target at compile time (CK_CMAKE_GPU_TARGET_IDS)
+        # that a multi-arch build cannot give. Keep the WarpGemm path, which is
+        # what older CK uses by default.
+        USE_NEW_UNIFIED_FRAMEWORK=0
         USE_ROCM_CK_SDPA)
 
     message(STATUS "Generating CK kernel instances...")
@@ -698,6 +703,9 @@ if(USE_ROCM)
       POSITION_INDEPENDENT_CODE ON
       HIP_ARCHITECTURES "${_ck_gemm_hip_arches}")
     target_compile_options(ck_gemm PRIVATE ${HIP_CXX_FLAGS})
+    # ck_tile_group_gemm.hip uses ck_tile: see USE_NEW_UNIFIED_FRAMEWORK in
+    # CK_SDPA_EXTRA_HIPCC_OPTIONS above.
+    target_compile_definitions(ck_gemm PRIVATE USE_NEW_UNIFIED_FRAMEWORK=0)
     target_include_directories(ck_gemm PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/hip
       ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include
@@ -796,11 +804,6 @@ add_compile_definitions(USE_EXTERNAL_MZCRC)
 
 if(NOT MSVC)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS m)
-endif()
-
-if(AT_NNPACK_ENABLED)
-  include_directories(${NNPACK_INCLUDE_DIRS})
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS nnpack) # cpuinfo is added below
 endif()
 
 if(MKLDNN_FOUND)
@@ -928,11 +931,9 @@ endif()
       list(APPEND ATen_HIP_DEPENDENCY_LIBS torch::magma)
     endif(USE_ROCM)
     if(MSVC)
-      if($ENV{TH_BINARY_BUILD})
-        # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
-        # in caffe2/CMakeLists.txt
-        list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
-      endif($ENV{TH_BINARY_BUILD})
+      # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
+      # in caffe2/CMakeLists.txt
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
     endif(MSVC)
   endif(USE_MAGMA)
 
