@@ -408,13 +408,13 @@ void fakeFallback(
       }
       return;
     }
+    // New views and shallow copies inside the kernel are plain Meta tensors.
+    at::init_cpp_fake(impl, *device, mode);
     if (!is_alias && t.requires_grad()) {
       // Backend kernels run below autograd, but a Meta kernel can copy
       // requires_grad from an input
       t.set_requires_grad(false);
     }
-    // New views and shallow copies inside the kernel are plain Meta tensors.
-    at::init_cpp_fake(impl, *device, mode);
     impl->set_real_tensor(nullptr);
     impl->set_fake_dispatch_keys(output_dispatch_keys);
   };
