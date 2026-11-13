@@ -171,10 +171,11 @@ kernel void matmul_mpp_staged(
       uint,                                                             \
       uint)
 
-// The tile rows metal_gemm picks for it: kMatmulStagedMaxRows and half of it.
+// The tile rows metal_gemm picks for it: kMatmulBlock, a half and a quarter.
 #define INSTANTIATE_MATMUL_MPP_STAGED_DTYPE(T) \
   INSTANTIATE_MATMUL_MPP_STAGED(T, 8);         \
-  INSTANTIATE_MATMUL_MPP_STAGED(T, 16)
+  INSTANTIATE_MATMUL_MPP_STAGED(T, 16);        \
+  INSTANTIATE_MATMUL_MPP_STAGED(T, 32)
 
 INSTANTIATE_MATMUL_MPP_STAGED_DTYPE(float);
 INSTANTIATE_MATMUL_MPP_STAGED_DTYPE(half);
