@@ -271,9 +271,6 @@ void fakeFallback(
     }
   }
 
-  // The op's tensor inputs, so output wrapping can tell an input returned as
-  // an output (by in-place and out= ops) from a new tensor
-  std::unordered_set<const c10::TensorImpl*> input_impls;
   std::optional<c10::Device> device;
   for_each_tensor(
       stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
@@ -315,7 +312,6 @@ void fakeFallback(
         if (mode->get_constant(impl) != nullptr) {
           unsupported(op, "constant inputs");
         }
-        input_impls.insert(impl);
         const auto fake_device = impl->fake_device();
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
         if (!device.has_value()) {
@@ -377,7 +373,10 @@ void fakeFallback(
       return;
     }
     auto* impl = t.unsafeGetTensorImpl();
-    if (t.is_fake() && impl->fake_tensor_mode() == mode) {
+    if (t.is_fake()) {
+      TORCH_CHECK(
+          impl->fake_tensor_mode() == mode,
+          "Meta kernel returned a fake tensor from another mode");
       // device() reports meta inside the kernel invocation scope.
       const auto fake_device = impl->fake_device();
       TORCH_CHECK(
@@ -386,12 +385,9 @@ void fakeFallback(
           *fake_device,
           ", expected ",
           *device);
-    }
-    // An input returned as an output (by in-place and out= ops, or an op that
-    // returns its input without an alias annotation) is kept as is, as Python
-    // does. Its stored fake device is read, as device() reports meta here.
-    if (input_impls.contains(impl)) {
-      TORCH_INTERNAL_ASSERT(impl->fake_device() == device);
+      if (output_dispatch_keys.has_value()) {
+        impl->set_fake_dispatch_keys(output_dispatch_keys);
+      }
       return;
     }
     if (!is_alias && t.requires_grad()) {
@@ -399,8 +395,7 @@ void fakeFallback(
       // requires_grad from an input
       t.set_requires_grad(false);
     }
-    // A copy a Meta kernel made of a fake input inherited the input's fake
-    // state (see init_cpp_fake), where Python would see a plain meta tensor
+    // New views and shallow copies inside the kernel are plain Meta tensors.
     at::init_cpp_fake(impl, *device, mode);
     impl->set_real_tensor(nullptr);
     impl->set_fake_dispatch_keys(output_dispatch_keys);
