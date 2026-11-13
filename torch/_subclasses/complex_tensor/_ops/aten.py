@@ -232,7 +232,7 @@ def prod_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> ComplexTensor:
 def complex_impl(re: torch.Tensor, im: torch.Tensor) -> ComplexTensor:
     if re.shape != im.shape:
         re, im = torch.broadcast_tensors(re, im)
-    return ComplexTensor(re, im)
+    return ComplexTensor(re.clone(), im.clone())
 
 
 @register_real_to_complex(aten.polar.default)
@@ -754,11 +754,17 @@ def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
 
 
 @register_real_to_complex(aten.view_as_complex.default)
-@register_real_to_complex(aten.view_as_complex_copy.default)
 def view_as_complex_impl(self: torch.Tensor) -> ComplexTensor:
     if len(self.shape) < 1 or self.shape[-1] != 2:
         raise RuntimeError("Tensor must have a last dimension of size 2")
     return ComplexTensor(self[..., 0], self[..., 1])
+
+
+@register_real_to_complex(aten.view_as_complex_copy.default)
+def view_as_complex_copy_impl(self: torch.Tensor) -> ComplexTensor:
+    if len(self.shape) < 1 or self.shape[-1] != 2:
+        raise RuntimeError("Tensor must have a last dimension of size 2")
+    return ComplexTensor(self[..., 0].clone(), self[..., 1].clone())
 
 
 @register_complex(aten.linalg_vector_norm)

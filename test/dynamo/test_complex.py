@@ -400,6 +400,35 @@ class ComplexTests(ComplexDynamoTestCase):
         self.assertEqual(out_opt, out_ref)
         self.assertEqual(x_opt, x_ref)
 
+        def fn_complex_mutate_then_return(x, y):
+            c = torch.complex(x, y)
+            x.add_(1.0)
+            return c
+
+        def fn_copy_mutate_then_return(x):
+            c = torch.view_as_complex_copy(x)
+            x.add_(1.0)
+            return c
+
+        x_ref = torch.randn(4)
+        y_ref = torch.randn(4)
+        x_opt = x_ref.clone()
+        out_ref = fn_complex_mutate_then_return(x_ref, y_ref)
+        out_opt = torch.compile(
+            fn_complex_mutate_then_return, backend="aot_eager", fullgraph=True
+        )(x_opt, y_ref)
+        self.assertEqual(out_opt, out_ref)
+        self.assertEqual(x_opt, x_ref)
+
+        x_ref = torch.randn(1, 2)
+        x_opt = x_ref.clone()
+        out_ref = fn_copy_mutate_then_return(x_ref)
+        out_opt = torch.compile(
+            fn_copy_mutate_then_return, backend="aot_eager", fullgraph=True
+        )(x_opt)
+        self.assertEqual(out_opt, out_ref)
+        self.assertEqual(x_opt, x_ref)
+
 
 instantiate_parametrized_tests(ComplexTests)
 
