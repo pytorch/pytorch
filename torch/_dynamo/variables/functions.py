@@ -921,14 +921,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors func_descr_get which calls PyMethod_New to bind
         # the function to an instance, and returns the function itself when
         # there is no instance.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1119
-        if obj.is_constant_none():
+        if obj is None:
             return self
         source = obj.source and AttrSource(obj.source, self.fn.__name__)
         return UserMethodVariable(self, obj, source=source)
@@ -2090,7 +2090,7 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # method_descr_get: a bound method does not re-bind. Only reached where

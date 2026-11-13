@@ -2377,12 +2377,13 @@ def _is_skipped_constant_property(
 def _resolve_descriptor_get(
     tx: "InstructionTranslatorBase",
     type_attr: object,
-    obj: VariableTracker,
+    obj: VariableTracker | None,
     class_vt: VariableTracker,
     source: "Source | None",
     name: str,
 ) -> "VariableTracker | None":
-    """Invoke tp_descr_get on a type attribute if it's a descriptor.
+    """Invoke tp_descr_get on a type attribute if it's a descriptor. obj is
+    None for access through class_vt itself (C NULL).
 
     Handles all descriptor types that have dedicated VTs with
     tp_descr_get_impl.  Returns None if type_attr is not a recognized
@@ -2398,7 +2399,7 @@ def _resolve_descriptor_get(
         # the getter and then ask an int for .fget.
         prop_source = (
             mro_attr_source(tx, obj.python_type(), TypeSource(obj.source), name)
-            if obj.source
+            if obj is not None and obj.source
             else None
         )
         prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
@@ -2437,6 +2438,10 @@ def _resolve_descriptor_get(
         )
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.FunctionType):
+        if obj is None:
+            return VariableBuilder.create_internal_user_function(
+                type_attr, source=source
+            )
         return variables.UserMethodVariable(
             VariableBuilder.create_internal_user_function(
                 type_attr, source=source and AttrSource(source, "__func__")
