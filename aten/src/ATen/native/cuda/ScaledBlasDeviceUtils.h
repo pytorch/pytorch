@@ -11,4 +11,7 @@ namespace at::native::scaled {
 TORCH_CUDA_CPP_API
 bool scaled_mm_arch_allowed(bool sm90_only = false, bool sm100_only = false);
 
+TORCH_CUDA_CPP_API
+void check_mnk4_support();
+
 } // namespace at::native::scaled
