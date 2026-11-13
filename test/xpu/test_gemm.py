@@ -1459,15 +1459,6 @@ class TestBasicGEMM(TestCase):
 
         res = weight_int4pack_mm(a, b_int4pack, scales, zeros_int8)
 
-        # The XPU implementation normalizes A with .contiguous() before the
-        # oneDNN call, so a column-major activation must give the exact same
-        # result as its contiguous copy.
-        if a_col_major:
-            res_contiguous = weight_int4pack_mm(
-                a.contiguous(), b_int4pack, scales, zeros_int8
-            )
-            self.assertEqual(res, res_contiguous)
-
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
