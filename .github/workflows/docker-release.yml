@@ -77,7 +77,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     container:
       image: ghcr.io/actions/actions-runner:latest
-    environment: ${{ (github.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    # TEMP: ciflow/nightly is only to test the HF mirror on the PR, revert before merge
+    environment: ${{ (github.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v') || startsWith(github.event.ref, 'refs/tags/ciflow/nightly/')) && 'docker-build' || '' }}
     timeout-minutes: 240
     # The actions-runner container defaults `run:` to sh; force bash for the
     # build/tag scripts (set -o pipefail, [[ ]]).
@@ -180,7 +181,8 @@ jobs:
               "${PREFIX}:${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}"
           fi
       - name: Login to Hugging Face Container Registry
-        if: ${{ github.event.ref == 'refs/heads/nightly' }}
+        # TEMP: ciflow/nightly is only to test the HF mirror on the PR, revert before merge
+        if: ${{ github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/ciflow/nightly/') }}
         continue-on-error: true
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
@@ -190,12 +192,17 @@ jobs:
           password: ${{ secrets.HF_TOKEN }}
       - name: Mirror nightly image to Hugging Face (experimental)
         # Registry-side copy, no docker daemon needed.
-        if: ${{ github.event.ref == 'refs/heads/nightly' }}
+        # TEMP: ciflow/nightly is only to test the HF mirror on the PR, revert before merge
+        if: ${{ github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/ciflow/nightly/') }}
         continue-on-error: true
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           set -eo pipefail
+          # TEMP: on ciflow/nightly, copy yesterday's published nightly. Revert before merge.
+          if [[ "${GITHUB_REF}" == refs/tags/ciflow/nightly/* ]]; then
+            PYTORCH_VERSION="${PYTORCH_VERSION%.dev*}.dev$(date -u -d yesterday +%Y%m%d)"
+          fi
           if [[ "${CUDA_VERSION_SHORT}" == "cpu" ]]; then
             TAG="${PYTORCH_VERSION}-runtime"
           else
