@@ -2503,6 +2503,10 @@ Arguments:
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
     use_libuv (bool, optional): Deprecated since 2.16 and ignored; ``TCPServer`` always uses libuv. ``False`` emits a ``FutureWarning``. Default is True.
+    tls_cert (str, optional): Path to a PEM certificate (chain). Enables TLS with mutual certificate authentication, which requires ``tls_cert``, ``tls_key`` and ``tls_ca`` and must be enabled on both client and server. If no ``tls_*`` option is set, the ``TORCH_TCPSTORE_TLS_CERT``, ``TORCH_TCPSTORE_TLS_KEY``, ``TORCH_TCPSTORE_TLS_CA`` and ``TORCH_TCPSTORE_TLS_PSK`` environment variables are used instead; TLS is disabled when all selected settings are empty or unset; otherwise empty values and paths containing NUL bytes raise an error. ``clone()`` preserves the resolved configuration, including disabled TLS, regardless of later environment changes. Certificate files are reloaded from the resolved paths, so prefer absolute paths; replacing them affects later clones. Reusing a ``multi_tenant`` server with a different TLS configuration raises. Keep the TLS environment variables stable while constructing stores. Fresh stores created internally, including by ``init_process_group`` with ``env://``, torchrun/the elastic agent, distributed debug, and the asynchronous checkpoint prefix-store helper, only enable TLS through the environment variables; explicit options on another store do not configure them. Linux only; loads OpenSSL >= 1.1.1 (``libssl.so.3``, ``libssl.so.1.1`` or ``libssl.so``) at runtime. Any certificate signed by the CA is accepted; the hostname and subject are not checked, so use a dedicated CA. A certificate may be used for both server and client connections (rank 0 runs both), so it needs both the serverAuth and clientAuth extended key usages, or none; any extended key usage on CA certificates in the chain must also include both. Default is None.
+    tls_key (str, optional): Path to the unencrypted PEM private key, which may be the same file as ``tls_cert``. Default is None.
+    tls_ca (str, optional): Path to the PEM CA bundle used to verify the peer certificate. Default is None.
+    tls_psk (str, optional): The pre-shared key value, not a filename. An empty value disables TLS only if all selected TLS settings are empty or unset. Used verbatim as UTF-8 bytes (32 to 256 bytes, no NUL); no hex or base64 decoding is performed. Enables TLS 1.3 with pre-shared key authentication instead of certificates; it cannot be combined with ``tls_cert``, ``tls_key`` or ``tls_ca``. Client and server must use the same key. The key must be random, with at least 128 bits of entropy, not a passphrase: a captured handshake allows offline guessing. For example, generate a value with ``secrets.token_hex(32)`` without printing it. The environment variable ``TORCH_TCPSTORE_TLS_PSK`` also contains the value directly. ``clone()`` reuses the resolved value, independent of later environment changes. Linux only; the OpenSSL and internal-store notes for ``tls_cert`` apply. Any holder of the key can impersonate either endpoint and gets full read/write access to every key. Keep the value secret; avoid shell tracing and command-line arguments that expose it. Distribution is up to the user. Constructor ``TypeError`` diagnostics omit all argument values, including for plaintext stores; the original message, exception subtype, notes, and chaining are not preserved. This does not prevent user-defined conversion or representation methods from exposing values. Default is None.
 
 .. note:: The server limits keys (including any prefix) to 8 KiB, values to 8 MiB per request and multi-key requests to 128K keys; it disconnects clients that exceed them.
 
@@ -2526,7 +2530,11 @@ Example::
                       bool waitWorkers,
                       bool multiTenant,
                       std::optional<int> masterListenFd,
-                      bool useLibUV) {
+                      bool useLibUV,
+                      std::optional<std::string> tlsCert,
+                      std::optional<std::string> tlsKey,
+                      std::optional<std::string> tlsCa,
+                      std::optional<std::string> tlsPsk) {
             if (!useLibUV) {
               static std::atomic<bool> warned{false};
               if (!warned.load() || c10::WarningUtils::get_warnAlways()) {
@@ -2560,7 +2568,11 @@ Example::
                 .waitWorkers = waitWorkers,
                 .timeout = timeout,
                 .multiTenant = multiTenant,
-                .masterListenFd = masterListenFd};
+                .masterListenFd = masterListenFd,
+                .tlsCert = std::move(tlsCert),
+                .tlsKey = std::move(tlsKey),
+                .tlsCa = std::move(tlsCa),
+                .tlsPsk = std::move(tlsPsk)};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -2576,6 +2588,11 @@ Example::
           py::arg("multi_tenant") = false,
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = true,
+          py::kw_only(),
+          py::arg("tls_cert") = py::none(),
+          py::arg("tls_key") = py::none(),
+          py::arg("tls_ca") = py::none(),
+          py::arg("tls_psk") = py::none(),
           R"(Creates a new TCPStore.)")
       .def_property_readonly(
           "host",
@@ -2594,6 +2611,33 @@ Example::
           &::c10d::TCPStore::repr,
           R"(Returns a string representation of the TCPStore.)",
           py::call_guard<py::gil_scoped_release>());
+
+  // pybind's argument-mismatch errors echo every argument, including secrets.
+  // Forward through the original constructor to retain its conversion rules,
+  // but discard TypeError diagnostics before they can expose a PSK.
+  {
+    auto tcpStore = module.attr("TCPStore");
+    auto init = tcpStore.attr("__init__");
+    auto doc = init.attr("__doc__").cast<std::string>();
+    py::options options;
+    options.disable_function_signatures();
+    tcpStore.attr("__init__") = py::cpp_function(
+        [init](py::args args, py::kwargs kwargs) {
+          try {
+            init(*args, **kwargs);
+          } catch (const py::error_already_set& error) {
+            if (error.matches(PyExc_TypeError)) {
+              // @allow-raw-throw: Preserve TypeError without secret context.
+              throw py::type_error(
+                  "Invalid TCPStore arguments (values omitted to protect TLS secrets)");
+            }
+            throw;
+          }
+        },
+        py::is_method(tcpStore),
+        py::name("__init__"),
+        doc.c_str());
+  }
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
