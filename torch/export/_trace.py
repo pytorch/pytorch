@@ -202,6 +202,10 @@ DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
 
 @contextmanager
 def _ignore_backend_decomps():
+    orig_precision = torch.backends._get_fp32_precision_state(
+        *torch.backends.mkldnn._FP32_PRECISION_STATE_KEYS,
+        *torch.backends.cudnn._FP32_PRECISION_STATE_KEYS,
+    )
     orig_mkldnn_flag = torch.backends.mkldnn.set_flags(False)
     orig_nnpack_flag = torch.backends.nnpack.set_flags(False)
     orig_cudnn_flag = torch.backends.cudnn.set_flags(False)
@@ -212,6 +216,7 @@ def _ignore_backend_decomps():
         torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
         torch.backends.cudnn.set_flags(*orig_cudnn_flag)
+        torch.backends._set_fp32_precision_state(orig_precision)
 
 
 @contextmanager
