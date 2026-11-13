@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import gc
 import operator
+import weakref
 
 import onnx
 
@@ -18,7 +20,7 @@ from torch.onnx._internal.exporter import (
     _registration,
 )
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
-from torch.onnx._internal.exporter._torchlib.ops import core
+from torch.onnx._internal.exporter._torchlib.ops import core, factories
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -88,6 +90,20 @@ class TestNativeRegistration(TestCase):
         }
         result = ReferenceEvaluator(proto).run(None, feed)[0]
         self.assertEqual(torch.from_numpy(result), model(inputs[0], torch.ones(4)))
+
+    def test_arange_probe_does_not_retain_context(self):
+        references = []
+        expected = torch.arange(3.1, dtype=torch.int64).numel() == 4
+        for _ in range(3):
+            builder = _ir_builder.GraphBuilder(ir.Graph([], [], nodes=[]), opset=18)
+            op = _ir_builder.TranslationContext(builder)
+            references.append(weakref.ref(builder))
+            self.assertEqual(
+                factories._int64_arange_non_integral_uses_float_length(op), expected
+            )
+            del op, builder
+        gc.collect()
+        self.assertTrue(all(reference() is None for reference in references))
 
     def test_decorator_returns_plain_function(self):
         size = len(_torchlib_registry._registry)
