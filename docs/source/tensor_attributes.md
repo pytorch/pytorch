@@ -37,8 +37,8 @@ A {class}`torch.dtype` is an object that represents the data type of a
 | `torch.bcomplex32` [^shell] | 32-bit complex with two `bfloat16` components |
 | `torch.complex64` or `torch.cfloat` | 64-bit complex with two `float32` components |
 | `torch.complex128` or `torch.cdouble` | 128-bit complex with two `float64` components |
-| `torch.float8_e4m3fn` [^shell] [^1] | 8-bit floating point, S-E-M 1-4-3, from <https://arxiv.org/abs/2209.05433> |
-| `torch.float8_e5m2` [^shell] | 8-bit floating point, S-E-M 1-5-2, from <https://arxiv.org/abs/2209.05433> |
+| `torch.float8_e4m3fn` [^shell] [^1] [^5] | 8-bit floating point, S-E-M 1-4-3, from <https://arxiv.org/abs/2209.05433> |
+| `torch.float8_e5m2` [^shell] [^5] | 8-bit floating point, S-E-M 1-5-2, from <https://arxiv.org/abs/2209.05433> |
 | `torch.float8_e4m3fnuz` [^shell] [^1] | 8-bit floating point, S-E-M 1-4-3, from <https://arxiv.org/pdf/2206.02915> |
 | `torch.float8_e5m2fnuz` [^shell] [^1] | 8-bit floating point, S-E-M 1-5-2, from <https://arxiv.org/pdf/2206.02915> |
 | `torch.float8_e8m0fnu` [^shell] [^1] [^e8m0] | 8-bit floating point, S-E-M 0-8-0, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
@@ -95,6 +95,11 @@ A {class}`torch.dtype` is an object that represents the data type of a
     to be even): the sign is ignored, values below `2**-127`, including 0,
     become `2**-127` (the smallest value), and values from `1.5 * 2**127` up,
     infinities and NaN map to NaN.
+
+[^5]: Casting to `torch.float8_e4m3fn` or `torch.float8_e5m2` rounds to
+    nearest, ties to even, and saturates: values beyond the largest finite
+    value (448 and 57344 respectively) and infinities become the largest finite
+    value of their sign, and NaN maps to NaN.
 
 **Note**: legacy constructors such as `torch.*.FloatTensor`, `torch.*.DoubleTensor`, `torch.*.HalfTensor`,
 `torch.*.BFloat16Tensor`, `torch.*.ByteTensor`, `torch.*.CharTensor`, `torch.*.ShortTensor`, `torch.*.IntTensor`,

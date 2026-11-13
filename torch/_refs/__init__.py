@@ -821,6 +821,9 @@ def isfinite(a: TensorLikeType) -> TensorLikeType:
 def isinf(a: TensorLikeType) -> TensorLikeType:
     if utils.is_complex_dtype(a.dtype):
         return torch.logical_or(isinf(torch.real(a)), isinf(torch.imag(a)))
+    if a.dtype == torch.float8_e5m2:
+        # As in eager: float("inf") would saturate to float8_e5m2's max.
+        return isinf(a.to(torch.float16))
     if utils.is_float_dtype(a.dtype):
         return torch.abs(a) == float("inf")
     return torch.zeros_like(a, dtype=torch.bool)
@@ -835,6 +838,8 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
     )
+    if a.dtype == torch.float8_e5m2:
+        return isposinf(a.to(torch.float16))
     if utils.is_float_dtype(a.dtype):
         return a == float("inf")
     return torch.zeros_like(a, dtype=torch.bool)
@@ -849,6 +854,8 @@ def isneginf(a: TensorLikeType) -> TensorLikeType:
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
     )
+    if a.dtype == torch.float8_e5m2:
+        return isneginf(a.to(torch.float16))
     if utils.is_float_dtype(a.dtype):
         return a == float("-inf")
     return torch.zeros_like(a, dtype=torch.bool)

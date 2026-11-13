@@ -354,8 +354,9 @@ Tensor = torch.Tensor
 
 
 def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
-    # The default behavior in PyTorch for casting to `float8_e4m3fn`
-    # and `e5m2` is to not saturate. In this context, we should saturate.
+    # PyTorch's casts to the fnuz float8 dtypes give NaN on overflow (those
+    # to `float8_e4m3fn` and `e5m2` saturate). In this context, we should
+    # saturate.
     # A common case where we want to saturate is when the history of a
     # tensor has a maximum value of `amax1`, and the current amax value
     # is `amax2`, where `amax1 < amax2`. This is common when using delayed

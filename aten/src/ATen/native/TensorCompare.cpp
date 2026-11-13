@@ -512,15 +512,6 @@ Tensor isreal(const Tensor& self) {
   return at::imag(self) == 0;
 }
 
-#if !defined(C10_MOBILE)
-#define _AT_DISPATCH_INF_TYPES(TYPE, NAME, ...) \
-  AT_DISPATCH_FLOATING_TYPES_AND3(              \
-      kHalf, kBFloat16, kFloat8_e5m2, TYPE, NAME, __VA_ARGS__)
-#else
-#define _AT_DISPATCH_INF_TYPES(TYPE, NAME, ...) \
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, TYPE, NAME, __VA_ARGS__)
-#endif
-
 // Float8_e5m2 is the only fp8 dtype with an infinity encoding. Listed one dtype
 // at a time so that a newly added fp8 dtype has to make a decision here instead
 // of inheriting one.
@@ -551,9 +542,16 @@ Tensor isinf(const Tensor& self) {
     return at::isinf(at::real(self)).__ior__(at::isinf(at::imag(self)));
   }
 
-  return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isinf", [&]() {
-    return self.abs() == std::numeric_limits<scalar_t>::infinity();
-  });
+  // Note: comparing with an infinite Scalar would convert it to e5m2, which
+  // saturates it, so compare in Half, which has every e5m2 value
+  if (self.scalar_type() == kFloat8_e5m2) {
+    return at::isinf(self.to(kHalf));
+  }
+
+  return AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "isinf", [&]() {
+        return self.abs() == std::numeric_limits<scalar_t>::infinity();
+      });
 }
 
 Tensor isfinite(const Tensor& self) {
@@ -573,10 +571,16 @@ Tensor isfinite(const Tensor& self) {
     return at::isfinite(at::real(self)).__iand__(at::isfinite(at::imag(self)));
   }
 
-  return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isfinite", [&]() {
-    return (self == self) *
-        (self.abs() != std::numeric_limits<scalar_t>::infinity());
-  });
+  // Note: see isinf
+  if (self.scalar_type() == kFloat8_e5m2) {
+    return at::isfinite(self.to(kHalf));
+  }
+
+  return AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "isfinite", [&]() {
+        return (self == self) *
+            (self.abs() != std::numeric_limits<scalar_t>::infinity());
+      });
 }
 
 void _assert_async_cpu(const Tensor& self) {
