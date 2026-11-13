@@ -164,8 +164,6 @@ xfails = [
     # generate_pycode cannot reconstruct a GetItemSource, which is what
     # debug_force_nested_calls sources the wrapped frame's *args by
     NestedGraphBreaksFunctionTests.test_method_vt_reconstruct_pycode_nested_graph_breaks,
-    # bytecode codegen issues with nested graph breaks
-    NestedGraphBreaksDefaultsTests.test_frozenset_reconstruction2_nested_graph_breaks,
     # correctness issues due to debug_force_nested_calls wrapping
     NestedGraphBreaksDecoratorTests.test_fullgraph_eval_frame_override_nested_graph_breaks,
     NestedGraphBreaksDecoratorTests.test_torch_guards_stack_frame_register_inlining_disable_nested_graph_breaks,

@@ -146,6 +146,18 @@ def forward(self, x, y):
         result = out_graph(torch.randn(5))
         self.assertEqual(result, 5)
 
+    @common_utils.parametrize(
+        "value", [2, 2.5, "mode", True, common_utils.subtest(None, name="none")]
+    )
+    def test_sourced_constant_outputs_smoke(self, value):
+        # Smoke coverage: export remains usable with its specialized Python input.
+        def fn(x, value):
+            return x + 1, value, ((value,),)
+
+        x = torch.ones(1)
+        graph, _ = torch._dynamo.export(fn)(x, value)
+        self.assertEqual(graph(x, value), fn(x, value))
+
     def test_no_tensor_computation_2(self):
         inp = torch.randn(3)
         inp2 = 2

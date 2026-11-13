@@ -6,6 +6,7 @@ import torch._dynamo.test_case
 import torch.nn as nn
 from torch._dynamo.source import (
     AttrSource,
+    DictKeysSource,
     GlobalSource,
     is_from_local_source,
     LocalSource,
@@ -81,6 +82,11 @@ class SourceTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, box), x + 7)
         self.assertEqual(box.value, 7)
         self.assertEqual(counter.frame_count, 2)
+
+    def test_dict_keys_snapshot_cannot_create_guards(self):
+        source = DictKeysSource(LocalSource("mapping"))
+        with self.assertRaisesRegex(NotImplementedError, "codegen-only"):
+            source.make_guard(lambda _: None)
 
     def test_type_dict_source_bypasses_metaclass_getattribute(self):
         class Meta(type):
