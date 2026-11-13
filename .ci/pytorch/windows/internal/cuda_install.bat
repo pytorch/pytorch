@@ -29,6 +29,7 @@ if %CUDA_VER% EQU 129 goto cuda129
 if %CUDA_VER% EQU 130 goto cuda130
 if %CUDA_VER% EQU 132 goto cuda132
 if %CUDA_VER% EQU 134 goto cuda134
+if %CUDA_VER% EQU 135 goto cuda135
 
 echo CUDA %CUDA_VERSION_STR% is not supported
 exit /b 1
@@ -75,6 +76,13 @@ set CUDA_INSTALL_VERSION=13.4.3
 set CUDA_INSTALL_EXE=cuda_13.4.3_windows_x86_64.exe
 set "ARGS="
 set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda13-archive
+goto cuda_download
+
+:cuda135
+set CUDA_INSTALL_VERSION=13.5.0
+set CUDA_INSTALL_EXE=cuda_13.5.0_windows_x86_64.exe
+set "ARGS="
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda13-archive
 goto cuda_download
 
 :: Common download logic for CUDA toolkit and cuDNN
@@ -197,6 +205,10 @@ if %CUDA_VER% EQU 132 (
 if %CUDA_VER% EQU 134 (
     set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda13-archive
     set EXPECTED_CUDNN_VERSION=9.26.0
+)
+if %CUDA_VER% EQU 135 (
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda13-archive
+    set EXPECTED_CUDNN_VERSION=9.27.0
 )
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 
