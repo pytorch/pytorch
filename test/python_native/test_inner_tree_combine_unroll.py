@@ -50,12 +50,11 @@ class TestInnerTreeCombineUnroll(TestCase):
 
     @parametrize(
         "updates",
-        [{"combine_unroll": -1}, {"combine_rpb": 64}, {"combine_weights": True}],
+        [{"combine_unroll": -1}, {"combine_rpb": 64}],
         name_fn=lambda u: next(iter(u)),
     )
     def test_invalid_policy(self, updates):
-        """Reject a negative unroll, async staging with more rows than copying lanes, and
-        weights without uniform counts."""
+        """Reject a negative unroll and async staging with more rows than copying lanes."""
         import cutlass
 
         from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
@@ -66,18 +65,18 @@ class TestInnerTreeCombineUnroll(TestCase):
             rt.itree_combine_plan(None, 4, arch=policy, trait=trait)
 
     @parametrize(
-        "count,last,key,weights,staged",
+        "count,last,key,mode,staged",
         [
-            (8192, 8192, "welford", False, True),
-            (8192, 8192, "welford", True, True),
-            (8192, 8191, "welford", True, True),
-            (8192, 8192, "sum", True, True),
-            (8192, 8192, "fp64", True, True),
+            (8192, 8192, "welford", "counts", True),
+            (8192, 8192, "welford", "weights", True),
+            (8192, 8191, "welford", "weights", True),
+            (8192, 8192, "sum", "weights", True),
+            (8192, 8192, "fp64", "weights", True),
             # Without a staged tile the count field stays.
-            (8192, 8192, "welford", True, False),
+            (8192, 8192, "welford", "weights", False),
         ],
     )
-    def test_uniform_count_eligibility(self, count, last, key, weights, staged):
+    def test_uniform_count_eligibility(self, count, last, key, mode, staged):
         """Enable uniform counts only when every partial has the same supported shape
         and the combine stages tiles."""
         import cutlass
@@ -100,7 +99,7 @@ class TestInnerTreeCombineUnroll(TestCase):
             combine_max=512,
             combine_unroll=4,
         )
-        uniform = arch._replace(uniform_count=True, combine_weights=weights)
+        uniform = arch._replace(uniform_combine=mode)
         kwargs = dict(nrows=1, trait=trait)
         caps = SimpleNamespace(smem_per_block_optin=232448)
         with mock.patch.object(rt._hw, "caps", return_value=caps):
@@ -108,14 +107,11 @@ class TestInnerTreeCombineUnroll(TestCase):
             candidate = rt.itree_combine_plan(split, itemsize, arch=uniform, **kwargs)
         supported = staged and (count, last, key) == (8192, 8192, "welford")
         self.assertEqual(candidate.combine_tile > 0, staged)
-        self.assertEqual(candidate.uniform_count, supported)
-        self.assertEqual(candidate.combine_weights, weights and supported)
-        self.assertEqual(
-            candidate._replace(uniform_count=False, combine_weights=False), baseline
-        )
+        self.assertEqual(candidate.uniform_combine, mode if supported else "off")
+        self.assertEqual(candidate._replace(uniform_combine="off"), baseline)
 
-    @parametrize("weights", [False, True])
-    def test_uniform_count_smem_budget(self, weights):
+    @parametrize("mode", ["counts", "weights"])
+    def test_uniform_count_smem_budget(self, mode):
         """Budget uniform tiles without the count field, plus one shared weight row."""
         import cutlass
 
@@ -131,7 +127,7 @@ class TestInnerTreeCombineUnroll(TestCase):
             combine_async=8,
             combine_max=512,
         )
-        uniform = arch._replace(uniform_count=True, combine_weights=weights)
+        uniform = arch._replace(uniform_combine=mode)
         kwargs = dict(nrows=32, trait=trait)
         # 32 rows of 516 staged floats: three fields exceed the budget and two fit it, and two
         # plus one weight row of 512 fit it exactly but not a byte less.
@@ -142,8 +138,9 @@ class TestInnerTreeCombineUnroll(TestCase):
                 baseline = rt.itree_combine_plan(split, 4, arch=arch, **kwargs)
                 candidate = rt.itree_combine_plan(split, 4, arch=uniform, **kwargs)
             self.assertEqual(baseline.combine_tile, 256)
-            self.assertEqual(candidate.combine_tile, weighted_tile if weights else 512)
-            self.assertEqual(candidate.combine_weights, weights)
+            want = weighted_tile if mode == "weights" else 512
+            self.assertEqual(candidate.combine_tile, want)
+            self.assertEqual(candidate.uniform_combine, mode)
 
     @parametrize(
         "split", [(2**24, 8192, 8192, 512, 512), (1024, 2**24, 2**24, 512, 512)]
@@ -185,7 +182,6 @@ class TestInnerTreeCombineUnroll(TestCase):
     @parametrize(
         "updates,msg",
         [
-            ({"uniform_count": False}, "weights require uniform"),
             ({"shape": "split"}, "staged combine plan"),
             ({"combine_tile": 0}, "staged combine plan"),
             ({"trait": "sum"}, "combine_uniform, got SumOps"),
@@ -209,9 +205,8 @@ class TestInnerTreeCombineUnroll(TestCase):
         ).translate(str.maketrans(",", "x", " ()")),
     )
     def test_uniform_count_tile_rejects(self, updates, msg):
-        """Reject weights without counts, plans that stage no complete combine tile,
-        counts outside complete FP32 Welford partials, and staged blocks of more threads
-        than a warp has lanes."""
+        """Reject plans that stage no complete combine tile, counts outside complete
+        FP32 Welford partials, and staged blocks of more threads than a warp has lanes."""
         import cutlass
 
         from torch._native.ops.reductions import kernel_rowtile as rt, tile, traits as T
@@ -232,8 +227,7 @@ class TestInnerTreeCombineUnroll(TestCase):
             (1024, 8192, 8192, 512, 512),
             combine_grp=4,
             combine_tile=512,
-            uniform_count=True,
-            combine_weights=True,
+            uniform_combine="weights",
         )
         kwargs = dict(nouts=2, order="inner_tree")
         tile.TileReduce(traits["welford"], None, "general", 0, itree=valid, **kwargs)
@@ -359,16 +353,14 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         arch = rt._ITREE_ARCH[(9, 0)]._replace(
             combine_unroll=unroll,
             combine_max=128,
-            uniform_count=uniform != "off",
-            combine_weights=uniform == "weights",
+            uniform_combine=uniform,
         )
         key = f"multitile_{unroll}_{uniform}_{name}"
         combine, col_combine, got = run(arch, key)
         self.assertEqual(combine.combine_tile, 128)
         self.assertGreater(combine.split[0] // combine.combine_tile, 1)
         self.assertEqual(combine.combine_unroll, unroll)
-        self.assertEqual(combine.uniform_count, uniform != "off")
-        self.assertEqual(combine.combine_weights, uniform == "weights")
+        self.assertEqual(combine.uniform_combine, uniform)
         # Both entry points ran this plan: the row stage-two key ends with its sig, and the
         # general one has the input alignments after it.
         row_sigs = {k[-1] for k in rt._CACHE if k[:2] == ("rowitree2", key)}
@@ -380,8 +372,7 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             self.assertEqual(col_combine.combine_tile, 128)
             self.assertEqual(col_combine.combine_unroll, unroll)
             self.assertGreater(col_combine.split[0] // col_combine.combine_tile, 1)
-            self.assertEqual(col_combine.uniform_count, uniform != "off")
-            self.assertEqual(col_combine.combine_weights, uniform == "weights")
+            self.assertEqual(col_combine.uniform_combine, uniform)
             col_key = ("genitree2", f"{key}_col")
             col_sigs = {k[-2] for k in kg._COMPILE_CACHE if k[1:3] == col_key}
             self.assertEqual(col_sigs, {col_combine.sig})
@@ -442,9 +433,9 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         self.assertEqual(ordered.view(torch.int32), got.view(torch.int32))
         staged = (split.shape, split.rows_per_block, split.stage_e)
         self.assertEqual(staged, ("split", 4, 32))
-        folded = (c.combine_tile, c.combine_unroll, c.uniform_count, c.combine_weights)
+        folded = (c.combine_tile, c.combine_unroll, c.uniform_combine)
         # Welford partials come from uniform 8192-element batches, so they are weighted.
-        want = (2048, 64, True, True) if welford else (2048, 128, False, False)
+        want = (2048, 64, "weights") if welford else (2048, 128, "off")
         self.assertEqual(folded, want)
         # Each stage's cache key ends with its plan's sig.
         for tag, plan in (("rowitree1", split), ("rowitree2", c)):
@@ -459,10 +450,10 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         )
         self.assertEqual(got.view(torch.int32), want.view(torch.int32))
 
-    @parametrize("weights", [False, True])
+    @parametrize("mode", ["counts", "weights"])
     @parametrize("rpb", [1, 4])
     @parametrize("unroll", [0, 4])
-    def test_uniform_count_bits(self, device, unroll, rpb, weights):
+    def test_uniform_count_bits(self, device, unroll, rpb, mode):
         """Preserve exact bits at uniform-count boundaries where staged tail guards change."""
         import cutlass
 
@@ -518,7 +509,7 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             kg._launch(block, key, fields, outs)
             return block.cache_sig
 
-        candidate = plan._replace(uniform_count=True, combine_weights=weights)
+        candidate = plan._replace(uniform_combine=mode)
         # The production unstaged plan folds the same chain straight from global memory.
         unstaged = plan._replace(
             rows_per_block=128, combine_grp=1, combine_tile=0, combine_unroll=0
