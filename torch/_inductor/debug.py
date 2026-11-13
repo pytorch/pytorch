@@ -11,10 +11,11 @@ import os
 import os.path
 import pickle
 import pstats
+import re
 import shutil
 import tempfile
 import traceback
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any, IO
 from unittest.mock import patch
 
@@ -355,6 +356,7 @@ _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 _pre_grad_graph_id: int | None = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
+_inductor_kernel_module_fqn: dict[str, list[str]] = {}
 _kernel_information_jsons: dict[str, dict[str, Any]] = {}
 _inductor_kernel_provenance_debug_handle: int = 0
 
@@ -373,10 +375,37 @@ def get_kernel_information_jsons() -> dict[str, dict[str, Any]]:
     return _kernel_information_jsons
 
 
+# Dynamo names a module by the frame variable that held it
+# (`L['self'].block.fc`, `G['model'].block`); export emits a bare `block.fc`.
+# Strip the frame root so the two forms join.
+_FRAME_ROOT: re.Pattern[str] = re.compile(r"^[LG]\[('[^']*'|\"[^\"]*\")\]\.?")
+
+
+def innermost_module_fqn(node: fx.Node) -> str | None:
+    # A backward node carries the forward's stack, copied by AOTAutograd.
+    stack = node.meta.get("nn_module_stack") or node.meta.get("fwd_nn_module_stack")
+    if not isinstance(stack, dict) or not stack:
+        return None
+    innermost = list(stack.values())[-1]
+    fqn = innermost[0] if isinstance(innermost, (tuple, list)) and innermost else None
+    if not isinstance(fqn, str):
+        return None
+    # A root module strips to "", naming no component.
+    return _FRAME_ROOT.sub("", fqn) or None
+
+
+def owning_module_fqns(origins: Iterable[fx.Node]) -> OrderedSet[str]:
+    return OrderedSet(fqn for fqn in map(innermost_module_fqn, origins) if fqn)
+
+
 def alias_kernel_provenance(original_kernel_name: str, alias_kernel_name: str) -> None:
     """Expose existing kernel provenance under an additional generated name."""
     if original_kernel_name in _inductor_kernel_stack_trace:
         _inductor_kernel_stack_trace[alias_kernel_name] = _inductor_kernel_stack_trace[
+            original_kernel_name
+        ]
+    if original_kernel_name in _inductor_kernel_module_fqn:
+        _inductor_kernel_module_fqn[alias_kernel_name] = _inductor_kernel_module_fqn[
             original_kernel_name
         ]
     if original_kernel_name in _inductor_triton_kernel_to_post_grad_node_info:
@@ -399,6 +428,7 @@ def reset_provenance_globals() -> Iterator[None]:
     global _inductor_triton_kernel_to_post_grad_node_info
     global _inductor_pre_grad_node_stack_trace
     global _inductor_kernel_stack_trace
+    global _inductor_kernel_module_fqn
     global _inductor_kernel_provenance_debug_handle
     global _inductor_kernel_extern_info
 
@@ -412,6 +442,7 @@ def reset_provenance_globals() -> Iterator[None]:
         _inductor_pre_grad_node_stack_trace.copy()
     )
     original_inductor_kernel_stack_trace = _inductor_kernel_stack_trace.copy()
+    original_inductor_kernel_module_fqn = _inductor_kernel_module_fqn.copy()
     original_inductor_kernel_provenance_debug_handle = (
         _inductor_kernel_provenance_debug_handle
     )
@@ -423,6 +454,7 @@ def reset_provenance_globals() -> Iterator[None]:
     _inductor_triton_kernel_to_post_grad_node_info = {}
     _inductor_pre_grad_node_stack_trace = {}
     _inductor_kernel_stack_trace = {}
+    _inductor_kernel_module_fqn = {}
     # Kernel timeline information is populated from compile_fx_inner while this
     # context is active.  It must outlive the reset scope so the profiler can
     # consume it during export_chrome_trace, which then clears it.
@@ -439,6 +471,7 @@ def reset_provenance_globals() -> Iterator[None]:
             original_triton_kernel_to_post_grad_node_info
         )
         _inductor_kernel_stack_trace = original_inductor_kernel_stack_trace
+        _inductor_kernel_module_fqn = original_inductor_kernel_module_fqn
         _inductor_pre_grad_node_stack_trace = (
             original_inductor_pre_grad_node_stack_trace
         )
@@ -1172,6 +1205,7 @@ def create_kernel_information_json() -> dict[str, dict[str, Any]]:
     try:
         global _inductor_post_to_pre_grad_nodes
         global _inductor_kernel_stack_trace
+        global _inductor_kernel_module_fqn
         global _inductor_triton_kernel_to_post_grad_node_info
         global _inductor_kernel_extern_info
 
@@ -1210,6 +1244,9 @@ def create_kernel_information_json() -> dict[str, dict[str, Any]]:
                 "post_grad_nodes": post_grad_nodes,
                 "pre_grad_nodes": pre_grad_list,
                 "extern_semantic_key": extern_semantic_key,
+                # Unlike `pre_grad_nodes`, populated for the backward too: a
+                # backward node carries the forward's `fwd_nn_module_stack`.
+                "module_fqns": _inductor_kernel_module_fqn.get(kernel_key, []),
             }
 
             # Merge shape metadata if available (extern ops only)
@@ -1250,11 +1287,13 @@ def set_kernel_post_grad_provenance_tracing(
 
         global _inductor_triton_kernel_to_post_grad_node_info
         global _inductor_kernel_stack_trace
+        global _inductor_kernel_module_fqn
         global _inductor_kernel_provenance_debug_handle
         global _inductor_kernel_extern_info
 
         _inductor_kernel_provenance_debug_handle += 1
         stack_traces: list[str] = []
+        module_fqns: OrderedSet[str] = OrderedSet()
         kernel_name = f"{kernel_name}:{_inductor_kernel_provenance_debug_handle}"
         if is_extern:
             if not isinstance(node_schedule, ExternKernel):
@@ -1323,6 +1362,15 @@ def set_kernel_post_grad_provenance_tracing(
             except Exception as e:
                 log.debug("Shape extraction failed for %s: %s", kernel_name, e)
             stack_traces = list(node_schedule.get_stack_traces())
+            # `origin_node`, when set, is the node this kernel IS; prefer it
+            # over the surrounding origins, as `get_stack_traces` does.
+            module_fqns.update(
+                owning_module_fqns(
+                    [node_schedule.origin_node]
+                    if node_schedule.origin_node
+                    else node_schedule.origins
+                )
+            )
         else:
             if not isinstance(node_schedule, list):
                 raise AssertionError(f"expected list, got {type(node_schedule)}")
@@ -1343,8 +1391,12 @@ def set_kernel_post_grad_provenance_tracing(
                             for origin in snode.node.origins
                             if origin.name not in curr_node_info
                         )
+                        # pyrefly: ignore [missing-attribute]
+                        module_fqns.update(owning_module_fqns(snode.node.origins))
             stack_traces = list(stack_traces_set)
         _inductor_kernel_stack_trace.setdefault(kernel_name, []).extend(stack_traces)
+        if module_fqns:
+            _inductor_kernel_module_fqn.setdefault(kernel_name, []).extend(module_fqns)
         return _inductor_kernel_provenance_debug_handle
     except Exception as e:
         # Since this is just debugging, it should never interfere with regular
