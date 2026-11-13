@@ -158,6 +158,14 @@ class TestKernelColTile(TestCase):
             aten += (ref.double() - want).abs().mean().item()
         self.assertLessEqual(ours, aten, f"CuTeDSL {ours:.3e} vs ATen {aten:.3e}")
 
+    def test_partial_tree_folds_every_partial_once(self):
+        # Stage 2 of a (2**20, 3) sum folds hundreds of partial rounds per thread, so whole
+        # trees run; small integers keep every partial sum exact.
+        x = torch.randint(-4, 5, (1 << 20, 3), device="cuda").float()
+        trait = T.SumOps(acc=cutlass.Float32)
+        got = ct.reduce_col_tile(trait, "partial_tree", x, torch.float32)
+        self.assertEqual(got, x.double().sum(0).float(), atol=0, rtol=0)
+
     def test_three_field_welford_launch(self):
         # Three fields select the otherwise untested high-register-pressure launch.
         x = torch.randn(4096, 256, device="cuda")
