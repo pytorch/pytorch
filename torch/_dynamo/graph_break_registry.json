@@ -357,6 +357,18 @@
       "Hints": []
     }
   ],
+  "GB1108": [
+    {
+      "Gb_type": "Descriptor mutation on a constant-source object",
+      "Context": "name={name_str}, class_source={self.cls_source.name}",
+      "Explanation": "Dynamo cannot guard the class metadata used to resolve a descriptor mutation on an object returned by a constant-result function.",
+      "Hints": [
+        "Pass the object as an input instead of returning it from a function ",
+        "marked with `torch._dynamo.assume_constant_result`.",
+        "Move the descriptor mutation outside the compiled region."
+      ]
+    }
+  ],
   "GB1273": [
     {
       "Gb_type": "Unsupported attribute assignment on traceback object",
@@ -1914,6 +1926,16 @@
       ]
     }
   ],
+  "GB9322": [
+    {
+      "Gb_type": "bytearray.join() with unsupported item type",
+      "Context": "bytearray.join() item: {item}",
+      "Explanation": "Dynamo only supports joining bytes and bytearray items, got {item.python_type_name()}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4778": [
     {
       "Gb_type": "nested function with non-constructible closure in output",
@@ -2537,6 +2559,16 @@
       "Context": "str(error)",
       "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
       "Hints": [
+        "Snapshots are not implemented on Python 3.16+. On older free-threaded ",
+        "Python, empty OrderedDicts remain supported; nonempty ones require ",
+        "Python 3.14.1+. Keep unsupported inputs outside fullgraph capture."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported OrderedDict snapshot runtime",
+      "Context": "str(error)",
+      "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
+      "Hints": [
         "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+."
       ]
     }
@@ -2644,6 +2676,15 @@
     }
   ],
   "GB0150": [
+    {
+      "Gb_type": "Unsupported hasattr call",
+      "Context": "generic_hasattr {obj} {name}",
+      "Explanation": "Dynamo does not know how to trace the function `{obj.debug_repr()}`",
+      "Hints": [
+        "Avoid calling `hasattr({obj.__class__.__name__}, {name})` in your code.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Unsupported hasattr call",
       "Context": "call_obj_hasattr {self} {name}",
@@ -4918,6 +4959,26 @@
       "Gb_type": "C-level descriptor delete on user-defined object",
       "Context": "object={self}, name={name_str}, descriptor={descriptor}",
       "Explanation": "Dynamo does not yet model this C-level descriptor deleter for user-defined objects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1208": [
+    {
+      "Gb_type": "Unsupported generator frame f_back",
+      "Context": "{state}",
+      "Explanation": "f_back is only modeled for created or suspended generators.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0949": [
+    {
+      "Gb_type": "Unsupported generator frame attribute",
+      "Context": "frame.{name}",
+      "Explanation": "Dynamo does not model the frame attribute {name}.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

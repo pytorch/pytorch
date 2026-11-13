@@ -165,8 +165,12 @@ _SAFE_C_SLOTS: OrderedSet[object] | None = None
 def _safe_c_slots() -> OrderedSet[object]:
     """C slot wrappers known to be safe to call at trace time.
 
-    Covers tp_hash and tp_richcompare slots for C extension types.
-    Used by UDOV's tp_hash_impl and tp_richcompare_impl MRO walks.
+    Covers tp_hash and tp_richcompare slots for C extension types, used by
+    UDOV's tp_hash_impl and tp_richcompare_impl MRO walks, and the
+    __getattribute__ wrappers of builtin types whose tp_getattro is
+    PyObject_GenericGetAttr, used by object_generic_getattr. A C type that
+    sets the slot explicitly gets its own wrapper, so identity with
+    object.__getattribute__ is not enough.
     """
     global _SAFE_C_SLOTS
     if _SAFE_C_SLOTS is None:
@@ -188,7 +192,35 @@ def _safe_c_slots() -> OrderedSet[object]:
             for dunder in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"):
                 if hasattr(tp, dunder):
                     _SAFE_C_SLOTS.add(getattr(tp, dunder))
+        for tp in (
+            object,
+            list,
+            tuple,
+            dict,
+            set,
+            frozenset,
+            collections.deque,
+            range,
+            str,
+            bytes,
+            bytearray,
+            int,
+            float,
+            complex,
+            slice,
+            torch.Size,
+        ):
+            _SAFE_C_SLOTS.add(tp.__getattribute__)
     return _SAFE_C_SLOTS
+
+
+def _normalize_custom_hash(value: int) -> int:
+    # slot_tp_hash preserves in-range Py_hash_t values, hashes overflowing
+    # integers, and reserves -1 for errors. Bypass int-subclass overrides.
+    value = int.__index__(value)
+    if not -sys.maxsize - 1 <= value <= sys.maxsize:
+        value = int.__hash__(value)
+    return -2 if value == -1 else value
 
 
 def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
@@ -814,7 +846,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, self.value.__base__, source)
         # __name__, __qualname__, __doc__, __module__,
         # __abstractmethods__, etc. — all C-level getset descriptors on type.
-        resolved = type.__getattribute__(self.value, name)
+        try:
+            resolved = type.__getattribute__(self.value, name)
+        except AttributeError as e:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=list(e.args),
+            )
+
         if source:
             return VariableTracker.build(tx, resolved, source)
         from . import ConstantVariable
@@ -968,7 +1008,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             descriptor_source = (
                 self.get_source_by_walking_mro(tx, name)
                 if self.source is not None
-                else source
+                else None
             )
             return VariableBuilder.create_internal_wrapper_descriptor(
                 cls_attr,
@@ -985,7 +1025,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             descriptor_source = (
                 self.get_source_by_walking_mro(tx, name)
                 if self.source is not None
-                else source
+                else None
             )
             return VariableBuilder.create_internal_method_descriptor(
                 cls_attr,
@@ -3681,6 +3721,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             hasattr(type(descriptor), "__set__")
             or hasattr(type(descriptor), "__delete__")
         ):
+            if self.cls_source is not None and is_constant_source(self.cls_source):
+                # Constant sources cannot guard a changed MRO or descriptor between calls.
+                unimplemented(
+                    gb_type="Descriptor mutation on a constant-source object",
+                    context=f"name={name_str}, class_source={self.cls_source.name}",
+                    explanation="Dynamo cannot guard the class metadata used to resolve "
+                    "a descriptor mutation on an object returned by a constant-result function.",
+                    hints=[
+                        "Pass the object as an input instead of returning it from a function "
+                        "marked with `torch._dynamo.assume_constant_result`.",
+                        "Move the descriptor mutation outside the compiled region.",
+                    ],
+                )
             desc_source = None
             if self.cls_source:
                 desc_source = self.get_source_by_walking_mro(tx, name_str)
@@ -4541,42 +4594,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source = self._wrap_source(source)
         return source
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        if self.source:
-            install_guard(
-                self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
-            )
-
-        if not self._object_has_getattribute:
-            type_attr = self.lookup_class_mro_attr(name)
-            if (
-                (type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr))
-                and hasattr(self.value, "__dict__")
-                and not tx.output.side_effects.has_pending_mutation_of_attr(
-                    self,
-                    name,
-                    (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
-                )
-                and not tx.output.side_effects.has_pending_mutation_of_attr(
-                    self, "__dict__", AttrMutationKind.GENERIC_SETATTR
-                )
-                and self.has_key_in_generic_dict(tx, name)
-            ):
-                return variables.ConstantVariable.create(True)
-
-        try:
-            var_vt = self.tp_getattro_impl(tx, name)
-            return VariableTracker.build(
-                tx, not isinstance(var_vt, variables.DeletedVariable)
-            )
-        except ObservedAttributeError:
-            handle_observed_exception(tx)
-            return variables.ConstantVariable.create(False)
-
     def is_hashable(self) -> bool:
         # Mirrors the __hash__ is None check in tp_hash_impl's MRO walk.
         # Returns "Is this hashable in CPython?", not "can Dynamo trace the hash?".
@@ -4616,7 +4633,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if isinstance(result, FakeIdVariable):
                     return result.as_python_constant(), True
                 if isinstance(result, variables.SymNodeVariable):
-                    return int(result.evaluate_expr()), False
+                    return _normalize_custom_hash(int(result.evaluate_expr())), False
                 # CPython's slot_tp_hash validates PyLong_Check(res):
                 # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9543-L9548
                 try:
@@ -4643,10 +4660,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             *graph_break_hints.USER_ERROR,
                         ],
                     )
-                # Normalize int subclasses to a plain int (mirrors CPython's
-                # own PyLong_AsSsize_t-style coercion in slot_tp_hash), since
-                # `ConstantVariable` only holds plain literal types.
-                return int(result.as_python_constant()), False
+                return _normalize_custom_hash(result.as_python_constant()), False
             try:
                 in_allowlist = type_hash in _safe_c_tp_hash_funcs()
             except TypeError:
