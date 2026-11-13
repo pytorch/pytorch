@@ -63,9 +63,9 @@ class NvshmemLibFinder:
         paths.extend(common_paths)
 
         try:
-            import torch
+            from torch._utils_internal import get_file_path
 
-            torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+            torch_lib = os.path.join(get_file_path("torch"), "lib")
             so_path = os.path.join(torch_lib, "libtorch_nvshmem.so")
 
             if os.path.exists(so_path):
