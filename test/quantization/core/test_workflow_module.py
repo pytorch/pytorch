@@ -58,7 +58,12 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
     to_tensor,
 )
-from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
@@ -76,7 +81,62 @@ _INT_DTYPES = (
     torch.uint16,
 )
 
+@instantiate_parametrized_tests
 class TestObserver(QuantizationTestCase):
+    @parametrize("observer_ctor", [MinMaxObserver, MovingAverageMinMaxObserver])
+    @parametrize("nonfinite", [float("inf"), float("-inf"), float("nan")])
+    @parametrize("initialized", [False, True])
+    @parametrize("scripted", [False, True])
+    @parametrize("mixed", [False, True])
+    def test_per_tensor_observers_reject_nonfinite(
+        self, observer_ctor, nonfinite, initialized, scripted, mixed
+    ):
+        observer = observer_ctor()
+        reference = observer_ctor()
+        if scripted:
+            observer = torch.jit.script(observer)
+        if initialized:
+            observer(torch.tensor([-1.0, 2.0]))
+            reference(torch.tensor([-1.0, 2.0]))
+        min_val = observer.min_val.clone()
+        max_val = observer.max_val.clone()
+        invalid = torch.tensor([1.0, nonfinite] if mixed else [nonfinite])
+        error = torch.jit.Error if scripted else ValueError
+        with self.assertRaisesRegex(error, "Observer input must contain only finite values"):
+            observer(invalid)
+        self.assertEqual(observer.min_val, min_val)
+        self.assertEqual(observer.max_val, max_val)
+
+        valid = torch.tensor([-3.0, 4.0])
+        self.assertEqual(observer(valid), valid)
+        reference(valid)
+        self.assertEqual(observer.min_val, reference.min_val)
+        self.assertEqual(observer.max_val, reference.max_val)
+        self.assertEqual(observer.calculate_qparams(), reference.calculate_qparams())
+
+    @parametrize("observer_ctor", [MinMaxObserver, MovingAverageMinMaxObserver])
+    @parametrize("nonfinite", [float("inf"), float("-inf"), float("nan")])
+    @parametrize("initialized", [False, True])
+    def test_fake_quant_rejects_nonfinite_calibration(self, observer_ctor, nonfinite, initialized):
+        fake_quant = FakeQuantize(observer=observer_ctor)
+        reference = FakeQuantize(observer=observer_ctor)
+        if initialized:
+            fake_quant(torch.tensor([-1.0, 2.0]))
+            reference(torch.tensor([-1.0, 2.0]))
+        scale = fake_quant.scale.clone()
+        zero_point = fake_quant.zero_point.clone()
+        with self.assertRaisesRegex(ValueError, "Observer input must contain only finite values"):
+            fake_quant(torch.tensor([1.0, nonfinite]))
+        self.assertEqual(fake_quant.scale, scale)
+        self.assertEqual(fake_quant.zero_point, zero_point)
+
+        valid = torch.tensor([1.0, 2.0])
+        result = fake_quant(valid)
+        self.assertTrue(torch.isfinite(result).all())
+        self.assertEqual(result, reference(valid))
+        self.assertEqual(fake_quant.scale, reference.scale)
+        self.assertEqual(fake_quant.zero_point, reference.zero_point)
+
     @given(qdtype=st.sampled_from(_INT_DTYPES),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
