@@ -205,6 +205,7 @@ _MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
     set.__getattribute__,
     frozenset.__getattribute__,
     int.__getattribute__,
+    float.__getattribute__,
     str.__getattribute__,
     list.__getattribute__,
     tuple.__getattribute__,
