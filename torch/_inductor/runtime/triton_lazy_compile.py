@@ -23,7 +23,7 @@ from .hints import (
     TRITON_DEFAULT_RSPLIT,
     TRITON_DEFAULT_RSPLIT_SIZE,
 )
-from .triton_heuristics import CachingAutotuner
+from .triton_heuristics import CachingAutotuner, PrecomputedGrid
 
 
 log = logging.getLogger(__name__)
@@ -219,7 +219,7 @@ def run_triton_kernel_with_autotune(
             for i in range(num_kernels)
         ]
         zblocks = [
-            config.get(f"ZBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])
+            config.get(f"Z0_BLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["Z0_BLOCK"])
             for i in range(num_kernels)
         ]
         r0blocks = [
@@ -229,7 +229,7 @@ def run_triton_kernel_with_autotune(
     else:
         xblocks = [config.get("XBLOCK", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])]
         yblocks = [config.get("YBLOCK", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])]
-        zblocks = [config.get("ZBLOCK", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])]
+        zblocks = [config.get("Z0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["Z0_BLOCK"])]
         r0blocks = [config.get("R0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])]
     rsplit = config.get("RSPLIT", TRITON_DEFAULT_RSPLIT)
     rsplit_size = config.get("RSPLIT_SIZE", TRITON_DEFAULT_RSPLIT_SIZE)
@@ -237,14 +237,7 @@ def run_triton_kernel_with_autotune(
     config_index = None
     grid_type = inductor_meta.get("grid_type") if inductor_meta else None
     if grid_type == "PrecomputedGrid" and inductor_meta:
-        # PrecomputedGrid selects one of precomputed_grids. We use config_index
-        # to remember which grid is chosen.
-        precomputed_grids = inductor_meta.get("precomputed_grids", [])
-        for idx, entry in enumerate(precomputed_grids):
-            entry_config = entry.get("config", {})
-            if all(config.get(k) == v for k, v in entry_config.items()):
-                config_index = idx
-                break
+        config_index = PrecomputedGrid.find_candidate_index(inductor_meta, config)
 
     global_scratch: int | None = cached_params.get("global_scratch")
     profile_scratch: int | None = cached_params.get("profile_scratch")
