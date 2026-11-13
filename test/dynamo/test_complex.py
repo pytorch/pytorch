@@ -362,9 +362,15 @@ class ComplexTests(ComplexDynamoTestCase):
             **tol,
         )
 
-        self._assert_decomposed_no_complex(
-            lambda a, b: torch.view_as_real(torch.polar(a, b)), abs_t, angle
-        )
+        # Chunk below AVX-512 float16 tiling width (32) so Inductor's
+        # _load_or_store_non_contiguous get_result_size (num_elems * 2) stays
+        # < 64 and does not trigger (1ULL << 64) UB in Vectorized16<Half>::store.
+        for start in range(0, len(pairs), 13):
+            self._assert_decomposed_no_complex(
+                lambda a, b: torch.view_as_real(torch.polar(a, b)),
+                abs_t[start : start + 13],
+                angle[start : start + 13],
+            )
 
     def test_real_to_complex_aliasing_and_mutation(self):
         def fn_passthrough(x):
