@@ -244,12 +244,9 @@ struct C10_API PyInterpreterVTable {
   virtual bool fake_run_with_mode_entered(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       c10::function_ref<bool()> step) const = 0;
-  // Resolves conflicts left by the CPU-scalar and mixed-device rules.
-  // Matches Python's _resolve_device_conflict in C++: returns the device whose
-  // type contains fake_tensor_prefer_device_type when exactly one matches,
-  // otherwise raises FakeTensorDeviceMismatchError. Acquires the GIL to read
-  // the live Python config and construct the Python exception on failure.
-  virtual c10::Device _resolve_device_conflict(
+  // Acquires the GIL to raise FakeTensorDeviceMismatchError after native
+  // common-device resolution fails.
+  virtual void fake_raise_device_mismatch(
       const c10::OperatorHandle& op,
       c10::Device common_device,
       c10::Device device) const = 0;
