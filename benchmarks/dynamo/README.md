@@ -78,6 +78,46 @@ For debugging you can run just a single benchmark by adding the `--only=<NAME>` 
 
 A complete list of options can be seen by running each of the runners with the `--help` flag.
 
+### Decoder-only generation and prefill
+
+Registered Hugging Face text-generation models use `--hf-inference-mode=generate`
+by default. Prefill is opt-in and supports `meta-llama/Llama-3.2-1B`,
+`google/gemma-2-2b`, `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B` with fixed,
+unpadded prompts:
+
+```
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
+  --backend=inductor --hf-inference-mode=prefill --prompt-length=1000 \
+  --batch-size=1 --only=Qwen/Qwen3-0.6B --output=prefill_performance.csv
+```
+
+Prefill requires exactly Transformers 5.14.1 because cache preallocation uses
+private APIs from that release. Other versions are rejected before loading models.
+
+Prefill measures one forward over the prompt, returning last-position logits and
+populating a reusable static cache. The cache holds `prompt_length + 1999`
+positions, the capacity `generate` allocates for its first forward, so attention
+spans the same KV length as in generation; `prompt_length + 2000` must fit the
+model's context length. Cache allocation and reset occur outside the compiled
+and timed forward. Use `--accuracy` to check correctness or
+`--disable-cudagraphs` to measure without CUDA graphs. `--prompt-length`
+(default 1000) and `--batch-size` configure the prefill workload; generation
+retains its existing `1 x 1000` inputs and rejects `--prompt-length`.
+
+Prefill requires `--inference` and a backend. It rejects `--amp`,
+`--aot-precompile`, `--batch-invariant`, `--compare-backed-unbacked`, `--ddp`,
+`--dynamic-batch-only`, `--dynamic-shapes`, `--enable-activation-checkpointing`,
+`--export`, `--export-aot-inductor`, `--export-nativert`, `--find-batch-sizes`,
+`--fsdp`, `--multiprocess`, `--optimus`, `--quantization`,
+`--recompile-profiler`, `--tolerance`, `--torchscript-jit-trace`,
+`--trace-on-xla`, `--unbacked-batch-only`, and `--xla`.
+
+CSV `abs_latency` and `eager_latency` are milliseconds for all
+`--iterations-per-run` requests; `input_tokens_per_second` includes all batch
+elements. Rows do not record the inference mode or prompt length, so write each
+mode and input size to its own file. Default output and profiler trace names get
+a `_prefill` suffix.
+
 As an example, the commands to run first line of the dashboard (performance only) would be:
 ```
 ./benchmarks/dynamo/torchbench.py --performance --training --amp --backend=inductor --output=torchbench_training.csv
