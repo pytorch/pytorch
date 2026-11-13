@@ -107,6 +107,7 @@ class TestRun(unittest.TestCase):
             "PI_ALLOW_UNLISTED_MODEL": "false",
             "PI_PROMPT": "Review the checkout.",
             "PI_THINKING": "medium",
+            "PI_APPEND_SYSTEM_PROMPT": "",
             "PI_TOOLS": "read,grep,find,ls",
             "PI_RESULT_SCHEMA": '{"type":"object"}',
             "PI_EXTENSIONS": "",
@@ -139,6 +140,7 @@ class TestRun(unittest.TestCase):
         execution = json.loads((self.out / "execution.json").read_text())
         self.assertEqual(execution[-1]["subtype"], "error_during_execution")
         self.assertIn(reason, execution[-1]["result"])
+        self.assertIsNone(execution[-1]["structured_output"])
         self.assertIn(
             f"execution-file={self.out}/execution.json",
             (self.root / "output").read_text(),
@@ -154,6 +156,7 @@ class TestRun(unittest.TestCase):
         self.assertEqual(execution[0]["tools"], ["read"])
         self.assertEqual(execution[-1]["subtype"], "success")
         self.assertEqual(execution[-1]["result"], "Finished.")
+        self.assertEqual(execution[-1]["structured_output"], {"verdict": "ready"})
         self.assertEqual(execution[-1]["total_cost_usd"], 0.012)
         self.assertEqual(
             execution[-1]["usage"],
@@ -221,6 +224,21 @@ class TestRun(unittest.TestCase):
             invocation[invocation.index("--tools") + 1],
             "read,grep,find,ls,submit_result",
         )
+
+    def test_append_system_prompt_is_passed_only_when_set(self) -> None:
+        for text, expected in [("", None), ("Trusted policy.", "Trusted policy.")]:
+            with self.subTest(text=text):
+                Path(self.env["FAKE_CALLS"]).unlink(missing_ok=True)
+                run = self.run_action(events(), PI_APPEND_SYSTEM_PROMPT=text)
+                self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                calls = [
+                    json.loads(line)
+                    for line in Path(self.env["FAKE_CALLS"]).read_text().splitlines()
+                ]
+                invocation = next(args for args in calls if "--mode" in args)
+                flag = "--append-system-prompt"
+                actual = invocation[invocation.index(flag) + 1] if flag in invocation else None
+                self.assertEqual(actual, expected)
 
     def test_malformed_events_fail_with_diagnostics_and_raw_stream(self) -> None:
         for malformed in ["not JSON\n", '{"type":\n', "42\n"]:

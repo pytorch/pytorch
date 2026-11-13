@@ -3,7 +3,8 @@
 # ciforge's scripts/review_log_inspector.py and
 # pytorch/test-infra's upload-claude-usage action.
 #
-# Args: $version (pi version), $model, $duration_ms (number), $error (action failure, or empty).
+# Args: $version (pi version), $model, $duration_ms (number), $error (action failure, or empty),
+# $structured_output (the submit_result object, or null).
 
 def iso: (. / 1000 | todate);
 
@@ -61,6 +62,7 @@ def iso: (. / 1000 | todate);
       type: "result",
       subtype: (if $error != "" then "error_during_execution" else "success" end),
       result: (if $error != "" then $error else [$last.content[]? | select(.type == "text") | .text] | join("\n") end),
+      structured_output: $structured_output,
       duration_ms: $duration_ms,
       num_turns: ($assistant | length),
       total_cost_usd: ([$assistant[].usage.cost.total // 0] | add // 0),

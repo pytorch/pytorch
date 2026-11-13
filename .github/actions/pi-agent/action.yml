@@ -16,6 +16,9 @@ inputs:
   thinking:
     description: off | minimal | low | medium | high | xhigh | max (clamped to the model)
     default: medium
+  append-system-prompt:
+    description: Optional trusted text appended to pi's system prompt
+    default: ""
   tools:
     description: >
       Comma-separated tool allowlist. Enforced per call; read/grep/find/ls are
@@ -84,6 +87,7 @@ runs:
         PI_ALLOW_UNLISTED_MODEL: ${{ inputs.allow-unlisted-model }}
         PI_PROMPT: ${{ inputs.prompt }}
         PI_THINKING: ${{ inputs.thinking }}
+        PI_APPEND_SYSTEM_PROMPT: ${{ inputs.append-system-prompt }}
         PI_TOOLS: ${{ inputs.tools }}
         PI_RESULT_SCHEMA: ${{ inputs.result-schema }}
         PI_EXTENSIONS: ${{ inputs.extensions }}

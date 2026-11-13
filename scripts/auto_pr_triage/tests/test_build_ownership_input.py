@@ -159,7 +159,7 @@ class WorkerProjectionTest(unittest.TestCase):
             trusted["codepath_owners"]["matched_path_groups"][0]["file_indices"],
             [0],
         )
-        self.assertIn("TodoWrite", trusted["worker_policy"])
+        self.assertIn("submit_result", trusted["worker_policy"])
         self.assertIn("attacker-controlled data", trusted["worker_policy"])
         self.assertNotIn("team_members", trusted)
 
