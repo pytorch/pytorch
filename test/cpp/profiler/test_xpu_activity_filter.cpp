@@ -74,6 +74,8 @@ TEST(XpuActivityFilterTest, SyncSelectionFollowsDefaultsAndFilters) {
   libkineto::api().registerProfilerFactory([configured_activities]() {
     return std::make_unique<CapturingProfiler>(configured_activities);
   });
+  // Register without device support so the test does not depend on the host.
+  libkineto_init(/*cpuOnly=*/true, /*logOnError=*/true);
 
   // A true collectivesProfilerExists() adds COLLECTIVE_COMM to every case
   // below. Pinned so expectations do not depend on the environment; the
@@ -85,11 +87,7 @@ TEST(XpuActivityFilterTest, SyncSelectionFollowsDefaultsAndFilters) {
                                      const ActivityFilter& activity_filter) {
     configured_activities->clear();
     prepareTrace(
-        /*cpuOnly=*/true,
-        activities,
-        ExperimentalConfig{},
-        /*trace_id=*/"",
-        activity_filter);
+        activities, ExperimentalConfig{}, /*trace_id=*/"", activity_filter);
     return *configured_activities;
   };
 
