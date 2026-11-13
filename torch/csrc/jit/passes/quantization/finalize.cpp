@@ -51,14 +51,14 @@ void removePackedParamInsertionAndFPWeightsSetAttr(
   while ((n = it.next()) != nullptr) {
     if (n->kind() == prim::SetAttr) {
       const std::string& attr_name = n->s(attr::name);
-      if (packed_param_attr_names.count(attr_name)) {
+      if (packed_param_attr_names.contains(attr_name)) {
         nodes_to_delete.push_back(n);
       } else {
         Value* v = n->input(0);
         Value* self = g->inputs()[0];
         std::vector<std::string> paths = getModuleAccessPath(v, self);
         std::string path = joinPaths(paths);
-        if (packed_param_attr_names.count(path)) {
+        if (packed_param_attr_names.contains(path)) {
           nodes_to_delete.push_back(n);
         }
       }

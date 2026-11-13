@@ -200,11 +200,12 @@ struct AtomicType<bfloat> {
   }
 };
 
-// Metal supports atomic_store_explicit for bools, but
-// sizeof(::metal::atomic_bool) is 4 Therefore it could not be used to
-// atomically modify unaligned memory, so fall back to compare and exchange
-// trick As accumulation over booleans are just or operation, do nothing if
-// value is false
+static inline bool true_op(bool, bool) {
+  return true;
+}
+
+// Accumulating booleans is an OR: skip false, otherwise OR in true via the
+// shared packed-CAS helper, which handles the sub-32-bit alignment fixup.
 template <>
 struct AtomicType<bool> {
   using type = ::metal::atomic<uint>;
@@ -212,22 +213,7 @@ struct AtomicType<bool> {
     if (!value) {
       return;
     }
-    auto ptr = data + (offset >> 2);
-    auto old =
-        ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
-    union {
-      uint i;
-      bool t[4];
-    } val;
-    do {
-      val.i = old;
-      val.t[offset & 3] = true;
-    } while (!::metal::atomic_compare_exchange_weak_explicit(
-        ptr,
-        &old,
-        val.i,
-        ::metal::memory_order_relaxed,
-        ::metal::memory_order_relaxed));
+    atomic_binary_op_helper<bool>(data, offset, true, true_op);
   }
   // Generic packed-CAS supports any bool op (AND for prod/amin, OR for amax).
   static inline void atomic_binary_op(

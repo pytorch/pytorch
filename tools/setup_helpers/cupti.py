@@ -1,6 +1,6 @@
 """Locate a sufficiently-new CUPTI header (``cupti_activity.h``) for the CUPTI
 field-id codegen (``tools/gen_cupti_stubs.py``), which parses the header to emit
-``torch/profiler/_cupti/_cupti_stubs.py``. Kept as a small standalone helper the
+``torch/profiler/_cuspy/_cupti_stubs.py``. Kept as a small standalone helper the
 CMake build and the CI build scripts both import at configure time.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 # CUPTI 13.3.0 (CUPTI_API_VERSION == 130300). The field-id codegen needs the v2
 # user-defined-record field-id enums, which the CUPTI ABI header only gained at
-# 13.3; an older header would emit an incomplete catalog. Mirrors the monitor's
+# 13.3; an older header would emit an incomplete catalog. Mirrors Cuspy's
 # runtime floor.
 _MIN_CUPTI_API_VERSION = 130300
 
@@ -37,20 +37,26 @@ def find_cupti_header() -> Path | None:
     ``_MIN_CUPTI_API_VERSION``. Candidate include dirs, in priority order:
 
     1. ``CUPTI_INCLUDE_DIR`` -- explicit override for out-of-tree setups.
-    2. ``/usr/local/cupti-headers-<major.minor>`` -- the CUPTI redist headers
+    2. The CUDA toolkit at ``CUDA_HOME``, ``CUDA_PATH``, or ``/usr/local/cuda`` --
+       prefer its headers so CUDA 13.4 binaries get the matching CUPTI field ids.
+    3. ``/usr/local/cupti-headers-<major.minor>`` -- the CUPTI redist headers
        staged into the CI Docker image by ``.ci/docker/common/install_cuda.sh``
        (``install_cupti_headers``); the highest version present wins.
-    3. The ``nvidia-cuda-cupti`` wheel (namespace package ``nvidia.cu13``) -- a
+    4. The ``nvidia-cuda-cupti`` wheel (namespace package ``nvidia.cu13``) -- a
        convenience fallback for local builds where the wheel is already installed.
 
     Returns the path only when a candidate both exists and is new enough; None
-    otherwise, so callers skip the codegen and the libclang build-dep. The CUDA
-    toolkit is deliberately not a source: its ``cupti_activity.h`` can predate the
-    v2 field-id enums, and this version gate would reject it anyway."""
+    otherwise, so callers skip the codegen and the libclang build-dep. Older
+    toolkits fail the version gate and fall back to the staged or wheel headers."""
     candidate_dirs: list[Path] = []
 
     if env := os.environ.get("CUPTI_INCLUDE_DIR"):
         candidate_dirs.append(Path(env))
+
+    cuda_home = Path(
+        os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or "/usr/local/cuda"
+    )
+    candidate_dirs += [cuda_home / "include", cuda_home / "extras/CUPTI/include"]
 
     # CUPTI redist headers staged into the CI Docker image by install_cuda.sh.
     # Several cupti-headers-<major.minor> dirs may coexist; prefer the highest.

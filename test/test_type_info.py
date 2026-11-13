@@ -28,6 +28,17 @@ if TEST_NUMPY:
 class TestDTypeInfo(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_hash(self):
+        for type_info, dtype in [
+            (torch.iinfo, torch.uint8),
+            (torch.iinfo, torch.int8),
+            (torch.finfo, torch.float32),
+        ]:
+            info = type_info(dtype)
+            self.assertNotEqual(hash(info), 0)
+            self.assertEqual(hash(info), hash(type_info(dtype)))
+            self.assertEqual({info, type_info(dtype)}, {info})
+
     def test_invalid_input(self):
         for dtype in [
             torch.float16,
@@ -123,6 +134,26 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(xinfo.tiny, 0.015625)
         self.assertEqual(xinfo.resolution, 1.0)
         self.assertEqual(xinfo.dtype, "float8_e4m3fn")
+
+        # Special test case for Float8_E4M3FNUZ
+        xinfo = torch.finfo(torch.float8_e4m3fnuz)
+        self.assertEqual(xinfo.bits, 8)
+        self.assertEqual(xinfo.max, 240.0)
+        self.assertEqual(xinfo.min, -240.0)
+        self.assertEqual(xinfo.eps, 0.125)
+        self.assertEqual(xinfo.tiny, 0.0078125)
+        self.assertEqual(xinfo.resolution, 1.0)
+        self.assertEqual(xinfo.dtype, "float8_e4m3fnuz")
+
+        # Special test case for Float8_E5M2FNUZ
+        xinfo = torch.finfo(torch.float8_e5m2fnuz)
+        self.assertEqual(xinfo.bits, 8)
+        self.assertEqual(xinfo.max, 57344.0)
+        self.assertEqual(xinfo.min, -57344.0)
+        self.assertEqual(xinfo.eps, 0.25)
+        self.assertEqual(xinfo.tiny, 3.05176e-05)
+        self.assertEqual(xinfo.resolution, 1.0)
+        self.assertEqual(xinfo.dtype, "float8_e5m2fnuz")
 
     def test_to_complex(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/124868

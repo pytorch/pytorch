@@ -139,7 +139,7 @@ struct AttentionKernel {
     const int32_t* seqstart_k_ptr = nullptr;
 
     const int32_t* seqlen_k_ptr = nullptr;
-    uint32_t causal_diagonal_offset = 0;
+    int32_t causal_diagonal_offset = 0;
 
     // Output tensors
     output_t* output_ptr = nullptr; // [num_queries, num_heads, head_dim_value]
@@ -183,6 +183,8 @@ struct AttentionKernel {
     int64_t bias_strideB = 0;
 
     int32_t num_batches = 0;
+    int32_t batch_offset = 0;
+    int32_t head_offset = 0;
     int32_t num_heads = 0;
     int32_t q_heads_per_kv = 1;
 
@@ -197,10 +199,10 @@ struct AttentionKernel {
     // Moves pointers to what we should process
     // Returns "false" if there is no work to do
     CUTLASS_DEVICE bool advance_to_block() {
-      auto batch_id = blockIdx.z;
-      auto head_id = blockIdx.y;
+      auto batch_id = blockIdx.z + batch_offset;
+      auto head_id = blockIdx.y + head_offset;
       auto kv_head_id = head_id / q_heads_per_kv;
-      auto query_start = blockIdx.x * kQueriesPerBlock;
+      int32_t query_start = blockIdx.x * kQueriesPerBlock;
 
       auto lse_dim = ceil_div((int32_t)num_queries, kAlignLSE) * kAlignLSE;
 
@@ -257,7 +259,10 @@ struct AttentionKernel {
           int64_t(q_start + query_start) * o_strideM + head_id * head_dim_value;
 
       if (kSupportsBias && attn_bias_ptr != nullptr) {
-        attn_bias_ptr += (batch_id * bias_strideB) + (head_id * bias_strideH);
+        // Anchor the query row before the single-query tail remaps bias_strideM.
+        attn_bias_ptr += (batch_id * bias_strideB) +
+            (head_id * bias_strideH) +
+            (int64_t(query_start) * bias_strideM);
       }
       if (output_accum_ptr != nullptr) {
         output_accum_ptr +=
@@ -286,10 +291,12 @@ struct AttentionKernel {
         // Exact rather than block-granular: the remap below drops causal
         // masking, so slack keys here would be attended unmasked.
         int32_t rows_this_block = cutlass::fast_min(
-            int32_t(kQueriesPerBlock), num_queries - int32_t(query_start));
-        num_keys = cutlass::fast_min(
-            int32_t(query_start + causal_diagonal_offset + rows_this_block),
-            num_keys);
+            int32_t(kQueriesPerBlock), num_queries - query_start);
+        num_keys = cutlass::fast_max(
+            int32_t(0),
+            cutlass::fast_min(
+                query_start + causal_diagonal_offset + rows_this_block,
+                num_keys));
       }
 
       num_queries -= query_start;
@@ -639,7 +646,7 @@ struct AttentionKernel {
     auto& s_prime = shared_storage.s_prime;
     auto& mi = shared_storage.mi;
     auto& out_rescale = shared_storage.out_rescale;
-    const uint32_t query_start = blockIdx.x * kQueriesPerBlock;
+    const int32_t query_start = blockIdx.x * kQueriesPerBlock;
 
     static_assert(kQueriesPerBlock < kNumWarpsPerBlock * kWarpSize, "");
     if (thread_id() < kQueriesPerBlock) {
@@ -793,6 +800,8 @@ struct AttentionKernel {
 
       if (kPreloadV) {
         prologueV(0);
+      } else {
+        MM1::Mma::drain_cp_asyncs();
       }
 
       typename MM0::Mma::Operator::IteratorC::TensorCoord
@@ -813,13 +822,8 @@ struct AttentionKernel {
         // load bias tile Bij into shared memory
         typename MM0::BiasLoader::GmemTileIterator bias_iter(
             {cutlass::layout::RowMajor(p.bias_strideM)},
-            // attn_bias_pointer points to matrix of size (n_queries, n_keys)
-            // for the relevant batch_id and head_id
-            // `query_start` is `uint32_t`, so compute the offset in 64-bit
-            // to avoid wraparound when num_queries * num_keys > 2^32
-            const_cast<scalar_t*>(
-                p.attn_bias_ptr + int64_t(query_start) * p.bias_strideM +
-                iter_key_start),
+            // attn_bias_ptr points to the first query row for this block.
+            const_cast<scalar_t*>(p.attn_bias_ptr + iter_key_start),
             {problem_size_0_m, problem_size_0_n},
             thread_id());
         cutlass::TensorRef<scalar_t, cutlass::layout::RowMajor> bias_tensor_ref(
@@ -853,7 +857,6 @@ struct AttentionKernel {
       if (p.custom_mask_type &&
           cutlass::fast_min(iter_key_start + kKeysPerBlock, p.num_keys) >=
               (query_start + p.causal_diagonal_offset)) {
-        auto query_start = blockIdx.x * kQueriesPerBlock;
         auto lane_offset = MM0::AccumLambdaIterator::get_lane_offset(
             my_lane_id, my_warp_id, iteratorC_tile_offset);
         int32_t last_col;
@@ -888,7 +891,6 @@ struct AttentionKernel {
                    int32_t(kQueriesPerBlock), int32_t(p.num_queries)) -
                p.window_size >=
            iter_key_start)) {
-        auto query_start = blockIdx.x * kQueriesPerBlock;
         auto lane_offset = MM0::AccumLambdaIterator::get_lane_offset(
             my_lane_id, my_warp_id, iteratorC_tile_offset);
         int32_t first_col;
@@ -1060,8 +1062,7 @@ struct AttentionKernel {
                 kKeysPerBlock;
           }
 
-          // int first_key_block = 0;
-          // MM1::Mma::drain_cp_asyncs(); # TODO figure out if this is needed for correctness
+          MM1::Mma::drain_cp_asyncs();
           DISPATCH_BOOL(
               iter_key_start == first_key, kIsFirst, ([&] {
                 DISPATCH_BOOL(
@@ -1168,6 +1169,7 @@ struct AttentionKernel {
           thread_id(),
           warp_id(),
           lane_id());
+      MM1::Mma::drain_cp_asyncs();
       epilogue(rescale, dest_iter, accum_o);
     }
 

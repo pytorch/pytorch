@@ -44,7 +44,7 @@ window_common_args = merge_dicts(
 def _add_docstr(*args: str) -> Callable[[_T], _T]:
     r"""Adds docstrings to a given decorated function.
 
-    Specially useful when the docstrings need string interpolation, e.g., with
+    Especially useful when the docstrings need string interpolation, e.g., with
     str.format().
     REMARK: Do not use this function if the docstring doesn't need string
     interpolation, just write a conventional docstring.
