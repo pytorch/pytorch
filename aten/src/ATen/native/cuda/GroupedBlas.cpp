@@ -1,4 +1,3 @@
-#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <sstream>
@@ -28,6 +27,7 @@
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_group_gemm.h>
 #include <ATen/native/hip/ck_tile_group_gemm.h>
+#include <ATen/native/hip/ck_tile_group_gemm/device_info.h>
 #endif
 #include <ATen/ceil_div.h>
 
@@ -1101,9 +1101,9 @@ static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_
 }
 
 // hipBLASLt runs one GEMM per expert, each with a fixed cost, but beats ck_tile's single persistent kernel once each
-// expert's GEMM is large. The size is one expert's M*N*K times tokens^0.25, where tokens is the jagged dim, so that
-// forward, dX and dW of one layer (same M*N*K, same tokens) pick the same backend. LDS per CU stands in for the
-// matrix rate, which no device property reports. Fitted on the op benchmark's MoE shapes on MI300X and MI355X.
+// expert's GEMM is long: its compute time at the datasheet peak plus 5x its output write time at DRAM bandwidth (ck_tile's
+// per-tile epilogue cost) above 30.55 us. Fitted on the op benchmark's MoE shapes on MI300X and MI355X; GPUs without
+// datasheet numbers stay on hipBLASLt.
 static bool should_use_ck_tile_group_gemm(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
@@ -1113,11 +1113,13 @@ static bool should_use_ck_tile_group_gemm(const Tensor& mat_a, const Tensor& mat
   const double m = mat_a.size(-2) / (a_is_2d && !b_is_2d ? experts : 1);
   const double n = mat_b.size(-1) / (b_is_2d && !a_is_2d ? experts : 1);
   const double k = mat_a.size(-1) / (a_is_2d && b_is_2d ? experts : 1);
-  const double tokens = a_is_2d && b_is_2d ? k : (b_is_2d ? n : m);
-  const double es = mat_a.element_size();
-  const auto* props = at::cuda::getCurrentDeviceProperties();
-  const double capacity = double(props->multiProcessorCount) * props->clockRate * 1e3 * props->sharedMemPerMultiprocessor;
-  return m * n * k * std::pow(tokens, 0.25) * es * es * es <= 1.585e-5 * capacity;
+  const auto dtype = mat_a.scalar_type();
+  const auto seconds = at::hip::detail::ck_tile_group_gemm::with_device_info(at::cuda::getCurrentDeviceProperties()->name, [&](auto info) {
+    using Info = decltype(info);
+    const double tflops = dtype == at::kFloat ? Info::fp32_tflops : (dtype == at::kHalf ? Info::fp16_tflops : Info::bf16_tflops);
+    return 2 * m * n * k / (tflops * 1e12) + 5 * m * n * mat_a.element_size() / (Info::dram_bw_gbs * 1e9);
+  });
+  return seconds && *seconds <= 30.55e-6;
 }
 #endif
 
