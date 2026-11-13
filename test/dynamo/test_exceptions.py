@@ -1663,6 +1663,109 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(t), fn(t))
 
+    def test_str_repr_key_error(self):
+        class Arg:
+            def __repr__(self):
+                return "Arg()"
+
+        def fn(t, d):
+            try:
+                d["missing"]
+            except KeyError as e:
+                missing = e
+            multi = KeyError("a", 1)
+            mutated = KeyError("a")
+            mutated.args = ("b",)
+            excs = (missing, KeyError(), KeyError(1), multi, mutated)
+            return t.sin(), [(str(e), repr(e)) for e in excs], repr(ValueError(Arg()))
+
+        t = torch.randn(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(t, {}), fn(t, {})
+        )
+
+    def test_str_unbound_local_error(self):
+        def fn(t):
+            return t.sin(), str(UnboundLocalError("x"))
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_str_unbound_local_error_from_deleted_local(self):
+        def fn(t):
+            value = 1
+            del value
+            try:
+                _ = value  # noqa: F821
+            except UnboundLocalError as e:
+                return t.sin(), str(e)
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    def test_str_exception_subclass(self):
+        class MyError(ValueError):
+            def __str__(self):
+                return "MyError: " + super().__str__()
+
+        class MyKeyError(KeyError):
+            def __str__(self):
+                return "MyKeyError: " + super(KeyError, self).__str__()
+
+        def fn(t):
+            excs = (MyError("a"), MyKeyError("a"))
+            return t.sin(), [(str(e), repr(e)) for e in excs]
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    def test_str_super_skips_builtin_exception_str(self):
+        class PlainKeyError(KeyError):
+            def base_str(self):
+                return super(KeyError, self).__str__()
+
+        class PlainSyntaxError(SyntaxError):
+            def base_str(self):
+                return super(SyntaxError, self).__str__()
+
+        class PlainOSError(OSError):
+            def base_str(self):
+                return super(OSError, self).__str__()
+
+        def fn(t):
+            excs = (
+                PlainKeyError("a"),
+                PlainSyntaxError("m", ("f.py", 1, 1, "x")),
+                PlainOSError(2, "nf"),
+            )
+            return t.sin(), [e.base_str() for e in excs]
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    def test_str_exception_unmodeled_graph_breaks(self):
+        makers = [
+            lambda: OSError("x"),
+            lambda: OSError(2, "nf", "p"),
+            lambda: FileNotFoundError("x"),
+            lambda: ImportError("a"),
+            lambda: SyntaxError(),
+            lambda: SyntaxError("m", ("f.py", 3, 1, "x", 3, 2)),
+            lambda: UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad"),
+            lambda: ExceptionGroup("eg", [ValueError(1)]),  # noqa: F821
+        ]
+        t = torch.randn(2)
+        for make_exc in makers:
+
+            def fn(t):
+                return t.sin(), str(make_exc())
+
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(Unsupported, "Unsupported exception __str__"):
+                torch.compile(fn, backend="eager", fullgraph=True)(t)
+            self.assertEqual(torch.compile(fn, backend="eager")(t), fn(t))
+
     def test_frozen_dataclass_setattr_raises(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
