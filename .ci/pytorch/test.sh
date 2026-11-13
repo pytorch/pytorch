@@ -47,6 +47,10 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  pip_install nccl-extensions==0.1.0
+fi
+
 # Remove onnxruntime if present to avoid interference with non-ONNX tests
 if [[ "$TEST_CONFIG" != "onnx" ]]; then
   pip uninstall -y onnxruntime 2>/dev/null || true
@@ -1533,7 +1537,9 @@ test_dynamo_benchmark() {
 
   if [[ "$suite" == "torchbench" &&
         ( "${TEST_CONFIG}" == *perf_compare* ||
-          ( "${TEST_CONFIG}" != *perf* && " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --inductor "* ) ) ]]; then
+          ( "${TEST_CONFIG}" != *perf* &&
+            ( " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --inductor "* ||
+              " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --export-aot-inductor "* ) ) ) ]]; then
     local model
     for model in "${INDUCTOR_TORCHBENCH_MIGRATION_MODELS[@]}"; do
       extra_args+=(--exclude-exact "$model")
@@ -2477,10 +2483,15 @@ test_vec256() {
     local ran=0
     reports_dir=$(pwd)/test/test-reports/vec256
     mkdir -p "$reports_dir"
-    pushd build/bin
+    pushd "$BUILD_BIN_DIR"
     vec256_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
     # The CPU's capability, not an ATEN_CPU_CAPABILITY override.
     cpu_capability=$(env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability().replace(' ', ''))")
+    if [[ -z "$cpu_capability" ]]; then
+      popd
+      echo "Could not query PyTorch's CPU capability"
+      return 1
+    fi
     for vec256_exec in $vec256_tests
     do
       capability=${vec256_exec#./vec_test_all_types_}
@@ -2499,11 +2510,11 @@ test_vec256() {
     popd
     if [[ "$ran" == 0 ]]; then
       echo "No vec_test_all_types binary ran"
-      exit 1
+      return 1
     fi
     if [[ -n "$failed" ]]; then
       echo "Failed vec_test_all_types binaries:$failed"
-      exit 1
+      return 1
     fi
     assert_git_not_dirty
   fi
@@ -2912,14 +2923,17 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_lazy_tensor_meta_reference_disabled
   test_without_numpy
   install_torchvision
-  # Fast, and run first so that other failures don't hide its results.
-  test_vec256
+  # Fast, so run first so that other failures don't hide its results; report
+  # its failure at the end so that it doesn't hide theirs either.
+  vec256_status=0
+  test_vec256 || vec256_status=$?
   test_python_shard 1
   test_aten
   test_libtorch 1
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
   fi
+  exit "$vec256_status"
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *cuda* || "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
     test_distributed_single_gpu
