@@ -38,6 +38,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("_new_zeros_with_same_feature_meta", torch::CppFunction::makeFallthrough());
 
   // linear algebra functions
+  m.impl("linear", torch::CppFunction::makeFallthrough());
   m.impl("dot", torch::CppFunction::makeFallthrough());
   m.impl("vdot", torch::CppFunction::makeFallthrough());
   m.impl("dot.out", torch::CppFunction::makeFallthrough());

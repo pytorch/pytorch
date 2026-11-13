@@ -47,6 +47,24 @@ struct MatmulParams {
   float alpha, beta; // beta == 0: bias is not read
 };
 
+// matmul_mpp_complex: kMatmulComplexRows rows per tile. A simdgroup takes
+// kMatmulBlock columns and kMatmulComplexStep of K per step, or half the
+// columns and twice the K for an output of one tile of rows or columns, or of
+// fewer than kMatmulFullGridPerCore threadgroups per GPU core.
+C10_METAL_CONSTEXPR uint32_t kMatmulComplexRows = 16;
+C10_METAL_CONSTEXPR uint32_t kMatmulComplexStep = 16;
+C10_METAL_CONSTEXPR uint32_t kMatmulComplexKPass = 512;
+// Complex products with M, K and N up to this are faster on the naive
+// kernels.
+C10_METAL_CONSTEXPR uint32_t kMatmulComplexNaiveMaxDim = 16;
+
+struct MatmulComplexParams {
+  MatmulParams<uint64_t> gemm; // alpha and beta hold their real parts
+  float alpha_im, beta_im;
+  float a_sign, b_sign, bias_sign; // -1 for a conjugated operand
+  uint32_t k_start, k_end;
+};
+
 #ifdef __METAL__
 #include <metal_simdgroup>
 #include <metal_simdgroup_matrix>
