@@ -154,6 +154,17 @@ def fully_shard(
     overlap. Users generally should *not* call :meth:`fully_shard` only on the
     topmost root module.
 
+    The module of the outermost :meth:`fully_shard` call is the root. FSDP
+    initializes it lazily when any FSDP module inside it first runs forward,
+    so submodules may run forward before or without the root module, e.g. when
+    an inference engine calls the embedding and the decoder layers itself.
+    Such submodules are non-root modules, so with the default
+    ``reshard_after_forward`` they reshard after each forward; pass
+    ``reshard_after_forward=False`` to keep them unsharded. If a submodule
+    enables manual backward finalization before the root is initialized,
+    submodules that run forward without the root instead run as roots of their
+    own, e.g. pipeline stages.
+
     When called with a list (``fully_shard([a, b, ...])``), the model's
     forward may run only a subset of the grouped modules, with the rest
     called later in the same iteration. Chunked-loss training with
@@ -456,12 +467,10 @@ class FSDPModule:
         ``RuntimeError``. Reset from a different FSDP root sharing that context
         raises until the owning root waits or resets.
 
-        Must be called on the root FSDP module — i.e. the module the
-        top-level ``fully_shard`` was applied to, equivalently the
-        module first forwarded. Calling on a non-root module raises
-        ``RuntimeError``.
+        The root FSDP module is the module the top-level ``fully_shard`` was
+        applied to. Calling this on a non-root module resets its root.
         """
-        state = self._get_fsdp_state()
+        state = self._get_fsdp_state()._get_root_state()
         state._reset_iter_state()
 
     def set_is_last_backward(self, is_last_backward: bool) -> None:
@@ -478,7 +487,8 @@ class FSDPModule:
         """
         Set whether the caller must finalize backward.
 
-        This must be called on the root FSDP module. When enabled, manual
+        This applies to the root FSDP module: after the first forward, calling
+        it on a non-root module sets the mode of its root. When enabled, manual
         finalization supersedes :meth:`set_is_last_backward`. Call
         :meth:`finalize_backward` after all backward passes in the logical
         backward operation and before reading or clearing gradients. Otherwise,
@@ -489,12 +499,7 @@ class FSDPModule:
         Set this before backward. The mode cannot change after backward starts
         until the backward iteration is finalized or reset.
         """
-        state = self._get_fsdp_state()
-        if state._is_root is False:
-            raise RuntimeError(
-                "set_manual_backward_finalization must be called on the root "
-                f"{state._state_name} module"
-            )
+        state = self._get_fsdp_state()._get_root_state()
         if (
             enabled != state._state_ctx.manual_backward_finalization
             and torch._C._current_graph_task_id() != -1
@@ -532,7 +537,8 @@ class FSDPModule:
         Enable manual finalization before forward, then call this after all
         backward passes in the logical backward operation. This completes
         pending gradient reduction and resharding according to their current
-        settings. Calling this before the root module's first forward is a no-op.
+        settings. Calling this before the first forward is a no-op, and calling
+        it on a non-root module finalizes its root.
         It is also safe after a completed backward that did not reach any
         FSDP-managed parameters. Do not call it between forward and backward.
 
@@ -577,7 +583,7 @@ class FSDPModule:
                 FSDP root that shares its communication context. If ``False``,
                 wait before returning.
         """
-        state = self._get_fsdp_state()
+        state = self._get_fsdp_state()._get_root_state()
         if state._is_root is None:
             return _GradientReductionHandleImpl(None, None) if async_op else None
         if state._state_ctx.gradient_reduction_pending:

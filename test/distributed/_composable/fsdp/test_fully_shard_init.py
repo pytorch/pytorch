@@ -1,7 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import gc
 import itertools
+import weakref
 from typing import cast
 
 import torch
@@ -608,14 +610,119 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
             model0_out_proj_param_fqns, {"0.out_proj.weight", "0.out_proj.bias"}
         )
 
+    def test_fully_shard_lazy_init_from_nested_state(self):
+        """
+        Tests that lazy initialization started from a nested state makes the
+        outermost state the root.
+
+        FSDP(model(
+            0: FSDP(MLP(FSDP(in_proj), out_proj)),
+            1: MLP(in_proj, out_proj),
+        ))
+        """
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0].in_proj)
+        fully_shard(model[0])
+        fully_shard(model)
+        root_state = fully_shard.state(model)
+        model0_state = fully_shard.state(model[0])
+        model0_in_proj_state = fully_shard.state(model[0].in_proj)
+        model0_in_proj_state._lazy_init()
+
+        self.assertTrue(root_state._is_root)
+        self.assertFalse(model0_state._is_root)
+        self.assertFalse(model0_in_proj_state._is_root)
+        self.assertEqual(
+            root_state._state_ctx.all_states,
+            [root_state, model0_state, model0_in_proj_state],
+        )
+
+    def test_fully_shard_multi_module_lazy_init_from_nested_state(self):
+        """
+        Tests that lazy initialization started below a multi-module state makes
+        the outermost single-module state the root.
+
+        FSDP(model(
+            0: FSDP([0, 2])(MLP(FSDP(in_proj), out_proj)),
+            1: MLP(in_proj, out_proj),
+            2: FSDP([0, 2])(MLP(in_proj, out_proj)),
+        ))
+        """
+        model = nn.Sequential(MLP(8), MLP(8), MLP(8))
+        fully_shard(model[0].in_proj)
+        fully_shard([model[0], model[2]])
+        fully_shard(model)
+        root_state = fully_shard.state(model)
+        multi_module_state = fully_shard.state(model[0])
+        model0_in_proj_state = fully_shard.state(model[0].in_proj)
+        model0_in_proj_state._lazy_init()
+
+        self.assertTrue(root_state._is_root)
+        self.assertFalse(multi_module_state._is_root)
+        self.assertFalse(model0_in_proj_state._is_root)
+
+    def test_fully_shard_enclosing_state_does_not_extend_lifetime(self):
+        """
+        Tests that keeping a nested module alive before lazy initialization
+        does not keep its enclosing module alive, and that the nested module
+        then becomes its own root.
+        """
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0])
+        fully_shard(model)
+        model0 = model[0]
+        model_ref = weakref.ref(model)
+        del model
+        # gc.collect() is a no-op while another rank's thread is collecting, so
+        # collect after every rank drops its model and check after every rank collects
+        dist.barrier()
+        gc.collect()
+        dist.barrier()
+        self.assertIsNone(model_ref())
+        model0_state = fully_shard.state(model0)
+        model0_state._lazy_init()
+        self.assertTrue(model0_state._is_root)
+
+    def test_fully_shard_lazy_init_after_module_tree_changes(self):
+        """
+        Tests that lazy initialization from a nested state uses the module tree
+        at that time: a module detached after sharding becomes its own root
+        without initializing its former root, and a module moved within the
+        tree still makes the outermost state the root.
+        """
+        model = nn.Sequential(MLP(8), MLP(8), MLP(8))
+        for mlp in model:
+            fully_shard(mlp)
+        fully_shard(model)
+        root_state = fully_shard.state(model)
+
+        detached = model[0]
+        model[0] = nn.Identity()
+        detached_state = fully_shard.state(detached)
+        detached_state._lazy_init()
+        self.assertTrue(detached_state._is_root)
+        self.assertIsNone(root_state._is_root)
+
+        moved = model[2]
+        del model[2]
+        model[1].moved = moved
+        moved_state = fully_shard.state(moved)
+        moved_state._lazy_init()
+        self.assertTrue(root_state._is_root)
+        self.assertFalse(moved_state._is_root)
+        self.assertEqual(
+            root_state._state_ctx.all_states,
+            [root_state, fully_shard.state(model[1]), moved_state],
+        )
+
     def test_fully_shard_double_lazy_init(self):
         model = nn.Sequential(MLP(8), MLP(8))
         fully_shard(model[0].in_proj)
         fully_shard(model[0].out_proj)
+        # Lazy init before ``model`` is sharded makes ``0.in_proj`` a root
+        fully_shard.state(model[0].in_proj)._lazy_init()
         fully_shard(model)
         root_state = fully_shard.state(model)
-        model0_in_proj_state = fully_shard.state(model[0].in_proj)
-        model0_in_proj_state._lazy_init()
         regex = (
             "FSDP state has already been lazily initialized for 0.in_proj\n"
             "FSDP requires running forward through the root module first"
