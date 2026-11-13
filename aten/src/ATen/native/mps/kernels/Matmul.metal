@@ -12,21 +12,23 @@ using namespace metal;
 
 constant uint TILE_DIM = 16;
 
-template <typename T, int BM, typename idx_t>
+template <typename T, int BM, int BN, typename idx_t>
 inline MatmulTile<T> matmul_tile(
     device const T* a,
     device const T* b,
     device T* out,
+    device const T* bias,
     constant MatmulParams<idx_t>& p,
-    uint2 tgid) {
-  const idx_t row = idx_t(tgid.y) * BM, col = idx_t(tgid.x) * kMatmulTileN;
+    uint3 tgid) {
+  const idx_t row = idx_t(tgid.y) * BM, col = idx_t(tgid.x) * BN, z = tgid.z;
   return {
-      a + row * p.a_stride_m,
-      b + col * p.b_stride_n,
-      out + row * p.out_stride_m + col * p.out_stride_n,
+      a + z * p.a_batch + row * p.a_stride_m,
+      b + z * p.b_batch + col * p.b_stride_n,
+      out + z * p.out_batch + row * p.out_stride_m + col * p.out_stride_n,
       uint32_t(min(idx_t(BM), idx_t(p.m) - row)),
-      uint32_t(min(idx_t(kMatmulTileN), idx_t(p.n) - col)),
-      p.k};
+      uint32_t(min(idx_t(BN), idx_t(p.n) - col)),
+      p.k,
+      bias + z * p.bias_batch + row * p.bias_stride_m + col * p.bias_stride_n};
 }
 
 template <typename T, int BM, typename idx_t>
@@ -36,13 +38,14 @@ kernel void matmul_simd(
     device const T* a [[buffer(0)]],
     device const T* b [[buffer(1)]],
     device T* out [[buffer(2)]],
-    constant MatmulParams<idx_t>& params [[buffer(3)]],
-    uint2 tgid [[threadgroup_position_in_grid]],
+    device const T* bias [[buffer(3)]],
+    constant MatmulParams<idx_t>& params [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]],
     uint simd_group [[simdgroup_index_in_threadgroup]],
     uint simd_lane [[thread_index_in_simdgroup]]) {
   threadgroup T a_tile[BM * (kMatmulTileK + kMatmulTilePad)];
   threadgroup T b_tile[kMatmulTileK * (kMatmulTileN + kMatmulTilePad)];
-  auto tile = matmul_tile<T, BM>(a, b, out, params, tgid);
+  auto tile = matmul_tile<T, BM, kMatmulTileN>(a, b, out, bias, params, tgid);
   matmul_tile_gemm<T, BM>(tile, params, a_tile, b_tile, simd_group, simd_lane);
 }
 
@@ -52,8 +55,9 @@ kernel void matmul_simd(
       device const T*,                                                        \
       device const T*,                                                        \
       device T*,                                                              \
+      device const T*,                                                        \
       constant MatmulParams<IDX_T>&,                                          \
-      uint2,                                                                  \
+      uint3,                                                                  \
       uint,                                                                   \
       uint)
 
@@ -72,16 +76,18 @@ INSTANTIATE_MATMUL_SIMD_DTYPE(bfloat);
 
 #if C10_METAL_HAS_MPP
 template <typename T, int BM, bool TA, bool TB>
-[[max_total_threads_per_threadgroup(
-    matmul_simdgroups(BM, kMatmulTileN) * simdgroup_size)]]
+[[max_total_threads_per_threadgroup(kMatmulBlockSimdgroups * simdgroup_size)]]
 kernel void matmul_mpp(
     device const T* a [[buffer(0)]],
     device const T* b [[buffer(1)]],
     device T* out [[buffer(2)]],
-    constant MatmulParams<uint64_t>& params [[buffer(3)]],
-    uint2 tgid [[threadgroup_position_in_grid]]) {
-  auto tile = matmul_tile<T, BM>(a, b, out, params, tgid);
-  matmul_mpp_gemm<T, BM, kMatmulTileN, TA, TB>(tile, params);
+    device const T* bias [[buffer(3)]],
+    constant MatmulParams<uint64_t>& params [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint simd_group [[simdgroup_index_in_threadgroup]]) {
+  constexpr int BN = kMatmulBlock * kMatmulBlockSimdgroups;
+  auto tile = matmul_tile<T, BM, BN>(a, b, out, bias, params, tgid);
+  matmul_mpp_block_gemm<T, BM, TA, TB>(tile, params, simd_group);
 }
 
 #define INSTANTIATE_MATMUL_MPP(T, BM, TA, TB, LAYOUT)                        \
@@ -90,8 +96,10 @@ kernel void matmul_mpp(
       device const T*,                                                       \
       device const T*,                                                       \
       device T*,                                                             \
+      device const T*,                                                       \
       constant MatmulParams<uint64_t>&,                                      \
-      uint2)
+      uint3,                                                                 \
+      uint)
 
 #define INSTANTIATE_MATMUL_MPP_BM(T, BM)           \
   INSTANTIATE_MATMUL_MPP(T, BM, false, false, nn); \
@@ -99,10 +107,10 @@ kernel void matmul_mpp(
   INSTANTIATE_MATMUL_MPP(T, BM, true, false, tn);  \
   INSTANTIATE_MATMUL_MPP(T, BM, true, true, tt)
 
+// The tile rows metal_gemm picks (Matmul.mm): kMatmulBlock and half of it.
 #define INSTANTIATE_MATMUL_MPP_DTYPE(T) \
   INSTANTIATE_MATMUL_MPP_BM(T, 16);     \
-  INSTANTIATE_MATMUL_MPP_BM(T, 32);     \
-  INSTANTIATE_MATMUL_MPP_BM(T, 64)
+  INSTANTIATE_MATMUL_MPP_BM(T, 32)
 
 INSTANTIATE_MATMUL_MPP_DTYPE(float);
 INSTANTIATE_MATMUL_MPP_DTYPE(half);
@@ -426,10 +434,6 @@ kernel void naive_addbmm(
       constant uint4& sizes [[buffer(6)]],                                  \
       uint3 tid [[thread_position_in_threadgroup]],                         \
       uint3 group_id [[threadgroup_position_in_grid]])
-
-INSTANTIATE_MM_OPS(float);
-INSTANTIATE_MM_OPS(half);
-INSTANTIATE_MM_OPS(bfloat);
 
 // Complex MM
 INSTANTIATE_MM_OPS(float2);

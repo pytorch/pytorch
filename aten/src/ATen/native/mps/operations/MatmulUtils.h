@@ -11,11 +11,20 @@ namespace at::native::mps {
 // out = a * b for float32, float16 and bfloat16. out must not overlap a or b.
 void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out);
 
+// bias (out when undefined) has the shape of out; it is read only when
+// beta != 0.
 template <typename idx_t>
 MatmulParams<idx_t> matmul_params(
     const Tensor& a,
     const Tensor& b,
-    const Tensor& out) {
+    const Tensor& out,
+    const Tensor& bias_ = {},
+    float alpha = 1,
+    float beta = 0) {
+  const auto& bias = bias_.defined() ? bias_ : out;
+  const auto batch_stride = [](const Tensor& t) {
+    return static_cast<idx_t>(t.dim() == 3 ? t.stride(0) : 0);
+  };
   return {
       .m = c10::safe_conv<uint32_t>(a.size(-2), "uint32_t"),
       .n = c10::safe_conv<uint32_t>(b.size(-1), "uint32_t"),
@@ -27,6 +36,14 @@ MatmulParams<idx_t> matmul_params(
       .b_stride_n = static_cast<idx_t>(b.stride(-1)),
       .out_stride_m = static_cast<idx_t>(out.stride(-2)),
       .out_stride_n = static_cast<idx_t>(out.stride(-1)),
+      .bias_stride_m = static_cast<idx_t>(bias.stride(-2)),
+      .bias_stride_n = static_cast<idx_t>(bias.stride(-1)),
+      .a_batch = batch_stride(a),
+      .b_batch = batch_stride(b),
+      .out_batch = batch_stride(out),
+      .bias_batch = batch_stride(bias),
+      .alpha = alpha,
+      .beta = beta,
   };
 }
 
@@ -71,7 +88,8 @@ inline bool matmul_mpp_indices_fit(
   if (params.m > int_max || params.n > int_max || params.k > int_max ||
       params.a_stride_m > int_max || params.a_stride_k > int_max ||
       params.b_stride_k > int_max || params.b_stride_n > int_max ||
-      params.out_stride_m > int_max || params.out_stride_n > int_max) {
+      params.out_stride_m > int_max || params.out_stride_n > int_max ||
+      params.bias_stride_m > int_max || params.bias_stride_n > int_max) {
     return false;
   }
 
@@ -82,7 +100,9 @@ inline bool matmul_mpp_indices_fit(
       matmul_mpp_tensor_offsets_fit(
              params.k, params.b_stride_k, tile_cols, params.b_stride_n) &&
       matmul_mpp_tensor_offsets_fit(
-             tile_rows, params.out_stride_m, tile_cols, params.out_stride_n);
+             tile_rows, params.out_stride_m, tile_cols, params.out_stride_n) &&
+      matmul_mpp_tensor_offsets_fit(
+             tile_rows, params.bias_stride_m, tile_cols, params.bias_stride_n);
 }
 
 } // namespace at::native::mps
