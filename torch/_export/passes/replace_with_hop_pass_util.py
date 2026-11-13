@@ -173,6 +173,10 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
                 else node
             ),
         )
+    # Inlining does not recompile, because regenerating the code of the whole
+    # module after every region makes this pass quadratic in the region count.
+    # node_inline_ still scans the whole module for unused submodules after
+    # every piece. That scan is much cheaper and keeps attribute names stable.
     new_gm.recompile()
     new_gm.graph.lint()
     return new_gm, new_signature
