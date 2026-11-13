@@ -174,10 +174,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
     @parametrize(
         "factory",
         [
-            subtest(lambda: torch.device("cpu"), name="device"),
-            subtest(lambda: float("1.23456789"), name="float"),
-            subtest(lambda: int("1234567890123456"), name="int"),
-            subtest(lambda: b"configuration-value".decode(), name="str"),
+            subtest(lambda n: torch.device("cpu", n), name="device"),
+            subtest(lambda n: float("1.23456789") + n, name="float"),
+            subtest(lambda n: int("1234567890123456") + n, name="int"),
+            subtest(lambda n: f"configuration-value-{n}", name="str"),
         ],
     )
     def test_sourced_non_singleton_aggregate_identity(self, factory):
@@ -186,18 +186,24 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        values = [factory(), factory()]
+        values = [factory(0), factory(0), factory(1)]
         self.assertIsNot(values[0], values[1])
         x = torch.ones(1)
-        for value in values:
+        for index, value in enumerate(values):
             result = compiled(x, value)
             self.assertEqual(result[0], x + 1)
             self.assertIs(result[1][0][0], value)
             self.assertIs(next(iter(result[2])), value)
             self.assertIs(result[3].start, value)
-        self.assertEqual(counter.frame_count, 1)
+            self.assertEqual(counter.frame_count, 1 if index < 2 else 2)
 
-    @parametrize("mapping_type", [dict, collections.OrderedDict])
+    @parametrize(
+        "mapping_type",
+        [
+            subtest(dict, name="dict"),
+            subtest(collections.OrderedDict, name="OrderedDict"),
+        ],
+    )
     def test_dict_input_key_snapshot_reused(self, mapping_type):
         seen = []
 
@@ -254,7 +260,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(seen, [1])
 
-    @parametrize("container_type", [None, list, dict, set])
+    @parametrize("container_type", [subtest(None, name="scalar"), list, dict, set])
     @parametrize("nested", [False, True])
     @parametrize("frozen", [False, True])
     def test_sourced_constant_in_aggregates(self, container_type, nested, frozen):
