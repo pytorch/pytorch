@@ -3870,39 +3870,7 @@ class TestMPS(TestCaseMPS):
         helper(threshold=0.5, value=-15, num_elems=100)
         helper(threshold=1, value=10, num_elems=100, inplace=True, requires_grad=False)
 
-    # Test pow
     def test_pow(self):
-        def helper(shape):
-            # aten::pow.Tensor_Tensor
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            y = cpu_y.detach().clone().to('mps')
-            z = torch.pow(x, y)
-            ref_z = torch.pow(cpu_x, cpu_y)
-
-            self.assertEqual(z, ref_z)
-
-            # aten::pow.Tensor_Scalar
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-            exp = random.random()
-            z = torch.pow(x, exp)
-            ref_z = torch.pow(cpu_x, exp)
-
-            self.assertEqual(z, ref_z)
-
-            # aten::pow.Scalar
-            x = random.random()
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            y = cpu_y.detach().clone().to('mps')
-            z = torch.pow(x, y)
-            ref_z = torch.pow(x, cpu_y)
-
-            self.assertEqual(z, ref_z)
-
-        helper((2, 8, 4, 5))
-
         # Regression for complex half pow: the polar form exp(y*log(x)) must be
         # evaluated in float, otherwise moderately large magnitudes overflow half
         # (e.g. (300+0j)**1 -> NaN). TODO: migrate to the pow OpInfo once chalf is
@@ -6883,14 +6851,6 @@ class TestMPS(TestCaseMPS):
             for keepdim in [False, True]:
                 helper((2, 8, 4, 5), dim, keepdim)
 
-    def test_minimum_maximum_nan_propagation(self):
-        x = torch.rand(32, device="mps")
-        y = torch.rand(32, device="mps")
-        x[3] = torch.nan
-        y[5] = torch.nan
-        self.assertTrue(torch.minimum(x, y).isnan().any().item())
-        self.assertTrue(torch.maximum(x, y).isnan().any().item())
-
     def test_clamp_fp16_fp32(self):
         cpu_x = torch.randn(10, device='cpu', dtype=torch.float, requires_grad=False)
         x = cpu_x.detach().clone().to('mps')
@@ -7056,35 +7016,6 @@ class TestMPS(TestCaseMPS):
         torch.clamp(cpu_x, min=cpu_min_t, max=cpu_max_t, out=cpu_out)
         torch.clamp(mps_x, min=mps_min_t, max=mps_max_t, out=mps_out)
         self.assertEqual(mps_out.cpu(), cpu_out)
-
-    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    @parametrize("op", ["floor_divide", "div_floor"])
-    def test_div_floor_extremal(self, dtype, op):
-        # Floor division follows Python semantics (c10::div_floor_floating),
-        # not a naive floor(a / b): e.g. inf // 1 -> nan, 1 // -inf -> -1, and
-        # division by zero falls through to the IEEE result.
-        vals = [float("nan"), float("inf"), -float("inf"), 0.0, -0.0,
-                1.0, -1.0, 2.0, -2.0, 3.5, -3.5, 7.0, -7.0]
-        n = len(vals)
-        cpu_a = torch.tensor(vals, dtype=dtype).repeat_interleave(n)
-        cpu_b = torch.tensor(vals, dtype=dtype).repeat(n)
-        mps_a, mps_b = cpu_a.to("mps"), cpu_b.to("mps")
-        if op == "floor_divide":
-            self.assertEqual(torch.floor_divide(mps_a, mps_b), torch.floor_divide(cpu_a, cpu_b))
-        else:
-            self.assertEqual(torch.div(mps_a, mps_b, rounding_mode="floor"),
-                             torch.div(cpu_a, cpu_b, rounding_mode="floor"))
-
-    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    def test_remainder_extremal(self, dtype):
-        vals = [float("nan"), float("inf"), -float("inf"), 0.0, -0.0,
-                1.0, -1.0, 2.0, -2.0, 3.5, -3.5, 7.0, -7.0,
-                1e10, -1e10, 1e30, -1e30]
-        n = len(vals)
-        cpu_a = torch.tensor(vals, dtype=dtype).repeat_interleave(n)
-        cpu_b = torch.tensor(vals, dtype=dtype).repeat(n)
-        self.assertEqual(torch.remainder(cpu_a.to("mps"), cpu_b.to("mps")),
-                         torch.remainder(cpu_a, cpu_b))
 
     def test_remainder(self):
         res_cpu = torch.remainder(

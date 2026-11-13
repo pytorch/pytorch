@@ -24,7 +24,9 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCPU,
     dtypesIfCUDA,
     dtypesIfXPU,
+    expectedFailure,
     expectedFailureMeta,
+    expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyNativeDeviceTypes,
@@ -35,16 +37,18 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNotRocm,
     skipIf,
     skipMeta,
+    skipMPS,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
     all_types_and,
     all_types_and_complex_and,
     complex_types,
-    floating_and_complex_types,
     floating_types_and,
     get_all_int_dtypes,
     get_all_math_dtypes,
+    highest_precision_complex,
+    highest_precision_float,
     integral_types,
     integral_types_and,
 )
@@ -58,6 +62,7 @@ from torch.testing._internal.common_methods_invocations import (
     generate_elementwise_binary_with_scalar_and_type_promotion_samples,
     generate_elementwise_binary_with_scalar_samples,
 )
+from torch.testing._internal.common_mps import mps_ops_modifier
 from torch.testing._internal.common_utils import (
     decorateIf,
     gradcheck,
@@ -84,6 +89,8 @@ if TEST_SCIPY:
 
 
 _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
+
+binary_ufuncs = mps_ops_modifier(binary_ufuncs)
 
 
 # TODO: update to use opinfos consistently
@@ -1325,10 +1332,12 @@ class TestBinaryUfuncsDevice(TestCase):
             ("trunc", lambda a, b: np.trunc(np.true_divide(a, b)).astype(a.dtype)),
         ):
             expect = torch.from_numpy(np_ref(an, bn))
+            if expect.dtype == torch.float64:
+                expect = expect.to(highest_precision_float(device))
 
             kwargs = dict(rounding_mode=mode) if mode is not None else {}
             # Contiguous (likely vectorized)
-            with set_default_dtype(torch.double):
+            with set_default_dtype(highest_precision_float(device)):
                 actual = torch.divide(a, b, **kwargs)
             self.assertEqual(
                 actual, expect, exact_device=False, exact_dtype=exact_dtype
@@ -1336,7 +1345,7 @@ class TestBinaryUfuncsDevice(TestCase):
 
             # Non-contiguous (not vectorized)
             expect = expect[::2]
-            with set_default_dtype(torch.double):
+            with set_default_dtype(highest_precision_float(device)):
                 actual = torch.divide(a[::2], b[::2], **kwargs)
 
             self.assertEqual(
@@ -1379,6 +1388,8 @@ class TestBinaryUfuncsDevice(TestCase):
 
     @onlyAccelerator
     @dtypes(torch.float, torch.bfloat16)
+    # MPS divides rather than multiplying by the reciprocal
+    @expectedFailure("mps", torch.float32)
     def test_division_by_scalar(self, device, dtype):
         num = torch.rand(1024, device=device, dtype=dtype)
         denom = torch.logspace(-4, 4, steps=20)
@@ -1594,6 +1605,7 @@ class TestBinaryUfuncsDevice(TestCase):
                 self.assertEqual(res1.dtype, expected_dtype)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @expectedFailure("mps", torch.bfloat16)  # error message differs for BComplex32
     def test_pow(self, device, dtype):
         m1 = torch.empty(0, dtype=dtype, device=device)
         if m1.is_floating_point() or m1.is_complex():
@@ -1693,7 +1705,7 @@ class TestBinaryUfuncsDevice(TestCase):
                     isinstance(exponent, torch.Tensor)
                     and base.dim() == 0
                     and base.device.type == "cpu"
-                    and exponent.device.type in ["cuda", "xpu"]
+                    and exponent.device.type in ["cuda", "xpu", "mps"]
                 ):
                     regex = (
                         f"Expected all tensors to be on the same device, "
@@ -1722,6 +1734,7 @@ class TestBinaryUfuncsDevice(TestCase):
     # first input must be a scalar. It is not as simple as just wrapping this in
     # a lambada that switches the inputs, because we also want to test samples inputs
     # where the second input is a scalar. The wrapper would need some more logic.
+    @skipMPS  # gradcheck requires float64
     def test_pow_scalar_base(self, device):
         a = (
             torch.arange(1, 13, dtype=torch.double, device=device)
@@ -1808,10 +1821,10 @@ class TestBinaryUfuncsDevice(TestCase):
         _test_int_and_float_pow(torch.int32, -10, 10, device)
         _test_int_and_float_pow(torch.float16, 0.0, 5.0, device)
         _test_int_and_float_pow(torch.float32, 0.0, 10.0, device)
-        _test_int_and_float_pow(torch.float64, 0.0, 10.0, device)
+        _test_int_and_float_pow(highest_precision_float(device), 0.0, 10.0, device)
         # pow's output would have some NaNs as well
         _test_int_and_float_pow(torch.float32, -10.0, 10.0, device)
-        _test_int_and_float_pow(torch.float64, -10.0, 10.0, device)
+        _test_int_and_float_pow(highest_precision_float(device), -10.0, 10.0, device)
 
     # Tests that a Runtime error occurs when a base tensor cannot be resized
     # by pow's inplace variant due to PyTorch's broadcasting semantics.
@@ -1825,10 +1838,10 @@ class TestBinaryUfuncsDevice(TestCase):
         test_inputs = [
             (
                 make_tensor(
-                    base_size, dtype=torch.float64, device=device, high=10.0, low=0.0
+                    base_size, dtype=torch.float, device=device, high=10.0, low=0.0
                 ),
                 make_tensor(
-                    exp_size, dtype=torch.float64, device=device, high=10.0, low=0.0
+                    exp_size, dtype=torch.float, device=device, high=10.0, low=0.0
                 ),
             )
             for base_size, exp_size in test_cases
@@ -1952,6 +1965,7 @@ class TestBinaryUfuncsDevice(TestCase):
 
     @onlyNativeDeviceTypes
     @skipMeta
+    @expectedFailureMPS  # computes in the dtype of `out=` instead of uint8
     def test_pow_scalar_type_promotion(self, device):
         # Test against a scalar and non-scalar input
         inputs = [17, [17]]
@@ -1999,7 +2013,7 @@ class TestBinaryUfuncsDevice(TestCase):
         floats = [-3.0, -2.0, -1.0, -1 / 2, -1 / 3, 0.0, 1 / 3, 1 / 2, 1.0, 2.0, 3.0]
         test_tensor_pow_tensor(floats, torch.float16, np.float16)
         test_tensor_pow_tensor(floats, torch.float32, np.float32)
-        test_tensor_pow_tensor(floats, torch.float64, np.float64)
+        test_tensor_pow_tensor(floats, highest_precision_float(device), np.float64)
 
     def test_logical_xor_with_nontrivial_alignment(self, device):
         # test tensor that is not aligned to multiple of 16 bytes
@@ -2840,7 +2854,7 @@ class TestBinaryUfuncsDevice(TestCase):
     )
     def test_copysign(self, device, dtypes):
         def _test_copysign_numpy(a, b):
-            torch_result = torch.copysign(a, b)
+            torch_result = torch.copysign(a, b).cpu()
 
             if a.dtype == torch.bfloat16:
                 np_a = a.to(torch.float).cpu().numpy()
@@ -3028,7 +3042,7 @@ class TestBinaryUfuncsDevice(TestCase):
         y = torch.arange(1, 11, dtype=dtype, device=device)
 
         z = x // y
-        z_alt = torch.floor(x.double() / y.double()).to(dtype)
+        z_alt = torch.floor(x.cpu().double() / y.cpu().double()).to(dtype)
 
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
@@ -3063,6 +3077,7 @@ class TestBinaryUfuncsDevice(TestCase):
     @skipCUDAIfNotRocm  # NVIDIA CUDA reaches source-level UB for these inputs.
     @dtypes(*integral_types())
     @dtypesIfXPU(*set(integral_types()) - {torch.int64})
+    @expectedFailureMPS  # MPS returns different values for x % 0 than CUDA
     def test_fmod_remainder_by_zero_integral(self, device, dtype):
         fn_list = (torch.fmod, torch.remainder)
         for fn in fn_list:
@@ -3109,6 +3124,7 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertEqual(result_scalar, expected)
 
     @dtypes(*all_types_and(torch.half))
+    @expectedFailure("mps", torch.float16)  # float16 results differ from NumPy
     def test_fmod_remainder(self, device, dtype):
         # Use numpy as reference
         def _helper(x, mod, fns_list):
@@ -3493,6 +3509,7 @@ class TestBinaryUfuncsDevice(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*get_all_int_dtypes())
+    @expectedFailureMPS  # shifts by >= the bit width are not clamped
     def test_shift_limits(self, device, dtype):
         "Ensure that integer bit shifting works as expected with out-of-limits shift values."
         # Issue #70904
@@ -3739,6 +3756,7 @@ class TestBinaryUfuncsDevice(TestCase):
             raise AssertionError("m is intentionally a scalar")
         self.assertEqual(torch.pow(2, m), 2**m)
 
+    @expectedFailureMPS  # the GPU flushes float16 denormals to zero
     def test_ldexp(self, device):
         # random values
         mantissas = torch.randn(64, device=device)
@@ -3939,7 +3957,12 @@ class TestBinaryUfuncsDevice(TestCase):
         self._test_logaddexp(device, dtype, base2=True)
 
     def test_add(self, device):
-        dtypes = floating_and_complex_types()
+        dtypes = (
+            torch.float,
+            highest_precision_float(device),
+            torch.cfloat,
+            highest_precision_complex(device),
+        )
         for dtype in dtypes:
             # [res] torch.add([res,] tensor1, tensor2)
             m1 = torch.randn(100, 100, dtype=dtype, device=device)
@@ -4076,8 +4099,9 @@ class TestBinaryUfuncsDevice(TestCase):
             RuntimeError, msg, lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2))
         )
 
-        m1 = torch.tensor([3.0, 4.0], dtype=torch.double, device=device)
-        m2 = torch.tensor([4.0, 3.0], dtype=torch.double, device=device)
+        dtype = highest_precision_float(device)
+        m1 = torch.tensor([3.0, 4.0], dtype=dtype, device=device)
+        m2 = torch.tensor([4.0, 3.0], dtype=dtype, device=device)
         self.assertRaisesRegex(
             RuntimeError, msg, lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2))
         )
@@ -4092,6 +4116,7 @@ class TestBinaryUfuncsDevice(TestCase):
         )
 
     @onlyAccelerator
+    @expectedFailureMPS  # alpha * other overflows in half precision
     def test_addsub_half_tensor(self, device):
         x = torch.tensor([60000.0], dtype=torch.half, device=device)
         for op, y, alpha in (
@@ -4238,15 +4263,16 @@ class TestBinaryUfuncsDevice(TestCase):
 
     def test_atan2(self, device):
         def _test_atan2_with_size(size, device):
-            a = torch.rand(size=size, device=device, dtype=torch.double)
-            b = torch.rand(size=size, device=device, dtype=torch.double)
+            dtype = highest_precision_float(device)
+            a = torch.rand(size=size, device=device, dtype=dtype)
+            b = torch.rand(size=size, device=device, dtype=dtype)
             actual = a.atan2(b)
             x = a.view(-1)
             y = b.view(-1)
             expected = torch.tensor(
                 [math.atan2(x[i].item(), y[i].item()) for i in range(x.numel())],
                 device=device,
-                dtype=torch.double,
+                dtype=dtype,
             )
             self.assertEqual(expected, actual.view(-1), rtol=0, atol=0.02)
 
@@ -4282,7 +4308,7 @@ class TestBinaryUfuncsDevice(TestCase):
             actual = torch.atan2(y_tensor, x_tensor)
             self.assertEqual(expected_tensor, actual, rtol=0, atol=0.02)
 
-        for dtype in [torch.float, torch.double]:
+        for dtype in [torch.float, highest_precision_float(device)]:
             _test_atan2(0, 0, 0, device, dtype)
             _test_atan2(0, 1, math.pi / 2, device, dtype)
             _test_atan2(0, -1, math.pi / -2, device, dtype)
@@ -4450,6 +4476,7 @@ class TestBinaryUfuncsDevice(TestCase):
             )
         )
     )
+    @skipMPS  # float_power always returns float64 or complex128
     def test_float_power(self, device, dtypes):
         def to_np(value):
             if isinstance(value, torch.Tensor) and value.dtype == torch.bfloat16:
@@ -4548,6 +4575,7 @@ class TestBinaryUfuncsDevice(TestCase):
             torch.float_power(i, exp, out=out)
             self.assertEqual(expected_scalar_base, out)
 
+    @skipMPS  # float_power always returns float64 or complex128
     def test_float_power_exceptions(self, device):
         def _promo_helper(x, y):
             for i in (x, y):
@@ -5008,7 +5036,9 @@ instantiate_device_type_tests(
     only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
-instantiate_device_type_tests(TestBinaryUfuncsDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestBinaryUfuncsDevice, globals(), allow_xpu=True, allow_mps=True
+)
 instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
