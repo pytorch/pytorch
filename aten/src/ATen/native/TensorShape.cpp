@@ -1327,23 +1327,17 @@ static Tensor make_qtensor(
   return result;
 }
 
-// as_strided creates a new TensorImpl but shares the storage so for faketensor
-// we need to copy over the metadata like the device and also the faketensormode
-// pointer
+// Outside Meta kernels a view keeps its input's fake metadata. Inside a
+// kernel it is a new Meta output; see Note [C++ fake outputs inside Meta
+// kernels].
 static void maybe_copy_fake_tensor_metadata(
     const Tensor& self,
     TensorImpl* result) {
-  if (!self.is_fake()) {
+  if (!self.is_fake() || c10::impl::FakeTensorModeTLS::in_kernel_invocation()) {
     return;
   }
   auto fake_device = self.unsafeGetTensorImpl()->fake_device();
-  if (!fake_device.has_value()) {
-    // During in_kernel_invocation, a view of a view that inherited only the
-    // Fake key (see at::init_cpp_fake) has no fake state to copy either; the
-    // fallback makes the op's outputs fakes
-    TORCH_INTERNAL_ASSERT(c10::impl::FakeTensorModeTLS::in_kernel_invocation());
-    return;
-  }
+  TORCH_INTERNAL_ASSERT(fake_device.has_value());
   at::set_and_normalize_fake_device(result, *fake_device);
   result->set_fake_tensor_mode(self.unsafeGetTensorImpl()->fake_tensor_mode());
 }
