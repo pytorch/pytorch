@@ -7,12 +7,10 @@ namespace detail {
 
 const MPSHooksInterface& getMPSHooks() {
   auto create_impl = [] {
-#if !defined C10_MOBILE
     auto hooks = MPSHooksRegistry()->Create("MPSHooks");
     if (hooks) {
       return hooks;
     }
-#endif
     return std::make_unique<MPSHooksInterface>();
   };
   static auto hooks = create_impl();

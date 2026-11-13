@@ -5,19 +5,26 @@ import gc
 import inspect
 import os
 import sys
+import sysconfig
 import unittest
 import weakref
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+import torch._dynamo.testing
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+from torch._dynamo.guards import _ordered_dict_order, GuardBuilder
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     set_default_dtype,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
@@ -40,6 +47,256 @@ x = torch.tensor(4)
 weakref_x = weakref.ref(x)
 
 default_mgr_enum = torch._dynamo.guards.GuardManagerType.GUARD_MANAGER
+dict_mgr_enum = torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER
+
+
+@instantiate_parametrized_tests
+class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("order", [(), (0,), (0, 1, 2), (2, 0, 1)])
+    def test_ordered_dict_order_guard(self, order):
+        mapping = OrderedDict.fromkeys(range(len(order)), 1)
+        for key in order:
+            mapping.move_to_end(key)
+        root = RootGuardManager()
+        manager = root.dict_getitem_manager(
+            "mapping", "mapping", mapping, dict_mgr_enum
+        )
+        manager.add_ordered_dict_order_guard(order, ["mapping order"], None)
+        clone = root.clone_manager(lambda manager: True)
+        inputs = {"mapping": mapping}
+        self.assertTrue(root.check(inputs))
+        self.assertTrue(root.check_verbose(inputs).result)
+        self.assertTrue(clone.check(inputs))
+        self.assertIsInstance(
+            manager.get_leaf_guards()[0], guards.ORDERED_DICT_ORDER_MATCH
+        )
+        self.assertTrue(guards.ORDERED_DICT_ORDER_MATCH(root, order, [], None)(mapping))
+        if len(order) > 1:
+            mapping.move_to_end(order[0])
+            self.assertFalse(root.check(inputs))
+            self.assertFalse(clone.check(inputs))
+            self.assertEqual(
+                root.check_verbose(inputs).verbose_code_parts, ["mapping order"]
+            )
+
+    @unittest.skipUnless(
+        sysconfig.get_config_var("Py_GIL_DISABLED") == 1, "requires free threading"
+    )
+    def test_ordered_dict_order_guard_shared_scratch(self):
+        roots = []
+        for size in (17, 128, 16, 1024, 2):
+            mapping = OrderedDict.fromkeys(range(size))
+            mapping.move_to_end(0)
+            root = RootGuardManager()
+            root.add_ordered_dict_order_guard(tuple(mapping), [], None)
+            roots.append((root, root.clone_manager(lambda manager: True), mapping))
+
+        def check_roots():
+            for _ in range(20):
+                for root, clone, mapping in roots:
+                    self.assertTrue(root.check(mapping))
+                    self.assertTrue(clone.check(mapping))
+                    wrong = OrderedDict.fromkeys(range(len(mapping)))
+                    self.assertFalse(root.check(wrong))
+                    self.assertFalse(clone.check(wrong))
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            list(executor.map(lambda _: check_roots(), range(4)))
+
+    @parametrize("clone", [False, True])
+    @parametrize("subclass", [False, True])
+    @parametrize("reordered", [False, True])
+    def test_ordered_dict_order_guard_recursive_tags(self, clone, subclass, reordered):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        class Mapping(OrderedDict):
+            pass
+
+        class OtherMapping(OrderedDict):
+            pass
+
+        module = torch.nn.Module()
+        module.mapping = (Mapping if subclass else OrderedDict)({1: None, 2: None})
+        root = RootGuardManager()
+        module_mgr = root.dict_getitem_manager(
+            "module", "module", module, default_mgr_enum
+        )
+        dict_mgr = module_mgr.get_generic_dict_manager(
+            "module.__dict__", vars(module), default_mgr_enum
+        )
+        mapping_mgr = dict_mgr.dict_getitem_manager(
+            "mapping",
+            "module.mapping",
+            module.mapping,
+            torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
+        )
+        if reordered:
+            module.mapping.move_to_end(1)
+        order = (1, 0) if reordered else (0, 1)
+        mapping_mgr.add_ordered_dict_order_guard(order, ["mapping order"], None)
+        GuardManagerWrapper(root).find_tag_safe_roots()
+        self.assertEqual(
+            module_mgr.is_tag_safe_root(),
+            not subclass
+            and sys.version_info >= (3, 12)
+            and sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
+        )
+        if clone:
+            root = root.clone_manager(lambda manager: True)
+        inputs = {"module": module}
+        self.assertTrue(root.check(inputs))
+        self.assertTrue(root.check(inputs))
+        module.mapping.move_to_end(2 if reordered else 1)
+        self.assertFalse(root.check(inputs))
+        module.mapping.move_to_end(1 if reordered else 2)
+        self.assertTrue(root.check(inputs))
+        if subclass:
+            module.mapping.__class__ = OtherMapping
+            self.assertFalse(root.check(inputs))
+
+    @parametrize("reordered", [False, True])
+    def test_ordered_dict_order_guard_bypasses_callbacks(self, reordered):
+        class Key:
+            fail = False
+
+            def __init__(self, value):
+                self.value = value
+
+            def __hash__(self):
+                if self.fail:
+                    raise AssertionError("guard called __hash__")
+                return self.value
+
+            def __eq__(self, other):
+                if self.fail:
+                    raise AssertionError("guard called __eq__")
+                return True
+
+        class Mapping(OrderedDict):
+            def __iter__(self):
+                raise AssertionError("guard called a Python mapping callback")
+
+            keys = __len__ = __iter__
+
+        first, second = Key(1), Key(2)
+        mapping = Mapping([(first, 1), (second, 2)])
+        if reordered:
+            mapping.move_to_end(first)
+        Key.fail = True
+        order = _ordered_dict_order(mapping)
+        self.assertEqual(order, (1, 0) if reordered else (0, 1))
+        root = RootGuardManager()
+        root.add_ordered_dict_order_guard(order, [], None)
+        self.assertTrue(root.check(mapping))
+        Key.fail = False
+        mapping.move_to_end(second if reordered else first)
+        Key.fail = True
+        self.assertFalse(root.check(mapping))
+
+    def test_ordered_dict_order_guard_does_not_specialize_keys(self):
+        root = RootGuardManager()
+        root.add_ordered_dict_order_guard((1, 0), [], None)
+        for keys in ((1, 2), (11, 12)):
+            mapping = OrderedDict.fromkeys((None, *keys))
+            del mapping[None]
+            self.assertFalse(root.check(mapping))
+            mapping.move_to_end(keys[0])
+            self.assertTrue(root.check(mapping))
+
+    @parametrize("order", [(-1,), (1,), (0, 0)])
+    def test_ordered_dict_order_guard_rejects_invalid_positions(self, order):
+        root = RootGuardManager()
+        with self.assertRaisesRegex(ValueError, "permutation"):
+            root.add_ordered_dict_order_guard(order, [], None)
+
+    @parametrize(
+        "mutation, linked_count",
+        [(mode, count) for mode in ("before", "after") for count in (0, 1, 2)]
+        + [("delete", 1), ("replace", 1), ("duplicate", 1)],
+    )
+    @parametrize("key_type", [str, int])
+    def test_ordered_dict_invalid_storage(self, mutation, linked_count, key_type):
+        mapping = OrderedDict()
+        if mutation == "before":
+            dict.__setitem__(mapping, key_type(0), 0)
+        mapping.update((key_type(i), i) for i in range(1, linked_count + 1))
+        if mutation in ("delete", "replace", "duplicate"):
+            dict.__delitem__(mapping, key_type(1))
+        if mutation == "duplicate":
+            mapping[key_type(1)] = 1
+        if mutation in ("after", "replace", "duplicate"):
+            dict.__setitem__(mapping, key_type(0), 0)
+        valid = OrderedDict(dict.items(mapping))
+        spec = GuardBuilder.ORDERED_DICT_ORDER_MATCH.guard_check_spec
+        order = spec.get_metadata_fn(None, valid)
+        self.assertTrue(spec.eval_fn(valid, order))
+        self.assertIsNone(_ordered_dict_order(mapping))
+        self.assertFalse(spec.eval_fn(mapping, order))
+        self.assertFalse(spec.eval_fn(mapping, None))
+        root = RootGuardManager()
+        root.add_ordered_dict_order_guard(order, [], None)
+        self.assertFalse(root.check(mapping))
+
+    def test_ordered_dict_snapshot_preserves_instance_state(self):
+        class State(dict):
+            pass
+
+        mapping = OrderedDict.fromkeys([1, 2])
+        before = tuple(map(id, gc.get_referents(mapping)))
+        self.assertEqual(guards.ordered_dict_keys(mapping), [1, 2])
+        self.assertEqual(tuple(map(id, gc.get_referents(mapping))), before)
+        mapping.__dict__ = State(extra=1)
+        mapping.move_to_end(1)
+        self.assertEqual(_ordered_dict_order(mapping), (1, 0))
+
+    def test_empty_order_guard_runs_under_dictionary_manager(self):
+        root = RootGuardManager()
+        mapping = OrderedDict()
+        manager = root.dict_getitem_manager(
+            "mapping", "mapping", mapping, dict_mgr_enum
+        )
+        manager.add_ordered_dict_order_guard((), [], None)
+        self.assertTrue(root.check({"mapping": mapping}))
+        mapping["orphan"] = None
+        dict.clear(mapping)
+        self.assertEqual(dict.__len__(mapping), 0)
+        self.assertFalse(root.check({"mapping": mapping}))
+        self.assertFalse(root.check_verbose({"mapping": mapping}).result)
+
+    def test_invalid_ordered_dict_input_snapshot_graph_breaks(self):
+        mapping = OrderedDict(a=1)
+        dict.__setitem__(mapping, "unlinked", 2)
+
+        def fn(x, mapping):
+            return x + len(mapping)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend=counter)(x, mapping), x + 2)
+        self.assertEqual(counter.frame_count, 0)
+
+    def test_ordered_dict_snapshot_rejects_duplicate_storage_key(self):
+        from torch._dynamo.utils import (
+            enumerate_items_with_dict_position,
+            InvalidOrderedDict,
+        )
+
+        class Key:
+            hash_value = 0
+
+            def __hash__(self):
+                return self.hash_value
+
+        key = Key()
+        mapping = OrderedDict([(key, 1)])
+        key.hash_value = 1
+        mapping[key] = 2
+        self.assertEqual(len(mapping), 2)
+        with self.assertRaisesRegex(InvalidOrderedDict, "storage differs"):
+            list(enumerate_items_with_dict_position(mapping))
+        self.assertIsNone(_ordered_dict_order(mapping))
 
 
 class Pair:
@@ -1795,6 +2052,50 @@ class TagSafetyChecks(RecursiveDictTagTests):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):
             opt_fn(torch.randn(4, 4))
+
+    def test_nn_module_tag_safe_with_method_code_guard(self):
+        # forward and helper get a __code__ guard via type(mod).__dict__; that
+        # must not cost the module its tag-safe root.
+        class Mod(torch.nn.Module):
+            def helper(self, x):
+                return x * 2
+
+            def forward(self, x):
+                return self.helper(x)
+
+        mod = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_mgr = builder.get_guard_manager_from_source(LocalSource("mod"))
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+
+        from torch._dynamo.testing import CompileCounter
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4, 4)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(x)
+
+        # The tag-safe root must not hide the guards: rebinding either class
+        # function still recompiles.
+        Mod.helper = lambda self, x: x * 9
+        self.assertEqual(opt_fn(x), x * 9)
+        self.assertEqual(cnt.frame_count, 2)
+        Mod.forward = lambda self, x: self.helper(x) + 1
+        self.assertEqual(opt_fn(x), x * 9 + 1)
+        self.assertEqual(cnt.frame_count, 3)
 
 
 class RecursiveDictGuardTests(RecursiveDictTagTests):
