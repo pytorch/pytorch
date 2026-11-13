@@ -138,8 +138,13 @@ struct TcfgApi {
   // a Python error set: RecursionError, or MemoryError.
   void* (*frame_push)(PyObject* func, uint16_t*** instr, uint16_t** code);
   // Pops the frame, which must be the current one. A frame object that
-  // something still refers to (a traceback) takes the frame's contents over.
-  void (*frame_pop)(void* frame);
+  // something still refers to (a traceback) takes the frame's contents over,
+  // and with them `kept` (a reference that is consumed; may be null): what
+  // the locals of the function were bound to, which lives as long as the
+  // frame object then, as the locals of an interpreted function do.
+  void (*frame_pop)(void* frame, PyObject* kept);
+  // Whether something other than the stack refers to the frame.
+  int32_t (*frame_held)(void* frame);
 };
 
 } // extern "C"
