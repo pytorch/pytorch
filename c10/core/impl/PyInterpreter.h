@@ -244,6 +244,16 @@ struct C10_API PyInterpreterVTable {
   virtual bool fake_run_with_mode_entered(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       c10::function_ref<bool()> step) const = 0;
+  // Calls torch._subclasses.fake_tensor._resolve_device_conflict, which
+  // returns the device FakeTensor._find_common_device keeps for fake inputs of
+  // op on common_device and device, where its rules for zero-dim CPU tensors
+  // and for ops that allow mixed devices do not reconcile them: the one whose
+  // type torch._functorch.config.fake_tensor_prefer_device_type names, else it
+  // raises FakeTensorDeviceMismatchError. Acquires the GIL.
+  virtual c10::Device _resolve_device_conflict(
+      const c10::OperatorHandle& op,
+      c10::Device common_device,
+      c10::Device device) const = 0;
   // Raises a Python exception of type kind with message msg, for errors the
   // C++ fake fallback raises where FakeTensorMode raises them. Acquires the
   // GIL.
