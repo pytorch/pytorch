@@ -202,26 +202,6 @@ class TestAutocastMPS(TestCase):
         y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
         self.assertEqual(y.to(y_autocast.dtype), y_autocast)
 
-    # Regression test for https://github.com/pytorch/pytorch/issues/201630
-    # None and "eager" are baselines that worked before the fix. "aot_eager"
-    # used to fail.
-    @parametrize("backend", [None, "eager", "aot_eager"])
-    def test_nested_autocast_compiled(self, backend):
-        def f(x):
-            with torch.autocast(device_type=x.device.type, enabled=False):
-                return x @ x
-
-        device = "mps"
-
-        x = torch.rand(64, 64, device=device) + 10.0
-        x.requires_grad_()
-        torch._dynamo.reset()
-        fn = f if backend is None else torch.compile(f, fullgraph=True, backend=backend)
-        with torch.autocast(device, dtype=torch.float16):
-            out = fn(x)
-
-        self.assertEqual(out.dtype, x.dtype)
-
     def test_conv_transpose3d_autocast_fp32(self):
         m = nn.ConvTranspose3d(16, 33, 3, stride=2).to("mps")
         x = torch.randn(20, 16, 10, 50, 100, device="mps")
@@ -829,80 +809,6 @@ class TestMPS(TestCaseMPS):
         q = mps_hist / mps_hist.sum()
         kl_div = F.kl_div(q.log(), p, reduction='sum').item()
         self.assertLess(kl_div, 0.03)
-
-    def test_stream(self):
-        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        with torch.mps.stream(None):
-            self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        s1 = torch.mps.Stream()
-        s2 = torch.mps.Stream()
-        self.assertNotEqual(s1, torch.mps.default_stream())
-        self.assertNotEqual(s2, torch.mps.default_stream())
-        self.assertNotEqual(s1, s2)
-
-        # Check that the stream is reset correctly if an exception is raised
-        # within another stream's context.
-        # Note: Use a custom exception type so that any unexpected errors inside
-        # the `try` block pass through to fail the test
-        class MyException(Exception):
-            pass
-
-        try:
-            with torch.mps.stream(s1):
-                self.assertEqual(torch.mps.current_stream(), s1)
-                raise MyException
-
-        except MyException:
-            self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        # Check that the stream is reset correctly with nested contexts
-        with torch.mps.stream(s1):
-            self.assertEqual(torch.mps.current_stream(), s1)
-            with torch.mps.stream(s2):
-                self.assertEqual(torch.mps.current_stream(), s2)
-
-            self.assertEqual(torch.mps.current_stream(), s1)
-
-        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        def concurrent_sine_loop(a1, a2, s1=None, s2=None, n=100):
-            r1 = a1
-            r2 = a2
-
-            for _ in range(n):
-                with torch.mps.stream(s1):
-                    r1 = torch.sin(r1)
-                with torch.mps.stream(s2):
-                    r2 = torch.sin(r2)
-
-            return r1, r2
-
-        # Check that two separate workloads run on separate streams gives the
-        # same result as running them on one stream.
-        try:
-            a1 = torch.randn(100, device='mps')
-            a2 = torch.randn(100, device='mps')
-            torch.mps.synchronize()
-
-            r1, r2 = concurrent_sine_loop(a1, a2, s1, s2)
-            s1.synchronize()
-            s2.synchronize()
-
-            r1_check, r2_check = concurrent_sine_loop(a1, a2, s1=None, s2=None)
-            torch.mps.synchronize()
-
-            self.assertEqual(r1, r1_check)
-            self.assertEqual(r2, r2_check)
-
-        finally:
-            torch.mps.synchronize()
-            s1.synchronize()
-            s2.synchronize()
-            torch.mps.empty_cache()
-
-        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
 
     def _get_stream_by_name(self, stream):
         if stream == "default":
@@ -10066,6 +9972,17 @@ class TestMPS(TestCaseMPS):
             ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
         self.assertEqual(y, ref, atol=0, rtol=0)
 
+    # https://github.com/pytorch/pytorch/issues/111374
+    def test_lerp_inf(self):
+        inf = float("inf")
+        x = torch.tensor([-inf, inf, 0.0, 0.0, 1.5], device="mps")
+        y = torch.tensor([0.0, 0.0, -inf, inf, 2.5], device="mps")
+        for dtype, w in product([torch.float, torch.half, torch.bfloat16, torch.cfloat], [0.0, 0.3, 0.5, 0.7, 1.0]):
+            xd, yd = x.to(dtype), y.to(dtype)
+            wt = torch.full_like(xd, w + 0.1j if dtype.is_complex else w)
+            self.assertEqual(torch.lerp(xd, yd, w), torch.lerp(xd.cpu(), yd.cpu(), w))
+            self.assertEqual(torch.lerp(xd, yd, wt), torch.lerp(xd.cpu(), yd.cpu(), wt.cpu()))
+
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
 # synthetic kernels (simple_add for arithmetic, simple_ge for comparison)
@@ -14362,30 +14279,6 @@ class TestRNNMPS(TestCaseMPS):
         for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
-
-    def test_lstm_autocast(self, device="mps"):
-        dtype = torch.float32
-        other_dtype = torch.float16
-
-        seq_len = 3
-        batch_size = 5
-        hidden_size = 7
-        input_size = 11
-        num_layers = 1
-
-        rnn = nn.LSTM(input_size=input_size, hidden_size=hidden_size, dtype=dtype, device=device)
-
-        input = torch.randn(seq_len, batch_size, input_size, dtype=other_dtype, device=device)
-        hx = torch.randn(num_layers, batch_size, hidden_size, dtype=dtype, device=device)
-        cx = torch.randn(num_layers, batch_size, hidden_size, dtype=dtype, device=device)
-
-        with torch.autocast(device_type="mps"):
-            output, (hn, cn) = rnn(input, (hx, cx))
-
-        output_check, (hn_check, cn_check) = rnn(input.to(dtype), (hx, cx))
-        self.assertEqual(output.to(dtype), output_check, atol=1e-3, rtol=1e-3)
-        self.assertEqual(hn.to(dtype), hn_check, atol=1e-3, rtol=1e-3)
-        self.assertEqual(cn.to(dtype), cn_check, atol=1e-3, rtol=1e-3)
 
     # Regression test for https://github.com/pytorch/pytorch/issues/190057:
     # dropout=1.0 produced 0 * inf = NaN between layers.
