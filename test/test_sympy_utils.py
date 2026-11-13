@@ -25,7 +25,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils._sympy.functions import (
+    CeilToInt,
     FloorDiv,
+    FloorToInt,
     Identity,
     IntTrueDiv,
     Max as TorchSymMax,
@@ -38,6 +40,7 @@ from torch.utils._sympy.functions import (
     RShift,
     BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
+    TruncToInt,
 )
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
@@ -1143,6 +1146,50 @@ class TestSympySolve(TestCase):
 
 
 class TestSympyFunctions(TestCase):
+    def test_rounding_to_int_safely_canonicalizes_pytorch_integer_functions(self):
+        x, y = sympy.symbols("x y")
+        integer_exprs = (
+            CeilToInt(x),
+            FloorDiv(x, y),
+            FloorToInt(x),
+            TruncToInt(x),
+        )
+
+        for outer in (CeilToInt, FloorToInt, TruncToInt):
+            for inner in integer_exprs:
+                with self.subTest(outer=outer, inner=inner):
+                    self.assertIs(outer(inner), inner)
+
+        integer_symbol = sympy.Symbol("integer_symbol", integer=True)
+        for rounding in (CeilToInt, FloorToInt, TruncToInt):
+            with self.subTest(rounding=rounding):
+                result = rounding(integer_symbol)
+                self.assertIs(result.func, rounding)
+                self.assertEqual(result.args, (integer_symbol,))
+
+    def test_rounding_to_int_does_not_canonicalise_expressions_with_incorrect_assumptions(
+        self,
+    ):
+        s14 = sympy.Symbol("s14", integer=True, positive=True)
+        s37 = sympy.Symbol("s37", integer=True, positive=True)
+        s46 = sympy.Symbol("s46", integer=True, positive=True)
+        incorrectly_assumed_integer = sympy.Mul(
+            sympy.Rational(1, 22),
+            24 * s37 + 672,
+            FloorDiv(s14 * s46, 2016),
+        )
+
+        self.assertEqual(
+            incorrectly_assumed_integer.subs({s14: 2016, s37: 1, s46: 1}),
+            sympy.Rational(348, 11),
+        )
+
+        for rounding in (CeilToInt, FloorToInt, TruncToInt):
+            with self.subTest(rounding=rounding):
+                result = rounding(incorrectly_assumed_integer)
+                self.assertIs(result.func, rounding)
+                self.assertEqual(result.args, (incorrectly_assumed_integer,))
+
     def test_shift_edges(self):
         x = sympy.Symbol("x", integer=True)
         self.assertEqual(LShift(x, 0), x)

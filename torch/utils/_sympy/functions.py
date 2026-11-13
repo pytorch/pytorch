@@ -106,6 +106,19 @@ __all__ = [
 ]
 
 
+def _is_integer_check_safe(expr: sympy.Basic) -> bool:
+    """Trust only PyTorch functions that statically declare an integer result.
+
+    SymPy's inferred ``expr.is_integer`` can be incorrect for composite
+    expressions, so it is not safe to use for correctness-preserving
+    canonicalization.
+    """
+
+    return isinstance(expr, sympy.Integer) or (
+        expr.func.__module__ == __name__ and expr.func.is_integer is True
+    )
+
+
 def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
     # No need to check that two args are not the same, since expr is pre-optimized but we do it anyway.
     return (
@@ -563,6 +576,8 @@ class CeilToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
+        if _is_integer_check_safe(number):
+            return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
         return None
@@ -581,7 +596,7 @@ class FloorToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
-        if isinstance(number, sympy.Integer):
+        if _is_integer_check_safe(number):
             return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
@@ -1312,7 +1327,7 @@ class TruncToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
-        if number.is_integer is True:
+        if _is_integer_check_safe(number):
             return number
         if isinstance(number, IntTrueDiv):
             base, divisor = number.args
