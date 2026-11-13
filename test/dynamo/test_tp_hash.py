@@ -781,8 +781,6 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
     )
     def test_hash_distributed_group_member(self):
         """DistributedVariable (WorldMetaClassVariable): hash of GroupMember."""
-        if not torch.distributed.is_available():
-            self.skipTest("torch.distributed not available")
         import torch.distributed as dist
 
         self._assert_hash_equals(dist.GroupMember)
