@@ -3574,7 +3574,11 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "SWIZZLE_32_8",
           at::blas::SwizzleType::SWIZZLE_32_8,
-          "gfx950-style 32x8 swizzle (hipBLASLt BLK32_UE8M0_32_8)");
+          "gfx950-style 32x8 swizzle (hipBLASLt BLK32_UE8M0_32_8)")
+      .value(
+          "SWIZZLE_MN_K4",
+          at::blas::SwizzleType::SWIZZLE_MN_K4,
+          "MN-major scales with four values packed along K");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
@@ -3828,7 +3832,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_should_allow_numbers_as_tensors", [](const std::string& name) {
-        return torch::should_allow_numbers_as_tensors(name);
+        return at::should_allow_numbers_as_tensors(name);
       });
 
   py_module.def(
