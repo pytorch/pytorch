@@ -38,6 +38,7 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
     skipCUDAIf,
     skipXPUIf,
 )
@@ -3142,6 +3143,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 @skipIfNoDynamoSupport
 class TestControlFlowDevice(_TestControlFlowBase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(_TestControlFlowBase.setUp)
 
     @onlyAccelerator
     def test_cond_gpu(self, device):
@@ -4965,6 +4967,11 @@ class TestControlFlowDevice(_TestControlFlowBase):
         if autograd:
             self.check_autograd(result, result_exp, (init, xs, kv))
 
+    @decorateIf(
+        unittest.skip("init aliasing requires an AOT backend"),
+        lambda params: params["alias_site"] == "init"
+        and params["compile_mode"] in ("none", "eager"),
+    )
     @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("alias_site", ["init", "nested"])
@@ -5423,6 +5430,7 @@ class GraphModule(torch.nn.Module):
 class AssociativeScanTestsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @preserves_device_selection
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
@@ -11045,6 +11053,39 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             )
         self.assertEqual(eager_out, exp_out)
         self.assertEqual(compiled_out, exp_out)
+
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
+    def test_scan_in_vmap_output_drops_traced_step(self):
+        # Tracing runs the combine function for one step. Inside vmap, the
+        # output of scan keeps the wrapper that the combine function returned,
+        # but not the constant or real tensor of that step, and the step's own
+        # value keeps both.
+        from torch._functorch.vmap import vmap_increment_nesting
+        from torch._higher_order_ops.scan import _scan_output_value
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            maybe_get_fake_constant,
+            maybe_get_real_tensor,
+        )
+
+        functorch = torch._C._functorch
+        mode = FakeTensorMode()
+        with mode:
+            step = torch.tensor([5])
+        # As in trace_scan, the output node of the combine graph records the
+        # plain fake tensor.
+        node = torch.fx.Graph().placeholder("step")
+        node.meta["val"] = step
+        with vmap_increment_nesting(1, "error") as level:
+            with mode:
+                batched = functorch._add_batch_dim(step, 0, level)
+            out = _scan_output_value(node, batched)
+            self.assertTrue(functorch.is_batchedtensor(out))
+            inner = functorch.get_unwrapped(out)
+        self.assertIsNone(maybe_get_fake_constant(inner))
+        self.assertIsNone(maybe_get_real_tensor(inner))
+        self.assertIsNotNone(maybe_get_fake_constant(step))
+        self.assertIsNotNone(maybe_get_real_tensor(step))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_scan_in_vmap_simple(self):

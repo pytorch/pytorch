@@ -194,17 +194,14 @@ def maybe_handle_backward_generation(
             raise AssertionError("boxed_forward_device_index must not be None")
         if boxed_forward_device_index.value is None:
             raise AssertionError("boxed_forward_device_index.value must not be None")
+        from torch._inductor.cudagraph_trees import mark_running_backward
+
         compiled_graph_callable = compiled_graph.current_callable
+        device_index = boxed_forward_device_index.value
 
-        manager = torch._inductor.cudagraph_trees.get_manager(
-            boxed_forward_device_index.value, create_if_none_exists=False
-        )
-        # should already exist from forward
-        if manager is None:
-            raise AssertionError("CUDAGraph manager must not be None")
-
+        # The manager is looked up when the backward runs (see mark_running_backward).
         def compiled_artifact(new_inputs: Sequence[InputType]) -> object:
-            manager.set_to_running_backward()  # type: ignore[union-attr]
+            mark_running_backward(device_index)
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact
@@ -1331,9 +1328,9 @@ class RegionalOutputCode(OutputCode):
         if self._serialized_graph_module is None:
             raise AssertionError("self._serialized_graph_module must not be None")
         # Get fake mode from example inputs
-        from torch._guards import detect_fake_mode
+        from torch._guards import detect_fake_mode, require_python_fake_mode
 
-        fake_mode = detect_fake_mode(example_inputs)
+        fake_mode = require_python_fake_mode(detect_fake_mode(example_inputs))
         if fake_mode is None:
             raise RuntimeError(
                 "Could not detect fake mode from example inputs. "
