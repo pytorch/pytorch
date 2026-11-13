@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/addmm.h>
@@ -12,6 +13,28 @@
 namespace at::native {
 
 using namespace mps;
+
+static void complex_linear_out(const Tensor& input, const Tensor& weight, const Tensor& bias, Tensor output) {
+  const int64_t rows = input.numel() / input.size(-1);
+  const std::vector<int64_t> input_shape{rows, input.size(-1)}, output_shape{rows, output.size(-1)};
+  const auto input_stride = at::detail::computeStride(input.sizes(), input.strides(), input_shape);
+  const auto output_stride = at::detail::computeStride(output.sizes(), output.strides(), output_shape);
+  const auto bias_stride =
+      bias.defined() ? at::detail::computeStride(bias.sizes(), bias.strides(), output_shape) : output_stride;
+  if (input_stride && output_stride && bias_stride) {
+    auto input_2d = input.as_strided(input_shape, *input_stride);
+    auto output_2d = output.as_strided(output_shape, *output_stride);
+    if (bias.defined()) {
+      at::addmm_out(output_2d, bias.as_strided(output_shape, *bias_stride), input_2d, weight);
+    } else {
+      at::mm_out(output_2d, input_2d, weight);
+    }
+    return;
+  }
+  for (const auto i : c10::irange(input.size(0))) {
+    complex_linear_out(input.select(0, i), weight, bias.defined() ? bias.select(0, i) : bias, output.select(0, i));
+  }
+}
 
 Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::optional<Tensor>& bias_opt) {
   // wT = transpose(weight);
@@ -70,6 +93,11 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
       output.zero_();
     }
     // Squeeze last dim of 1D linear
+    return weight_arg.dim() != 1 ? output : output.squeeze(-1);
+  }
+
+  if (input.is_complex()) {
+    complex_linear_out(input, weight.t(), is_bias_defined ? bias.expand(output_size) : bias, output);
     return weight_arg.dim() != 1 ? output : output.squeeze(-1);
   }
 

@@ -24,11 +24,8 @@
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
-#include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
-#include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -186,7 +183,7 @@ void encode_gemv_launch(at::mps::MPSStream* stream,
 void dispatch_gemv(const Tensor& A,
                    const Tensor& B,
                    const Tensor& out,
-                   const std::optional<Tensor>& bias,
+                   const Tensor& bias,
                    const ResolvedMatrix& matrix,
                    const Scalar& alpha,
                    const Scalar& beta,
@@ -210,8 +207,8 @@ void dispatch_gemv(const Tensor& A,
   Tensor expanded_bias;
   int64_t out_stride = 0;
   if (epi == GemmEpilogue::Bias) {
-    TORCH_INTERNAL_ASSERT(bias.has_value());
-    expanded_bias = bias->expand_as(out);
+    TORCH_INTERNAL_ASSERT(bias.defined());
+    expanded_bias = bias.expand_as(out);
     out_stride = m_is_one ? expanded_bias.stride(c) : expanded_bias.stride(r);
   } else {
     expanded_bias = matrix.tensor; // dummy binding for buffer(4); never dereferenced
@@ -262,10 +259,9 @@ void dispatch_gemv(const Tensor& A,
 bool try_mps_gemv(const Tensor& A,
                   const Tensor& B,
                   const Tensor& out,
-                  const std::optional<Tensor>& bias,
+                  const Tensor& bias,
                   const Scalar& alpha,
-                  const Scalar& beta,
-                  GemmEpilogue epi) {
+                  const Scalar& beta) {
   const auto dtype = out.scalar_type();
   if (dtype != at::kFloat && dtype != at::kHalf && dtype != at::kBFloat16) {
     return false;
@@ -284,38 +280,38 @@ bool try_mps_gemv(const Tensor& A,
     return false;
   }
   const auto matrix = resolve_matrix(m_is_one ? B : A);
+  const bool has_bias = bias.defined();
   // Dispatch 64-bit-index variants when numel or storage offsets exceed int32.
-  const bool idx64 = !offsetsFitIn<int32_t>(A, B, out) || (bias.has_value() && !offsetsFitIn<int32_t>(*bias));
+  const bool idx64 = !offsetsFitIn<int32_t>(A, B, out) || (has_bias && !offsetsFitIn<int32_t>(bias));
   const GemvPolicy policy = GemvPolicy::current();
+  const auto epi = has_bias ? GemmEpilogue::Bias : GemmEpilogue::None;
   dispatch_gemv(A, B, out, bias, matrix, alpha, beta, epi, policy, m_is_one, outlen, idx64);
   return true;
 }
 
 Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
-  // Handle conjugated inputs by creating resolved copies
-  auto self_ = self.is_conj() ? self.resolve_conj() : self;
-  auto other_ = other.is_conj() ? other.resolve_conj() : other;
+  const std::array<bool, 4> conjugate = {self.is_conj(), other.is_conj(), false, false};
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
   auto matmulPSO = lib.getPipelineStateForFunc("matmul_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "matmul", {self_, other_}, stream);
+      getMPSProfiler().beginProfileKernel(matmulPSO, "matmul", {self, other}, stream);
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      c10::metal::vec3<uint32_t> sizes = {static_cast<uint32_t>(self_.size(0)),
-                                          static_cast<uint32_t>(self_.size(1)),
+      c10::metal::vec3<uint32_t> sizes = {static_cast<uint32_t>(self.size(0)),
+                                          static_cast<uint32_t>(self.size(1)),
                                           static_cast<uint32_t>(output.size(1))};
       std::array<int64_t, 6> strides = {
-          self_.stride(0), self_.stride(1), other_.stride(0), other_.stride(1), output.stride(0), output.stride(1)};
+          self.stride(0), self.stride(1), other.stride(0), other.stride(1), output.stride(0), output.stride(1)};
       constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
       uint32_t gridSizeX = (output.size(1) + TILE_DIM - 1) / TILE_DIM;
-      uint32_t gridSizeY = (self_.size(0) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (self.size(0) + TILE_DIM - 1) / TILE_DIM;
 
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
-      mtl_setArgs(computeEncoder, self_, other_, output, strides, sizes);
+      mtl_setArgs(computeEncoder, self, other, output, strides, sizes, conjugate);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO, stream);
     }
@@ -393,40 +389,38 @@ Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& resu
 }
 
 Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output) {
-  // Handle conjugated inputs by creating resolved copies
-  auto batch1_ = batch1.is_conj() ? batch1.resolve_conj() : batch1;
-  auto batch2_ = batch2.is_conj() ? batch2.resolve_conj() : batch2;
+  const std::array<bool, 4> conjugate = {batch1.is_conj(), batch2.is_conj(), false, false};
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
   auto matmulPSO = lib.getPipelineStateForFunc("naive_bmm_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_batch_matmul", {batch1_, batch2_}, stream);
+      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_batch_matmul", {batch1, batch2}, stream);
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(batch1_.size(1)),
-                                       static_cast<uint32_t>(batch1_.size(2)),
+      std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(batch1.size(1)),
+                                       static_cast<uint32_t>(batch1.size(2)),
                                        static_cast<uint32_t>(output.size(2)),
                                        static_cast<uint32_t>(output.size(0))};
-      std::array<int64_t, 9> strides = {batch1_.stride(2),
-                                        batch1_.stride(1),
-                                        batch1_.stride(0),
-                                        batch2_.stride(2),
-                                        batch2_.stride(1),
-                                        batch2_.stride(0),
+      std::array<int64_t, 9> strides = {batch1.stride(2),
+                                        batch1.stride(1),
+                                        batch1.stride(0),
+                                        batch2.stride(2),
+                                        batch2.stride(1),
+                                        batch2.stride(0),
                                         output.stride(2),
                                         output.stride(1),
                                         output.stride(0)};
       constexpr uint32_t TILE_DIM = 16;
       uint32_t gridSizeX = (output.size(2) + TILE_DIM - 1) / TILE_DIM;
-      uint32_t gridSizeY = (batch1_.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (batch1.size(1) + TILE_DIM - 1) / TILE_DIM;
       uint32_t gridSizeZ = output.size(0);
 
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, gridSizeZ);
 
-      mtl_setArgs(computeEncoder, batch1_, batch2_, output, strides, sizes);
+      mtl_setArgs(computeEncoder, batch1, batch2, output, strides, sizes, conjugate);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO, stream);
     }
@@ -446,26 +440,24 @@ Tensor& do_metal_addmm(const Tensor& self,
     do_metal_mm(self, other, output);
     return output;
   }
-  // Handle conjugated inputs by creating resolved copies
-  auto self_ = self.is_conj() ? self.resolve_conj() : self;
-  auto other_ = other.is_conj() ? other.resolve_conj() : other;
-  auto bias_ = beta.toComplexDouble() == 0.0 ? at::zeros({}, bias.options()).expand_as(output) : bias.resolve_conj();
+  auto bias_ = beta.toComplexDouble() == 0.0 ? at::zeros({}, bias.options()).expand_as(output) : bias;
+  const std::array<bool, 4> conjugate = {self.is_conj(), other.is_conj(), bias_.is_conj(), false};
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
   auto matmulPSO = lib.getPipelineStateForFunc("addmm_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self_, other_}, stream);
+      getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self, other}, stream);
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      c10::metal::vec3<uint32_t> sizes = {static_cast<uint32_t>(self_.size(0)),
-                                          static_cast<uint32_t>(self_.size(1)),
+      c10::metal::vec3<uint32_t> sizes = {static_cast<uint32_t>(self.size(0)),
+                                          static_cast<uint32_t>(self.size(1)),
                                           static_cast<uint32_t>(output.size(1))};
-      std::array<int64_t, 8> strides = {self_.stride(0),
-                                        self_.stride(1),
-                                        other_.stride(0),
-                                        other_.stride(1),
+      std::array<int64_t, 8> strides = {self.stride(0),
+                                        self.stride(1),
+                                        other.stride(0),
+                                        other.stride(1),
                                         output.stride(0),
                                         output.stride(1),
                                         bias_.stride(0),
@@ -473,11 +465,11 @@ Tensor& do_metal_addmm(const Tensor& self,
       auto alpha_beta = make_alpha_beta(alpha, beta, output.scalar_type());
       constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
       uint32_t gridSizeX = (output.size(1) + TILE_DIM - 1) / TILE_DIM;
-      uint32_t gridSizeY = (self_.size(0) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (self.size(0) + TILE_DIM - 1) / TILE_DIM;
 
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
-      mtl_setArgs(computeEncoder, self_, other_, output, bias_, alpha_beta.i64, strides, sizes);
+      mtl_setArgs(computeEncoder, self, other, output, bias_, alpha_beta.i64, strides, sizes, conjugate);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO, stream);
     }
@@ -492,22 +484,13 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
                                    const Scalar& beta,
                                    Tensor& output,
                                    bool is_baddbmm) {
-  // beta == 0 means bias is ignored, so nan/inf in it must not propagate. baddbmm then
-  // lowers to a plain bmm (skipping the bias) with an in-place alpha scale for alpha != 1.
-  if (is_baddbmm && beta.toComplexDouble() == 0.0) {
-    do_metal_bmm(batch1, batch2, output);
-    if (alpha.toComplexDouble() != 1.0) {
-      output.mul_(alpha);
-    }
-    return output;
+  // Keep alpha in the epilogue so it is applied before rounding to the output dtype.
+  if (is_baddbmm && beta.toComplexDouble() == 0.0 && alpha.toComplexDouble() == 1.0) {
+    return do_metal_bmm(batch1, batch2, output);
   }
 
-  // Handle conjugated inputs by creating resolved copies. addbmm still needs its batch
-  // reduction, so when beta == 0 feed the kernel a broadcast scalar zero for the bias.
-  auto batch1_ = batch1.is_conj() ? batch1.resolve_conj() : batch1;
-  auto batch2_ = batch2.is_conj() ? batch2.resolve_conj() : batch2;
-  auto bias_src = beta.toComplexDouble() == 0.0 ? at::zeros({}, bias.options()) : bias;
-  auto bias_ = bias_src.is_conj() ? bias_src.resolve_conj() : bias_src;
+  auto bias_ = beta.toComplexDouble() == 0.0 ? at::zeros({}, bias.options()) : bias;
+  const std::array<bool, 4> conjugate = {batch1.is_conj(), batch2.is_conj(), bias_.is_conj(), false};
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -521,28 +504,28 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       getMPSProfiler().beginProfileKernel(
-          matmulPSO, std::string("naive_") + op_name, {batch1_, batch2_, bias_expanded}, stream);
+          matmulPSO, std::string("naive_") + op_name, {batch1, batch2, bias_expanded}, stream);
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
 
       std::array<uint32_t, 4> sizes;
       if (is_baddbmm) {
-        sizes = {static_cast<uint32_t>(batch1_.size(1)),
-                 static_cast<uint32_t>(batch1_.size(2)),
+        sizes = {static_cast<uint32_t>(batch1.size(1)),
+                 static_cast<uint32_t>(batch1.size(2)),
                  static_cast<uint32_t>(output.size(2)),
                  static_cast<uint32_t>(output.size(0))};
       } else {
-        sizes = {static_cast<uint32_t>(batch1_.size(1)),
-                 static_cast<uint32_t>(batch1_.size(2)),
+        sizes = {static_cast<uint32_t>(batch1.size(1)),
+                 static_cast<uint32_t>(batch1.size(2)),
                  static_cast<uint32_t>(output.size(1)),
-                 static_cast<uint32_t>(batch1_.size(0))};
+                 static_cast<uint32_t>(batch1.size(0))};
       }
 
       auto alpha_beta = make_alpha_beta(alpha, beta, output.scalar_type());
 
       constexpr uint32_t TILE_DIM = 16;
       uint32_t gridSizeX = (output.size(-1) + TILE_DIM - 1) / TILE_DIM;
-      uint32_t gridSizeY = (batch1_.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (batch1.size(1) + TILE_DIM - 1) / TILE_DIM;
       uint32_t gridSizeZ = is_baddbmm ? output.size(0) : 1;
 
       // Unified stride layout for both baddbmm and addbmm:
@@ -550,12 +533,12 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
       // [3-5]: batch2 (col, row, batch)
       // [6-8]: output (col, row, batch)
       // [9-11]: bias (col, row, batch)
-      std::array<int64_t, 12> strides = {batch1_.stride(2),
-                                         batch1_.stride(1),
-                                         batch1_.stride(0),
-                                         batch2_.stride(2),
-                                         batch2_.stride(1),
-                                         batch2_.stride(0),
+      std::array<int64_t, 12> strides = {batch1.stride(2),
+                                         batch1.stride(1),
+                                         batch1.stride(0),
+                                         batch2.stride(2),
+                                         batch2.stride(1),
+                                         batch2.stride(0),
                                          output.stride(-1),
                                          output.stride(-2),
                                          output.stride(0), // Output batch is unused for addbmm
@@ -566,7 +549,7 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, gridSizeZ);
 
-      mtl_setArgs(computeEncoder, batch1_, batch2_, output, bias_expanded, alpha_beta.i64, strides, sizes);
+      mtl_setArgs(computeEncoder, batch1, batch2, output, bias_expanded, alpha_beta.i64, strides, sizes, conjugate);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
 
       getMPSProfiler().endProfileKernel(matmulPSO, stream);
@@ -626,180 +609,94 @@ void metal_gemm(const Tensor& a,
   });
 }
 
-// metal_gemm, or the GEMV kernels for a 2-D product with one row or column.
-void real_gemm(const Tensor& a, const Tensor& b, const Tensor& out, const Tensor& bias = {}, const Scalar& beta = 0) {
-  const auto gemv_bias = bias.defined() ? std::optional<Tensor>(bias) : std::nullopt;
-  const auto epilogue = bias.defined() ? GemmEpilogue::Bias : GemmEpilogue::None;
-  if (a.dim() != 2 || !try_mps_gemv(a, b, out, gemv_bias, 1, beta, epilogue)) {
-    metal_gemm(a, b, out, bias, 1, beta);
-  }
-}
-
-// The real view of a complex matrix or batch: each row its re/im pairs. The conjugation flag is dropped; the callers
-// fold it into the signs.
-Tensor real_view(const Tensor& t) {
-  auto sizes = t.sizes().vec();
-  sizes.back() *= 2;
-  return at::view_as_real(t.is_conj() ? t._conj() : t).view(sizes);
-}
-
-// X expanded by matmul_complex_embed (see MatmulComplexEmbedParams). A batch sharing one plane expands it once.
-Tensor complex_expanded(const Tensor& X, bool blocks, c10::complex<float> alpha, float sign_in, float sign_out) {
-  const bool batched = X.dim() == 3;
-  if (batched && X.stride(0) == 0 && X.size(0) > 1) {
-    return complex_expanded(X[0], blocks, alpha, sign_in, sign_out).expand({X.size(0), -1, -1});
-  }
-  const auto dt = c10::toRealValueType(X.scalar_type());
-  const int64_t R = X.size(-2), C = X.size(-1), batch = batched ? X.size(0) : 1;
-  const int64_t rows = 2 * R, cols = blocks ? 2 * C : C;
-  const int64_t line = kMatmulComplexRowAlignBytes / c10::elementSize(dt), ld = at::ceil_div(cols, line) * line;
-  auto out = at::empty(batched ? std::vector<int64_t>{batch, rows, ld} : std::vector<int64_t>{rows, ld},
-                       X.options().dtype(dt));
-  const MatmulComplexEmbedParams p{.rows = R,
-                                   .cols = C,
-                                   .rs = X.stride(-2),
-                                   .cs = X.stride(-1),
-                                   .plane = batched ? X.stride(0) : 0,
-                                   .ld = ld,
-                                   .out_plane = rows * ld,
-                                   .alpha_re = alpha.real(),
-                                   .alpha_im = alpha.imag(),
-                                   .sign_in = sign_in,
-                                   .sign_out = sign_out,
-                                   .blocks = blocks};
-  const auto pso = lib.getPipelineStateForFunc(fmt::format("matmul_complex_embed_{}", scalarToMetalTypeString(dt)));
-  auto stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(pso, "matmul_complex_embed", {X}, stream);
-      auto enc = stream->commandEncoder();
-      [enc setComputePipelineState:pso];
-      mtl_setArgs(enc, X, out, p);
-      [enc dispatchThreadgroups:MTLSizeMake(at::ceil_div(C, int64_t{c10::metal::simdgroup_size}),
-                                            at::ceil_div(R, int64_t{kMatmulComplexRowsPerThreadgroup}),
-                                            batch)
-          threadsPerThreadgroup:MTLSizeMake(c10::metal::simdgroup_size, kMatmulComplexRowsPerThreadgroup, 1)];
-      getMPSProfiler().endProfileKernel(pso, stream);
-    }
-  });
-  return out.narrow(-1, 0, cols);
-}
-
-// out = F's row pairs (and column pairs, signed by B's conjugation) gathered + beta * bias.
-void complex_interleave(const Tensor& F,
-                        const Tensor& out,
-                        bool column_pairs,
-                        float sign,
-                        const Tensor& bias,
-                        c10::complex<float> beta) {
-  const bool batched = out.dim() == 3;
-  const int64_t M = out.size(-2), N = out.size(-1), batch = batched ? out.size(0) : 1;
-  const auto bias_ = bias.defined() ? bias : out; // out stands in for a bias that is not read
-  const MatmulComplexInterleaveParams p{.M = M,
-                                        .N = N,
-                                        .ldf = F.stride(-2),
-                                        .ldc = out.stride(-2),
-                                        .f_plane = batched ? F.stride(0) : 0,
-                                        .c_plane = batched ? out.stride(0) : 0,
-                                        .bias_plane = batched ? bias_.stride(0) : 0,
-                                        .bias_rs = bias_.stride(-2),
-                                        .bias_cs = bias_.stride(-1),
-                                        .beta_re = bias.defined() ? beta.real() : 0.0f,
-                                        .beta_im = bias.defined() ? beta.imag() : 0.0f,
-                                        .sign = sign,
-                                        .column_pairs = column_pairs};
-  const auto pso = lib.getPipelineStateForFunc(fmt::format("matmul_complex_interleave_{}", scalarToMetalTypeString(F)));
-  auto stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(pso, "matmul_complex_interleave", {F}, stream);
-      auto enc = stream->commandEncoder();
-      [enc setComputePipelineState:pso];
-      mtl_setArgs(enc, F, out, bias_, p);
-      [enc dispatchThreadgroups:MTLSizeMake(at::ceil_div(N, int64_t{c10::metal::simdgroup_size}),
-                                            at::ceil_div(M, int64_t{kMatmulComplexRowsPerThreadgroup}),
-                                            batch)
-          threadsPerThreadgroup:MTLSizeMake(c10::metal::simdgroup_size, kMatmulComplexRowsPerThreadgroup, 1)];
-      getMPSProfiler().endProfileKernel(pso, stream);
-    }
-  });
-}
-
-// Bytes of an operand's own storage (a plane shared by a batch counts once).
-int64_t operand_bytes(const Tensor& t) {
-  const int64_t planes = t.dim() == 3 && t.stride(0) != 0 ? t.size(0) : 1;
-  return planes * t.size(-2) * t.size(-1) * t.element_size();
-}
-
-// out = alpha * A @ B + beta * bias for complex 2-D or batched operands, as a real product of twice the size. With B
-// expanded to blocks, out's real view is A's real view times it; with A expanded, the product is interleaved into out.
-// alpha and the conjugations fold into the expansion. The expanded operand is the one that moves fewer bytes.
-void metal_complex_gemm(const Tensor& A,
-                        const Tensor& B,
-                        const Tensor& out,
+// out = alpha * a @ b + beta * bias for complex 2-D or batched operands of any strides. matmul_mpp_complex reads the
+// operands in place and takes a conjugation as a sign; small products, and any without MPP or past its 32-bit tile
+// offsets, take the naive kernels.
+void metal_complex_gemm(Tensor a,
+                        Tensor b,
+                        Tensor out,
                         const Tensor& bias = {},
                         const Scalar& alpha = 1,
                         const Scalar& beta = 0) {
-  const auto bias_ = bias.defined() ? bias.expand_as(out) : bias;
   if (out.is_conj()) {
     // The storage of a conjugated out holds the conjugate of the result.
     return metal_complex_gemm(
-        A.conj(), B.conj(), out.conj(), bias_.defined() ? bias_.conj() : bias_, alpha.conj(), beta.conj());
-  }
-  const bool batched = A.dim() == 3;
-  const int64_t M = out.size(-2), N = out.size(-1), batch = batched ? A.size(0) : 1;
-  // out's pairs run along its rows: a column-major out, and a contiguous single column of it (so that the GEMV
-  // kernels stream A), take the product of the transposes; any other layout a copy.
-  const bool column = N == 1 && M > 1 && out.stride(-2) == 1;
-  if ((out.stride(-1) != 1 && N > 1) || column) {
-    if (column || M == 1 || out.stride(-2) == 1) {
-      return metal_complex_gemm(B.mT(), A.mT(), out.mT(), bias_.defined() ? bias_.mT() : bias_, alpha, beta);
-    }
-    const auto c = at::empty_like(out, MemoryFormat::Contiguous);
-    metal_complex_gemm(A, B, c, bias_, alpha, beta);
-    out.copy_(c);
-    return;
+        a.conj(), b.conj(), out.conj(), bias.defined() ? bias.conj() : bias, alpha.conj(), beta.conj());
   }
   const auto alpha_c = alpha.toComplexFloat(), beta_c = beta.toComplexFloat();
-  const bool add = bias_.defined() && beta_c != c10::complex<float>(0.0f);
-  const auto bias_c = add ? bias_.resolve_conj() : Tensor();
-  // B is read raw along K (stored column-major) or along N, else copied.
-  const bool b_along_k = B.stride(-2) == 1 && B.stride(-1) != 1;
-  const Tensor B_ = b_along_k || B.stride(-1) == 1 ? B : B.contiguous();
-  const bool a_raw = A.stride(-1) == 1;
-  // Bytes moved beyond the product's own reads: an expansion reads its operand and writes twice its size (into rows,
-  // its size), a copy of A reads and writes it; with A expanded the interleave reads the product and writes out, and
-  // with B read along N the product is twice out.
-  const int64_t a_bytes = operand_bytes(A), b_bytes = operand_bytes(B_), c_bytes = operand_bytes(out);
-  const int64_t expand_b = 3 * b_bytes + (a_raw ? 0 : 2 * a_bytes);
-  const int64_t expand_a = b_along_k ? 3 * a_bytes + 2 * c_bytes : 2 * a_bytes + 4 * c_bytes;
-  const auto conj_sign = [](const Tensor& t) { return t.is_conj() ? -1.0f : 1.0f; };
-  const float sign_b = conj_sign(B_);
-  if (expand_b <= expand_a) {
-    const Tensor A_ = a_raw ? A : A.contiguous();
-    const auto Bp = complex_expanded(B_, true, alpha_c, sign_b, conj_sign(A_));
-    // The real epilogue scales the bias by a real beta: a complex one is applied first.
-    const bool real_beta = beta_c.imag() == 0.0f;
-    Tensor bias_r;
-    if (add) {
-      const auto b = bias_c.stride(-1) == 1 ? bias_c : bias_c.contiguous();
-      bias_r = real_view(real_beta ? b : at::mul(b, beta));
+  // out stands in for a bias that is not read.
+  const bool add = bias.defined() && beta_c != c10::complex<float>(0.0f);
+  auto bias_ = add ? (bias.sizes() == out.sizes() ? bias : bias.expand_as(out)) : out;
+  const auto sign = [](const Tensor& t) { return t.is_conj() ? -1.0f : 1.0f; };
+  MatmulComplexParams params{
+      .gemm = matmul_params<uint64_t>(a, b, out, bias_, alpha_c.real(), add ? beta_c.real() : 0.0f),
+      .alpha_im = alpha_c.imag(),
+      .beta_im = add ? beta_c.imag() : 0.0f,
+      .a_sign = sign(a),
+      .b_sign = sign(b),
+      .bias_sign = sign(bias_),
+      .k_start = 0,
+      .k_end = 0};
+  const int64_t batch = out.dim() == 3 ? out.size(0) : 1;
+  static const int64_t full_grid = kMatmulFullGridPerCore * MPSDevice::getInstance()->getCoreCount();
+  constexpr uint32_t bm = kMatmulComplexRows, wide_bn = kMatmulBlock * kMatmulBlockSimdgroups;
+  const int64_t wide_tiles = at::ceil_div(params.gemm.m, bm) * at::ceil_div(params.gemm.n, wide_bn) * batch;
+  const bool narrow = std::min(params.gemm.m, params.gemm.n) <= bm || wide_tiles < full_grid;
+  const uint32_t block = narrow ? kMatmulBlock / 2 : kMatmulBlock;
+  const auto bn = block * kMatmulBlockSimdgroups;
+  const bool small = std::max({params.gemm.m, params.gemm.n, params.gemm.k}) <= kMatmulComplexNaiveMaxDim;
+  if (small || !has_mpp() || !matmul_mpp_indices_fit(params.gemm, bm, bn)) {
+    auto out_ = out;
+    if (!bias.defined()) {
+      out.dim() == 2 ? do_metal_mm(a, b, out_) : do_metal_bmm(a, b, out_);
+    } else if (out.dim() == 2) {
+      do_metal_addmm(a, b, out_, alpha, beta, bias);
+    } else {
+      do_metal_addbmm_or_baddbmm(bias, a, b, alpha, beta, out_, true);
     }
-    real_gemm(real_view(A_), Bp, real_view(out), bias_r, add && real_beta ? beta_c.real() : 1.0f);
     return;
   }
-  // A expanded to blocks against B's real view along K (its conjugation moving to A's side), or to rows against B's
-  // real view along N.
-  const float sign_a = conj_sign(A);
-  const auto Ap = b_along_k
-      ? complex_expanded(A, true, {alpha_c.real(), -sign_b * alpha_c.imag()}, -sign_a * sign_b, sign_b)
-      : complex_expanded(A, false, alpha_c, sign_a, 1.0f);
-  const auto B_r = b_along_k ? real_view(B_.mT()).mT() : real_view(B_);
-  const int64_t cols = b_along_k ? N : 2 * N;
-  const auto F =
-      at::empty(batched ? std::vector<int64_t>{batch, 2 * M, cols} : std::vector<int64_t>{2 * M, cols}, Ap.options());
-  real_gemm(Ap, B_r, F);
-  complex_interleave(F, out, !b_along_k, sign_b, bias_c, beta_c);
+  const bool matrix = params.gemm.m > 1 && params.gemm.n > 1;
+  const bool few_rows = matrix && params.gemm.m <= bm / 2;
+  if (few_rows && params.gemm.n > bm / 2) {
+    std::swap(a, b);
+    a = a.mT();
+    b = b.mT();
+    out = out.mT();
+    bias_ = bias_.mT();
+    params.gemm = matmul_params<uint64_t>(a, b, out, bias_, params.gemm.alpha, params.gemm.beta);
+    std::swap(params.a_sign, params.b_sign);
+  }
+  const bool reduce = few_rows && params.gemm.n <= bm / 2 && params.gemm.a_stride_k <= params.gemm.a_stride_m;
+  const auto dtype = scalarToMetalTypeString(c10::toRealValueType(out.scalar_type()));
+  const bool tail = narrow && out.scalar_type() == kComplexFloat && params.gemm.k % (2 * kMatmulComplexStep) == 1;
+  const auto pso = lib.getPipelineStateForFunc(
+      reduce ? fmt::format("matmul_complex_reduce_{}", dtype)
+             : fmt::format("matmul_mpp_complex_{}_{}{}", dtype, block, tail ? "_tail" : ""));
+  // Only float2 output can preserve the accumulator between passes. An aliased bias must survive until the epilogue.
+  const auto k_pass = !narrow && out.scalar_type() == kComplexFloat && !out.is_alias_of(a) && !out.is_alias_of(b) &&
+          (!add || !out.is_alias_of(bias_))
+      ? kMatmulComplexKPass
+      : params.gemm.k;
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "metal_complex_mm", {a, b}, stream);
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, a, b, out, bias_);
+      auto pass = params;
+      for (pass.k_start = 0; pass.k_start < params.gemm.k; pass.k_start = pass.k_end) {
+        pass.k_end = std::min(pass.k_start + k_pass, params.gemm.k);
+        mtl_setArgs<4>(encoder, pass);
+        [encoder dispatchThreadgroups:MTLSizeMake(at::ceil_div(params.gemm.n, reduce ? kMatmulBlockSimdgroups : bn),
+                                                  at::ceil_div(params.gemm.m, reduce ? 1u : bm),
+                                                  batch)
+                threadsPerThreadgroup:MTLSizeMake(kMatmulBlockSimdgroups * c10::metal::simdgroup_size, 1, 1)];
+      }
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
 }
 
 } // anonymous namespace
@@ -826,10 +723,6 @@ void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out) {
   metal_gemm(a, b, out);
 }
 
-static bool naive_complex(const Tensor& a, const Tensor& out) {
-  return std::max({a.size(-1), out.size(-2), out.size(-1)}) <= kMatmulComplexNaiveMaxDim;
-}
-
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
@@ -851,7 +744,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   }
 
   // Rank-1 (M==1 xor N==1): route mm/mv to the metal GEMV kernels.
-  if (try_mps_gemv(self, other, output, std::nullopt, 1, 0, GemmEpilogue::None)) {
+  if (try_mps_gemv(self, other, output, {}, 1, 0)) {
     return output;
   }
 
@@ -863,7 +756,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     metal_gemm(self, other, output);
     return output;
   }
-  if (c10::isComplexType(self.scalar_type()) && !naive_complex(self, output)) {
+  if (c10::isComplexType(self.scalar_type())) {
     metal_complex_gemm(self, other, output);
     return output;
   }
@@ -945,17 +838,19 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     return result;
   }
 
-  const bool complex = c10::isComplexType(batch1.scalar_type());
-  if (!c10::isIntegralType(batch1.scalar_type(), true) && !(complex && naive_complex(batch1, result))) {
+  if (supportedFloatingType(batch1.scalar_type())) {
     // addbmm is one product over the batches' K laid end to end.
     const bool sum = opType == ADDBMM_OP_TYPE;
-    const auto a = sum ? batch1.transpose(0, 1).reshape({batch1.size(1), -1}) : batch1;
-    const auto b = sum ? batch2.reshape({-1, batch2.size(2)}) : batch2;
-    if (complex) {
-      metal_complex_gemm(a, b, result, input, alpha, beta);
-    } else {
-      metal_gemm(a, b, result, input, alpha, beta);
-    }
+    metal_gemm(sum ? batch1.transpose(0, 1).reshape({batch1.size(1), -1}) : batch1,
+               sum ? batch2.reshape({-1, batch2.size(2)}) : batch2,
+               result,
+               input,
+               alpha,
+               beta);
+    return result;
+  }
+  if (opType == BADDBMM_OP_TYPE && c10::isComplexType(batch1.scalar_type())) {
+    metal_complex_gemm(batch1, batch2, result, input, alpha, beta);
     return result;
   }
   return do_metal_addbmm_or_baddbmm(input, batch1, batch2, alpha, beta, result, opType == BADDBMM_OP_TYPE);
@@ -1009,7 +904,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   }
 
   // Rank-1 (M==1 xor N==1): route addmm/addmv to the metal GEMV kernels.
-  if (try_mps_gemv(self, other, output, *bias_, alpha, beta, GemmEpilogue::Bias)) {
+  if (try_mps_gemv(self, other, output, *bias_, alpha, beta)) {
     return output;
   }
 
@@ -1017,7 +912,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     metal_gemm(self, other, output, *bias_, alpha, beta);
     return output;
   }
-  if (c10::isComplexType(self.scalar_type()) && !naive_complex(self, output)) {
+  if (c10::isComplexType(self.scalar_type())) {
     metal_complex_gemm(self, other, output, *bias_, alpha, beta);
     return output;
   }
@@ -1047,7 +942,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     metal_gemm(batch1, batch2, result);
     return result;
   }
-  if (c10::isComplexType(batch1.scalar_type()) && !naive_complex(batch1, result)) {
+  if (c10::isComplexType(batch1.scalar_type())) {
     metal_complex_gemm(batch1, batch2, result);
     return result;
   }

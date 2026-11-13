@@ -29,38 +29,6 @@ C10_METAL_CONSTEXPR uint32_t kMatmulFullGridPerCore = 4;
 // fp32 K steps between barriers that keep a tile's simdgroups on the same
 // operand rows, which then stay in cache. half and bfloat do not drift.
 C10_METAL_CONSTEXPR uint32_t kMatmulPaceSteps = 4;
-// Complex products with M, K and N up to this are faster on the naive
-// kernels than as a real GEMM.
-C10_METAL_CONSTEXPR uint32_t kMatmulComplexNaiveMaxDim = 16;
-// Rows of an expanded complex operand are padded to this.
-C10_METAL_CONSTEXPR uint32_t kMatmulComplexRowAlignBytes = 64;
-// The embed and interleave kernels run a thread per element.
-C10_METAL_CONSTEXPR uint32_t kMatmulComplexRowsPerThreadgroup = 4;
-
-// A complex product runs as a real one of twice the size: one operand is
-// expanded by matmul_complex_embed, the other read through its real view.
-// blocks: element x of alpha X becomes [[re, im], [-im, re]] (second row
-// signed by sign_out); else re and im go to rows 2r and 2r + 1.
-struct MatmulComplexEmbedParams {
-  int64_t rows, cols; // of the complex operand
-  int64_t rs, cs, plane; // its strides, in complex elements
-  int64_t ld, out_plane; // of the expansion
-  float alpha_re, alpha_im;
-  float sign_in, sign_out; // of the imaginary part read and written
-  bool blocks;
-};
-
-// matmul_complex_interleave gathers the real product F (re and im on row
-// pairs, and their partial products on column pairs) into complex C.
-struct MatmulComplexInterleaveParams {
-  int64_t M, N;
-  int64_t ldf, ldc; // of F (real elements) and C (complex elements)
-  int64_t f_plane, c_plane, bias_plane;
-  int64_t bias_rs, bias_cs; // in complex elements
-  float beta_re, beta_im; // zero: the bias is not read
-  float sign; // of B's imaginary part when F holds column pairs
-  bool column_pairs;
-};
 
 template <typename idx_t>
 struct MatmulParams {
@@ -77,6 +45,24 @@ struct MatmulParams {
   idx_t bias_stride_n;
   idx_t a_batch, b_batch, out_batch, bias_batch; // batch strides
   float alpha, beta; // beta == 0: bias is not read
+};
+
+// matmul_mpp_complex: kMatmulComplexRows rows per tile. A simdgroup takes
+// kMatmulBlock columns and kMatmulComplexStep of K per step, or half the
+// columns and twice the K for an output of one tile of rows or columns, or of
+// fewer than kMatmulFullGridPerCore threadgroups per GPU core.
+C10_METAL_CONSTEXPR uint32_t kMatmulComplexRows = 16;
+C10_METAL_CONSTEXPR uint32_t kMatmulComplexStep = 16;
+C10_METAL_CONSTEXPR uint32_t kMatmulComplexKPass = 512;
+// Complex products with M, K and N up to this are faster on the naive
+// kernels.
+C10_METAL_CONSTEXPR uint32_t kMatmulComplexNaiveMaxDim = 16;
+
+struct MatmulComplexParams {
+  MatmulParams<uint64_t> gemm; // alpha and beta hold their real parts
+  float alpha_im, beta_im;
+  float a_sign, b_sign, bias_sign; // -1 for a conjugated operand
+  uint32_t k_start, k_end;
 };
 
 #ifdef __METAL__
