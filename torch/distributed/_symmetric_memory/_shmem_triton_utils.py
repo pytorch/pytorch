@@ -83,8 +83,19 @@ if has_triton():
         registry: type[ShmemKernelRegistry],
         init_hook: Callable[..., None],
         error_prefix: str,
+        extra_extern_libs: dict[str, str] | None = None,
     ):
-        """Build the @requires_<backend> decorator for a Triton JIT function."""
+        """
+        Build the @requires_<backend> decorator for a Triton JIT function.
+
+        ``extra_extern_libs`` are linked before the device library, so symbols
+        they reference from the device library are pulled in. The AMD backend
+        links an extern lib only if its key is a substring of a symbol the kernel
+        calls before linking (``need_extern_lib`` in triton_amd.cc, used by
+        ``make_llir`` in backends/amd/compiler.py), so a kernel that reaches the
+        device library only through an extra lib needs that lib's symbol names to
+        contain ``extern_libs_key``.
+        """
         import triton
         from triton.runtime.jit import JITFunction
 
@@ -95,7 +106,7 @@ if has_triton():
             )
 
         lib_path = find_device_library()
-        extern_libs = {extern_libs_key: lib_path}
+        extern_libs = {**(extra_extern_libs or {}), extern_libs_key: lib_path}
         registry.register(jit_func.fn.__name__)
         triton.knobs.runtime.jit_post_compile_hook = init_hook
         return GridCallableWithExtern(jit_func, extern_libs)
