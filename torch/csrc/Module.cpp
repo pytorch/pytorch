@@ -21,6 +21,7 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
@@ -2782,6 +2783,40 @@ PyObject* initModule() {
     py_module.def(
         "_fake_dispatch_register_custom_op_impl",
         add_for(FakeDispatchCategory::CustomOpImpl));
+    py_module.def(
+        "_fake_dispatch_register_static_shape_decomp",
+        add_for(FakeDispatchCategory::StaticShapeDecomp));
+    py_module.def(
+        "_fake_dispatch_deregister_decomp",
+        [](const std::string& name, const std::string& overload) {
+          const c10::OperatorName op_name(name, overload);
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::Decomp, op_name);
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::StaticShapeDecomp, op_name);
+        });
+    py_module.def(
+        "_fake_dispatch_deregister_meta",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::Meta, c10::OperatorName(name, overload));
+        });
+    py_module.def(
+        "_fake_dispatch_contains_static_shape_decomp",
+        [](const std::string& name, const std::string& overload) {
+          return at::impl::fakeDispatchTableContains(
+              FakeDispatchCategory::StaticShapeDecomp,
+              c10::OperatorName(name, overload));
+        });
+    py_module.def(
+        "_cpp_fake_not_implemented",
+        [](const std::string& name, const std::string& overload) {
+          const c10::OperatorName op_name(name, overload);
+          const auto op = c10::Dispatcher::singleton().findSchema(op_name);
+          TORCH_CHECK_VALUE(
+              op.has_value(), "operator ", op_name, " does not exist");
+          return at::impl::cppFakeNotImplemented(*op);
+        });
     py_module.def(
         "_fake_dispatch_deregister_op_impl",
         [](const std::string& name, const std::string& overload) {
