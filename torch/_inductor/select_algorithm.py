@@ -42,7 +42,8 @@ from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
-from ..utils._sympy.functions import CeilDiv, Max, Min
+from ..utils._sympy.functions import CeilDiv, FloorDiv, Max, Min
+from ..utils._sympy.symbol import symbol_is_type, SymT
 from . import config, ir
 from .autotune_process import (
     AsyncAutotuner,
@@ -620,7 +621,7 @@ class TritonTemplateKernel(TritonKernel):
                     f"TMA template output rank must be in {supported_ranks}, "
                     f"got {output_rank}"
                 )
-            prefixes = ("x", "y", "z")
+            prefixes = ("x", "y", "z0_")
             tiling = dict(zip(prefixes, output_node.get_size()))
             tiling["r0_"] = sympy.S.One
         else:
@@ -635,7 +636,7 @@ class TritonTemplateKernel(TritonKernel):
         )
         if tma_tiled:
             # By default `construct_range_trees` will return the range_trees in the order
-            # ["z", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
+            # ["z0_", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
             # and this order defines what the kernel block shape will be. So if the template
             # input / output has requested e.g. ["x", "y"], `construct_range_trees` will still return the
             # trees in the order ["y", "x"]. This would mean that the template would need to transpose
@@ -1217,12 +1218,13 @@ class TritonTemplateKernel(TritonKernel):
         """
         Hook called from template code to declare a TMA descriptor.
 
-        When HOST_SIDE_TMA is True and the input's sizes and strides are all
-        static: registers the input's pointer arg in host_tma_descriptor_args
-        so the launcher replaces it with a TensorDescriptor. Emits an alias so
-        the template can use desc_name.
+        When HOST_SIDE_TMA is True and the launcher can evaluate the input's
+        sizes and strides (integers, or dynamic sizes it reads at launch):
+        registers the input's pointer arg in host_tma_descriptor_args so the
+        launcher replaces it with a TensorDescriptor. Emits an alias so the
+        template can use desc_name.
 
-        Otherwise (HOST_SIDE_TMA False, or an input with a dynamic dim):
+        Otherwise (HOST_SIDE_TMA False, or a dim the launcher cannot evaluate):
         emits device-side descriptor creation using tl.make_tensor_descriptor().
 
         dim_order: permutation of dimensions for TMA layout. e.g. [1, 0]
@@ -1245,16 +1247,35 @@ class TritonTemplateKernel(TritonKernel):
             if input_name is not None
             else None
         )
+        launch_args: OrderedSet[str] | None = None
+        dims: list[sympy.Expr] = []
         if host_side and arg_name is not None:
-            # The host launcher needs static dims, so a dynamic input falls back
-            # to a device-side descriptor. def_kernel merges operands that view
-            # one buffer into a single arg, and the launcher would hand that arg
-            # to all of them as a TensorDescriptor, so they must all fall back.
+            # Read dims off the IR node rather than via self.size()/self.stride():
+            # those wrap the result in tl.full(...) under int64 indexing, which is
+            # kernel-side syntax the host launcher cannot resolve.
+            node_stride = self.get_stride_and_maybe_freeze_layout(node)
+            dims = [
+                sympy.sympify(dim)
+                for dim in [size[d] for d in dim_order]
+                + [node_stride[d] for d in dim_order]
+            ]
+            launch_args = self._host_tma_launch_args(dims)
+            # def_kernel merges operands that view one buffer into a single arg,
+            # and the launcher would hand that arg to all of them as one
+            # TensorDescriptor. Views with dynamic dims have differing shapes, so
+            # a shared arg keeps launch-time dims out and falls back, as do dims
+            # the launcher cannot evaluate; once one view falls back, all do.
+            shared = (
+                sum(
+                    self.args.input_buffers.get(n.get_name(), name) == arg_name
+                    for name, n in self.named_input_nodes.items()
+                )
+                > 1
+            )
+            if launch_args and shared:
+                launch_args = None
             device_args = self.device_tma_descriptor_args
-            if arg_name in device_args or not all(
-                isinstance(e, (int, sympy.Integer))
-                for e in (*size, *self.get_stride_and_maybe_freeze_layout(node))
-            ):
+            if arg_name in device_args or launch_args is None:
                 if arg_name in self.host_tma_descriptor_args:
                     raise NotImplementedError(
                         f"host-side TMA cannot share arg {arg_name} with a "
@@ -1267,18 +1288,18 @@ class TritonTemplateKernel(TritonKernel):
                 raise NotImplementedError(
                     "host-side TMA descriptors for template outputs are not supported"
                 )
-            # Read dims off the IR node rather than via self.size()/self.stride():
-            # those wrap the result in tl.full(...) under int64 indexing, which is
-            # kernel-side syntax the host launcher cannot resolve.
-            node_size = node.get_size()
-            node_stride = self.get_stride_and_maybe_freeze_layout(node)
+            if launch_args is None:
+                raise AssertionError("host-side descriptor without resolved dims")
+            rendered = [self._host_tma_dim(self.rename_indexing(d)) for d in dims]
             desc: dict[str, Any] = {
                 "block_shape": [int(b) for b in block_shape],
-                "shape": [texpr(self.rename_indexing(node_size[d])) for d in dim_order],
-                "strides": [
-                    texpr(self.rename_indexing(node_stride[d])) for d in dim_order
-                ],
+                "shape": rendered[: len(dim_order)],
+                "strides": rendered[len(dim_order) :],
             }
+            if launch_args:
+                # The kernel's size args these dims read; the launcher evaluates
+                # the rendered expressions over them at each launch.
+                desc["launch_args"] = sorted(launch_args)
             prev = self.host_tma_descriptor_args.get(arg_name)
             if prev is not None and prev != desc:
                 # def_kernel dedupes operands that alias one buffer into a single
@@ -1290,6 +1311,66 @@ class TritonTemplateKernel(TritonKernel):
             self.host_tma_descriptor_args[arg_name] = desc
             return f"{desc_name} = {input_name}"
 
+        return self._device_tma_descriptor(
+            desc_name, input_name, block_shape, dim_order
+        )
+
+    def _host_tma_launch_args(self, dims: list[sympy.Expr]) -> OrderedSet[str] | None:
+        """Kernel size args a host-side descriptor's dims read at launch, or None
+        if a dim cannot be evaluated by the launcher.
+
+        A dim can be read at launch when it is an integer expression whose free
+        symbols are all graph sizes (dynamic shapes), which become the kernel's
+        size args (ks0), built only from operations that pexpr prints as plain
+        Python (see _host_tma_plain_dim). The C++ wrapper builds descriptors from
+        the tensor's own sizes, so there every dim must be a compile-time integer.
+        """
+        launch_args: OrderedSet[str] = OrderedSet()
+        for dim in dims:
+            dim = V.graph.sizevars.simplify(dim)
+            if not dim.free_symbols:
+                continue
+            if (
+                V.graph.cpp_wrapper
+                or not dim.is_integer
+                or not self._host_tma_plain_dim(dim)
+            ):
+                return None
+            if not all(
+                symbol_is_type(sym, (SymT.SIZE, SymT.PRECOMPUTED_SIZE))
+                for sym in dim.free_symbols
+            ):
+                return None
+            launch_args.update(
+                str(self.rename_indexing(sym)) for sym in dim.free_symbols
+            )
+        return launch_args
+
+    @staticmethod
+    def _host_tma_plain_dim(dim: sympy.Expr) -> bool:
+        """Whether pexpr renders dim with only integers, names, + * // and
+        builtin max/min. Others print as math.floor(...), torch.sym_float(...)
+        and so on, which the launchers do not bind."""
+        if dim.is_Integer or dim.is_Symbol:
+            return True
+        if isinstance(dim, (sympy.Add, sympy.Mul, FloorDiv, Max, Min)):
+            return all(
+                TritonTemplateKernel._host_tma_plain_dim(arg) for arg in dim.args
+            )
+        return False
+
+    @staticmethod
+    def _host_tma_dim(dim: sympy.Expr) -> int | str:
+        """A host-side descriptor dim: an int, or launcher (Python) source."""
+        return int(dim) if dim.is_number else pexpr(dim)
+
+    def _device_tma_descriptor(
+        self,
+        desc_name: str,
+        input_name: str | None,
+        block_shape: list[int],
+        dim_order: list[int],
+    ) -> str:
         base_name = input_name if input_name is not None else "output"
         stride_exprs = ", ".join(self.stride(input_name, d) for d in dim_order)
         size_exprs = ", ".join(self.size(input_name, d) for d in dim_order)

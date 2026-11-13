@@ -50,6 +50,7 @@ from torch.testing._internal.common_methods_invocations import (
     sparse_csr_unary_ufuncs,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     coalescedonoff,
     HardwareClassification,
     IS_FBCODE,
@@ -316,6 +317,16 @@ class TestSparseCompressedDevice(TestCase):
     @parametrize('input_kind', [subtest('tensor', name='from_tensor'), subtest('list', name='from_list')])
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @decorateIf(
+        unittest.skip("nothing to test"),
+        lambda p: p['input_kind'] == 'list' and p['shape_and_device_inference']
+        and torch.device(p['device']).type != 'cpu',
+    )
+    @decorateIf(
+        unittest.skip("dtype not supported with list values"),
+        lambda p: p['input_kind'] == 'list' and p['shape_and_device_inference']
+        and p['dtype'] not in {torch.float32, torch.complex64, torch.int64, torch.bool},
+    )
     def test_sparse_compressed_constructor(self, layout, device, dtype,
                                            use_factory_function, shape_and_device_inference, input_kind):
         device_type = torch.device(device).type
@@ -636,6 +647,14 @@ class TestSparseCompressedDevice(TestCase):
     @all_sparse_compressed_layouts()
     @ops(_sparse_compressed_ops)
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
+    @decorateIf(
+        unittest.skip('Masked reduction does not support this sparse layout and dtype'),
+        lambda p: p['layout'] == torch.sparse_csr and (not p['dtype'].is_floating_point) and (p['op'].name in ('masked.mean', 'masked.amax', 'masked.amin')),
+    )
+    @decorateIf(
+        unittest.skip('OpInfo does not support this sparse layout'),
+        lambda p: not p['op'].supports_sparse_layout(p['layout']),
+    )
     def test_consistency(self, layout, device, dtype, op):
         """Checks that the op on a strided and on a sparse tensors will
         produce the same results.
@@ -2215,6 +2234,24 @@ class TestSparseCSRDevice(TestCase):
             test_shape(7, 8, 9, 20, False, index_dtype, (1, 1))
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
 
+    @dtypes(*floating_and_complex_types())
+    def test_sparse_addmm_csr_strided_dense_and_out(self, device, dtype):
+        crow_indices = torch.tensor([0, 2, 2, 5, 6], device=device, dtype=torch.int64)
+        col_indices = torch.tensor([0, 3, 1, 2, 4, 3], device=device, dtype=torch.int64)
+        values = torch.arange(1, 7, device=device).to(dtype)
+        sparse = torch.sparse_csr_tensor(
+            crow_indices, col_indices, values, (4, 5), device=device
+        )
+        dense = torch.randn(7, 5, device=device, dtype=dtype).t()
+        bias = torch.randn(7, 4, device=device, dtype=dtype).t()
+        out = torch.empty(7, 4, device=device, dtype=dtype).t()
+
+        result = torch.addmm(bias, sparse, dense, beta=0.7, alpha=1.3, out=out)
+        expected = torch.addmm(bias, sparse.to_dense(), dense, beta=0.7, alpha=1.3)
+
+        self.assertIs(result, out)
+        self.assertEqual(out, expected)
+
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
@@ -2934,7 +2971,7 @@ class TestSparseCSRDevice(TestCase):
             self.assertEqual(op(inp).values().numel(), inp.values().numel(),
                              lambda msg: f"{msg}\n{op.name} fails to preserve sparsity pattern.")
 
-    @ops(sparse_csr_unary_ufuncs)
+    @ops([op for op in sparse_csr_unary_ufuncs if op.supports_out])
     def test_sparse_csr_unary_out(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 
@@ -2959,7 +2996,7 @@ class TestSparseCSRDevice(TestCase):
 
             self.assertEqual(out, expect)
 
-    @ops(sparse_csr_unary_ufuncs)
+    @ops([op for op in sparse_csr_unary_ufuncs if op.inplace_variant is not None])
     def test_sparse_csr_unary_inplace(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 
@@ -2994,6 +3031,10 @@ class TestSparseCSRDevice(TestCase):
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @ops(sparse_csr_unary_ufuncs, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble])
+    @decorateIf(
+        unittest.skip('Unary op does not support CSR input and autograd'),
+        lambda p: p['op'].name not in UNARY_EWISE_CSR_ALLOW_AUTOGRAD,
+    )
     def test_autograd_sparse_csr_unary(self, device, dtype, op):
         if op.name not in UNARY_EWISE_CSR_ALLOW_AUTOGRAD:
             self.skipTest(f"Skipped! Unary op {op.name} not supported with CSR input and autograd")
@@ -3133,6 +3174,10 @@ class TestSparseCSRDevice(TestCase):
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, ])
+    @decorateIf(
+        unittest.skip("MKL Sparse is not available"),
+        lambda p: p["op"].name == "mv" and no_mkl_sparse and torch.device(p["device"]).type == "cpu",
+    )
     def test_autograd_dense_output(self, device, dtype, op):
         device_type = torch.device(device).type
         if op.name == "mv" and no_mkl_sparse and device_type == 'cpu':
@@ -3751,12 +3796,19 @@ def skipIfNoTriton(cls):
         return cls
     else:
 
+        @unittest.skip("Triton is not available.")
         @functools.wraps(cls, updated=())
         class skipped_cls(cls):
             def setUp(self):
                 self.skipTest("Triton is not available.")
 
         return skipped_cls
+
+
+def _triton_blocksize(blocksize):
+    if isinstance(blocksize, str):
+        return tuple(map(int, blocksize.split("x")))
+    return (blocksize, blocksize)
 
 
 @skipIfNoTriton
@@ -4253,6 +4305,14 @@ class TestSparseCompressedTritonKernelsDevice(TestCase):
         # but key is still valid:
         self.assertEqual(d.get(key5), (key5, 567), **assertEqualOptions)
 
+    skip_unsupported_out_dtype = decorateIf(
+        unittest.skip("Requested output dtype is not supported"),
+        lambda p: p["out_dtype"] != "unspecified" and (
+            p["op"] != "bsr_dense_addmm"
+            or getattr(torch, p["out_dtype"]).is_floating_point != p["dtype"].is_floating_point
+        ),
+    )
+
     @suppress_warnings
     @parametrize("op", ['bsr_dense_addmm', 'bsr_dense_mm', 'bsr_dense_linear', '_int_bsr_dense_addmm'])
     @parametrize("blocksize", [16, '16x32', 32])
@@ -4262,6 +4322,21 @@ class TestSparseCompressedTritonKernelsDevice(TestCase):
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float, torch.int8)
     @precisionOverride({torch.float16: 6e-1})
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @skip_unsupported_out_dtype
+    @decorateIf(
+        unittest.skip("Redundant floating point test for the integer kernel"),
+        lambda p: p["op"] == "_int_bsr_dense_addmm" and (p["dtype"].is_floating_point or p["dtype"].is_complex),
+    )
+    @decorateIf(
+        unittest.skip("bsr_dense_linear does not support non-square blocks or int8"),
+        lambda p: p["op"] == "bsr_dense_linear" and (
+            p["dtype"] is torch.int8 or len(set(_triton_blocksize(p["blocksize"]))) > 1
+        ),
+    )
+    @decorateIf(
+        unittest.skip("triton kernel does not support int8 blocks smaller than 32"),
+        lambda p: p["dtype"] is torch.int8 and min(_triton_blocksize(p["blocksize"])) < 32,
+    )
     def test_triton_kernel(self, op, device, dtype, blocksize, out_dtype):
         from torch.sparse._triton_ops import bsr_dense_addmm, bsr_dense_mm, _int_bsr_dense_addmm
         from torch.sparse._triton_ops_meta import (create_blocked_tensor, get_meta,
@@ -4438,6 +4513,7 @@ class TestSparseCompressedTritonKernelsDevice(TestCase):
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float, torch.int8)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @skip_unsupported_out_dtype
     def test_triton_tune(self, op, device, dtype, out_dtype):
         from torch.sparse._triton_ops import bsr_dense_addmm, _int_bsr_dense_addmm
         from torch.sparse._triton_ops_meta import (create_blocked_tensor, tune_bsr_dense_addmm,
