@@ -575,7 +575,7 @@ class ITensor : public dnnl::memory {
       data_ptr[i] = zero_points[i];
   }
 
-  /// Function that refill tensor with new description. Specifiy extra buffer.
+  /// Function that refill tensor with new description. Specify extra buffer.
   void init(
       const desc& adesc,
       void* ahandle,
@@ -909,7 +909,7 @@ class ITensor : public dnnl::memory {
 
     auto need_convert_to_default_format = [](const desc& src_desc,
                                              const dims& shape) {
-      // if src_desc is default format, do not need to conver format.
+      // if src_desc is default format, do not need to convert format.
       if (src_desc.is_default()) {
         return false;
       } else {
@@ -1110,7 +1110,7 @@ class ITensor : public dnnl::memory {
     return *workspace_;
   }
 
-  /// Decide wether there is an extra tensor packed in
+  /// Decide whether there is an extra tensor packed in
   bool has_workspace() const {
     return workspace_ != nullptr;
   }
