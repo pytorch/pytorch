@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/utils/schema_info.h>
 
 #include <c10/util/irange.h>
 #include <algorithm>
@@ -173,6 +174,10 @@ struct ConcretePyInterpreterVTable final
       const std::string& msg) const override;
   bool fake_has_plain_tensor_type(const c10::TensorImpl* self) const override;
   bool fake_avoid_device_init(
+      const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
+  void invalidate_written_to_constants(
+      const c10::OperatorHandle& op,
+      const torch::jit::Stack& stack,
       const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
   bool fake_try_decomp(
       const c10::OperatorHandle& op,
@@ -1047,6 +1052,9 @@ DEFINE_CACHED_PYTHON_IMPORT(
     get_decomposition_table,
     py::module::import("torch._decomp").attr("decomposition_table"))
 DEFINE_CACHED_PYTHON_IMPORT(
+    get_schema_info,
+    py::module::import("torch._subclasses.fake_tensor").attr("get_schema_info"))
+DEFINE_CACHED_PYTHON_IMPORT(
     get_op_implementations_checks,
     py::module::import("torch._subclasses.fake_impls")
         .attr("op_implementations_checks"))
@@ -1287,6 +1295,32 @@ bool ConcretePyInterpreterVTable::fake_avoid_device_init(
   return fake_tensor::getCppFakeTensorModePyObj(mode)
       .attr("avoid_device_init")
       .cast<bool>();
+}
+
+void ConcretePyInterpreterVTable::invalidate_written_to_constants(
+    const c10::OperatorHandle& op,
+    const torch::jit::Stack& stack,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) const {
+  py::gil_scoped_acquire gil;
+  py::object schema_info_obj = get_schema_info()(getTorchApiFunction(op));
+  auto& schema_info = schema_info_obj.cast<torch::utils::SchemaInfo&>();
+  const auto arguments =
+      torch::jit::last(stack, op.schema().arguments().size());
+  for (const auto i : c10::irange(arguments.size())) {
+    if (!arguments[i].isTensor()) {
+      continue;
+    }
+    const auto& t = arguments[i].toTensor();
+    if (!t.defined() || !t.is_fake() ||
+        t.unsafeGetTensorImpl()->fake_tensor_mode() != mode) {
+      continue;
+    }
+    auto constant = mode->get_constant(t.unsafeGetTensorImpl());
+    if (constant && schema_info.is_mutable({c10::SchemaArgType::input, i})) {
+      mode->invalidate_constant_aliases(
+          constant->storage().unsafeGetStorageImpl());
+    }
+  }
 }
 
 // Try a registered Python decomposition for op.
