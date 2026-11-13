@@ -28,8 +28,9 @@ typedef void* MTLBuffer_t;
 #include <utility>
 #include <vector>
 
-// Forward declaration of TensorBase and TensorIteratorBase
+// Forward declarations of tensor and iterator types
 namespace at {
+class Tensor;
 class TensorBase;
 struct TensorIteratorBase;
 } // namespace at
@@ -70,6 +71,9 @@ class MetalKernelFunction {
   void startEncoding();
   void setArg(unsigned idx, const at::TensorBase& t);
   void setArg(unsigned idx, const void* ptr, uint64_t size);
+  // One 8-byte slot per tensor: GPU address for MPS tensors, inline value for CPU scalars.
+  // CPU float64 values are narrowed to float32, matching ordinary scalar arguments.
+  void setTensorListArg(unsigned idx, c10::ArrayRef<at::Tensor> tensors);
   void setErrorBufferIndex(unsigned idx);
   template <
       typename T,
