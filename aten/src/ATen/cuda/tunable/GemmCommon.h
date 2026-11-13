@@ -16,6 +16,7 @@
 #include <optional>
 #endif
 
+#include <ATen/cuda/tunable/GemmLdRules.h>
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/CUDABlas.h>
@@ -113,16 +114,8 @@ inline std::string MaybeWildcardInt(int64_t value, bool wildcard) {
   return wildcard ? "*" : c10::str(value);
 }
 
-inline bool UsesMForLda(char transa) {
-  // lda is the leading dim of A. For non-transposed A (transa == 'N'), A is
-  // laid out with lda >= m, so lda tracks M; for transposed A (transa == 'T'),
-  // lda >= k, so lda tracks K. This mirrors GetSizeA's stride computation.
-  return transa == 'N' || transa == 'n';
-}
-
-inline bool UsesKForLdb(char transb) {
-  return transb == 'N' || transb == 'n';
-}
+// Shared transpose/tightness rules and the signature parser/matcher live in
+// GemmLdRules.h; see there for what is shared vs site-specific.
 
 // A leading dim is "tight" (equals its logical extent, no independent padding)
 // only when lda==m/k, ldb==k/n, ldc==m. Wildcard a leading dim only when it is
@@ -133,18 +126,18 @@ inline bool UsesKForLdb(char transb) {
 // torch/cuda/tunable.py and ROCm/TheRock#5553.
 inline bool ShouldWildcardLda(char transa, bool dynamic_m, bool dynamic_k,
                               int64_t lda, int64_t m, int64_t k) {
-  return UsesMForLda(transa) ? (dynamic_m && lda == m)
-                             : (dynamic_k && lda == k);
+  return UsesMForLda(transa) ? (dynamic_m && IsTight(lda, m))
+                             : (dynamic_k && IsTight(lda, k));
 }
 
 inline bool ShouldWildcardLdb(char transb, bool dynamic_n, bool dynamic_k,
                               int64_t ldb, int64_t n, int64_t k) {
-  return UsesKForLdb(transb) ? (dynamic_k && ldb == k)
-                             : (dynamic_n && ldb == n);
+  return UsesKForLdb(transb) ? (dynamic_k && IsTight(ldb, k))
+                             : (dynamic_n && IsTight(ldb, n));
 }
 
 inline bool ShouldWildcardLdc(bool dynamic_m, int64_t ldc, int64_t m) {
-  return dynamic_m && ldc == m;
+  return dynamic_m && IsTight(ldc, m);
 }
 
 inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {

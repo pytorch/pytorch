@@ -290,6 +290,61 @@ def wildcard_fallback_is_enabled() -> bool:
     return torch._C._cuda_tunableop_wildcard_fallback_is_enabled()  # type: ignore[attr-defined]
 
 
+# The four helpers below drive the compile-time two-phase flow and are private:
+# the setters are called only by Inductor orchestration, and these Python
+# queries only by tests. The value they carry is read back on the C++ side
+# through TuningContext::IsNearestMatchEnabled/IsRecordBorrowedEnabled, not
+# through these. They are deliberately absent from __all__ and from
+# docs/source/cuda.tunable.md -- promoting them would commit us to a supported
+# contract for what is an internal compile-time mechanism.
+def _nearest_match_enable(val: bool = True) -> None:
+    r"""Allow a compile-time reuse pass to borrow a tuned solution.
+
+    Advisory policy, not an enforcement point. Setting it records an intent in
+    the tuning context for a reuse pass to read back; it changes nothing on its
+    own. TunableOp dispatch never consults it, so execution continues to
+    resolve shapes by exact match however this is set.
+
+    Borrowing means reusing the solution tuned for a shape identical except in
+    one free dimension (M, N or batch count), rounded up. A borrow is a guess
+    and is expected to be benchmarked before it is trusted.
+
+    Setting PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED=0 forces this off for the
+    process and cannot be overridden here.
+    """
+    torch._C._cuda_tunableop_nearest_match_enable(val)  # type: ignore[attr-defined]
+
+
+def _nearest_match_is_enabled() -> bool:
+    r"""Returns the reuse pass's advisory borrow setting, with the env kill
+    switch applied. Not a statement about what LookupNearest will do: it
+    borrows whenever it is called, regardless of this value.
+    """
+    return torch._C._cuda_tunableop_nearest_match_is_enabled()  # type: ignore[attr-defined]
+
+
+def _record_borrowed_enable(val: bool = True) -> None:
+    r"""Signal a compile-time reuse pass that it may persist borrowed verdicts.
+
+    Advisory policy, like _nearest_match_enable: it records an intent for a
+    reuse pass to read back. Results are normally written only during a tuning
+    pass; this signals that a pass may also persist a verdict it reached
+    without tuning. Setting it does not change what any other caller writes.
+
+    Setting PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED=0 forces this off for the
+    process and cannot be overridden here.
+    """
+    torch._C._cuda_tunableop_record_borrowed_enable(val)  # type: ignore[attr-defined]
+
+
+def _record_borrowed_is_enabled() -> bool:
+    r"""Returns the reuse pass's advisory recording setting, with the env kill
+    switch applied. Not a statement about what RecordBorrowed will do: it
+    records whenever it is called, regardless of this value.
+    """
+    return torch._C._cuda_tunableop_record_borrowed_is_enabled()  # type: ignore[attr-defined]
+
+
 def set_max_tuning_duration(duration: int) -> None:
     r"""Set max time in milliseconds to spend tuning a given solution.
 
