@@ -25,47 +25,62 @@ _REGISTER_KS = tuple(sorted(_impl_register_ks))
 # Radix sort-length padding edges; baseline (K, N) correctness lives in OpInfo.
 _RADIX_PADDING_KS = (65, 129, 513)
 # One K per radix gate row, plus the register gate, to cover each N ceiling.
-_GATE_MAX_N_KS = (max(_REGISTER_KS), 64, 257, 384, 1024)
+_GATE_MAX_N_KS = (max(_REGISTER_KS), 64, 257, 513)
 
 
-def _gate_n_bounds(k: int) -> tuple[int, int]:
+def _gate_n_bounds(k: int, dtype: torch.dtype = torch.float32) -> tuple[int, int]:
     from torch._native.ops.topk.flydsl_impl import _radix_n_range, _REGISTER_N_BOUNDS
 
     if k in _REGISTER_KS:
-        return _REGISTER_N_BOUNDS
-    n_range = _radix_n_range(k)
+        n_range = _REGISTER_N_BOUNDS.get(dtype)
+        if n_range is None:
+            raise AssertionError(f"missing register gate for dtype={dtype}")
+        return n_range
+    n_range = _radix_n_range(k, dtype)
     if n_range is None:
-        raise AssertionError(f"missing radix gate for K={k}")
+        raise AssertionError(f"missing radix gate for K={k} dtype={dtype}")
     return n_range
 
 
-def _test_n(k: int) -> int:
-    return _gate_n_bounds(k)[0]
+def _test_n(k: int, dtype: torch.dtype = torch.float32) -> int:
+    return _gate_n_bounds(k, dtype)[0]
 
 
-def _test_n_max(k: int) -> int:
-    return _gate_n_bounds(k)[1]
+def _test_n_max(k: int, dtype: torch.dtype = torch.float32) -> int:
+    return _gate_n_bounds(k, dtype)[1]
 
 
 def _special_cols(n: int) -> tuple[int, ...]:
     return (0, n // 3 + 1, n // 2, 2 * n // 3 + 2, n - 1)
 
 
-def _expected_kernel(k: int, n: int) -> str:
+def _expected_kernel(k: int, n: int, dtype: torch.dtype = torch.float32) -> str:
     from torch._native.ops.topk.flydsl_impl import _kernel_for
 
-    kernel = _kernel_for(k, n)
+    kernel = _kernel_for(k, n, dtype)
     if kernel is None:
-        raise AssertionError(f"K={k} N={n} is outside the FlyDSL gate")
+        raise AssertionError(f"K={k} N={n} dtype={dtype} is outside the FlyDSL gate")
     return kernel
 
 
-def _test_m(device_index: int | None = None) -> int:
-    from torch._native.ops.topk.flydsl_impl import _min_rows_for_full_wave
+def _test_m(
+    k: int = 8,
+    dtype: torch.dtype = torch.float32,
+    device_index: int | None = None,
+) -> int:
+    from torch._native.ops.topk.flydsl_impl import (
+        _min_rows_for_full_wave,
+        _RADIX_MIN_CU_WAVES,
+        _REGISTER_MIN_CU_WAVES,
+    )
 
     if device_index is None:
         device_index = torch.cuda.current_device()
-    return max(256, _min_rows_for_full_wave(device_index))
+    min_rows = _min_rows_for_full_wave(device_index)
+    min_cu_waves = (
+        _REGISTER_MIN_CU_WAVES[dtype] if k in _REGISTER_KS else _RADIX_MIN_CU_WAVES
+    )
+    return max(256, min_rows * min_cu_waves)
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
@@ -131,11 +146,11 @@ class TestFlyDSLTopK(TestCase):
 
     def test_supported_dtypes_and_orderings(self):
         torch.manual_seed(13)
-        rows = _test_m()
         for dtype in _SUPPORTED_DTYPES:
             for largest in (True, False):
                 for k in (8, 65):
-                    n = _test_n(k)
+                    n = _test_n(k, dtype)
+                    rows = _test_m(k, dtype)
                     with self.subTest(dtype=dtype, largest=largest, k=k, n=n):
                         x = make_tensor(
                             (rows, n),
@@ -329,9 +344,7 @@ class TestFlyDSLTopK(TestCase):
     def test_unsupported_case_falls_through_without_compiling(self, case: str):
         rows = _test_m()
         if case == "too_few_rows":
-            from torch._native.ops.topk.flydsl_impl import _min_rows_for_full_wave
-
-            rows = _min_rows_for_full_wave(torch.cuda.current_device()) - 1
+            rows -= 1
         n = _test_n(8)
         shape = (n, rows) if case == "noncontiguous" else (rows, n)
         dtype = torch.float64 if case == "unsupported_dtype" else torch.float32
