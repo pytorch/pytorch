@@ -457,6 +457,7 @@ False
     arctanh_
     atan2
     arctan2
+    bitwise_count
     bitwise_not
     bitwise_and
     bitwise_or

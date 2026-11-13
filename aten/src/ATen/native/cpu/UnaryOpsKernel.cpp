@@ -8,10 +8,12 @@
 #include <ATen/Config.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vml.h>
+#include <ATen/native/Math.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/CopyKernel.h>
 #include <ATen/native/cpu/Loops.h>
@@ -328,6 +330,16 @@ static void sign_kernel(TensorIteratorBase& iter){
               return left - right;
           });
     });
+  }
+}
+
+static void bitwise_count_kernel(TensorIteratorBase& iter) {
+  if (iter.input_dtype() == ScalarType::Bool) {
+    cpu_kernel(iter, [](bool a) -> uint8_t { return a ? 1 : 0; });
+  } else {
+    AT_DISPATCH_V2(iter.input_dtype(), "bitwise_count_cpu", AT_WRAP([&]() {
+      cpu_kernel(iter, [](scalar_t a) -> uint8_t { return calc_bitwise_count(a); });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   }
 }
 
@@ -868,6 +880,7 @@ REGISTER_DISPATCH(neg_stub, &CPU_CAPABILITY::neg_kernel)
 REGISTER_DISPATCH(signbit_stub, &CPU_CAPABILITY::signbit_kernel)
 REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel)
 REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel)
+REGISTER_DISPATCH(bitwise_count_stub, &CPU_CAPABILITY::bitwise_count_kernel)
 REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel)
 REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel)
 REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel)

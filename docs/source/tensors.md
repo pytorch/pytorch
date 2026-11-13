@@ -275,6 +275,7 @@ view of a storage and defines numeric operations on it.
     Tensor.bernoulli_
     Tensor.bfloat16
     Tensor.bincount
+    Tensor.bitwise_count
     Tensor.bitwise_not
     Tensor.bitwise_not_
     Tensor.bitwise_and
