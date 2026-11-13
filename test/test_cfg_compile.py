@@ -2,12 +2,17 @@
 
 import collections
 import dis
+import gc
 import importlib
 import math
+import os
+import signal
 import sys
 import threading
+import time
 import traceback
 import unittest
+import unittest.mock
 import warnings
 import weakref
 
@@ -2644,6 +2649,96 @@ class TestCfgFrames(TestCase):
         self.assertEqual(
             [name.rsplit(".", 1)[-1] for name in interpreted], ["scale", "fmt"]
         )
+
+
+def breaker_signals_itself(log):
+    os.kill(os.getpid(), signal.SIGUSR1)
+    log.append("after the call")
+
+
+def breaker_spins(flag, limit):
+    n = 0
+    while not flag and n < limit:
+        n += 1
+    return n
+
+
+@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
+class TestCfgEvalBreaker(TestCase):
+    """Signals, and the other threads, get their turn as they do under the interpreter."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    @unittest.skipUnless(hasattr(signal, "SIGUSR1"), "needs SIGUSR1")
+    def test_signal_handler_runs_when_the_call_returns(self):
+        def run(fn):
+            log = []
+
+            def handler(signum, frame):
+                log.append(("handler", frame.f_code.co_name))
+
+            previous = signal.signal(signal.SIGUSR1, handler)
+            try:
+                fn(log)
+            finally:
+                signal.signal(signal.SIGUSR1, previous)
+            return log
+
+        compiled = torch.cfg_compile(breaker_signals_itself, fallback=False)
+        expected = [("handler", "breaker_signals_itself"), "after the call"]
+        self.assertEqual(run(breaker_signals_itself), expected)
+        self.assertEqual(run(compiled), expected)
+
+    @unittest.skipUnless(hasattr(signal, "SIGUSR1"), "needs SIGUSR1")
+    def test_exception_of_a_signal_handler_is_raised_by_the_call(self):
+        def handler(signum, frame):
+            raise KeyboardInterrupt("from the handler")
+
+        compiled = torch.cfg_compile(breaker_signals_itself, fallback=False)
+        previous = signal.signal(signal.SIGUSR1, handler)
+        try:
+            for fn in (breaker_signals_itself, compiled):
+                log = []
+                with self.assertRaisesRegex(KeyboardInterrupt, "from the handler"):
+                    fn(log)
+                self.assertEqual(log, [])
+        finally:
+            signal.signal(signal.SIGUSR1, previous)
+
+    def test_other_threads_run_during_a_compiled_loop(self):
+        flag = []
+
+        def worker():
+            time.sleep(0.05)
+            flag.append(1)
+
+        compiled = torch.cfg_compile(breaker_spins, fallback=False)
+        self.assertEqual(compiled([], 10), 10)
+        thread = threading.Thread(target=worker)
+        thread.start()
+        # The loop calls nothing: only the VM can let the other thread run.
+        limit = 200_000_000
+        count = compiled(flag, limit)
+        thread.join()
+        self.assertLess(count, limit)
+
+    def test_garbage_is_collected_during_a_compiled_loop(self):
+        def churn(n):
+            for _ in range(n):
+                cycle = []
+                cycle.append(cycle)
+
+        def collections(fn):
+            before = gc.get_stats()[0]["collections"]
+            fn(100_000)
+            return gc.get_stats()[0]["collections"] - before
+
+        # The lists are cycles, which only the collector frees, and the loop
+        # calls nothing that would enter the interpreter: the collector runs
+        # when the VM gives it the chance.
+        compiled = torch.cfg_compile(churn, fallback=False)
+        self.assertGreater(collections(churn), 20)
+        self.assertGreater(collections(compiled), 20)
 
 
 class LifetimeProbe:
