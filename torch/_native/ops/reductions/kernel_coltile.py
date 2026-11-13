@@ -162,6 +162,7 @@ class ColConfig(NamedTuple):
     partial_layout: str
     combine_columns: int = 0
     unroll: int = tile._ROLL_UNROLL
+    col_group: int = 1
 
 
 def select_col_config(
@@ -855,6 +856,7 @@ def _reduce_col_tile(
         batched_col=x.dim() == 3,
         pc=pc,
         unroll=cfg.unroll,
+        col_group=cfg.col_group,
     )
     parts = (
         []
