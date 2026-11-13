@@ -299,6 +299,32 @@ inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivatio
   }
 }
 
+// Activation epilogue suffix for a TunableOp key, as a labelled "_act_<name>"
+// pair like the existing _ld_, _compute_ and _swz_ tokens. Empty for None so
+// that plain addmm / F.linear keep the keys they have today. No default case:
+// a new epilogue has to be named here, or two of them would share one key.
+inline const char* epilogue_signature(const at::cuda::blas::GEMMAndBiasActivationEpilogue& value) {
+  switch (value) {
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::None:
+      return "";
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::RELU:
+      return "_act_RELU";
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::GELU:
+      return "_act_GELU";
+  }
+  TORCH_CHECK(false, "unhandled GEMMAndBiasActivationEpilogue in TunableOp key");
+  return ""; // unreachable - TORCH_CHECK(false) throws
+}
+
+// Bias presence for a TunableOp key, spelled like ScaledGemmParams' _bias_None.
+// With an activation set, CUDA also takes a 2-D self and calls with a null
+// bias, selecting a plain RELU/GELU epilogue instead of the _BIAS one. Empty
+// when a bias is present, so existing keys are unchanged; ROCm rejects a 2-D
+// self, so it never emits this token.
+inline const char* bias_signature(const void* bias) {
+  return bias == nullptr ? "_bias_None" : "";
+}
+
 namespace detail {
 
 static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size, const NumericalCheckConfig& config) {
@@ -467,9 +493,9 @@ struct GemmAndBiasParams : OpParams {
 
   std::string Signature() const override {
     return fmt::sprintf(
-        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld%s_%s",
+        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld%s%s%s",
         transa, transb, m, n, k, lda, ldb, ldc, ComputeTypeSignature<T>(),
-        to_string_epilogue(activation));
+        epilogue_signature(activation), bias_signature(bias));
   }
 
   std::string DynamicSignature() const override {
@@ -477,7 +503,7 @@ struct GemmAndBiasParams : OpParams {
     const bool dynamic_n = this->IsDynamicN();
     const bool dynamic_k = this->IsDynamicK();
     return fmt::sprintf(
-        "%c%c_%s_%s_%s_ld_%s_%s_%s%s_%s",
+        "%c%c_%s_%s_%s_ld_%s_%s_%s%s%s%s",
         transa, transb,
         MaybeWildcardInt(m, dynamic_m),
         MaybeWildcardInt(n, dynamic_n),
@@ -486,7 +512,7 @@ struct GemmAndBiasParams : OpParams {
         MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
         MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
         ComputeTypeSignature<T>(),
-        to_string_epilogue(activation));
+        epilogue_signature(activation), bias_signature(bias));
   }
 
   size_t GetSizeA() const {

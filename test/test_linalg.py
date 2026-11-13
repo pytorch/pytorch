@@ -10593,13 +10593,17 @@ class TestLinalgCudaOnly(TestCase):
                     find_tunableop_result(results, op_signature, params_signature)
                 )
 
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
     @dtypes(torch.bfloat16)
     def test_addmm_activation_signature_tunableop(self, device, dtype):
-        # GemmAndBiasParams::Signature() must include the activation epilogue.
-        # Without it, relu and gelu of the same shape collapse onto a single
-        # TunableOp entry, and the kernel tuned for one epilogue is replayed
-        # for the other.
+        # GemmAndBiasParams::Signature() must include the activation epilogue,
+        # otherwise relu and gelu of one shape share a single TunableOp entry
+        # and the kernel tuned for one is replayed for the other.
+        if os.getenv("DISABLE_ADDMM_CUDA_LT") == "1":
+            self.skipTest("DISABLE_ADDMM_CUDA_LT keeps addmm off the Lt path")
         with self._tunableop_ctx():
+            torch.backends.cuda.preferred_blas_library("cublaslt")
             torch.cuda.tunable.set_rotating_buffer_size(0)
             torch.cuda.tunable.set_max_tuning_duration(1)
             torch.cuda.tunable.set_max_tuning_iterations(1)
@@ -10612,21 +10616,107 @@ class TestLinalgCudaOnly(TestCase):
             torch._addmm_activation(bias, x, w, use_gelu=False)
             torch._addmm_activation(bias, x, w, use_gelu=True)
 
-            params_signatures = sorted(
+            params_signatures = [
                 result[1]
                 for result in torch.cuda.tunable.get_results()
                 if result[0].startswith("GemmAndBiasTunableOp")
-            )
+            ]
+            if not params_signatures:
+                self.skipTest("_addmm_activation did not use the Lt GemmAndBias path")
+            relu = [s for s in params_signatures if s.endswith("_act_RELU")]
+            gelu = [s for s in params_signatures if s.endswith("_act_GELU")]
             self.assertEqual(
-                len(params_signatures), 2,
+                (len(relu), len(gelu)), (1, 1),
                 f"expected one entry per activation epilogue, got {params_signatures}")
-
-            gelu_signature, relu_signature = params_signatures
-            self.assertTrue(gelu_signature.endswith("_GELU"), gelu_signature)
-            self.assertTrue(relu_signature.endswith("_RELU"), relu_signature)
-            # Same shape, so the two keys may only differ in the epilogue suffix.
+            # Same shape, so the two keys may only differ in the epilogue name.
             self.assertEqual(
-                gelu_signature[:-len("_GELU")], relu_signature[:-len("_RELU")])
+                relu[0][:-len("RELU")], gelu[0][:-len("GELU")])
+
+            # With an activation set, CUDA also takes a 2-D self, which calls
+            # with bias == nullptr and asks cuBLASLt for a plain RELU epilogue
+            # instead of the _BIAS one. ROCm rejects a 2-D self here.
+            if not torch.version.hip:
+                torch._addmm_activation(
+                    torch.randn(M, N, device=device, dtype=dtype), x, w, use_gelu=False)
+                no_bias = [
+                    result[1]
+                    for result in torch.cuda.tunable.get_results()
+                    if result[0].startswith("GemmAndBiasTunableOp")
+                    and result[1].endswith("_bias_None")
+                ]
+                self.assertEqual(
+                    len(no_bias), 1, f"expected one bias-free entry, got {no_bias}")
+                self.assertEqual(no_bias[0], relu[0] + "_bias_None")
+
+            # DynamicSignature() builds the wildcard key and has to carry the
+            # epilogue too, so it keeps matching the concrete key token for token.
+            with torch.cuda.tunable.dynamic_dims_mask(M=True):
+                torch._addmm_activation(bias, x, w, use_gelu=True)
+            wildcard = [
+                result[1]
+                for result in torch.cuda.tunable.get_results()
+                if result[0].startswith("GemmAndBiasTunableOp") and "*" in result[1]
+            ]
+            self.assertEqual(len(wildcard), 1, f"expected one wildcard entry, got {wildcard}")
+            self.assertTrue(wildcard[0].endswith("_act_GELU"), wildcard[0])
+
+            # ... and the bias token, for the same reason.
+            if not torch.version.hip:
+                with torch.cuda.tunable.dynamic_dims_mask(M=True):
+                    torch._addmm_activation(
+                        torch.randn(M, N, device=device, dtype=dtype), x, w, use_gelu=True)
+                wildcard_no_bias = [
+                    result[1]
+                    for result in torch.cuda.tunable.get_results()
+                    if result[0].startswith("GemmAndBiasTunableOp")
+                    and "*" in result[1] and result[1].endswith("_bias_None")
+                ]
+                self.assertEqual(
+                    len(wildcard_no_bias), 1,
+                    f"expected one bias-free wildcard entry, got {wildcard_no_bias}")
+
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
+    @dtypes(torch.bfloat16)
+    def test_addmm_activation_offline_tunableop(self, device, dtype):
+        # The offline tuner has to replay a recorded _addmm_activation GEMM with
+        # its epilogue, not as a plain F.linear, or the recorded key never fills.
+        if os.getenv("DISABLE_ADDMM_CUDA_LT") == "1":
+            self.skipTest("DISABLE_ADDMM_CUDA_LT keeps addmm off the Lt path")
+        with self._tunableop_ctx():
+            torch.backends.cuda.preferred_blas_library("cublaslt")
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            # Record the two epilogues without tuning them.
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+
+            # nn.Linear-shaped operands. An NN-layout GemmAndBias record makes
+            # the offline tuner raise on its transA != transB assertion, which
+            # aborts the whole file; that predates this change.
+            M, K, N = 32, 64, 128
+            x = torch.randn(M, K, device=device, dtype=dtype)
+            w = torch.randn(N, K, device=device, dtype=dtype)
+            bias = torch.randn(N, device=device, dtype=dtype)
+            torch._addmm_activation(bias, x, w.t(), use_gelu=False)
+            torch._addmm_activation(bias, x, w.t(), use_gelu=True)
+            # A bias == nullptr record has to be replayed with a 2-D self too.
+            if not torch.version.hip:
+                torch._addmm_activation(
+                    torch.randn(M, N, device=device, dtype=dtype), x, w.t(), use_gelu=False)
+
+            untuned_filename = get_tunableop_untuned_filename()
+            if not os.path.exists(untuned_filename):
+                self.skipTest("_addmm_activation did not use the Lt GemmAndBias path")
+
+            # Tune them offline and check every recorded key got filled.
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.record_untuned_enable(False)
+            torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
+
+            self.assertTrue(self._compare_untuned_tuned_entries())
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_msg)

@@ -1037,8 +1037,28 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         X, matA = _create_matrices(
             m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
         )
-        matA = matA.t()
-        torch.nn.functional.linear(X, matA, bias)
+        # A key written by _addmm_activation ends in a labelled "_act_<name>"
+        # token, preceded by "_bias_None" when the call had no 1-D bias. Replay
+        # has to reproduce both, or it tunes the plain key and leaves the
+        # recorded one unfilled. "act" labels the name because the bare last
+        # token is ambiguous after "_compute_bf16x9_r".
+        tokens = untuned_gemm_temp
+        no_bias = tokens[-2:] == ["bias", "None"]
+        if no_bias:
+            tokens = tokens[:-2]
+        epilogue = tokens[-1] if len(tokens) > 1 and tokens[-2] == "act" else None
+
+        if epilogue is None and not no_bias:
+            matA = matA.t()
+            torch.nn.functional.linear(X, matA, bias)
+        elif epilogue in ("RELU", "GELU"):
+            # A null bias is only reachable with a 2-D self, not a 1-D bias.
+            addmm_self = (
+                torch.rand(m, n, dtype=dtype, device=deviceid) if no_bias else bias
+            )
+            torch._addmm_activation(addmm_self, X, matA, use_gelu=(epilogue == "GELU"))
+        else:
+            warnings.warn(f"error: unknown epilogue {epilogue}", stacklevel=2)
     else:
         warnings.warn(f"error: unknown op {op_sig}", stacklevel=2)
 
