@@ -38,10 +38,16 @@ Unit tests for _pycute.int_tuple
 """
 
 from torch.distributed._pycute import *
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestIntTuple(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_product(self):
         self.assertEqual(product(2), 2)
 

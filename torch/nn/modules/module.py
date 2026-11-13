@@ -8,7 +8,7 @@ import weakref
 from collections import namedtuple, OrderedDict
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any, Optional, overload, TypeVar, Union
-from typing_extensions import Self
+from typing_extensions import Self  # noqa: UP035
 
 import torch
 from torch import device, dtype, memory_format, Tensor
@@ -954,16 +954,22 @@ class Module:
 
         # _apply is traced by dynamo at the bytecode level, and torch._subclasses
         # is in dynamo's MOD_SKIPLIST, revisit later for c++
-        from torch._subclasses.fake_tensor import is_fake
+        from torch._subclasses.fake_tensor import FakeTensor, is_fake
 
-        def has_fake_tensor(tensor, tensor_applied) -> bool:
-            # is_fake also sees through functional and functorch wrappers.
-            return is_fake(tensor) or is_fake(tensor_applied)
+        def must_overwrite(tensor: Tensor, tensor_applied: Tensor) -> bool:
+            # FakeTensorMode's memo puts weakrefs on fakes, which swap_tensors rejects.
+            return any(
+                isinstance(t, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+                or (bool(weakref.getweakrefs(t)) and is_fake(t))
+                for t in (tensor, tensor_applied)
+            )
 
-        def compute_should_use_set_data(tensor, tensor_applied, has_fake) -> bool:
+        def compute_should_use_set_data(
+            tensor: Tensor, tensor_applied: Tensor, overwrite: bool
+        ) -> bool:
             if (
                 torch._has_compatible_shallow_copy_type(tensor, tensor_applied)
-                and not has_fake
+                and not overwrite
             ):
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
@@ -997,15 +1003,14 @@ class Module:
             # `with torch.no_grad():`
             with torch.no_grad():
                 param_applied = fn(param)
-            p_has_fake_tensor = has_fake_tensor(param, param_applied)
+            p_must_overwrite = must_overwrite(param, param_applied)
             p_should_use_set_data = compute_should_use_set_data(
-                param, param_applied, p_has_fake_tensor
+                param, param_applied, p_must_overwrite
             )
 
             # Some subclasses need swap_tensors because they may have multiple
-            # child tensors. FakeTensorMode memoizes tensors with weakrefs, so
-            # fake tensors must use the overwrite path instead.
-            p_should_use_swap_tensors = not p_has_fake_tensor and (
+            # child tensors.
+            p_should_use_swap_tensors = not p_must_overwrite and (
                 should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
             )
 
@@ -1040,31 +1045,32 @@ class Module:
 
                 out_param = Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
-                if p_has_fake_tensor:
+                if p_must_overwrite:
                     fn.fake_parameter_memo[id(param)] = (param, out_param)
 
             if param_grad is not None:
                 with torch.no_grad():
                     grad_applied = fn(param_grad)
-                g_has_fake_tensor = has_fake_tensor(param_grad, grad_applied)
+                g_must_overwrite = must_overwrite(param_grad, grad_applied)
                 g_should_use_set_data = compute_should_use_set_data(
-                    param_grad, grad_applied, g_has_fake_tensor
+                    param_grad, grad_applied, g_must_overwrite
                 )
                 # Decide for the gradient itself: a wrapper-subclass gradient
                 # on a plain parameter still needs swap_tensors.
-                g_should_use_swap_tensors = not g_has_fake_tensor and (
+                g_should_use_swap_tensors = not g_must_overwrite and (
                     should_use_swap_tensors
                     or is_traceable_wrapper_subclass(grad_applied)
                 )
                 if g_should_use_swap_tensors:
                     grad_applied.requires_grad_(param_grad.requires_grad)
                     try:
-                        # The module's reference would keep param_grad's use
-                        # count at 2 and block the swap.
-                        out_param.grad = None
+                        # param's reference would keep param_grad's use count
+                        # at 2 and block the swap. When param was overwritten,
+                        # out_param is a new Parameter without a grad.
+                        param.grad = None
                         torch.utils.swap_tensors(param_grad, grad_applied)
                     except Exception as e:
-                        out_param.grad = param_grad
+                        param.grad = param_grad
                         raise RuntimeError(
                             f"_apply(): Couldn't swap {self._get_name()}.{key}.grad"
                         ) from e

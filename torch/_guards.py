@@ -492,6 +492,18 @@ class StorageOverlap(GuardEnvExpr):
     non_overlapping_sources: list[Source]
 
 
+@dataclasses.dataclass(frozen=True)
+class StorageOverlapPartition(GuardEnvExpr):
+    input_sources: list[Source]
+    overlapping_indices: tuple[tuple[int, ...], ...]
+
+    def __post_init__(self) -> None:
+        if len(set(self.input_sources)) != len(self.input_sources):
+            raise AssertionError(
+                f"input_sources must be unique, got {self.input_sources}"
+            )
+
+
 """
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
@@ -1560,7 +1572,6 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
           have to be flattened)
     """
     from torch._subclasses.fake_tensor import (
-        FakeTensor,
         FakeTensorMode,
         get_plain_tensors,
         is_fake_tensor,
@@ -1590,11 +1601,7 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
-            fake_tensors: list[FakeTensor] = [
-                x
-                for x in out
-                if isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-            ]
+            fake_tensors = [x for x in out if is_fake_tensor(x)]
             fake_modes.extend(
                 [
                     (maybe_get_fake_mode(tensor), f"subclass input {i}", ix)
