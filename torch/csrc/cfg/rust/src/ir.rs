@@ -138,6 +138,12 @@ pub enum Op {
     /// Whether v is the function object consts[func] and still has the code
     /// object consts[code]: the guard of an inlined call.
     IsFunction { v: V, func: u32, code: u32 },
+    /// The object `super().name` and `super(class, this).name` look the name
+    /// up on. If what the global `super` names is the builtin, it is
+    /// `super(class, this)` either way; anything else is called with the two
+    /// arguments if they were written out and with none if not, as
+    /// LOAD_SUPER_ATTR does.
+    SuperObject { global_super: V, class: V, this: V, explicit: bool },
     /// len(v) as an int: what a sequence pattern of `match` compares.
     GetLen(V),
     /// Whether the type of v is a sequence (false) or a mapping (true) for
@@ -347,6 +353,11 @@ impl Op {
                 f(*subject);
                 f(*class);
                 f(*names)
+            }
+            Op::SuperObject { global_super, class, this, .. } => {
+                f(*global_super);
+                f(*class);
+                f(*this)
             }
             Op::BuildTuple(vs)
             | Op::BuildList(vs)
@@ -650,6 +661,13 @@ impl Function {
             Op::ListToTuple(a) => format!("list_to_tuple {}", n(a)),
             Op::Unpack(a, k) => format!("unpack {} {}", n(a), k),
             Op::UnpackEx(a, before, after) => format!("unpack_ex {} {} {}", n(a), before, after),
+            Op::SuperObject { global_super, class, this, explicit } => format!(
+                "super_object {}({}, {}){}",
+                n(global_super),
+                n(class),
+                n(this),
+                if *explicit { "" } else { "    ; arguments implied" }
+            ),
             Op::GetLen(a) => format!("get_len {}", n(a)),
             Op::MatchKind(a, mapping) => {
                 format!("match_{} {}", if *mapping { "mapping" } else { "sequence" }, n(a))

@@ -1818,6 +1818,13 @@ impl Compiled {
                 status(ffi::PyDict_Update(d, o))
             }
             Op::ListToTuple(l) => checked(ffi::PyList_AsTuple(self.obj(regs, *l))),
+            Op::SuperObject { global_super, class, this, explicit } => {
+                let callee = self.obj(regs, *global_super);
+                let args = [self.obj(regs, *class), self.obj(regs, *this)];
+                let builtin = callee == std::ptr::addr_of_mut!(ffi::PySuper_Type) as Obj;
+                let nargs = if *explicit || builtin { 2 } else { 0 };
+                checked(ffi::PyObject_Vectorcall(callee, args.as_ptr(), nargs, null_mut()))
+            }
             Op::GetLen(v) => {
                 let len = ffi::PyObject_Length(self.obj(regs, *v));
                 if len < 0 {
