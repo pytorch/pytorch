@@ -14,7 +14,7 @@ from .base import SourceLocation, VariableTracker, VariableTrackerMeta
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from typing_extensions import Self
+    from typing import Self
 
     from ..symbolic_convert import InstructionTranslatorBase
     from .tensor import SymNodeVariable
@@ -24,7 +24,7 @@ class LazyCache:
     """Container to cache the real VariableTracker"""
 
     def __init__(self, value: object, source: Any) -> None:
-        if not isinstance(value, LazySymNodeFormatString):
+        if not issubclass(type(value), LazySymNodeFormatString):
             if not source:
                 raise AssertionError(
                     "source is required for non-LazySymNodeFormatString values"
