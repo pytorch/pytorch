@@ -244,9 +244,9 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 // reports its own layout.
 // Python keeps them on the output of a top-level alias or detach (dispatched,
 // through functionalization, or by calling fast_detach directly), but not of
-// other views. Here ExtraMeta's copy constructor copies them, so every shallow
-// copy, such as detach, keeps them, while views, including alias, drop them;
-// matching Python is left to the C++ fake dispatch path (later in this stack).
+// other views. The fake fallback (FakeFallbackKernel.cpp) does the same for a
+// dispatched op. A shallow copy made outside dispatch keeps them, as
+// ExtraMeta's copy constructor copies them.
 // Functionalization's alias/detach handling currently covers only a Python
 // FakeTensor. Unlike Python, fake.data = other gives the fake other's keys, as
 // set_data replaces the whole ExtraMeta.
@@ -256,7 +256,7 @@ struct C10_API ExtraMeta {
   std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
   std::optional<c10::Device> fake_device_ = std::nullopt;
-  std::shared_ptr<FakeTensorModeHandle> fake_tensor_mode_ = nullptr;
+  std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
   // The real tensor this fake shadows, when propagate_real_tensors is on.
   c10::intrusive_ptr<c10::TensorImpl> real_tensor_ = nullptr;
   // See Note [C++ fake dispatch keys]
@@ -1511,7 +1511,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return extra_meta_->fake_device_;
   }
 
-  void set_fake_tensor_mode(std::shared_ptr<FakeTensorModeHandle> mode) {
+  void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
     auto& extra_meta = get_extra_meta();
     // python validates allow_meta against the mode that owns the tensor, which
     // is only known here: set_fake_device may run before the mode is attached
@@ -1519,13 +1519,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (mode && extra_meta.fake_device_.has_value() &&
         extra_meta.fake_device_->type() == c10::DeviceType::Meta) {
       TORCH_CHECK(
-          mode->mode->allow_meta_,
+          mode->allow_meta_,
           "device.type must not be 'meta' when allow_meta is False");
     }
     extra_meta.fake_tensor_mode_ = std::move(mode);
   }
 
-  std::shared_ptr<FakeTensorModeHandle> fake_tensor_mode() const {
+  std::shared_ptr<FakeTensorMode> fake_tensor_mode() const {
     if (!extra_meta_) {
       return nullptr;
     }

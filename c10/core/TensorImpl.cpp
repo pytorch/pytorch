@@ -197,7 +197,7 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   if (fake_device.type() == c10::DeviceType::Meta && extra_meta_ != nullptr) {
     const auto& mode = extra_meta_->fake_tensor_mode_;
     TORCH_CHECK(
-        mode == nullptr || mode->mode->allow_meta_,
+        mode == nullptr || mode->allow_meta_,
         "device.type must not be 'meta' when allow_meta is False");
   }
 
@@ -399,7 +399,7 @@ void TensorImpl::release_resources() {
   if (extra_meta_ && extra_meta_->fake_constant_) {
     auto mode = extra_meta_->fake_tensor_mode_;
     TORCH_INTERNAL_ASSERT(mode);
-    mode->mode->clear_constant(this);
+    mode->clear_constant(this);
   }
   autograd_meta_.reset();
   if (storage_) {
@@ -737,7 +737,7 @@ void TensorImpl::copy_generic_tensor_metadata(
       dest_impl->extra_meta_->fake_constant_) {
     auto mode = dest_impl->extra_meta_->fake_tensor_mode_;
     TORCH_INTERNAL_ASSERT(mode);
-    mode->mode->set_constant(dest_impl, nullptr);
+    mode->set_constant(dest_impl, nullptr);
   }
   if (src_impl->extra_meta_ != nullptr) {
     dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
@@ -1185,11 +1185,13 @@ FakeTensorMode::FakeTensorMode(
     std::shared_ptr<c10::SafePyObject> shape_env,
     std::shared_ptr<c10::SafePyObject> converter,
     bool allow_meta,
-    bool allow_unsafe_data_ptr_access)
+    bool allow_unsafe_data_ptr_access,
+    bool propagate_real_tensors)
     : shape_env_(std::move(shape_env)),
       fake_tensor_converter_(std::move(converter)),
       allow_meta_(allow_meta),
-      allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
+      allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access),
+      propagate_real_tensors_(propagate_real_tensors) {}
 
 FakeTensorMode::~FakeTensorMode() = default;
 
