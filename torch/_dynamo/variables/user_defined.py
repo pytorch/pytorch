@@ -5485,7 +5485,7 @@ class DefaultDictVariable(ConstDictVariable):
         return isinstance(
             arg,
             (
-                variables.BaseBuiltinVariable,
+                variables.TypeVariable,
                 variables.functions.BaseUserFunctionVariable,
                 variables.functions.PolyfilledFunctionVariable,
                 variables.functions._WrappedSkipFunctionMethodDescriptorCommonVariable,
