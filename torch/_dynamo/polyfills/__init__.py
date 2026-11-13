@@ -539,6 +539,8 @@ def frozendict_fromkeys(
 ) -> C:
     if not torch._has_frozendict:
         raise AssertionError("requires builtins.frozendict")
+    if cls is not torch._frozendict:
+        return dict_fromkeys(cls, iterable, value)
     return _frozendict_fromkeys(cls(), iterable, value)
 
 
