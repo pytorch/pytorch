@@ -25,7 +25,7 @@ jobs:
       - name: Record nonsecret context
         id: context
         env:
-          CANARY_REVISION: A
+          CANARY_REVISION: B
           EVENT: ${{ github.event_name }}
           SHA: ${{ github.sha }}
           REF: ${{ github.ref }}
