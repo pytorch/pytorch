@@ -74,6 +74,10 @@
 // made below autograd, while Python's FakeTensor keeps the requires_grad a Meta
 // kernel set on its meta output.
 //
+// TODO: Python CIA kernels written directly into py_kernels for ops without
+// native CIA kernels are not recorded in the tables. In-tree direct writers
+// (torch.export) override ops with native CIA kernels, which we always probe.
+//
 // rngprims are not in PrimMeta and use their registered fake implementations.
 
 namespace {
@@ -263,6 +267,9 @@ void fakeFallback(
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   const auto arguments_begin = stack->size() - num_arguments;
+  const bool metadata_copy = schema.overload_name().empty() &&
+      (schema.name() == "aten::detach" ||
+       schema.name() == "aten::shallow_copy_data_");
   if (c10::impl::PythonDispatcherTLS::get_state() != nullptr) {
     unsupported(op, "the Python dispatcher");
   }
@@ -509,6 +516,23 @@ void fakeFallback(
   const bool has_sparse_inputs =
       meta_keyset.has(c10::DispatchKey::SparseMeta) ||
       meta_keyset.has(c10::DispatchKey::SparseCsrMeta);
+  if (metadata_copy) {
+    // These kernels only copy metadata. Run them on the fakes directly so
+    // shallow_copy_data_ never replaces an existing fake inside a Meta kernel.
+    c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
+        {c10::DispatchKey::Fake,
+         c10::DispatchKey::Python,
+         c10::DispatchKey::PreDispatch,
+         c10::DispatchKey::PythonTLSSnapshot}));
+    auto self = (*stack)[arguments_begin].toTensor();
+    auto result = schema.name() == "aten::detach"
+        ? at::impl::fake_detach(self)
+        : at::impl::fake_shallow_copy_data_(
+              self, (*stack)[arguments_begin + 1].toTensor());
+    torch::jit::drop(*stack, num_arguments);
+    torch::jit::push(*stack, std::move(result));
+    return;
+  }
   // Mirror FakeTensor._find_common_device. Probe without resolving conflicts
   // for op_implementations, which may choose devices themselves. Resolve only
   // when wrapping a Meta output, so kernel errors take precedence.
@@ -548,28 +572,13 @@ void fakeFallback(
       if (!resolve) {
         return std::nullopt;
       }
-      if (mode->prefer_device_type_.has_value()) {
-        const bool common_has_preferred =
-            common_device->type() == *mode->prefer_device_type_;
-        const bool input_has_preferred =
-            input_device.type() == *mode->prefer_device_type_;
-        if (!common_has_preferred && input_has_preferred) {
-          common_device = input_device;
-          common_is_cpu_zero_dim = is_cpu_zero_dim;
-          continue;
-        }
-        if (common_has_preferred && !input_has_preferred) {
-          continue;
-        }
+      const auto resolved =
+          (*c10::impl::getGlobalPyInterpreter())
+              ->_resolve_device_conflict(op, *common_device, input_device);
+      if (resolved == input_device) {
+        common_device = input_device;
+        common_is_cpu_zero_dim = is_cpu_zero_dim;
       }
-      TORCH_CHECK(
-          false,
-          "Expected all tensors to be on the same device, but found at least "
-          "two devices, ",
-          *common_device,
-          " and ",
-          input_device,
-          "!");
     }
     return common_device;
   };
@@ -583,14 +592,16 @@ void fakeFallback(
       !cpp_meta_supports_symint(op, categories)) {
     const bool has_cia =
         op.hasKernelForDispatchKey(c10::DispatchKey::CompositeImplicitAutograd);
+    // Probe every native CIA op too: export writes py_kernels directly,
+    // bypassing the registration hook that sets the PythonCIA bit.
     const bool try_decomp =
         (has(FakeDispatchCategory::StaticShapeDecomp) && !has_sparse_inputs) ||
-        has(FakeDispatchCategory::PythonCIA);
-    if (try_decomp || has_cia) {
+        has(FakeDispatchCategory::PythonCIA) || has_cia;
+    if (try_decomp) {
       const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
       auto decompose = [&] {
         bool has_python_cia = false;
-        if (try_decomp && interpreter->fake_try_decomp(
+        if (interpreter->fake_try_decomp(
                 op, stack, /*has_symbolic_sizes=*/false, &has_python_cia)) {
           return true;
         }
@@ -657,12 +668,10 @@ void fakeFallback(
   }
   meta_keyset = meta_keyset.add(c10::DispatchKey::Meta);
 
-  // As in Python, the outputs of alias and detach of a fake keep its recorded
-  // dispatch keys (see Note [C++ fake dispatch keys]), and other new outputs
-  // have none
+  // As in Python, alias keeps its input's recorded dispatch keys (see Note
+  // [C++ fake dispatch keys]), and other new Meta outputs have none.
   std::optional<c10::DispatchKeySet> output_dispatch_keys;
-  if (schema.overload_name().empty() &&
-      (schema.name() == "aten::alias" || schema.name() == "aten::detach")) {
+  if (schema.overload_name().empty() && schema.name() == "aten::alias") {
     const auto& self = (*stack)[arguments_begin].toTensor();
     output_dispatch_keys = self.unsafeGetTensorImpl()->fake_dispatch_keys();
   }
@@ -738,10 +747,7 @@ void fakeFallback(
     if (converted_outputs.contains(impl)) {
       return std::nullopt;
     }
-    if (t.is_fake()) {
-      TORCH_CHECK(
-          impl->fake_tensor_mode() == mode,
-          "Meta kernel returned a fake tensor from another mode");
+    if (t.is_fake() && impl->fake_tensor_mode() == mode) {
       const auto fake_device = impl->fake_device();
       TORCH_CHECK(
           fake_device == output_common_device,
@@ -754,6 +760,9 @@ void fakeFallback(
       }
       return std::nullopt;
     }
+    TORCH_CHECK(
+        !t.is_fake(),
+        "Meta kernel returned a fake tensor from another mode");
     if (!is_alias && t.requires_grad()) {
       // Backend kernels run below autograd, but a Meta kernel can copy
       // requires_grad from an input
