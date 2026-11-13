@@ -81,6 +81,7 @@ from torch._inductor.utils import clear_caches, fresh_cache
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.fake_tensor import maybe_get_fake_mode
+from torch._utils_internal import get_file_path
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -6179,7 +6180,7 @@ class TestVecISACheckBuild(TestCase):
 
         env = cpu_vec_isa.VecISA._build_probe_env()
 
-        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+        torch_lib = os.path.join(get_file_path("torch"), "lib")
         value = env.get("LD_LIBRARY_PATH", "")
         self.assertEqual(
             value.split(os.pathsep)[0],
@@ -6201,7 +6202,7 @@ class TestVecISACheckBuild(TestCase):
         compiler = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
         if compiler is None:
             raise unittest.SkipTest("no C compiler available")
-        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+        torch_lib = os.path.join(get_file_path("torch"), "lib")
         if not os.path.isfile(os.path.join(torch_lib, "libc10.so")):
             raise unittest.SkipTest("libc10.so not found in torch lib dir")
 

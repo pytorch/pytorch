@@ -20,6 +20,7 @@ import torch._inductor.async_compile
 import torch._ops
 from torch import dtype as torch_dtype
 from torch._inductor.runtime.runtime_utils import dynamo_timed
+from torch._utils_internal import get_file_path
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
@@ -632,9 +633,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
         extend_aoti_c_shim_path = os.path.join(
-            os.path.dirname(torch.__file__),
-            "include",
-            extend_aoti_c_shim_include,
+            get_file_path("torch"), "include", extend_aoti_c_shim_include
         )
         if os.path.exists(extend_aoti_c_shim_path):
             self.header.splice(f"#include <{extend_aoti_c_shim_include}>")
