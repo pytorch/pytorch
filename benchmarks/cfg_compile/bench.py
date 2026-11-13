@@ -16,6 +16,9 @@ The modes are cumulative, each adding one mechanism to the previous one:
     skip_autograd  + enter below the Autograd kernel when no gradient is tracked
     unboxed        + kernel results get no Python object until Python needs one
                    (the default configuration)
+
+A last section times code that is mostly Python (loops, calls, an nn.Module
+forward, a training step), where the comparison is with the interpreter.
 """
 
 import argparse
@@ -82,6 +85,56 @@ def python_heavy(xs, scale):
         else:
             out.append(x)
     return out
+
+
+def py_loop(n):
+    total = 0
+    for i in range(n):
+        total += i
+    return total
+
+
+def py_branches(n):
+    even = odd = 0
+    for i in range(n):
+        if i & 1:
+            odd += 1
+        else:
+            even += 1
+    return even, odd
+
+
+def py_add(a, b):
+    return a + b
+
+
+def py_calls(n):
+    total = 0
+    for i in range(n):
+        total = py_add(total, i)
+    return total
+
+
+class Net(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(16, 32)
+        self.fc2 = torch.nn.Linear(32, 1)
+
+    def forward(self, x):
+        return self.fc2(torch.relu(self.fc1(x)))
+
+
+def module_forward(net, x):
+    return net(x)
+
+
+def training_step(net, opt, x, y):
+    opt.zero_grad()
+    loss = torch.nn.functional.mse_loss(net(x), y)
+    loss.backward()
+    opt.step()
+    return loss
 
 
 def workloads(size, device):
@@ -302,6 +355,49 @@ def bench_unboxing(device):
     return out
 
 
+def bench_python(device):
+    """Code that is mostly Python: here the VM competes with the interpreter
+    itself, and every call it compiles is a call the interpreter would have
+    made faster."""
+    n = 1000
+    rows = []
+
+    def row(name, fn, args, variants, per=1):
+        fns = {"eager": fn}
+        for label, options in variants.items():
+            fns[label] = torch.cfg_compile(fn, fallback=False, **options)
+        ns = compare(fns, args, device)
+        rows.append({"name": name, "ns": {k: v / per for k, v in ns.items()}})
+
+    plain = {"compiled": {"unroll": False}}
+    row("loop: total += i, per iteration", py_loop, (n,), plain, per=n)
+    row("loop with a branch, per iteration", py_branches, (n,), plain, per=n)
+    row(
+        "loop calling a Python function, per iteration",
+        py_calls,
+        (n,),
+        {
+            "compiled": {"unroll": False},
+            "not inlined": {"unroll": False, "inline": False},
+            "callees interpreted": {"unroll": False, "inline": False, "callees": False},
+        },
+        per=n,
+    )
+    callees = {"compiled": {}, "callees interpreted": {"callees": False}}
+    net = Net().to(device)
+    x, y = torch.randn(32, 16, device=device), torch.randn(32, 1, device=device)
+    with torch.no_grad():
+        row("nn.Module forward, 2 Linear layers", module_forward, (net, x), callees)
+    opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
+    row(
+        "training step: forward, backward, SGD",
+        training_step,
+        (net, opt, x, y),
+        callees,
+    )
+    return rows
+
+
 def speedup(row, mode):
     return row["ns"]["eager"] / row["ns"][mode]
 
@@ -434,6 +530,42 @@ def report(results, charts):
         )
     out.append("")
 
+    if "python" in results:
+        out.append("### Python code, calls and modules\n")
+        out.append(
+            "Where most of the work is Python, the VM is measured against the interpreter itself. "
+            "Times are ns; the ratio is the default configuration over eager, so above 1 is slower.\n"
+        )
+        out.append(
+            "| workload | eager | compiled | not inlined | callees interpreted | compiled / eager |"
+        )
+        out.append("|---|---:|---:|---:|---:|---:|")
+        for row in results["python"]:
+            ns = row["ns"]
+            cells = " | ".join(
+                f"{ns[k]:,.1f}" if k in ns else ""
+                for k in ("eager", "compiled", "not inlined", "callees interpreted")
+            )
+            out.append(
+                f"| {row['name']} | {cells} | {ns['compiled'] / ns['eager']:.2f} |"
+            )
+        out.append("")
+        if charts:
+            out.append(
+                chart(
+                    "Python-heavy code: time relative to eager (below 1 is faster)",
+                    [
+                        row["name"].split(",")[0].split(":")[0]
+                        for row in results["python"]
+                    ],
+                    [
+                        row["ns"]["compiled"] / row["ns"]["eager"]
+                        for row in results["python"]
+                    ],
+                    "time / eager",
+                )
+            )
+
     out.append("### Shape-dependent control flow\n")
     out.append(
         "| pipeline | batch 1: eager | cfg | batch 8: eager | cfg | profile runs per block | versions per block |"
@@ -493,6 +625,7 @@ def main():
             "unboxing": bench_unboxing(args.device),
         }
     results["autograd"] = bench_autograd(args.device)
+    results["python"] = bench_python(args.device)
     if args.json:
         with open(args.json, "w") as f:
             json.dump(results, f, indent=1)
