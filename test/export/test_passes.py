@@ -9,6 +9,7 @@ import math
 import operator
 import unittest
 from re import escape
+from unittest import mock
 
 import torch
 from functorch.experimental.control_flow import cond
@@ -1132,7 +1133,7 @@ def forward(self, sin, cos):
                 return recompile(gm)
 
             m, x = Regions(n), torch.randn(4)
-            with unittest.mock.patch.object(
+            with mock.patch.object(
                 torch.fx.GraphModule, "recompile", counting_recompile
             ):
                 ep = export(m, (x,))
