@@ -178,6 +178,12 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
     PANIC(invalidate_written_to_constants);
   }
+  bool fake_try_fast_impl(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
+    PANIC(fake_try_fast_impl);
+  }
   bool fake_try_decomp(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
@@ -190,12 +196,12 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       torch::jit::Stack* /*stack*/) const override {
     PANIC(fake_try_meta);
   }
-  bool fake_try_custom_op_impl(
+  bool run_fake_impl(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
       const std::shared_ptr<FakeTensorMode>& /*mode*/,
       PyObject* /*real*/) const override {
-    PANIC(fake_try_custom_op_impl);
+    PANIC(run_fake_impl);
   }
   bool fake_try_op_impl(
       const c10::OperatorHandle& /*op*/,
@@ -204,10 +210,10 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       std::optional<c10::Device> /*common_device*/) const override {
     PANIC(fake_try_op_impl);
   }
-  bool fake_try_prim_meta(
+  bool prim_meta_impl(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/) const override {
-    PANIC(fake_try_prim_meta);
+    PANIC(prim_meta_impl);
   }
   bool fake_infer_from_real_out(
       const c10::OperatorHandle& /*op*/,
