@@ -94,7 +94,9 @@ void cumsum_outer_dim(const Tensor& result, const Tensor& self, int64_t dim) {
   const int64_t outer = self.numel() / (n * inner);
   // Narrower column blocks when there are fewer full ones than threads, e.g. for a 2-D input.
   const int64_t splits = divup(int64_t{at::get_num_threads()}, outer);
-  const int64_t block = std::clamp(divup(divup(inner, splits), int64_t{16}) * 16, int64_t{16}, kBlock);
+  // At least a cache line per block, so that adjacent tasks do not write into the same line.
+  constexpr int64_t kMinBlock = std::max<int64_t>(16, 64 / sizeof(scalar_t));
+  const int64_t block = std::clamp(divup(divup(inner, splits), kMinBlock) * kMinBlock, kMinBlock, kBlock);
   const int64_t blocks = divup(inner, block);
   const scalar_t* in = self.const_data_ptr<scalar_t>();
   scalar_t* out = result.data_ptr<scalar_t>();
@@ -109,7 +111,21 @@ void cumsum_outer_dim(const Tensor& result, const Tensor& self, int64_t dim) {
       for (const auto i : c10::irange(n)) {
         const scalar_t* src = in + offset + i * inner;
         scalar_t* dst = out + offset + i * inner;
-        for (const auto j : c10::irange(len)) {
+        int64_t j = 0;
+        // The compiler does not vectorize the scalar loop for half and bfloat16.
+        if constexpr (is_reduced_floating_point_v<scalar_t>) {
+          using bVec = Vectorized<scalar_t>;
+          using fVec = Vectorized<float>;
+          for (; j + bVec::size() <= len; j += bVec::size()) {
+            auto [x0, x1] = convert_to_float<scalar_t>(bVec::loadu(src + j));
+            auto a0 = fVec::loadu(acc.data() + j) + x0;
+            auto a1 = fVec::loadu(acc.data() + j + fVec::size()) + x1;
+            a0.store(acc.data() + j);
+            a1.store(acc.data() + j + fVec::size());
+            convert_from_float<scalar_t>(a0, a1).store(dst + j);
+          }
+        }
+        for (; j < len; ++j) {
           acc[j] += src[j];
           dst[j] = (scalar_t)acc[j];
         }
@@ -122,12 +138,9 @@ void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  if (result.sizes() != self.sizes()) {
-    at::native::resize_output(result, self.sizes());
-  }
   // With only size-1 dims after it, the scan dim is contiguous and the strided kernel is faster.
   const bool has_inner = c10::multiply_integers(self.sizes().slice(wrap_dim + 1)) > 1;
-  if (self.numel() > 0 && has_inner && self.is_contiguous() && result.is_contiguous()) {
+  if (has_inner && self.is_contiguous() && result.is_contiguous()) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, self.scalar_type(), "cumsum_out_cpu", [&] {
       cumsum_outer_dim<scalar_t>(result, self, wrap_dim);
     });
