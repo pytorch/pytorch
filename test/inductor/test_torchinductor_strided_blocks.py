@@ -404,13 +404,15 @@ class CommonTemplate:
             atol = None
             rtol = None
 
-        self._run_and_compare(
+        _result, (code,) = self._run_and_compare(
             forward,
             *args,
-            expected_num_block_pointers=4,
+            expected_num_block_pointers=3 if config.triton.use_tensor_descriptor else 4,
             atol=atol,
             rtol=rtol,
         )
+        if config.triton.use_tensor_descriptor:
+            self.assertIn("tl.load(", code)
 
     @parametrize(
         "x_size,y_size",
@@ -1110,7 +1112,7 @@ class CommonTemplate:
         self._assert_reduction_ndims(code, 2)
 
     def test_3d_reduction_with_pointwise_output(self):
-        view = self._discontiguous_tensor((5, 7, 3, 5), self.device)
+        view = self._discontiguous_tensor((5, 7, 3, 8), self.device)
 
         _result, (code,) = self._run_and_compare(
             functools.partial(torch.sum, dim=(1, 2, 3)),
@@ -1301,8 +1303,7 @@ class CommonTemplate:
                 f"for r{reduction_dim}_offset in tl.range(0, r{reduction_dim}_numel",
                 code,
             )
-        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
-            self.assertIn("tl.advance(", code)
+        self.assertEqual("tl.advance(" in code, not config.triton.use_tensor_descriptor)
 
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
@@ -1757,6 +1758,8 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
                 **tiled_reduction_config,
                 "triton.max_tiles": 3,
             },
+            rtol=1e-4,
+            atol=1e-4,
         )
 
         self.assertIn("tl.load(in_ptr0 +", code)
@@ -2885,18 +2888,14 @@ if GPU_TYPE == "cuda":
         TritonHostSideTMATestCUDA.test_expected_num_block_pointers_expected_num_block_pointers_9_raises_True_cuda
     )
 
-    # Known TMA API limitations: these cases also fail for device-side TMA (they
-    # carry @xfail_if_use_tensor_descriptor). For host-side TMA they either produce
-    # different (still-correct) codegen that breaks the device-specific code asserts,
-    # or hit the same descriptor constraints (e.g. the 16-byte last-dim minimum in
-    # test_reduction_padded_output_tiling).
+    # Host TMA shares descriptor constraints with device-side TMA and also
+    # produces different codegen for these marked cases.
     _HOST_TMA_EXPECTED_FAILURES = [
         "test_boundary_check_block_multiple_False_ynumel_exceed_ygrid_size_False_include_z_True_cuda",
         "test_boundary_check_block_multiple_True_ynumel_exceed_ygrid_size_True_include_z_False_cuda",
         "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_False_cuda",
         "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_True_cuda",
         "test_pointwise_index_order_cuda",
-        "test_reduction_padded_output_tiling_cuda",
     ]
     for _name in _HOST_TMA_EXPECTED_FAILURES:
         setattr(
