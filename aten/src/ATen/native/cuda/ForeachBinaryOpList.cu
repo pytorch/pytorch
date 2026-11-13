@@ -1,5 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
@@ -164,6 +166,151 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
       });
 }
 
+namespace {
+
+template <
+    typename T,
+    typename src_t,
+    int depth,
+    int r_args_depth,
+    int res_arg_index>
+struct BinaryOpListAlphaMixedFunctor {
+  static_assert(depth == 2 && r_args_depth == 2 && res_arg_index == 0);
+  using opmath_t = at::opmath_type<T>;
+  template <typename Op>
+  __device__ __forceinline__ void operator()(
+      int64_t chunk_size,
+      TensorListMetadata<depth>& tl,
+      Op op,
+      opmath_t alpha) {
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    auto n = tl.numel_for_tensor[tensor_loc];
+
+    T* self_ptr = (T*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+    src_t* src_ptr =
+        (src_t*)tl.addresses[1][tensor_loc] + chunk_idx * chunk_size;
+    const bool all_aligned = is_aligned(self_ptr) && is_aligned(src_ptr);
+
+    n -= chunk_idx * chunk_size;
+    T self_args[kILP];
+    src_t src_args[kILP];
+
+    if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
+      for (int64_t i_start = threadIdx.x;
+           i_start * kILP < n && i_start * kILP < chunk_size;
+           i_start += blockDim.x) {
+        load_store(self_args, self_ptr, 0, i_start);
+        load_store(src_args, src_ptr, 0, i_start);
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          self_args[ii] = static_cast<T>(
+              op(static_cast<opmath_t>(self_args[ii]),
+                 alpha * static_cast<opmath_t>(src_args[ii])));
+        }
+        load_store(self_ptr, self_args, i_start, 0);
+      }
+    } else {
+      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+           i_start += blockDim.x * kILP) {
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          const auto i = i_start + threadIdx.x + ii * blockDim.x;
+          self_args[ii] = 0;
+          src_args[ii] = 0;
+          if (i < n && i < chunk_size) {
+            self_args[ii] = self_ptr[i];
+            src_args[ii] = src_ptr[i];
+          }
+        }
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          self_args[ii] = static_cast<T>(
+              op(static_cast<opmath_t>(self_args[ii]),
+                 alpha * static_cast<opmath_t>(src_args[ii])));
+        }
+        store_args(self_ptr, self_args, i_start, chunk_size, n);
+      }
+    }
+  }
+};
+
+inline bool is_mixed_dtype_fused_type(ScalarType t) {
+  return t == kFloat || t == kHalf || t == kBFloat16;
+}
+
+// In-place add_/sub_ where each list has one dtype but the lists differ, e.g.
+// fp32 params updated with bf16 buffers. Every float/half/bfloat16 pair
+// computes in float, the same as the per-tensor slow path. Bool alpha and
+// partially overlapping pairs fall back so the slow path raises its errors.
+bool can_use_mixed_dtype_fast_route(
+    TensorList tensors1,
+    TensorList tensors2,
+    const Scalar& alpha) {
+  const auto self_dtype = tensors1[0].scalar_type();
+  const auto other_dtype = tensors2[0].scalar_type();
+  if (self_dtype == other_dtype || !is_mixed_dtype_fused_type(self_dtype) ||
+      !is_mixed_dtype_fused_type(other_dtype) || alpha.isBoolean() ||
+      !check_fast_path_restrictions(
+          {tensors1, tensors2},
+          alpha,
+          /* does_op_promote_integer_inputs_to_float */ false,
+          /* skip_cross_list_dtype_check */ true)) {
+    return false;
+  }
+  for (const auto i : c10::irange(tensors1.size())) {
+    const auto overlap = at::get_overlap_status(tensors1[i], tensors2[i]);
+    if (overlap != MemOverlapStatus::No && overlap != MemOverlapStatus::Full) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <template <class> class Op>
+void foreach_tensor_list_op_mixed_dtype_(
+    TensorList tensors1,
+    TensorList tensors2,
+    const Scalar& alpha) {
+  auto tensor_lists = c10::make_nested<Tensor>(tensors1.vec(), tensors2.vec());
+  AT_DISPATCH_V2(
+      tensors1[0].scalar_type(),
+      "foreach_tensor_list_op_mixed_dtype_",
+      AT_WRAP([&] {
+        using self_t = scalar_t;
+        using opmath_t = at::opmath_type<self_t>;
+        AT_DISPATCH_V2(
+            tensors2[0].scalar_type(),
+            "foreach_tensor_list_op_mixed_dtype_",
+            AT_WRAP([&] {
+              if constexpr (!std::is_same_v<self_t, scalar_t>) {
+                multi_tensor_apply<2>(
+                    tensor_lists,
+                    BinaryOpListAlphaMixedFunctor<
+                        self_t,
+                        scalar_t,
+                        /* depth */ 2,
+                        /* r_args_depth */ 2,
+                        /* res_arg_index */ 0>(),
+                    Op<opmath_t>(),
+                    alpha.to<opmath_t>());
+              } else {
+                TORCH_INTERNAL_ASSERT(
+                    false, "mixed-dtype foreach path got matching dtypes");
+              }
+            }),
+            kFloat,
+            kHalf,
+            kBFloat16);
+      }),
+      kFloat,
+      kHalf,
+      kBFloat16);
+  increment_version(tensors1);
+}
+
+} // anonymous namespace
+
 #define FOREACH_BINARY_OP_LIST(FUNCTION, NAME, OP, DIVISION_OP)     \
   void foreach_tensor_##NAME##_list_kernel_cuda_(                   \
       TensorList tensors1, TensorList tensors2) {                   \
@@ -191,12 +338,15 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
   void foreach_tensor_##NAME##_list_kernel_cuda_(                      \
       TensorList tensors1, TensorList tensors2, const Scalar& alpha) { \
     check_foreach_api_restrictions(tensors1, tensors2);                \
-    if (!can_use_fast_route({tensors1, tensors2}, alpha)) {            \
-      return at::native::foreach_tensor_##NAME##_list_kernel_slow_(    \
+    if (can_use_fast_route({tensors1, tensors2}, alpha)) {             \
+      return FUNCTION##_<OP>(tensors1, tensors2, alpha);               \
+    }                                                                  \
+    if (can_use_mixed_dtype_fast_route(tensors1, tensors2, alpha)) {   \
+      return foreach_tensor_list_op_mixed_dtype_<OP>(                  \
           tensors1, tensors2, alpha);                                  \
     }                                                                  \
-                                                                       \
-    FUNCTION##_<OP>(tensors1, tensors2, alpha);                        \
+    at::native::foreach_tensor_##NAME##_list_kernel_slow_(             \
+        tensors1, tensors2, alpha);                                    \
   }                                                                    \
                                                                        \
   std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(        \

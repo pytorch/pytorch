@@ -129,6 +129,7 @@ if __name__ == "__main__":
     parser.add_argument("--hip-version", "--hip_version", type=str)
     parser.add_argument("--rocm-version", "--rocm_version", type=str)
     parser.add_argument("--xpu-version", "--xpu_version", type=str)
+    parser.add_argument("--xpu-ops-commit", type=str)
 
     args = parser.parse_args()
 
@@ -138,6 +139,7 @@ if __name__ == "__main__":
     args.hip_version = None if args.hip_version == "" else args.hip_version
     args.rocm_version = None if args.rocm_version == "" else args.rocm_version
     args.xpu_version = None if args.xpu_version == "" else args.xpu_version
+    args.xpu_ops_commit = args.xpu_ops_commit or None
 
     pytorch_root = Path(__file__).parent.parent
     version_path = pytorch_root / "torch" / "version.py"
@@ -152,7 +154,8 @@ if __name__ == "__main__":
     with open(version_path, "w") as f:
         f.write("from typing import Optional\n\n")
         f.write(
-            "__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip', 'rocm', 'xpu']\n"
+            "__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip', 'rocm', "
+            "'xpu', 'xpu_ops_commit']\n"
         )
         f.write(f"__version__ = '{version}'\n")
         # NB: This is not 100% accurate, because you could have built the
@@ -164,3 +167,4 @@ if __name__ == "__main__":
         f.write(f"hip: Optional[str] = {repr(args.hip_version)}\n")
         f.write(f"rocm: Optional[str] = {repr(args.rocm_version)}\n")
         f.write(f"xpu: Optional[str] = {repr(args.xpu_version)}\n")
+        f.write(f"xpu_ops_commit: Optional[str] = {repr(args.xpu_ops_commit)}\n")
