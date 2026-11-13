@@ -11,7 +11,7 @@ import onnx_ir as ir
 
 import torch
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
-from torch.onnx._internal.exporter._torchlib.ops import common as common_ops
+from torch.onnx._internal.exporter._torchlib.ops import _promotion, common as common_ops
 
 
 if TYPE_CHECKING:
@@ -47,6 +47,7 @@ def aten_mv(op: TranslationContext, self: ir.Value, vec: ir.Value) -> ir.Value:
 @onnx_impl(aten.dot.default)
 def aten_dot(op: TranslationContext, self: ir.Value, tensor: ir.Value) -> ir.Value:
     """dot(Tensor self, Tensor tensor) -> Tensor"""
+    self, tensor = _promotion.promote(op, self, tensor)
 
     return op.MatMul(self, tensor)
 
@@ -196,6 +197,7 @@ def aten_addr(
 
     Performs the outer-product of vectors vec1 and vec2 and adds it to the matrix input.
     """
+    self, vec1, vec2 = _promotion.promote(op, self, vec1, vec2)
     builder = op.builder
     vec1_shape = builder.constant([-1, 1], dtype=ir.DataType.INT64)
     vec2_shape = builder.constant([1, -1], dtype=ir.DataType.INT64)

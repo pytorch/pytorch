@@ -11,7 +11,7 @@ import onnx_ir as ir
 
 import torch
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
-from torch.onnx._internal.exporter._torchlib.ops import common as common_ops
+from torch.onnx._internal.exporter._torchlib.ops import _promotion, common as common_ops
 
 
 if TYPE_CHECKING:
@@ -25,12 +25,14 @@ _MATH_PI = math.pi
 @onnx_impl((aten.erf.default, aten.special_erf.default), opset_introduced=18)
 def aten_special_erf(op: TranslationContext, self: ir.Value) -> ir.Value:
     """erf(Tensor self) -> Tensor"""
+    (self,) = _promotion.promote(op, self, kind="INT_TO_FLOAT")
     return op.Erf(self)
 
 
 @onnx_impl((aten.erfc.default, aten.special_erfc.default), opset_introduced=18)
 def aten_special_erfc(op: TranslationContext, self: ir.Value) -> ir.Value:
     """erfc(Tensor self) -> Tensor"""
+    (self,) = _promotion.promote(op, self, kind="INT_TO_FLOAT")
     return op.Sub(1, op.Erf(self))
 
 
@@ -43,6 +45,7 @@ def aten_special_erfcx(op: TranslationContext, self: ir.Value) -> ir.Value:
 @onnx_impl((aten.expm1.default, aten.special_expm1.default), opset_introduced=18)
 def aten_special_expm1(op: TranslationContext, self: ir.Value) -> ir.Value:
     """special_expm1(Tensor self) -> Tensor"""
+    (self,) = _promotion.promote(op, self, kind="INT_TO_FLOAT")
     return op.Sub(op.Exp(self), 1)
 
 
@@ -68,6 +71,7 @@ def aten_special_log_softmax(
 @onnx_impl((aten.special_sinc.default, aten.sinc.default), opset_introduced=18)
 def aten_special_sinc(op: TranslationContext, self: ir.Value) -> ir.Value:
     """special_sinc(Tensor self) -> Tensor"""
+    (self,) = _promotion.promote(op, self, kind="INT_TO_FLOAT")
     # This computes the normalized sinc, where the input is multiplied by pi.
     # https://pytorch.org/docs/stable/special.html#torch.special.sinc
     pi_self = op.Mul(self, _MATH_PI)
@@ -85,6 +89,7 @@ def aten_special_xlogy(
     op: TranslationContext, self: ir.Value, other: ir.Value
 ) -> ir.Value:
     """special_xlogy(Tensor self, Tensor other) -> Tensor"""
+    self, other = _promotion.promote(op, self, other, kind="INT_TO_FLOAT")
     if not isinstance(self, ir.Value):
         self = op.CastLike(self, other)
     if not isinstance(other, ir.Value):

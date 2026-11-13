@@ -12,7 +12,11 @@ import onnx_ir as ir
 import torch
 from torch.onnx._internal.exporter._ir_builder import GraphBuilder, TranslationContext
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
-from torch.onnx._internal.exporter._torchlib.ops import common as common_ops, core
+from torch.onnx._internal.exporter._torchlib.ops import (
+    _promotion,
+    common as common_ops,
+    core,
+)
 
 
 if TYPE_CHECKING:
@@ -549,6 +553,7 @@ def aten_heaviside(
     op: TranslationContext, self: ir.Value, values: ir.Value
 ) -> ir.Value:
     """heaviside(Tensor self, Tensor values) -> Tensor"""
+    self, values = _promotion.promote(op, self, values)
 
     zero = op.CastLike(0, self)
     one = op.CastLike(1, self)
@@ -791,6 +796,7 @@ def aten_polar(op: TranslationContext, abs: ir.Value, angle: ir.Value) -> ir.Val
 @onnx_impl((aten.prelu.default, aten._prelu_kernel.default))
 def aten_prelu(op: TranslationContext, self: ir.Value, weight: ir.Value) -> ir.Value:
     """prelu(Tensor self, Tensor weight) -> Tensor"""
+    self, weight = _promotion.promote(op, self, weight)
 
     rank = len(common_ops.require_shape(op, self))
     if rank == 0:
@@ -907,6 +913,7 @@ def aten_selu(op: TranslationContext, self: ir.Value) -> ir.Value:
 @onnx_impl(aten.sigmoid.default)
 def aten_sigmoid(op: TranslationContext, self: ir.Value) -> ir.Value:
     """sigmoid(Tensor self) -> Tensor"""
+    (self,) = _promotion.promote(op, self, kind="INT_TO_FLOAT")
 
     return op.Sigmoid(self)
 
