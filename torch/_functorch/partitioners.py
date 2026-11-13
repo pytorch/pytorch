@@ -3297,6 +3297,7 @@ def get_default_op_list() -> OpTypes:
         aten.unsqueeze,
         aten.rsub,
         aten._to_copy,
+        aten._to_dtype_rounded,
     ]
     recomputable_view_ops = [aten.squeeze, aten.unsqueeze, aten.alias]
     recomputable_view_ops += [
@@ -3317,6 +3318,7 @@ def get_default_op_list() -> OpTypes:
         prims.prepare_softmax_online,
         aten.clone,
         aten._to_copy,
+        aten._to_dtype_rounded,
         aten.full_like,
         prims.var,
         prims.sum,

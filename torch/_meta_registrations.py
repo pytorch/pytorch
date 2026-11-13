@@ -41,7 +41,7 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch._refs import _broadcast_shapes, _maybe_broadcast
+from torch._refs import _broadcast_shapes, _check_to_dtype_rounded, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
 from torch.utils import _pytree as pytree
 from torch.utils._quantize_tensor_validation import (
@@ -199,6 +199,30 @@ def meta_take(self, index):
 @out_wrapper()
 def meta__standard_gamma(self, generator=None):
     return torch.empty_like(self)
+
+
+# The C++ meta kernel uses TensorIterator, which does not support symbolic
+# shapes.
+@register_meta(aten._to_dtype_rounded.default)
+def meta__to_dtype_rounded(self, dtype, round, *, memory_format=None):
+    _check_to_dtype_rounded(self, dtype, round)
+    return torch.empty_like(
+        self, dtype=dtype, memory_format=memory_format or torch.preserve_format
+    )
+
+
+@register_meta(aten._to_dtype_rounded.out)
+def meta__to_dtype_rounded_out(self, dtype, round, *, memory_format=None, out):
+    _check_to_dtype_rounded(self, dtype, round)
+    torch._check(
+        out.dtype == dtype,
+        lambda: f"_to_dtype_rounded: expected out to have dtype {dtype}, but got {out.dtype}",
+    )
+    # Like TensorIterator, give a resized out the stride order of self.
+    if _resize_output_check(out, self.shape):
+        out.resize_(self.shape)
+        out.as_strided_(self.shape, utils.compute_elementwise_output_strides(self))
+    return out
 
 
 @register_meta(
