@@ -1401,6 +1401,14 @@ class Identity(sympy.Function):
 
     precedence = 10
 
+    @classmethod
+    def eval(cls, arg: sympy.Expr) -> sympy.Expr | None:
+        # Nothing left to protect from expansion, and an Identity(Integer) term
+        # inside an Add is not comparable, which breaks Min/Max.
+        if isinstance(arg, sympy.Integer):
+            return arg
+        return None
+
     def __repr__(self) -> str:  # type: ignore[override]
         return f"Identity({self.args[0]})"
 
