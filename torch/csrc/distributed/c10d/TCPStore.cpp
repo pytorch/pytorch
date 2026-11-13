@@ -294,6 +294,10 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   // Resolved once for the server and connect retries. clone() reuses the
   // resolved certificate paths or PSK value but builds a new context.
   auto tls = detail::tlsConfig(opts);
+  C10D_INFO(
+      "TCPStore selected transport: {}",
+      !tls.enabled() ? "plaintext"
+                     : (tls.psk.empty() ? "certificate TLS" : "PSK TLS"));
   // Checks the platform, OpenSSL and files before the backend.
   auto clientTls = detail::TLSContext::fromConfig(tls, /*isServer=*/false);
   if (opts.isServer) {
@@ -327,6 +331,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
       serverOpts.tlsKey = tlsKey_;
       serverOpts.tlsCa = tlsCa_;
       serverOpts.tlsPsk = tlsPsk_;
+      serverOpts.tlsPskFile.reset();
       server_ = detail::TCPServer::start(serverOpts);
       // server successfully started
       C10D_DEBUG("The server has started on port = {}.", server_->port());

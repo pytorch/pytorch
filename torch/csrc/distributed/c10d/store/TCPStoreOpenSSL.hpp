@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 #include <ATen/DynamicLibrary.h>
 #include <c10/util/Exception.h>
@@ -19,6 +20,8 @@ using PskFindSessionCallback =
     int (*)(void*, const unsigned char*, size_t, void**);
 
 #define TCPSTORE_OPENSSL_FUNCTIONS(_)                                        \
+  _(unsigned long, OpenSSL_version_num, ())                                  \
+  _(const char*, OpenSSL_version, (int))                                     \
   _(const void*, TLS_method, ())                                             \
   _(void*, SSL_CTX_new, (const void*))                                       \
   _(void, SSL_CTX_free, (void*))                                             \
@@ -33,6 +36,7 @@ using PskFindSessionCallback =
   _(int, SSL_CTX_set_num_tickets, (void*, size_t))                           \
   _(uint64_t, SSL_CTX_set_options, (void*, uint64_t))                        \
   _(uint64_t, SSL_CTX_clear_options, (void*, uint64_t))                      \
+  _(int, SSL_CTX_set_cipher_list, (void*, const char*))                      \
   _(int, SSL_CTX_set_ciphersuites, (void*, const char*))                     \
   _(void,                                                                    \
     SSL_CTX_set_psk_use_session_callback,                                    \
@@ -55,6 +59,7 @@ using PskFindSessionCallback =
   _(void, SSL_set_connect_state, (void*))                                    \
   _(void, SSL_set_accept_state, (void*))                                     \
   _(int, SSL_shutdown, (void*))                                              \
+  _(int, SSL_is_init_finished, (const void*))                                \
   _(int, SSL_do_handshake, (void*))                                          \
   _(int, SSL_read, (void*, void*, int))                                      \
   _(int, SSL_peek, (void*, void*, int))                                      \
@@ -78,7 +83,7 @@ struct OpenSSL {
 
   OpenSSL() {
     std::string errors;
-    for (const char* name : {"libssl.so.3", "libssl.so.1.1", "libssl.so"}) {
+    for (const char* name : {"libssl.so.3", "libssl.so.1.1"}) {
       try {
         // libcrypto symbols resolve through this libssl's own dependency, so
         // the versions always match.
@@ -87,6 +92,12 @@ struct OpenSSL {
   name = reinterpret_cast<ret(*) args>(lib.sym(#name));
         TCPSTORE_OPENSSL_FUNCTIONS(TCPSTORE_LOAD)
 #undef TCPSTORE_LOAD
+        auto version = OpenSSL_version(0);
+        if (OpenSSL_version_num() < 0x10101000L || version == nullptr ||
+            std::string_view(version).find("OpenSSL ") != 0) {
+          errors += "; unsupported OpenSSL version or vendor";
+          continue;
+        }
         // Only a fully validated candidate gets a process-lifetime reference.
         at::DynamicLibrary keepAlive(name, nullptr, /*leak_handle=*/true);
         return;
@@ -96,8 +107,7 @@ struct OpenSSL {
     }
     C10_THROW_ERROR(
         DistStoreError,
-        "TCPStore TLS requires OpenSSL >= 1.1.1 (libssl.so.3, libssl.so.1.1 or "
-        "libssl.so)" +
+        "TCPStore TLS requires OpenSSL >= 1.1.1 (libssl.so.3 or libssl.so.1.1)" +
             errors);
   }
 };
