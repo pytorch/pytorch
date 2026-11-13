@@ -249,7 +249,6 @@
   "test/dynamo/test_aot_compile.py",
   "test/dynamo/test_autograd_function.py",
   "test/dynamo/test_backends.py",
-  "test/dynamo/test_backward_higher_order_ops.py",
   "test/dynamo/test_base_hop.py",
   "test/dynamo/test_base_output.py",
   "test/dynamo/test_benchmark_runner.py",
