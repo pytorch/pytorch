@@ -575,7 +575,10 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(result.shape, weight.shape)
         self.assertEqual(result.device, torch.device("cpu"))
 
-    def test_parameter_subclass_with_torch_dispatch_gets_subclass_dispatch(self):
+    @fake_tensor_modes
+    def test_parameter_subclass_with_torch_dispatch_gets_subclass_dispatch(
+        self, mode_cls
+    ):
         dispatch_calls = []
         fake_impl_calls = []
 
@@ -606,12 +609,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                 return NotImplemented
 
         weight = DispatchParameter(torch.randn(10, 10))
-        with FakeTensorMode():
+        with mode_cls() as mode:
             result = torch.ops._torch_testing.fake_tensor_dispatch_parameter_subclass(
                 weight
             )
 
         self.assertTrue(is_fake_tensor(result))
+        self.assertIs(maybe_get_fake_mode(result), mode)
         self.assertEqual(result.shape, weight.shape)
         self.assertEqual(result.device, torch.device("cpu"))
         self.assertEqual(
@@ -2478,6 +2482,22 @@ def forward(self, x_1):
                     self.assertIs(op(), destination)
                 self.assertEqual(destination.device, torch.device(input_device))
                 self.assertIs(maybe_get_fake_mode(destination), mode)
+
+    @fake_tensor_modes
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize("layout", [torch.sparse_coo, torch.sparse_csr])
+    def test_sparse_metadata_without_backend_kernel(self, mode_cls, layout):
+        mode = mode_cls()
+        meta = torch.eye(2).to_sparse(layout=layout).to("meta")
+        sparse = self.fake_from_meta(mode, meta, "privateuseone:0")
+        for context in (contextlib.nullcontext(), mode):
+            with context:
+                self.assertEqual(sparse.sparse_dim(), 2)
+                self.assertEqual(sparse.dense_dim(), 0)
+                if layout == torch.sparse_coo:
+                    self.assertTrue(sparse.is_coalesced())
+        self.assertEqual(sparse.device, torch.device("privateuseone:0"))
+        self.assertIs(maybe_get_fake_mode(sparse), mode)
 
     @fake_tensor_modes
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
@@ -5916,6 +5936,74 @@ class TestFakeTensorPreferDeviceType(TestCase):
                 self.assertEqual(result.device.type, "cpu")
                 self.assertTrue(is_fake_tensor(result))
 
+    @torch._functorch.config.patch(fake_tensor_prefer_device_type=None)
+    @fake_tensor_modes
+    @parametrize("reverse", [False, True])
+    @parametrize(
+        "devices,preference,expected_device",
+        [
+            (("cuda:0", "cuda:1"), "cuda", None),
+            (("cuda:0", "cuda:1"), "uda", None),
+            (("cpu", "cuda:1"), "cuda", "cuda:1"),
+            (("cpu", "cuda:1"), "cpu", "cpu"),
+            (("cpu", "cuda:1"), "uda", "cuda:1"),
+            (("cpu", "cuda:1"), "cp", "cpu"),
+            (("cpu", "cuda:1"), "xpu", None),
+            (("cpu", "cuda:1"), "u", None),
+            (("cpu", "cuda:1"), "", None),
+            (("cpu", "cuda:1"), "cuda:1", None),
+        ],
+    )
+    def test_fake_tensor_prefer_device_type_fallback(
+        self, mode_cls, reverse, devices, preference, expected_device
+    ):
+        # Synthetic accelerator indices must not initialize GPU contexts.
+        with (
+            patch("torch._subclasses.fake_tensor.init_gpu_context", lambda _: None),
+            patch.object(mode_cls, "avoid_device_init", True),
+            torch.library._scoped_library("_test_fake_device_conflict", "DEF") as lib,
+        ):
+            mode = mode_cls()
+            a, b = (
+                mode.fake_tensor_converter.from_meta_and_device(
+                    mode, torch.empty(2, 3, device="meta"), torch.device(device)
+                )
+                for device in devices
+            )
+            if reverse:
+                a, b = b, a
+
+            lib.define("resolve(Tensor a, Tensor b) -> Tensor")
+            # A fresh Meta output forces common-device resolution in the fallback.
+            lib.impl("resolve", lambda a, b: torch.empty(2, 3, device="meta"), "Meta")
+            op = torch.ops._test_fake_device_conflict.resolve.default
+
+            def check(expected):
+                if expected is None:
+                    msg = re.escape(
+                        f"found at least two devices, {a.device} and {b.device}!"
+                    )
+                    with self.assertRaisesRegex(
+                        FakeTensorDeviceMismatchError, msg
+                    ) as exc:
+                        op(a, b)
+                    self.assertIs(exc.exception.func, op)
+                    self.assertEqual(exc.exception.common_device, a.device)
+                    self.assertEqual(exc.exception.device, b.device)
+                else:
+                    result = op(a, b)
+                    self.assertEqual(result.device, torch.device(expected))
+                    self.assertEqual(result.shape, (2, 3))
+                    self.assertIs(maybe_get_fake_mode(result), mode)
+
+            with mode:
+                check(None)
+                with torch._functorch.config.patch(
+                    fake_tensor_prefer_device_type=preference
+                ):
+                    check(expected_device)
+                check(None)
+
 
 class TestFakeTensorPreferDeviceTypeDevice(TestCase):
     r"""Accelerator-only TestFakeTensorPreferDeviceType cases (see except_for below)."""
@@ -6803,6 +6891,49 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertTrue(dst.requires_grad)
         self.assertFalse(src.requires_grad)
         self.assertFalse(torch._C._in_kernel_invocation())
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @fake_tensor_modes
+    @parametrize(
+        "kind", ["tensor", "parameter", "parameter_subclass", "tensor_subclass"]
+    )
+    def test_fake_fallback_subclasses_without_python_dispatch(self, mode_cls, kind):
+        class ParameterSubclass(torch.nn.Parameter):
+            pass
+
+        class TensorSubclass(torch.Tensor):
+            pass
+
+        tensor_cls = {
+            "tensor": torch.Tensor,
+            "parameter": torch.nn.Parameter,
+            "parameter_subclass": ParameterSubclass,
+            "tensor_subclass": TensorSubclass,
+        }[kind]
+        real = torch.empty(2, 3, device="cpu")
+        if tensor_cls is not torch.Tensor:
+            real = torch.Tensor._make_subclass(tensor_cls, real)
+        self.assertIs(type(real).__torch_dispatch__, torch.Tensor.__torch_dispatch__)
+        self.assertFalse(torch._C._dispatch_keys(real).has(torch._C.DispatchKey.Python))
+        mode = mode_cls(allow_non_fake_inputs=True)
+        fake = mode.from_tensor(torch.empty(2, 3, device="cpu"))
+        with mode, torch._C.DisableTorchFunctionSubclass():
+            if kind == "tensor_subclass":
+                if mode_cls is CppFakeTensorMode:
+                    error, msg = (
+                        RuntimeError,
+                        "does not support converting tensor subclass TensorSubclass",
+                    )
+                else:
+                    error, msg = TypeError, "Multiple dispatch failed"
+                with self.assertRaisesRegex(error, msg):
+                    torch.add(real, fake)
+            else:
+                result = torch.add(real, fake)
+                self.assertTrue(is_fake_tensor(result))
+                self.assertIs(maybe_get_fake_mode(result), mode)
+                self.assertEqual(result.shape, (2, 3))
+                self.assertEqual(result.device, torch.device("cpu"))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
