@@ -7767,6 +7767,7 @@ class ShapeEnvAxiomCacheInvalidationTest(TestCase):
         with self.subTest("simplified result"):
             self.assertEqual(shape_env.simplify(expr), difference)
 
+    @skipIfTorchDynamo("directly exercises ShapeEnv caches")
     def test_guard_updates_floor_div_result(self):
         shape_env = ShapeEnv()
         a = create_symint(shape_env, 4, duck=False)
