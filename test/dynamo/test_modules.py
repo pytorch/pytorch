@@ -1851,6 +1851,52 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(torch.allclose(ref3, res3))
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
+    def test_registered_attribute_presence_invalidation(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                try:
+                    self.value
+                except AttributeError:
+                    return x
+                return x + 1
+
+        model = Model()
+        model.register_buffer("value", None)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(model, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(compiled(x), x + 1)
+        del model._buffers["value"]
+        self.assertEqual(compiled(x), x)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_registered_attribute_lookup_precedence(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("value", torch.tensor(2.0))
+                self._modules["value"] = torch.nn.Identity()
+
+            def forward(self, x):
+                value = self.value
+                return value(x) + 7 if isinstance(value, torch.nn.Module) else x + value
+
+        model = Model()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(model, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(counter.frame_count, 1)
+        model._parameters["value"] = torch.nn.Parameter(torch.tensor(5.0))
+        self.assertEqual(compiled(x), x + 5)
+        del model._parameters["value"]
+        self.assertEqual(compiled(x), x + 2)
+        del model._buffers["value"]
+        self.assertEqual(compiled(x), x + 7)
+        self.assertEqual(counter.frame_count, 3)
+
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
