@@ -10295,6 +10295,9 @@ class TestNNDeviceType(NNTestCase):
         # and for uint8 whenever the AVX2/NEON uint8 kernels do not apply
         # (e.g. num_channels > 4 on AVX2, so num_channels == 5 reaches it on
         # x86 CI). The other configurations check the non-separable kernels.
+        # The single output pixel cases also cover the AVX2 uint8 kernel, which
+        # mixed up its packed and unpacked layouts when the output spatial dims
+        # are all 1 (contiguous and channels_last are indistinguishable then).
         kwargs = dict(mode=mode, align_corners=False, antialias=antialias)
 
         def to_mf(t):
@@ -10327,7 +10330,8 @@ class TestNNDeviceType(NNTestCase):
             (2, 1, 4, 1),  # output width 1, upsample height (the reported case)
             (5, 1, 3, 1),  # output width 1, downsample height
             (1, 1, 3, 1),  # single input pixel column
-            (3, 1, 1, 1),  # single output pixel
+            (3, 1, 1, 1),  # single output pixel, vertical pass only
+            (1, 3, 1, 1),  # single output pixel, horizontal pass only
             (1, 5, 1, 3),  # output height 1, horizontal pass only
             (4, 3, 2, 1),  # two passes, width 1 intermediate for the vertical pass
             (3, 4, 1, 2),  # two passes, output height 1
