@@ -173,6 +173,9 @@ struct ConcretePyInterpreterVTable final
       const std::string& msg) const override;
   bool fake_is_unrecognized_subclass(
       const c10::TensorImpl* self) const override;
+  bool fake_has_plain_tensor_type(const c10::TensorImpl* self) const override;
+  bool fake_avoid_device_init(
+      const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
   bool fake_try_decomp(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
@@ -199,7 +202,8 @@ struct ConcretePyInterpreterVTable final
       PyObject* real) const override;
   c10::intrusive_ptr<c10::TensorImpl> to_meta_tensor(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
-      const c10::intrusive_ptr<c10::TensorImpl>& real) const override;
+      const c10::intrusive_ptr<c10::TensorImpl>& real,
+      bool make_constant) const override;
   bool allow_non_fake_inputs(
       const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
   PyObject* fake_run_real_op(
@@ -1282,6 +1286,22 @@ bool ConcretePyInterpreterVTable::fake_is_unrecognized_subclass(
       get_check_for_subclass_arg()(py::handle(obj)).cast<bool>();
 }
 
+bool ConcretePyInterpreterVTable::fake_has_plain_tensor_type(
+    const c10::TensorImpl* self) const {
+  py::gil_scoped_acquire gil;
+  PyObject* obj = self->pyobj_slot()->load_pyobj();
+  return obj == nullptr ||
+      Py_TYPE(obj) == reinterpret_cast<PyTypeObject*>(THPVariableClass);
+}
+
+bool ConcretePyInterpreterVTable::fake_avoid_device_init(
+    const std::shared_ptr<c10::FakeTensorMode>& mode) const {
+  py::gil_scoped_acquire gil;
+  return fake_tensor::getCppFakeTensorModePyObj(mode)
+      .attr("avoid_device_init")
+      .cast<bool>();
+}
+
 // Try a registered Python decomposition for op.
 //
 // This mirrors the decomposition-selection block in
@@ -1512,7 +1532,8 @@ bool ConcretePyInterpreterVTable::fake_infer_from_real_out(
 // (FakeTensorConverter.from_real_tensor).
 c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     const std::shared_ptr<c10::FakeTensorMode>& mode,
-    const c10::intrusive_ptr<c10::TensorImpl>& real_impl) const {
+    const c10::intrusive_ptr<c10::TensorImpl>& real_impl,
+    bool make_constant) const {
   py::gil_scoped_acquire gil;
   at::Tensor real(real_impl);
   py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
@@ -1531,7 +1552,8 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     // in_kernel_invocation_manager (as its set_ for a shared storage does).
     c10::impl::ExcludeDispatchKeyGuard exclude_fake(
         {c10::DispatchKeySet(c10::DispatchKey::Fake)});
-    auto obj = converter.attr("from_real_tensor")(py_mode, real);
+    auto obj = converter.attr("from_real_tensor")(
+        py_mode, real, py::arg("make_constant") = make_constant);
     fake_tensor = py::cast<at::Tensor>(std::move(obj));
   }
   return fake_tensor.unsafeReleaseIntrusivePtr();
