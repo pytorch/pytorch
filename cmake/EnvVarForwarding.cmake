@@ -28,7 +28,7 @@
 #                            in pyproject.toml
 #   FLASH_ATTENTION_MAX_JOBS max concurrent FlashAttention CUDA compilations;
 #                            unset by default, set by CUDA CI based on runner memory
-#   PYTORCH_HIP_OFFLOAD_JOBS device offloading threads per HIP compilation
+#   TORCH_HIP_OFFLOAD_JOBS   device offloading threads per HIP compilation
 #                            (default 1, or jobserver to use the make jobserver)
 #   CC / CXX / CFLAGS        compiler and flags; read by CMake / scikit-build-core
 #                            directly (CFLAGS also applies to C++ unless CXXFLAGS
@@ -150,6 +150,7 @@ set(_ENV_PASSTHROUGH
   CUDNN_ROOT
   EXPERIMENTAL_SINGLE_THREAD_POOL
   FLASH_ATTENTION_MAX_JOBS
+  TORCH_HIP_OFFLOAD_JOBS
   INSTALL_TEST
   INTEL_MKL_DIR
   INTEL_OMP_DIR
@@ -163,7 +164,6 @@ set(_ENV_PASSTHROUGH
   Numa_LIBRARIES
   ONNX_ML
   ONNX_NAMESPACE
-  PYTORCH_HIP_OFFLOAD_JOBS
   ATEN_THREADING
   WERROR
   OPENSSL_ROOT_DIR

@@ -1096,12 +1096,12 @@ if(USE_ROCM)
     # Architecture is handled by CMAKE_HIP_ARCHITECTURES (set in LoadHIP.cmake).
     string(APPEND CMAKE_HIP_FLAGS " --offload-compress -std=c++20")
     # Set thread/job count for device offloading tasks during HIP compilation.
-    set(PYTORCH_HIP_OFFLOAD_JOBS "1" CACHE STRING
+    set(TORCH_HIP_OFFLOAD_JOBS "1" CACHE STRING
         "Number of device offloading threads per HIP compilation, or 'jobserver'")
-    if(NOT PYTORCH_HIP_OFFLOAD_JOBS STREQUAL "1")
-      string(APPEND CMAKE_HIP_FLAGS " --offload-jobs=${PYTORCH_HIP_OFFLOAD_JOBS}")
+    if(NOT TORCH_HIP_OFFLOAD_JOBS STREQUAL "1")
+      string(APPEND CMAKE_HIP_FLAGS " --offload-jobs=${TORCH_HIP_OFFLOAD_JOBS}")
     endif()
-    message(STATUS "Setting --offload-jobs for HIP to: ${PYTORCH_HIP_OFFLOAD_JOBS}")
+    message(STATUS "Setting --offload-jobs for HIP to: ${TORCH_HIP_OFFLOAD_JOBS}")
     # Pass device library path for theRock nightly builds
     if(DEFINED ENV{HIP_DEVICE_LIB_PATH})
       file(TO_CMAKE_PATH "$ENV{HIP_DEVICE_LIB_PATH}" _hip_device_lib_path)
