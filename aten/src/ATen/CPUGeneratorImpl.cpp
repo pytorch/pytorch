@@ -1,5 +1,5 @@
 #include <ATen/CPUGeneratorImpl.h>
-#include <ATen/Utils.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/core/MT19937RNGEngine.h>
 #include <algorithm>
 

@@ -8,7 +8,13 @@ import unittest
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    make_dynamo_test,
+    parametrize,
+    subtest,
+)
 
 
 class _Color(enum.Enum):
@@ -20,7 +26,18 @@ class _OpaqueReprDescriptorObject:
     __repr__ = str.upper
 
 
+class _SetSubclass(set):
+    pass
+
+
+class _FrozenSetSubclass(frozenset):
+    pass
+
+
+@instantiate_parametrized_tests
 class TpReprTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_dynamo_test
     def test_int_repr(self):
         assert repr(3) == "3"  # noqa: S101
@@ -124,8 +141,8 @@ class TpReprTests(TestCase):
         obj = BadRepr()
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         out = compiled(x, obj)
+        self.assertTrue(type(out) is str)
         self.assertEqual(fn(x, obj), out)
-        self.assertIn("__repr__ returned non-string", out)
 
     def test_dunder_repr_returning_non_string_raises(self):
         class BadRepr:
@@ -424,6 +441,25 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=False)
         self.assertEqual(compiled(), fn())
 
+    def test_self_ref_userlist_repr(self):
+        def fn():
+            l = collections.UserList([1, 2])
+            l.append(l)
+            return repr(l)
+
+        # fullgraph=True: a graph break would run repr() eagerly and hide a wrong result.
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
+    def test_self_ref_userdict_repr(self):
+        def fn():
+            d = collections.UserDict()
+            d["self"] = d
+            return repr(d)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
     def test_mutual_ref_repr(self):
         def fn():
             a = [1]
@@ -433,6 +469,32 @@ class TpReprTests(TestCase):
             return repr(a)
 
         compiled = torch.compile(fn, backend="eager", fullgraph=False)
+        self.assertEqual(compiled(), fn())
+
+    # A sourceless set subclass built in the graph loses its type name on the
+    # outer repr: Dynamo prints {SetSubclass(...)} instead of SetSubclass({...}).
+    @parametrize(
+        "set_type",
+        (
+            set,
+            frozenset,
+            subtest(_SetSubclass, decorators=[unittest.expectedFailure]),
+            _FrozenSetSubclass,
+        ),
+        name_fn=lambda t: t.__name__.lstrip("_"),
+    )
+    def test_self_ref_set_repr(self, set_type):
+        class Wrapper:
+            def __repr__(self):
+                return repr(self.value)
+
+        def fn():
+            w = Wrapper()
+            s = set_type([w])
+            w.value = s
+            return repr(s)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(), fn())
 
     def test_str_of_id_of_compile_time_object(self):
@@ -459,7 +521,7 @@ class TpReprTests(TestCase):
     def test_repr_of_hash_of_compile_time_object(self):
         # hash() returning id(self) on a sourceless object yields a
         # FakeIdVariable (HASH kind); repr() must route through its
-        # repr_impl and mirror int.__repr__ (a decimal string).
+        # tp_repr_impl and mirror int.__repr__ (a decimal string).
         class Obj:
             def __hash__(self):
                 return id(self)

@@ -6,21 +6,24 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/refcount_contention.h>
 #include <cstring>
 
 PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
   AT_ASSERT(name.length() < DTYPE_NAME_LEN);
   auto type = &THPDtypeType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPDtype*>(self.get());
   self_->scalar_type = scalar_type;
   std::strncpy(self_->name, name.c_str(), DTYPE_NAME_LEN);
+  torch::utils::set_immortal_if_possible(self.get());
   return self.release();
 }
 
-static PyObject* THPDtype_is_floating_point(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_is_floating_point(
+    THPDtype* self,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   if (at::isFloatingType(self->scalar_type)) {
     Py_RETURN_TRUE;
@@ -30,14 +33,14 @@ static PyObject* THPDtype_is_floating_point(THPDtype* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDtype_itemsize(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_itemsize(THPDtype* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   return THPUtils_packUInt64(
       scalarTypeToTypeMeta(self->scalar_type).itemsize());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDtype_is_complex(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_is_complex(THPDtype* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   if (at::isComplexType(self->scalar_type)) {
     Py_RETURN_TRUE;
@@ -47,7 +50,7 @@ static PyObject* THPDtype_is_complex(THPDtype* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDtype_is_signed(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_is_signed(THPDtype* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   if (at::isSignedType(self->scalar_type)) {
     Py_RETURN_TRUE;
@@ -76,7 +79,7 @@ static PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDtype_to_real(PyObject* _self, PyObject* noargs) {
+static PyObject* THPDtype_to_real(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto* self = reinterpret_cast<THPDtype*>(_self);
   auto scalar_type = self->scalar_type;
@@ -87,7 +90,7 @@ static PyObject* THPDtype_to_real(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDtype_to_complex(PyObject* _self, PyObject* noargs) {
+static PyObject* THPDtype_to_complex(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto* self = reinterpret_cast<THPDtype*>(_self);
   auto scalar_type = self->scalar_type;
@@ -185,15 +188,11 @@ PyTypeObject THPDtypeType = {
 void THPDtype_init(PyObject* module) {
   // Set __module__ = "torch" so pickle can find dtype instances without
   // scanning sys.modules. See https://github.com/pytorch/pytorch/issues/65077
-  if (PyModule_AddType(module, &THPDtypeType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPDtypeType) >= 0);
   auto torch_name = THPUtils_packString("torch");
-  if (!torch_name)
-    throw python_error();
-  if (PyDict_SetItemString(THPDtypeType.tp_dict, "__module__", torch_name) <
-      0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_name);
+  TORCH_CHECK_PYTHON(
+      PyDict_SetItemString(THPDtypeType.tp_dict, "__module__", torch_name) >=
+      0);
   PyType_Modified(&THPDtypeType);
 }

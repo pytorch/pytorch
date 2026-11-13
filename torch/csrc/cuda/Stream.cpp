@@ -1,14 +1,9 @@
 #include <pybind11/pybind11.h>
-#include <torch/csrc/Device.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 
-#include <c10/cuda/CUDAGuard.h>
-
-#include <cuda_runtime_api.h>
 #include <structmember.h>
 
 PyObject* THCPStreamClass = nullptr;
@@ -102,21 +97,23 @@ static void THCPStream_dealloc(THCPStream* self) {
   THPStream_dealloc_common(reinterpret_cast<THPStream*>(self));
 }
 
-static PyObject* THCPStream_get_cuda_stream(THCPStream* self, void* unused) {
+static PyObject* THCPStream_get_cuda_stream(
+    THCPStream* self,
+    void* /*unused*/) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(self->cuda_stream.stream());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPStream_get_priority(THCPStream* self, void* unused) {
+static PyObject* THCPStream_get_priority(THCPStream* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(self->cuda_stream.priority());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THCPStream_priority_range(
-    PyObject* _unused,
-    PyObject* noargs) {
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto [least_priority, greatest_priority] =
       at::cuda::CUDAStream::priority_range();
@@ -124,14 +121,14 @@ static PyObject* THCPStream_priority_range(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPStream_query(PyObject* _self, PyObject* noargs) {
+static PyObject* THCPStream_query(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = (THCPStream*)_self;
   return PyBool_FromLong(self->cuda_stream.query());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPStream_synchronize(PyObject* _self, PyObject* noargs) {
+static PyObject* THCPStream_synchronize(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     auto self = (THCPStream*)_self;
@@ -218,12 +215,9 @@ void THCPStream_init(PyObject* module) {
   Py_INCREF(THPStreamClass);
   THCPStreamType.tp_base = THPStreamClass;
   THCPStreamClass = (PyObject*)&THCPStreamType;
-  if (PyType_Ready(&THCPStreamType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THCPStreamType) >= 0);
   Py_INCREF(&THCPStreamType);
-  if (PyModule_AddObject(
-          module, "_CudaStreamBase", (PyObject*)&THCPStreamType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
+          module, "_CudaStreamBase", (PyObject*)&THCPStreamType) >= 0);
 }
