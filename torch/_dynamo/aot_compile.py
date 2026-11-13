@@ -657,16 +657,11 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     # G['D']['a'] certifies that one item, while the name a load can substitute
     # is D, whose every other key the graph would then read live and unchecked.
     # get_global_source_name would walk such a source up to D.
-    # guard_on_key_order is deliberately not unioned in, even though a
-    # dict-order check roots a global: guard_filter_fn never prunes that set, so
-    # a name only it contributes is precisely a name no surviving guard checks
-    # the value of. On the default aot_compile filter, which drops every global
-    # guard, an iterated global dict is exactly that shape.
-    # Narrower than the serialized global_scope for the same reason: the
-    # serializer also fills that from a ShapeEnvSource guard's shape_env_sources
-    # and from DUPLICATE_INPUT's source_b -- names whose value no guard checks,
-    # and which DUPLICATE_INPUT records before its optimizer-source early return,
-    # so an optimizer-rooted pair records one with no guard installed at all.
+    # Order roots alone add no names: they select dictionary manager types but
+    # do not certify every value. A root with its own kept GlobalSource guard
+    # is still included below. Serialized global_scope also carries alias roots,
+    # shape_env_sources and DUPLICATE_INPUT's source_b, which need not have a value guard.
+    # DUPLICATE_INPUT can even record a root before its optimizer-source early return.
     from .source import GlobalSource
 
     return {
@@ -677,12 +672,13 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
 
 
 def _recorded_guard_globals(guards_state: "GuardsState") -> set[str]:
-    """Every global name the kept guards read at check time."""
-    # Wider than their originating_sources: the serialized global_scope is the
-    # serializer's own record of the names the kept guards resolve, so it also
-    # carries a DUPLICATE_INPUT's source_b and a cpp-form SHAPE_ENV guard's
-    # shape_env_sources. A SHAPE_ENV guard installed as a Python lambda reads
-    # its G['NAME'] operands from the same scope, and none of them reaches
+    """Global names required to rebuild or check the retained guard tree."""
+    # Beyond the guards' own originating_sources, global_scope carries retained
+    # order roots used to select manager types during rebuilding, even if no
+    # runtime guard reads the root directly. It also carries a DUPLICATE_INPUT's
+    # source_b and a cpp-form SHAPE_ENV guard's shape_env_sources. A SHAPE_ENV
+    # guard installed as a Python lambda reads its G['NAME'] operands from the
+    # same scope, and none of them reaches
     # global_scope -- shape_env_sources is filled from the cpp code parts alone
     # -- so they are recovered from the lambda's own text.
     # A filter that drops SHAPE_ENV drops them too: the builder records
@@ -718,8 +714,8 @@ class AOTCompiledFunction:
     # ", or pass ... a guard_globals= scope", so every reason must end in
     # "; <imperative advice>" for the two verb phrases to read as parallel.
     _forward_not_resolved_reason: str | None = None
-    # Whether a kept guard is rooted at a user global; False until a load
-    # decides it. Arms the live-value pick, and deserialize's fallback warning.
+    # Whether rebuilding or checking the retained tree needs a user global.
+    # Arms the live-value pick and deserialize's fallback warning at load.
     _has_global_guards: bool = dataclasses.field(init=False, default=False)
     # The globals a kept guard's own source IS (not one reached only through a
     # sub-path of it), armed only for a supplied live scope. _serve re-takes
@@ -775,7 +771,7 @@ class AOTCompiledFunction:
         if self._artifacts.guard_manager is None:
             guards_state = load_guards_state(self._artifacts.guards_state)
             output_graph = guards_state.output_graph
-            # The wide set: every name the kept guards read, which also gates the
+            # The wide set: every name needed to rebuild or check the tree, which gates the
             # seeding below. Enough to arm the pick, but not to decide what it
             # takes -- see _guard_source_globals. The builtins dict key rides
             # along whether or not a guard reads it, so it is not evidence.
@@ -851,9 +847,9 @@ class AOTCompiledFunction:
         # Dynamo mints __import_* aliases, a __builtins_dict___N key and the
         # ___unnamed_scope_<id>_c<n> key of an inlined frame's globals into the
         # TRACING process's globals and roots guards at them; a process that only
-        # loads never traced. Each name is gated on the artifact showing a kept
-        # guard reads it -- the aliases and the unnamed-scope key on every name
-        # the kept guards read, the builtins key on the deserialized guards' own
+        # loads never traced. Each name is gated on the artifact needing it to
+        # rebuild or check its tree -- the aliases and the unnamed-scope key on
+        # every recorded name, the builtins key on the deserialized guards' own
         # roots -- because this writes into a scope that may be a user module's live
         # namespace and installs no CleanupHook. A binding this process already
         # had is left alone: a wrong binding fails the guard rather than passing
@@ -864,8 +860,8 @@ class AOTCompiledFunction:
         from .utils import CleanupHook
 
         output_graph = guards_state.output_graph
-        # A scope lacking any name the kept guards read fails with a KeyError on
-        # G[...], whichever channel reads it, so that whole set gates the aliases
+        # A scope lacking a required name can fail while rebuilding or checking
+        # the tree, so the whole recorded set gates the aliases
         # and the unnamed-scope key: the same set the arming in __post_init__
         # starts from, before it subtracts the aliases, which a seeding must
         # not. Only a caller-supplied scope can be missing one --
@@ -2510,11 +2506,11 @@ class AOTCompiledModel:
         ):
             log.warning(
                 "no live guard scope could be resolved from model.forward, so "
-                "global guards on this artifact resolve against the scope "
-                "rebuilt from the serialized bytecode instead, where they check "
-                "nothing useful: one on a global the graph lifted is compared "
-                "against the value serialized with it and cannot fail, and one "
-                "on a global that scope does not carry cannot be satisfied, so "
+                "global names required by this artifact resolve against the scope "
+                "rebuilt from the serialized bytecode instead. An order-only root "
+                "supplies dictionary structure without a runtime value check. "
+                "A runtime guard on a captured global cannot detect rebinding; "
+                "one on a name absent from that scope cannot be satisfied, so "
                 "the call will report no match. %s.",
                 forward_not_resolved_reason,
             )

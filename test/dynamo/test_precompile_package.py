@@ -423,6 +423,29 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(loaded(x, left, left), fn(x, left, left))
 
     @parametrize("caching_precompile", (False, True))
+    def test_module_attribute_guard_survives_serialization(self, caching_precompile):
+        def fn(x, module):
+            return x + module.weight
+
+        module = torch.nn.Linear(3, 3)
+        x = torch.ones(3)
+        with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+            compiled = _aot_compile(fn, x, module)
+            data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        self.assertTrue(loaded.guard_check(x, module))
+        self.assertEqual(loaded(x, module), fn(x, module))
+        state, _ = _kept_types(compiled)
+        self.assertTrue(
+            any(
+                guard.create_fn_name() == "TENSOR_MATCH"
+                and guard.name.startswith("L['module']")
+                for guard in state.output_graph.guards
+            )
+        )
+        self.assertFalse(loaded.guard_check(x, torch.nn.Linear(3, 4)))
+
+    @parametrize("caching_precompile", (False, True))
     @parametrize("descriptor_kind", ("method", "classmethod"))
     def test_raw_descriptor_guard_survives_serialization(
         self, caching_precompile, descriptor_kind
