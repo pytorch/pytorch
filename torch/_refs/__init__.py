@@ -2307,8 +2307,9 @@ def _check_to_dtype_rounded(a: TensorLikeType, dtype: torch.dtype, rounding: str
     """The checks of aten._to_dtype_rounded, in the same order as its kernel
     (check_to_dtype_rounded in aten/src/ATen/native/RoundedConversion.cpp)."""
     torch._check(
-        a.layout == torch.strided,
-        lambda: f"rounding is only supported for strided tensors, but got {a.layout}",
+        a.layout == torch.strided and not a.is_nested,
+        lambda: "rounding is only supported for strided, non-nested tensors, but got "
+        + ("a nested tensor" if a.is_nested else str(a.layout)),
     )
     narrower = {
         torch.float64: (torch.float32, torch.float16, torch.bfloat16),
@@ -2366,8 +2367,16 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
         if device is None:
             return to(convert(a), **kwargs)
         device = torch.device(device)
-        if has_kernel(a.device) and (a.device.type != "cpu" or not has_kernel(device)):
+        # For a target of the same type, dispatch decides where to convert.
+        if device.type == a.device.type or (
+            has_kernel(a.device) and (a.device.type != "cpu" or not has_kernel(device))
+        ):
             return to(convert(a), **kwargs)
+        torch._check_not_implemented(
+            has_kernel(device),
+            lambda: "Tensor.to(..., round=...) converts on CPU or CUDA, but got a "
+            f"conversion from {a.device} to {device}",
+        )
         return convert(to(a, **kwargs))
 
     _canonicalize_to_arguments(a, kwargs)
