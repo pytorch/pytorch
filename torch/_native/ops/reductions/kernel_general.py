@@ -686,20 +686,37 @@ def _try_indexed_itree(
     _launch(s1, key1, [_flat(x)], parts)
 
     outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
+    _combine_itree_partials(trait, trait_key, plan, parts, outs, count, nouts)
+    return tuple(outs)
+
+
+def _combine_itree_partials(
+    trait: Any,
+    trait_key: str,
+    plan: Any,
+    parts: list[torch.Tensor],
+    outs: list[torch.Tensor],
+    project_n: int,
+    nouts: int,
+) -> None:
+    """Fold a split plan's per-partition partials in the row planner's fixed combine order."""
+    from . import kernel_rowtile as rt
+
+    num_o = outs[0].numel()
     combine = rt.itree_combine_plan(
         plan,
         max(p.element_size() for p in parts),
-        x.device,
+        parts[0].device,
         nfields=trait.nfields,
         nrows=num_o,
     )
     s2 = ReduceBlock(
         trait,
-        count=nbatch,
+        count=plan.split[0],
         num_o=num_o,
         red_pairs=[],
         kept_pairs=[],
-        project_n=count,
+        project_n=project_n,
         nouts=nouts,
         order="inner_tree",
         itree=combine,
@@ -707,11 +724,10 @@ def _try_indexed_itree(
     key2 = (
         "genitree2",
         trait_key,
-        tuple(out_dtypes),
-        part_dtypes,
+        tuple(o.dtype for o in outs),
+        tuple(p.dtype for p in parts),
     ) + s2.cache_sig
     _launch(s2, key2, parts, outs)
-    return tuple(outs)
 
 
 def _reduce(
