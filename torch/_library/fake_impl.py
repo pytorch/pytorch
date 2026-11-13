@@ -144,7 +144,12 @@ def run_fake_impl(fake_mode, func, args, kwargs, real=None):
     ctx = FakeImplCtx(fake_mode, func)
     try:
         with set_ctx_getter(lambda: ctx), fake_mode:
-            return fake_impl(*args, **kwargs)
+            result = fake_impl(*args, **kwargs)
+            if result is NotImplemented:
+                raise RuntimeError(
+                    f"fake implementation for {func} returned NotImplemented"
+                )
+            return result
     except MissingOpProfile:
         from torch._subclasses.fake_tensor import (
             can_infer_fake_from_real_out,

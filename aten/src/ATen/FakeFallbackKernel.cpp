@@ -20,8 +20,10 @@
 // runs an op whose tensor inputs are fakes of one mode on one device, or a
 // constructor under a mode.
 // Decompositions, CompositeImplicitAutograd kernels and prim metas run with the
-// mode entered and return outputs as is. Otherwise, op_implementations handlers
-// run with the mode uninstalled. If none handles the op, it
+// mode entered and return outputs as is. Registered custom fake kernels then
+// run through run_fake_impl, which enters the mode itself. Otherwise,
+// op_implementations handlers run with the mode uninstalled. If none handles
+// the op, it
 // runs on the inputs' meta storage through its Meta kernel (its sparse Meta
 // kernel for sparse inputs), and the new outputs become fakes of that mode on
 // that device, as Python's wrap_meta_outputs_with_default_device_logic does.
@@ -48,8 +50,6 @@
 // So that ops do not give results Python's FakeTensorMode would not, it raises
 // NotImplementedError where Python runs something other than these,
 // apart from the known divergences in the TODOs below:
-//  - ops Python runs through custom op fake kernels (the remaining
-//    fake_try_* callbacks in c10/core/impl/PyInterpreter.h);
 //  - handlers that allocate unbacked sizes;
 //  - ops run under the Python dispatcher, whose Python-dispatcher-only Meta
 //    registrations do not run here;
@@ -402,8 +402,10 @@ void fakeFallback(
       return;
     }
   }
-  if (has(FakeDispatchCategory::CustomOpImpl)) {
-    unsupported(op, "custom op fake kernels");
+  if (has(FakeDispatchCategory::CustomOpImpl) &&
+      (*c10::impl::getGlobalPyInterpreter())
+          ->fake_try_custom_op_impl(op, stack, mode, /*real=*/nullptr)) {
+    return;
   }
   // Integer indexing works without unbacked sizes; bool indexing calls nonzero.
   const bool is_index_tensor =
