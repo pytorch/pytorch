@@ -25,6 +25,7 @@ from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
+from ._fsdp_policy import FSDPPolicy
 from ._p2p import (
     _build_p2p_edge_groups,
     _preconnect_p2p_edge_groups,
@@ -293,6 +294,8 @@ class _PipelineSchedule(ABC):
         kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
+        *,
+        fsdp_policy: FSDPPolicy | None = None,
     ):
         # From arguments
         self._n_microbatches = n_microbatches
@@ -301,6 +304,13 @@ class _PipelineSchedule(ABC):
         # See documentation in `PipelineScheduleSingle` / `PipelineScheduleMulti`
         self.scale_grads = scale_grads
         self._finalize_gradients = True
+        if fsdp_policy is None:
+            fsdp_policy = FSDPPolicy()
+        elif not isinstance(fsdp_policy, FSDPPolicy):
+            raise TypeError(
+                f"fsdp_policy must be an FSDPPolicy, got {type(fsdp_policy).__name__}"
+            )
+        self._fsdp_policy = fsdp_policy
 
         # Chunking specification for positional inputs. (default: `None`)
         self._args_chunk_spec = args_chunk_spec
@@ -1109,6 +1119,10 @@ class PipelineScheduleSingle(_PipelineSchedule):
     Gradients are scaled by num_microbatches depending on the `scale_grads` argument, defaulting to True.  This setting
     should match the configuration of your loss_fn, which may either average losses (scale_grads=True)
     or sum losses (scale_grads=False).
+
+    ``fsdp_policy`` sets when an FSDP-wrapped stage reshards its parameters and
+    reduce-scatters its gradients. See :class:`~torch.distributed.pipelining.FSDPPolicy`. Defaults to
+    ``FSDPPolicy()``.
     """
 
     def __init__(
@@ -1120,6 +1134,8 @@ class PipelineScheduleSingle(_PipelineSchedule):
         kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
+        *,
+        fsdp_policy: FSDPPolicy | None = None,
     ):
         # Init parent
         super().__init__(
@@ -1129,6 +1145,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
+            fsdp_policy=fsdp_policy,
         )
         # Self attributes
         self._stage = stage
@@ -1251,6 +1268,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
 
         # Set the same has_backward flag for stage object
         self._stage.has_backward = self._has_backward
+        self._stage._set_fsdp_policy(self._fsdp_policy)
         self._finalize_gradients = finalize_gradients
 
         # Clean per iteration
@@ -1511,6 +1529,8 @@ class Schedule1F1B(PipelineScheduleSingle):
         kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
+        *,
+        fsdp_policy: FSDPPolicy | None = None,
     ):
         super().__init__(
             stage=stage,
@@ -1520,6 +1540,7 @@ class Schedule1F1B(PipelineScheduleSingle):
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
+            fsdp_policy=fsdp_policy,
         )
         if n_microbatches < self._num_stages:
             raise ValueError(
@@ -1770,6 +1791,34 @@ or equal to the number of stages ({self._num_stages})."
 
 def _requires_reduce_grad(action_type: _ComputationType) -> bool:
     return action_type in (W, B)
+
+
+def _validate_fsdp_policy(
+    policy: FSDPPolicy, actions: dict[int, list[_Action | None]]
+) -> None:
+    """Raise if the schedule's actions cannot follow the FSDP policy."""
+    if not policy._requires_full_backward:
+        return
+    for rank_actions in actions.values():
+        for action in rank_actions:
+            if action is None:
+                continue
+            for sub_action in action.sub_actions or (action,):
+                if sub_action.computation_type in (I, W):
+                    raise ValueError(
+                        f"{policy} requires one full backward per microbatch, but "
+                        f"the schedule contains {sub_action}. Use FSDPPolicy() "
+                        "with split-backward schedules."
+                    )
+                if policy.reshard == "layer" and sub_action.computation_type in (
+                    UNSHARD,
+                    RESHARD,
+                ):
+                    raise ValueError(
+                        "reshard='layer' lets FSDP unshard each module, but the "
+                        f"schedule contains {sub_action}. Provide a compute-only "
+                        "schedule."
+                    )
 
 
 def _add_reduce_grad(
@@ -2725,6 +2774,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
     Gradients are scaled by num_microbatches depending on the `scale_grads` argument, defaulting to True.  This setting
     should match the configuration of your loss_fn, which may either average losses (scale_grads=True)
     or sum losses (scale_grads=False).
+
+    ``fsdp_policy`` sets when FSDP-wrapped stages reshard their parameters and
+    reduce-scatter their gradients. See :class:`~torch.distributed.pipelining.FSDPPolicy`. Defaults to
+    ``FSDPPolicy()``.
     """
 
     def __init__(
@@ -2738,6 +2791,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
         use_full_backward: bool | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        *,
+        fsdp_policy: FSDPPolicy | None = None,
     ):
         # Init parent
         super().__init__(
@@ -2747,6 +2802,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
+            fsdp_policy=fsdp_policy,
         )
         # Self attributes
         self._stages = stages
@@ -2865,6 +2921,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         """
         Allocates the stage index to rank mapping which is needed for communication
         """
+        _validate_fsdp_policy(self._fsdp_policy, actions)
         self.stage_index_to_group_rank = _validate_schedule(
             actions,
             self.pp_group_size,
@@ -3006,6 +3063,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # Set the same has_backward flag for stage object
         for stage in self._stages:
             stage.has_backward = self._has_backward
+            stage._set_fsdp_policy(self._fsdp_policy)
         self._finalize_gradients = finalize_gradients
 
         # Clean per iteration
@@ -3448,13 +3506,20 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             )
             # Perform schedule lowering
             for rank in actions:
-                self.pipeline_order_with_comms[rank] = _add_unshard_reshard(
-                    actions[rank],
-                    max_active_stages=self._max_active_stages,
-                    unshard_lookahead=unshard_lookahead[rank],
-                )
+                rank_actions = actions[rank]
+                # Under reshard="layer", FSDP's hooks unshard one module at a
+                # time. A stage-level UNSHARD would all-gather the whole stage.
+                if self._fsdp_policy.reshard == "schedule":
+                    rank_actions = cast(
+                        list[_Action | None],
+                        _add_unshard_reshard(
+                            rank_actions,
+                            max_active_stages=self._max_active_stages,
+                            unshard_lookahead=unshard_lookahead[rank],
+                        ),
+                    )
                 self.pipeline_order_with_comms[rank] = _add_reduce_grad(  # type: ignore[assignment]
-                    self.pipeline_order_with_comms[rank],  # type: ignore[arg-type]
+                    rank_actions,
                     self._n_microbatches,
                     defer_reduce_grad_wait=self._defer_reduce_grad_wait,
                 )
@@ -3547,7 +3612,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     def _assert_unsharded(self, stage: _PipelineStageBase):
         """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
         stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
-        if stage_uses_fsdp:
+        # Under reshard="layer", FSDP's hooks unshard each module before use.
+        if stage_uses_fsdp and self._fsdp_policy.reshard == "schedule":
             stage_idx = stage.stage_index
             if stage_idx in self.unshard_ops:
                 for op in self.unshard_ops[stage_idx]:
@@ -3918,6 +3984,9 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             reduction may be pending per pipeline rank.
         max_outstanding_sends: Maximum number of pending forward and backward
             send batches on each pipeline rank. ``None`` applies no hard limit.
+        fsdp_policy: When FSDP-wrapped stages reshard parameters and
+            reduce-scatter gradients. See :class:`~torch.distributed.pipelining.FSDPPolicy`. Defaults to
+            ``FSDPPolicy()``.
     """
 
     def __init__(
@@ -3934,6 +4003,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         *,
         defer_reduce_grad_wait: bool = False,
         max_outstanding_sends: int | None = None,
+        fsdp_policy: FSDPPolicy | None = None,
     ):
         super().__init__(
             stages=stages,
@@ -3947,6 +4017,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             unshard_lookahead=unshard_lookahead,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
             max_outstanding_sends=max_outstanding_sends,
+            fsdp_policy=fsdp_policy,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -4181,6 +4252,9 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             to be posted and may stall. Schedule construction raises
             ``ValueError`` when no causally safe wait placement can meet the
             limit.
+        fsdp_policy: When FSDP-wrapped stages reshard parameters and
+            reduce-scatter gradients. See :class:`~torch.distributed.pipelining.FSDPPolicy`. Defaults to
+            ``FSDPPolicy()``.
     """
 
     def __init__(
@@ -4199,6 +4273,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         *,
         defer_reduce_grad_wait: bool = False,
         max_outstanding_sends: int | None = None,
+        fsdp_policy: FSDPPolicy | None = None,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -4215,6 +4290,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             unshard_lookahead=unshard_lookahead,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
             max_outstanding_sends=max_outstanding_sends,
+            fsdp_policy=fsdp_policy,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -4314,6 +4390,9 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             reduction may be pending per pipeline rank.
         max_outstanding_sends: Maximum number of pending forward and backward
             send batches on each pipeline rank. ``None`` applies no hard limit.
+        fsdp_policy: Must be ``FSDPPolicy()``, the default. This schedule
+            splits the backward into input and weight passes, so other
+            policies raise ``ValueError``.
     """
 
     def __init__(
@@ -4332,6 +4411,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         *,
         defer_reduce_grad_wait: bool = False,
         max_outstanding_sends: int | None = None,
+        fsdp_policy: FSDPPolicy | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -4350,6 +4430,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             unshard_lookahead=unshard_lookahead,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
             max_outstanding_sends=max_outstanding_sends,
+            fsdp_policy=fsdp_policy,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -4535,6 +4616,9 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             reduction may be pending per pipeline rank.
         max_outstanding_sends: Maximum number of pending forward and backward
             send batches on each pipeline rank. ``None`` applies no hard limit.
+        fsdp_policy: Must be ``FSDPPolicy()``, the default. This schedule
+            splits the backward into input and weight passes, so other
+            policies raise ``ValueError``.
     """
 
     def __init__(
@@ -4553,6 +4637,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         *,
         defer_reduce_grad_wait: bool = False,
         max_outstanding_sends: int | None = None,
+        fsdp_policy: FSDPPolicy | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -4571,6 +4656,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             unshard_lookahead=unshard_lookahead,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
             max_outstanding_sends=max_outstanding_sends,
+            fsdp_policy=fsdp_policy,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -4745,6 +4831,9 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             reduction may be pending per pipeline rank.
         max_outstanding_sends: Maximum number of pending forward and backward
             send batches on each pipeline rank. ``None`` applies no hard limit.
+        fsdp_policy: Must be ``FSDPPolicy()``, the default. This schedule
+            splits the backward into input and weight passes, so other
+            policies raise ``ValueError``.
     """
 
     def __init__(
@@ -4763,6 +4852,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         *,
         defer_reduce_grad_wait: bool = False,
         max_outstanding_sends: int | None = None,
+        fsdp_policy: FSDPPolicy | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -4781,6 +4871,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             unshard_lookahead=unshard_lookahead,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
             max_outstanding_sends=max_outstanding_sends,
+            fsdp_policy=fsdp_policy,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"

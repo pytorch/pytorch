@@ -579,6 +579,56 @@ They do not change compute order, `RESHARD` placement, residency episodes, or
 collective counts. Applications should benchmark an explicit tuple when stage
 costs differ materially from the balanced model.
 
+### Controlling FSDP Resharding and Gradient Reduction
+
+By default, an FSDP-wrapped stage keeps its parameters unsharded, and its
+gradients unreduced in the reduce dtype, from its first microbatch until its
+final `REDUCE_GRAD`. This minimizes FSDP communication. But each device then
+holds the unsharded parameters and gradients of every module on its stages for
+the whole step, and a larger FSDP degree does not reduce that memory. With bf16
+parameters and fp32 reduction, this is 6 bytes per parameter on the rank's
+stages, divided by the tensor-parallel degree.
+
+Pass a `torch.distributed.pipelining.FSDPPolicy` as `fsdp_policy` to
+trade more FSDP collectives for less memory. Per FSDP module, with `m`
+microbatches and `k = k_microbatch_reduce`:
+
+| `reshard` | `reduce` | Unsharded parameters | Unreduced gradients | All-gathers per step | Reduce-scatters per step |
+| --- | --- | --- | --- | --- | --- |
+| `"schedule"` | `"step"` | All modules of the resident stages | All modules | 1 | 1 |
+| `"schedule"` | `"microbatch"` | All modules of the resident stages | About 2 modules if `k=1` | 1 | `ceil(m / k)` |
+| `"layer"` | `"step"` | About 2 modules | All modules | `2m` | 1 |
+| `"layer"` | `"microbatch"` | About 2 modules | About 2 modules if `k=1` | `2m` | `ceil(m / k)` |
+
+The "about 2 modules" terms are the module that computes and the module whose
+all-gather or reduce-scatter overlaps with it. The all-gather counts assume
+`reshard_after_forward=False` for `"schedule"`, and runtime schedules whose
+`max_active_stages` window holds all of the rank's stages.
+
+```python
+from torch.distributed.pipelining import FSDPPolicy, Schedule1F1B
+
+schedule = Schedule1F1B(
+    stage,
+    n_microbatches=8,
+    loss_fn=loss_fn,
+    fsdp_policy=FSDPPolicy(reshard="layer", reduce="microbatch"),
+)
+```
+
+The policy sets the FSDP flags for the stage backward of each microbatch. A
+backward that `loss_fn` runs itself, for example in a chunked loss, manages its
+own FSDP settings.
+
+Start with `reduce="microbatch"`, which frees the gradient accumulators. Add
+`reshard="layer"` for the lowest parameter memory. Non-default policies require
+one full backward per stage and microbatch. Schedules that split the backward
+into input and weight passes (`ScheduleInterleavedZeroBubble`,
+`ScheduleZBVZeroBubble`, and `ScheduleDualPipeV`) accept only the default and
+raise `ValueError` for other policies. A different policy changes the order in
+which gradients are summed, so gradients can differ from the default policy in
+the last bits.
+
 ## Logging
 
 You can turn on additional logging using the `TORCH_LOGS` environment variable from [torch.\_logging](https://pytorch.org/docs/main/logging.html#module-torch._logging):
@@ -748,6 +798,10 @@ pipeline rank.
 ```{eval-rst}
 .. autoclass:: PipelineScheduleMulti
   :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.pipelining.FSDPPolicy
 ```
 
 ```{eval-rst}
