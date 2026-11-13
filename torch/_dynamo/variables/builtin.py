@@ -3646,11 +3646,32 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if args and isinstance(args[0], ConstDictVariable):
             args[0].check_base_dict_mutation(tx, name)
         resolved_fn = getattr(dict, name, None)
+        if isinstance(resolved_fn, types.WrapperDescriptorType):
+            if not args:
+                from .builder import VariableBuilder
+
+                wrapper = VariableBuilder.create_internal_wrapper_descriptor(
+                    resolved_fn, self
+                )
+                return wrapper.call_function(tx, args, kwargs)
+            if not issubclass(args[0].python_type(), resolved_fn.__objclass__):
+                raise_type_error(
+                    tx,
+                    f"descriptor '{name}' requires a 'dict' object "
+                    f"but received a '{args[0].python_type_name()}'",
+                )
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
             if isinstance(obj, ConstDictVariable):
                 obj.check_base_dict_mutation(tx, name)
-            if name in (*_RICH_CMP_DUNDERS, "__repr__", "__iter__"):
+            if name in (
+                *_RICH_CMP_DUNDERS,
+                "__repr__",
+                "__iter__",
+                "__len__",
+                "__or__",
+                "__ror__",
+            ):
                 if not isinstance(obj, ConstDictVariable):
                     unimplemented(
                         gb_type="Unsupported builtin dictionary storage operation",

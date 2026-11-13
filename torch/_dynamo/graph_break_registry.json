@@ -7448,5 +7448,25 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0580": [
+    {
+      "Gb_type": "Dictionary mutated during iteration",
+      "Context": "str(error)",
+      "Explanation": "Dynamo cannot trace dictionary iteration that changes its keys.",
+      "Hints": [
+        "Avoid changing dictionary keys during iteration."
+      ]
+    }
+  ],
+  "GB4061": [
+    {
+      "Gb_type": "Unsupported OrderedDict union result",
+      "Context": "new.python_type_name()",
+      "Explanation": "Dynamo cannot yet update a non-dictionary returned by an OrderedDict subclass constructor.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

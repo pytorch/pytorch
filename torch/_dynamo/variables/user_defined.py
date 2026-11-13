@@ -117,6 +117,7 @@ from .base import (
     attr_getset,
     AttrMutationKind,
     GetSet,
+    maybe_get_python_type,
     Member,
     Method,
     MutationType,
@@ -144,6 +145,7 @@ from .object_protocol import (
     is_nb_not_implemented,
     mro_attr_source,
     mro_lookup,
+    pycallable_check,
     pynumber_as_ssize_t,
     pynumber_index,
     repr_guard,
@@ -5536,17 +5538,7 @@ class DefaultDictVariable(ConstDictVariable):
         val = arg.get_real_python_backed_value()
         if val is not NO_SUCH_SUBOBJ:
             return val is None or callable(val)
-        # Callables (functions, builtins, classes) are supported
-        return isinstance(
-            arg,
-            (
-                variables.BaseBuiltinVariable,
-                variables.functions.BaseUserFunctionVariable,
-                variables.functions.PolyfilledFunctionVariable,
-                variables.functions._WrappedSkipFunctionMethodDescriptorCommonVariable,
-                variables.UserDefinedClassVariable,
-            ),
-        )
+        return pycallable_check(maybe_get_python_type(arg))
 
     def is_python_constant(self) -> bool:
         if not self.default_factory.is_python_constant():
@@ -5656,25 +5648,15 @@ class DefaultDictVariable(ConstDictVariable):
         if not pydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
 
-        # A UserDefinedDictVariable is now itself a ConstDictVariable (MI), so
-        # `left.items` is the storage in both cases.
-        if not isinstance(left, ConstDictVariable):
-            raise AssertionError(
-                f"Expected ConstDictVariable, got {type(left)}: {left}"
+        cls = VariableTracker.build(tx, type).call_function(tx, [self_], {})
+        new = cls.call_function(tx, [self_.default_factory, left], {})
+        if not isinstance(new, ConstDictVariable):
+            # PyDict_Update rejects a non-dict returned by the subclass constructor.
+            raise_observed_exception(
+                SystemError, tx, args=["bad argument to internal function"]
             )
-        items = left.materialize_keys()
-
-        new = tx.output.side_effects.track_new_user_defined_object(
-            VariableTracker.build(tx, dict),
-            VariableTracker.build(tx, collections.defaultdict),
-            [],
-            tx=tx,
-        )
-        new.default_factory = self.default_factory  # type: ignore[missing-attribute]
-        new.items.update(items)  # type: ignore[missing-attribute]
-        default_factory = new.default_factory  # type: ignore[missing-attribute]
-        tx.output.side_effects.store_attr(new, "default_factory", default_factory)
-        new.call_method(tx, "update", [right], {})
+        tx.output.side_effects.mutation(new)
+        new.dict_merge(tx, right)
         return new
 
     def nb_inplace_or_impl(
