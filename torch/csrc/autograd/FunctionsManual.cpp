@@ -2603,9 +2603,9 @@ Tensor infinitely_differentiable_logit_backward(
     const double lo = eps.value();
     const double hi = 1.0 - lo;
     return at::where(
-        at::logical_and(self >= lo, self <= hi),
-        grad / (self * (1.0 - self)),
-        at::zeros({}, self.options()));
+        at::logical_or(self<lo, self> hi),
+        at::zeros({}, self.options()),
+        grad / (self * (1.0 - self)));
   } else {
     return at::where(
         at::logical_and(self >= 0.0, self <= 1.0),
