@@ -1944,12 +1944,32 @@ def forward(self, x_1):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
-    def test_scalar_inputs(self):
-        with FakeTensorMode():
-            self.checkType(torch.div(3, 2), "cpu", [])
+    @fake_tensor_modes
+    @parametrize(
+        "op",
+        [
+            torch.div,
+            subtest(partial(torch.div, rounding_mode="trunc"), name="trunc_div"),
+            subtest(aten.add.Tensor, name="wrapped_add"),
+        ],
+        name_fn=lambda op: op.__name__,
+    )
+    def test_scalar_inputs(self, mode_cls, op):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
+        expected = op(3, 2)
+        with mode_cls() as mode:
+            out = op(3, 2)
+            self.checkType(out, "cpu", [])
             ten = torch.zeros(2, dtype=torch.int32) * 2.0
             self.assertEqual(ten.dtype, torch.float)
             self.checkType(ten, "cpu", [2])
+            self.assertIs(torch._guards.active_fake_mode(), mode)
+        self.assertEqual(maybe_get_fake_constant(out), expected)
+        self.assertIs(maybe_get_fake_mode(out), mode)
 
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
@@ -2061,11 +2081,20 @@ def forward(self, x_1):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
+    @fake_tensor_modes
     @parametrize("allow", [False, True])
     @parametrize("override", [None, False, True])
     @parametrize("channels", [1, 2])
-    def test_mixed_real_and_fake_inputs(self, allow, override, channels):
+    def test_mixed_real_and_fake_inputs(self, mode_cls, allow, override, channels):
         from torch._subclasses.fake_tensor import fake_tensor_tls
+
+        if mode_cls is CppFakeTensorMode and channels == 1:
+            self.skipTest("C++ fake fallback does not support constant inputs")
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
 
         class _TestPattern(torch.nn.Module):
             def __init__(self) -> None:
@@ -2089,7 +2118,7 @@ def forward(self, x_1):
                 return conv
 
         mod = _TestPattern()
-        mode = FakeTensorMode(allow_non_fake_inputs=allow)
+        mode = mode_cls(allow_non_fake_inputs=allow)
         allowed = allow if override is None else override
         with (
             patch.object(fake_tensor_tls, "allow_non_fake_inputs_override", override),
@@ -3405,6 +3434,7 @@ class TestFakeTensorMoveModule(TestCase):
         self.assertEqual(out.device, gpu_device)
 
 
+@instantiate_parametrized_tests
 class TestFakeTensorConstHandling(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -3416,10 +3446,33 @@ class TestFakeTensorConstHandling(TestCase):
         for arg in args:
             self.assertTrue(maybe_get_fake_constant(arg) is None)
 
-    def test_simple(self):
-        with FakeTensorMode():
-            x = torch.tensor(4.0)
-            self.assertEqual(x.item(), 4.0)
+    @fake_tensor_modes
+    @parametrize(
+        "data",
+        [
+            subtest(4.0, name="scalar"),
+            subtest([], name="empty"),
+            subtest([4.0], name="one"),
+            subtest([4.0, 5.0], name="two"),
+        ],
+    )
+    def test_simple(self, mode_cls, data):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
+        expected = torch.tensor(data)
+        with mode_cls() as mode:
+            x = torch.tensor(data)
+            if mode_cls is not CppFakeTensorMode and expected.ndim == 0:
+                self.assertEqual(x.item(), 4.0)
+        prims.utils.compare_tensor_meta(x, expected, check_strides=True)
+        self.assertIs(maybe_get_fake_mode(x), mode)
+        if expected.numel() <= 1:
+            self.assertEqual(maybe_get_fake_constant(x), expected)
+        else:
+            self.assertNotConst(x)
 
     def test_inplace_add(self):
         with FakeTensorMode():
@@ -3785,7 +3838,8 @@ class TestFakeTensorConverter(TestCase):
         self.assertEqual(out.device.type, "cpu")
 
     @fake_tensor_modes
-    def test_multiple_modes(self, mode_cls):
+    @parametrize("include_active_mode", [False, True])
+    def test_multiple_modes(self, mode_cls, include_active_mode):
         if mode_cls is CppFakeTensorMode:
             if TEST_WITH_TORCHDYNAMO:
                 self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
@@ -3801,7 +3855,7 @@ class TestFakeTensorConverter(TestCase):
                 t2_fake = m2.from_tensor(t2)
 
                 with self.assertRaisesRegex(AssertionError, "Mixing fake modes"):
-                    t_fake + t2_fake
+                    t_fake + (t2_fake if include_active_mode else t_fake)
 
     def test_separate_mode_error(self):
         with FakeTensorMode():
@@ -6895,6 +6949,154 @@ class TestCppFakeTensorModeBindings(TestCase):
                         op(fake, device=device)
         self.assertEqual(retained.device, torch.device(output_device))
         self.assertIs(maybe_get_fake_mode(retained), mode)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @fake_tensor_modes
+    @parametrize("size", [1, 2])
+    def test_fake_fallback_lift_storage(self, mode_cls, size):
+        mode = mode_cls()
+        real = torch.arange(size, dtype=torch.float32)
+        expected = real.clone()
+        with mode:
+            lifted = aten.lift_fresh.default(real)
+            repeated = aten.lift_fresh.default(real)
+            self.assertIs(torch._guards.active_fake_mode(), mode)
+        self.assertIs(maybe_get_fake_mode(lifted), mode)
+        prims.utils.compare_tensor_meta(lifted, real, check_strides=True)
+        if size == 1:
+            constant = maybe_get_fake_constant(lifted)
+            self.assertEqual(constant, expected)
+            self.assertNotEqual(constant.data_ptr(), real.data_ptr())
+            real.add_(1)
+            self.assertEqual(constant, expected)
+            self.assertIsNot(lifted, repeated)
+        else:
+            self.assertIsNone(maybe_get_fake_constant(lifted))
+            self.assertIs(lifted, repeated)
+            self.assertIs(mode.from_tensor(real), lifted)
+            with mode:
+                relifted = aten.lift_fresh.default(lifted)
+            self.assertIs(maybe_get_fake_mode(relifted), mode)
+            self.assertEqual(
+                relifted.untyped_storage()._cdata, lifted.untyped_storage()._cdata
+            )
+            self.assertIsNone(maybe_get_fake_constant(relifted))
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @fake_tensor_modes
+    @parametrize("size", [1, 2])
+    @parametrize("allow", [False, True])
+    def test_fake_fallback_real_array_constants(self, mode_cls, size, allow):
+        mode = mode_cls(allow_non_fake_inputs=allow)
+        real = torch.ones(size)
+        expected = real + real
+        with mode:
+            if size > 1 and not allow:
+                with self.assertRaisesRegex(
+                    AssertionError, "Please convert all Tensors"
+                ):
+                    real + real
+                return
+            out = real + real
+            self.assertIs(torch._guards.active_fake_mode(), mode)
+        self.assertIs(maybe_get_fake_mode(out), mode)
+        prims.utils.compare_tensor_meta(out, expected, check_strides=True)
+        if size == 1:
+            self.assertEqual(maybe_get_fake_constant(out), expected)
+        else:
+            self.assertIsNone(maybe_get_fake_constant(out))
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @fake_tensor_modes
+    @parametrize("parameter_output", [False, True])
+    def test_fake_fallback_constant_output_type(self, mode_cls, parameter_output):
+        mode = mode_cls()
+        real = torch.ones(1)
+        seen = []
+
+        def add(t):
+            seen.append(torch._guards.active_fake_mode())
+            out = t + 1
+            return (
+                torch.nn.Parameter(out, requires_grad=False)
+                if parameter_output
+                else out
+            )
+
+        with torch.library._scoped_library("_test_fake_constant", "DEF") as lib:
+            lib.define("add(Tensor x) -> Tensor")
+            lib.impl("add", add, "CPU")
+            with mode:
+                if parameter_output:
+                    with self.assertRaisesRegex(
+                        AssertionError, "Please convert all Tensors"
+                    ):
+                        torch.ops._test_fake_constant.add(real)
+                else:
+                    out = torch.ops._test_fake_constant.add(real)
+                self.assertIs(torch._guards.active_fake_mode(), mode)
+        self.assertEqual(seen, [None])
+        if not parameter_output:
+            self.assertIs(maybe_get_fake_mode(out), mode)
+            self.assertEqual(maybe_get_fake_constant(out), real + 1)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @fake_tensor_modes
+    @parametrize("dtype", [torch.int32, torch.int64])
+    def test_fake_fallback_scalar_only_outputs(self, mode_cls, dtype):
+        mode = mode_cls()
+        real_outputs = tuple(torch.tensor(v, dtype=dtype) for v in (17, 23))
+        calls = []
+
+        def real_impl():
+            calls.append("real")
+            return real_outputs
+
+        def meta_impl():
+            calls.append("meta")
+            return real_outputs
+
+        with torch.library._scoped_library("_test_fake_scalar_outputs", "DEF") as lib:
+            # A whitelisted name takes the constant attempt, but multiple
+            # outputs require ordinary output conversion after Meta execution.
+            lib.define("add() -> (Tensor, Tensor)")
+            lib.impl("add", real_impl, "CompositeExplicitAutograd")
+            lib.impl("add", meta_impl, "Meta")
+            with mode:
+                outputs = torch.ops._test_fake_scalar_outputs.add()
+                self.assertIs(torch._guards.active_fake_mode(), mode)
+        self.assertEqual(calls, ["real", "meta"])
+        for out, real, value in zip(outputs, real_outputs, (17, 23)):
+            self.assertIs(maybe_get_fake_mode(out), mode)
+            prims.utils.compare_tensor_meta(out, real, check_strides=True)
+            self.assertIsNone(maybe_get_fake_constant(out))
+            self.assertEqual(maybe_get_item_memo(out), value)
+            self.assertIs(mode.from_tensor(real), out)
+            self.assertFalse(is_fake_tensor(real))
+            self.assertEqual(real, torch.tensor(value, dtype=dtype))
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @fake_tensor_modes
+    @parametrize("allow", [False, True])
+    def test_fake_fallback_constant_avoid_device_init(self, mode_cls, allow):
+        mode = mode_cls(allow_non_fake_inputs=allow)
+        real = torch.ones(1)
+        with patch.object(mode_cls, "avoid_device_init", True), mode:
+            cpu = aten._to_copy.default(real, dtype=torch.float64)
+            if allow:
+                cuda = aten._to_copy.default(real, device=torch.device("cuda:0"))
+            else:
+                with self.assertRaisesRegex(
+                    AssertionError, "Please convert all Tensors"
+                ):
+                    aten._to_copy.default(real, device=torch.device("cuda:0"))
+            self.assertIs(torch._guards.active_fake_mode(), mode)
+        self.assertEqual(maybe_get_fake_constant(cpu), real.to(dtype=torch.float64))
+        self.assertIs(maybe_get_fake_mode(cpu), mode)
+        if allow:
+            self.assertIsNone(maybe_get_fake_constant(cuda))
+            self.assertIs(maybe_get_fake_mode(cuda), mode)
+            self.assertEqual(cuda.device, torch.device("cuda:0"))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_fake_fallback_clears_inherited_dispatch_keys(self):

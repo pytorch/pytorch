@@ -165,6 +165,13 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       const std::string& /*msg*/) const override {
     PANIC(fake_raise_python_error);
   }
+  bool fake_has_plain_tensor_type(const TensorImpl* /*self*/) const override {
+    PANIC(fake_has_plain_tensor_type);
+  }
+  bool fake_avoid_device_init(
+      const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
+    PANIC(fake_avoid_device_init);
+  }
   bool fake_try_decomp(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
@@ -204,7 +211,8 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   }
   c10::intrusive_ptr<TensorImpl> from_real_tensor(
       const std::shared_ptr<FakeTensorMode>& /*mode*/,
-      const c10::intrusive_ptr<TensorImpl>& /*real*/) const override {
+      const c10::intrusive_ptr<TensorImpl>& /*real*/,
+      bool /*make_constant*/) const override {
     PANIC(from_real_tensor);
   }
   bool allow_non_fake_inputs(

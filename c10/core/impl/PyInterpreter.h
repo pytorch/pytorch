@@ -256,6 +256,12 @@ struct C10_API PyInterpreterVTable {
   virtual void fake_raise_python_error(
       FakePythonError kind,
       const std::string& msg) const = 0;
+  // Python's exact `type(t) is Tensor`, excluding Parameter and subclasses.
+  // A TensorImpl without a Python object has the base Tensor type.
+  virtual bool fake_has_plain_tensor_type(const TensorImpl* self) const = 0;
+  // Reads the owning mode's avoid_device_init property under the GIL.
+  virtual bool fake_avoid_device_init(
+      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
 
   // Note [C++ FakeTensor dispatch]
   // A fake tensor models a tensor on a logical device without allocating its
@@ -351,7 +357,8 @@ struct C10_API PyInterpreterVTable {
   // converter.
   virtual c10::intrusive_ptr<TensorImpl> from_real_tensor(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
-      const c10::intrusive_ptr<TensorImpl>& real) const = 0;
+      const c10::intrusive_ptr<TensorImpl>& real,
+      bool make_constant = false) const = 0;
   // Whether real tensor inputs are allowed: fake_tensor_tls's override if set,
   // else mode's allow_non_fake_inputs_.
   virtual bool allow_non_fake_inputs(
