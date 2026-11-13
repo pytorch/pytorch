@@ -168,6 +168,7 @@ inline scalar_t interpolate_non_separable(char* src, char** data, const int64_t*
 //         -> interpolate_separable_1d_zero_strides
 //       -> basic_loop_separable_1d_horizontal (for other spatial dims otherwise,
 //                                             see upsample_separable_1d)
+//         -> interpolate_separable_1d_zero_strides
 
 template <typename scalar_t, typename index_t>
 inline scalar_t interpolate_separable_1d_zero_strides(
