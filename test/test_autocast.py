@@ -243,10 +243,9 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
         return super().__exit__(exc_type, exc_val, exc_tb)
 
 
-class TestAutocastDevice(TestCase):
+class TestAutocastFloat32(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyXPU
     @parametrize(
         "input_dtypes",
         [
@@ -256,7 +255,7 @@ class TestAutocastDevice(TestCase):
             (torch.bfloat16, torch.float32),
         ],
     )
-    def test_xpu_autocast_float32(self, device, input_dtypes):
+    def test_autocast_float32(self, device, input_dtypes):
         x = torch.full((2, 2), 1.0078125, device=device, dtype=input_dtypes[0])
         y = torch.full((2, 2), 1.0078125, device=device, dtype=input_dtypes[1])
         device_type = torch.device(device).type
@@ -279,8 +278,7 @@ class TestAutocastDevice(TestCase):
         self.assertEqual(torch.is_autocast_enabled(device_type), previous_enabled)
         self.assertEqual(torch.get_autocast_dtype(device_type), previous_dtype)
 
-    @onlyXPU
-    def test_xpu_autocast_float32_nested(self, device):
+    def test_autocast_float32_nested(self, device):
         device_type = torch.device(device).type
         x = torch.full((2, 2), 1.0078125, device=device, dtype=torch.bfloat16)
         previous_enabled = torch.is_autocast_enabled(device_type)
@@ -296,6 +294,19 @@ class TestAutocastDevice(TestCase):
             self.assertEqual(torch.mm(x, x).dtype, torch.bfloat16)
         self.assertEqual(torch.is_autocast_enabled(device_type), previous_enabled)
         self.assertEqual(torch.get_autocast_dtype(device_type), previous_dtype)
+
+
+class TestAutocastDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyXPU
+    def test_xpu_autocast_float32_mixed_dtype_linear(self, device):
+        linear = torch.nn.Linear(4, 3, device=device, dtype=torch.bfloat16)
+        x = torch.randn(2, 4, device=device, dtype=torch.float32)
+        with torch.autocast(device_type="xpu", dtype=torch.float32):
+            output = linear(x)
+        self.assertEqual(output.dtype, torch.float32)
+
 
     @onlyAccelerator
     def test_cast_cache_is_global(self, device):
@@ -368,9 +379,9 @@ class TestAutocastDevice(TestCase):
     def test_mps_autocast_error_message(self, device):
         with self.assertWarnsRegex(
             UserWarning,
-            "MPS Autocast only supports dtypes of torch.bfloat16, torch.float16 currently.",
+            "MPS Autocast only supports dtypes of torch.bfloat16, torch.float16, torch.float32 currently.",
         ):
-            with torch.autocast(device_type="mps", dtype=torch.float32):
+            with torch.autocast(device_type="mps", dtype=torch.float64):
                 _ = torch.ones(10)
 
     @onlyMPS
@@ -529,6 +540,13 @@ class TestTorchAutocastDevice(TestCase):
             (out2.mean() + out4.mean()).backward()
 
 
+instantiate_device_type_tests(
+    TestAutocastFloat32,
+    globals(),
+    only_for=["cpu", "cuda", "mps", "xpu"],
+    allow_mps=True,
+    allow_xpu=True,
+)
 instantiate_device_type_tests(
     TestAutocastDevice, globals(), allow_mps=True, allow_xpu=True
 )
