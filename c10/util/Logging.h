@@ -215,7 +215,7 @@ void enforceThatImpl(
     const char* expr,
     const void* caller,
     GetFailMsgFunc getFailMsg) {
-  if (C10_UNLIKELY(!(p(lhs, rhs)))) {
+  if (!(p(lhs, rhs))) [[unlikely]] {
     ::c10::ThrowEnforceNotMet(file, line, expr, getFailMsg(lhs, rhs), caller);
   }
 }
