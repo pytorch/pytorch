@@ -51,7 +51,6 @@ from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, 
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
-from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
 import operator
@@ -72,9 +71,6 @@ if torch.get_default_dtype() is not torch.float32:
 
 if TEST_SCIPY:
     import scipy
-
-def setUpModule():
-    initialize_kineto_with_cuda()
 
 def blaslt_supported_device():
     if torch.cuda.is_available():
@@ -11610,18 +11606,6 @@ class TestLinalgCudaOnly(TestCase):
             for A, B, left, upper, uni in gen_inputs(shape, dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
-    @skipIfRocm
-    @skipCUDAIfNoCusolver
-    @dtypes(torch.float, torch.double)
-    def test_linalg_batched_lu_rectangular_nan_pivots(self, device, dtype):
-        # The column-serial LU panel must never use an invalid pivot row
-        # when an entire column contains NaNs.
-        A = torch.full((2, 2048, 8), float("nan"), dtype=dtype, device=device)
-        LU, pivots, info = torch.linalg.lu_factor_ex(A, check_errors=False)
-        self.assertTrue(((1 <= pivots) & (pivots <= A.size(-2))).all())
-        self.assertEqual(LU.shape, A.shape)
-        torch.cuda.synchronize()
-
     @slowTest
     @skipIfRocm
     @skipCUDAIfNoCusolver
@@ -11737,6 +11721,14 @@ class TestLinalgCudaOnly(TestCase):
             self.assertEqual(info[4], 18)
             self.assertTrue(info[1] == info[3] == 0)
 
+            # Check all NaN columns -- no swaps should occur
+            if pivot:
+                A.fill_(float("nan"))
+                LU, pivots, _ = torch.linalg.lu_factor_ex(A, pivot=pivot)
+                expected_pivots = torch.arange(1, n + 1, device=device, dtype=torch.int32)
+                expected_pivots = expected_pivots.unsqueeze(0).expand(A.shape[0], n)
+                self.assertEqual(pivots, expected_pivots)
+
     @skipIfRocm
     @skipCUDAIfNoCusolver
     @setLinalgBackendsToDefaultFinally
@@ -11778,6 +11770,15 @@ class TestLinalgCudaOnly(TestCase):
                 # see test_linalg_batched_lu_stability_large_inputs
                 K = 1.0
                 self.assertTrue((scaled_residual < K).all())
+
+        # Check all NaN columns -- no swaps should occur
+        if pivot:
+            A = buffer
+            A.fill_(float("nan"))
+            LU, pivots, _ = torch.linalg.lu_factor_ex(A, pivot=pivot)
+            expected_pivots = torch.arange(1, min(r, c) + 2, device=device, dtype=torch.int32)
+            expected_pivots = expected_pivots.unsqueeze(0).expand(b, min(r, c) + 1)
+            self.assertEqual(pivots, expected_pivots)
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4,
                         torch.bfloat16: 5e-2, torch.half: 5e-2})

@@ -143,7 +143,7 @@ __global__ void build_trsm_ptr_kernel(
 ) {
   int b = blockIdx.x * blockDim.x + threadIdx.x;
   if (b >= batch_count) return;
-  auto* base = dA + static_cast<int64_t>(b) * matrix_stride;
+  auto* base = dA + static_cast<size_t>(b) * matrix_stride;
   dL11_array[b] = base + diag_offset + static_cast<size_t>(diag_offset) * lda;
   dA12_array[b] = base + diag_offset + static_cast<size_t>(diag_offset + panel_width) * lda;
 }
@@ -282,18 +282,18 @@ setup_pivinfo_kernel(
   int batch = blockIdx.x;
   int tid = threadIdx.x;
 
-  int* piv = pivinfo + static_cast<int64_t>(batch) * pivinfo_stride;
-  const int* ip = ipiv + static_cast<int64_t>(batch) * ipiv_stride;
+  int* piv = pivinfo + static_cast<size_t>(batch) * pivinfo_stride;
+  const int* ip = ipiv + static_cast<size_t>(batch) * ipiv_stride;
 
   // Initialize identity (1-based absolute row indices, like MAGMA)
-  for (int64_t dst = static_cast<int64_t>(tid) + row_offset; dst < static_cast<int64_t>(row_offset) + nrows; dst += BS) {
+  for (size_t dst = tid + row_offset; dst < row_offset + nrows; dst += BS) {
     piv[dst] = dst + 1;
   }
   __syncthreads();
 
   // Thread 0 replays the sequential swaps
   if (tid == 0) {
-    for (int src = row_offset; src < row_offset + nb; ++src) {
+    for (size_t src = row_offset; src < row_offset + nb; ++src) {
       auto dst = ip[src] - 1;
       if (src != dst) {
         thrust::swap(piv[src], piv[dst]);
@@ -346,8 +346,8 @@ laswp_rowparallel_kernel(
   int batch = blockIdx.z;
   int tid = threadIdx.x;
 
-  auto* A = dA + static_cast<int64_t>(batch) * matrix_stride;
-  const int* piv = pivinfo + static_cast<int64_t>(batch) * pivinfo_stride + row_offset;
+  auto* A = dA + static_cast<size_t>(batch) * matrix_stride;
+  const int* piv = pivinfo + static_cast<size_t>(batch) * pivinfo_stride + row_offset;
 
   // This tile's column range
   int tile_col_start = blockIdx.x * swp_width;
@@ -441,7 +441,7 @@ batched_panel_register_resident_fused_kernel(
   const int tid = threadIdx.x;
   const int batch = blockIdx.x;
   const int nrows = m - col_start;
-  auto* A = dA + static_cast<int64_t>(batch) * matrix_stride;
+  auto* A = dA + static_cast<size_t>(batch) * matrix_stride;
   int curr_row = tid; // tracks "virtual" row swaps
   int linfo = (col_start == 0) ? 0 : dinfo[batch];
 
@@ -529,7 +529,7 @@ batched_panel_register_resident_fused_kernel(
 
   // Write pivots (1-based, absolute)
   if (tid < nb) {
-    dipiv[static_cast<int64_t>(batch) * ipiv_stride + col_start + tid] = sipiv[tid] + col_start + 1;
+    dipiv[static_cast<size_t>(batch) * ipiv_stride + col_start + tid] = sipiv[tid] + col_start + 1;
   }
 
   // Write back results using curr_row
@@ -552,7 +552,7 @@ batched_panel_register_resident_nopiv_fused_kernel(
   const int tid = threadIdx.x;
   const int batch = blockIdx.x;
   const int nrows = m - col_start;
-  auto* A = dA + static_cast<int64_t>(batch) * matrix_stride;
+  auto* A = dA + static_cast<size_t>(batch) * matrix_stride;
   int linfo = (col_start == 0) ? 0 : dinfo[batch];
 
   extern __shared__ char smem_raw[];
@@ -638,7 +638,7 @@ bool try_launch_fused_panel_register_resident(
 }
 
 // Batched panel LU factorization for nrows > 1024.
-template <typename scalar_t, int BS, typename index_t>
+template <typename scalar_t, int BS, typename linidx_t = int>
 __global__ void __launch_bounds__(BS)
 batched_panel_colserial_fused_kernel(
   scalar_t* __restrict__ dA, int64_t matrix_stride,
@@ -656,7 +656,7 @@ batched_panel_colserial_fused_kernel(
   __shared__ scalar_t sdiag;
 
   int batch = blockIdx.z;
-  auto* A = dA + static_cast<int64_t>(batch) * matrix_stride;
+  auto* A = dA + static_cast<size_t>(batch) * matrix_stride;
   int tid = threadIdx.x;
   int panel_end = col_start + nb;
 
@@ -675,13 +675,12 @@ batched_panel_colserial_fused_kernel(
       }
     }
     int pivot_row = block_argmax<real_t, BS>(my_max, my_idx, sdata, sidx, tid);
-    // An all-NaN column leaves the argmax sentinel unset. Fall back to
-    // the diagonal so that swaps and pivot indices remain in bounds.
+    // All NaN cols will return a sentinel, -1. Setting it to k disables swaps
     if (pivot_row < 0) {
       pivot_row = k;
     }
     if (tid == 0) {
-      dipiv[static_cast<int64_t>(batch) * ipiv_stride + k] = pivot_row + 1; // 1-based!
+      dipiv[static_cast<size_t>(batch) * ipiv_stride + k] = pivot_row + 1; // 1-based!
     }
 
     // 2. Row swaps
@@ -712,8 +711,8 @@ batched_panel_colserial_fused_kernel(
 
     // 4. Rank-1 update (linearized)
     if (rows_below > 0 && update_cols > 0) {
-      const index_t numel = static_cast<index_t>(rows_below) * update_cols;
-      for (index_t idx = tid; idx < numel; idx += BS) {
+      auto numel = static_cast<linidx_t>(rows_below) * update_cols;
+      for (decltype(numel) idx = tid; idx < numel; idx += BS) {
         auto local_row = idx % rows_below;
         auto local_col = idx / rows_below;
         auto i = k + 1 + local_row;
@@ -771,27 +770,34 @@ void lu_batched_panel_recursive(
     // Fallback: nrows > 1024 or nb is larger than what the register-resident kernel requires
     TORCH_CHECK(compute_pivots, "nopiv LU must not reach the pivoting colserial fallback");
     auto grid = dim3(1, 1, batch_count);
-    // Retain the faster int32 rank-1 update for panels whose flattened
-    // index space fits, and use int64_t only for larger panels.
-    const bool use_int32 = static_cast<int64_t>(m - col_start) * nb <= std::numeric_limits<int>::max();
+    // Use faster int linearized index in the 1-rank panel updates, if the whole submatrix fits
+    auto use_32bit_linidx = static_cast<int64_t>(m - col_start) * nb <= std::numeric_limits<int>::max();
     if ((m - col_start) > tuning.panel_threshold) {
-      if (use_int32) {
-        batched_panel_colserial_fused_kernel<scalar_t, 1024, int><<<grid, 1024, 0, at::cuda::getCurrentCUDAStream()>>>(
-          dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
+      if (use_32bit_linidx) {
+        batched_panel_colserial_fused_kernel<scalar_t, 1024><<<grid, 1024, 0, at::cuda::getCurrentCUDAStream()>>>(
+          dA, matrix_stride, lda, m,
+          col_start, nb,
+          ipiv_stride, dipiv, dinfo
         );
       } else {
         batched_panel_colserial_fused_kernel<scalar_t, 1024, int64_t><<<grid, 1024, 0, at::cuda::getCurrentCUDAStream()>>>(
-          dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
+          dA, matrix_stride, lda, m,
+          col_start, nb,
+          ipiv_stride, dipiv, dinfo
         );
       }
     } else {
-      if (use_int32) {
-        batched_panel_colserial_fused_kernel<scalar_t, 256, int><<<grid, 256, 0, at::cuda::getCurrentCUDAStream()>>>(
-          dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
+      if (use_32bit_linidx) {
+        batched_panel_colserial_fused_kernel<scalar_t, 256><<<grid, 256, 0, at::cuda::getCurrentCUDAStream()>>>(
+          dA, matrix_stride, lda, m,
+          col_start, nb,
+          ipiv_stride, dipiv, dinfo
         );
       } else {
         batched_panel_colserial_fused_kernel<scalar_t, 256, int64_t><<<grid, 256, 0, at::cuda::getCurrentCUDAStream()>>>(
-          dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
+          dA, matrix_stride, lda, m,
+          col_start, nb,
+          ipiv_stride, dipiv, dinfo
         );
       }
     }
