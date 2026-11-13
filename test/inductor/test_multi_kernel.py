@@ -335,7 +335,7 @@ class MultiKernelTest(TestCase):
         self.assertEqual(f(small), compiled_fn(small))
 
         self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
-        # Each multi_kernel_hints entry gets a variant tuned at that row count.
+        # One kernel per multi_kernel_hints entry, with size_hints at that row count.
         check = FileCheck()
         for hint in config.multi_kernel_hints:
             size_hints = {"x": hint, "r0_": 1024} if reduction else {"x": hint * 1024}

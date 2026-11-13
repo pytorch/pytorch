@@ -23,7 +23,10 @@ import torch._logging
 import torch.utils._pytree as pytree
 from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    has_free_symbols,
+)
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
@@ -4713,21 +4716,23 @@ class SIMDScheduling(BaseScheduling):
             "tiling_scores": tiling_score,
         }
         kernels = self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs)
-        hints: list[int] = []
+        kernels_by_hint: dict[int, SIMDKernel] = {}
         if (
             self.supports_multi_kernel_hints
             and config.multi_kernel_hints
             and len(kernels) == 1
-            and (kernel_features.numel * kernel_features.reduction_numel).free_symbols
+            and has_free_symbols(
+                (kernel_features.numel, kernel_features.reduction_numel)
+            )
         ):
-            # The variants share the lowering and differ only in size_hints.
-            hints = config.multi_kernel_hints
-            kernels = [
-                self.create_kernel_choices(
+            # hint_override only changes size_hints, so each call yields one kernel.
+            kernels_by_hint = {
+                hint: self.create_kernel_choices(
                     kernel_features, [tiling], {**kernel_kwargs, "hint_override": hint}
                 )[0]
-                for hint in hints
-            ]
+                for hint in config.multi_kernel_hints
+            }
+            kernels = list(kernels_by_hint.values())
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
@@ -4746,17 +4751,17 @@ class SIMDScheduling(BaseScheduling):
         del kernel
 
         final_kernel: SIMDKernel | MultiKernel
-        if hints:
-            _, call_args, signature, _ = kernels[0].args.python_argdefs()
+        if kernels_by_hint:
+            _, _, signature, _ = kernels[0].args.python_argdefs()
             shapes = tuple(
-                tuple(V.graph.get_buffer(name).get_size())
-                for name, arg in zip(call_args, signature)
+                tuple(V.graph.get_buffer(arg.buffer).get_size())
+                for arg in signature
                 if isinstance(arg, TensorArg)
             )
             final_kernel = SizeHintMultiKernel(
                 {
                     self._make_shape_cache_key(shapes, hint): kernel
-                    for hint, kernel in zip(hints, kernels)
+                    for hint, kernel in kernels_by_hint.items()
                 }
             )
         elif len(kernels) > 1:
