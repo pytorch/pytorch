@@ -1089,6 +1089,7 @@ for _pointwise_name in (
     "isinf",
     "signbit",
     "to_dtype_bitcast",
+    "to_dtype_rounded",
 ):
     register_pointwise_op(_pointwise_name)
 
@@ -3007,6 +3008,8 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
             # MXFP8 grouped GEMM: the e8m0 scales are consumed by the kernel,
             # never read arithmetically by generated Triton.
             aten._scaled_grouped_mm_v2.default,
+            # Produces the e8m0 bits directly.
+            aten._to_dtype_rounded.default,
         ) or is_view(node.target):
             return False
         if node.target == torch.ops.prims.convert_element_type.default:
@@ -3991,7 +3994,6 @@ make_fallback(aten._scaled_addmm.default, warn=False)
 make_fallback(aten._scaled_addmm_.default, warn=False)
 make_fallback(aten._quantize_tensor.default, warn=False)
 make_fallback(aten._quantize_tensor_dual.default, warn=False)
-make_fallback(aten._to_dtype_rounded.default, warn=False)
 
 
 # 1) Easy
@@ -10045,6 +10047,34 @@ def prepare_softmax_online(x, dim):
         exp = lowerings[aten.exp](sub(x, amax))
         xsum = sum_(exp, dim, keepdims=True)
         return amax, xsum
+
+
+@register_lowering(aten._to_dtype_rounded, type_promotion_kind=None)
+def _to_dtype_rounded(
+    x: TensorBox, dtype: torch.dtype, round: str, *, memory_format=None
+):
+    src_dtype = x.get_dtype()
+    device = x.get_device()
+    if device is not None and is_triton(device):
+        # Only CUDA (and ROCm) has an eager kernel to match.
+        supported = device.type == "cuda" and is_triton_fp8_dtype_supported(
+            dtype, device
+        )
+    else:
+        supported = ir.is_cpu(x) and config.cpu_backend == "cpp"
+    # Inductor does not support float8_e5m3fnu yet.
+    supported = supported and dtype != torch.float8_e5m3fnu
+    if not supported:
+        return fallback_handler(
+            aten._to_dtype_rounded.default, add_to_fallback_set=False
+        )(x, dtype, round, memory_format=memory_format)
+
+    def fn(value):
+        return ops.to_dtype_rounded(value, dtype, src_dtype, round)
+
+    # Like clone, leave the layout to the scheduler rather than materializing
+    # memory_format here.
+    return make_pointwise(fn, override_return_dtype=dtype)(x)
 
 
 @register_lowering(inductor_prims.cvt_e8m0_rceil, type_promotion_kind=None)
