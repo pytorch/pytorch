@@ -132,7 +132,9 @@ must between 1 and the total number of GPUs available.
 A compile-time reuse pass -- `TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE=reuse`
 under Inductor -- borrows the nearest recorded shape, benchmarks the borrow
 against Default, and persists the verdict, Default included when the borrow
-loses. A non-Default wildcard entry is validated and persisted the same way.
+loses. It borrows only where Inductor actually benchmarks an aten GEMM, so a
+compile with max-autotune off, or one that takes a single-choice or
+deterministic exit, or one that hits the autotune cache, reuses nothing. A non-Default wildcard entry is validated and persisted the same way.
 Verdicts go into the same results file as real tuning results, in the same
 format. The file cannot distinguish them, and a later tuning pass treats those
 shapes as exact hits and never tunes them. The pass reads donors from, and

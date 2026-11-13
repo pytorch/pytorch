@@ -47,7 +47,9 @@ class TORCH_CUDA_CPP_API ResultEntry {
     operator std::string () { return key_; }
     std::string GetKey() const { return key_; }
     double GetTime() const { return time_; }
-    friend std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry);
+    friend TORCH_CUDA_CPP_API std::ostream& operator<<(
+        std::ostream& stream,
+        const ResultEntry& entry);
     static ResultEntry Null() { return ResultEntry("Null", 0.0); }
     static ResultEntry Default() { return ResultEntry("Default", 0.0); }
 
