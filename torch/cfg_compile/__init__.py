@@ -25,6 +25,30 @@ Nothing is specialized on shapes unless a pass asks for it: every dimension is
 dynamic. A pass can narrow a dimension to a range by attaching a guard; when
 such a guard fails, only the basic block that carries it is recompiled.
 
+Calls are followed. A call of a Python function of the same module is inlined
+under a guard on the function; any other Python function, method or
+``nn.Module`` is compiled the first time compiled code calls it; and
+``for i in range(k)`` with a small constant ``k`` is unrolled. Closures,
+``try``/``except``/``finally``, ``with``, imports and class statements are
+compiled. Generators, coroutines and functions that read their own frame
+(``locals()``, ``eval``, ``exec`` and the like) run in the interpreter, and so
+does what they call. A Python side effect does not split the function: it is
+one more instruction of the graph, between the specialized ones. A whole
+training step can therefore be one compiled function, with the same results
+bit for bit as the interpreter::
+
+    @torch.cfg_compile
+    def step(model, opt, x, y):
+        opt.zero_grad()
+        loss = torch.nn.functional.mse_loss(model(x), y)
+        loss.backward()  # the autograd engine, on the tape the forward recorded
+        opt.step()
+        return loss
+
+
+    step(model, opt, x, y)
+    step.stats()["compiled_callees"]  # Module._call_impl, Linear.forward, SGD.step, ...
+
 What is compiled is described by a :class:`Pipeline`, an ordered list of
 passes that is run over each block until it stops changing. Passes are
 built-in ones, named by a string, or Python callables taking a ``Region``.
