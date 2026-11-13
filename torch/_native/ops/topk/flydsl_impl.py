@@ -101,7 +101,7 @@ _RADIX_GATE_RANGES = (
 def _fits_topk_buffer_span(rows_m: int, n: int, k: int, itemsize: int) -> bool:
     if not fu._fits_int32_buffer_span(rows_m, n, itemsize):
         return False
-    return rows_m * k * 8 <= (1 << 32) - 1
+    return rows_m * n <= (1 << 31) - 1 and rows_m * k * 8 <= (1 << 32) - 1
 
 
 def _is_pow2(x: int) -> bool:

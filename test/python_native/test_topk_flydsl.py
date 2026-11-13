@@ -127,6 +127,12 @@ class TestFlyDSLTopK(TestCase):
                 f"output is not {'descending' if largest else 'ascending'}",
             )
 
+    def test_signed_int32_element_span(self):
+        from torch._native.ops.topk.flydsl_impl import _fits_topk_buffer_span
+
+        self.assertTrue(_fits_topk_buffer_span(4095, 524288, 1024, 1))
+        self.assertFalse(_fits_topk_buffer_span(4096, 524288, 1024, 1))
+
     @parametrize("k", _RADIX_PADDING_KS)
     def test_radix_sort_length_padding(self, k: int):
         torch.manual_seed(0)
