@@ -61,7 +61,12 @@ enum class GemmEpilogue : int { None = 0, Bias = 1 };
 struct GemvDims {
   int64_t n, K, ld, ms, xs;
   int64_t bias_r, bias_c;
+  // gemv_nt over rows of x: the row count and the row strides of x and y.
+  int64_t rows, xr, yr;
 };
+
+// gemv_nt takes x @ W.t() for up to this many rows of x.
+C10_METAL_CONSTEXPR int32_t kGemvRowsMax = 4;
 
 struct SvdParams {
   uint32_t m; // staged rows = max(orig m,n) >= n
