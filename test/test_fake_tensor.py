@@ -60,6 +60,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
     guarding_hint_or_throw,
+    GuardOnDataDependentSymNode,
     ShapeEnv,
     ShapeEnvSettings,
     StatefulSymbolicContext,
@@ -6129,6 +6130,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             maybe_set_item_memo,
             maybe_set_sym_memo,
         )
+        from torch.fx.experimental.sym_node import _NO_HINT, SymNode
 
         shape_env = ShapeEnv()
         mode = CppFakeTensorMode(shape_env=shape_env)
@@ -6141,6 +6143,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         sym = shape_env.create_unspecified_symbol(2.5, source, DimDynamic.DYNAMIC)
         backed_float = shape_env.create_symfloatnode(sym, hint=2.5, source=source)
         unbacked_float = shape_env.create_unbacked_symfloat()
+        hintless_float = torch.SymFloat(SymNode(sym, shape_env, float, hint=_NO_HINT))
+        self.assertIsNone(hintless_float.node.hint)
 
         # The memo is stored with the mode's current epoch
         mode.epoch += 1
@@ -6148,17 +6152,20 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIs(maybe_get_sym_memo(fake, "nonzero_memo").node, backed_int.node)
         mode.epoch += 1
         self.assertIsNone(maybe_get_sym_memo(fake, "nonzero_memo"))
-        for memo in (backed_int, unbacked_float, backed_float):
+        for memo in (backed_int, unbacked_float, hintless_float, backed_float):
             maybe_set_item_memo(fake, memo)
             self.assertIs(maybe_get_item_memo(fake), memo)
+            if memo is hintless_float:
+                self.assertEqual(guarding_hint_or_throw(memo), 2.5)
+                self.assertIsNone(memo.node.hint)
             mode.epoch += 1
             kept = memo is backed_float
             self.assertIs(maybe_get_item_memo(fake), memo if kept else None)
         mode.epoch += 1
         self.assertIs(maybe_get_item_memo(fake), backed_float)
-        # Which relies on a SymFloat's hint never being filled in later
-        with self.assertRaisesRegex(AssertionError, "Expected an int or bool"):
+        with self.assertRaises(GuardOnDataDependentSymNode):
             guarding_hint_or_throw(unbacked_float.node)
+        self.assertIsNone(unbacked_float.node.hint)
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_set_get_fake_dispatch_keys(self):
