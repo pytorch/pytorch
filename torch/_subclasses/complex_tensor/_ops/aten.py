@@ -13,10 +13,12 @@ from .common import (
     is_complex,
     OpType,
     promote_tensors,
+    REAL_TO_COMPLEX,
     register_binary_nonlinear,
     register_complex,
     register_error,
     register_force_test,
+    register_real_to_complex,
     register_simple,
     split_complex_arg,
     split_complex_tensor,
@@ -226,9 +228,24 @@ def prod_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> ComplexTensor:
     return ComplexTensor(u, v).to(dtype)  # type: ignore[bad-return]
 
 
-@register_complex(aten.complex)
+@register_real_to_complex(aten.complex.default)
 def complex_impl(re: torch.Tensor, im: torch.Tensor) -> ComplexTensor:
+    if re.shape != im.shape:
+        re, im = torch.broadcast_tensors(re, im)
     return ComplexTensor(re, im)
+
+
+@register_real_to_complex(aten.polar.default)
+def polar_impl(abs: torch.Tensor, angle: torch.Tensor) -> ComplexTensor:
+    if abs.dtype != angle.dtype:
+        raise RuntimeError(
+            f"Expected object of scalar type {abs.dtype} but got scalar type {angle.dtype} for second argument"
+        )
+    if abs.dtype not in REAL_TO_COMPLEX:
+        raise NotImplementedError(
+            f"Expected both inputs to be Half, Float or Double tensors but got {abs.dtype} and {angle.dtype}"
+        )
+    return ComplexTensor(abs * torch.cos(angle), abs * torch.sin(angle))
 
 
 @register_complex(aten.pow)
@@ -732,8 +749,9 @@ def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
     return torch.stack([self.re, self.im], dim=-1)
 
 
-@register_complex(aten.view_as_complex)
-def view_as_complex_impl(self: ComplexTensor) -> torch.Tensor:
+@register_real_to_complex(aten.view_as_complex.default)
+@register_real_to_complex(aten.view_as_complex_copy.default)
+def view_as_complex_impl(self: torch.Tensor) -> ComplexTensor:
     if len(self.shape) < 1 or self.shape[-1] != 2:
         raise RuntimeError("Tensor must have a last dimension of size 2")
     return ComplexTensor(self[..., 0], self[..., 1])
