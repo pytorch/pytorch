@@ -2503,6 +2503,9 @@ Arguments:
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
     use_libuv (bool, optional): Deprecated since 2.16 and ignored; ``TCPServer`` always uses libuv. ``False`` emits a ``FutureWarning``. Default is True.
+    tls_cert (str, optional): Path to a PEM certificate (chain). Enables TLS with mutual certificate authentication, which requires ``tls_cert``, ``tls_key`` and ``tls_ca`` and must be enabled on both client and server. If none of the three is set, the ``TORCH_TCPSTORE_TLS_CERT``, ``TORCH_TCPSTORE_TLS_KEY`` and ``TORCH_TCPSTORE_TLS_CA`` environment variables are used instead; TLS is disabled when all selected settings are empty or unset; otherwise empty values and paths containing NUL bytes raise an error. ``clone()`` preserves the resolved configuration, including disabled TLS, regardless of later environment changes. Certificate files are reloaded from the resolved paths, so prefer absolute paths; replacing them affects later clones. Reusing a ``multi_tenant`` server with a different TLS configuration raises. Keep the TLS environment variables stable while constructing stores. Fresh stores created internally, including by ``init_process_group`` with ``env://``, torchrun/the elastic agent, distributed debug, and the asynchronous checkpoint prefix-store helper, only enable TLS through the environment variables; explicit options on another store do not configure them. Linux only; loads OpenSSL >= 1.1.1 (``libssl.so.3``, ``libssl.so.1.1`` or ``libssl.so``) at runtime. Any certificate signed by the CA is accepted; the hostname and subject are not checked, so use a dedicated CA. A certificate may be used for both server and client connections (rank 0 runs both), so it needs both the serverAuth and clientAuth extended key usages, or none; any extended key usage on CA certificates in the chain must also include both. Default is None.
+    tls_key (str, optional): Path to the unencrypted PEM private key, which may be the same file as ``tls_cert``. Default is None.
+    tls_ca (str, optional): Path to the PEM CA bundle used to verify the peer certificate. Default is None.
 
 .. note:: The server limits keys (including any prefix) to 8 KiB, values to 8 MiB per request and multi-key requests to 128K keys; it disconnects clients that exceed them.
 
@@ -2526,7 +2529,10 @@ Example::
                       bool waitWorkers,
                       bool multiTenant,
                       std::optional<int> masterListenFd,
-                      bool useLibUV) {
+                      bool useLibUV,
+                      std::optional<std::string> tlsCert,
+                      std::optional<std::string> tlsKey,
+                      std::optional<std::string> tlsCa) {
             if (!useLibUV) {
               static std::atomic<bool> warned{false};
               if (!warned.load() || c10::WarningUtils::get_warnAlways()) {
@@ -2560,7 +2566,10 @@ Example::
                 .waitWorkers = waitWorkers,
                 .timeout = timeout,
                 .multiTenant = multiTenant,
-                .masterListenFd = masterListenFd};
+                .masterListenFd = masterListenFd,
+                .tlsCert = std::move(tlsCert),
+                .tlsKey = std::move(tlsKey),
+                .tlsCa = std::move(tlsCa)};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -2576,6 +2585,10 @@ Example::
           py::arg("multi_tenant") = false,
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = true,
+          py::kw_only(),
+          py::arg("tls_cert") = py::none(),
+          py::arg("tls_key") = py::none(),
+          py::arg("tls_ca") = py::none(),
           R"(Creates a new TCPStore.)")
       .def_property_readonly(
           "host",
