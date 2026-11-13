@@ -2869,9 +2869,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                 explanation=f"Dynamo doesn't have a rule to determine the type of argument {arg}",
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
-        if isinstance(arg, variables.NNModuleHooksDictVariable) and arg.source:
+        if isinstance(arg, variables.NNModuleHooksDictVariable):
             # Explicit isinstance observes the registry type, unlike internal slot dispatch.
-            install_guard(arg.source.make_guard(GuardBuilder.TYPE_MATCH))
+            arg._guard_type()
         isinstance_type = isinstance_type_var.as_python_constant()
         # An AsyncCollectiveTensor (ACT) input's tensor-class guard is relaxed
         # (see VariableBuilder.wrap_tensor): the cache entry does not discriminate
@@ -3648,13 +3648,15 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
+            if isinstance(obj, ConstDictVariable):
+                obj.check_base_dict_mutation(tx, name)
             if name in (*_RICH_CMP_DUNDERS, "__repr__", "__iter__"):
                 if not isinstance(obj, ConstDictVariable):
                     unimplemented(
                         gb_type="Unsupported builtin dictionary storage operation",
                         context=f"dict.{name} on {obj.python_type_name()}",
                         explanation="Dynamo cannot yet preserve builtin dictionary storage for this operation.",
-                        hints=[],
+                        hints=[*graph_break_hints.SUPPORTABLE],
                     )
                 # Explicit dict slots bypass OrderedDict's linked-order behavior.
                 slotdef = obj.lookup_slotdefs(name)
@@ -3857,23 +3859,10 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
             ]
         if len(args) != 2 or kwargs:
             raise_observed_exception(TypeError, tx)
+        from .object_protocol import generic_hasattr
+
         obj, attr = args
-        if not attr.is_python_constant():
-            raise_observed_exception(TypeError, tx)
-        attr_name = attr.as_python_constant()
-        if not isinstance(attr_name, str):
-            raise_type_error(
-                tx, f"attribute name must be string, not '{attr.python_type_name()}'"
-            )
-        result = obj.call_obj_hasattr(tx, attr_name)
-        if result is None:
-            unimplemented(
-                gb_type="hasattr() on unsupported type",
-                context=f"hasattr({obj}, {attr})",
-                explanation=f"hasattr() is not supported on type {obj.python_type_name()}",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return result
+        return generic_hasattr(tx, obj, attr)
 
 
 class SetAttrBuiltinVariable(BaseBuiltinVariable):

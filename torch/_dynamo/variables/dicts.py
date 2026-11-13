@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
+import torch
 from torch._guards import TracingContext
 from torch.utils._pytree import MappingKey
 
@@ -70,6 +71,7 @@ from ..utils import (
     odict_items,
     odict_keys,
     odict_values,
+    specialize_symnode,
     tracked_repr,
     unpack_iterable,
 )
@@ -100,6 +102,7 @@ from .object_protocol import (
     generic_getattr,
     generic_getitem,
     generic_getiter,
+    generic_hasattr_str,
     generic_is_true,
     generic_richcompare_bool,
     generic_setitem,
@@ -109,6 +112,7 @@ from .object_protocol import (
     pysequence_contains,
     repr_guard,
     type_is_immutable,
+    vt_identity_compare,
 )
 
 
@@ -162,6 +166,34 @@ def _guard_nan_key(key: VariableTracker) -> None:
     # on their identity, including NaNs nested inside tuple keys.
     if key.source and _contains_nan(_get_literal_key(key)):
         install_guard(key.make_guard(GuardBuilder.ID_MATCH))
+
+
+def _key_has_user_hash_or_eq(
+    tx: "InstructionTranslatorBase", key: VariableTracker
+) -> bool:
+    key = key.realize()
+    eq_fn = mro_lookup(key.python_type(), "__eq__")
+    if eq_fn is not None and not isinstance(
+        eq_fn, (types.WrapperDescriptorType, types.MethodDescriptorType)
+    ):
+        return True
+    hash_fn = mro_lookup(key.python_type(), "__hash__")
+    # Inherited hashes consume builtin storage, not overridden iteration.
+    if hash_fn is tuple.__hash__:
+        items = variables.TupleVariable.unpack_var_sequence(
+            cast(variables.TupleVariable, key), tx
+        )
+        return any(_key_has_user_hash_or_eq(tx, item) for item in items)
+    if hash_fn is frozenset.__hash__:
+        items = variables.FrozensetVariable.unpack_var_sequence(
+            cast(variables.FrozensetVariable, key), tx
+        )
+        return any(_key_has_user_hash_or_eq(tx, item) for item in items)
+    return not (
+        hash_fn is None
+        or isinstance(hash_fn, types.WrapperDescriptorType)
+        or hash_fn is torch.Tensor.__hash__
+    )
 
 
 def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
@@ -262,6 +294,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         self,
         items: dict[VariableTracker, VariableTracker]
         | dict[HashableTracker, VariableTracker],
+        *,
+        has_deleted_keys: bool = False,
+        has_reordered_keys: bool = False,
         **kwargs: Any,
     ) -> None:
         # .clone() pass these arguments in kwargs but they're recreated a few
@@ -327,6 +362,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             not is_from_local_source(self.source) if self.source else True
         )
         self.original_items = {key.vt: value for key, value in self.items.items()}
+        # Reinserting deleted keys still invalidates existing OrderedDict iterators.
+        self.has_deleted_keys = has_deleted_keys
+        self.has_reordered_keys = has_reordered_keys
         # Re-entrancy guard for is_python_constant against self-referential
         # dicts. Both forms re-enter this same instance's is_python_constant, so
         # a per-instance flag suffices.
@@ -557,7 +595,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> None:
         # Build a dictionary that contains the keys and values.
         num_args = 0
-        guard_order = False
+        guard_order = self.should_reconstruct_all and isinstance(
+            self.mutation_type, (ValueMutationExisting, AttributeMutationExisting)
+        )
         items = dict.items(self.items) if use_dict_storage else self.items.items()
         for key, value in items:
             item = self.original_items.get(key.vt)
@@ -828,8 +868,15 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         # A dict-family descriptor selects its declaring type, even on an OrderedDict.
         name = descriptor.__name__
         if descriptor.__objclass__ is dict:
+            if issubclass(self.python_type(), collections.OrderedDict):
+                flags = _flags_from_ml_flags(dict, name)
+                _check_method_arity(self, tx, name, flags, args, kwargs)
+                if name == "update":
+                    check_positional(tx, name, len(args), 0, 1)
+                elif name in ("pop", "setdefault"):
+                    check_positional(tx, name, len(args), 1, 2)
             self.check_base_dict_mutation(tx, name)
-        if name not in ("keys", "values", "items", "__reversed__"):
+        if name not in ("keys", "values", "items", "__reversed__", "popitem"):
             return None
         owner = descriptor.__objclass__
         if owner is dict:
@@ -958,6 +1005,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 raise_observed_exception(KeyError, tx, args=[args[0]])
             return args[1]
         self.should_reconstruct_all = True
+        self.has_deleted_keys = True
         tx.output.side_effects.mutation(self)
         if is_proxy:
             del self.items[key]
@@ -982,9 +1030,18 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                     "popitem(): dictionary is empty",
                 ],
             )
+        if isinstance(self, OrderedDictVariable):
+            unimplemented(
+                gb_type="dict.popitem on OrderedDict",
+                context=self.python_type().__name__,
+                explanation="dict.popitem removes storage without updating OrderedDict links.",
+                hints=["Use OrderedDict.popitem to keep its linked order consistent."],
+                skip_frame=True,
+            )
         k, v = self.items.popitem()
         invalidate_key_summary(self.items)
         self.should_reconstruct_all = True
+        self.has_deleted_keys = True
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
@@ -995,6 +1052,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.should_reconstruct_all = True
+        self.has_deleted_keys = self.has_deleted_keys or bool(self.items)
         tx.output.side_effects.mutation(self)
         self.items.clear()
         invalidate_key_summary(self.items)
@@ -1033,10 +1091,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> None:
         # Probe subclass keys before dict_merge considers its raw-storage fast path.
-        if (
-            pydict_checkexact(other)
-            or other.call_obj_hasattr(tx, "keys").as_python_constant()
-        ):
+        if pydict_checkexact(other) or generic_hasattr_str(tx, other, "keys"):
             self.dict_merge(tx, other)
         else:
             # Mutable iterables must retain live iteration across key hashes.
@@ -1262,6 +1317,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             except KeyError:
                 raise_observed_exception(KeyError, tx, args=[key])
             self.should_reconstruct_all = True
+            self.has_deleted_keys = True
         else:
             self._store_item(hkey, value)
         return ConstantVariable.create(None)
@@ -1270,31 +1326,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         """Mapping length for dict objects."""
         self.install_dict_keys_match_guard()
         return VariableTracker.build(tx, len(self.items))
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        # dict not allow setting arbitrary attributes.  OrderedDict and
-        # defaultdict allow arbitrary setattr, but not deletion of default attrs
-        cls = self.python_type()
-        if any(
-            cls is t for t in (dict, collections.OrderedDict, collections.defaultdict)
-        ):
-            if hasattr(cls, name):
-                return ConstantVariable.create(True)
-            if cls is dict:
-                return ConstantVariable.create(False)
-
-        msg = f"hasattr on {cls} is not supported"
-        unimplemented(
-            gb_type="unsupported hasattr operation",
-            context=f"Class {cls}",
-            explanation=msg,
-            hints=[
-                "Consider using a regular dictionary instead",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         self.install_dict_keys_match_guard()
@@ -1470,25 +1501,60 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.source:
-            unimplemented(
-                gb_type="Input OrderedDict linked-order mutation",
-                context="OrderedDict.move_to_end",
-                explanation="Dynamo does not yet replay linked order for input OrderedDicts.",
-                hints=[],
-            )
         self.install_dict_keys_match_guard()
+        # The endpoint identity shortcut also depends on the input's key order.
+        # Hook IDs cannot be exempted: a changed ID can turn a no-op into KeyError.
+        if self.source:
+            tx.output.guard_on_key_order.add(self.source)
+            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
+        last_arg = kwargs.get(
+            "last", args[1] if len(args) == 2 else ConstantVariable.create(True)
+        )
+        last = specialize_symnode(generic_is_true(tx, last_arg)).as_python_constant()
+        if self.source and any(
+            _key_has_user_hash_or_eq(tx, key)
+            for key in (
+                *self.original_items,
+                *(key.vt for key in dict.__iter__(self.items)),
+                args[0],
+            )
+        ):
+            # Include keys inserted before the move or by last.__bool__.
+            # Replay repeats hash/equality callbacks already executed during tracing.
+            # Skip the whole frame so fallback does not replay callbacks twice.
+            unimplemented(
+                gb_type="OrderedDict mutation with user-defined hash or equality",
+                context="OrderedDict.move_to_end",
+                explanation="Dynamo cannot replay input OrderedDict moves without repeating user hash or equality callbacks.",
+                hints=["Construct the OrderedDict inside the compiled function."],
+                skip_frame=True,
+            )
+
+        if not self.items:
+            raise_observed_exception(KeyError, tx, args=[args[0]])
+
+        _guard_nan_key(args[0])
+        endpoint = next(
+            HashableTracker.iter_keys_by_identity(
+                reversed(self.items) if last else self.items
+            )
+        )
+        same_key = vt_identity_compare(args[0], endpoint.vt)
+        if same_key is not None and same_key.as_python_constant():
+            return ConstantVariable.create(None)
+        key = HashableTracker(args[0])
+        guard_key_collisions(self.items, (key,))
+        if key not in self.items:
+            raise_observed_exception(KeyError, tx, args=[args[0]])
         tx.output.side_effects.mutation(self)
-        if args[0] not in self:
-            raise_observed_exception(KeyError, tx)
-
-        last = True
-        if len(args) == 2 and args[0].is_python_constant():
-            last = args[1].as_python_constant()
-        if "last" in kwargs and kwargs["last"].is_python_constant():
-            last = kwargs["last"].as_python_constant()
-
-        self.items.move_to_end(self._hashable_key(args[0]), last=last)
+        self.items.move_to_end(key, last=last)
+        # Later moves can restore the order without restoring valid iterators.
+        self.has_reordered_keys = self.has_reordered_keys or endpoint is not next(
+            HashableTracker.iter_keys_by_identity(
+                reversed(self.items) if last else self.items
+            )
+        )
+        self.should_reconstruct_all = True
         return ConstantVariable.create(None)
 
     def popitem(
@@ -1512,6 +1578,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         k, v = self.items.popitem(last=last)
         invalidate_key_summary(self.items)
         self.should_reconstruct_all = True
+        self.has_deleted_keys = True
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
@@ -1795,13 +1862,6 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 
         return generic_richcompare(tx, self.dv_dict, other, op)
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is types.MappingProxyType:
-            return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
-        return super().call_obj_hasattr(tx, name)
-
 
 class NNModuleHooksDictVariable(ConstDictVariable):
     # Defer local hook-ID guards so equivalent modules can reuse hook dispatch.
@@ -2056,15 +2116,6 @@ class DictViewVariable(VariableTracker):
         codegen.add_push_null(load_method)
         codegen(self.dv_dict)
         codegen.extend_output(create_call_function(1, False))
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.kv is None:
-            raise AssertionError("kv must not be None for call_obj_hasattr")
-        return ConstantVariable.create(
-            mro_lookup(self.python_type(), name) is not NO_SUCH_SUBOBJ
-        )
 
     # dictview_mapping getset returns a read-only mappingproxy of the underlying
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
