@@ -79,6 +79,7 @@ from ..utils import (
     is_tensor_getset_descriptor,
     is_torch_class,
     istype,
+    lazily_unpack,
     no_keywords,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -2183,6 +2184,34 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         if not args and not kwargs:
             return variables.ConstantVariable.create(b"")
+        if (
+            len(args) == 1
+            and not kwargs
+            and isinstance(
+                args[0],
+                (variables.IteratorVariable, variables.LocalGeneratorObjectVariable),
+            )
+        ):
+            # bytes(iterator_of_ints), e.g. a generator. Checked before the
+            # constant branch so a fresh list/tuple iterator is consumed too.
+            # Like CPython, pull one element at a time and raise at the first
+            # bad one, so unbounded iterators stop and later items are left.
+            # Other types may define __bytes__, the buffer protocol or
+            # __index__, which take priority in CPython.
+            out = bytearray()
+            for item in lazily_unpack(tx, args[0]):
+                if not item.is_python_constant():
+                    unimplemented(
+                        gb_type="bytes() over an iterator with non-constant items",
+                        context=f"bytes({args[0]}), item {item}",
+                        explanation="bytes() can only be folded when every item is a constant.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                try:
+                    out += bytes((item.as_python_constant(),))
+                except (TypeError, ValueError) as e:
+                    raise_observed_exception(type(e), tx, args=list(e.args))
+            return VariableTracker.build(tx, bytes(out))
         if all(a.is_python_constant() for a in args) and all(
             v.is_python_constant() for v in kwargs.values()
         ):
@@ -2198,26 +2227,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                     tx,
                     args=list(e.args),
                 )
-        if (
-            len(args) == 1
-            and not kwargs
-            and isinstance(
-                args[0],
-                (variables.IteratorVariable, variables.LocalGeneratorObjectVariable),
-            )
-        ):
-            # bytes(iterator_of_ints), e.g. a generator: unpack it and fold if
-            # every element is a constant. Other types may define __bytes__,
-            # the buffer protocol or __index__, which take priority in CPython.
-            try:
-                items = [x.as_python_constant() for x in unpack_iterable(tx, args[0])]
-            except NotImplementedError:
-                items = None
-            if items is not None:
-                try:
-                    return VariableTracker.build(tx, bytes(items))
-                except (TypeError, ValueError) as e:
-                    raise_observed_exception(type(e), tx, args=list(e.args))
         unimplemented(
             gb_type="bytes() with non-constant arguments",
             context=f"bytes(*{args}, **{kwargs})",

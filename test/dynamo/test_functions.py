@@ -280,7 +280,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return (
                 t + 1,
                 (1024).to_bytes(2, "big"),
-                (-5).to_bytes(2, signed=True),
+                (-5).to_bytes(2, "big", signed=True),
                 int.from_bytes((255).to_bytes(4, "little"), "little"),
             )
 
@@ -324,6 +324,52 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         opt = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
+    def test_bytes_from_iterator_matches_eager(self):
+        # bytes() must pull one item at a time and stop at the first bad one,
+        # leaving the rest of the iterator unconsumed, like CPython.
+        def gen_then_keyerror():
+            yield 300
+            raise KeyError("unreachable")
+
+        def stops_early(t):
+            g = (x for x in [1, 256, 3])
+            try:
+                bytes(g)
+            except ValueError:
+                pass
+            return t + 1, list(g)
+
+        def bad_type(t):
+            try:
+                bytes(x for x in ["a"])
+            except TypeError:
+                return t + 1
+            return t - 1
+
+        def wrong_exception(t):
+            try:
+                bytes(gen_then_keyerror())
+            except ValueError:
+                return t + 1
+            except KeyError:
+                return t - 1
+
+        def unbounded(t):
+            try:
+                bytes(itertools.count())
+            except ValueError:
+                return t + 1
+            return t - 1
+
+        def consumes_iterator(t):
+            it = iter((7, 8))
+            m = map(ord, "ab")
+            return t + 1, bytes(it), list(it), bytes(m), list(m)
+
+        for fn in (stops_early, bad_type, wrong_exception, unbounded, consumes_iterator):
+            opt = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
 
     def test_bytes_non_iterator_matches_eager(self):
         # __bytes__, __index__ and dynamic ints must not take the iterator path.
