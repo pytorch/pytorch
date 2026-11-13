@@ -152,7 +152,7 @@ void initDeviceStreamState(DeviceIndex device) {
           c10::xpu::asyncHandler,
           properties[p]));
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-      if (C10_UNLIKELY(interp)) {
+      if (interp) [[unlikely]] {
         (*interp)->trace_gpu_stream_creation(
             c10::kXPU, reinterpret_cast<uintptr_t>(stream.get()));
       }
@@ -212,7 +212,7 @@ XPUStream XPUStreamForId(DeviceIndex device_index, StreamId stream_id) {
 int XPUStream::priority() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
-  if (C10_UNLIKELY(st == StreamIdType::EXT)) {
+  if (st == StreamIdType::EXT) [[unlikely]] {
     // Query external stream priority
     using namespace sycl::ext::oneapi::property;
     if (queue().has_property<queue::priority_normal>()) {
@@ -237,6 +237,7 @@ sycl::queue& XPUStream::queue() const {
   StreamIdType st = streamIdType(stream_id);
   StreamIdIndex si = streamIdIndex(stream_id);
   switch (st) {
+    case StreamIdType::LOW:
     case StreamIdType::NORMAL:
     case StreamIdType::HIGH:
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -362,24 +363,51 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
  * Note [Synchronize Streams on Device]
  *
  * syncStreamsOnDevice waits for all work previously submitted to the SYCL
- * queues we manage on `device`. It walks every reserved queue in each priority
- * pool and calls `wait()` on it; only queues we own are drained, SYCL queues
- * created outside our pools are unaffected.
- *
- * A true device-wide wait via `ext_oneapi_wait_and_throw()` (available with
- * SYCL >= 2026.0 on devices exposing `ext_oneapi_device_wait`) would be more
- * efficient, but it does not currently interoperate with XPUGraph. We will
- * switch to that path once the XPUGraph interaction is resolved.
+ * queues we manage on `device`. Two paths exist:
+ *  1. Fast path (SYCL >= 2026.1 and device exposes `ext_oneapi_device_wait`):
+ *     delegate to `device_synchronize`, which issues a single
+ *     `ext_oneapi_wait_and_throw()` -- a true device-wide wait. SYCL < 2026.1
+ *     is excluded because earlier runtimes could crash (release an invalid
+ *     queue) when a device-wide wait interleaves with XPUGraph capture; see
+ *     https://github.com/pytorch/pytorch/issues/187277.
+ *     The fast path is limited to:
+ *     On Windows, it additionally requires BMG and newer. See
+ *     https://github.com/pytorch/pytorch/issues/197520.
+ *     On Linux, it is unrestricted.
+ *  2. Legacy path (otherwise): walk every reserved queue in each priority
+ *     pool and `wait()` on it. This only drains queues we own; SYCL queues
+ *     outside our pools are unaffected.
  */
 
-// Note: The stream pools are lazily initialized on first call.
+// Note: The stream pools are lazily initialized on the legacy path; the fast
+// path bypasses our pools entirely.
 void syncStreamsOnDevice(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
   check_device_index(device);
 
-  auto legacy_sync = [device]() {
+// TODO: drop the legacy fallback below once a driver supporting
+// `ext_oneapi_device_wait` is widely deployed across all supported platforms.
+#if SYCL_COMPILER_VERSION >= 20260100
+  const auto& raw_device = c10::xpu::get_raw_device(device);
+  bool use_device_wide_wait =
+      raw_device.has(sycl::aspect::ext_oneapi_device_wait);
+
+#ifdef _WIN32
+  namespace syclex = sycl::ext::oneapi::experimental;
+  use_device_wide_wait &=
+      raw_device.get_info<syclex::info::device::architecture>() >=
+      syclex::architecture::intel_gpu_bmg_g21;
+#endif
+
+#else
+  constexpr bool use_device_wide_wait = false;
+#endif
+
+  if (use_device_wide_wait) {
+    c10::xpu::device_synchronize(device);
+  } else {
     initXPUStreamsOnce();
     // Initializes the stream pools (once)
     initDeviceStreamOnce(device);
@@ -390,12 +418,10 @@ void syncStreamsOnDevice(DeviceIndex device) {
       }
     }
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_device_synchronization(c10::kXPU);
     }
-  };
-
-  legacy_sync();
+  }
 }
 
 } // namespace c10::xpu

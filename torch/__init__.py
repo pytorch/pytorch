@@ -28,7 +28,10 @@ from types import ModuleType as _ModuleType
 from typing import (
     Any as _Any,
     get_origin as _get_origin,
+    LiteralString as _LiteralString,
+    Never as _Never,
     overload as _overload,
+    Self as _Self,
     TYPE_CHECKING,
     TypeAlias as _TypeAlias,
     TypeGuard as _TypeGuard,
@@ -36,12 +39,19 @@ from typing import (
 )
 from typing_extensions import (
     deprecated as _deprecated,
-    LiteralString as _LiteralString,
-    Never as _Never,
     ParamSpec as _ParamSpec,
-    Self as _Self,
     TypeIs as _TypeIs,
 )
+
+
+# Re-executing this file (retrying a failed import, or `reload`) would corrupt the C++ global state the first run set up.
+if getattr(sys, "_torch_import_started", False):
+    raise ImportError(
+        "`torch` can only be initialized once per process, so this module cannot "
+        "be imported again: neither via `importlib.reload(torch)`, nor by "
+        "re-importing after a failed `import torch`."
+    )
+sys._torch_import_started = True  # type: ignore[attr-defined]
 
 
 # As a bunch of torch.packages internally still have this check
@@ -180,6 +190,7 @@ else:
 if sys.platform == "win32":
 
     def _load_dll_libraries() -> None:
+        import importlib.util
         import sysconfig
 
         from torch.version import cuda as cuda_version
@@ -187,10 +198,51 @@ if sys.platform == "win32":
         pfiles_path = os.getenv("ProgramFiles", r"C:\Program Files")
         py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
         th_dll_path = os.path.join(os.path.dirname(__file__), "lib")
+        # Anchor the DLL dir on the compiled _C extension rather than __file__:
+        # editable installs (e.g. scikit-build-core) run this __init__ from the
+        # source tree, whose lib/ is empty, while _C and its dependent DLLs live
+        # in the installed tree. In a wheel install both resolve to the same dir.
+        _spec = importlib.util.find_spec("torch._C")
+        if _spec is not None and _spec.origin:
+            th_dll_path = os.path.join(os.path.dirname(_spec.origin), "lib")
         usebase_path = os.path.join(
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
         py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
+        cudnn_dll_path = th_dll_path
+        if cuda_version:
+            try:
+                # CUDA Pathfinder locates and loads the CUDA runtime DLLs installed
+                # by NVIDIA's PyPI packages on Windows.
+                from cuda.pathfinder import load_nvidia_dynamic_lib
+
+                for lib in (
+                    "cudart",
+                    "nvJitLink",
+                    "nvrtc",
+                    "cublas",
+                    "cublasLt",
+                    "cufft",
+                    "curand",
+                    "cusolver",
+                    "cusparse",
+                    "cupti",
+                    "cudnn",
+                ):
+                    try:
+                        loaded = load_nvidia_dynamic_lib(lib)
+                        if lib == "cudnn" and loaded.abs_path:
+                            cudnn_dll_path = os.path.dirname(loaded.abs_path)
+                    except Exception:
+                        warnings.warn(
+                            f"cuda-pathfinder is unable to find {lib} lib in the current python environment or sys PATH variable",
+                            stacklevel=2,
+                        )
+            except Exception:
+                warnings.warn(
+                    "cuda-pathfinder is not installed or is unable to find DLLs; falling back to CUDA DLLs from the torch package.",
+                    stacklevel=2,
+                )
 
         # When users create a virtualenv that inherits the base environment,
         # we will need to add the corresponding library directory into
@@ -244,12 +296,7 @@ if sys.platform == "win32":
         )
 
         kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
-        with_load_library_flags = hasattr(kernel32, "AddDllDirectory")
         prev_error_mode = kernel32.SetErrorMode(0x0001)
-
-        kernel32.LoadLibraryW.restype = ctypes.c_void_p
-        if with_load_library_flags:
-            kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
         for dll_path in dll_paths:
             os.add_dll_directory(dll_path)
@@ -269,32 +316,15 @@ if sys.platform == "win32":
                 ).strip()
             )
 
-        dlls = glob.glob(os.path.join(th_dll_path, "*.dll"))
-        path_patched = False
-        for dll in dlls:
-            is_loaded = False
-            if with_load_library_flags:
-                res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
-                last_error = ctypes.get_last_error()
-                if res is None and last_error != 126:
-                    err = ctypes.WinError(last_error)
-                    err.strerror += (
-                        f' Error loading "{dll}" or one of its dependencies.'
-                    )
-                    raise err
-                elif res is not None:
-                    is_loaded = True
-            if not is_loaded:
-                if not path_patched:
-                    os.environ["PATH"] = ";".join(dll_paths + [os.environ["PATH"]])
-                    path_patched = True
-                res = kernel32.LoadLibraryW(dll)
-                if res is None:
-                    err = ctypes.WinError(ctypes.get_last_error())
-                    err.strerror += (
-                        f' Error loading "{dll}" or one of its dependencies.'
-                    )
-                    raise err
+        # cudnn64_9.dll loads its sub-libraries (cudnn_graph64_9.dll, ...) by bare
+        # name on first use, which searches PATH. Preload them from the directory
+        # cudnn64_9.dll comes from (cuda-pathfinder's, else torch\lib) so a missing
+        # or different cuDNN on PATH is never used.
+        kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+        for dll in glob.glob(os.path.join(cudnn_dll_path, "cudnn*.dll")):
+            if kernel32.LoadLibraryExW(dll, None, 0x00001100) is None:
+                err = ctypes.WinError(ctypes.get_last_error()).strerror
+                warnings.warn(f'Failed to preload "{dll}": {err}', stacklevel=2)
 
         kernel32.SetErrorMode(prev_error_mode)
 
@@ -354,7 +384,6 @@ def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> Non
         ("cuda_runtime", "libcudart.so.*[0-9]"),
         ("cuda_cupti", "libcupti.so.*[0-9]"),
         ("cufft", "libcufft.so.*[0-9]"),
-        ("curand", "libcurand.so.*[0-9]"),
         ("nvjitlink", "libnvJitLink.so.*[0-9]"),
         ("cusparse", "libcusparse.so.*[0-9]"),
         ("cusparselt", "libcusparseLt.so.*[0-9]"),
@@ -381,90 +410,6 @@ def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> Non
     _preload_cuda_lib("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
 
 
-# ROCm runtime libs a TheRock-built libtorch DT_NEEDEDs, mirroring the set
-# bundled by .ci/manywheel/repair_wheel.py::ROCM_SO_FILES. Ordered leaf-first so
-# that RTLD_GLOBAL preloading satisfies inter-lib NEEDED entries as we go.
-_rocm_core_libs: list[str] = [
-    "libamd_comgr.so",
-    "libhsa-runtime64.so",
-    "libamdhip64.so",
-    "libhiprtc.so",
-    "librocm-core.so",
-    "librocm_smi64.so",
-    "libroctx64.so",
-    "libroctracer64.so",
-    "librocblas.so",
-    "libhipblas.so",
-    "libhipblaslt.so",
-    "librocfft.so",
-    "libhipfft.so",
-    "librocrand.so",
-    "libhiprand.so",
-    "librocsolver.so",
-    "libhipsolver.so",
-    "librocsparse.so",
-    "libhipsparse.so",
-    "libhipsparselt.so",
-    "libMIOpen.so",
-    "librccl.so",
-]
-
-
-def _preload_rocm_deps() -> None:
-    """Preload TheRock ROCm runtime libs, the ROCm analogue of _preload_cuda_deps.
-
-    TheRock ships the ROCm runtime as the ``rocm`` pip package, unpacked to
-    ``<site-packages>/_rocm_sdk_core`` (a sibling of ``torch/``; the same layout
-    torch.utils.cpp_extension._find_rocm_home() keys off). Its runtime libs live
-    in ``_rocm_sdk_core/lib`` and the vendored OS-side "sysdeps" (libdrm, liblzma,
-    ... renamed to ``librocm_sysdeps_*.so``) live in
-    ``_rocm_sdk_core/lib/rocm_sysdeps/lib``. Neither dir is on the default loader
-    search path, so a wheel built against TheRock -- whose torch .so files carry
-    NEEDED entries such as ``librocm_sysdeps_liblzma.so.5`` and
-    ``libamdhip64.so`` -- is only importable when those dirs are reachable
-    (e.g. via LD_LIBRARY_PATH from /etc/rocm_env.sh). Preloading the libs here
-    (RTLD_GLOBAL, before ``import torch._C``) makes the wheel self-resolving
-    regardless of the environment, the same way _preload_cuda_deps handles the
-    nvidia-*-cu12 wheels. Because this lives in torch source it travels with any
-    build (bare ``setup.py`` / ``python -m build``), not just the CI script.
-
-    No-ops on non-Linux, on non-ROCm builds (``torch.version.hip is None`` covers
-    CUDA and CPU), and on OS-managed ROCm where ``_rocm_sdk_core`` is absent
-    (the apt/``/opt/rocm`` path, whose libs are already on the loader path).
-    """
-    if platform.system() != "Linux":
-        return
-
-    from torch.version import hip as hip_version
-
-    if hip_version is None:
-        return
-
-    import importlib.util
-
-    spec = importlib.util.find_spec("_rocm_sdk_core")
-    if spec is None or spec.origin is None:
-        return
-    root_lib = os.path.join(os.path.dirname(spec.origin), "lib")
-    sysdeps_lib = os.path.join(root_lib, "rocm_sysdeps", "lib")
-
-    def _preload(pattern: str) -> None:
-        # Best-effort: preload every match with RTLD_GLOBAL so its symbols/soname
-        # satisfy libtorch's NEEDED entries. A lib whose own deps are not yet
-        # resolvable just fails silently; preloading the rest still lets the
-        # loader resolve libtorch.
-        for sofile in sorted(glob.glob(pattern)):
-            try:
-                ctypes.CDLL(sofile, mode=ctypes.RTLD_GLOBAL)
-            except OSError:
-                pass
-
-    # sysdeps first: the core libs (and libtorch) depend on them.
-    _preload(os.path.join(sysdeps_lib, "librocm_sysdeps_*.so*"))
-    for base in _rocm_core_libs:
-        _preload(os.path.join(root_lib, base + "*"))
-
-
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
     if platform.system() == "Windows":
@@ -473,14 +418,15 @@ def _load_global_deps() -> None:
     # Determine the file extension based on the platform
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
     lib_name = f"libtorch_global_deps{lib_ext}"
-    here = os.path.abspath(__file__)
-    global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
-
-    # TheRock ROCm wheels keep the runtime in _rocm_sdk_core, which is not on the
-    # loader search path; front-load it so libtorch_global_deps' NEEDED entries
-    # (and, further down, libtorch_hip's) resolve. No-ops for CUDA/CPU builds and
-    # for OS-managed ROCm. See _preload_rocm_deps.
-    _preload_rocm_deps()
+    # get_file_path follows the compiled extension, which under a redirect-mode
+    # editable install lives beside the installed distribution, not __file__.
+    global_deps_lib_path = get_file_path("torch", "lib", lib_name)
+    if not os.path.exists(global_deps_lib_path):
+        # Handing a missing path to CDLL would surface as an unrelated dlopen
+        # failure through the CUDA-dependency retry below.
+        raise OSError(
+            f"{global_deps_lib_path} is missing; torch is not fully installed"
+        )
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -1615,6 +1561,7 @@ def is_storage(obj: object, /) -> _TypeGuard["TypedStorage | UntypedStorage"]:
         True
         >>>
         >>> # TypedStorage (legacy)
+        >>> warnings.filterwarnings("ignore", message=".*TypedStorage is deprecated")  # docs: hide
         >>> typed_storage = torch.TypedStorage(5, dtype=torch.float32)
         >>> torch.is_storage(typed_storage)
         True
@@ -1845,6 +1792,7 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
         * :func:`torch.Tensor.index_put` with ``accumulate=False``
@@ -1861,7 +1809,18 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :func:`torch.nn.functional.interpolate` with ``mode='bilinear'`` and ``antialias=False``
+          when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on MPS tensor
+        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
+          when called on an MPS tensor with floating or complex dtype
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, :func:`torch.nn.AdaptiveMaxPool2d`,
+          :func:`torch.nn.AvgPool2d`, and :func:`torch.nn.AvgPool3d` when attempting to differentiate
+          an MPS tensor
+        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
+          in some cases
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1879,7 +1838,6 @@ def use_deterministic_algorithms(
           and one of the following modes is used:
 
           - ``linear``
-          - ``bilinear``
           - ``bicubic``
           - ``trilinear``
 
@@ -1895,10 +1853,13 @@ def use_deterministic_algorithms(
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
-        * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
-        * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on a CUDA tensor
+        * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
+          an MPS tensor with floating or complex dtype
+        * :func:`torch.kthvalue` when called on an MPS tensor
+        * :class:`torch.nn.Embedding` when attempting to differentiate an MPS tensor
+        * :class:`torch.nn.EmbeddingBag` when attempting to differentiate an MPS tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     In addition, several operations fill uninitialized memory when this setting
@@ -2103,6 +2064,12 @@ def set_float32_matmul_precision(precision: str) -> None:
         `torch.backends.cuda.matmul.allow_tf32 = True`. When "highest" (the default)
         is set then the float32 datatype is used for internal computations, equivalent
         to setting `torch.backends.cuda.matmul.allow_tf32 = False`.
+
+    .. note::
+
+        The implementation of "high" and "medium" precision in AMD Instinct MI300 series
+        devices uses 10 mantissa bits but always rounds down instead of rounding to nearest,
+        reducing accuracy slightly and introducing a downward bias. See :ref:`tf32_on_mi300`.
 
     Args:
         precision(str): can be set to "highest" (default), "high", or "medium" (see above).
@@ -2752,24 +2719,28 @@ from torch.autograd import (  # usort: skip
     set_grad_enabled as set_grad_enabled,
 )
 
-from torch import (
+from torch import (  # usort: skip
     __config__ as __config__,
     __future__ as __future__,
     _awaits as _awaits,
     accelerator as accelerator,
     autograd as autograd,
     backends as backends,
+    # Device modules must be imported before other modules (e.g., multiprocessing)
+    # that need to access their classes at import time.
     cpu as cpu,
     cuda as cuda,
+    mps as mps,
+    mtia as mtia,
+    xpu as xpu,
     distributed as distributed,
     distributions as distributions,
     fft as fft,
+    foreach as foreach,
     futures as futures,
     hub as hub,
     jit as jit,
     linalg as linalg,
-    mps as mps,
-    mtia as mtia,
     multiprocessing as multiprocessing,
     nested as nested,
     nn as nn,
@@ -2782,7 +2753,6 @@ from torch import (
     types as types,
     utils as utils,
     version as version,
-    xpu as xpu,
 )
 from torch.signal import windows as windows
 
@@ -2931,23 +2901,36 @@ class _TorchCompileInductorWrapper:
             return
 
         from torch._inductor import config
-
-        current_config: dict[str, _Any] = config.get_config_copy()
+        from torch._inductor.codegen.common import (
+            get_compile_option_owner,
+            init_backend_registration,
+        )
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
-            if attr_name not in current_config:
-                raise RuntimeError(
-                    f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
+            if attr_name in config._config:  # type: ignore[attr-defined]
+                # core inductor keys take precedence over device namespaces
+                owner_config, target_key = config, attr_name
+            else:
+                # a deferred privateuse1 backend may not have registered yet
+                init_backend_registration()
+                owner_config, target_key = get_compile_option_owner(attr_name) or (
+                    config,
+                    attr_name,
                 )
-            attr_type = config.get_type(attr_name)  # type: ignore[attr-defined]
+            if target_key not in owner_config._config:  # type: ignore[attr-defined]
+                raise RuntimeError(
+                    f"Unexpected optimization option {key}, known options are "
+                    f"{list(config.get_config_copy())}"
+                )
+            attr_type = owner_config.get_type(target_key)  # type: ignore[attr-defined]
             # Subscriptable generic types don't support isinstance so skip the type
             # check. There doesn't seem to be a good way of checking membership without
             # 3rd party libraries.
             if _get_origin(attr_type) is None:
                 if not isinstance(val, attr_type):
                     val_type_str = type(val).__name__
-                    expected_type_str = type(current_config[attr_name]).__name__
+                    expected_type_str = type(getattr(owner_config, target_key)).__name__
                     raise RuntimeError(
                         f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
                     )
@@ -3006,18 +2989,12 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         *,
         config_patches: dict[str, _Any] | None = None,
     ) -> _Any:
-        from contextlib import nullcontext
-        from unittest import mock
-
         from torch._guards import detect_fake_mode
         from torch._inductor.virtualized import V
+        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 
         fake_mode = detect_fake_mode(inputs_)
-        ctx = (
-            mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
-            if fake_mode
-            else nullcontext()
-        )
+        ctx = allow_non_fake_inputs_temporarily(fake_mode)
         with (
             V.set_aot_compilation(True),
             ctx,
@@ -3033,6 +3010,7 @@ class _TorchCompileWrapper:
         mode: str | None,
         options: dict[str, _Any] | None,
         dynamic: builtins.bool | None,
+        name: str | None = None,
     ) -> None:
         from torch._dynamo.backends.registry import lookup_backend
 
@@ -3043,6 +3021,7 @@ class _TorchCompileWrapper:
         else:
             self.compiler_name = str(backend)
         self.dynamic = dynamic
+        self.name = name
         self.compiler_fn = lookup_backend(backend)
         self.kwargs: dict[str, _Any] = {}
         # only pass the args if they non-empty
@@ -3050,6 +3029,8 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
+        if name:
+            self.kwargs["name"] = name
 
     def __eq__(self, other: object) -> builtins.bool:
         return (
@@ -3057,6 +3038,7 @@ class _TorchCompileWrapper:
             and self.compiler_fn == other.compiler_fn
             and self.kwargs == other.kwargs
             and self.dynamic == other.dynamic
+            and self.name == other.name
         )
 
     def __call__(self, model_: _Any, inputs_: _Any) -> _Any:
@@ -3065,6 +3047,13 @@ class _TorchCompileWrapper:
     def reset(self) -> None:
         if hasattr(self.compiler_fn, "reset"):
             self.compiler_fn.reset()
+
+    # Forwarded so the backend's _dynamo_backend_init can be read off the
+    # wrapper (what get_compiler_fn receives); read at fire time so the hook
+    # can be set on the backend even after torch.compile() wraps it.
+    @property
+    def _dynamo_backend_init(self) -> _Any | None:
+        return getattr(self.compiler_fn, "_dynamo_backend_init", None)
 
 
 _InputT = _ParamSpec("_InputT")
@@ -3200,7 +3189,7 @@ def compile(
         - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
           This is an unsafe feature and there is no backward compatibility guarantee provided
           for dynamo guards as data types.
-          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          For stable helper functions to use, see the documentation in `torch.compiler`, for example:
           - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
           - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
           - `torch.compiler.keep_tensor_guards_unsafe`
@@ -3239,8 +3228,8 @@ def compile(
     import sysconfig
 
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 15):
-        raise RuntimeError("torch.compile is not supported on Python 3.15+")
+    if sys.version_info >= (3, 16):
+        raise RuntimeError("torch.compile is not supported on Python 3.16+")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -3336,7 +3325,7 @@ def compile(
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
     else:
-        backend = _TorchCompileWrapper(backend, mode, options, dynamic)
+        backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 
     return torch._dynamo.optimize(
         backend=backend,
@@ -3485,8 +3474,9 @@ def get_device_module(device: "torch.device | str | None" = None) -> _ModuleType
     elif isinstance(device, str):
         device_module_name = torch.device(device).type
     elif device is None:
-        # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
-        device_module_name = torch._C._get_accelerator().type
+        # Use the current accelerator's type, falling back to CPU when none is available.
+        acc = torch._C._accelerator_getAccelerator()
+        device_module_name = acc.type if acc is not None else "cpu"
     else:
         raise RuntimeError(
             f"Invalid value of device '{device}', expect torch.device, str, or None"

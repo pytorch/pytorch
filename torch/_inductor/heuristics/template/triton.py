@@ -1,30 +1,34 @@
 from __future__ import annotations
 
 import dataclasses
+import importlib.metadata
 import itertools
 import logging
 import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.utils import counters
 from torch._inductor.heuristics.registry import register_template_heuristic
+from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
+from ...autows_utils import has_two_ctas, meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
-    blackwell_ws_persistent_device_tma_mm_template,
-    get_scaling_options,
-    get_tile_size,
+    blackwell_ws_persistent_tma_mm_template,
     mm_template,
     persistent_mm_template,
+    persistent_tdm_mm_template,
     persistent_tma_mm_template,
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
@@ -33,11 +37,20 @@ from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
+    _rocm_version_tuple,
+    _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
+    _TDM_MIN_INNERMOST_REQUEST_BYTES,
+    commit_tdm_operand_layout,
     get_backend_num_stages,
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    kpack_supported,
+    mfma_kdim,
+    rocm_gfx_arch,
+    tdm_descriptor_row_major,
     TMA_DESCRIPTOR_SIZE,
+    tma_inner_dim,
     triton_type,
     using_b200,
     using_rocm_rdna3,
@@ -48,13 +61,29 @@ from .triton_addmm import AddMMConfigMixin
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable, Generator, Sequence
 
     from triton import Config as TritonConfig
+
+    from ...ir import IRNode
+    from ...utils import _IntLike
 
 else:
     from torch._inductor.runtime.triton_compat import Config as TritonConfig
 log = logging.getLogger(__name__)
+
+
+USE_META_WS = meta_ws_enabled()
+
+
+def _use_template_autows() -> bool:
+    """Whether to expand the Blackwell GEMM search space with Meta Triton autoWS
+    configs: opt-in flag plus an enabled meta-WS Triton build."""
+    return config.triton.enable_template_autows and USE_META_WS
+
+
+# Check if running on ROCm
+IS_ROCM = torch.version.hip is not None
 
 
 def _origami_enabled() -> bool:
@@ -62,10 +91,115 @@ def _origami_enabled() -> bool:
     return config.rocm.origami
 
 
-USE_META_WS = os.environ.get("TRITON_USE_META_WS", "0") == "0"
+def _origami_package_supported(
+    rocm_version: tuple[int, int], package_version: str
+) -> bool:
+    """On ROCm >= 10.0, rocm-origami < 0.0.3 lacks the API used here."""
+    if rocm_version < (10, 0):
+        return True
+    try:
+        return Version(package_version) >= Version("0.0.3")
+    except InvalidVersion:
+        return False
 
-# Check if running on ROCm
-IS_ROCM = torch.version.hip is not None
+
+# AttributeError: the _origami_* wrappers below read private rocm-origami attributes.
+_ORIGAMI_ERRORS = (ValueError, TypeError, RuntimeError, AttributeError)
+
+
+def _log_origami_fallback(err: Exception) -> None:
+    """Warn once per error type; the error text is logged at debug."""
+    torch._logging.warning_once(
+        log,
+        "Origami could not select configs (%s); using the regular config "
+        "generator. Run with TORCH_LOGS=+inductor for details.",
+        type(err).__name__,
+    )
+    log.debug("Origami selection error: %s", err)
+
+
+def _origami_config_key(cfg: BaseConfig) -> tuple[int, int, int]:
+    """Tile dimensions; _filter_configs may change num_stages/num_warps but not these."""
+    return (cfg.block_m, cfg.block_n, cfg.block_k)
+
+
+def _tdm_descriptor_orientation(kwargs: dict[str, Any]) -> tuple[bool, bool]:
+    """Read the operand orientations a TDM heuristic must have injected.
+
+    Fails closed rather than defaulting to row-major: which tile extent is
+    contiguous depends on the orientation, so a wrong default would silently
+    filter against the wrong axis and admit misaligned blocks.
+    """
+    missing = [
+        key for key in ("tdm_a_row_major", "tdm_b_row_major") if key not in kwargs
+    ]
+    if missing:
+        raise AssertionError(
+            f"TDM config filtering requires {', '.join(missing)}; they are "
+            "injected by the TDM template heuristics and must not be defaulted"
+        )
+    return kwargs["tdm_a_row_major"], kwargs["tdm_b_row_major"]
+
+
+def _tdm_block_legal(block: int, dtype_size: int) -> bool:
+    """Rule 1: the innermost request must hold >= 16 bytes.
+
+    Kept independent of rule 3, which currently implies it but is provisional.
+    """
+    return int(block) * dtype_size >= _TDM_MIN_INNERMOST_REQUEST_BYTES
+
+
+def _tdm_block_direct_path(block: int, dtype_size: int) -> bool:
+    """Rule 3: relative 128-byte contiguous block width."""
+    return (int(block) * dtype_size) % _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES == 0
+
+
+def _tdm_block_aligned(block: int, dtype_size: int) -> bool:
+    """Whether a tile's contiguous extent is both legal and selected."""
+    if dtype_size <= 0:
+        raise AssertionError(
+            f"TDM config filtering requires a positive dtype_size, got {dtype_size}"
+        )
+    return _tdm_block_legal(block, dtype_size) and _tdm_block_direct_path(
+        block, dtype_size
+    )
+
+
+def _tdm_descriptor_blocks_aligned(
+    block_m: int,
+    block_n: int,
+    block_k: int,
+    dtype_size: int,
+    *,
+    a_row_major: bool,
+    b_row_major: bool,
+) -> bool:
+    a_contiguous_block = block_k if a_row_major else block_m
+    b_contiguous_block = block_n if b_row_major else block_k
+    return _tdm_block_aligned(a_contiguous_block, dtype_size) and _tdm_block_aligned(
+        b_contiguous_block, dtype_size
+    )
+
+
+def _filter_tdm_descriptor_block_configs(
+    configs: list[BaseConfig],
+    dtype_size: int,
+    *,
+    a_row_major: bool,
+    b_row_major: bool,
+) -> list[BaseConfig]:
+    return [
+        config
+        for config in configs
+        if _tdm_descriptor_blocks_aligned(
+            config.block_m,
+            config.block_n,
+            config.block_k,
+            dtype_size,
+            a_row_major=a_row_major,
+            b_row_major=b_row_major,
+        )
+    ]
 
 
 # rocm-origami pip pkg is only available on ROCm builds and is only used when
@@ -75,6 +209,22 @@ IS_ROCM = torch.version.hip is not None
 if IS_ROCM and config.max_autotune and config.rocm.origami:
     try:
         import origami  # type: ignore[import-not-found]
+
+        try:
+            _origami_version = importlib.metadata.version("rocm-origami")
+        except importlib.metadata.PackageNotFoundError:
+            _origami_version = None
+        _rocm_version = _rocm_version_tuple()
+        if _origami_version is not None and not _origami_package_supported(
+            _rocm_version, _origami_version
+        ):
+            log.warning(
+                "rocm-origami %s is not compatible with ROCm %d.%d; upgrade to "
+                "rocm-origami>=0.0.3 or set TORCHINDUCTOR_ORIGAMI=0. Origami disabled.",
+                _origami_version,
+                *_rocm_version,
+            )
+            origami = None
     except ImportError:
         origami = None
         log.info(
@@ -154,6 +304,11 @@ class BlackwellGPUGemmConfig(GemmConfig):
     epilogue_subtile: int = dataclasses.field(kw_only=True, default=1)
     warp_specialize: bool = dataclasses.field(kw_only=True, default=True)
     flatten: bool = dataclasses.field(kw_only=True, default=True)
+    # Meta Triton autoWS knobs (meta-WS builds only)
+    use_meta_ws: bool = dataclasses.field(kw_only=True, default=False)
+    data_partition_factor: int = dataclasses.field(kw_only=True, default=1)
+    separate_epilogue_store: bool = dataclasses.field(kw_only=True, default=False)
+    two_ctas: bool = dataclasses.field(kw_only=True, default=False)
 
 
 # FlexAttention Configs
@@ -303,6 +458,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         # Whether the heuristic is used for int8. Use this when the heuristic is int8 exclusive
         # but prefer the preprocess_mm_configs argument when it's used for both
         self.has_int8_tensor: bool = False
+        # Whether descriptor-specific TDM config filtering is active.
+        self.uses_tdm_configs: bool = False
         # Whether to scale configs at all
         # TODO(coconutruben): remove this once mm_plus_mm and tests support scaling
         self.should_scale_configs: bool = True
@@ -377,11 +534,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(64, 64, 64, 3, 8),
             GemmConfig(128, 256, 128, 3, 8),
             GemmConfig(256, 128, 128, 3, 8),
-        ]
-
-        self.mixed_mm_configs: list[BaseConfig] = [
-            GemmConfig(16, 128, 256, 3, 4),
-            GemmConfig(16, 128, 256, 5, 8),
         ]
 
         self.persistent_mm_configs: list[BaseConfig] = [
@@ -842,6 +994,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     def _finalize_mm_configs(
         self,
         configs: list[BaseConfig],
+        dtype_size: int = 0,
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.
@@ -871,7 +1024,15 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
             # Add BlackwellGPUGemmConfig specific fields to key if present
             if isinstance(conf, BlackwellGPUGemmConfig):
-                key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
+                key += (
+                    conf.epilogue_subtile,
+                    conf.warp_specialize,
+                    conf.flatten,
+                    conf.use_meta_ws,
+                    conf.data_partition_factor,
+                    conf.separate_epilogue_store,
+                    conf.two_ctas,
+                )
 
             extra_key, extra_kwargs = self._get_extra_config_key_and_kwargs(conf)
             key += extra_key
@@ -894,6 +1055,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["EPILOGUE_SUBTILE"] = conf.epilogue_subtile
                     kwargs["WARP_SPECIALIZE"] = conf.warp_specialize
                     kwargs["FLATTEN"] = conf.flatten
+                    kwargs["USE_META_WS"] = conf.use_meta_ws
+                    kwargs["DATA_PARTITION_FACTOR"] = conf.data_partition_factor
+                    kwargs["SEPARATE_EPILOGUE_STORE"] = conf.separate_epilogue_store
+                    kwargs["TWO_CTAS"] = conf.two_ctas
 
                 kwargs.update(extra_kwargs)
 
@@ -1026,9 +1191,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             if torch.cuda.is_available():
                 device = torch.cuda.current_device()
                 props = torch.cuda.get_device_properties(device)
-                if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                if hasattr(props, "shared_memory_per_block_optin"):
                     sm_available = int(props.shared_memory_per_block_optin)
-                elif hasattr(props, "shared_memory_per_block"):  # for ROCm
+                elif hasattr(props, "shared_memory_per_block"):
                     sm_available = int(props.shared_memory_per_block)
                 else:
                     return None
@@ -1140,7 +1305,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
             scaled_configs = self._prune_reg_spill_configs(scaled_configs)
-        return self._finalize_mm_configs(scaled_configs)
+        return self._finalize_mm_configs(scaled_configs, dtype_size=dtype_size)
 
     def triton_config(
         self, num_stages: int, num_warps: int, **kwargs: Any
@@ -1183,7 +1348,11 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     # Flex attn helpers
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -1209,7 +1378,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
@@ -1322,6 +1491,16 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
         )
 
 
+def _flex_needs_small_blocks(
+    capability: tuple[int, int], head_dim: int, v_head_dim: int | None
+) -> bool:
+    # Triton miscompiles flex attention on sm_10x when the QK or V head_dim is
+    # > 256 and a block dim is >= 64 (fwd BLOCK_M; bwd BLOCK_N1/BLOCK_M2),
+    # faulting with "misaligned address" or "unspecified launch failure".
+    # https://github.com/triton-lang/triton/issues/10309
+    return capability[0] == 10 and max(head_dim, v_head_dim or 0) > 256
+
+
 class CUDAConfigHeuristic(BaseConfigHeuristic):
     """
     Child class for CUDA device specific gemm/flex attention/conv/ configs.
@@ -1394,17 +1573,29 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         ]
 
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         capability = torch.cuda.get_device_capability()
+        prune_large_blocks = _flex_needs_small_blocks(capability, head_dim, v_head_dim)
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_fwd_configs
-            flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
+                flex_attn_fwd_configs = self.exhaustive_flex_attn_fwd_configs
+            else:
+                flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
+            if prune_large_blocks:
+                flex_attn_fwd_configs = [
+                    c for c in flex_attn_fwd_configs if c.block_m < 64
+                ]
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return flex_attn_fwd_configs
 
-        if head_dim <= 256:
+        if head_dim <= 256 and not prune_large_blocks:
             if dtype == torch.float32:
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
@@ -1426,11 +1617,12 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = self.a100_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
+        elif dtype == torch.float32:
+            default_config = FlexConfig(32, 16, 3, 4)
+        elif prune_large_blocks:
+            default_config = FlexConfig(32, 32, 2, 4)
         else:
-            if dtype == torch.float32:
-                default_config = FlexConfig(32, 16, 3, 4)
-            else:
-                default_config = FlexConfig(64, 32, 3, 4)
+            default_config = FlexConfig(64, 32, 3, 4)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -1438,14 +1630,25 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
+        """Return flex attention backward configs for the current CUDA device."""
         capability = torch.cuda.get_device_capability()
+        prune_large_blocks = _flex_needs_small_blocks(capability, head_dim, v_head_dim)
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_bwd_configs
-            flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+                flex_attn_bwd_configs = self.exhaustive_flex_attn_bwd_configs
+            else:
+                flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+            if prune_large_blocks:
+                flex_attn_bwd_configs = [
+                    c
+                    for c in flex_attn_bwd_configs
+                    if max(c.block_m1, c.block_n1, c.block_m2, c.block_n2) < 64
+                ]
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return flex_attn_bwd_configs
 
         major, minor = capability
         if dtype == torch.float32:
@@ -1493,16 +1696,15 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 )
             ),
             "sm12x": lambda h: (
-                FlexBwDConfig(32, 128, 128, 32, 3, 4)
-                if h < 64
-                else FlexBwDConfig(
-                    64, 64, 64, 64, 1 if h >= 128 else 2, 4
-                )
+                FlexBwDConfig(32, 128, 128, 32, 3, 4) if h < 64 else
+                FlexBwDConfig(64, 64, 64, 64, 2, 4) if h < 128 else
+                FlexBwDConfig(64, 64, 64, 64, 1, 4) if h == 128 else
+                FlexBwDConfig(32, 32, 32, 32, 2, 4)
             ),
         }
         # fmt: on
 
-        if head_dim <= 256:
+        if head_dim <= 256 and not prune_large_blocks:
             default_config = config_map[capability_class](head_dim)
         else:
             default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
@@ -1551,6 +1753,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         super().__init__()
 
         self.default_num_stages = get_backend_num_stages()
+
+        kpack_choices = [1, 2] if kpack_supported() else [1]
 
         self.mm_configs: list[BaseConfig] = [
             ROCmGemmConfig(
@@ -1609,13 +1813,15 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
         ]
 
-        # Exhaustive search for mm configs
+        # Exhaustive search for mm configs. num_stages is deliberately not an axis
+        # here: _filter_configs forces every config to self.default_num_stages, so
+        # enumerating it would only produce duplicates that get deduped later.
         self.exhaustive_configs: list[BaseConfig] = [
             ROCmGemmConfig(
                 BLOCK_M,
                 BLOCK_N,
                 BLOCK_K,
-                num_stages,
+                self.default_num_stages,
                 num_warps,
                 group_m=group_m,
                 matrix_instr_nonkdim=matrix_instr_nonkdim,
@@ -1625,12 +1831,11 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
             )
-            for num_stages in [1, self.default_num_stages]
             for num_warps in [4, 8]
             for group_m in [4, 8, 16]
             for matrix_instr_nonkdim in [0, 16]
             for waves_per_eu in [0, 2]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
         ]
 
         # Architecture-aware default kpack for flex configs
@@ -1660,6 +1865,25 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 256): ROCmFlexConfig(32, 32, 1, 8, kpack=default_kpack),
         }
 
+        # Backward defaults measured on gfx950. Only the head dims covered here were
+        # measured; anything else keeps the shared ROCm values below. The block shape
+        # and num_stages=2 have to move together: on gfx950 either one alone is a
+        # regression at head_dim 128, while the pair is a gain at both head dims.
+        self.gfx950_default_flex_bwd_config = {
+            (torch.bfloat16, 64): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+            (torch.bfloat16, 128): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+            (torch.float16, 64): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+            (torch.float16, 128): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+        }
+
         # RDNA3 (gfx11xx) optimal configs profiled on gfx1151 (head_dim=256).
         # Three seq_len tiers to match CU occupancy on 16-CU RDNA3:
         #   short  (seq < 128): BLOCK_M=16, tiny tiles keep all CUs busy
@@ -1680,6 +1904,19 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         self.rdna3_default_flex_config = {
             (torch.bfloat16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
             (torch.float16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
+        }
+
+        # Selection is an exact match on the gfx target, so a target only gets
+        # values that were measured on it. gfx numbers neither order by
+        # capability nor identify the product line -- gfx1250 is MI450, a CDNA5
+        # part -- so there is no direction along which tuning can be inherited.
+        # Targets absent here fall back to the shared ROCm defaults below.
+        self.flex_fwd_config_by_arch = {
+            "gfx942": self.gfx942_default_flex_config,
+            "gfx950": self.gfx950_default_flex_config,
+        }
+        self.flex_bwd_config_by_arch = {
+            "gfx950": self.gfx950_default_flex_bwd_config,
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -1718,7 +1955,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
         ]
 
         self.exhaustive_flex_attn_bwd_configs: list[FlexBwDConfig] = [
@@ -1742,7 +1979,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
             if BLOCK_N1 % BLOCK_M1 == 0
             and BLOCK_M2 % BLOCK_N2 == 0  # kernel static assertions
         ]
@@ -1759,24 +1996,105 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for kpack in [1, 2]
         ]
 
-    def _prune_exhaustive_configs(
+    def preprocess_mm_configs(
         self,
+        m: int,
+        n: int,
+        k: int,
         configs: list[BaseConfig],
-        dtype_size: int,
-    ) -> list[BaseConfig]:
-        # these cause AMD compile to crash
-        pruned_configs = [
-            c
-            for c in configs
-            if not (
-                (
-                    getattr(c, "matrix_instr_nonkdim", 0) == 2
-                    and getattr(c, "kpack", 0) == 2
+        has_int8_tensor: bool = False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
+        dtype_size: int = 0,
+        op_name: str = "mm",
+        **kwargs,
+    ) -> Generator[TritonConfig, None, None]:
+        tdm_report: tuple[int, int, bool, bool] | None = None
+        if self.uses_tdm_configs:
+            # Validate before filtering: an already-empty pool would skip a
+            # per-config check entirely and report success for bad metadata.
+            a_row_major, b_row_major = _tdm_descriptor_orientation(kwargs)
+            if dtype_size <= 0:
+                raise AssertionError(
+                    "TDM config filtering requires a positive dtype_size, "
+                    f"got {dtype_size}"
                 )
-                or (c.block_k <= 16 and getattr(c, "kpack", 0) == 2)
+            candidate_count = len(configs)
+            configs = _filter_tdm_descriptor_block_configs(
+                configs,
+                dtype_size,
+                a_row_major=a_row_major,
+                b_row_major=b_row_major,
             )
-        ]
-        return pruned_configs
+            tdm_report = (candidate_count, dtype_size, a_row_major, b_row_major)
+            caller_exclude = exclude
+
+            def tdm_exclude(
+                block_m: sympy.Integer,
+                block_n: sympy.Integer,
+                block_k: sympy.Integer,
+            ) -> bool:
+                return not _tdm_descriptor_blocks_aligned(
+                    block_m,
+                    block_n,
+                    block_k,
+                    dtype_size,
+                    a_row_major=a_row_major,
+                    b_row_major=b_row_major,
+                ) or caller_exclude(block_m, block_n, block_k)
+
+            exclude = tdm_exclude
+
+        scaled = super().preprocess_mm_configs(
+            m,
+            n,
+            k,
+            configs,
+            has_int8_tensor,
+            scale,
+            exclude,
+            dtype_size,
+            op_name,
+            **kwargs,
+        )
+        if tdm_report is None:
+            return scaled
+        return self._report_empty_tdm_pool(scaled, *tdm_report)
+
+    @staticmethod
+    def _report_empty_tdm_pool(
+        configs: Generator[TritonConfig, None, None],
+        candidate_count: int,
+        dtype_size: int,
+        a_row_major: bool,
+        b_row_major: bool,
+    ) -> Generator[TritonConfig, None, None]:
+        """Report when preprocessing leaves a TDM template with no configs.
+
+        Counted after scaling, not right after the block filter: scaling clamps
+        block sizes to the shape hints and re-applies ``tdm_exclude``, so a
+        config that passed at full size can still be dropped by a small K.
+        """
+        surviving = 0
+        for triton_config in configs:
+            surviving += 1
+            yield triton_config
+        if not surviving:
+            # debug, not warning: an empty pool is expected for any shape whose
+            # clamped block width misses the 128-byte policy, and the cause is
+            # not necessarily alignment -- caller exclusions and the other
+            # preprocessing stages can empty it too.
+            log.debug(
+                "TDM: preprocessing left no usable configs out of %d candidates "
+                "(dtype_size=%d, a_row_major=%s, b_row_major=%s); this template "
+                "contributes no autotuning choices",
+                candidate_count,
+                dtype_size,
+                a_row_major,
+                b_row_major,
+            )
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
@@ -1789,11 +2107,12 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
     def _finalize_mm_configs(
         self,
         configs: list[BaseConfig],
+        dtype_size: int = 0,
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used: OrderedSet[tuple[int, ...]] = OrderedSet()
+        used: OrderedSet[tuple[int | None, ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -1806,17 +2125,39 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             waves_per_eu: int = getattr(conf, "waves_per_eu", 0)
             # Use explicit kpack if set, otherwise determine optimal value based on
             # architecture and BLOCK_K
-            kpack: int = getattr(conf, "kpack", get_default_kpack(conf.block_k))
+            explicit_kpack = getattr(conf, "kpack", None)
+            kpack: int = explicit_kpack or get_default_kpack(conf.block_k)
+            kdim = mfma_kdim(dtype_size, matrix_instr_nonkdim)
+
+            # Policy: mfma_kdim returns None for a dtype not in the CDNA MFMA
+            # table (e.g. fp64, or an unspecified dtype_size=0). Without the true
+            # MFMA K-extent we cannot decide whether a kpack pack underfills the
+            # operand, so we skip the kpack underfill check rather than guessing
+            # from matrix_instr_nonkdim (which over-prunes small-kdim dtypes).
+            if kdim is None:
+                underfills_mfma = False
+            else:
+                underfills_mfma = kpack > 1 and conf.block_k < kpack * kdim
+
+            # A default kpack that would underfill is dropped to 1
+            # so a valid config is emitted instead of being pruned. An explicitly
+            # requested kpack that underfills is left to be pruned below.
+            if explicit_kpack is None and underfills_mfma:
+                kpack = 1
+                underfills_mfma = False
 
             if matrix_instr_nonkdim != 0 and (
                 conf.block_m % matrix_instr_nonkdim != 0
                 or conf.block_n % matrix_instr_nonkdim != 0
+                or underfills_mfma
             ):
                 #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                #  an explicitly requested kpack > 1 must supply kpack whole MFMA
+                #  K-steps (kpack * kdim) or packing miscompiles
                 continue
 
             # Construct key for finding duplicate configs
-            key: tuple[int, ...] = (
+            key: tuple[int | None, ...] = (
                 conf.block_m,
                 conf.block_n,
                 conf.block_k,
@@ -1825,6 +2166,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 waves_per_eu,
                 matrix_instr_nonkdim,
                 kpack,
+                conf.hint_override,
             )
 
             # Check if gemm specific arg exists - add to key if does
@@ -1851,13 +2193,18 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     "matrix_instr_nonkdim": matrix_instr_nonkdim,
                     "waves_per_eu": waves_per_eu,
                     "kpack": kpack,
+                    "hint_override": conf.hint_override,
                 }
                 if group_m is not None:
                     kwargs["GROUP_M"] = group_m
                 yield self.triton_config(**kwargs)
 
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -1866,7 +2213,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
-        capability = torch.cuda.get_device_capability()
         default_kpack = get_default_kpack()
 
         if head_dim <= 256:
@@ -1888,14 +2234,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     default_config = self.rdna3_default_flex_config.get(
                         (dtype, head_dim), default_config
                     )
-            elif capability >= (9, 5):  # gfx950 (MI350X/MI355X)
-                default_config = self.gfx950_default_flex_config.get(
-                    (dtype, head_dim), default_config
-                )
-            elif capability >= (9, 4):  # gfx942 (MI300X/MI325X)
-                default_config = self.gfx942_default_flex_config.get(
-                    (dtype, head_dim), default_config
-                )
+            else:
+                default_config = self.flex_fwd_config_by_arch.get(
+                    rocm_gfx_arch(), {}
+                ).get((dtype, head_dim), default_config)
         else:
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(32, 16, 1, 4, kpack=default_kpack)
@@ -1908,7 +2250,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
@@ -1918,10 +2260,15 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         default_kpack = get_default_kpack()
+        arch_bwd_config = self.flex_bwd_config_by_arch.get(rocm_gfx_arch(), {}).get(
+            (dtype, head_dim)
+        )
         if dtype == torch.float32:
             default_config = ROCmFlexBwDConfig(
                 16, 16, 16, 16, 1, 4, kpack=default_kpack
             )
+        elif arch_bwd_config is not None:
+            default_config = arch_bwd_config
         elif head_dim <= 256:
             if head_dim == 64:
                 default_config = ROCmFlexBwDConfig(
@@ -2021,7 +2368,11 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             ]
 
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -2050,7 +2401,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
@@ -2093,13 +2444,6 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         return flex_decode_configs
 
-    def _prune_exhaustive_configs(
-        self,
-        configs: list[BaseConfig],
-        dtype_size: int,
-    ) -> list[BaseConfig]:
-        return configs
-
 
 class MTIAConfigHeuristic(BaseConfigHeuristic):
     """
@@ -2108,6 +2452,45 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
+def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
+    """Whether a Triton GEMM template should use TF32, matching eager matmul."""
+    allow_tf32 = False
+    if isinstance(device_type, str):
+        try:
+            iface = get_interface_for_device(device_type)
+        except NotImplementedError:
+            iface = None
+        else:
+            allow_tf32 = bool(iface.allow_tf32())
+    if device_type == "cuda":
+        # CUDA applies a shape threshold on top of the backend flag.
+        # Based on reverse engineering H100 CUDA 12.8 behavior.
+        size_threshold = V.graph.sizevars.statically_known_true(
+            sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
+        )
+        return allow_tf32 and size_threshold
+    return allow_tf32
+
+
+def blackwell_tma_mma_layout_supported(
+    dtype: torch.dtype,
+    allow_tf32: bool,
+    a_row_major: bool,
+    block_m: int,
+) -> bool:
+    """Whether the Blackwell TMA GEMM templates can lower this A operand layout.
+
+    tcgen05.mma does not support transposed FP32 operands in shared memory.
+    With the layouts emitted by the Blackwell persistent-TMA mm template and
+    the decompose-K partial-BMM template, the unsupported case is a transposed
+    (column-major) A operand with TF32 enabled and BLOCK_M > 32. BLOCK_M=32
+    and either orientation of B use supported MMA layouts.
+    """
+    return not (
+        dtype == torch.float32 and allow_tf32 and not a_row_major and block_m > 32
+    )
+
+
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     """
     Mixin class that converts config lists to template kwargs.
@@ -2127,38 +2510,41 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # attributes used by the origami branch in _get_template_configs_impl.
     default_num_stages: int
     exhaustive_configs: list[BaseConfig]
+    uses_tdm_configs: bool
+    blackwell_persistent_mm_configs: list[BaseConfig]
     _get_exceeding_shared_memory_checker: Callable[
         [bool, int], Callable[[BaseConfig, int], bool] | None
     ]
     preprocess_mm_configs: Callable[..., Generator[TritonConfig, None, None]]
+
+    # Whether to render the K loop ascending (range(0, tl.cdiv(K, BLOCK_K)))
+    # instead of descending (range(K, 0, -BLOCK_K)). XPU's Triton->SPIR-V
+    # backend miscompiles the descending form when the loop runs more than one
+    # iteration, so the XPU heuristics set this to True. Off XPU the flag stays
+    # False and ASCENDING_K is never injected (see get_extra_kwargs), so those
+    # kernels are unaffected.
+    ascending_k: bool = False
+
+    def _allow_tf32(self, kernel_inputs: KernelInputs) -> bool:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
+        m, n, k = kernel_inputs.mnk_symbolic()
+        return mm_allow_tf32(m, n, k, kernel_inputs.device_type)
 
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> dict[str, Any]:
-        if not isinstance(kernel_inputs, MMKernelInputs):
-            raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
-        m, n, k = kernel_inputs.mnk_symbolic()
-        device_type = kernel_inputs.device_type
-        if device_type == "xpu":
-            # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
-            allow_tf32 = torch.backends.mkldnn.allow_tf32
-        elif device_type == "cuda":
-            # allow_tf32 alignment heuristics based on reverse engineering
-            # H100 CUDA 12.8 behavior
-            size_threshold = V.graph.sizevars.statically_known_true(
-                sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
-            )
-            allow_tf32 = (
-                torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
-            )
-        else:
-            allow_tf32 = False
-
-        return {
-            "ALLOW_TF32": allow_tf32,
+        extra_kwargs = {
+            "ALLOW_TF32": self._allow_tf32(kernel_inputs),
         }
+        # Scoped to XPU (self.ascending_k) and to the templates that reference
+        # the key. The mm/addmm/... ops via mm_template are excluded because
+        # triton_mm.py.jinja already renders ascending unconditionally.
+        if self.ascending_k and op_name in ("bmm", "baddbmm", "mm_plus_mm"):
+            extra_kwargs["ASCENDING_K"] = True
+        return extra_kwargs
 
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
         return True
@@ -2175,6 +2561,110 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             return self.get_exhaustive_mm_configs()
         else:
             return self.get_mm_configs()
+
+    def _origami_may_select(self) -> bool:
+        """Origami replaces the regular configs, so use it only for in-tree
+        heuristics and not when max_mm_configs is set. Customize configs by
+        subclassing; setting mm_configs on an in-tree instance has no effect while
+        Origami is on (patch rocm.origami to False instead)."""
+        return (
+            type(self).__module__ == __name__
+            and config.test_configs.max_mm_configs is None
+        )
+
+    def _origami_select_configs(
+        self,
+        origami_module: Any,
+        allcfgs: Any,
+        m: Any,
+        n: Any,
+        k: Any,
+        dtype: Any,
+        device: Any,
+        a_stride: Any,
+        b_stride: Any,
+    ) -> tuple[list[BaseConfig], dict[tuple[int, int, int], tuple[Any, Any]]]:
+        """Origami's picks for one problem, plus (occupancy, group_m) per tile key.
+
+        Raises whatever Origami raises; the caller falls back on _ORIGAMI_ERRORS.
+        """
+        selector = origami_module.OrigamiMatmulSelector(
+            allcfgs,
+            m,
+            n,
+            k,
+            dtype,
+            dtype,
+            dtype,
+            device,
+            a_stride,
+            b_stride,
+        )
+        # _origami_{problem,hardware,configs} wrap the private attrs;
+        # see TODO at top of file for the upstream-API migration plan.
+        problem = _origami_problem(selector)
+        hardware = _origami_hardware(selector)
+        topk_results = origami_module.select_topk_configs(
+            problem,
+            hardware,
+            _origami_configs(selector),
+            config.rocm.origami_topk,
+        )
+
+        seen: OrderedSet[tuple[int, int, int, int]] = OrderedSet()
+        origami_configs: list[BaseConfig] = []
+        # Tile key -> (occupancy, group_m) for converting the filtered configs.
+        origami_params: dict[tuple[int, int, int], tuple[Any, Any]] = {}
+        try:
+            warp_size = DeviceProperties.create(device).warp_size or 64
+        except (RuntimeError, AttributeError) as e:
+            # Fall back to the standard warp size if device properties are unavailable.
+            torch._logging.warning_once(
+                log, "Failed to get device warp size (%s); using 64.", type(e).__name__
+            )
+            warp_size = 64
+        for result in topk_results:
+            cfg = result.config
+            key = (cfg.mt.m, cfg.mt.n, cfg.mt.k, cfg.occupancy)
+            if key in seen:
+                continue
+            seen.add(key)
+            grid = origami_module.select_grid_size(
+                problem,
+                hardware,
+                cfg,
+                origami_module.grid_selection_t.data_parallel,
+                hardware.N_CU,
+            )
+            wgm_result = origami_module.select_workgroup_mapping(
+                problem, hardware, cfg, grid
+            )
+            # One MFMA per warp, capped at 2 * parallel_mi_cu.
+            tile_area = cfg.mt.m * cfg.mt.n
+            max_warps = 2 * hardware.parallel_mi_cu
+            # mfma_dim from origami hardware object; fall back to 16.
+            mfma_dim = getattr(hardware, "mfma_m", 16)
+            num_warps = min(
+                max_warps,
+                max(1, tile_area // (mfma_dim * warp_size)),
+            )
+            # ROCmConfigHeuristic._filter_configs normalizes num_stages to
+            # self.default_num_stages, so seed with that value to keep the
+            # in-flight GemmConfig consistent with the post-filter state.
+            base_config = GemmConfig(
+                block_m=cfg.mt.m,
+                block_n=cfg.mt.n,
+                block_k=cfg.mt.k,
+                num_stages=self.default_num_stages,
+                num_warps=num_warps,
+                group_m=wgm_result.wgm,
+            )
+            origami_configs.append(base_config)
+            origami_params[_origami_config_key(base_config)] = (
+                cfg.occupancy,
+                wgm_result.wgm,
+            )
+        return origami_configs, origami_params
 
     def _get_template_configs_impl(
         self,
@@ -2201,9 +2691,39 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         dtype = kernel_inputs.dtype()
         # Get the appropriate config generator
         configs = self._get_config_generator()
-        # `origami is not None` encodes the module-load gate (see top of file);
-        # only DEFAULT search space is supported here.
-        if origami is not None and config.max_autotune_gemm_search_space == "DEFAULT":
+        # origami is a C++ perf model that requires concrete m, n, k; feeding it
+        # sympy symbols (dynamic shapes, e.g. torch.cat with k=s0+s1) yields no
+        # usable selection, so restrict origami to fully static problems and let
+        # symbolic shapes fall through to the regular config generator below.
+        mnk_static = all(not getattr(x, "free_symbols", None) for x in (m, n, k))
+        if (
+            origami is not None
+            and _origami_enabled()
+            and not mnk_static
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+        ):
+            log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
+        if (
+            origami is not None
+            and _origami_enabled()
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+            and not self._origami_may_select()
+        ):
+            log.debug(
+                "Origami skipped: %s is not an in-tree heuristic or max_mm_configs is set",
+                type(self).__name__,
+            )
+        # `origami is not None` is the module-load gate (set at import time);
+        # `_origami_enabled()` checks config.rocm.origami at call time so that
+        # config.patch({"rocm.origami": False}) disables the origami path even
+        # after the module has been imported.
+        if (
+            origami is not None
+            and _origami_enabled()
+            and self._origami_may_select()
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+            and mnk_static
+        ):
             # Extract device and strides for origami GEMM
             device = kernel_inputs.device()
             strides = kernel_inputs.strides_symbolic()
@@ -2214,7 +2734,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             # have to drop its best picks at compile time (Triton OutOfResources
             # is not always caught on the HIP backend). Check against
             # self.default_num_stages because ROCmConfigHeuristic._filter_configs
-            # (triton.py:1728) clobbers num_stages to that value downstream.
+            # normalizes num_stages to that value downstream.
             lds_check = self._get_exceeding_shared_memory_checker(False, 0)
             exhaustive = self.exhaustive_configs
             if lds_check is not None:
@@ -2242,147 +2762,92 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 configs=exhaustive,
                 dtype_size=dtype.itemsize,
                 op_name=op_name,
+                **kwargs,
             )
-            selector = origami.OrigamiMatmulSelector(
-                allcfgs,
-                m,
-                n,
-                k,
-                dtype,
-                dtype,
-                dtype,
-                device,
-                a_stride,
-                b_stride,
-            )
-            # _origami_{problem,hardware,configs} wrap the private attrs;
-            # see TODO at top of file for the upstream-API migration plan.
-            topk_results = origami.select_topk_configs(
-                _origami_problem(selector),
-                _origami_hardware(selector),
-                _origami_configs(selector),
-                config.rocm.origami_topk,
-            )
-            seen = OrderedSet()
-            # Collect origami-selected configs into a list before filtering
-            origami_configs: list[BaseConfig] = []
-            # Map config key (immutable tile dimensions) to origami parameters
-            origami_triton_configs: dict[tuple[int, int, int], tuple[Any, Any]] = {}
+            try:
+                origami_configs, origami_triton_configs = self._origami_select_configs(
+                    origami, allcfgs, m, n, k, dtype, device, a_stride, b_stride
+                )
+                origami_error = False
+            except _ORIGAMI_ERRORS as err:
+                # This also covers Inductor's own code in the helper (num_warps math,
+                # GemmConfig build): a ValueError/TypeError/RuntimeError/AttributeError
+                # bug there falls back and is counted instead of failing the compile.
+                _log_origami_fallback(err)
+                origami_error = True
+                origami_configs, origami_triton_configs = [], {}
 
-            def _config_key(cfg: BaseConfig) -> tuple[int, int, int]:
-                """
-                Generate a stable key for origami configs based on immutable tile dimensions.
-                Uses only block_m, block_n, block_k since these uniquely identify an origami
-                config and remain invariant across _filter_configs modifications (which may
-                change num_stages, num_warps, and other attributes).
-                """
-                return (
-                    cfg.block_m,
-                    cfg.block_n,
-                    cfg.block_k,
+            # Revalidate the reconstructed Origami tiles. The candidate pool was
+            # filtered above, but selected results are rebuilt as GemmConfig objects.
+            if self.uses_tdm_configs:
+                a_row_major, b_row_major = _tdm_descriptor_orientation(kwargs)
+                origami_config_count = len(origami_configs)
+                origami_configs = _filter_tdm_descriptor_block_configs(
+                    origami_configs,
+                    dtype.itemsize,
+                    a_row_major=a_row_major,
+                    b_row_major=b_row_major,
                 )
-
-            for result in topk_results:
-                cfg = result.config
-                key = (cfg.mt.m, cfg.mt.n, cfg.mt.k, cfg.occupancy)
-                if key in seen:
-                    continue
-                seen.add(key)
-                grid = origami.select_grid_size(
-                    _origami_problem(selector),
-                    _origami_hardware(selector),
-                    cfg,
-                    origami.grid_selection_t.data_parallel,
-                    _origami_hardware(selector).N_CU,
-                )
-                wgm_result = origami.select_workgroup_mapping(
-                    _origami_problem(selector),
-                    _origami_hardware(selector),
-                    cfg,
-                    grid,
-                )
-                # One MFMA per warp, capped at 2 * parallel_mi_cu.
-                tile_area = cfg.mt.m * cfg.mt.n
-                try:
-                    warp_size = DeviceProperties.create(device).warp_size or 64
-                except (RuntimeError, AttributeError) as e:
-                    # Fallback to standard warp size if device properties unavailable
-                    log.warning(
-                        "Failed to get device warp size: %s. Using default 64.", e
+                pruned = origami_config_count - len(origami_configs)
+                if pruned:
+                    log.info(
+                        "Origami: pruned %d/%d selected configs failing "
+                        "TDM descriptor alignment",
+                        pruned,
+                        origami_config_count,
                     )
-                    warp_size = 64
-                max_warps = 2 * _origami_hardware(selector).parallel_mi_cu
-                # mfma_dim from origami hardware object; fall back to 16.
-                mfma_dim = getattr(_origami_hardware(selector), "mfma_m", 16)
-                num_warps = min(
-                    max_warps,
-                    max(1, tile_area // (mfma_dim * warp_size)),
-                )
-                # num_stages: ROCmConfigHeuristic._filter_configs (triton.py:1728)
-                # overwrites this to self.default_num_stages, so seed with that
-                # value to keep the in-flight GemmConfig consistent with the
-                # post-filter state.
-                base_config = GemmConfig(
-                    block_m=cfg.mt.m,
-                    block_n=cfg.mt.n,
-                    block_k=cfg.mt.k,
-                    num_stages=self.default_num_stages,
-                    num_warps=num_warps,
-                    group_m=wgm_result.wgm,
-                )
-                origami_configs.append(base_config)
-                # Store triton config and its parameters for later conversion using stable key
-                config_key = _config_key(base_config)
-                origami_triton_configs[config_key] = (
-                    cfg.occupancy,
-                    wgm_result.wgm,
-                )
 
             # Apply backend filters (max block size, memory constraints, etc.).
             # LDS-overflow prune already happened upstream against
             # self.exhaustive_configs before origami selection.
             filtered_configs = self._filter_configs(origami_configs)
 
-            # If origami returned configs, use them; otherwise fall back to regular generator
-            if filtered_configs:
-                # Convert filtered configs to template kwargs and yield
-                for filtered_config in filtered_configs:
-                    # Retrieve stored origami parameters using stable config key
-                    config_key = _config_key(filtered_config)
-                    origami_params = origami_triton_configs.get(config_key)
-                    if origami_params is None:
-                        # If not found, log a warning about the lookup failure
-                        log.warning(
-                            "Config lookup failed for %s. "
-                            "This may indicate a config rebuilding issue in _filter_configs.",
-                            config_key,
-                        )
-                        continue
-                    occupancy, group_m = origami_params
+            # Use Origami's picks. Defensive: in-tree filters never change block
+            # sizes, but if no pick survives filtering and lookup, fall back.
+            yielded = False
+            # Convert filtered configs to template kwargs and yield
+            for filtered_config in filtered_configs:
+                # Retrieve stored origami parameters using stable config key
+                config_key = _origami_config_key(filtered_config)
+                origami_params = origami_triton_configs.get(config_key)
+                if origami_params is None:
+                    # Debug only: if every lookup misses, the fallback below bumps the
+                    # origami_fallback counter (and warns once per process).
+                    log.debug(
+                        "Config lookup failed for %s. "
+                        "This may indicate a config rebuilding issue in _filter_configs.",
+                        config_key,
+                    )
+                    continue
+                occupancy, group_m = origami_params
 
-                    # Create TritonConfig from filtered config
-                    triton_config = self.triton_config(  # pyright: ignore[attr-defined]
-                        num_stages=filtered_config.num_stages,
-                        num_warps=filtered_config.num_warps,
-                        BLOCK_M=filtered_config.block_m,
-                        BLOCK_N=filtered_config.block_n,
-                        BLOCK_K=filtered_config.block_k,
-                        GROUP_M=group_m,
-                        waves_per_eu=occupancy,
-                    )
-                    template_kwargs = self._convert_config_to_template_kwargs(
-                        triton_config,
-                        m,
-                        n,
-                        k,
-                        kernel_inputs.out_dtype(),
-                    )
-                    yield template_kwargs
-            else:
-                # No origami configs returned (e.g., topk=0), fall back to regular generator
-                log.warning(
-                    "Origami returned no configs, falling back to regular config generator"
+                # Create TritonConfig from filtered config
+                triton_config = self.triton_config(  # pyright: ignore[attr-defined]
+                    num_stages=filtered_config.num_stages,
+                    num_warps=filtered_config.num_warps,
+                    BLOCK_M=filtered_config.block_m,
+                    BLOCK_N=filtered_config.block_n,
+                    BLOCK_K=filtered_config.block_k,
+                    GROUP_M=group_m,
+                    waves_per_eu=occupancy,
                 )
+                template_kwargs = self._convert_config_to_template_kwargs(
+                    triton_config,
+                    m,
+                    n,
+                    k,
+                    kernel_inputs.out_dtype(),
+                )
+                yielded = True
+                yield template_kwargs
+            if not yielded:
+                # No valid Origami configs remain; fall back to the regular generator.
+                counters["inductor"]["origami_fallback"] += 1
+                if not origami_error:
+                    torch._logging.warning_once(
+                        log,
+                        "No valid Origami configs remain, falling back to regular config generator",
+                    )
                 for c in configs(
                     m,
                     n,
@@ -2402,9 +2867,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         else:
             # Warn if origami was enabled but not used due to EXHAUSTIVE search space.
-            # `origami is not None` already covers IS_ROCM + max_autotune + rocm.origami.
             if (
                 origami is not None
+                and _origami_enabled()
                 and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
             ):
                 log.warning(
@@ -2599,6 +3064,10 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
     """
     TMA-specific mixin that uses persistent configs and adds TMA options.
     This inherits from MMTemplateConfigMixin and overrides config generation.
+
+    ``ROCmPersistentTDMTemplateConfigHeuristic`` feeds the same Jinja template
+    with deliberately different probes (unit-stride row-majorness, stable
+    descriptor API, no workspace). Keep both in sync when adding a variable.
     """
 
     def _get_template_configs_impl(
@@ -2613,9 +3082,29 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError("TMATemplateConfigMixin requires MMKernelInputs")
         mat1, mat2 = kernel_inputs.mat1mat2()
+
+        def _row_major(node) -> bool:
+            # TMA needs the contiguous dim last. Use tma_inner_dim, as
+            # can_use_tma does -- deriving it separately here is how a [1, K]
+            # operand ended up transposed. Unlike can_use_tma, resolve backed
+            # symbols to hints first: its XPU path only checks the last
+            # stride's hint, so raw strides could fail the assert below. On
+            # CUDA the two can't disagree, since can_use_tma rejects a symbolic
+            # outer stride whose hint is 1 as unaligned.
+            stride = [
+                V.graph.sizevars.replace_backed_symbols_with_hints(st)
+                for st in node.layout.stride
+            ]
+            inner = tma_inner_dim(stride)
+            if inner is None:
+                raise AssertionError(
+                    f"host-side TMA: expected exactly one stride-1 dim, got {stride}"
+                )
+            return inner == len(stride) - 1
+
         tma_opts = {
-            "A_ROW_MAJOR": not mat1.layout.is_transposed(),
-            "B_ROW_MAJOR": not mat2.layout.is_transposed(),
+            "A_ROW_MAJOR": _row_major(mat1),
+            "B_ROW_MAJOR": _row_major(mat2),
             "NUM_SMS": get_num_sms(),
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
@@ -2637,6 +3126,25 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
 
 # TMA mixins for Blackwell templates
 class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
+    """Config mixin for the Blackwell persistent-TMA GEMM template.
+
+    Generates the fb-triton autoWS (meta-WS) config sweep and prunes the
+    combinations the lowering cannot support before they reach codegen.
+    """
+
+    @staticmethod
+    def _supports_mma_layout(
+        dtype: torch.dtype,
+        allow_tf32: bool,
+        template_kwargs: dict[str, Any],
+    ) -> bool:
+        return blackwell_tma_mma_layout_supported(
+            dtype,
+            allow_tf32,
+            template_kwargs["A_ROW_MAJOR"],
+            template_kwargs["BLOCK_M"],
+        )
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -2646,12 +3154,29 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Blackwell GEMM requires MMKernelInputs")
+        _, mat2 = kernel_inputs.mat1mat2()
+        element_size = mat2.get_dtype().itemsize
+        allow_tf32 = self._allow_tf32(kernel_inputs)
+
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
             op_name,
             **kwargs,
         ):
+            if not self._supports_mma_layout(
+                kernel_inputs.dtype(), allow_tf32, template_kwargs
+            ):
+                continue
+            use_meta_ws = template_kwargs.get("USE_META_WS", False)
+            # autoWS configs come from a full sweep; drop combos the lowering
+            # does not support so no invalid config reaches codegen.
+            if use_meta_ws and not self._autows_constraints_ok(
+                template_kwargs, element_size=element_size
+            ):
+                continue
             # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
             # or num_stages < 2. Similar issues have been seen with num_stages=1
@@ -2662,18 +3187,110 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 template_kwargs.get("WARP_SPECIALIZE", True)
                 and not constraints_violated
             )
-            # Meta WS pass has only validated flatten=False; OSS Triton uses flatten=True
+            # Meta WS pass has only validated flatten=False; OSS Triton uses flatten=True.
+            # The Meta WS knob is global in Triton, so it rewrites every WS kernel,
+            # not just the use_meta_ws configs.
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and USE_META_WS
+                and not (use_meta_ws or USE_META_WS)
             )
-            yield {
+            two_ctas = template_kwargs.get("TWO_CTAS", False)
+            out = {
                 **template_kwargs,
-                "NUM_SMS": get_num_sms(),
+                "NUM_SMS": get_num_sms(two_ctas=two_ctas),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
+                "HOST_SIDE_TMA": config.triton.enable_host_side_tma,
             }
+            if two_ctas:
+                out["ctas_per_cga"] = (2, 1, 1)
+            yield out
+
+    @staticmethod
+    def _autows_constraints_ok(
+        template_kwargs: dict[str, Any], *, element_size: int
+    ) -> bool:
+        """autoWS lowering constraints; swept configs violating these are pruned."""
+        block_m = template_kwargs["BLOCK_M"]
+        block_n = template_kwargs["BLOCK_N"]
+        subtile = template_kwargs.get("EPILOGUE_SUBTILE", 1)
+        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
+        # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
+        if block_n // subtile < 32:
+            return False
+        # dp=2 splits the row tile into two MMA partitions; BLOCK_M=64 fails in
+        # the fb-triton WS pass pipeline, so keep the tile at 128 or 256
+        if dp == 2 and block_m not in (128, 256):
+            return False
+        if template_kwargs.get("TWO_CTAS", False):
+            # This MetaWS 2CTA template currently requires TMA epilogue stores.
+            if not (has_two_ctas() and config.triton.enable_template_tma_store):
+                return False
+            # 2CTA halves B along N. Each CTA's slice must still span at least
+            # 128 bytes to use the required swizzle.
+            if block_m < 128 or (block_n // 2) * element_size < 128:
+                return False
+        return True
+
+    def _get_config_generator(self) -> partial[Generator[TritonConfig, None, None]]:
+        if _use_template_autows():
+            configs = (
+                self._generate_autows_exhaustive_configs()
+                if config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+                else self._generate_autows_configs()
+            )
+            return partial(self.preprocess_mm_configs, configs=configs)
+        return super()._get_config_generator()
+
+    def _generate_autows_configs(self) -> list[BaseConfig]:
+        """The Blackwell persistent set crossed with the autoWS-specific knobs."""
+        base = cast(list[BlackwellGPUGemmConfig], self.blackwell_persistent_mm_configs)
+        return [
+            dataclasses.replace(
+                cfg,
+                use_meta_ws=True,
+                flatten=False,
+                separate_epilogue_store=True,
+                data_partition_factor=data_partition_factor,
+                two_ctas=two_ctas,
+            )
+            for cfg in base
+            for data_partition_factor in [1, 2]
+            for two_ctas in [False, True]
+        ]
+
+    @staticmethod
+    def _generate_autows_exhaustive_configs() -> list[BaseConfig]:
+        configs: list[BaseConfig] = []
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+            [32, 64, 128, 256], repeat=3
+        ):
+            for num_stages in [2, 3, 4, 5, 6, 7, 8]:
+                # AutoWS doesn't work with num_warps < 4
+                for num_warps in [4, 8]:
+                    for epilogue_subtile in [1, 2, 4, 8]:
+                        for data_partition_factor in [1, 2]:
+                            for separate_epilogue_store in [False, True]:
+                                for two_ctas in [False, True]:
+                                    configs.append(
+                                        BlackwellGPUGemmConfig(
+                                            block_m=BLOCK_M,
+                                            block_n=BLOCK_N,
+                                            block_k=BLOCK_K,
+                                            num_stages=num_stages,
+                                            num_warps=num_warps,
+                                            group_m=8,
+                                            epilogue_subtile=epilogue_subtile,
+                                            use_meta_ws=True,
+                                            data_partition_factor=data_partition_factor,
+                                            separate_epilogue_store=separate_epilogue_store,
+                                            two_ctas=two_ctas,
+                                            warp_specialize=True,
+                                            flatten=False,
+                                        )
+                                    )
+        return configs
 
     @staticmethod
     def _generate_exhaustive_configs() -> list[BaseConfig]:
@@ -2730,13 +3347,15 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Need to unsqueeze bias from [N] -> [1, N]
             bias = L[aten.unsqueeze](bias, 0)
 
-        def is_tensorwise_scale(scale: Any) -> bool:
+        def is_tensorwise_scale(scale: IRNode) -> bool:
             size = scale.get_size()
             return len(size) == 0 or all(
                 V.graph.sizevars.statically_known_equals(dim, 1) for dim in size
             )
 
-        def normalize_tensorwise_scale(scale: Any, *, allow_high_rank: bool) -> Any:
+        def normalize_tensorwise_scale(
+            scale: IRNode, *, allow_high_rank: bool
+        ) -> IRNode:
             if not is_tensorwise_scale(scale):
                 return scale
             if not allow_high_rank and len(scale.get_size()) > 2:
@@ -2785,7 +3404,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         scale_b = input_nodes[3]
 
         # Scale compatibility assertion from mm_common.scaled_mm_options
-        def are_compatible_scales(size_a: Any, size_b: Any) -> bool:
+        def are_compatible_scales(
+            size_a: Sequence[_IntLike], size_b: Sequence[_IntLike]
+        ) -> bool:
             # Same sized scales are compatible
             if len(size_a) == len(size_b):
                 return True
@@ -2852,29 +3473,6 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
             return False
         return True
 
-    # pyrefly: ignore [bad-override]
-    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
-        """
-        Filter out bad configs for specific hardware.
-        On AMD MI350X (GFX 9.5+), skip configs with BLOCK_K<=64 due to lack of corresponding MFMA instructions.
-        """
-
-        def should_skip_mi350x_config(config: BaseConfig) -> bool:
-            """Skip config if BLOCK_K<=64 on MI350X (GFX 9.5+)"""
-            try:
-                return (
-                    config.block_k <= 64
-                    and IS_ROCM
-                    and torch.cuda.get_device_capability() >= (9, 5)
-                )
-            except RuntimeError:
-                # If no HIP GPUs are available, we can't check device capability
-                # so we don't skip any configs
-                return False
-
-        filtered_configs = [c for c in configs if not should_skip_mi350x_config(c)]
-        return super()._filter_configs(filtered_configs)
-
 
 # Scaled TMA-specific mixin for scaled MM templates with TMA
 class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
@@ -2927,6 +3525,7 @@ class ScaledBlackwellTMAConfigMixin(
     This inherits from ScaledMMConfigMixin, which inherits the scale_mm_epilogue, and adds TMA-specific options.
     """
 
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         Warp specialization-specific filtering (BlackwellTMATemplateConfigMixin)
@@ -3029,7 +3628,93 @@ class PersistentMMTemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    persistent_tdm_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+)
+class ROCmPersistentTDMTemplateConfigHeuristic(
+    MMTemplateConfigMixin,
+    ROCmConfigHeuristic,  # type: ignore[misc]
+):
+    """Persistent descriptor MM heuristic for gfx1250 TDM.
+
+    No `TMAWorkspaceMixin`: stable descriptors need no explicit TMA descriptor
+    workspace. Its `num_warps != 2` filter is NVIDIA-TMA policy.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Persistent pool; ROCm finalization backfills the AMD kernargs.
+        self.mm_configs = self.persistent_mm_configs
+        self.uses_tdm_configs = True
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(
+                "ROCmPersistentTDMTemplateConfigHeuristic requires MMKernelInputs"
+            )
+        mat1, mat2 = kernel_inputs.mat1mat2()
+        # Orientation is read from hints here; admission installed int32 bounds
+        # only. Exact size/stride/offset guards are deferred to the commit below.
+        a_row_major = tdm_descriptor_row_major(mat1)
+        b_row_major = tdm_descriptor_row_major(mat2)
+        if a_row_major is None or b_row_major is None:
+            return
+
+        kwargs = {
+            **kwargs,
+            "tdm_a_row_major": a_row_major,
+            "tdm_b_row_major": b_row_major,
+        }
+        # Materialize before committing: alignment filtering, shape-hint
+        # scaling, Origami selection and backend filters all run below and any
+        # can empty the pool. Specializing for a template that then contributes
+        # nothing is the defect this ordering avoids.
+        generated = super()._get_template_configs_impl(kernel_inputs, op_name, **kwargs)
+        # Same Jinja template as TMATemplateConfigMixin, deliberately different
+        # probes; see that class for why the two option blocks stay separate.
+        configs = [
+            {
+                **template_kwargs,
+                "A_ROW_MAJOR": a_row_major,
+                "B_ROW_MAJOR": b_row_major,
+                "NUM_SMS": get_num_sms(),
+                # The TDM capability gate requires make_tensor_descriptor.
+                "TMA_EXPERIMENTAL_API": False,
+            }
+            for template_kwargs in generated
+        ]
+        if not configs:
+            log.debug(
+                "TDM: no configs survived filtering; leaving operands unspecialized"
+            )
+            return
+
+        # The one production commit point; addmm inherits this method.
+        commit_tdm_operand_layout(mat1, mat2)
+        log.debug("TDM: committed operand layout for %d configs", len(configs))
+        yield from configs
+
+
+@register_template_heuristic(
+    persistent_tdm_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+    op_name="addmm",
+)
+class ROCmAddMMPersistentTDMTemplateConfigHeuristic(
+    AddMMConfigMixin, ROCmPersistentTDMTemplateConfigHeuristic
+):
+    """Addmm extension for the gfx1250 TDM persistent template."""
+
+
+@register_template_heuristic(
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
 )
@@ -3042,6 +3727,53 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
         super().__init__()
         self.mm_configs = self.blackwell_persistent_mm_configs
         self.exhaustive_configs = self._generate_exhaustive_configs()
+
+    def _generate_autows_configs(self) -> list[BaseConfig]:
+        return [
+            BlackwellGPUGemmConfig(
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile=epilogue_subtile,
+                data_partition_factor=data_partition_factor,
+                separate_epilogue_store=separate_epilogue_store,
+                two_ctas=two_ctas,
+                use_meta_ws=True,
+                flatten=False,
+            )
+            for (
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile,
+                data_partition_factor,
+                separate_epilogue_store,
+                two_ctas,
+            ) in [
+                (64, 32, 256, 4, 4, 1, 1, True, False),
+                (128, 64, 64, 8, 4, 1, 1, True, False),
+                (128, 256, 64, 7, 8, 8, 1, False, True),
+                (128, 64, 64, 8, 4, 2, 1, False, False),
+                (128, 256, 64, 6, 8, 8, 2, False, True),
+                (32, 32, 256, 2, 4, 1, 1, True, False),
+                (32, 32, 256, 4, 4, 1, 1, True, False),
+                (128, 128, 128, 4, 4, 4, 2, True, True),
+                (128, 256, 128, 3, 4, 8, 2, False, True),
+                (64, 128, 128, 3, 4, 2, 1, True, False),
+                (128, 256, 128, 3, 4, 8, 1, False, True),
+                (128, 256, 64, 7, 4, 8, 1, False, True),
+                (128, 256, 64, 5, 4, 4, 2, False, True),
+                (128, 256, 128, 2, 4, 4, 1, False, True),
+                (256, 256, 64, 5, 4, 8, 2, False, False),
+                (128, 256, 64, 6, 8, 8, 1, False, True),
+                (64, 64, 256, 4, 4, 1, 1, True, False),
+                (256, 128, 64, 4, 4, 4, 2, True, False),
+            ]
+        ]
 
 
 @register_template_heuristic(
@@ -3057,7 +3789,7 @@ class CUDAAddmmPersistentTMATemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="addmm",
@@ -3076,6 +3808,53 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
         )
         self.exhaustive_configs = self._generate_exhaustive_configs()
 
+    def _generate_autows_configs(self) -> list[BaseConfig]:
+        return [
+            BlackwellGPUGemmConfig(
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile=epilogue_subtile,
+                data_partition_factor=data_partition_factor,
+                separate_epilogue_store=separate_epilogue_store,
+                two_ctas=two_ctas,
+                use_meta_ws=True,
+                flatten=False,
+            )
+            for (
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile,
+                data_partition_factor,
+                separate_epilogue_store,
+                two_ctas,
+            ) in [
+                (64, 32, 256, 4, 4, 1, 1, True, False),
+                (256, 128, 64, 4, 4, 4, 2, True, False),
+                (256, 256, 64, 2, 8, 2, 2, True, True),
+                (128, 64, 64, 8, 4, 1, 1, True, False),
+                (128, 256, 64, 7, 4, 8, 1, True, True),
+                (32, 32, 256, 2, 4, 1, 1, True, False),
+                (32, 32, 64, 2, 4, 1, 1, True, False),
+                (128, 256, 64, 7, 4, 8, 2, False, True),
+                (128, 256, 64, 7, 4, 8, 2, True, True),
+                (256, 256, 64, 6, 4, 8, 2, False, True),
+                (128, 128, 128, 4, 4, 4, 2, True, True),
+                (32, 64, 32, 2, 4, 1, 1, True, False),
+                (256, 128, 64, 4, 4, 2, 2, True, False),
+                (64, 32, 256, 5, 4, 1, 1, True, False),
+                (128, 256, 64, 5, 4, 4, 1, False, True),
+                (128, 256, 64, 7, 4, 8, 1, False, True),
+                (128, 128, 64, 8, 4, 1, 1, True, False),
+                (64, 64, 256, 7, 4, 1, 1, True, False),
+            ]
+        ]
+
 
 @register_template_heuristic(
     mm_template.uid, "cuda", register=torch.version.hip is None, op_name="scaled_mm"
@@ -3088,6 +3867,7 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
 
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
         return super()._filter_configs(configs)
@@ -3119,10 +3899,7 @@ class CUDAScaledTMAEpilogueScalingTemplateConfigHeuristic(
 class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
     ScaledTMAConfigMixin, CUDAConfigHeuristic
 ):
-    """
-    Scaled TMA template heuristic for CUDA:
-        main loop scaling variants (BlockWise1x128, BlockWise1x32, BlockWise1x16, BlockWise128x128)
-    """
+    """Scaled TMA configurations for 128-element main-loop scale blocks."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -3138,14 +3915,9 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
         """
         Generate main loop scaling kernel inputs.
         """
-        mat_a, mat_b, scale_a, scale_b = kernel_inputs._input_nodes
-        scale_a_size, scale_b_size = scale_a.get_size(), scale_b.get_size()
-
-        scale_option_a, scale_option_b = get_scaling_options(
-            mat_a, mat_b, scale_a_size, scale_b_size
-        )
-        tile_size_a = get_tile_size(scale_option_a)
-        tile_size_b = get_tile_size(scale_option_b)
+        # Both main-loop recipes scale 128 elements along K. Inferring them
+        # again from shapes misclassifies single-K-block inputs as rowwise.
+        tile_size_a = tile_size_b = 128
 
         # Get base scaled MM template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -3156,11 +3928,17 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
             # Add scaling-specific options for main loop scaling variants
 
             # Inductor templates require compile-time constants passed in as tl.constexpr values.
-            # In cases in which the block size (BLOCK_*) is smaller than the tile size (128, 32, 16),
-            # scales must be broadcasted to BLOCK_* (rather than to a tile_sizextile_size chunk).
+            # When BLOCK_* is smaller than 128, broadcast scales to BLOCK_*
+            # rather than to a full 128x128 tile.
 
             template_kwargs["TILE_SIZE_A"] = tile_size_a
             template_kwargs["TILE_SIZE_B"] = tile_size_b
+
+            # Scaling the operands promotes them to fp32, where tl.dot defaults to
+            # tf32 and drops most of the fp8 mantissa. Quoted because template
+            # kwargs render verbatim. This heuristic is CUDA-and-not-ROCm only, so
+            # tf32x3 is always available.
+            template_kwargs["DOT_PRECISION"] = '"tf32x3"'
 
             template_kwargs["MIN_BLOCK_TILE_AM"] = min(
                 template_kwargs["BLOCK_M"], tile_size_a
@@ -3180,7 +3958,7 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
 
 @register_template_heuristic(
     # regular Blackwell MM template + scaling epilogue from ScaledMMConfigMixin
-    blackwell_ws_persistent_device_tma_mm_template.uid,
+    blackwell_ws_persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="scaled_mm",
@@ -3301,8 +4079,11 @@ class ROCmScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, ROCmConfigHeurist
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
 
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
+        if rocm_gfx_arch() in ("gfx950", "gfx1250"):
+            configs = [c for c in configs if c.block_k > 64]
         return super()._filter_configs(configs)
 
 
@@ -3420,6 +4201,10 @@ class CPUMMPlusMMTemplateConfigHeuristic(
 class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     """Standard MM template heuristic for XPU"""
 
+    # See MMTemplateConfigMixin.ascending_k. Applies to the bmm template
+    # (also used by baddbmm via XPUAddmmTemplateConfigHeuristic).
+    ascending_k = True
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -3490,6 +4275,9 @@ class XPUMMPlusMMTemplateConfigHeuristic(
     MMPlusMMTemplateConfigMixin, XPUConfigHeuristic
 ):
     """MM Plus MM template heuristic for XPU"""
+
+    # See MMTemplateConfigMixin.ascending_k.
+    ascending_k = True
 
     def __init__(self) -> None:
         super().__init__()

@@ -8,32 +8,11 @@
 #include <c10/util/env.h>
 #include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <array>
 #include <iostream>
 #include <utility>
-
-namespace std {
-template<>
-struct hash<std::tuple<std::string, c10::TypePtr, c10::TypePtr>> {
-  size_t operator()(std::tuple<std::string, c10::TypePtr, c10::TypePtr> const& t) const {
-    // This hashing is all hidden behind a static initializer so it
-    // doesn't have to be optimal
-    auto hash = std::hash<std::string>()(std::get<0>(t));
-    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
-    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<2>(t)));
-    return hash;
-  }
-};
-template<>
-struct hash<std::tuple<std::string, c10::TypePtr>> {
-  size_t operator()(std::tuple<std::string, c10::TypePtr> const& t) const {
-    auto hash = std::hash<std::string>()(std::get<0>(t));
-    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
-    return hash;
-  }
-};
-} // namespace std
 
 namespace c10 {
 
@@ -83,7 +62,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       if (has_valid_strides_info &&
           type_verbosity() >= TypeVerbosity::TypeAndStride) {
         out << ", strides=[";
-        for (size_t i = 0; i < *ndim; ++i) {
+        for (const auto i : c10::irange(*ndim)) {
           if (i > 0) {
             out << ", ";
           }
@@ -287,7 +266,8 @@ TypePtr OptionalType::get(TypePtr inner) {
 }
 
 TypePtr ListType::get(const std::string& identifier, TypePtr inner) {
-  static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
+  using Key = std::tuple<std::string, TypePtr>;
+  static ska::flat_hash_map<Key, TypePtr, c10::hash<Key>> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
   // a static initializer; it should only be called once per type.
@@ -301,7 +281,8 @@ TypePtr ListType::get(const std::string& identifier, TypePtr inner) {
 }
 
 TypePtr DictType::get(const std::string& identifier, TypePtr key, TypePtr value) {
-  static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
+  using Key = std::tuple<std::string, TypePtr, TypePtr>;
+  static ska::flat_hash_map<Key, TypePtr, c10::hash<Key>> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
   // a static initializer; it should only be called once per type.
@@ -752,7 +733,7 @@ TupleTypePtr TupleType::createWithSpec(const std::optional<c10::QualifiedName>& 
   std::vector<Argument> arguments;
   arguments.reserve(field_names.size());
   auto min_default_idx = field_names.size() - field_defaults.size();
-  for (size_t i = 0; i < field_names.size(); ++i) {
+  for (const auto i : c10::irange(field_names.size())) {
     if (i < min_default_idx) {
       Argument arg{
           /*name=*/std::string{field_names[i]},
@@ -857,7 +838,7 @@ bool TupleType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
       return false;
     }
 
-    for (size_t i = 0; i < args_lhs.size(); ++i) {
+    for (const auto i : c10::irange(args_lhs.size())) {
       if (args_lhs[i].name() != args_rhs[i].name()) {
         return false;
       }
@@ -889,14 +870,14 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   }
 
   // `compare` guarantees that rhs is always a TupleType.
-  auto rhsTuple = rhs.expect<TupleType>();
-  if (schema_ == nullptr && rhsTuple->schema_ == nullptr) {
+  const auto& rhsTuple = rhs.expectRef<TupleType>();
+  if (schema_ == nullptr && rhsTuple.schema_ == nullptr) {
     return typesSame;
   }
-  if (schema_ == nullptr || rhsTuple->schema_ == nullptr) {
+  if (schema_ == nullptr || rhsTuple.schema_ == nullptr) {
     return false;
   }
-  return *schema_ == *rhsTuple->schema_;
+  return *schema_ == *rhsTuple.schema_;
 }
 
 std::string TupleType::str() const {

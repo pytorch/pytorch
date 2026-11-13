@@ -2,6 +2,7 @@ if(NOT __AOTRITON_INCLUDED)
   set(__AOTRITON_INCLUDED TRUE)
 
   set(__AOTRITON_EXTERN_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/aotriton")
+  set(__AOTRITON_WIN32_PATCH_DIR "${CMAKE_CURRENT_LIST_DIR}/aotriton-win32")
   set(__AOTRITON_INSTALL_DIR "${PROJECT_SOURCE_DIR}/torch")
   add_library(__caffe2_aotriton INTERFACE)
 
@@ -9,14 +10,22 @@ if(NOT __AOTRITON_INCLUDED)
   # Replaces .ci/docker/aotriton_version.txt
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
-  set(__AOTRITON_VER "0.13b")
+  set(__AOTRITON_VER "0.15b")
+  set(__AOTRITON_BUILD_VARIANTS "")
+  # Note in this file rocm<X.Y> was actually repurposed to match the HIP version
+  # ROCm 7.0 nightlies shipped two incompatible HIP versions, 6.5 and
+  # 7.0, so the ROCm version alone cannot select a compatible package
+  # The rocm prefix stays only because renaming to hip may break things
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.4
       "manylinux_2_28"  # rocm7.0
       "manylinux_2_28"  # rocm7.1
       "manylinux_2_28"  # rocm7.2
       "manylinux_2_28"  # rocm7.14
-      "manylinux_2_28"  # rocm7.15
+      "manylinux_2_28"  # "rocm7.15" ROCM 10.0
+      "manylinux_2_28"  # "rocm7.16" ROCM 10.1/Early 10.2
+      "manylinux_2_28"  # rocm7.17 ROCM 10.2
+      "manylinux_2_28"  # rocm7.18 ROCM 10.3
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.4"
@@ -25,19 +34,25 @@ if(NOT __AOTRITON_INCLUDED)
       "rocm7.2"
       "rocm7.14"
       "rocm7.15"
+      "rocm7.16"
+      "rocm7.17"
+      "rocm7.18"
       )
   if(DEFINED ENV{PYTORCH_AOTRITON_COMMIT})
     set(__AOTRITON_CI_COMMIT "$ENV{PYTORCH_AOTRITON_COMMIT}")
   else()
-    set(__AOTRITON_CI_COMMIT "6e00ef3e335b45dfb49065259533b59c68995bfe")
+    set(__AOTRITON_CI_COMMIT "ebcd732348ed216d98e71a18c0ae341c7742a935")
   endif()
   set(__AOTRITON_SHA256_LIST
-      "2fafa80953d9a49bd20e794bb8c0e1646e8aa815be2fb161deaa849a47547b17"  # rocm6.4
-      "7409f7c974cc79be731a419818bdb2ed6b8a3640fd40665baa76ec3c2a537204"  # rocm7.0
-      "f061a997679d8529a7b196b0ffb39912145ede217e515e1ee9ef5673b56d9e41"  # rocm7.1
-      "1cdeebb7ef61ab691fba1d81da919b9db5d8bef28269c892a30bd13a0495b7a0"  # rocm7.2
-      "7a139797c16b002fd5d9bcd706d36dc9819bb108877150f8186da21d0590eaa6"  # rocm7.14
-      "f024225d8b6063f7d95974e5957cb20893a1579a9a73b22b60426441331bc021"  # rocm7.15
+      "e40882633181319f50ed713bd23831e884216c007ea55043c5875d47986273f9"  # rocm6.4
+      "3588920badfa69dcdcf89c1f056e39764c2dbc96d75ab31a7bccc0efd9b66844"  # rocm7.0
+      "73188eb425d5e1e519a0236aae269d2aec4c0cebb4726832c6581c01dd31b0e6"  # rocm7.1
+      "6b70339be879ca7ba03c145f54ec213503ea97b955df3c96755e7f0b3235b6c3"  # rocm7.2
+      "e5ee9522a7ae0aa43bb92752a8e87edaacde00c4bf357f0423f0ca406389de9e"  # rocm7.14
+      "4faffe8dd7dcc59c0db16c0a9eb1d88d0cd423df10bc88264dca74ad93870c96"  # rocm7.15
+      "dce419812204cc11ba4d470c736395efd20dbdd7f509ee89333c70d316131d6e"  # rocm7.16
+      "5fb6869c5cea979ec512d29949b7a513e9544d377082360f151ec07ca4a6e9af"  # rocm7.17
+      "5cfeec9dae4b37c8152c0ad75f8c54b94faa517fa6dc9818f348ebeac38a429c"  # rocm7.18
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
@@ -45,17 +60,19 @@ if(NOT __AOTRITON_INCLUDED)
       "amd-gfx950"
       "amd-gfx110x"
       "amd-gfx115x"
+      "amd-gfx117x"
       "amd-gfx120x"
       "amd-gfx1250"
      )
   set(__AOTRITON_IMAGE_SHA256_LIST
-     "a3d1a6868ce290ba8118618207093e785252eff4e18a64f495752cb5a03ffed6" # amd-gfx90a
-     "ccdbc7e3d96839be4895ee004f21531cc55d590c9018937b9e314bba363b3927" # amd-gfx942
-     "518fd072eb05948fc0a6c25a20832591c6406df865e3b691a2aeff3fd4c5ce1d" # amd-gfx950
-     "efe773e7a2c8adc995d90ecd0daca2db801285445ee10432df2b29c67d5b11d2" # amd-gfx110x
-     "1bc50e8aa8b6bda3410e92886ccca8fd45df3e60a6cbda9ffc58b2c541efd5c2" # amd-gfx115x
-     "6a465dbc03148bba8a2d78c4c2a3cb83155eca00f4f7f749e676402d7660968c" # amd-gfx120x
-     "4aaf71d6e510549d593757e5f88598df1e4a29cbcd91f70750ee8a76f65c027f" # amd-gfx1250
+     "42189997e3f44bbcde9d2ce6ebedbeaf373c280299d03ec7933be73e0c6243d3" # amd-gfx90a
+     "11f5c0fa8c4b13efcd466261adf1fd6b5bdbe00c03ad35bcf3d53e075dd18846" # amd-gfx942
+     "5030077f0388bbbf4d68841a7465d91cfa7b652a3134a73e73f5639c45b6df93" # amd-gfx950
+     "9b1bb0f3bfef08845d2b955a006890f287c46b537c07da497e5e084d90d7be35" # amd-gfx110x
+     "352e9e5b99c230d7da854f86bac6d14930ab8a811275d39899eae030c6d161ab" # amd-gfx115x
+     "bd00d282c743a97d1e94b1593bd9aef81293a381cc0d0c0f4e7bb2382c52f283" # amd-gfx117x
+     "4605621b2422e4a3b28b3357d70e60c55ca57de6179df0a9788ef0b487eda64b" # amd-gfx120x
+     "230d10fc13aee49aaeb7227bed879bae41a082457fabecfc0a5c97f047875122" # amd-gfx1250
      )
   set(__AOTRITON_BASE_URL "$ENV{PYTORCH_AOTRITON_BASE_URL}")
   if(NOT __AOTRITON_BASE_URL)
@@ -139,16 +156,41 @@ if(NOT __AOTRITON_INCLUDED)
     else()
       SET(RECURSIVE "ON")
     endif()
+    set(__AOTRITON_PATCH_COMMAND "")
     if(WIN32)
       message(STATUS "Building AOTriton Windows dependencies")
       aotriton_build_windows_dependencies(dlfcn-win32_external xz_external dlfcn-win32_DIR liblzma_DIR)
+      # AOTriton 0.15b needs no Windows patch; the step is kept for future fixes.
+      file(GLOB __AOTRITON_WIN32_PATCHES "${__AOTRITON_WIN32_PATCH_DIR}/*.patch")
+      list(SORT __AOTRITON_WIN32_PATCHES)
+      # Without patches `git apply` would read stdin, so only set the step
+      # when the directory has some.
+      if(__AOTRITON_WIN32_PATCHES)
+        # Restore the checkout first so the patch step can be re-run.
+        find_package(Git REQUIRED)
+        set(__AOTRITON_PATCH_COMMAND
+          PATCH_COMMAND ${GIT_EXECUTABLE} checkout -- .
+          COMMAND ${GIT_EXECUTABLE} apply ${__AOTRITON_WIN32_PATCHES})
+      endif()
     endif()
     message(STATUS "PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}")
+    set(__AOTRITON_ROCM_ARGS "")
+    if(EXISTS "${ROCM_PATH}/lib/cmake/hip")
+      list(APPEND __AOTRITON_ROCM_ARGS "-Dhip_DIR=${ROCM_PATH}/lib/cmake/hip")
+    endif()
+    # TheRock vendors liblzma; its prefix lets pkg_search_module find liblzma.pc.
+    # The RPATH lets non-wheel builds load it; repair_wheel.py rewrites it for wheels.
+    if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib/pkgconfig")
+      list(APPEND __AOTRITON_ROCM_ARGS
+        "-DCMAKE_PREFIX_PATH=${ROCM_PATH}/lib/rocm_sysdeps"
+        "-DCMAKE_INSTALL_RPATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    endif()
 
     ExternalProject_Add(${project}
       GIT_REPOSITORY https://github.com/ROCm/aotriton.git
       GIT_SUBMODULES_RECURSE ${RECURSIVE}
       GIT_TAG ${__AOTRITON_CI_COMMIT}
+      ${__AOTRITON_PATCH_COMMAND}
       PREFIX ${__AOTRITON_EXTERN_PREFIX}
       CMAKE_CACHE_ARGS
       -DAOTRITON_TARGET_ARCH:STRING=${PYTORCH_ROCM_ARCH}
@@ -159,6 +201,7 @@ if(NOT __AOTRITON_INCLUDED)
       -DAOTRITON_NO_PYTHON=ON
       -DAOTRITON_NOIMAGE_MODE=${noimage}
       -DHIP_PLATFORM=amd
+      ${__AOTRITON_ROCM_ARGS}
       $<$<BOOL:${WIN32}>:-Ddlfcn-win32_DIR=${dlfcn-win32_DIR}>
       $<$<BOOL:${WIN32}>:-Dliblzma_DIR=${liblzma_DIR}>
       BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/${__AOTRITON_LIB}"
@@ -179,7 +222,9 @@ if(NOT __AOTRITON_INCLUDED)
     list(GET __AOTRITON_SHA256_LIST ${index} __AOTRITON_SHA256)
 
     string(CONCAT __AOTRITON_FILE "aotriton-"
-                                  "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
+                                  "${__AOTRITON_VER}"
+                                  "${__AOTRITON_BUILD_VARIANTS}-"
+                                  "${__AOTRITON_MANYLINUX}"
                                   "_${__AOTRITON_ARCH}-${__AOTRITON_ROCM}"
                                   "-shared.tar.${__AOTRITON_Z}")
     string(CONCAT __AOTRITON_URL
@@ -205,7 +250,7 @@ if(NOT __AOTRITON_INCLUDED)
     list(GET __AOTRITON_IMAGE_SHA256_LIST ${index} __AOTRITON_SHA256)
 
     string(CONCAT __AOTRITON_FILE
-           "aotriton-${__AOTRITON_VER}-images-"
+           "aotriton-${__AOTRITON_VER}${__AOTRITON_BUILD_VARIANTS}-images-"
            "${image}.tar.${__AOTRITON_Z}")
     string(CONCAT __AOTRITON_URL
            "${__AOTRITON_BASE_URL}"

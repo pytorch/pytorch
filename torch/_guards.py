@@ -42,7 +42,8 @@ if TYPE_CHECKING:
     from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+    from torch.types import IntLikeType
 
 
 """
@@ -280,7 +281,10 @@ class Guard:
     stack: CapturedTraceback | None = None
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
-    _unserializable: bool = False
+    # The local-scope type a TYPE_MATCH or FAKE_SCRIPT_TYPE_MATCH found, if any;
+    # serialize_guards refuses it.
+    _unserializable: type | None = None
+    _force_dict_keys_match: bool = False
 
     def __hash__(self) -> int:
         if self._hash is None:
@@ -486,6 +490,18 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 class StorageOverlap(GuardEnvExpr):
     overlapping_sources: list[Source]
     non_overlapping_sources: list[Source]
+
+
+@dataclasses.dataclass(frozen=True)
+class StorageOverlapPartition(GuardEnvExpr):
+    input_sources: list[Source]
+    overlapping_indices: tuple[tuple[int, ...], ...]
+
+    def __post_init__(self) -> None:
+        if len(set(self.input_sources)) != len(self.input_sources):
+            raise AssertionError(
+                f"input_sources must be unique, got {self.input_sources}"
+            )
 
 
 """
@@ -698,7 +714,7 @@ class GuardsSet:
         return list(self.source_to_guards[source])
 
     def remove_guards_with_source(self, source: Source) -> None:
-        """Delete all guards that contains a given source"""
+        """Delete all guards that contain a given source"""
         from ._dynamo.source import is_from_source
 
         self.inner = OrderedSet(
@@ -821,7 +837,7 @@ class InvokeSubgraphReuseCondition:
     #   (InputTag.TENSOR, TensorMetadata)
     #   (InputTag.SYMNODE, sym_num — same object implies same symbol)
     #   (InputTag.CONSTANT, value)
-    #   (InputTag.MODULE, None)
+    #   (InputTag.OBJECT, None)
     # Tensor metadata is checked here because TENSOR_MATCH guards for
     # subgraph inputs may already exist before tracing and thus won't
     # appear in the guard delta.
@@ -1004,7 +1020,19 @@ class HopDispatchSetCache:
         return self.hop_cache_map[op]  # type: ignore[index]
 
 
-_TLS = threading.local()
+class _TLSStorage(threading.local):
+    # Default the hot-path attributes to None per thread so that
+    # TracingContext.try_get() / CompileContext.try_get() -- called on every
+    # torch.compile'd call -- hit a present attribute instead of paying for an
+    # AttributeError raise+catch inside getattr(). Without this, a thread that
+    # never ran compilation itself (e.g. a worker thread executing compiled code
+    # compiled on another thread) takes the slow getattr-miss path on every call.
+    def __init__(self) -> None:
+        self.tracing_context: TracingContext | None = None
+        self.compile_context: CompileContext | None = None
+
+
+_TLS = _TLSStorage()
 
 """
 TracingContext is the source of truth for all currently accumulated information
@@ -1122,13 +1150,12 @@ class TracingContext:
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,
-        # or None if no stride is known.  This is always the HINT, it
-        # is never a SymInt (it would be better if it was a SymInt, but
-        # I can't conveniently get this from Inductor atm.  Also, be
-        # careful not to accidentally induce guards on the SymInt if
-        # you ever do change this in aot_autograd.py; you should check
-        # on permutations preferentially.)
-        self.output_strides: list[tuple[int, ...] | None] | None = None
+        # or None if no stride is known.  An entry may be a SymInt: under
+        # dynamic shapes inductor reports strides symbolically, see
+        # set_tracing_context_output_strides.  Be careful not to induce
+        # guards on those SymInts when consuming this in aot_autograd.py;
+        # you should check on permutations preferentially.
+        self.output_strides: list[tuple[IntLikeType, ...] | None] | None = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
@@ -1189,6 +1216,7 @@ class TracingContext:
         # colno/end_colno kwargs were added to FrameSummary in 3.11
         kwargs: dict[str, Any] = {}
         if sys.version_info >= (3, 11) and self.loc_in_frame_positions is not None:
+            kwargs["end_lineno"] = self.loc_in_frame_positions.end_lineno
             kwargs["colno"] = self.loc_in_frame_positions.col_offset
             kwargs["end_colno"] = self.loc_in_frame_positions.end_col_offset
         return traceback.FrameSummary(
@@ -1215,7 +1243,7 @@ class TracingContext:
             except Exception as e:
                 # Prevent real_stack from getting attached
                 #
-                # The invariant is that if an Exception as real_stack, we've
+                # The invariant is that if an Exception has real_stack, we've
                 # appropriately attached a user stack and we no longer need to
                 # attach anything. Because we cannot conveniently interpose
                 # when an exception is thrown, we instead interpose everywhere
@@ -1263,7 +1291,7 @@ class TracingContext:
     @staticmethod
     @contextlib.contextmanager
     def report_output_strides() -> Generator[
-        list[tuple[int, ...] | None] | None, None, None
+        list[tuple[IntLikeType, ...] | None] | None, None, None
     ]:
         tc = TracingContext.try_get()
         if tc is None:
@@ -1427,10 +1455,18 @@ class Source:
         globals: dict[str, Any],
         locals: dict[str, Any],
         cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
     ) -> Any:
+        """Resolve this source, reporting only errors raised by this source's operation."""
         if self in cache:
             return cache[self]
-        value = eval(self._name_template, globals, locals)
+        try:
+            value = eval(self._name_template, globals, locals)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, None, error)
+            raise
         cache[self] = value
         return value
 
@@ -1485,6 +1521,8 @@ class ChainedSource(Source):
         globals: dict[str, Any],
         locals: dict[str, Any],
         cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
     ) -> Any:
         if self in cache:
             return cache[self]
@@ -1493,9 +1531,18 @@ class ChainedSource(Source):
         while tmpvar in locals:
             tmpvar = f"tmp{counter}"
             counter += 1
-        locals[tmpvar] = self.base.get_value(globals, locals, cache)
-        value = eval(self._name_template.format(tmpvar), globals, locals)
-        del locals[tmpvar]
+        # Resolve dependencies outside the try so on_error sees the exact
+        # Source operation that failed, rather than an enclosing source.
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        locals[tmpvar] = base_value
+        try:
+            value = eval(self._name_template.format(tmpvar), globals, locals)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        finally:
+            del locals[tmpvar]
         cache[self] = value
         return value
 
@@ -1513,20 +1560,21 @@ class ChainedSource(Source):
         return result
 
 
-def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
+def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | CppFakeTensorMode | None:
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
     heuristically detect the fake mode via the following sources, in order of
     priority:
 
-        - Currently active fake mode on stack
+        - Currently active fake mode, Python or C++
         - Fake mode associated with passed in tensors (inputs does not
           have to be flattened)
+
+    The result can be a CppFakeTensorMode; see Note [Fake mode lookups and
+    CppFakeTensorMode] in torch/_subclasses/fake_tensor.py.
     """
     from torch._subclasses.fake_tensor import (
-        FakeTensor,
-        FakeTensorMode,
         get_plain_tensors,
         is_fake_tensor,
         maybe_get_fake_mode,
@@ -1542,11 +1590,8 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
 
     fake_modes = []
 
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
-
-    for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
-        if isinstance(m, FakeTensorMode):
-            fake_modes.append((m, "active fake mode", i))
+    if (m := active_fake_mode()) is not None:
+        fake_modes.append((m, "active fake mode", 0))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
@@ -1555,11 +1600,7 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
-            fake_tensors: list[FakeTensor] = [
-                x
-                for x in out
-                if isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-            ]
+            fake_tensors = [x for x in out if is_fake_tensor(x)]
             fake_modes.extend(
                 [
                     (maybe_get_fake_mode(tensor), f"subclass input {i}", ix)
@@ -1582,16 +1623,41 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         return None
 
 
-def active_fake_mode() -> FakeTensorMode | None:
+def active_fake_mode() -> FakeTensorMode | CppFakeTensorMode | None:
     """
-    Inspects the dispatch mode stack for an active fake mode and returns it.
-    Returns None if no fake mode is active.
+    Returns the active fake mode, or None if no fake mode is active. It can be
+    a CppFakeTensorMode; see Note [Fake mode lookups and CppFakeTensorMode] in
+    torch/_subclasses/fake_tensor.py.
     """
-    from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+    # A FakeTensorMode is an infra mode, so it can only be in the FAKE slot;
+    # _get_dispatch_mode(FAKE) falls back to an installed C++ mode's
+    # CppFakeTensorMode when that slot is empty.
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
 
-    for _, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
-        if isinstance(m, FakeTensorMode):
-            return m
 
-    return None
+def require_python_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode | None,
+    /,
+) -> FakeTensorMode | None:
+    """
+    Returns mode unchanged if it is a FakeTensorMode or None.
+
+    Use it on a fake mode that must be a Python FakeTensorMode, for example to
+    call from_tensor or is_our_fake on it or to pass it on to code typed for
+    FakeTensorMode: a result of detect_fake_mode, active_fake_mode or
+    maybe_get_fake_mode, or a mode the caller was given. Callers narrow the
+    lookups with it so that they keep getting a Python FakeTensorMode when a
+    lookup finds a C++ mode.
+
+    Raises:
+        RuntimeError: if mode is a CppFakeTensorMode, which does not have all of
+            FakeTensorMode's interface.
+    """
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+    if isinstance(mode, CppFakeTensorMode):
+        raise RuntimeError(
+            "This needs a Python torch._subclasses.fake_tensor.FakeTensorMode; "
+            "a CppFakeTensorMode is not supported here yet"
+        )
+    return mode

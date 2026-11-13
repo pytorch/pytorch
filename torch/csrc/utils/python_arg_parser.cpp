@@ -77,49 +77,8 @@ static const std::unordered_map<std::string, std::vector<std::string>>
         {"other", {"x2"}},
 };
 
-// TODO: remove this. This is a temporary list of functions that allow Python
-// numbers to bind to Tensors. Some binary ops have separate Tensor and Scalar
-// overloads and binding to the Tensor overload with a number of a different
-// type will trigger a type error.
-//
-// If you modify this, you will need to adjust the blocklist in
-// tools/pyi/gen_pyi.py (and add hardcoded signatures for these
-// functions.)
 bool should_allow_numbers_as_tensors(const std::string& name) {
-  static std::unordered_set<std::string> allowed = {
-      "add",
-      "add_",
-      "add_out",
-      "div",
-      "div_",
-      "div_out",
-      "divide",
-      "divide_",
-      "divide_out", // alias of div
-      "mul",
-      "mul_",
-      "mul_out",
-      "multiply",
-      "multiply_",
-      "multiply_out", // alias of mul
-      "sub",
-      "sub_",
-      "sub_out",
-      "subtract",
-      "subtract_",
-      "subtract_out", // alias of sub
-      "true_divide",
-      "true_divide_",
-      "true_divide_out",
-      "to",
-      "_to_copy",
-      "copy_",
-      "copy",
-      "floor_divide",
-      "floor_divide_",
-      "floor_divide_out",
-      "_conj"}; // _conj needed because mul.Tensor backward calls it
-  return allowed.find(name) != allowed.end();
+  return at::should_allow_numbers_as_tensors(name);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -377,9 +336,7 @@ static py::object dispatch_on_subclass(
             args,
             kwargs,
             NULL));
-        if (ret.ptr() == nullptr) {
-          throw python_error();
-        }
+        TORCH_CHECK_PYTHON(ret.ptr() != nullptr);
         if (ret.ptr() != Py_NotImplemented) {
           break;
         }
@@ -419,9 +376,7 @@ static py::object dispatch_on_subclass(
           kwargs,
           NULL));
     }
-    if (ret.ptr() == nullptr) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(ret.ptr() != nullptr);
     if (ret.ptr() != Py_NotImplemented) {
       // Return the reference to the result. This also covers the case where
       // ret is NULL and __torch_function__/__torch_dispatch raised an
@@ -482,9 +437,7 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
           args,
           kwargs,
           NULL));
-      if (ret.ptr() == nullptr) {
-        throw python_error();
-      }
+      TORCH_CHECK_PYTHON(ret.ptr() != nullptr);
       return std::make_tuple(std::move(ret), std::move(mode_obj));
     }
   }
@@ -510,9 +463,7 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
         args,
         kwargs));
   }
-  if (ret.ptr() == nullptr) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(ret.ptr() != nullptr);
   return std::make_tuple(std::move(ret), std::move(mode_obj));
 }
 
@@ -688,6 +639,7 @@ auto handle_torch_function_no_python_arg_parser(
     ss << "\nFor more information, try re-running with TORCH_LOGS=not_implemented";
     const std::string& tmp = std::move(ss).str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
+    // @allow-raw-throw: raises the TypeError set immediately above
     throw python_error();
   }
   return ret.release().ptr();
@@ -1472,7 +1424,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   }
   name = fmt.substr(0, open_paren);
 
-  bool allow_numbers_as_tensors = should_allow_numbers_as_tensors(name);
+  bool allow_numbers_as_tensors = at::should_allow_numbers_as_tensors(name);
 
   auto last_offset = open_paren + 1;
   bool keyword_only = false;
@@ -1606,9 +1558,8 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   Py_ssize_t i = 0;
   for (auto& param : signature.params) {
     int cmp = PyObject_RichCompareBool(name, param.python_name, Py_EQ);
-    if (cmp < 0) {
-      throw python_error();
-    } else if (cmp) {
+    TORCH_CHECK_PYTHON(cmp >= 0);
+    if (cmp) {
       return i;
     }
     i++;
@@ -1901,9 +1852,27 @@ void PythonArgParser::print_error(
     signature.parse(self, args, kwargs, parsed_args, overloaded_args, true);
   }
 
+  // Say why each plausible overload did not match with its own parse() error;
+  // format_invalid_args can only guess it from the signature strings (#87514).
+  std::vector<std::string> mismatch_reasons;
+  for (auto& signature : signatures_) {
+    if (signature.hidden) {
+      continue;
+    }
+    std::string& reason = mismatch_reasons.emplace_back();
+    if (num_args >= signature.min_args && num_args <= signature.max_args) {
+      try {
+        std::vector<PyObject*> overloaded_args;
+        signature.parse(self, args, kwargs, parsed_args, overloaded_args, true);
+      } catch (const c10::Error& e) {
+        reason = e.what_without_backtrace();
+      }
+    }
+  }
+
   auto options = get_signatures();
-  auto msg =
-      torch::format_invalid_args(args, kwargs, function_name + "()", options);
+  auto msg = torch::format_invalid_args(
+      args, kwargs, function_name + "()", options, mismatch_reasons);
   TORCH_CHECK_TYPE(false, msg);
 }
 
@@ -1926,7 +1895,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     return THPVariable_Unpack(obj);
   }
 
-  bool save_symint = false;
+  c10::SymNode symbolic_node;
   at::Scalar scalar;
   if (PyBool_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
@@ -1941,16 +1910,16 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     // conversion to Tensor does not.  Instead, do it out of band.
   } else if (
       torch::is_symint(py::handle(obj)) || torch::is_dynint(py::handle(obj))) {
-    save_symint = true;
+    symbolic_node = py::handle(obj).cast<c10::SymInt>().toSymNode();
     // This scalar value doesn't matter, it shouldn't ever actually
     // get read out.  Make it a big and weird looking number to help
     // people figure out if there's aproblem.
     scalar = at::Scalar(7777777);
   } else if (torch::is_symfloat(py::handle(obj))) {
-    save_symint = true;
+    symbolic_node = py::handle(obj).cast<c10::SymFloat>().toSymNodeImpl();
     scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
   } else if (torch::is_symbool(py::handle(obj))) {
-    save_symint = true;
+    symbolic_node = py::handle(obj).cast<c10::SymBool>().toSymNodeImpl();
     scalar = at::Scalar(true);
   } else {
     // NB: Are you here because you passed None to a Variable method,
@@ -1970,11 +1939,12 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   at::Tensor tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
 
-  if (save_symint) {
+  if (symbolic_node) {
+    tensor.unsafeGetTensorImpl()->set_symbolic_wrapped_number(
+        std::move(symbolic_node));
     auto py_tensor = py::cast(tensor);
-    if (PyObject_SetAttrString(py_tensor.ptr(), "_wrapped_number", obj) < 0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(
+        PyObject_SetAttrString(py_tensor.ptr(), "_wrapped_number", obj) >= 0);
   }
 
   return tensor;
@@ -2000,15 +1970,12 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   if (THPUtils_checkLong(arg)) {
     int overflow = -1;
     long long value = PyLong_AsLongLongAndOverflow(arg, &overflow);
-    if (value == -1 && PyErr_Occurred()) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(value != -1 || !PyErr_Occurred());
     if (overflow != 0) {
       // try unsigned
       unsigned long long value = PyLong_AsUnsignedLongLong(arg);
-      if (value == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
-        throw python_error();
-      }
+      TORCH_CHECK_PYTHON(
+          value != static_cast<unsigned long long>(-1) || !PyErr_Occurred());
       return at::Scalar(static_cast<uint64_t>(value));
     } else {
       return at::Scalar(static_cast<int64_t>(value));

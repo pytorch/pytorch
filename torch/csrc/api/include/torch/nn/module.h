@@ -557,7 +557,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   }
 
   virtual std::vector<AnyValue> _forward_populate_default_args(
-      std::vector<AnyValue>&& arguments) {
+      std::vector<AnyValue>&& /*arguments*/) {
     TORCH_CHECK(
         false,
         "torch::nn::Module subclass that has default arguments in `forward` method ",
@@ -566,7 +566,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   }
 
   /// The registered parameters of this `Module`.
-  /// Inorder to access parameters_ in ParameterDict and ParameterList
+  /// In order to access parameters_ in ParameterDict and ParameterList
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   OrderedDict<std::string, Tensor> parameters_;
 

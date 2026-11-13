@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: package/deploy"]
+# Owner(s): ["module: package/deploy"]
 
 import os
 import zipfile
@@ -264,7 +264,7 @@ class DirectoryReaderTest(PackageTestCase):
         """
         from package_a.test_module import ModWithTensor
 
-        scripted_mod = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
+        scripted_mod = torch.jit._script.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         filename = self.temp()
         with PackageExporter(filename) as e:

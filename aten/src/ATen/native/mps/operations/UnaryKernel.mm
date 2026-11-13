@@ -58,6 +58,14 @@ static void logical_not_kernel(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "logical_not", std::nullopt, std::nullopt, /*ilp_threshold=*/1u << 18);
 }
 
+static void signbit_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "signbit", std::nullopt, std::nullopt, /*ilp_threshold=*/1u << 18);
+}
+
+static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps) {
+  lib.exec_unary_kernel(iter, "logit", eps);
+}
+
 static void polygamma_kernel(TensorIteratorBase& iter, int64_t order) {
   if (order == 0) {
     return lib.exec_unary_kernel(iter, "digamma");
@@ -98,6 +106,55 @@ static void nan_to_num_kernel_mps(TensorIteratorBase& iter,
   });
 }
 
+// frexp writes two outputs, so it cannot use the shared exec_unary_kernel path.
+static void frexp_kernel_mps(TensorIteratorBase& iter) {
+  if (iter.numel() == 0) {
+    return;
+  }
+  // Keep numel within the kernels' uint thread-grid index (both the dense and
+  // strided variants dispatch 1D). Offsets themselves are 64-bit inside the
+  // kernel, so this split is only about grid sizing, not offset width.
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto&& sub_iter : iter.with_32bit_indexing()) {
+      frexp_kernel_mps(sub_iter);
+    }
+    return;
+  }
+
+  const bool is_dense = iter.is_contiguous();
+  // dtype(0) is the mantissa's, which frexp_out pins to the input's dtype.
+  const auto kernel_name =
+      fmt::format("frexp_{}_{}", is_dense ? "dense" : "strided", mps::scalarToMetalTypeString(iter.dtype(0)));
+  auto pipelineState = lib.getPipelineStateForFunc(kernel_name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+
+      getMPSProfiler().beginProfileKernel(pipelineState, kernel_name, /*isGraph=*/false, stream);
+
+      [computeEncoder setComputePipelineState:pipelineState];
+      mps::bind_iter_tensors(computeEncoder, iter);
+      if (!is_dense) {
+        // Pass the iterator's byte strides straight through; the kernel indexes
+        // with the shared long-offset primitives. Strides come from the
+        // iterator and not the tensors, since reorder_dimensions() and
+        // coalesce_dimensions() leave iter.shape() in a different order from
+        // the operands' own.
+        mps::mtl_setArgs<3>(computeEncoder,
+                            iter.shape(),
+                            iter.strides(0),
+                            iter.strides(1),
+                            iter.strides(2),
+                            static_cast<uint32_t>(iter.ndim()));
+      }
+      mps::mtl_dispatch1DJob(computeEncoder, pipelineState, iter.numel());
+
+      getMPSProfiler().endProfileKernel(pipelineState, stream);
+    }
+  });
+}
+
 REGISTER_UNARY_TI_DISPATCH(exp);
 REGISTER_UNARY_TI_DISPATCH(expm1);
 REGISTER_UNARY_TI_DISPATCH(erf);
@@ -109,12 +166,17 @@ REGISTER_UNARY_TI_DISPATCH(cosh);
 REGISTER_UNARY_TI_DISPATCH(tanh);
 REGISTER_UNARY_TI_DISPATCH(angle);
 REGISTER_UNARY_TI_DISPATCH(abs);
+REGISTER_UNARY_TI_DISPATCH(sign);
+REGISTER_UNARY_TI_DISPATCH(sgn);
 REGISTER_UNARY_TI_DISPATCH(sin);
 REGISTER_UNARY_TI_DISPATCH(cos);
 REGISTER_UNARY_TI_DISPATCH(tan);
 REGISTER_UNARY_TI_DISPATCH(asin);
 REGISTER_UNARY_TI_DISPATCH(acos);
+REGISTER_UNARY_TI_DISPATCH(asinh);
+REGISTER_UNARY_TI_DISPATCH(acosh);
 REGISTER_UNARY_TI_DISPATCH(atan);
+REGISTER_UNARY_TI_DISPATCH(atanh);
 REGISTER_UNARY_TI_DISPATCH(sqrt);
 REGISTER_UNARY_TI_DISPATCH(reciprocal);
 REGISTER_UNARY_TI_DISPATCH(rsqrt);
@@ -128,8 +190,15 @@ REGISTER_UNARY_TI_DISPATCH(lgamma);
 REGISTER_UNARY_TI_DISPATCH(digamma);
 REGISTER_UNARY_TI_DISPATCH(bitwise_not);
 REGISTER_UNARY_TI_DISPATCH(round);
+REGISTER_UNARY_TI_DISPATCH(floor);
+REGISTER_UNARY_TI_DISPATCH(ceil);
+REGISTER_UNARY_TI_DISPATCH(trunc);
+REGISTER_UNARY_TI_DISPATCH(frac);
 REGISTER_UNARY_TI_DISPATCH(sigmoid);
+REGISTER_DISPATCH(frexp_stub, frexp_kernel_mps);
 REGISTER_DISPATCH(logical_not_stub, logical_not_kernel);
+REGISTER_DISPATCH(signbit_stub, signbit_kernel);
+REGISTER_DISPATCH(logit_stub, logit_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 REGISTER_DISPATCH(pow_tensor_scalar_stub, pow_tensor_scalar_kernel);

@@ -6,7 +6,7 @@ from torch.nn.utils.parametrize import is_parametrized
 
 def module_contains_param(module, parametrization):
     if is_parametrized(module):
-        # see if any of the module tensors have a parametriztion attached that matches the one passed in
+        # see if any of the module tensors have a parametrization attached that matches the one passed in
         return any(
             any(isinstance(param, parametrization) for param in param_list)
             for param_list in module.parametrizations.values()

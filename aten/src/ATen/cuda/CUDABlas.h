@@ -15,9 +15,20 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/BlasBackend.h>
+#include <ATen/Context.h>
 #include <ATen/OpMathType.h>
+#include <optional>
 
 namespace at::cuda::blas {
+
+inline bool useBF16x9() {
+  // NoTF32Guard is the existing force-IEEE override for CUDA FP32 matmul, so
+  // it must also suppress other non-IEEE modes.
+  return !at::NoTF32Guard::should_disable_fp32_reduced_precision() &&
+      at::globalContext().float32Precision(
+          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+      at::Float32Precision::BF16X9;
+}
 
 // RAII guard that sets the CuBLAS pointer mode and restores it to
 // its previous value when the guard is destroyed
@@ -61,13 +72,13 @@ template <typename Dtype, typename C_Dtype, typename std::enable_if<CUDABLAS_GEM
 void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype));
 
 template <>
-void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
+TORCH_CUDA_CU_API void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
-void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
+TORCH_CUDA_CU_API void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
 template <>
-void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
 template <>
-void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
@@ -122,7 +133,21 @@ bool gemm_and_bias(
     const Dtype* bias,
     C_Dtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
+    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None,
+    // Pass a non-null c_ptr to compute D = alpha * A @ B + beta * C with C and D
+    // at distinct addresses, which avoids having to copy C into D first.
+    // c_ptr and bias are mutually exclusive (asserted): a bias is applied by the
+    // epilogue with beta == 0, so there is no C operand to point elsewhere. The
+    // two live in one function because everything around the operands -- the
+    // reduction-scheme masks, SM carveout, alignment preferences and heuristic
+    // selection -- is identical, and duplicating it drifts.
+    // c_ld is the leading dimension of C, which need not match result_ld: C and
+    // D are separate tensors and may be padded differently.
+    // beta is ignored when a bias is supplied, since the epilogue applies the
+    // bias and the GEMM accumulates with beta == 0.
+    const C_Dtype* c_ptr = nullptr,
+    int64_t c_ld = 0,
+    at::opmath_type<Dtype> beta = 1);
 
 void int8_gemm(
     bool transpose_mat1,
@@ -149,12 +174,14 @@ void scaled_gemm(
     ScalarType mat1_dtype,
     ScalarType mat1_scale_dtype,
     at::blas::ScalingType mat1_scaling_type,
+    at::blas::SwizzleType mat1_swizzle_type,
     const void* mat2_ptr,
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
     ScalarType mat2_scale_dtype,
     at::blas::ScalingType mat2_scaling_type,
+    at::blas::SwizzleType mat2_swizzle_type,
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
@@ -162,7 +189,38 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     bool use_fast_accum,
-    const std::optional<Tensor>& alpha);
+    const std::optional<Tensor>& alpha,
+    // C uses the result dtype and leading dimension. A nonzero beta requires C.
+    const void* c_ptr = nullptr,
+    float beta = 0.0f,
+    float alpha_multiplier = 1.0f,
+    const Tensor* device_beta = nullptr);
+
+enum class CublasGroupedScaleLayout : uint8_t {
+  Scalar,
+  PerBatchScalar,
+  Vec128F32,
+  Block128x128F32,
+  Vec32MnK4UE8M0,
+  Vec128MnK4UE8M0,
+};
+
+inline bool cublaslt_grouped_gemm_arch_supported() {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+  const auto major = at::cuda::getCurrentDeviceProperties()->major;
+  return major >= 9 && major <= 11;
+#else
+  return false;
+#endif
+}
+
+struct GroupedGemmScaleOptions {
+  const void* A_scale_ptr = nullptr;
+  const void* B_scale_ptr = nullptr;
+  bool use_fast_accum = false;
+  CublasGroupedScaleLayout A_layout = CublasGroupedScaleLayout::Scalar;
+  CublasGroupedScaleLayout B_layout = CublasGroupedScaleLayout::Scalar;
+};
 
 void grouped_gemm(
       char transa,
@@ -175,9 +233,10 @@ void grouped_gemm(
       int64_t avgK,
       const int64_t* alphaArrayDev,
       const float* alphaScalar,
-      ScalarType input_dtype,
+      ScalarType A_dtype,
       const int64_t* APtrArrayDev,
       const void* ldaArrayDev,
+      ScalarType B_dtype,
       const int64_t* BPtrArrayDev,
       const void* ldbArrayDev,
       const int64_t* betaArrayDev,
@@ -188,7 +247,8 @@ void grouped_gemm(
       int64_t* DPtrArrayDev,
       const void* lddArrayDev,
       int batchCount,
-      bool use_int64_dims);
+      bool use_int64_dims,
+      const std::optional<GroupedGemmScaleOptions>& scales = std::nullopt);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)  CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
 
@@ -210,21 +270,21 @@ template <typename Dtype, typename C_Dtype, typename std::enable_if<CUDABLAS_GEM
 void bgemm(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype));
 
 template <>
-void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double));
+TORCH_CUDA_CU_API void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double));
 template <>
-void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float));
+TORCH_CUDA_CU_API void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float));
 template <>
-void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>));
 template <>
-void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>));
 template <>
-void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
+TORCH_CUDA_CU_API void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
 template <>
-void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+TORCH_CUDA_CU_API void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
 template<>
-void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float));
+TORCH_CUDA_CU_API void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float));
 template<>
-void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float));
+TORCH_CUDA_CU_API void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float));
 
 template <typename Dtype, typename C_Dtype = Dtype>
 inline void bgemm_internal(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {

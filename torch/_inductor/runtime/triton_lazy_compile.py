@@ -23,10 +23,19 @@ from .hints import (
     TRITON_DEFAULT_RSPLIT,
     TRITON_DEFAULT_RSPLIT_SIZE,
 )
-from .triton_heuristics import CachingAutotuner
+from .triton_heuristics import CachingAutotuner, PrecomputedGrid
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class TritonTmaDescriptorMetadata:
+    block_size: list[int]
+    elem_size: int
+    elem_type: int
+    swizzle: int
+    fp4_padded: bool
 
 
 @dataclasses.dataclass
@@ -44,6 +53,7 @@ class TritonKernelCompileResult:
     config_index: int | None
     global_scratch: int | None
     profile_scratch: int | None
+    tensordesc_meta: list[TritonTmaDescriptorMetadata]
 
 
 _async_compile: Any = None
@@ -227,17 +237,30 @@ def run_triton_kernel_with_autotune(
     config_index = None
     grid_type = inductor_meta.get("grid_type") if inductor_meta else None
     if grid_type == "PrecomputedGrid" and inductor_meta:
-        # PrecomputedGrid selects one of precomputed_grids. We use config_index
-        # to remember which grid is chosen.
-        precomputed_grids = inductor_meta.get("precomputed_grids", [])
-        for idx, entry in enumerate(precomputed_grids):
-            entry_config = entry.get("config", {})
-            if all(config.get(k) == v for k, v in entry_config.items()):
-                config_index = idx
-                break
+        config_index = PrecomputedGrid.find_candidate_index(inductor_meta, config)
 
     global_scratch: int | None = cached_params.get("global_scratch")
     profile_scratch: int | None = cached_params.get("profile_scratch")
+    tensordesc_meta = []
+    for metadata in cached_params.get("tensordesc_meta") or []:
+        if metadata is None:
+            raise RuntimeError(f"Missing final TMA metadata for {kernel_name}")
+        if metadata.get("is_im2col", False):
+            raise RuntimeError("AOTInductor does not support TMA im2col descriptors")
+        if metadata.get("fp4_padded", False):
+            raise RuntimeError(
+                "Inductor C++ wrappers do not support fp4-padded TMA descriptors"
+            )
+        device_elem_type = int(metadata["elem_type"])
+        tensordesc_meta.append(
+            TritonTmaDescriptorMetadata(
+                block_size=[int(value) for value in metadata["block_size"]],
+                elem_size=int(metadata["elem_size"]),
+                elem_type={8: 10, 9: 8, 10: 9}.get(device_elem_type, device_elem_type),
+                swizzle=int(metadata["swizzle"]),
+                fp4_padded=bool(metadata.get("fp4_padded", False)),
+            )
+        )
 
     log.debug(
         "Successfully autotuned Triton kernel: cubin_path=%s, "
@@ -274,5 +297,6 @@ def run_triton_kernel_with_autotune(
         config_index=config_index,
         global_scratch=global_scratch,
         profile_scratch=profile_scratch,
+        tensordesc_meta=tensordesc_meta,
     )
     return result

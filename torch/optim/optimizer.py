@@ -1,17 +1,17 @@
-# mypy: allow-untyped-defs
 """Base optimizer."""
 
 import functools
 import warnings
 from collections import defaultdict, OrderedDict
-from collections.abc import Callable, Hashable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from copy import deepcopy
 from itertools import chain
-from typing import Any, cast, overload, TypeAlias, TypeVar
-from typing_extensions import deprecated, ParamSpec, Self
+from typing import Any, cast, overload, Self, TypeAlias, TypeVar
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch.utils.hooks as hooks
+from torch.optim._utils import _preserve_state_dtype_on_load
 from torch.utils._foreach_utils import (
     _get_foreach_kernels_supported_devices,
     _get_fused_kernels_supported_devices,
@@ -87,7 +87,15 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     return _use_grad
 
 
-def _get_value(x):
+@overload
+def _get_value(x: torch.Tensor) -> torch.Tensor: ...
+
+
+@overload
+def _get_value(x: float) -> float: ...
+
+
+def _get_value(x: torch.Tensor | float) -> torch.Tensor | float:
     # item is significantly faster than a cpu tensor in eager mode
     if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return x
@@ -95,9 +103,11 @@ def _get_value(x):
         return x.item() if isinstance(x, torch.Tensor) else x
 
 
-def _stack_if_compiling(x):
+def _stack_if_compiling(
+    x: Sequence[torch.Tensor | float],
+) -> torch.Tensor | Sequence[torch.Tensor | float]:
     if not torch.jit.is_scripting() and torch.compiler.is_compiling():
-        return torch.stack(x)
+        return torch.stack(cast(list[torch.Tensor], x))
     else:
         return x
 
@@ -129,7 +139,7 @@ def _disable_dynamo_if_unsupported(
         # but this only occurs in the rare case that the user explicitly deletes
         # the capturable flag. If capturable=True, this is not a problem.
         @functools.wraps(func)
-        def maybe_fallback(*args: _P.args, **kwargs: _P.kwargs):
+        def maybe_fallback(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
@@ -199,7 +209,9 @@ def _device_dtype_check_for_fused(
         )
 
 
-def _view_as_real(params, *state_and_grads) -> None:
+def _view_as_real(
+    params: list[torch.Tensor], *state_and_grads: list[torch.Tensor]
+) -> None:
     for i, p in enumerate(params):
         if torch.is_complex(p):
             params[i] = torch.view_as_real(params[i])
@@ -207,7 +219,7 @@ def _view_as_real(params, *state_and_grads) -> None:
                 s[i] = torch.view_as_real(s[i])
 
 
-def _get_scalar_dtype(is_fused=None):
+def _get_scalar_dtype(is_fused: bool | None = None) -> torch.dtype:
     if is_fused:
         return torch.float32
     return (
@@ -225,7 +237,15 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     return capturable_supported_devices
 
 
-def _to_scalar(x: float | torch.Tensor):
+@overload
+def _to_scalar(x: torch.Tensor) -> torch.Tensor: ...
+
+
+@overload
+def _to_scalar(x: float) -> float: ...
+
+
+def _to_scalar(x: torch.Tensor | float) -> torch.Tensor | float:
     r"""This function converts a hyperparameter to a 0-dimension (scalar) tensor
     if it is a nonzero-dimensions 1-element tensor. If it is not a tensor, it is
     kept as is.
@@ -284,6 +304,16 @@ _differentiable_doc = r"""differentiable (bool, optional): whether autograd shou
 
 _maximize_doc = r"""maximize (bool, optional): maximize the objective with respect to the
             params, instead of minimizing (default: False)"""
+
+_functional_api_doc = r"""Functional API that performs {optimizer} algorithm computation.
+
+This function updates the provided parameters and optimizer state in place.
+The caller must initialize and retain optimizer state. Unless intentionally
+constructing a differentiable update with a supported ``differentiable=True``
+argument, call this function under :class:`torch.no_grad`.
+See :ref:`functional-optimizer-api` for the common functional optimizer
+contract and examples, and :class:`~torch.optim.{optimizer}` for algorithm
+details."""
 
 
 def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableHandle:
@@ -391,6 +421,14 @@ class Optimizer:
                 "params argument given to the optimizer should be "
                 "an iterable of Tensors or dicts, but got " + torch.typename(params)
             )
+        elif isinstance(params, set):
+            warnings.warn(
+                "optimizer parameters need to be organized in ordered collections, but "
+                "the ordering of tensors in sets will change between runs. Please use a "
+                "list instead. This will be an error in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
 
         self.state: defaultdict[torch.Tensor, Any] = defaultdict(dict)
         self.param_groups: list[dict[str, Any]] = []
@@ -402,7 +440,7 @@ class Optimizer:
             param_groups = [{"params": param_groups}]
 
         for param_group in param_groups:
-            self.add_param_group(cast(dict, param_group))
+            self.add_param_group(cast(dict[str, Any], param_group))
 
         # Allows _accelerator_graph_capture_health_check to rig a poor man's TORCH_WARN_ONCE in python,
         # which I don't think exists
@@ -462,7 +500,7 @@ class Optimizer:
         # Determine available accelerator device
         accelerator = torch.accelerator.current_accelerator(check_available=True)
 
-        if accelerator and accelerator.type in {"cuda", "xpu"}:
+        if accelerator is not None:
             capturing = torch.accelerator.current_stream().is_capturing()
 
             if capturing and not all(
@@ -775,13 +813,11 @@ class Optimizer:
         param: torch.Tensor,
         value: torch.Tensor,
         param_id: int,
-        param_groups: list[dict[Any, Any]],
-        key: Hashable = None,
+        param_groups: list[dict[str, Any]],
+        key: str | None = None,
     ) -> torch.Tensor:
-        # Floating-point types are a bit special here. They are the only ones
-        # that are assumed to always match the type of params.
-        # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
-        # UNLESS fused or capturable, see note [special device hosting for step]
+        # Unfused, noncapturable optimizers retain CPU step tensors to avoid synchronization.
+        # See note [special device hosting for step].
         fused = False
         capturable = False
         if param_groups is None:
@@ -797,10 +833,9 @@ class Optimizer:
             else:
                 return value
         else:
-            if param.is_floating_point():
+            if param.is_floating_point() and not _preserve_state_dtype_on_load.get():
                 return value.to(dtype=param.dtype, device=param.device)
-            else:
-                return value.to(device=param.device)
+            return value.to(device=param.device)
 
     def register_load_state_dict_pre_hook(
         self,
@@ -886,8 +921,33 @@ class Optimizer:
                 from a call to :meth:`state_dict`.
 
         .. warning::
+            By default, state tensors other than ``step`` are currently cast to the
+            parameter dtype for floating-point parameters. In a future release,
+            the default will preserve their saved dtype in order to respect the
+            dtype in the checkpoint. However, this behavior will break use cases
+            that rely on the state being automatically cast to the parameter's
+            dtype, as many optimizer :meth:`step` implementations do not support
+            mixed precision. We emit a ``FutureWarning`` when loading the checkpoint
+            changes a state tensor's dtype. Use :func:`torch.optim.preserve_state_dtype_on_load`
+            to select the desired behavior explicitly. In either case, state tensors
+            are moved to the parameter's device.
+
+        .. note::
+            When preserving dtypes, state tensors must be compatible with the
+            selected optimizer implementation for :meth:`step`. Use
+            :func:`torch.optim.preserve_state_dtype_on_load` with ``False`` to
+            retain automatic casting, or explicitly convert state tensors before
+            stepping, for example with :meth:`register_load_state_dict_post_hook`.
+
+        .. warning::
             Make sure this method is called after initializing :class:`torch.optim.lr_scheduler.LRScheduler`,
             as calling it beforehand will overwrite the loaded learning rates.
+
+        .. note::
+            The ``step`` tensor keeps its saved dtype and device unless the parameter
+            group is fused or capturable, which moves it to the parameter's device as
+            ``torch.float32``. This behavior is independent of the dtype preservation
+            setting.
 
         .. note::
             The names of the parameters (if they exist under the "param_names" key of each param group
@@ -961,38 +1021,48 @@ class Optimizer:
             )
         )
 
-        def _cast(param, value, param_id=None, param_groups=None, key=None):
-            r"""Make a deep copy of value, casting all tensors to device of param."""
+        warn_about_dtype_cast = False
+
+        def _cast(
+            param: torch.Tensor,
+            value: _T,
+            param_id: int,
+            param_groups: list[dict[str, Any]],
+            key: str | None = None,
+        ) -> _T:
+            r"""Apply the current dtype, device, and step policies recursively."""
+            nonlocal warn_about_dtype_cast
             if isinstance(value, torch.Tensor):
-                return Optimizer._process_value_according_to_param_policy(
-                    param,
-                    value,
-                    # pyrefly: ignore [bad-argument-type]
-                    param_id,
-                    # pyrefly: ignore [bad-argument-type]
-                    param_groups,
-                    key,
+                casted_tensor = Optimizer._process_value_according_to_param_policy(
+                    param, value, param_id, param_groups, key
                 )
+                warn_about_dtype_cast |= (
+                    _preserve_state_dtype_on_load.get() is None
+                    and key != "step"
+                    and casted_tensor.dtype != value.dtype
+                )
+                return cast(_T, casted_tensor)
             elif isinstance(value, dict):
-                return {
+                casted = {
                     k: _cast(
                         param, v, param_id=param_id, param_groups=param_groups, key=k
                     )
                     for k, v in value.items()
                 }
+                return cast(_T, casted)
             elif isinstance(value, Iterable):
                 # pyrefly: ignore [bad-instantiation]
-                return type(value)(
+                rebuilt = type(value)(
                     # pyrefly: ignore [bad-argument-count]
                     _cast(param, v, param_id=param_id, param_groups=param_groups)
                     for v in value
                 )  # type: ignore[call-arg]
+                return cast(_T, rebuilt)
             else:
                 return value
 
-        # Copy state assigned to params (and cast tensors to appropriate types).
-        # State that is not assigned to params is copied as is (needed for
-        # backward compatibility).
+        # Apply the current dtype policy and step handling to parameter state.
+        # Copy state not assigned to parameters as is for backward compatibility.
         state: defaultdict[torch.Tensor, dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict["state"].items():
             if k in id_map:
@@ -1002,6 +1072,21 @@ class Optimizer:
                 )
             else:
                 state[k] = v
+
+        if warn_about_dtype_cast:
+            warnings.warn(
+                "Optimizer.load_state_dict currently casts non-step state tensors to "
+                "the parameter dtype for floating-point parameters. In a future release, "
+                "the default will preserve their saved dtype. Use "
+                "torch.optim.preserve_state_dtype_on_load() to opt in if the saved "
+                "state dtypes are supported by your optimizer implementation, or "
+                "torch.optim.preserve_state_dtype_on_load(False) to keep "
+                "the current behavior and silence this warning. The step tensor "
+                "policy is unchanged.",
+                FutureWarning,
+                # Skip the Dynamo wrappers to point to the caller.
+                stacklevel=4,
+            )
 
         # Update parameter groups, setting their 'params' value
         def update_group(
@@ -1124,8 +1209,8 @@ class Optimizer:
         else:
             param_group["params"] = list(params)
 
-        extracted_param_tensors = []
-        extracted_param_names = []
+        extracted_param_tensors: list[torch.Tensor] = []
+        extracted_param_names: list[str] = []
         for param in param_group["params"]:
             if isinstance(param, tuple):
                 param_name = param[0]

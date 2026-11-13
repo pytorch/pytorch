@@ -220,8 +220,8 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
     .add_output(dX)
     .add_output(dScale_vec)
     .add_output(dZeroPoint_vec)
-    .add_input(X_)
-    .add_input(dY_)
+    .add_const_input(X_)
+    .add_const_input(dY_)
     .build();
 
   fake_quant_grad_learnable_tensor_stub(

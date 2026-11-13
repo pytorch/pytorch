@@ -8,8 +8,7 @@ import functools
 import io
 import threading
 import warnings
-from typing import Any, cast, TYPE_CHECKING, TypeVar
-from typing_extensions import Self
+from typing import Any, cast, Self, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._utils import _to, _type
@@ -36,6 +35,15 @@ _share_memory_lock = threading.Lock()
 _share_memory_map: dict[int, threading.RLock] = {}
 
 T = TypeVar("T", bound="_StorageBase | TypedStorage")
+
+
+def _throws_on_data_ptr_access(storage: _StorageBase | TypedStorage) -> _bool:
+    # Whether storage.data_ptr() would raise (e.g. FakeTensor,
+    # FunctionalTensor, or a cudagraph-invalidated storage). Non-throwing
+    # replacement for wrapping data_ptr() in a try/except RuntimeError.
+    return torch._C._storage_throw_on_immutable_data_ptr(
+        storage._cdata
+    ) or torch._C._storage_throw_on_mutable_data_ptr(storage._cdata)
 
 
 class _StorageBase:
@@ -545,6 +553,7 @@ def _new_dtypes():
         torch.float8_e5m2fnuz,
         torch.float8_e4m3fnuz,
         torch.float8_e8m0fnu,
+        torch.float8_e5m3fnu,
         torch.float4_e2m1fn_x2,
         torch.bits8,
         torch.bits16,

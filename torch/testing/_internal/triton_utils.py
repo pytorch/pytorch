@@ -5,6 +5,7 @@ import unittest
 from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    HAS_MTIA_AND_TRITON,
     HAS_XPU_AND_TRITON,
 )
 from torch.utils._triton import has_triton
@@ -17,11 +18,13 @@ requires_xpu_and_triton = unittest.skipUnless(
     HAS_XPU_AND_TRITON, "requires xpu and triton"
 )
 requires_gpu_and_triton = unittest.skipUnless(
-    HAS_XPU_AND_TRITON or HAS_CUDA_AND_TRITON, "requires gpu and triton"
+    HAS_XPU_AND_TRITON or HAS_CUDA_AND_TRITON or HAS_MTIA_AND_TRITON,
+    "requires gpu and triton",
 )
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
-if has_triton():
+# Test kernels are shared across accelerator and CPU Triton backends.
+if has_triton(include_cpu=True):
     import triton
     from triton import language as tl
 

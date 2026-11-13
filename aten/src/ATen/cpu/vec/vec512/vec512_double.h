@@ -6,6 +6,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
+
+#include <limits>
 #if (defined(CPU_CAPABILITY_AVX512))
 #define SLEEF_STATIC_LIBS
 #include <sleef.h>
@@ -150,13 +152,18 @@ class Vectorized<double> {
     }
     return loadu(tmp);
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<double> or_nan_if(const Vectorized<double>& mask) const {
+    return _mm512_or_pd(values, mask);
+  }
   Vectorized<double> abs() const {
     auto mask = _mm512_set1_pd(-0.f);
     return _mm512_andnot_pd(mask, values);
   }
   Vectorized<double> angle() const {
     const auto zero_vec = _mm512_castsi512_pd(zero_vector);
-    const auto nan_vec = _mm512_set1_pd(NAN);
+    const auto nan_vec =
+        _mm512_set1_pd(std::numeric_limits<double>::quiet_NaN());
     const auto not_nan_mask = _mm512_cmp_pd_mask(values, values, _CMP_EQ_OQ);
     const auto not_nan =
         _mm512_mask_set1_epi64(zero_vector, not_nan_mask, 0xFFFFFFFFFFFFFFFF);
@@ -164,7 +171,7 @@ class Vectorized<double> {
         _mm512_cmp_pd_mask(_mm512_castsi512_pd(not_nan), zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm512_set1_pd(c10::pi<double>);
 
-    const auto neg_mask = _mm512_cmp_pd_mask(values, zero_vec, _CMP_LT_OQ);
+    const auto neg_mask = _mm512_movepi64_mask(_mm512_castpd_si512(values));
     auto angle = _mm512_mask_blend_pd(neg_mask, zero_vec, pi);
     angle = _mm512_mask_blend_pd(nan_mask, angle, nan_vec);
     return angle;
@@ -326,6 +333,17 @@ class Vectorized<double> {
   }
   Vectorized<double> pow(const Vectorized<double>& b) const {
     return Vectorized<double>(Sleef_powd8_u10(values, b));
+  }
+  double reduce_add() const {
+    return _mm512_reduce_add_pd(values);
+  }
+  // Propagates NaN, matching maximum() and torch.max; the vmaxpd sequence
+  // behind _mm512_reduce_max_pd drops it. See Vectorized<double> in vec256.
+  double reduce_max() const {
+    const double m = _mm512_reduce_max_pd(values);
+    return _mm512_cmp_pd_mask(values, values, _CMP_UNORD_Q)
+        ? std::numeric_limits<double>::quiet_NaN()
+        : m;
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN

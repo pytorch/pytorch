@@ -113,7 +113,7 @@ def _create_batched_inputs(
     return tree_unflatten(batched_inputs, args_spec), batch_size
 
 
-# Undos the batching (and any batch dimensions) associated with the `vmap_level`.
+# Undoes the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
     batched_outputs: Tensor | tuple[Tensor, ...],
     out_dims: out_dims_t,

@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/profiler/util.h>
@@ -49,6 +51,39 @@ std::string getCommsIdViaSaveNcclMeta(
 }
 
 } // namespace
+
+TEST(CommsIdTest, SaveNcclMetaTypedPreservesTypes) {
+  auto debugInfo =
+      makeDebugInfo("pg_uid", "custom_pg", 2, "allreduce", 4, 42, false, 4, 2);
+  c10::DebugInfoGuard guard(c10::DebugInfoKind::PARAM_COMMS_INFO, debugInfo);
+  at::RecordFunction fn(at::RecordScope::USER_SCOPE);
+  auto metadata = saveNcclMetaTyped(fn);
+
+  EXPECT_EQ(metadata.at(kCommsName).toStringRef(), "allreduce");
+  EXPECT_EQ(metadata.at(kDtype).toStringRef(), "Float");
+  EXPECT_EQ(metadata.at(kInMsgNelems).toInt(), 1024);
+  EXPECT_EQ(metadata.at(kGroupRanks).toStringRef(), "[4, 6, 8, 10]");
+  EXPECT_TRUE(metadata.at(kCommsId).isUnsigned());
+  EXPECT_TRUE(metadata.at(kIsAsynchronizedOp).toBool());
+}
+
+TEST(CommsIdTest, NcclMetaStringMapFormatsValues) {
+  collective_meta_t metadata;
+  metadata.emplace(kCommsName, "allreduce");
+  metadata.emplace(kDtype, "Float");
+  metadata.emplace(kInMsgNelems, int64_t{1024});
+  metadata.emplace(kIsAsynchronizedOp, false);
+  metadata.emplace(kCommsId, std::numeric_limits<uint64_t>::max());
+  metadata.emplace(kInSplit, "[1, 2]");
+
+  auto formatted = ncclMetaToStringMap(metadata);
+  EXPECT_EQ(formatted.at(kCommsName), "\"allreduce\"");
+  EXPECT_EQ(formatted.at(kDtype), "\"Float\"");
+  EXPECT_EQ(formatted.at(kInMsgNelems), "1024");
+  EXPECT_EQ(formatted.at(kIsAsynchronizedOp), "false");
+  EXPECT_EQ(formatted.at(kCommsId), "18446744073709551615");
+  EXPECT_EQ(formatted.at(kInSplit), "\"[1, 2]\"");
+}
 
 TEST(CommsIdTest, ParamCommsDebugInfoStoresSeqNumberAndIsP2P) {
   auto info =

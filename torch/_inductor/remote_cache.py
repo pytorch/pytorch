@@ -301,7 +301,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
         # pyrefly: ignore [missing-attribute]
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
-            # first use. Mark is as unavailable now.
+            # first use. Mark it as unavailable now.
             self._redis = None
             return None
 
@@ -322,7 +322,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
         # pyrefly: ignore [missing-attribute]
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
-            # first use. Mark is as unavailable now.
+            # first use. Mark it as unavailable now.
             self._redis = None
 
 

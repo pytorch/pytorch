@@ -14,6 +14,7 @@
 
 #include <c10/core/SafePyObject.h>
 #include <c10/util/SmallVector.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -26,7 +27,9 @@
 #include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 #include <torch/csrc/utils/python_raii.h>
 
+#include <c10/util/irange.h>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -185,9 +188,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
                   **args_kwargs.second)
         : with_keyset_ ? func(keyset, *args_kwargs.first, **args_kwargs.second)
                         : func(*args_kwargs.first, **args_kwargs.second);
-    if (!obj) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(obj);
     pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
   }
 };
@@ -202,6 +203,7 @@ static py::object ophandle_call_boxed(
     const c10::OperatorHandle& handle,
     const py::args& args,
     const py::kwargs& kwargs) {
+  HANDLE_TH_ERRORS
   auto stack = torch::jit::createStackForSchema(
       handle.schema(),
       args,
@@ -212,6 +214,7 @@ static py::object ophandle_call_boxed(
     handle.callBoxed(stack);
   }
   return torch::jit::createPyObjectForStack(std::move(stack));
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 // Function that performs PyObject dispatch
@@ -239,14 +242,14 @@ struct PyObjectRedispatchFunc {
 
 // ORs the dispatch keys from `obj` into key_set
 static void pyobject_dispatch_collect_keys(PyObject* obj, uint64_t& key_set) {
-  if (C10_LIKELY(THPVariable_CheckExact(obj))) {
+  if (THPVariable_CheckExact(obj)) [[likely]] {
     key_set |=
         THPVariable_Unpack(obj).unsafeGetTensorImpl()->key_set().raw_repr();
     return;
   }
   if (PyList_CheckExact(obj)) {
     Py_ssize_t size = PyList_GET_SIZE(obj);
-    for (Py_ssize_t i = 0; i < size; ++i) {
+    for (const auto i : c10::irange(size)) {
       pyobject_dispatch_collect_keys(PyList_GET_ITEM(obj, i), key_set);
     }
     return;
@@ -262,8 +265,8 @@ static c10::DispatchKeySet pyobject_dispatch_compute_keyset(
     PyObject* const* args,
     Py_ssize_t nargs) {
   uint64_t key_set = 0;
-  extractor.dispatchArgIndicesReverse().for_each_set_bit(
-      [&](size_t reverse_arg_index) {
+  c10::utils::for_each_set_bit(
+      extractor.dispatchArgIndicesReverse(), [&](size_t reverse_arg_index) {
         pyobject_dispatch_collect_keys(
             args[nargs - 1 - static_cast<Py_ssize_t>(reverse_arg_index)],
             key_set);
@@ -340,7 +343,7 @@ static bool pyobject_dispatch_arg_has_torch_function(PyObject* arg) {
   if (PyList_CheckExact(arg) || PyTuple_CheckExact(arg)) {
     const Py_ssize_t len = PySequence_Fast_GET_SIZE(arg);
     PyObject** items = PySequence_Fast_ITEMS(arg);
-    for (Py_ssize_t i = 0; i < len; ++i) {
+    for (const auto i : c10::irange(len)) {
       if (pyobject_dispatch_arg_has_torch_function(items[i])) {
         return true;
       }
@@ -366,7 +369,7 @@ static bool pyobject_dispatch_has_torch_function(
   if (at::impl::torch_function_mode_enabled()) {
     return true;
   }
-  for (Py_ssize_t i = op_args_start; i < nargs + nkwargs; ++i) {
+  for (const auto i : c10::irange(op_args_start, nargs + nkwargs)) {
     if (pyobject_dispatch_arg_has_torch_function(args[i])) {
       return true;
     }
@@ -386,7 +389,7 @@ static PyObject* pyobject_dispatch_call_redispatch_cpp(
   c10::SmallVector<PyObject*, 64> call_args;
   call_args.reserve(1 + nargs - op_args_start + nkwargs);
   call_args.push_back(py_key_set.ptr());
-  for (Py_ssize_t i = op_args_start; i < nargs + nkwargs; ++i) {
+  for (const auto i : c10::irange(op_args_start, nargs + nkwargs)) {
     call_args.push_back(args[i]);
   }
   return PyObject_Vectorcall(
@@ -421,7 +424,7 @@ static PyObject* pyobject_dispatch_call_python_with_keyset(
   c10::SmallVector<PyObject*, 64> call_args;
   call_args.reserve(1 + nargs - op_args_start + nkwargs);
   call_args.push_back(py_key_set.ptr());
-  for (Py_ssize_t i = op_args_start; i < nargs + nkwargs; ++i) {
+  for (const auto i : c10::irange(op_args_start, nargs + nkwargs)) {
     call_args.push_back(args[i]);
   }
   return PyObject_Vectorcall(
@@ -443,7 +446,7 @@ static PyObject* pyobject_dispatch_with_keyset(
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
   // TODO(#187974): Figure out why we need a special case to send the Python
   // key back to the C++ Dispatcher.
-  if (C10_UNLIKELY(key_set.has(c10::DispatchKey::Python))) {
+  if (key_set.has(c10::DispatchKey::Python)) [[unlikely]] {
     return pyobject_dispatch_call_redispatch_cpp(
         self->cpp_redispatch_fn,
         key_set,
@@ -457,7 +460,7 @@ static PyObject* pyobject_dispatch_with_keyset(
   // If there's no Python kernel, call back to the C++ Dispatcher
   const auto* holder =
       kernel_function.template boxedKernelFunctor<PythonKernelHolder>();
-  if (C10_UNLIKELY(holder == nullptr || holder->with_op())) {
+  if (holder == nullptr || holder->with_op()) [[unlikely]] {
     return pyobject_dispatch_call_redispatch_cpp(
         self->cpp_redispatch_fn,
         key_set,
@@ -470,11 +473,11 @@ static PyObject* pyobject_dispatch_with_keyset(
   // Otherwise, just directly invoke the Python kernel.
   auto* kernel = holder->func(self->interpreter);
   TORCH_INTERNAL_ASSERT(kernel != nullptr);
-  if (C10_UNLIKELY(skip_torch_function)) {
+  if (skip_torch_function) [[unlikely]] {
     torch::consume_should_skip_torch_function();
   }
   PyObject* result = nullptr;
-  if (C10_UNLIKELY(holder->with_keyset())) {
+  if (holder->with_keyset()) [[unlikely]] {
     result = pyobject_dispatch_call_python_with_keyset(
         kernel, key_set, args, nargs, nkwargs, kwnames, op_args_start);
   } else {
@@ -497,9 +500,9 @@ static PyObject* pyobject_dispatch_vectorcall(
   Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
   bool skip_torch_function = torch::peek_should_skip_torch_function();
-  if (C10_UNLIKELY(
-          !skip_torch_function &&
-          pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 0))) {
+  if (!skip_torch_function &&
+      pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 0))
+      [[unlikely]] {
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
@@ -519,7 +522,7 @@ static PyObject* pyobject_dispatch_vectorcall(
       normalized_args.empty() ? args : normalized_args.data();
   auto key_set = pyobject_dispatch_compute_keyset(
       self->handle->dispatchKeyExtractor(), op_args, nargs);
-  if (C10_UNLIKELY(skip_torch_function)) {
+  if (skip_torch_function) [[unlikely]] {
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
   return pyobject_dispatch_with_keyset(
@@ -537,9 +540,9 @@ static PyObject* pyobject_redispatch_vectorcall(
   Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
   bool skip_torch_function = torch::peek_should_skip_torch_function();
-  if (C10_UNLIKELY(
-          !skip_torch_function &&
-          pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))) {
+  if (!skip_torch_function &&
+      pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))
+      [[unlikely]] {
     return PyObject_Vectorcall(
         self->cpp_redispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
@@ -560,7 +563,7 @@ static PyObject* pyobject_redispatch_vectorcall(
     return nullptr;
   }
   auto key_set = c10::DispatchKeySet::from_raw_repr(raw_repr);
-  if (C10_UNLIKELY(skip_torch_function)) {
+  if (skip_torch_function) [[unlikely]] {
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
   return pyobject_dispatch_with_keyset(
@@ -594,17 +597,14 @@ static PyObject* make_pyobject_dispatch_func(
     PyObject* cpp_dispatch_fn,
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
-  auto* owned_handle = new c10::OperatorHandle(handle);
+  auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
   auto* result = PyObject_New(PyObjectDispatchFunc, &PyObjectDispatchFuncType);
-  if (result == nullptr) {
-    delete owned_handle;
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_dispatch_fn);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_dispatch_fn = cpp_dispatch_fn;
   result->cpp_redispatch_fn = cpp_redispatch_fn;
-  result->handle = owned_handle;
+  result->handle = owned_handle.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
@@ -614,16 +614,13 @@ static PyObject* make_pyobject_redispatch_func(
     const c10::OperatorHandle& handle,
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
-  auto* owned_handle = new c10::OperatorHandle(handle);
+  auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
   auto* result =
       PyObject_New(PyObjectRedispatchFunc, &PyObjectRedispatchFuncType);
-  if (result == nullptr) {
-    delete owned_handle;
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_redispatch_fn = cpp_redispatch_fn;
-  result->handle = owned_handle;
+  result->handle = owned_handle.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
@@ -673,6 +670,15 @@ class SetExcludeDispatchKeyGuard {
   bool old;
 };
 
+// Thread-local stack used to save/restore the local dispatch key set around a
+// torch.compile'd call (see compile_wrapper in eval_frame.py). Keeping the
+// saved keyset in C++ avoids materializing it as a (registered) pybind11
+// instance on every compiled call, and a stack supports nested compiled calls.
+static std::vector<c10::impl::LocalDispatchKeySet>& dynamoDispatchKeySetStack() {
+  static thread_local std::vector<c10::impl::LocalDispatchKeySet> stack;
+  return stack;
+}
+
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -685,9 +691,7 @@ void initDispatchBindings(PyObject* module) {
   PyObjectDispatchFuncType.tp_call = PyVectorcall_Call;
   PyObjectDispatchFuncType.tp_vectorcall_offset =
       offsetof(PyObjectDispatchFunc, vectorcall);
-  if (PyType_Ready(&PyObjectDispatchFuncType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&PyObjectDispatchFuncType) >= 0);
 
   PyObjectRedispatchFuncType.tp_name = "torch._C._PyObjectRedispatchFunc";
   PyObjectRedispatchFuncType.tp_basicsize = sizeof(PyObjectRedispatchFunc);
@@ -698,9 +702,7 @@ void initDispatchBindings(PyObject* module) {
   PyObjectRedispatchFuncType.tp_call = PyVectorcall_Call;
   PyObjectRedispatchFuncType.tp_vectorcall_offset =
       offsetof(PyObjectRedispatchFunc, vectorcall);
-  if (PyType_Ready(&PyObjectRedispatchFuncType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&PyObjectRedispatchFuncType) >= 0);
 
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
       .def("schema", &c10::OperatorHandle::schema)
@@ -711,6 +713,7 @@ void initDispatchBindings(PyObject* module) {
              c10::DispatchKeySet keyset,
              const py::args& args,
              const py::kwargs& kwargs) {
+            HANDLE_TH_ERRORS
             auto& handle = self.cast<c10::OperatorHandle&>();
             auto stack = torch::jit::createStackForSchema(
                 handle.schema(),
@@ -722,6 +725,7 @@ void initDispatchBindings(PyObject* module) {
               handle.redispatchBoxed(keyset, &stack);
             }
             return torch::jit::createPyObjectForStack(std::move(stack));
+            END_HANDLE_TH_ERRORS_PYBIND
           });
 
   m.def("_dispatch_call_boxed", &ophandle_call_boxed);
@@ -1222,6 +1226,9 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(FuncTorchVmapMode)
       DEF_ONE(FuncTorchGradWrapper)
       DEF_ONE(PythonDispatcher)
+      // Export DispatchKey::Fake to Python so Python guards and dispatch
+      // utilities can construct, inspect, include, or exclude that key.
+      DEF_ONE(Fake)
       DEF_ONE(PreDispatch)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
@@ -1319,6 +1326,22 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_keys", [](const at::Tensor& tensor) {
     auto* impl = tensor.unsafeGetTensorImpl();
     return impl->key_set();
+  });
+  // Save the current local dispatch key set onto a C++ thread-local stack, to
+  // be restored by _dynamo_restore_local_dispatch_key_set. Used by
+  // torch.compile's per-call wrapper to preserve dispatch state across the
+  // compiled call without constructing pybind11 DispatchKeySet instances.
+  m.def("_dynamo_save_local_dispatch_key_set", []() {
+    dynamoDispatchKeySetStack().push_back(
+        c10::impl::tls_local_dispatch_key_set());
+  });
+  m.def("_dynamo_restore_local_dispatch_key_set", []() {
+    auto& stack = dynamoDispatchKeySetStack();
+    TORCH_CHECK(
+        !stack.empty(),
+        "_dynamo_restore_local_dispatch_key_set called with an empty stack");
+    c10::impl::_force_tls_local_dispatch_key_set(stack.back());
+    stack.pop_back();
   });
   m.def("_dispatch_tls_local_include_set", []() {
     return c10::impl::tls_local_dispatch_key_set().included_;
@@ -1422,16 +1445,16 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
-    return at::functionalization::impl::replace_(a, b);
+    at::functionalization::impl::replace_(a, b);
   });
   m.def("_propagate_xla_data", [](const at::Tensor& a, const at::Tensor& b) {
     at::functionalization::impl::propagate_xla_data(a, b);
   });
   m.def("_commit_update", [](const at::Tensor& a) {
-    return at::functionalization::impl::commit_update(a);
+    at::functionalization::impl::commit_update(a);
   });
   m.def("_unsafe_reset_storage", [](const at::Tensor& a) {
-    return at::functionalization::impl::unsafe_reset_storage(a);
+    at::functionalization::impl::unsafe_reset_storage(a);
   });
 
   m.def("_dispatch_key_for_device", [](const std::string& device_type) {
@@ -1547,9 +1570,7 @@ void python_op_registration_trampoline_impl(
                                          **args_kwargs.second)
       : with_keyset ? callable(keyset, *args_kwargs.first, **args_kwargs.second)
                     : callable(*args_kwargs.first, **args_kwargs.second);
-  if (!obj) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(obj);
   pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 

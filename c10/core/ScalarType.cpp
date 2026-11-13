@@ -1,5 +1,5 @@
 #include <c10/core/ScalarType.h>
-#include <c10/util/Array.h>
+#include <c10/util/irange.h>
 #include <array>
 
 namespace c10 {
@@ -22,16 +22,17 @@ constexpr auto bf = ScalarType::BFloat16;
 constexpr auto cb = ScalarType::BComplex32;
 constexpr auto ud = ScalarType::Undefined;
 
-constexpr auto index2dtype = array_of<
-    c10::ScalarType>(u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, bf, cb);
+constexpr auto index2dtype = std::to_array<c10::ScalarType>(
+    {u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, bf, cb});
 
 constexpr std::array<int64_t, static_cast<size_t>(ScalarType::NumOptions)>
 calculate_dtype2index() {
   std::array<int64_t, static_cast<size_t>(ScalarType::NumOptions)> inverse = {};
-  for (int64_t i = 0; i < static_cast<int64_t>(ScalarType::NumOptions); i++) {
+  for (const auto i :
+       c10::irange(static_cast<int64_t>(ScalarType::NumOptions))) {
     inverse[i] = -1;
   }
-  for (int64_t i = 0; i < static_cast<int64_t>(index2dtype.size()); i++) {
+  for (const auto i : c10::irange(static_cast<int64_t>(index2dtype.size()))) {
     inverse[static_cast<int64_t>(index2dtype[i])] = i;
   }
   return inverse;
@@ -230,6 +231,8 @@ std::pair<std::string_view, std::string_view> getDtypeNames(
     case c10::ScalarType::Float8_e8m0fnu:
       // TODO(#146647): macroify all of this
       return {"float8_e8m0fnu", ""};
+    case c10::ScalarType::Float8_e5m3fnu:
+      return {"float8_e5m3fnu", ""};
     case c10::ScalarType::Float4_e2m1fn_x2:
       return {"float4_e2m1fn_x2", ""};
     default:
@@ -257,6 +260,8 @@ std::string_view getScalarTypeAbbr(ScalarType scalarType) {
       return "f8e5m2fnuz";
     case ScalarType::Float8_e8m0fnu:
       return "f8e8m0fnu";
+    case ScalarType::Float8_e5m3fnu:
+      return "f8e5m3fnu";
     case ScalarType::Float4_e2m1fn_x2:
       return "f4e2m1fnx2";
     case ScalarType::ComplexHalf:

@@ -32,7 +32,6 @@
 
 #pragma once
 #include <cutlass/gemm/kernel/static_tile_scheduler.hpp>
-#include <cutlass/version.h>
 
 namespace {
 
@@ -219,11 +218,7 @@ public:
 
   CUTLASS_HOST_DEVICE
   static bool
-#if defined(CUTLASS_VERSION) && CUTLASS_VERSION >= 450
   can_implement(Arguments const& args, KernelHardwareInfo const&) {
-#else
-  can_implement(Arguments const& args) {
-#endif
     return args.max_swizzle_size >= 1;
   }
 

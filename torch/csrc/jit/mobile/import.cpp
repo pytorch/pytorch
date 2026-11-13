@@ -174,7 +174,7 @@ void tryRegisterMethod(const std::vector<c10::Argument>& args, Function& func) {
   }
 
   if (auto cls = args[0].type()->castRaw<ClassType>()) {
-    if (C10_UNLIKELY(cls->findMethod(func.name()))) {
+    if (cls->findMethod(func.name())) [[unlikely]] {
       return;
     }
     cls->addMethod(&func);
@@ -389,7 +389,7 @@ void BytecodeDeserializer::parseMethods(
         debug_handles_m_tuple,
         function.get());
 
-    // 3. If upgrader is needed, change change the OP instruction to CALL
+    // 3. If upgrader is needed, change the OP instruction to CALL
     // instruction (In next PR, use_upgrader will be parsed to parseInstruction
     // function and do the actual change)
     if (use_upgrader) {
@@ -643,7 +643,7 @@ mobile::Module _load_for_mobile(
     std::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
-#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT)
   torch::initialize_torch_libraries();
 #endif
   auto observer = torch::observerConfig().getModuleObserver();

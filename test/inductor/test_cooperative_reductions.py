@@ -9,12 +9,15 @@ from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import FixedTritonConfig, TritonKernel
+from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.runtime_utils import ceildiv
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import assert_close
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -24,9 +27,9 @@ class TestVarianceReductionHeuristic(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
-    def _skip_if_not_cuda(self):
-        if GPU_TYPE != "cuda":
-            self.skipTest("CUDA-specific variance heuristic")
+    def _skip_if_not_gpu(self):
+        if GPU_TYPE not in ["cuda", "xpu"]:
+            self.skipTest("CUDA/XPU-specific variance heuristic")
 
     def _dtypes(self):
         dtypes = [torch.float16]
@@ -34,8 +37,9 @@ class TestVarianceReductionHeuristic(TestCase):
             dtypes.append(torch.bfloat16)
         return dtypes
 
+    @skipIfXpu(msg="intel/torch-xpu-ops/issues/5221")
     def test_var_mean_uses_two_step_for_non_split_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_gpu()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
@@ -52,7 +56,7 @@ class TestVarianceReductionHeuristic(TestCase):
             self.assertNotIn("welford_reduce", source_code)
 
     def test_var_mean_keeps_welford_for_float32_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_gpu()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
@@ -66,7 +70,7 @@ class TestVarianceReductionHeuristic(TestCase):
 
     @config.patch("triton.force_cooperative_reductions", True)
     def test_var_mean_keeps_welford_for_small_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_gpu()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
@@ -89,7 +93,7 @@ class TestVarianceReductionHeuristic(TestCase):
         }
     )
     def test_var_mean_keeps_welford_for_split_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_gpu()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
@@ -143,13 +147,24 @@ class CooperativeReductionTests(TestCase):
         torch._dynamo.reset()
 
     def run_and_check(self, fn, args, dtype=None, *, expect_kernel_count=1):
-        # Define fixed tolerances
-        RTOL = 1e-5
-        ATOL = 1e-6
+        # Cooperative reductions accumulate in a different order than eager, so a
+        # single fixed tolerance is too tight for large-magnitude reductions
+        # (e.g. sum over ~1M elements). Scale rtol with the input dtype's
+        # precision, keeping atol tight and the float64/default path tight. sum is
+        # a large-magnitude relative-error problem, so rtol alone covers it; a loose
+        # atol would slash sensitivity for small-magnitude outputs (softmax ~1e-6,
+        # mean over 1M ~1e-3) sharing this parametrization.
+        RTOL, ATOL = {
+            torch.float16: (1e-2, 1e-6),
+            torch.bfloat16: (1e-2, 1e-6),
+            torch.float32: (1e-3, 1e-6),
+        }.get(dtype, (1e-5, 1e-6))
 
-        # calculate reference value in higher precision when input dtype is float16
+        # Compute the reference in float64 for reduced-precision inputs so the
+        # eager baseline does not itself carry the same accumulation error that
+        # the compiled reduction does.
         ref_dtype = dtype
-        if dtype == torch.float16:
+        if dtype in (torch.float16, torch.float32):
             ref_dtype = torch.float64
 
         # Cast to the determined reference dtype
@@ -352,6 +367,18 @@ class TestFixedConfigs(TestCase):
         self.assertEqual(heuristic.call_count, 1)
         self.assertIn("@triton_heuristics.fixed_config(", source_code)
 
+    def _skip_if_too_few_sms(self, cfg, xnumel):
+        # A cooperative launch needs all of its blocks resident at once. These
+        # configs can be heavy enough that only one block fits per SM, so a
+        # device with fewer SMs than blocks (e.g. a small MIG slice) rejects
+        # the launch with "too many blocks in cooperative launch".
+        num_blocks = cfg["RSPLIT"] * ceildiv(xnumel, cfg["XBLOCK"])
+        sm_count = DeviceProperties.create(torch.device(GPU_TYPE)).multi_processor_count
+        if num_blocks > sm_count:
+            self.skipTest(
+                f"cooperative launch needs {num_blocks} SMs, device has {sm_count}"
+            )
+
     @parametrize(
         "persistent,cooperative,cfg",
         [
@@ -398,6 +425,7 @@ class TestFixedConfigs(TestCase):
         cfg = {"XBLOCK": 64, "RSPLIT": rsplit, "num_warps": 8}
         if not persistent:
             cfg["R0_BLOCK"] = 64
+        self._skip_if_too_few_sms(cfg, x)
         args = [torch.randn(x, r, device=GPU_TYPE)]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
@@ -414,6 +442,7 @@ class TestFixedConfigs(TestCase):
         cfg = {"XBLOCK": 2, "RSPLIT": 33, "num_warps": 8}
         if not persistent:
             cfg["R0_BLOCK"] = 32
+        self._skip_if_too_few_sms(cfg, 2)
 
         args = [
             torch.stack(
@@ -457,6 +486,7 @@ class TestFixedConfigs(TestCase):
         cfg = {"XBLOCK": 128, "RSPLIT": rsplit, "num_warps": 16, "num_stages": 1}
         if not persistent:
             cfg["R0_BLOCK"] = 64
+        self._skip_if_too_few_sms(cfg, 1)
         args = [torch.randn(1024, device=GPU_TYPE) for _ in range(2)]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 

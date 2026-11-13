@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/frontend/tree_views.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/bit_cast.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -601,12 +602,41 @@ struct Environment {
   ValueTable value_table;
 };
 
-template <class T, class Hash>
+// Constant identity is bitwise for floats: -0.0 == 0.0 under IEEE eq, but
+// memoizing them to one constant changes numerics (reciprocal/copysign);
+// nan keys would never match. Key float/complex memo maps by bit pattern.
+struct BitwiseDoubleHash {
+  size_t operator()(double val) const {
+    return std::hash<int64_t>{}(c10::bit_cast<int64_t>(val));
+  }
+};
+
+struct BitwiseDoubleEq {
+  bool operator()(double lhs, double rhs) const {
+    return c10::bit_cast<int64_t>(lhs) == c10::bit_cast<int64_t>(rhs);
+  }
+};
+
+struct BitwiseComplexHash {
+  size_t operator()(c10::complex<double> val) const {
+    return c10::get_hash(
+        c10::bit_cast<int64_t>(val.real()), c10::bit_cast<int64_t>(val.imag()));
+  }
+};
+
+struct BitwiseComplexEq {
+  bool operator()(c10::complex<double> lhs, c10::complex<double> rhs) const {
+    return BitwiseDoubleEq()(lhs.real(), rhs.real()) &&
+        BitwiseDoubleEq()(lhs.imag(), rhs.imag());
+  }
+};
+
+template <class T, class Hash, class KeyEqual>
 static Value* materializeConstant(
     T val,
     Graph& graph,
     const SourceRange& r,
-    std::unordered_map<T, Value*, Hash>& map) {
+    std::unordered_map<T, Value*, Hash, KeyEqual>& map) {
   auto existing_constant = map.find(val);
   if (existing_constant != map.end()) {
     return existing_constant->second;
@@ -696,11 +726,13 @@ struct to_ir {
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
   std::unordered_map<int64_t, Value*, std::hash<int64_t>> integral_constants;
-  std::unordered_map<double, Value*, std::hash<double>> fp_constants;
+  std::unordered_map<double, Value*, BitwiseDoubleHash, BitwiseDoubleEq>
+      fp_constants;
   std::unordered_map<
       c10::complex<double>,
       Value*,
-      c10::hash<c10::complex<double>>>
+      BitwiseComplexHash,
+      BitwiseComplexEq>
       complex_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
@@ -734,7 +766,7 @@ struct to_ir {
   // If the graph might not return, add an implicit None return at the end
   void handleMaybeNoReturn(const Def& def, Block* block) {
     auto decl_ret = def_stack_.back().declared_return_type_;
-    if (exit_blocks.count(block) == 0) {
+    if (!exit_blocks.contains(block)) {
       auto decl_ret = def_stack_.back().declared_return_type_;
       if (decl_ret && decl_ret != NoneType::get()) {
         throw(
@@ -1161,7 +1193,7 @@ struct to_ir {
       }
       // Found an exit statement in this block. The remaining statements aren't
       // reachable so we don't emit them.
-      if (exit_blocks.count(environment_stack->block()))
+      if (exit_blocks.contains(environment_stack->block()))
         return;
     }
   }
@@ -1235,7 +1267,7 @@ struct to_ir {
           static_if = !*v.staticIf();
         }
         return CondValue(result, v.refinements().Not(), static_if);
-      } break;
+      }
       case TK_IS:
       case TK_ISNOT: {
         // meta programming on AST for is/is not cases and emit branches base on
@@ -1271,7 +1303,7 @@ struct to_ir {
               cond_op.lhs(), lhs_val, cond_op.rhs(), rhs_val, expr.kind()));
           return CondValue(cond_value, refinements, std::nullopt);
         }
-      } break;
+      }
       default: {
         if (expr.kind() == TK_APPLY) {
           auto apply = Apply(expr);
@@ -1308,7 +1340,7 @@ struct to_ir {
           static_if = maybe_ivalue->toBool();
         }
         return CondValue(expr_out, RefinementSet({}), static_if);
-      } break;
+      }
     }
   }
 
@@ -1974,8 +2006,8 @@ struct to_ir {
     auto save_false = emitSingleIfBranch(
         false_block, falseBranch, cond_value.refinements().Not());
 
-    bool true_exits = exit_blocks.count(true_block);
-    bool false_exits = exit_blocks.count(false_block);
+    bool true_exits = exit_blocks.contains(true_block);
+    bool false_exits = exit_blocks.contains(false_block);
     if (true_exits && false_exits) {
       exit_blocks.insert(n->owningBlock());
     }
@@ -3504,7 +3536,7 @@ struct to_ir {
           v = graph->insertUncheckedCast(v, type);
         }
         return std::make_shared<SimpleValue>(v);
-      } break;
+      }
       case prim::GetAttr: {
         checkApplyNumInputsRange(apply, 2, 3);
         auto obj = emitSugaredExpr(apply.inputs()[0], 1);
@@ -3528,7 +3560,7 @@ struct to_ir {
             return emitSugaredExpr(apply.inputs()[2], 1);
           }
         }
-      } break;
+      }
       case prim::Uninitialized: {
         checkApplyNumInputs(apply, 1);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
@@ -3540,9 +3572,10 @@ struct to_ir {
         checkApplyNumInputs(apply, 1);
         auto arg = emitSugaredExpr(apply.inputs()[0], 1);
         auto inputs = arg->asTuple(apply.range(), method);
-        auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
-          return sv->asValue(apply.range(), method);
-        });
+        auto inp_values =
+            fmap(std::move(inputs), [&](const SugaredValuePtr& sv) {
+              return sv->asValue(apply.range(), method);
+            });
         return std::make_shared<SimpleValue>(
             graph->insertNode(graph->createTuple(inp_values))->output());
       }
@@ -3637,7 +3670,7 @@ struct to_ir {
         checkApplyNumInputs(apply, 2);
         const auto result = emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
         return std::make_shared<SimpleValue>(result.value());
-      } break;
+      }
       // This represents the "__new__" method on classes
       // because it takes a ClassValue as input.
       // So if we see:
@@ -4163,10 +4196,10 @@ struct to_ir {
       case TK_APPLY: {
         auto apply = Apply(tree);
         return emitApplyExpr(apply, n_binders, type_hint);
-      } break;
+      }
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree), type_hint);
-      } break;
+      }
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
     }
@@ -4781,43 +4814,43 @@ struct to_ir {
       }
       case TK_CONST: {
         return emitConst(Const(tree));
-      } break;
+      }
       case TK_TRUE: {
         return graph->insertConstant(true, tree->range());
-      } break;
+      }
       case TK_FALSE: {
         return graph->insertConstant(false, tree->range());
-      } break;
+      }
       case TK_NONE: {
         return graph->insertConstant(IValue(), tree->range());
-      } break;
+      }
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree), type_hint);
-      } break;
+      }
       case TK_STRINGLITERAL: {
         return emitStringLiteral(StringLiteral(tree));
-      } break;
+      }
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
         return emitListLiteral(ll, type_hint);
-      } break;
+      }
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
         return graph->insertNode(graph->createTuple(values))->output();
-      } break;
+      }
       case TK_DICT_LITERAL: {
         auto dc = DictLiteral(tree);
         return emitDictLiteral(dc, type_hint);
-      } break;
+      }
       case TK_LIST_COMP: {
         auto lc = ListComp(tree);
         return emitListComprehension(lc, type_hint);
-      } break;
+      }
       case TK_DICT_COMP: {
         auto dc = DictComp(tree);
         return emitDictComprehension(dc, type_hint);
-      } break;
+      }
       default:
         throw(ErrorReport(tree) << "Cannot emit expr for: " << tree);
     }

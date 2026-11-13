@@ -223,5 +223,50 @@ class TestCommMode(TestCase):
         self.checksAssert(comm_mode, c10d_ops.alltoall_base_, 1, 1)
 
 
+class TestCommModeModuleReuse(TestCase):
+    """Tests that do not require a process group."""
+
+    def test_comm_mode_repeated_module_forward(self):
+        m = torch.nn.Linear(2, 2)
+        with CommDebugMode():
+            m(torch.ones(1, 2))
+            m(torch.ones(1, 2))
+
+        # After exiting, normal forward should still work
+        m(torch.ones(1, 2))
+
+        # No hooks should remain on the module from CommDebugMode
+        self.assertEqual(len(m._forward_hooks), 0)
+        self.assertEqual(len(m._forward_pre_hooks), 0)
+
+    def test_comm_mode_many_forwards(self):
+        m = torch.nn.Linear(2, 2)
+        with CommDebugMode():
+            for _ in range(10):
+                m(torch.ones(1, 2))
+
+        m(torch.ones(1, 2))
+        self.assertEqual(len(m._forward_hooks), 0)
+
+    def test_comm_mode_nested_modules_reuse(self):
+        class TwoLayerMLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(2, 2)
+                self.fc2 = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.fc2(torch.relu(self.fc1(x)))
+
+        m = TwoLayerMLP()
+        with CommDebugMode():
+            m(torch.ones(1, 2))
+            m(torch.ones(1, 2))
+
+        m(torch.ones(1, 2))
+        self.assertEqual(len(m.fc1._forward_hooks), 0)
+        self.assertEqual(len(m.fc2._forward_hooks), 0)
+
+
 if __name__ == "__main__":
     run_tests()

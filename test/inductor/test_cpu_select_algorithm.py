@@ -28,6 +28,7 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_MACOS,
@@ -164,6 +165,8 @@ class BaseTestSelectAlgorithm(TestCase):
 
 
 class TestSelectAlgorithm(BaseTestSelectAlgorithm):
+    hw_classification = HardwareClassification.CPU
+
     common = check_model
 
     @inductor_config.patch({"freezing": True})
@@ -201,6 +204,24 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    def test_addmm_zero_beta_nan_bias(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.full((64,), float("nan"))
+                self.weight = torch.randn(128, 64)
+
+            def forward(self, x):
+                # alpha != 1 keeps freezing from packing this into an mkldnn linear.
+                return torch.addmm(self.bias, x, self.weight, beta=0, alpha=0.5)
+
+        counters.clear()
+        self.common(M().eval(), (torch.randn(32, 128),))
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1473,6 +1494,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     ):
         if not int8_mixed_bf16 and dtype == torch.bfloat16:
             return
+        if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            self.skipTest(
+                "oneDNN qlinear binary with a bf16 operand needs bf16 hardware support"
+            )
         B = (2, batch_size) if input_3d else (batch_size,)
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
         input2 = torch.randn(*B, in_features).to(dtype=torch.float32)
@@ -1648,6 +1673,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
 
+    @skipIfNoONEDNN
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
@@ -2968,6 +2994,31 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
+    @requires_mkl
+    @dtypes(torch.float32, torch.bfloat16, torch.half)
+    def test_bmm_with_template_buffer_other_users(self, dtype):
+        # https://github.com/pytorch/pytorch/issues/185405
+        # The BMM output is returned raw *and* consumed by an epilogue, so the GEMM
+        # output buffer gets an extra local-to-global copy epilogue whose ranges are
+        # 3D while the template stores 2D tiles, hence it needs the batch reindexer.
+        class M(torch.nn.Module):
+            def forward(self, q, k):
+                matmul = torch.matmul(q, k.transpose(-2, -1))
+                return matmul, torch.mul(matmul, 0.35355339059327373)
+
+        counters.clear()
+        q = torch.randn(2, 8, 4, 8).to(dtype=dtype)
+        k = torch.randn(2, 8, 4, 8).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (q, k), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        # The bug requires the mul to actually be fused into the template, since
+        # template_buffer_has_other_users is False when there are no epilogue nodes.
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @patches
+    @torch.no_grad
     @parametrize("bs", (1, 50))
     @parametrize("Mdim", (192,))
     @parametrize("Kdim", (196,))
@@ -3523,6 +3574,8 @@ class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
 
 
 class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
+    hw_classification = HardwareClassification.CPU
+
     common = check_model
     test_linear_dynamic_shapes = TestSelectAlgorithm.test_linear_static_shapes
     test_linear_with_pointwise_dynamic_shapes = (

@@ -11,7 +11,7 @@ from torch.distributed.optim._deprecation_warning import (
 __all__: list[str] = []
 
 
-# Define a TorchScript compatible Functional Adam Optimizer
+# Define a Functional Adam Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
 # we explicitly allow the distributed optimizer pass gradients to
@@ -20,7 +20,6 @@ __all__: list[str] = []
 # parameters without data traces on accumulating to the same .grad.
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
-@torch.jit.script
 class _FunctionalAdam:
     def __init__(
         self,

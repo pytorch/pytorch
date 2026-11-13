@@ -1,9 +1,12 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import inspect
+import operator
 import sys
 import unittest
 from collections import defaultdict
 from contextlib import contextmanager
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -13,6 +16,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
     same,
+    skipIfNotPy312,
 )
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
@@ -25,6 +29,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -49,6 +54,10 @@ def set_default_dtype(dtype):
         yield
     finally:
         torch.set_default_dtype(old_dtype)
+
+
+class Boom(Exception):
+    pass
 
 
 class CustomizedCtxManager:
@@ -86,6 +95,11 @@ def customized_ctx_manager_with_graph_break(mode):
         yield torch._C._set_grad_enabled(mode)
     finally:
         torch._C._set_grad_enabled(prev)
+
+
+def _graph_break(x):
+    torch._dynamo.graph_break()
+    return x
 
 
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
@@ -138,6 +152,246 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.testing.standard_test(
                 self, fn=fn4, nargs=2, expected_ops=3
             )  # coalesced noop
+
+    def _check_filtered_comprehension(self, fn, args, requires_grad, result=None):
+        # Compile fn, run it twice (compile and cache hit), and check that the
+        # adds traced in its resume function ran under the restored context.
+        expected = fn(*args)
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        before = torch.is_grad_enabled()
+        num_graphs = []
+        for _ in range(2):
+            actual = compiled(*args)
+            num_graphs.append(len(backend.graphs))
+            self.assertEqual(actual, expected)
+            out = actual if result is None else result(actual)
+            self.assertEqual(out.requires_grad, requires_grad)
+            self.assertEqual(torch.is_grad_enabled(), before)
+        self.assertEqual(num_graphs[0], num_graphs[1])
+        adds = [
+            node
+            for graph in backend.graphs
+            for node in graph.graph.nodes
+            if node.op == "call_function"
+            and node.target is operator.add
+            and "resume_in_fn" in node.meta.get("stack_trace", "")
+        ]
+        self.assertTrue(adds)
+        for node in adds:
+            self.assertEqual(node.meta["example_value"].requires_grad, requires_grad)
+
+    # The profiling=True variants rely on record_function being traced as a
+    # no-op; with capture on, a graph break inside it is unsupported.
+    @parametrize("profiling", (False, True))
+    @parametrize("none_filter", (False, True))
+    @torch._dynamo.config.patch(capture_profiler_record_function=False)
+    def test_filtered_comprehension_context_graph_break(self, profiling, none_filter):
+        def fn(x, xs, flags):
+            ctx = (
+                torch.profiler.record_function("filtered_comprehension")
+                if profiling
+                else torch.no_grad()
+            )
+            with ctx:
+                if none_filter:
+                    idx = [i for i in range(len(xs)) if flags[i] is not None]
+                else:
+                    idx = [i for i in range(len(xs)) if i >= 1]
+                ys = [xs[i] for i in idx]
+                x = _graph_break(x) + sum(ys)
+            return x
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.randn(4, requires_grad=True) for _ in range(3)]
+        # Grad mode cannot show a lost scope for profiling=True. This variant
+        # checks that the resume function runs: with the scope dropped it
+        # raises TypeError from nullcontext.__init__.
+        self._check_filtered_comprehension(fn, (x, xs, [None, True, None]), profiling)
+
+    def test_filtered_comprehension_nested_context_graph_break(self):
+        def fn(x, xs):
+            with torch.no_grad():
+                with torch.enable_grad():
+                    idx = [i for i in range(len(xs)) if i >= 1]
+                    ys = [xs[i] for i in idx]
+                    return _graph_break(x) + sum(ys)
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.randn(4, requires_grad=True) for _ in range(3)]
+        self._check_filtered_comprehension(fn, (x, xs), True)
+
+    def test_filtered_comprehension_context_data_dependent_filter(self):
+        # The data-dependent filter graph-breaks inside the comprehension, at
+        # the restored jump. The elements must still be computed under no_grad.
+        def fn(x, ts):
+            with torch.no_grad():
+                ys = [t * 2 for t in ts if t.sum() > 0]
+                x = x + sum(ys)
+            return x, ys
+
+        x = torch.randn(4, requires_grad=True)
+        ts = [torch.ones(4, requires_grad=True) * s for s in (1, -1, 2)]
+        expected = fn(x, ts)
+        compiled = torch.compile(fn, backend="eager")
+        before = torch.is_grad_enabled()
+        for _ in range(2):
+            actual = compiled(x, ts)
+            self.assertEqual(actual, expected)
+            self.assertFalse(actual[0].requires_grad)
+            self.assertEqual([y.requires_grad for y in actual[1]], [False, False])
+            self.assertEqual(torch.is_grad_enabled(), before)
+
+    def test_filtered_comprehension_context_exception(self):
+        class Predicate:
+            def __bool__(self):
+                raise ValueError("filter failed")
+
+        def fn(x, flags):
+            # The comprehension's cleanup handler, whose entry the restored
+            # jump gets, must restore the outer i before the ValueError
+            # reaches the except.
+            i = 7
+            with torch.no_grad():
+                try:
+                    idx = [i for i in range(len(flags)) if flags[i]]
+                except ValueError:
+                    idx = [0]
+                ys = [x for i in idx]
+                torch._dynamo.graph_break()
+                x = x + sum(ys)
+            return x, i
+
+        x = torch.randn(4, requires_grad=True)
+        self._check_filtered_comprehension(
+            fn, (x, [Predicate()]), False, result=lambda out: out[0]
+        )
+
+    def test_loop_trailing_if_nested_context_graph_break(self):
+        def fn(x, xs):
+            with torch.no_grad():
+                with torch.enable_grad():
+                    n = 0
+                    for t in xs:
+                        if t is not None:
+                            n += 1
+                    torch._dynamo.graph_break()
+                    return x * n
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [None, x, None, x]
+        expected = fn(x, xs)
+        backend = EagerAndRecordGraphs()
+        actual = torch.compile(fn, backend=backend)(x, xs)
+        self.assertEqual(actual, expected)
+        self.assertTrue(actual.requires_grad)
+        self.assertTrue(torch.is_grad_enabled())
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_comprehension_graph_break_under_context_keeps_capture(self):
+        def gb(t):
+            torch._dynamo.graph_break()
+            return t
+
+        def fn(x, xs):
+            t = 42
+            with torch.no_grad():
+                keep = [gb(t) * x for t in xs]
+                y = torch.sin(x)
+            return keep, y, t
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.ones(4), 2 * torch.ones(4)]
+        expected = fn(x, xs)
+        backend = EagerAndRecordGraphs()
+        actual = torch.compile(fn, backend=backend)(x, xs)
+        self.assertEqual(actual, expected)
+        self.assertEqual([t.requires_grad for t in actual[0]], [False, False])
+        self.assertFalse(actual[1].requires_grad)
+        self.assertEqual(actual[2], 42)
+        self.assertTrue(
+            any(
+                node.target is torch.sin
+                for graph in backend.graphs
+                for node in graph.graph.nodes
+            )
+        )
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_filtered_comprehension_caller_context_nested_graph_break(self):
+        def inner(x, xs):
+            return [t * x for t in xs if t.sum() > 0]
+
+        def fn(x, xs):
+            with torch.no_grad():
+                keep = inner(x, xs)
+                w = x + 1
+            return [w] + keep
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.ones(4), -torch.ones(4)]
+        expected = fn(x, xs)
+        actual = torch.compile(fn, backend="eager")(x, xs)
+        self.assertEqual(actual, expected)
+        self.assertEqual([t.requires_grad for t in actual], [False, False])
+
+    def test_comprehension_graph_break_exception_restores_context(self):
+        def check(t):
+            torch._dynamo.graph_break()
+            if t.sum() < 0:
+                raise Boom("negative")
+            return t
+
+        def fn(x, xs):
+            with torch.no_grad():
+                return [check(t) * x for t in xs]
+
+        x = torch.randn(4, requires_grad=True)
+        compiled = torch.compile(fn, backend="eager")
+        out = compiled(x, [torch.ones(4)])
+        self.assertEqual([t.requires_grad for t in out], [False])
+        with self.assertRaisesRegex(Boom, "negative"):
+            compiled(x, [torch.ones(4), -torch.ones(4)])
+        self.assertTrue(torch.is_grad_enabled())
+
+    def test_filtered_comprehension_graph_break_in_try(self):
+        def check(t):
+            if t.numel() > 3:
+                raise Boom("too big")
+            return t
+
+        def fn(x, xs):
+            try:
+                keep = [check(t) * x for t in xs if t.sum() > 0]
+            except Boom:
+                keep = []
+            return keep
+
+        x = torch.randn(4)
+        xs = [torch.ones(4), -torch.ones(4)]
+        self.assertEqual(torch.compile(fn, backend="eager")(x, xs), [])
+
+    def test_filtered_comprehension_graph_break_try_in_context(self):
+        def check(t):
+            if t.numel() > 3:
+                raise Boom("too big")
+            return t
+
+        def fn(x, xs):
+            with torch.no_grad():
+                try:
+                    keep = [check(t) * x for t in xs if t.sum() > 0]
+                except Boom:
+                    keep = []
+                y = x * 2
+            return keep, y
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.ones(4), -torch.ones(4)]
+        actual = torch.compile(fn, backend="eager")(x, xs)
+        self.assertEqual(actual, fn(x, xs))
+        self.assertFalse(actual[1].requires_grad)
+        self.assertTrue(torch.is_grad_enabled())
 
     def test_grad_mode_guard(self):
         def fn(a, b):
@@ -320,6 +574,71 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled.device.type, device_type)
         self.assertEqual(compiled.device.index, 0)
         self.assertEqual(compiled.dtype, torch.float32)
+
+    def test_autocast_ctor_signature_is_pinned(self):
+        # builder.py and ctx_manager.py each hard-code this parameter list, in
+        # attribute-name and parameter-name form respectively; a new or reordered
+        # constructor parameter has to be reflected in both.
+        self.assertEqual(
+            list(inspect.signature(torch.amp.autocast_mode.autocast).parameters),
+            ["device_type", "dtype", "enabled", "cache_enabled"],
+        )
+
+    def test_autocast_object_guarded_by_value_not_identity(self):
+        # A user-held autocast object reaches the trace as four specialized
+        # values (device, dtype, enabled, cache_enabled), so those are what the
+        # graph depends on. Guarding the object by id() instead is both too
+        # strong -- a second object configured identically cannot reuse the
+        # graph -- and unserializable, which is what makes a precompiled
+        # artifact drop the guard entirely.
+        class MyModule(torch.nn.Module):
+            def __init__(self, ctx):
+                super().__init__()
+                self.ctx = ctx
+                # Unlike an nn.Linear weight, this tensor does not require grad, so
+                # the autocast cache cannot retain a stale bf16 cast across tests.
+                self.w = torch.randn(4, 4)
+
+            def forward(self, x):
+                with self.ctx:
+                    return x @ self.w
+
+        module = MyModule(torch.amp.autocast("cpu", dtype=torch.bfloat16))
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(module, backend=cnts)
+        x = torch.randn(4, 4)
+        self.assertEqual(compiled(x).dtype, torch.bfloat16)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # A DIFFERENT object with the same settings: same graph, no recompile.
+        # An id() guard would miss here and recompile.
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.bfloat16)
+        self.assertEqual(compiled(x).dtype, torch.bfloat16)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # A different setting is a different graph.
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.float16)
+        self.assertEqual(compiled(x).dtype, torch.float16)
+        self.assertEqual(cnts.frame_count, 2)
+
+        # Mutating in place must also invalidate the graph.
+        module.ctx._enabled = False
+        self.assertEqual(compiled(x).dtype, torch.float32)
+        self.assertEqual(cnts.frame_count, 3)
+
+    def test_autocast_object_from_constant_source(self):
+        @torch._dynamo.assume_constant_result
+        def get_ctx():
+            return torch.amp.autocast("cpu", dtype=torch.bfloat16)
+
+        weight = torch.randn(4, 4)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            with get_ctx():
+                return x @ weight
+
+        self.assertEqual(fn(torch.randn(4, 4)).dtype, torch.bfloat16)
 
     def test_autocast_cpu(self):
         class MyModule(torch.nn.Module):
@@ -525,9 +844,7 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
@@ -538,9 +855,7 @@ class GraphModule(torch.nn.Module):
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
         return (matmul,)
 """,
@@ -557,9 +872,7 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
@@ -570,9 +883,7 @@ class GraphModule(torch.nn.Module):
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
         return (matmul,)
 """,
@@ -613,9 +924,7 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
@@ -635,9 +944,7 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
 
@@ -666,9 +973,7 @@ class GraphModule(torch.nn.Module):
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
         return (matmul,)
 """,
@@ -689,19 +994,53 @@ class GraphModule(torch.nn.Module):
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
         return (matmul,)
 """,
             )
+
+    def test__enter__exit_autocast_graph_break_explicit_dtype(self):
+        def f(x):
+            m = torch.amp.autocast_mode._enter_autocast(
+                "cpu", torch.float16, True, True
+            )
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 2
+            torch.amp.autocast_mode._exit_autocast(m)
+            return x
+
+        prev_enabled = torch.is_autocast_enabled("cpu")
+        prev_dtype = torch.get_autocast_dtype("cpu")
+        prev_cache = torch.is_autocast_cache_enabled()
+        try:
+            torch.set_autocast_enabled("cpu", False)
+            torch.set_autocast_dtype("cpu", torch.bfloat16)
+            torch.set_autocast_cache_enabled(True)
+
+            opt_f = torch.compile(f, backend="eager", fullgraph=False)
+            x = torch.randn(3, 3, dtype=torch.float32)
+            out = f(x)
+            self.assertFalse(torch.is_autocast_enabled("cpu"))
+            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+
+            opt_out = opt_f(x)
+            self.assertEqual(out, opt_out)
+            self.assertFalse(torch.is_autocast_enabled("cpu"))
+            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+            self.assertTrue(torch.is_autocast_cache_enabled())
+        finally:
+            torch.set_autocast_enabled("cpu", prev_enabled)
+            torch.set_autocast_dtype("cpu", prev_dtype)
+            torch.set_autocast_cache_enabled(prev_cache)
 
     def test_autocast_low_level_api(self):
         def f(x, y):
             torch.set_autocast_enabled("cpu", True)
             torch.set_autocast_dtype("cpu", torch.bfloat16)
             torch.set_autocast_cache_enabled(True)
+            torch.autocast_increment_nesting()
             x = x @ y
             torch.autocast_decrement_nesting()
             torch.clear_autocast_cache()
@@ -711,6 +1050,8 @@ class GraphModule(torch.nn.Module):
         prev_enabled = torch.is_autocast_enabled("cpu")
         prev_dtype = torch.get_autocast_dtype("cpu")
         prev_cache = torch.is_autocast_cache_enabled()
+        nesting_before = torch.autocast_increment_nesting() - 1
+        torch.autocast_decrement_nesting()
 
         try:
             opt_f = torch.compile(f, backend="eager", fullgraph=True)
@@ -721,6 +1062,9 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(out, opt_out)
             self.assertEqual(out.dtype, opt_out.dtype)
             self.assertFalse(torch.is_autocast_enabled("cpu"))
+            nesting_after = torch.autocast_increment_nesting() - 1
+            torch.autocast_decrement_nesting()
+            self.assertEqual(nesting_after, nesting_before)
         finally:
             torch.set_autocast_enabled("cpu", prev_enabled)
             torch.set_autocast_dtype("cpu", prev_dtype)
@@ -817,9 +1161,7 @@ class GraphModule(torch.nn.Module):
         _is_autocast_available = torch._C._is_autocast_available('cpu');  _is_autocast_available = None
 
         set_autocast_enabled = torch.set_autocast_enabled('cpu', True);  set_autocast_enabled = None
-
         set_autocast_dtype = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype = None
-
         autocast_increment_nesting = torch.autocast_increment_nesting();  autocast_increment_nesting = None
         set_autocast_cache_enabled = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled = None
         matmul: "bf16[3, 3]" = l_l_x_ @ l_l_y_;  l_l_x_ = l_l_y_ = None
@@ -828,9 +1170,7 @@ class GraphModule(torch.nn.Module):
         clear_autocast_cache = torch.clear_autocast_cache();  clear_autocast_cache = None
 
         set_autocast_enabled_1 = torch.set_autocast_enabled('cpu', False);  set_autocast_enabled_1 = None
-
         set_autocast_dtype_1 = torch.set_autocast_dtype('cpu', torch.bfloat16);  set_autocast_dtype_1 = None
-
         set_autocast_cache_enabled_1 = torch.set_autocast_cache_enabled(True);  set_autocast_cache_enabled_1 = None
         return (matmul,)
 """,
@@ -867,6 +1207,22 @@ class GraphModule(torch.nn.Module):
         retraced_out = retraced()(x)[0]
         self.assertEqual(out, retraced_out)
         self.assertFalse(torch.is_inference_mode_enabled())
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_inference_mode_canonicalize_node_order(self):
+        # https://github.com/pytorch/pytorch/issues/195418
+        # Canonicalization must not move compute out of the region between
+        # _enter_inference_mode and _exit_inference_mode.
+        def f(x):
+            with torch.inference_mode():
+                return x + 1
+
+        x = torch.tensor(1.0, requires_grad=True)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+        self.assertFalse(res.requires_grad)
+        self.assertTrue(torch.is_inference(res))
 
     @parametrize(
         "Ctx",
@@ -1775,8 +2131,9 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(inp), opt_fn(inp))
 
-    def test_store_attr_graph_break_key_error(self):
-        # STORE_ATTR on dummy should result in graph break
+    def test_store_attr_on_function(self):
+        # setattr on a function object is traced as a generic attribute
+        # mutation and replayed at runtime -- no graph break.
         def dummy():
             pass
 
@@ -1787,9 +2144,12 @@ class GraphModule(torch.nn.Module):
             return x + 4
 
         inp = torch.ones(3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp), opt_fn(inp))
-        self.assertGreater(len(counters["graph_break"]), 0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        # Check the compiled run applied the mutation before the eager run
+        # below overwrites dummy.attr1.
+        compiled_res = opt_fn(inp)
+        self.assertEqual(dummy.attr1, inp + 2)
+        self.assertEqual(fn(inp), compiled_res)
 
     @parametrize("gb", (True, False))
     def test_functorch_low_level(self, gb):
@@ -2052,8 +2412,348 @@ class GraphModule(torch.nn.Module):
         retraced_graph = normalize_gm(eager.graphs[0].print_readable(False))
         self.assertEqual(first_graph, retraced_graph)
 
+    def test_context_wrapping_variable_rejects_dict_target_values(self):
+        # target_values must be None or a Sequence; a dict silently iterates
+        # only its keys, which is the bug pattern we want to catch early.
+        from torch._dynamo.variables.ctx_manager import ContextWrappingVariable
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "ContextWrappingVariable.target_values must be None or a Sequence",
+        ):
+            ContextWrappingVariable(target_values={"key": "val"})
+
 
 class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
+    def test_cuda_use_mem_pool_fx_cse_preserves_distinct_contexts(self):
+        from torch._functorch.compile_utils import fx_graph_cse
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        add_a = graph.call_function(torch.ops.aten.add.Tensor, (x, 1))
+        add_a.meta["custom"] = {"mempool": 0, "mempool_device": 0}
+        add_b = graph.call_function(torch.ops.aten.add.Tensor, (x, 1))
+        add_b.meta["custom"] = {"mempool": 1, "mempool_device": 0}
+        graph.output((add_a, add_b))
+
+        cse_graph = fx_graph_cse(graph)
+        add_nodes = [
+            node
+            for node in cse_graph.nodes
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor
+        ]
+        self.assertEqual(len(add_nodes), 2)
+
+    def _check_cuda_use_mem_pool(self, backend=None):
+        torch.cuda.empty_cache()
+
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda") + 1
+
+        pool = torch.cuda.MemPool()
+        opt_fn = (
+            torch.compile(fn, backend=backend, fullgraph=True)
+            if backend is not None
+            else torch.compile(fn, backend="inductor", fullgraph=True)
+        )
+        res = opt_fn(pool)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((16,), 2.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_use_mem_pool_context_manager(self):
+        self._check_cuda_use_mem_pool(backend="eager")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_mem_pool_id(self):
+        def fn(pool):
+            return pool.id
+
+        pool = torch.cuda.MemPool()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(pool), pool.id)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_context_manager_inductor(self):
+        self._check_cuda_use_mem_pool()
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_cpp_wrapper_unsupported(self):
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda")
+
+        pool = torch.cuda.MemPool()
+        with (
+            torch._inductor.config.patch(
+                {
+                    "cpp_wrapper": True,
+                    "triton.autotune_at_compile_time": True,
+                    "triton.autotune_with_sample_inputs": True,
+                }
+            ),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "torch.cuda.use_mem_pool is not supported with C\\+\\+ wrapper codegen",
+            ),
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(pool)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_realize_at_boundary_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, inp):
+            with torch.cuda.use_mem_pool(pool):
+                x = inp + 1
+            return x + 1
+
+        pool = torch.cuda.MemPool()
+        inp = torch.ones(16, device="cuda")
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, inp)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((16,), 3.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_fallback_alloc_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, inp):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.histc(inp, bins=4, min=0, max=4)
+
+        pool = torch.cuda.MemPool()
+        inp = torch.arange(16, device="cuda", dtype=torch.float32) % 4
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, inp)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((4,), 4.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_foreach_alloc_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, xs):
+            with torch.cuda.use_mem_pool(pool):
+                return torch._foreach_add(xs, 1.0)
+
+        pool = torch.cuda.MemPool()
+        xs = [
+            torch.ones(64, device="cuda"),
+            torch.full((64,), 2.0, device="cuda"),
+        ]
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, xs)
+        torch.cuda.synchronize()
+        self.assertEqual(res[0], torch.full((64,), 2.0, device="cuda"))
+        self.assertEqual(res[1], torch.full((64,), 3.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_forced_extern_multi_template_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, x, y):
+            with torch.cuda.use_mem_pool(pool):
+                return x @ y
+
+        pool = torch.cuda.MemPool()
+        x = torch.randn(32, 32, device="cuda")
+        y = torch.randn(32, 32, device="cuda")
+        with torch._inductor.config.patch(
+            {
+                "test_configs.force_extern_kernel_in_multi_template": True,
+                "triton.native_matmul": False,
+            }
+        ):
+            res = torch.compile(
+                fn,
+                backend="inductor",
+                mode="max-autotune-no-cudagraphs",
+                fullgraph=True,
+            )(pool, x, y)
+        torch.cuda.synchronize()
+        self.assertEqual(res, x @ y, atol=1e-4, rtol=1e-4)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_nested_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(outer_pool, inner_pool, inp):
+            with torch.cuda.use_mem_pool(outer_pool):
+                outer = inp + 1
+                with torch.cuda.use_mem_pool(inner_pool):
+                    inner = inp + 2
+                outer = outer + 3
+            return outer, inner
+
+        outer_pool = torch.cuda.MemPool()
+        inner_pool = torch.cuda.MemPool()
+        inp = torch.ones(16, device="cuda")
+        outer, inner = torch.compile(fn, backend="inductor", fullgraph=True)(
+            outer_pool, inner_pool, inp
+        )
+        torch.cuda.synchronize()
+        self.assertEqual(outer, torch.full((16,), 5.0, device="cuda"))
+        self.assertEqual(inner, torch.full((16,), 3.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(outer_pool.id)), 0)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(inner_pool.id)), 0)
+        self.assertEqual(outer_pool.use_count(), 1)
+        self.assertEqual(inner_pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_distinct_pools_not_cse_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool_a, pool_b, inp):
+            with torch.cuda.use_mem_pool(pool_a):
+                a = inp + 1
+            with torch.cuda.use_mem_pool(pool_b):
+                b = inp + 1
+            return a + b
+
+        pool_a = torch.cuda.MemPool()
+        pool_b = torch.cuda.MemPool()
+        inp = torch.ones(16, device="cuda")
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool_a, pool_b, inp)
+        torch.cuda.synchronize()
+        self.assertEqual(res, torch.full((16,), 4.0, device="cuda"))
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool_a.id)), 0)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool_b.id)), 0)
+        self.assertEqual(pool_a.use_count(), 1)
+        self.assertEqual(pool_b.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_reduce_overhead_cudagraph_asserts_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool, x, w):
+            with torch.cuda.use_mem_pool(pool):
+                return (x @ w).relu()
+
+        pool = torch.cuda.MemPool()
+        x = torch.randn(64, 64, device="cuda")
+        w = torch.randn(64, 64, device="cuda")
+        with torch._inductor.config.patch({"triton.slow_path_cudagraph_asserts": True}):
+            opt_fn = torch.compile(
+                fn, backend="inductor", mode="reduce-overhead", fullgraph=True
+            )
+            res = opt_fn(pool, x, w)
+            res_second = opt_fn(pool, x, w)
+        torch.cuda.synchronize()
+        self.assertEqual(res, (x @ w).relu(), atol=1e-4, rtol=1e-4)
+        self.assertEqual(res_second, res)
+        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @requires_cuda_and_triton
+    def test_cuda_use_mem_pool_stream_order_inductor(self):
+        from torch._inductor.utils import run_and_get_code
+
+        torch.cuda.empty_cache()
+
+        def pool_outer(pool, stream, inp):
+            with torch.cuda.use_mem_pool(pool):
+                with torch.cuda.stream(stream):
+                    return inp + 1
+
+        def stream_outer(pool, stream, inp):
+            with torch.cuda.stream(stream):
+                with torch.cuda.use_mem_pool(pool):
+                    return inp + 2
+
+        inp = torch.ones(16, device="cuda")
+        stream = torch.cuda.Stream()
+        for fn in (pool_outer, stream_outer):
+            with self.subTest(fn=fn.__name__):
+                pool = torch.cuda.MemPool()
+                expected = fn(pool, stream, inp)
+                actual, source_codes = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True),
+                    pool,
+                    stream,
+                    inp,
+                )
+                torch.cuda.synchronize()
+                self.assertEqual(actual, expected)
+                self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+                self.assertEqual(pool.use_count(), 1)
+
+                source = "\n".join(source_codes)
+                # The compiled wrapper deliberately normalizes to pool-outer,
+                # stream-inner ordering so allocators with set_context/pop_context
+                # side effects see a consistent pool lifetime.
+                mempool_enter = source.index("with torch.cuda.use_mem_pool(")
+                stream_enter = source.index("with stream")
+                self.assertLess(mempool_enter, stream_enter)
+
+    @requires_cuda_and_triton
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires multiple cuda devices")
+    def test_cuda_use_mem_pool_device_none_resolves_at_entry_inductor(self):
+        torch.cuda.empty_cache()
+
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda:0")
+
+        with torch.cuda.device(1):
+            pool = torch.cuda.MemPool()
+            res = torch.compile(fn, backend="inductor", fullgraph=True)(pool)
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(res, torch.ones(16, device="cuda:0"))
+        self.assertEqual(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertEqual(pool.use_count(), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_use_mem_pool_invalid_signatures(self):
+        pool = torch.cuda.MemPool()
+
+        def missing(_pool):
+            with torch.cuda.use_mem_pool():
+                return torch.ones(1, device="cuda")
+
+        def too_many(pool):
+            with torch.cuda.use_mem_pool(pool, None, None):
+                return torch.ones(1, device="cuda")
+
+        def unexpected_kwarg(pool):
+            with torch.cuda.use_mem_pool(pool, foo=None):
+                return torch.ones(1, device="cuda")
+
+        def duplicate_pool(pool):
+            with torch.cuda.use_mem_pool(pool, pool=pool):
+                return torch.ones(1, device="cuda")
+
+        def duplicate_device(pool):
+            with torch.cuda.use_mem_pool(pool, None, device=None):
+                return torch.ones(1, device="cuda")
+
+        cases = [
+            (missing, "missing 1 required positional argument: 'pool'"),
+            (
+                too_many,
+                "takes from 1 to 2 positional arguments but 3 were given",
+            ),
+            (unexpected_kwarg, "unexpected keyword argument 'foo'"),
+            (duplicate_pool, "multiple values for argument 'pool'"),
+            (duplicate_device, "multiple values for argument 'device'"),
+        ]
+        for fn, msg in cases:
+            with (
+                self.subTest(msg=msg),
+                self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg),
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(pool)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
         def fn(x):
@@ -2606,6 +3306,232 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertTrue(res[0].dtype == torch.float16)
         self.assertTrue(res[1].dtype == torch.float16)
+
+
+@skipIfNotPy312
+class ComprehensionGeneratorTests(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    @parametrize("caller", [False, True])
+    @parametrize("retained", [False, True])
+    @parametrize("effect", ["constant", "context"])
+    def test_finalizer_order(self, device, caller, retained, effect):
+        def delayed(state, events):
+            try:
+                events.append("yield")
+                yield 1
+            finally:
+                events.append("finalize")
+                state["flag"] = 7
+                if effect == "context":
+                    ctx = torch.no_grad()
+                    state["ctx"] = ctx
+                    state["alias"] = ctx
+
+        def inner(x, xs, state, events):
+            events.append("prefix")
+            prefix = x.sin()
+            ys = [t * x + state["flag"] for t in xs if t.sum() > 0]
+            tail = x.cos()
+            events.append("tail")
+            return prefix, ys, tail, state["flag"], torch.is_grad_enabled()
+
+        def fn(x, xs, state, events):
+            gen = delayed(state, events)
+            next(gen)
+            if retained:
+                state["gen"] = gen
+                state["gen_alias"] = gen
+            if caller:
+                result = inner(x, xs, state, events)
+            else:
+                events.append("prefix")
+                prefix = x.sin()
+                ys = [t * x + state["flag"] for t in xs if t.sum() > 0]
+                tail = x.cos()
+                events.append("tail")
+                result = prefix, ys, tail, state["flag"], torch.is_grad_enabled()
+            return result
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        previous_ctx = None
+        warm_graphs = None
+        xs = [torch.ones(4, device=device), -torch.ones(4, device=device)]
+        for value in (1.0, 2.0):
+            x = torch.full((4,), value, device=device, dtype=torch.float64)
+            x.requires_grad_()
+            eager_x = x.detach().clone().requires_grad_()
+            expected_state = {"flag": 0}
+            expected_events = []
+            expected = fn(eager_x, xs, expected_state, expected_events)
+            state = {"flag": 0}
+            events = []
+            actual = compiled(x, xs, state, events)
+            if retained:
+                expected_state["gen"].close()
+                state["gen"].close()
+                self.assertEqual(type(state["gen"]).__name__, "generator")
+                self.assertIs(state["gen"], state["gen_alias"])
+            self.assertEqual(actual, expected)
+            self.assertEqual(events, ["yield", "prefix", "tail", "finalize"])
+            self.assertEqual(events, expected_events)
+            self.assertEqual(state["flag"], expected_state["flag"])
+            self.assertEqual(actual[3], 0)
+            self.assertTrue(actual[4])
+            self.assertTrue(torch.is_grad_enabled())
+            sum(t.sum() for t in [expected[0], *expected[1], expected[2]]).backward()
+            sum(t.sum() for t in [actual[0], *actual[1], actual[2]]).backward()
+            self.assertEqual(x.grad, eager_x.grad)
+            if effect == "context":
+                self.assertIsInstance(state["ctx"], torch.no_grad)
+                self.assertIs(state["ctx"], state["alias"])
+                self.assertIsNot(state["ctx"], previous_ctx)
+                previous_ctx = state["ctx"]
+            if warm_graphs is None:
+                warm_graphs = len(backend.graphs)
+            else:
+                self.assertEqual(len(backend.graphs), warm_graphs)
+        if not caller:
+            self.assertEqual(len(backend.graphs), 0)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    @parametrize("lifecycle", ["created", "exhausted", "closed"])
+    def test_finished_generator_keeps_capture(self, device, lifecycle):
+        def delayed(state):
+            try:
+                yield 1
+            finally:
+                state["flag"] = 7
+
+        def fn(x, xs, state):
+            gen = delayed(state)
+            if lifecycle != "created":
+                next(gen)
+                if lifecycle == "closed":
+                    gen.close()
+                else:
+                    next(gen, None)
+            prefix = x.sin()
+            ys = [t * x + state["flag"] for t in xs if t.sum() > 0]
+            return prefix, ys, x.cos(), state["flag"]
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        xs = [torch.ones(4, device=device), -torch.ones(4, device=device)]
+        warm_graphs = None
+        for value in (1.0, 2.0):
+            x = torch.full((4,), value, device=device, dtype=torch.float64)
+            x.requires_grad_()
+            expected_state = {"flag": 0}
+            expected = fn(x, xs, expected_state)
+            state = {"flag": 0}
+            actual = compiled(x, xs, state)
+            self.assertEqual(actual, expected)
+            self.assertEqual(state, expected_state)
+            self.assertTrue(torch.is_grad_enabled())
+            if warm_graphs is None:
+                warm_graphs = len(backend.graphs)
+            else:
+                self.assertEqual(len(backend.graphs), warm_graphs)
+        targets = {n.target for gm in backend.graphs for n in gm.graph.nodes}
+        self.assertIn("sin", targets)
+        self.assertIn("cos", targets)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    @parametrize("retained", [False, True])
+    def test_raising_finalizer_dispatch(self, device, retained):
+        def delayed(state):
+            try:
+                yield 1
+            finally:
+                state["flag"] += 1
+                raise Boom("finalizer")
+
+        def fn(x, xs, state):
+            gen = delayed(state)
+            next(gen)
+            if retained:
+                state["gen"] = gen
+            prefix = x.sin()
+            ys = [t * x + state["flag"] for t in xs if t.sum() > 0]
+            return prefix, ys, state["flag"]
+
+        x = torch.ones(4, device=device)
+        xs = [x]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        unraisable = []
+
+        def collect(error):
+            unraisable.append((error.exc_type, str(error.exc_value)))
+
+        with mock.patch.object(sys, "unraisablehook", collect):
+            for call in (fn, compiled):
+                state = {"flag": 0}
+                result = call(x, xs, state)
+                self.assertEqual(result[1], [x])
+                self.assertEqual(result[2], 0)
+                if retained:
+                    with self.assertRaisesRegex(Boom, "finalizer"):
+                        state["gen"].close()
+                self.assertEqual(state["flag"], 1)
+        self.assertEqual(unraisable, [] if retained else [(Boom, "finalizer")] * 2)
+        self.assertEqual(len(backend.graphs), 0)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    @parametrize("fullgraph", [False, True])
+    def test_traceable_comprehension_generator_keeps_capture(self, device, fullgraph):
+        def delayed(state):
+            try:
+                yield 1
+            finally:
+                state["flag"] += 1
+
+        def fn(x, xs, state):
+            gen = delayed(state)
+            next(gen)
+            prefix = x.sin()
+            ys = [t * x for t in xs]
+            return prefix, ys, x.cos(), state["flag"]
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        expected_state = {"flag": 0}
+        expected = fn(x, [x], expected_state)
+        state = {"flag": 0}
+        backend = EagerAndRecordGraphs()
+        actual = torch.compile(fn, backend=backend, fullgraph=fullgraph)(x, [x], state)
+        self.assertEqual(actual, expected)
+        self.assertEqual(state, expected_state)
+        self.assertEqual(state["flag"], 1)
+        targets = {n.target for gm in backend.graphs for n in gm.graph.nodes}
+        self.assertIn("sin", targets)
+        self.assertIn("cos", targets)
+        self.assertTrue(torch.is_grad_enabled())
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_fullgraph_does_not_replay_finalizer(self, device):
+        def delayed(state):
+            try:
+                yield 1
+            finally:
+                state["flag"] = 7
+
+        def fn(x, xs, state):
+            gen = delayed(state)
+            next(gen)
+            prefix = x.sin()
+            ys = [t * x for t in xs if t.sum() > 0]
+            return prefix, ys
+
+        x = torch.ones(4, device=device)
+        state = {"flag": 0}
+        backend = EagerAndRecordGraphs()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Data-dependent branching"
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, [x], state)
+        self.assertEqual(state, {"flag": 0})
+        self.assertEqual(len(backend.graphs), 0)
 
 
 class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
@@ -4112,6 +5038,7 @@ class GraphModule(torch.nn.Module):
 
 instantiate_parametrized_tests(CtxManagerTests)
 instantiate_parametrized_tests(ContextlibContextManagerTests)
+instantiate_device_type_tests(ComprehensionGeneratorTests, globals(), allow_xpu=True)
 instantiate_device_type_tests(
     CtxManagerTestsDevice, globals(), except_for=("cpu",), allow_xpu=True
 )

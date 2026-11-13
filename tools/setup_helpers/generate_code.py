@@ -27,7 +27,6 @@ def generate_code(
     install_dir: str | None = None,
     subset: str | None = None,
     disable_autograd: bool = False,
-    force_schema_registration: bool = False,
     operator_selector: Any = None,
 ) -> None:
     from tools.autograd.gen_annotated_fn_args import gen_annotated
@@ -168,13 +167,6 @@ def main() -> None:
         help="Path to the model YAML file that contains the list of operators to include for custom build.",
     )
     parser.add_argument(
-        "--force-schema-registration",
-        "--force_schema_registration",
-        action="store_true",
-        help="force it to generate schema-only registrations for ops that are not"
-        "listed on --selected-op-list",
-    )
-    parser.add_argument(
         "--gen-lazy-ts-backend",
         "--gen_lazy_ts_backend",
         action="store_true",
@@ -201,7 +193,6 @@ def main() -> None:
         options.install_dir,
         options.subset,
         options.disable_autograd,
-        options.force_schema_registration,
         # options.selected_op_list
         operator_selector=operator_selector,
     )

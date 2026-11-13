@@ -621,7 +621,7 @@ def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
     in a tuple of initial qmin and qmax values. One use case is these customized qmin and qmax
     values are used to calculate static estimates of the scale and zero point for aggressive lower-bit
     fake quantization. These estimates are compared against parameters learned through backpropagation.
-    The related literatures for scale and zero point via backpropagation are as follows:
+    The related literature for scale and zero point via backpropagation are as follows:
 
     Learned Step Size Quantization: https://openreview.net/pdf?id=rkgO66VKDS
     Trained Quantization Thresholds: https://arxiv.org/pdf/1903.08066.pdf
@@ -688,7 +688,7 @@ def determine_qparams(
                 zero_point = zero_point.new_full(zero_point.size(), 128)
     elif qscheme == torch.per_channel_affine_float_qparams:
         scale = (max_val - min_val) / float(quant_max - quant_min)
-        scale = torch.where(scale > eps, scale, torch.ones_like(scale))
+        scale = torch.where(scale > eps, scale, 1)
         # We use the quantize function
         # xq = Round(Xf * inv_scale + zero_point),
         # setting zero_point to (-1 * min *inv_scale) we get

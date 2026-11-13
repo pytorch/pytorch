@@ -4,7 +4,9 @@
 #include <c10/util/MaybeOwned.h>
 #include <atomic>
 #include <climits>
+#include <compare>
 #include <memory>
+#include <tuple>
 #include <type_traits>
 
 namespace pybind11 {
@@ -517,12 +519,13 @@ class intrusive_ptr final {
     rhs.target_ = FromNullType::singleton();
   }
 
-  intrusive_ptr(const intrusive_ptr& rhs) : target_(rhs.target_) {
+  intrusive_ptr(const intrusive_ptr& rhs) noexcept : target_(rhs.target_) {
     retain_();
   }
 
   template <class From, class FromNullType>
-  /* implicit */ intrusive_ptr(const intrusive_ptr<From, FromNullType>& rhs)
+  /* implicit */ intrusive_ptr(
+      const intrusive_ptr<From, FromNullType>& rhs) noexcept
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
@@ -765,13 +768,16 @@ inline void swap(
   lhs.swap(rhs);
 }
 
-// To allow intrusive_ptr inside std::map or std::set, we need operator<
+// Pointer ordering and equality for intrusive_ptr.
+// operator<=> gives us <, >, <=, >=; operator== gives us !=.
+// clang-format off
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator<(
+[[nodiscard]] inline std::strong_ordering operator<=>(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return lhs.get() < rhs.get();
+  return lhs.get() <=> rhs.get();
 }
+// clang-format on
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
 [[nodiscard]] inline bool operator==(
@@ -785,34 +791,6 @@ template <class TTarget1, class NullType1>
     const intrusive_ptr<TTarget1, NullType1>& lhs,
     std::nullptr_t) noexcept {
   return lhs.get() == nullptr;
-}
-
-template <class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator==(
-    std::nullptr_t,
-    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return nullptr == rhs.get();
-}
-
-template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator!=(
-    const intrusive_ptr<TTarget1, NullType1>& lhs,
-    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(lhs, rhs);
-}
-
-template <class TTarget1, class NullType1>
-[[nodiscard]] inline bool operator!=(
-    const intrusive_ptr<TTarget1, NullType1>& lhs,
-    std::nullptr_t) noexcept {
-  return !operator==(lhs, nullptr);
-}
-
-template <class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator!=(
-    std::nullptr_t,
-    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(nullptr, rhs);
 }
 template <typename T>
 struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
@@ -873,7 +851,7 @@ class weak_intrusive_ptr final {
   template <class TTarget2, class NullType2>
   friend class weak_intrusive_ptr;
 
-  void retain_() {
+  void retain_() noexcept {
     if (target_ != NullType::singleton()) {
       uint32_t new_weakcount =
           detail::atomic_weakcount_increment(target_->combined_refcount_);
@@ -918,13 +896,14 @@ class weak_intrusive_ptr final {
     rhs.target_ = FromNullType::singleton();
   }
 
-  weak_intrusive_ptr(const weak_intrusive_ptr& rhs) : target_(rhs.target_) {
+  weak_intrusive_ptr(const weak_intrusive_ptr& rhs) noexcept
+      : target_(rhs.target_) {
     retain_();
   }
 
   template <class From, class FromNullType>
   /* implicit */ weak_intrusive_ptr(
-      const weak_intrusive_ptr<From, FromNullType>& rhs)
+      const weak_intrusive_ptr<From, FromNullType>& rhs) noexcept
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
@@ -1008,7 +987,7 @@ class weak_intrusive_ptr final {
   // it would be simpler and easier to make work if we just expose
   // an unsafe getter for target_
   //
-  TTarget* _unsafe_get_target() const noexcept {
+  [[nodiscard]] TTarget* _unsafe_get_target() const noexcept {
     return target_;
   }
 
@@ -1031,7 +1010,7 @@ class weak_intrusive_ptr final {
     return use_count() == 0;
   }
 
-  intrusive_ptr<TTarget, NullType> lock() const noexcept {
+  [[nodiscard]] intrusive_ptr<TTarget, NullType> lock() const noexcept {
     if (target_ == NullType::singleton()) {
       return intrusive_ptr<TTarget, NullType>();
     } else {
@@ -1082,7 +1061,7 @@ class weak_intrusive_ptr final {
    * weak_intrusive_ptr::reclaim(ptr) to properly destruct it.
    * This is helpful for C APIs.
    */
-  TTarget* release() noexcept {
+  [[nodiscard]] TTarget* release() noexcept {
     TTarget* result = target_;
     target_ = NullType::singleton();
     return result;
@@ -1095,7 +1074,7 @@ class weak_intrusive_ptr final {
    * This is the counter-part to weak_intrusive_ptr::release() and the pointer
    * passed in *must* have been created using weak_intrusive_ptr::release().
    */
-  static weak_intrusive_ptr reclaim(TTarget* owning_weak_ptr) {
+  [[nodiscard]] static weak_intrusive_ptr reclaim(TTarget* owning_weak_ptr) {
     // See Note [Stack allocated intrusive_ptr_target safety]
     // if refcount > 0, weakcount must be >1 for weak references to exist.
     // see weak counting explanation at top of this file.
@@ -1114,16 +1093,18 @@ class weak_intrusive_ptr final {
    * new weak_intrusive_ptr representing a new weak reference, i.e.
    * the raw pointer retains ownership.
    */
-  static weak_intrusive_ptr reclaim_copy(TTarget* owning_ptr) {
+  [[nodiscard]] static weak_intrusive_ptr reclaim_copy(TTarget* owning_ptr) {
     auto ret = reclaim(owning_ptr);
     ret.retain_();
     return ret;
   }
 
+  // clang-format off
   template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-  friend bool operator<(
+  friend std::strong_ordering operator<=>(
       const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
       const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept;
+  // clang-format on
   template <class TTarget1, class NullType1, class TTarget2, class NullType2>
   friend bool operator==(
       const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
@@ -1137,26 +1118,21 @@ inline void swap(
   lhs.swap(rhs);
 }
 
-// To allow weak_intrusive_ptr inside std::map or std::set, we need operator<
+// Pointer ordering and equality for weak_intrusive_ptr.
+// clang-format off
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator<(
+[[nodiscard]] inline std::strong_ordering operator<=>(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return lhs.target_ < rhs.target_;
+  return lhs.target_ <=> rhs.target_;
 }
+// clang-format on
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
 [[nodiscard]] inline bool operator==(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.target_ == rhs.target_;
-}
-
-template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-[[nodiscard]] inline bool operator!=(
-    const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
-    const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(lhs, rhs);
 }
 
 // Alias for documentary purposes, to more easily distinguish
@@ -1231,7 +1207,7 @@ inline void incref(weak_intrusive_ptr_target* self) {
 
 inline void decref(weak_intrusive_ptr_target* self) {
   // Let it die
-  c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
+  std::ignore = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   // NB: You still "have" the 'self' pointer, but it's now invalid.
   // If you want more safety, used the actual c10::weak_intrusive_ptr class
 }
@@ -1240,7 +1216,7 @@ template <typename T>
 [[nodiscard]] inline T* lock(T* self) {
   auto wptr = c10::weak_intrusive_ptr<T>::reclaim(self);
   auto ptr = wptr.lock();
-  wptr.release();
+  std::ignore = wptr.release();
   return ptr.release();
 }
 
@@ -1248,7 +1224,7 @@ template <typename T>
 [[nodiscard]] inline uint32_t use_count(weak_intrusive_ptr_target* self) {
   auto wptr = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = wptr.use_count();
-  wptr.release();
+  std::ignore = wptr.release();
   return r;
 }
 

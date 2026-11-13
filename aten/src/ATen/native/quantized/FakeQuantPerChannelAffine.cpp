@@ -85,9 +85,9 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(Y)
-    .add_input(self)
-    .add_owned_input(native::_unsafe_view(scale, expected_shape))
-    .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_const_input(self)
+    .add_owned_const_input(native::_unsafe_view(scale, expected_shape))
+    .add_owned_const_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
 
   // TODO(future, optional): read once, write twice.  Not done at the moment
@@ -95,9 +95,9 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
   TensorIterator iter_mask = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(mask)
-    .add_input(self)
-    .add_owned_input(native::_unsafe_view(scale, expected_shape))
-    .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_const_input(self)
+    .add_owned_const_input(native::_unsafe_view(scale, expected_shape))
+    .add_owned_const_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
 
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
@@ -236,10 +236,10 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
     .add_output(dX)
     .add_output(dScale_vec)
     .add_output(dZeroPoint_vec)
-    .add_input(X_)
-    .add_input(dY_)
-    .add_input(scale_vectorized)
-    .add_input(zero_point_vectorized)
+    .add_const_input(X_)
+    .add_const_input(dY_)
+    .add_const_input(scale_vectorized)
+    .add_const_input(zero_point_vectorized)
     .build();
 
   fake_quant_grad_learnable_channel_stub(

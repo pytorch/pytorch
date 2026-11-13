@@ -27,6 +27,7 @@ register_log("fake_tensor", ["torch._subclasses.fake_tensor"])
 register_log("aot", ["torch._functorch.aot_autograd", "torch._functorch._aot_autograd"])
 register_log("autograd", "torch.autograd")
 register_log("inductor", ["torch._inductor", "torch._inductor.cudagraph_trees"])
+register_log("flex_gemm", "torch._inductor.kernel.flex_gemm.debug")
 
 register_artifact(
     "cudagraphs",
@@ -47,6 +48,12 @@ register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.f
 register_log("dtensor", ["torch.distributed._tensor", "torch.distributed.tensor"])
 register_log("onnx", "torch.onnx")
 register_log("native_dsl", "torch._native")
+register_artifact(
+    "native_dsl_compile",
+    "Emits a log line and a tlparse record per torch._native DSL compile-cache call "
+    "(compiles and cache hits). Off by default: this fires on every op call.",
+    off_by_default=True,
+)
 register_log(
     "export",
     [
@@ -219,6 +226,11 @@ register_artifact(
 register_artifact(
     "overlap_scheduling",
     "Detailed Inductor overlap scheduling pass information",
+    off_by_default=True,
+)
+register_artifact(
+    "partitioned_scatter",
+    "Inductor partitioned scatter pass decisions and memory accounting",
     off_by_default=True,
 )
 register_artifact(

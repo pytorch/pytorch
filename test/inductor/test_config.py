@@ -1,12 +1,23 @@
 # Owner(s): ["module: inductor"]
+import contextlib
+import functools
 import math
+import os
+import sys
+import types
 import unittest
+import unittest.mock
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.choices import InductorChoices
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON
 from torch.testing._internal.triton_utils import requires_gpu
 
@@ -59,6 +70,99 @@ class TestInductorConfig(TestCase):
         config.load_config(saved2)
         self.assertEqual(config.max_fusion_size, 321)
         self.assertEqual(config.triton.cudagraphs, False)
+
+    def test_use_block_ptr_enabled_off_by_default(self):
+        from torch._inductor.codegen.triton_utils import use_block_ptr_enabled
+
+        with config.patch("triton.use_block_ptr", False):
+            self.assertFalse(use_block_ptr_enabled())
+
+    def test_use_block_ptr_enabled_tracks_triton_capability(self):
+        # With the flag on, the effective setting follows Triton capability; when
+        # the block-pointer API is gone it is a no-op that warns exactly once.
+        import torch._inductor.codegen.triton_utils as triton_utils
+
+        with config.patch("triton.use_block_ptr", True):
+            with unittest.mock.patch.object(
+                triton_utils, "has_triton_block_ptr", lambda: True
+            ):
+                self.assertTrue(triton_utils.use_block_ptr_enabled())
+
+            triton_utils._warn_block_ptr_unavailable.cache_clear()
+            with unittest.mock.patch.object(
+                triton_utils, "has_triton_block_ptr", lambda: False
+            ):
+                with self.assertWarns(FutureWarning):
+                    self.assertFalse(triton_utils.use_block_ptr_enabled())
+
+    @staticmethod
+    def _patch_compile_iq(env, *, flags=None, fbtriton=True):
+        """Patch `env` into os.environ, fbtriton detection, and a stub triton.magnon
+        package.
+
+        `flags` maps triton.magnon.flags function names to their return values; None
+        makes importing triton.magnon.flags fail.
+        """
+        magnon = types.ModuleType("triton.magnon")
+        magnon.__path__ = []
+        modules = {"triton.magnon": magnon, "triton.magnon.flags": None}
+        if flags is not None:
+            magnon.flags = types.ModuleType("triton.magnon.flags")
+            for name, value in flags.items():
+                setattr(magnon.flags, name, lambda value=value: value)
+            modules["triton.magnon.flags"] = magnon.flags
+        stack = contextlib.ExitStack()
+        stack.enter_context(unittest.mock.patch.dict(os.environ, env))
+        stack.enter_context(unittest.mock.patch.dict(sys.modules, modules))
+        stack.enter_context(
+            unittest.mock.patch(
+                "torch.utils._triton.has_triton_compile_iq", return_value=fbtriton
+            )
+        )
+        return stack
+
+    @parametrize("env_var", ["TRITON_COMPILE_IQ_COLLECT", "TRITON_COMPILE_IQ_APPLY"])
+    def test_static_cuda_launcher_default_off_for_compile_iq(self, env_var):
+        with self._patch_compile_iq({env_var: "1"}):
+            self.assertFalse(config.static_cuda_launcher_default())
+
+    @parametrize("env_var", ["TRITON_COMPILE_IQ_COLLECT", "TRITON_COMPILE_IQ_APPLY"])
+    def test_static_cuda_launcher_default_ignores_compile_iq_without_fbtriton(
+        self, env_var
+    ):
+        with self._patch_compile_iq(
+            {env_var: "1", "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER": "1"},
+            fbtriton=False,
+        ):
+            self.assertTrue(config.static_cuda_launcher_default())
+
+    @parametrize("env_var", ["TRITON_COMPILE_IQ_COLLECT", "TRITON_COMPILE_IQ_APPLY"])
+    def test_compile_iq_overrides_static_cuda_launcher_env(self, env_var):
+        with (
+            self._patch_compile_iq(
+                {env_var: "1", "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER": "1"}
+            ),
+            self.assertLogs("torch._inductor.config", level="WARNING") as logs,
+        ):
+            self.assertFalse(config.static_cuda_launcher_default())
+        self.assertIn("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER=1", logs.output[0])
+
+    def test_static_cuda_launcher_default_follows_magnon_flag_parsing(self):
+        with self._patch_compile_iq(
+            {
+                "TRITON_COMPILE_IQ_COLLECT": "0",
+                "TRITON_COMPILE_IQ_APPLY": "false",
+                "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER": "1",
+            },
+            flags={"collect_enabled": False, "apply_enabled": False},
+        ):
+            self.assertTrue(config.static_cuda_launcher_default())
+
+    def test_static_cuda_launcher_default_tolerates_partial_magnon_flags(self):
+        with self._patch_compile_iq(
+            {"TRITON_COMPILE_IQ_APPLY": "1"}, flags={"collect_enabled": False}
+        ):
+            self.assertFalse(config.static_cuda_launcher_default())
 
     def test_hasattr(self):
         self.assertTrue(hasattr(config, "max_fusion_size"))
@@ -171,6 +275,19 @@ class TestInductorConfig(TestCase):
             ),
         )
 
+    @parametrize(
+        "key",
+        (
+            "fusion_memory_timeline_peak_memory_increase_gb",
+            "fusion_memory_timeline_peak_memory_pct_threshold",
+        ),
+    )
+    @parametrize("value", (None, 0.0, 0.5))
+    def test_fusion_memory_timeline_peak_options(self, key, value):
+        self.assertIsNone(getattr(config, key))
+        optimized = torch.compile(dummy_fn, options={key: value})
+        self.assertEqual(optimized.get_compiler_config()[key], value)
+
     def test_api_options(self):
         reduce_overhead_opts = torch._inductor.list_mode_options("reduce-overhead")
         self.assertEqual(reduce_overhead_opts["triton.cudagraphs"], True)
@@ -244,6 +361,111 @@ class TestInductorConfig(TestCase):
         ):
             code = torch._inductor.config.codegen_config()
             self.assertNotIn("post_grad_custom", code)
+
+    def test_codegen_serializes_inductor_choices_partial(self):
+        partial_choices = functools.partial(InductorChoices, lb=10, ub=100)
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+
+            self.assertIn("inductor_choices_class", code)
+            self.assertIn("functools.partial", code)
+            self.assertNotIn("<class ", code)
+            compile(code, "<codegen_config>", "exec")
+            namespace = {"torch": torch}
+            exec(code, namespace)
+            reconstructed = torch._inductor.config.inductor_choices_class
+            self.assertIsInstance(reconstructed, functools.partial)
+            self.assertIs(reconstructed.func, InductorChoices)
+            self.assertEqual(reconstructed.args, ())
+            self.assertEqual(reconstructed.keywords, {"lb": 10, "ub": 100})
+
+    def test_codegen_serializes_builtin_partial_with_container_arg(self):
+        partial_choices = functools.partial(max, [1, (2, {"limit": 3})])
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+            compile(code, "<codegen_config>", "exec")
+            exec(code, {"torch": torch})
+
+            reconstructed = torch._inductor.config.inductor_choices_class
+            self.assertIs(reconstructed.func, max)
+            self.assertEqual(reconstructed.args, ([1, (2, {"limit": 3})],))
+
+    def test_codegen_partial_over_non_importable_emits_comment(self):
+        non_importable = functools.partial(lambda lb=0: None, lb=5)
+
+        with torch._inductor.config.patch(inductor_choices_class=non_importable):
+            code = torch._inductor.config.codegen_config()
+
+            self.assertIn("omitted", code)
+            self.assertIn("inductor_choices_class", code)
+            self.assertNotIn("config.inductor_choices_class = functools.partial", code)
+            compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_unsupported_arg_emits_comment(self):
+        for arg in ({1, 2}, math.inf, math.nan):
+            with self.subTest(arg=arg):
+                partial_choices = functools.partial(InductorChoices, arg)
+                with torch._inductor.config.patch(
+                    inductor_choices_class=partial_choices
+                ):
+                    code = torch._inductor.config.codegen_config()
+
+                self.assertIn("omitted", code)
+                self.assertNotIn("config.inductor_choices_class =", code)
+                compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_unresolvable_identity_emits_comment(self):
+        def impostor():
+            pass
+
+        impostor.__module__ = InductorChoices.__module__
+        impostor.__qualname__ = InductorChoices.__qualname__
+        partial_choices = functools.partial(impostor)
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+
+        self.assertIn("partial callable cannot be re-imported", code)
+        compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_raising_metadata_emits_comment(self):
+        class CallableWithRaisingMetadata:
+            @property
+            def __module__(self):
+                raise RuntimeError("module metadata unavailable")
+
+            def __call__(self):
+                pass
+
+        partial_choices = functools.partial(CallableWithRaisingMetadata())
+
+        with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+            code = torch._inductor.config.codegen_config()
+
+        self.assertIn("partial callable cannot be re-imported", code)
+        compile(code, "<codegen_config>", "exec")
+
+    def test_codegen_partial_with_invalid_qualname_emits_comment(self):
+        class CallableWithInvalidQualname:
+            __module__ = __name__
+            __qualname__ = "invalid name"
+
+            def __call__(self):
+                pass
+
+        callable_with_invalid_qualname = CallableWithInvalidQualname()
+        globals()["invalid name"] = callable_with_invalid_qualname
+        try:
+            partial_choices = functools.partial(callable_with_invalid_qualname)
+            with torch._inductor.config.patch(inductor_choices_class=partial_choices):
+                code = torch._inductor.config.codegen_config()
+        finally:
+            del globals()["invalid name"]
+
+        self.assertIn("partial callable cannot be re-imported", code)
+        compile(code, "<codegen_config>", "exec")
 
     def test_select_decomp_table_fallback_embedding_bag_byte_unpack(self):
         """Test that select_decomp_table removes embedding_bag_byte_unpack when fallback is enabled"""
@@ -389,6 +611,9 @@ class TestInductorConfig(TestCase):
         called = False
         z.grad_fn.apply(torch.tensor(0))
         self.assertFalse(called)
+
+
+instantiate_parametrized_tests(TestInductorConfig)
 
 
 if __name__ == "__main__":

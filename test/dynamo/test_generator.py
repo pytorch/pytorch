@@ -12,6 +12,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
@@ -41,6 +42,8 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
 
 
 class GeneratorTests(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_generator_simple(self):
         def whoo():
             yield 1
@@ -1095,6 +1098,8 @@ class GraphModule(torch.nn.Module):
 
 
 class TestGeneratorSend(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_send(self):
         def double():
             x = yield
@@ -1234,6 +1239,8 @@ class TestGeneratorSend(GeneratorTestsBase):
 
 
 class TestGeneratorClose(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_close(self):
         def whoo(t):
             yield t.sin()
@@ -1684,6 +1691,8 @@ class TestGeneratorClose(GeneratorTestsBase):
 
 
 class TestGeneratorThrow(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_throw(self):
         def whoo(t):
             try:
@@ -1988,6 +1997,8 @@ class TestGeneratorThrow(GeneratorTestsBase):
 
 
 class TestGeneratorPEP(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Ported from CPython Lib/test/test_generators.py `pep_tests` doctest block.
 
     @make_dynamo_test
@@ -2092,6 +2103,8 @@ class TestGeneratorPEP(GeneratorTestsBase):
 
 
 class TestGeneratorCoroutine(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Ported from CPython Lib/test/test_generators.py `coroutine_tests` doctest
     # block. Cases relying on stdout capture were rewritten to record into a
     # list and assert; cases relying on gc finalization, traceback-level or
@@ -2243,6 +2256,47 @@ class TestGeneratorCoroutine(GeneratorTestsBase):
         g.close()  # close normally
 
     @make_dynamo_test
+    def test_gi_frame_f_back(self):
+        def f():
+            yield
+
+        def outer():
+            yield from f()
+
+        g = f()
+        frame = g.gi_frame
+        self.assertIsInstance(frame, types.FrameType)
+        self.assertIs(type(frame), types.FrameType)
+        self.assertIsNone(frame.f_back)
+        self.assertIs(g.gi_frame, frame)
+        next(g)
+        self.assertIsNone(g.gi_frame.f_back)
+        self.assertEqual(list(g), [])
+        self.assertIsNone(g.gi_frame)
+
+        g = outer()
+        next(g)
+        self.assertIsNone(g.gi_frame.f_back)
+
+    def test_gi_frame_unmodeled_graph_break(self):
+        def f():
+            yield
+
+        def f_back_after_close():
+            g = f()
+            frame = g.gi_frame
+            g.close()
+            return frame.f_back is None
+
+        def f_trace():
+            return f().gi_frame.f_trace is None
+
+        with self.assertRaisesRegex(Unsupported, "generator frame f_back"):
+            torch.compile(f_back_after_close, backend="eager", fullgraph=True)()
+        with self.assertRaisesRegex(Unsupported, "generator frame attribute"):
+            torch.compile(f_trace, backend="eager", fullgraph=True)()
+
+    @make_dynamo_test
     def test_generator_exit_not_caught_by_except_exception(self):
         log = []
 
@@ -2332,6 +2386,8 @@ class _DelegatingIterator:
 
 
 class TestSubgeneratorDelegation(GeneratorTestsBase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Delegation semantics for send/throw/close through `yield from`. CPython
     # forwards throw() and close() into the subiterator the delegating
     # generator is suspended on; these tests assert the subgenerator's own

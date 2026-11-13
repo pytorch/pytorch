@@ -3,16 +3,23 @@
 NVIDIA Universal GEMM scheduling for PyTorch Inductor.
 """
 
+from __future__ import annotations
+
+import dataclasses
+import enum
 import hashlib
 import logging
-from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, cast, Literal, overload, TYPE_CHECKING
 
+import torch
 from torch._inductor.utils import (
     get_fused_kernel_name,
     get_kernel_metadata,
+    GPU_ALIGN_BYTES,
     Placeholder,
 )
+from torch._prims_common import compute_required_storage_length
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from ... import config
@@ -20,11 +27,24 @@ from ...codecache import code_hash, get_path
 from ...ir import (
     Buffer,
     ComputedBuffer,
+    FlexibleLayout,
+    InputBuffer,
     Layout,
     MultiTemplateBuffer,
+    MutableBox,
+    NonOwningLayout,
     NVUniversalGemmBuffer,
     Pointwise,
+    Reduction,
+    ReinterpretView,
 )
+from ...kernel.gemm_epilogue import (
+    GEMM_ACCUMULATOR_ARG_NAME,
+    GEMM_REDUCTION_FRAGMENT_WIDTH,
+    GemmEpiloguePlan,
+    GemmReductionGeometry,
+)
+from ...kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -34,7 +54,17 @@ from ...scheduler import (
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
 from ..cutlass.python_evt import CutlassEVTCodegen
-from .nv_universal_gemm import NVUniversalGemmCaller
+from ..wrapper import codegen_reinterpret_view_layout_match
+from .epilogue_lowering import NVGemmEpilogueCapture, NVGemmEpilogueLowering
+from .nv_universal_gemm import GemmVariant, NVUniversalGemmCaller
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ...kernel.gemm_epilogue import GemmReductionPlan
+    from .epilogue_lowering import NVGemmEpilogueProgram
+    from .nv_universal_gemm_kernel import NVUniversalGemmKernel
 
 
 log = logging.getLogger(__name__)
@@ -44,7 +74,306 @@ _BENCHMARK_KERNEL_PREFIX = "nv_gemm_"
 EPILOGUE_FN_NAME = "_epilogue_fn"
 
 
-class NVUniversalGemmScheduling(BaseScheduling):
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class NVGemmGeneratedSource:
+    r"""Rendered NVGEMM source and its finalized kernel."""
+
+    source: str
+    kernel: NVUniversalGemmKernel
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _NVGemmBenchmarkTensorSpec:
+    size: tuple[int, ...]
+    stride: tuple[int, ...]
+    offset: int
+    device: torch.device
+    dtype: torch.dtype
+    storage_dtype: torch.dtype
+    storage_of: int
+    storage_size: int
+
+
+def _nvgemm_benchmark_tensor_specs(
+    kernel: NVUniversalGemmKernel,
+) -> tuple[_NVGemmBenchmarkTensorSpec | None, ...]:
+    graph_input_examples = {}
+    if V.graph.example_inputs is not None:
+        graph_input_examples = dict(
+            zip(V.graph.graph_input_names, V.graph.example_inputs, strict=True)
+        )
+
+    tensor_specs = []
+    ranges_by_storage: dict[object, list[tuple[int, int, int]]] = {}
+    for index, argument in enumerate(kernel.ordered_arguments()):
+        if argument.kind == "workspace":
+            tensor_specs.append(None)
+            continue
+
+        node = argument.node
+        if node is None:
+            node = V.graph.get_buffer(cast(str, argument.buffer_name))
+        while isinstance(node, MutableBox):
+            node = node.data
+
+        storage_node = node
+        view_byte_offset = 0
+        while True:
+            if isinstance(storage_node, MutableBox):
+                storage_node = storage_node.data
+            elif isinstance(storage_node, ReinterpretView):
+                same_layout, _ = codegen_reinterpret_view_layout_match(
+                    storage_node.data,
+                    storage_node.layout.size,
+                    storage_node.layout.stride,
+                    storage_node.layout.offset,
+                )
+                if not same_layout:
+                    view_byte_offset += (
+                        cast(
+                            int,
+                            V.graph.sizevars.optimization_hint(
+                                storage_node.layout.offset
+                            ),
+                        )
+                        * storage_node.get_dtype().itemsize
+                    )
+                storage_node = storage_node.data
+                # Wrapper codegen emits only the outer layout in an unnamed chain.
+                while isinstance(storage_node, (MutableBox, ReinterpretView)):
+                    storage_node = storage_node.data
+            elif isinstance(storage_node, Buffer):
+                layout = storage_node.get_layout()
+                if not isinstance(layout, NonOwningLayout):
+                    break
+                storage_node = layout.view
+            else:
+                break
+
+        view_byte_offset += (
+            cast(
+                int,
+                V.graph.sizevars.optimization_hint(storage_node.get_layout().offset),
+            )
+            * storage_node.get_dtype().itemsize
+        )
+
+        storage_key: object = id(storage_node)
+        storage_base_offset = 0
+        if isinstance(storage_node, InputBuffer):
+            name = storage_node.get_name()
+            if name in V.graph.constants:
+                example = V.graph.constants[name]
+                storage_offset = cast(
+                    int,
+                    V.graph.sizevars.optimization_hint(example.storage_offset()),
+                )
+            elif name in V.graph.graph_inputs:
+                example = graph_input_examples.get(name)
+                storage_offset = cast(
+                    int,
+                    V.graph.sizevars.optimization_hint(
+                        V.graph.graph_input_storage_offsets.get(name, 0)
+                    ),
+                )
+            else:
+                example = None
+                storage_offset = 0
+            if isinstance(example, torch.Tensor):
+                storage_key = StorageWeakRef(example.untyped_storage())
+                storage_base_offset = storage_offset * example.element_size()
+
+        size = cast(
+            tuple[int, ...], V.graph.sizevars.optimization_hints(node.get_size())
+        )
+        stride = cast(
+            tuple[int, ...], V.graph.sizevars.optimization_hints(node.get_stride())
+        )
+        dtype = node.get_dtype()
+        storage_dtype = storage_node.get_dtype()
+        storage_length = compute_required_storage_length(size, stride, 0)
+        if argument.kind == "epilogue" and not kernel.epilogue.is_evt_fallback:
+            bounded_stride = list(FlexibleLayout.contiguous_strides(size))
+            for dim, length in enumerate(size):
+                if length > 1:
+                    bounded_stride[dim] += 1
+                    break
+            bounded_stride = tuple(bounded_stride)
+            bounded_storage_length = compute_required_storage_length(
+                size, bounded_stride, 0
+            )
+            if bounded_storage_length < storage_length:
+                stride = bounded_stride
+                storage_length = bounded_storage_length
+                storage_key = ("bounded_epilogue", index)
+                storage_base_offset = 0
+                view_byte_offset = 0
+                storage_dtype = dtype
+        device = node.get_device()
+        if device is None:
+            raise AssertionError("expected tensor argument to have a device")
+        byte_offset = storage_base_offset + view_byte_offset
+        max_byte = byte_offset + storage_length * dtype.itemsize
+        ranges_by_storage.setdefault(storage_key, []).append(
+            (index, byte_offset, max_byte)
+        )
+        tensor_specs.append(
+            _NVGemmBenchmarkTensorSpec(
+                size=size,
+                stride=stride,
+                offset=byte_offset,
+                device=device,
+                dtype=dtype,
+                storage_dtype=storage_dtype,
+                storage_of=index,
+                storage_size=0,
+            )
+        )
+
+    storage_ranges = []
+    for ranges in ranges_by_storage.values():
+        ranges.sort(key=lambda item: item[1:])
+        current = []
+        current_end = -1
+        for item in ranges:
+            _, start, end = item
+            if current and start > current_end:
+                storage_ranges.append(current)
+                current = []
+            current.append(item)
+            current_end = max(current_end, end)
+        storage_ranges.append(current)
+
+    for ranges in storage_ranges:
+        storage_of = min(index for index, _, _ in ranges)
+        min_byte = min(start for _, start, _ in ranges)
+        max_byte = max(end for _, _, end in ranges)
+        origin = min_byte // GPU_ALIGN_BYTES * GPU_ALIGN_BYTES
+        nbytes = max_byte - origin
+        nbytes = (nbytes + GPU_ALIGN_BYTES - 1) // GPU_ALIGN_BYTES * GPU_ALIGN_BYTES
+        storage_spec = tensor_specs[storage_of]
+        if storage_spec is None:
+            raise AssertionError("expected tensor storage metadata")
+        tensor_specs[storage_of] = dataclasses.replace(
+            storage_spec,
+            storage_size=nbytes // storage_spec.storage_dtype.itemsize,
+        )
+
+        for index, _, _ in ranges:
+            spec = tensor_specs[index]
+            if spec is None:
+                raise AssertionError("expected tensor argument metadata")
+            offset_bytes = spec.offset - origin
+            if offset_bytes % spec.dtype.itemsize != 0:
+                raise AssertionError("unaligned NVGEMM benchmark tensor offset")
+            tensor_specs[index] = dataclasses.replace(
+                spec,
+                offset=offset_bytes // spec.dtype.itemsize,
+                storage_of=storage_of,
+            )
+
+    return tuple(tensor_specs)
+
+
+def _render_nvgemm_benchmark_helpers(
+    generated: NVGemmGeneratedSource,
+) -> str:
+    arguments = generated.kernel.ordered_arguments()
+    tensor_specs = _nvgemm_benchmark_tensor_specs(generated.kernel)
+
+    args_code = IndentedBuffer()
+    args_code.writeline("")
+    args_code.writeline("is_nvgemm = True")
+    args_code.writeline("")
+    args_code.writeline("def get_args():")
+    with args_code.indent():
+        args_code.writeline("import torch")
+        args_code.writeline("from torch._dynamo.testing import rand_strided")
+        args_code.writeline("args = []")
+
+        storage_vars = {}
+        view_vars = {}
+        for index, (argument, spec) in enumerate(
+            zip(arguments, tensor_specs, strict=True)
+        ):
+            if argument.kind == "workspace":
+                args_code.writeline(
+                    f"args.append(torch.empty({generated.kernel.workspace_size}, "
+                    f"device='{generated.kernel.output_node.get_device()}', dtype=torch.int8))"
+                )
+                continue
+
+            if spec is None:
+                raise AssertionError("expected tensor argument metadata")
+            if spec.storage_of == index:
+                storage_var = f"storage_{len(storage_vars)}"
+                storage_vars[index] = storage_var
+                args_code.writeline(
+                    f"{storage_var} = rand_strided(({spec.storage_size},), (1,), "
+                    f"device='{spec.device}', dtype={spec.storage_dtype})"
+                )
+
+            view_key = (
+                spec.storage_of,
+                spec.size,
+                spec.stride,
+                spec.offset,
+                spec.dtype,
+            )
+            view_var = view_vars.get(view_key)
+            if view_var is None:
+                view_var = f"arg_{len(view_vars)}"
+                view_vars[view_key] = view_var
+                storage_expr = storage_vars[spec.storage_of]
+                storage_spec = tensor_specs[spec.storage_of]
+                if storage_spec is None:
+                    raise AssertionError("expected tensor storage metadata")
+                if spec.dtype != storage_spec.storage_dtype:
+                    storage_expr += f".view({spec.dtype})"
+                args_code.writeline(
+                    f"{view_var} = torch.as_strided("
+                    f"{storage_expr}, {spec.size}, {spec.stride}, {spec.offset})"
+                )
+            args_code.writeline(f"args.append({view_var})")
+
+        args_code.writeline("return args")
+
+    args_code.writeline("")
+    args_code.writeline("def call(args):")
+    with args_code.indent():
+        args_code.writeline("import torch")
+        args_code.writeline("stream = torch.cuda.current_stream().cuda_stream")
+        bench_fn_name = f"{_BENCHMARK_KERNEL_PREFIX}_{MAIN_SUFFIX}"
+        args_code.writeline(f"{bench_fn_name}(*args, stream=stream)")
+
+    return generated.source + args_code.getvalue()
+
+
+def _nvgemm_precompile_input_metadata(
+    kernel: NVUniversalGemmKernel,
+) -> tuple[dict[str, list[int]], dict[str, list[int]], dict[str, str]]:
+    shapes = {}
+    strides = {}
+    dtypes = {}
+    for argument in kernel.ordered_arguments():
+        if argument.kind != "input":
+            continue
+        input_node = argument.node
+        if input_node is None:
+            raise AssertionError("expected NVGEMM input argument node")
+        shapes[argument.name] = [int(s) for s in input_node.get_size()]
+        strides[argument.name] = [int(s) for s in input_node.get_stride()]
+        dtypes[argument.name] = str(input_node.get_dtype()).removeprefix("torch.")
+    return shapes, strides, dtypes
+
+
+class NVGemmVerticalFusionDecision(enum.Enum):
+    FUSE = enum.auto()
+    DEFER = enum.auto()
+    REJECT = enum.auto()
+
+
+class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
     """
     Scheduling implementation for NVIDIA Universal GEMM kernels.
 
@@ -82,6 +411,35 @@ class NVUniversalGemmScheduling(BaseScheduling):
             return False
 
     @staticmethod
+    def _has_nvgemm_choice(ir_node: Any) -> bool:
+        return isinstance(ir_node, NVUniversalGemmBuffer) or (
+            isinstance(ir_node, MultiTemplateBuffer)
+            and any(
+                isinstance(choice, NVUniversalGemmCaller) for choice in ir_node._choices
+            )
+        )
+
+    @staticmethod
+    def _uses_swap_ab(ir_node: Any) -> bool:
+        if isinstance(ir_node, NVUniversalGemmBuffer):
+            return ir_node.swap_ab
+        return (
+            isinstance(ir_node, MultiTemplateBuffer)
+            and isinstance(ir_node._render_caller, NVUniversalGemmCaller)
+            and ir_node._render_caller.swap_ab
+        )
+
+    @staticmethod
+    def _has_output_scale(ir_node: Any) -> bool:
+        if isinstance(ir_node, NVUniversalGemmBuffer):
+            return ir_node.output_scale_node is not None
+        return isinstance(ir_node, MultiTemplateBuffer) and any(
+            isinstance(choice, NVUniversalGemmCaller)
+            and choice.output_scale_node is not None
+            for choice in ir_node._choices
+        )
+
+    @staticmethod
     def is_nv_universal_gemm_template(node: BaseSchedulerNode) -> bool:
         """Check if a node is an NVGEMM template SchedulerNode."""
         if not isinstance(node, SchedulerNode):
@@ -89,19 +447,94 @@ class NVUniversalGemmScheduling(BaseScheduling):
         return NVUniversalGemmScheduling._is_nvgemm_ir_buffer(node.node)
 
     @staticmethod
+    def _supports_reduction_layout(
+        choice: NVUniversalGemmCaller,
+        min_tile_shape: tuple[int, int],
+    ) -> bool:
+        required_tile = min_tile_shape[::-1] if choice.swap_ab else min_tile_shape
+        design = choice.kernel.metadata.design
+        if choice.variant not in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM):
+            return True
+        tile_m, tile_n = design.tile_shape[:2]
+        for tile, group in zip((tile_m, tile_n), required_tile):
+            if group and tile % group != 0:
+                log.debug(
+                    "Skipping %s: reduction group %s does not divide tile %s",
+                    choice.name,
+                    group,
+                    tile,
+                )
+                return False
+        if choice.variant == GemmVariant.GEMM:
+            use_2cta = design.use_2cta_mma
+        else:
+            use_2cta = design.tile_shape[0] == 256
+        if not use_2cta:
+            return True
+
+        cluster_m, cluster_n = design.cluster_shape[:2]
+        if required_tile[0] > tile_m // 2:
+            log.debug(
+                "Skipping %s: reduction group %s exceeds its per-CTA M tile %s",
+                choice.name,
+                required_tile[0],
+                tile_m // 2,
+            )
+            return False
+        n_group = required_tile[1]
+        if n_group == 0:
+            return True
+        if tile_m == 128 and n_group > GEMM_REDUCTION_FRAGMENT_WIDTH // 2:
+            log.debug(
+                "Skipping %s: reduction group %s crosses N-warp ownership",
+                choice.name,
+                n_group,
+            )
+            return False
+        if n_group <= GEMM_REDUCTION_FRAGMENT_WIDTH:
+            supported = n_group < tile_n
+            if not supported:
+                log.debug(
+                    "Skipping %s: reduction group %s does not fit one N-warp fragment",
+                    choice.name,
+                    n_group,
+                )
+            return supported
+
+        # The wide-M layout assigns each row's N tile to one warp partition.
+        supported = tile_m == 256 and (cluster_m, cluster_n) == (2, 1)
+        if not supported:
+            log.debug(
+                "Skipping %s: reduction group %s crosses N-warp ownership",
+                choice.name,
+                n_group,
+            )
+        return supported
+
+    @staticmethod
     def _best_nvgemm_choice(
         ir_node: MultiTemplateBuffer,
         require_epilogue_fusion: bool = False,
+        min_tile_shape: tuple[int, int] = (0, 0),
     ) -> NVUniversalGemmCaller:
         """Find the best NVUniversalGemmCaller from an MTB's choice timings."""
         choice_timings = ir_node.choice_timings()
         best: NVUniversalGemmCaller | None = None
         best_time = float("inf")
-        for choice, timing in choice_timings.items():
+        for choice in ir_node._choices:
             if not isinstance(choice, NVUniversalGemmCaller):
                 continue
             if require_epilogue_fusion and not choice.supports_epilogue_fusion:
                 continue
+            if not NVUniversalGemmScheduling._supports_reduction_layout(
+                choice, min_tile_shape
+            ):
+                continue
+            required_tile = min_tile_shape[::-1] if choice.swap_ab else min_tile_shape
+            tile_shape = choice.kernel.metadata.design.tile_shape
+            if any(tile_shape[axis] < required_tile[axis] for axis in (0, 1)):
+                continue
+            timing = choice_timings.get(choice, float("inf"))
             if best is None or timing < best_time:
                 best_time = timing
                 best = choice
@@ -112,10 +545,13 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
     @staticmethod
     def get_nv_gemm_buffer_from_node(
-        node: BaseSchedulerNode, require_epilogue_fusion: bool = False
+        node: BaseSchedulerNode,
+        require_epilogue_fusion: bool = False,
+        min_tile_shape: tuple[int, int] = (0, 0),
     ) -> NVUniversalGemmBuffer:
         """Extract NVUniversalGemmBuffer from node (direct or via MultiTemplateBuffer)."""
-        assert isinstance(node, SchedulerNode)  # noqa: S101
+        if not isinstance(node, SchedulerNode):
+            raise AssertionError(f"expected SchedulerNode, got {type(node)}")
         ir_node = node.node
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
@@ -123,14 +559,30 @@ class NVUniversalGemmScheduling(BaseScheduling):
         elif isinstance(ir_node, MultiTemplateBuffer):
             # Honor an explicit swap/finalize -- the fusion benchmark loop swaps
             # in each EFC choice one at a time and must not re-select from timings.
-            if isinstance(ir_node._render_caller, NVUniversalGemmCaller) and (
-                not require_epilogue_fusion
-                or ir_node._render_caller.supports_epilogue_fusion
+            selected = ir_node._render_caller
+            required_tile = (
+                min_tile_shape[::-1]
+                if isinstance(selected, NVUniversalGemmCaller) and selected.swap_ab
+                else min_tile_shape
+            )
+            if (
+                isinstance(selected, NVUniversalGemmCaller)
+                and (not require_epilogue_fusion or selected.supports_epilogue_fusion)
+                and NVUniversalGemmScheduling._supports_reduction_layout(
+                    selected, min_tile_shape
+                )
+                and all(
+                    selected.kernel.metadata.design.tile_shape[axis]
+                    >= required_tile[axis]
+                    for axis in (0, 1)
+                )
             ):
-                selected_choice = ir_node._render_caller
+                selected_choice = selected
             elif require_epilogue_fusion:
                 selected_choice = NVUniversalGemmScheduling._best_nvgemm_choice(
-                    ir_node, require_epilogue_fusion=True
+                    ir_node,
+                    require_epilogue_fusion=True,
+                    min_tile_shape=min_tile_shape,
                 )
             else:
                 min_choice, _ = ir_node.get_min_choice()
@@ -155,9 +607,49 @@ class NVUniversalGemmScheduling(BaseScheduling):
             return False
         return NVUniversalGemmScheduling._is_nvgemm_ir_buffer(node.get_template_node())
 
+    @staticmethod
+    def is_pdl_enabled_template(node: BaseSchedulerNode) -> bool:
+        """Return whether a scheduler node resolves to a PDL-enabled NVGEMM."""
+        if isinstance(node, SchedulerNode):
+            ir_node = node.node
+        elif isinstance(node, FusedSchedulerNode):
+            ir_node = node.get_template_node()
+        else:
+            return False
+
+        if isinstance(ir_node, NVUniversalGemmBuffer):
+            return bool(ir_node.kernel_metadata.get("use_pdl", False))
+        if not isinstance(ir_node, MultiTemplateBuffer):
+            return False
+
+        selected = ir_node._render_caller
+        if selected is None:
+            try:
+                selected, _ = ir_node.get_min_choice()
+            except (RuntimeError, ValueError):
+                return False
+        if not isinstance(selected, NVUniversalGemmCaller):
+            return False
+        kernel_impl = getattr(selected.kernel, "impl", None)
+        return bool(
+            getattr(
+                kernel_impl,
+                "use_pdl",
+                getattr(selected.kernel.metadata.design, "use_pdl", False),
+            )
+        )
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        return (
+            self.vertical_fusion_decision(node1, node2)
+            is NVGemmVerticalFusionDecision.FUSE
+        )
+
+    def vertical_fusion_decision(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> NVGemmVerticalFusionDecision:
         if self.is_nv_universal_gemm_template(node1):
             return self._can_fuse_epilogue_impl(
                 cast(SchedulerNode, node1),
@@ -171,100 +663,199 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 None,
             )
             if template_snode is None:
-                return False
+                return NVGemmVerticalFusionDecision.REJECT
             return self._can_fuse_epilogue_impl(
                 cast(SchedulerNode, template_snode),
-                self._unwrap_epilogue_nodes(fnode1),
+                [
+                    node
+                    for node in fnode1.snodes
+                    if not self.is_nv_universal_gemm_template(node)
+                ],
                 node2,
             )
-        return False
+        return NVGemmVerticalFusionDecision.REJECT
 
-    def _unwrap_epilogue_nodes(
-        self, fused_node: FusedSchedulerNode
-    ) -> list[BaseSchedulerNode]:
-        """Extract epilogue nodes from a fused node."""
-        epilogue_nodes = []
-        for node in fused_node.snodes:
-            if not self.is_nv_universal_gemm_template(node):
-                epilogue_nodes.append(node)
-        return epilogue_nodes
+    @staticmethod
+    def _lower_pointwise_epilogue(
+        gemm_name: str,
+        nodes: Sequence[BaseSchedulerNode],
+        removed_buffers: OrderedSet[str],
+        reduction_geometries: dict[str, GemmReductionGeometry] | None = None,
+        suppressed_outputs: OrderedSet[str] | None = None,
+    ) -> GemmEpiloguePlan:
+        buffers = [node.node for node in nodes if isinstance(node.node, ComputedBuffer)]
+        if len(buffers) != len(nodes):
+            raise NotImplementedError("NVGEMM epilogue nodes must be computed buffers")
+        try:
+            return LoopIRCuteDSLCodegen.from_buffers(
+                gemm_name,
+                buffers,
+                removed_buffers,
+                EPILOGUE_FN_NAME,
+                reduction_geometries,
+                suppressed_outputs,
+            )
+        except NotImplementedError:
+            return CutlassEVTCodegen.ir_to_evt_python_code(
+                gemm_name,
+                list(nodes),
+                removed_buffers,
+                fn_name=EPILOGUE_FN_NAME,
+                as_standalone_function=True,
+            )
 
     def _can_fuse_epilogue_impl(
         self,
         gemm_template_node: SchedulerNode,
         existing_epilogue_nodes: list[BaseSchedulerNode],
         node_to_fuse: BaseSchedulerNode,
-    ) -> bool:
-        from .nv_universal_gemm import GemmVariant
-
+    ) -> NVGemmVerticalFusionDecision:
         if not config.epilogue_fusion:
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
 
         ir_node = gemm_template_node.node
         if not isinstance(ir_node, (NVUniversalGemmBuffer, MultiTemplateBuffer)):
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
+        if self._has_output_scale(ir_node):
+            return NVGemmVerticalFusionDecision.DEFER
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
-            if ir_node.variant != GemmVariant.GEMM:
+            if ir_node.variant not in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM):
                 log.debug(
                     "NVGEMM epilogue fusion: not supported for %s variant",
                     ir_node.variant.op_name,
                 )
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
             if not ir_node.supports_epilogue_fusion:
                 log.debug(
                     "NVGEMM epilogue fusion: kernel %s does not support epilogue fusion",
                     ir_node.kernel_metadata.get("kernel_name", "unknown"),
                 )
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
+            variants = (ir_node.variant,)
         elif isinstance(ir_node, MultiTemplateBuffer):
             # Use _choices, not choice_timings() — the latter forces autotune sync.
-            has_efc_choice = False
-            for choice in ir_node._choices:
-                if not (
-                    isinstance(choice, NVUniversalGemmCaller)
-                    and choice.supports_epilogue_fusion
-                ):
-                    continue
-                has_efc_choice = True
-                if choice.variant != GemmVariant.GEMM:
-                    log.debug(
-                        "NVGEMM epilogue fusion: MultiTemplateBuffer has non-GEMM EFC choices"
-                    )
-                    return False
-            if not has_efc_choice:
+            variants = tuple(
+                choice.variant
+                for choice in ir_node._choices
+                if isinstance(choice, NVUniversalGemmCaller)
+                and choice.supports_epilogue_fusion
+            )
+            if not variants:
                 log.debug("NVGEMM epilogue fusion: no EFC kernel available in choices")
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
+            if any(
+                variant not in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM)
+                for variant in variants
+            ):
+                log.debug(
+                    "NVGEMM epilogue fusion: MultiTemplateBuffer has unsupported EFC choices"
+                )
+                return NVGemmVerticalFusionDecision.DEFER
 
-        scheduler_nodes_to_fuse = node_to_fuse.get_nodes()
+        epilogue_program = self._lower_epilogue(
+            ir_node, (*existing_epilogue_nodes, node_to_fuse)
+        )
+        all_scheduler_nodes = epilogue_program.capture.nodes
+        if not epilogue_program.supported:
+            log.debug("NVGEMM could not lower every captured reduction region")
+            return NVGemmVerticalFusionDecision.DEFER
+        feeds_main = epilogue_program.feeds_main
+        if feeds_main:
+            fused_names = OrderedSet(
+                scheduler_node.get_name() for scheduler_node in all_scheduler_nodes
+            )
+            fused_names.add(gemm_template_node.get_name())
+            if not V.graph.scheduler.can_buffer_be_removed_through_fusion(
+                ir_node.get_name(), fused_names
+            ):
+                return NVGemmVerticalFusionDecision.DEFER
+        reduction_region = epilogue_program.reduction_partition.region_for(
+            node_to_fuse.get_nodes()
+        )
+        scaled_epilogue = all(
+            variant == GemmVariant.SCALED_GEMM for variant in variants
+        )
+        swap_ab = self._uses_swap_ab(ir_node)
+        try:
+            reduction_plan = epilogue_program.oriented_reduction_plan(swap_ab)
+            reduction_geometries = epilogue_program.oriented_reduction_geometries(
+                swap_ab
+            )
+        except NotImplementedError as exc:
+            log.debug("NVGEMM cannot orient fused reductions: %s", exc)
+            return NVGemmVerticalFusionDecision.DEFER
+        if epilogue_program.has_composite_generated_reduction_plan:
+            log.debug("NVGEMM direct EFC supports one generated reduction")
+            return NVGemmVerticalFusionDecision.DEFER
+        if reduction_plan is not None and not all(
+            variant.supports_reduction(reduction_plan) for variant in variants
+        ):
+            return NVGemmVerticalFusionDecision.DEFER
+        if isinstance(ir_node, MultiTemplateBuffer) and not any(
+            isinstance(choice, NVUniversalGemmCaller)
+            and choice.supports_epilogue_fusion
+            and self._supports_reduction_layout(choice, epilogue_program.min_tile_shape)
+            for choice in ir_node._choices
+        ):
+            log.debug(
+                "NVGEMM epilogue fusion: no EFC kernel supports the reduction layout"
+            )
+            return NVGemmVerticalFusionDecision.DEFER
 
-        for s_node in scheduler_nodes_to_fuse:
+        for s_node in all_scheduler_nodes:
             node = s_node.node
             if not isinstance(node, ComputedBuffer):
                 log.debug("NVGEMM epilogue fusion: %s is not a ComputedBuffer", node)
-                return False
-            if not isinstance(node.data, Pointwise):
-                log.debug("NVGEMM epilogue fusion: %s is not a Pointwise op", node)
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
 
-            if not V.graph.sizevars.statically_known_list_equals(
-                node.get_size(), ir_node.get_size()
-            ):
-                log.debug(
-                    "NVGEMM epilogue fusion: size mismatch %s vs %s",
-                    node.get_size(),
-                    ir_node.get_size(),
-                )
-                return False
-
-        # EFC kernels don't support broadcast. Reject conservatively when a read
-        # can't be resolved — folded constants (weights/biases) aren't in
-        # name_to_buf, and silently skipping them would let a stride-0 bias through.
+        generated_reduction_nodes = OrderedSet(
+            node
+            for region in epilogue_program.generated_reduction_regions
+            for node in region.nodes
+        )
+        generated_reduction_outputs = reduction_geometries
+        if not feeds_main:
+            for s_node in epilogue_program.pointwise_nodes:
+                node = cast(ComputedBuffer, s_node.node)
+                if (
+                    s_node in generated_reduction_nodes
+                    or node.get_name() in generated_reduction_outputs
+                ):
+                    continue
+                if not isinstance(node.data, Pointwise):
+                    log.debug("NVGEMM epilogue fusion: %s is not a Pointwise op", node)
+                    return NVGemmVerticalFusionDecision.DEFER
+                if not V.graph.sizevars.statically_known_list_equals(
+                    node.get_size(), ir_node.get_size()
+                ):
+                    log.debug(
+                        "NVGEMM epilogue fusion: size mismatch %s vs %s",
+                        node.get_size(),
+                        ir_node.get_size(),
+                    )
+                    return NVGemmVerticalFusionDecision.DEFER
+                if not V.graph.sizevars.statically_known_list_equals(
+                    node.data.ranges, ir_node.get_size()
+                ):
+                    log.debug(
+                        "NVGEMM epilogue fusion: iteration-domain mismatch %s vs %s",
+                        node.data.ranges,
+                        ir_node.get_size(),
+                    )
+                    return NVGemmVerticalFusionDecision.DEFER
+        # Epilogue inputs support matrix, row, and column loads here. Reject
+        # other broadcast patterns before the pointwise lowerer's capability check.
         gemm_size = ir_node.get_size()
         name_to_buf = V.graph.name_to_buffer | V.graph.graph_inputs
-        for s_node in scheduler_nodes_to_fuse:
+        internal_names = OrderedSet([ir_node.get_name()]) | OrderedSet(
+            node.node.get_name()
+            for node in all_scheduler_nodes
+            if isinstance(node.node, Buffer)
+        )
+        for s_node in epilogue_program.pointwise_nodes:
             for rd in s_node.read_writes.reads:
-                if rd.name == ir_node.get_name():
+                if rd.name in internal_names:
                     continue
                 read_buf = name_to_buf.get(rd.name)
                 if read_buf is None:
@@ -272,77 +863,296 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         "NVGEMM epilogue fusion: read %s not in name_to_buffer/graph_inputs, refusing to fuse",
                         rd.name,
                     )
-                    return False
+                    return NVGemmVerticalFusionDecision.DEFER
                 read_size = read_buf.get_size()
-                if not V.graph.sizevars.statically_known_list_equals(
-                    read_size, gemm_size
+                if len(read_size) > len(gemm_size):
+                    log.debug(
+                        "NVGEMM epilogue fusion: read buffer %s has unsupported rank",
+                        rd.name,
+                    )
+                    return NVGemmVerticalFusionDecision.DEFER
+                padded_size = [1] * (len(gemm_size) - len(read_size)) + list(read_size)
+                supported_shapes = (
+                    gemm_size,
+                    [1, gemm_size[1]],
+                    [gemm_size[0], 1],
+                    [1] * len(gemm_size),
+                )
+                if not any(
+                    V.graph.sizevars.statically_known_list_equals(padded_size, shape)
+                    for shape in supported_shapes
                 ):
                     log.debug(
-                        "NVGEMM epilogue fusion: read buffer %s size %s != GEMM size %s (broadcast not supported)",
+                        "NVGEMM epilogue fusion: read buffer %s size %s is not broadcastable to GEMM size %s",
                         rd.name,
                         read_size,
                         gemm_size,
                     )
-                    return False
-                if hasattr(read_buf, "get_stride"):
-                    for s in read_buf.get_stride():
-                        if s == 0:
-                            log.debug(
-                                "NVGEMM epilogue fusion: read buffer %s has zero stride (broadcast not supported)",
-                                rd.name,
-                            )
-                            return False
-
+                    return NVGemmVerticalFusionDecision.DEFER
         if not existing_epilogue_nodes:
             reads = OrderedSet(rd.name for rd in node_to_fuse.read_writes.reads)
             if ir_node.get_name() not in reads:
                 log.debug(
                     "NVGEMM epilogue fusion: first epilogue node doesn't read from GEMM output"
                 )
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
 
         if node_to_fuse.has_aliasing_or_mutation():
             log.debug("NVGEMM epilogue fusion: node has aliasing or mutation")
-            return False
-        elif node_to_fuse.is_reduction():
+            return NVGemmVerticalFusionDecision.DEFER
+        elif (
+            node_to_fuse.is_reduction() and reduction_region is None and not feeds_main
+        ):
             log.debug("NVGEMM epilogue fusion: reductions not supported")
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
 
-        all_epilogue_nodes = list(existing_epilogue_nodes) + list(
-            node_to_fuse.get_nodes()
+        fused_buffer_names = OrderedSet(
+            n.get_name() for n in [gemm_template_node, *epilogue_program.capture.nodes]
         )
-
-        # Multi-store chains (>1 node) not yet supported: _render_epilogue_kwargs
-        # skips intermediate stores, so EpilogueArguments construction would fail.
-        # Normally pre-fusion collapses chains, but reject explicitly to avoid
-        # silent miscompile if that changes.
-        if len(all_epilogue_nodes) > 1:
-            log.debug(
-                "NVGEMM epilogue fusion: multi-stage chains (%d nodes) not yet supported",
-                len(all_epilogue_nodes),
+        preserve_gemm_output = (
+            not V.graph.scheduler.can_buffer_be_removed_through_fusion(
+                ir_node.get_name(), fused_buffer_names
             )
-            return False
-
-        trial_removed_buffers = V.graph.removed_buffers | OrderedSet(
-            [ir_node.get_name()]
         )
+        # Multi-store epilogues wire each output to its own destination tensor.
+        trial_removed_buffers = V.graph.removed_buffers.copy()
+        if not preserve_gemm_output:
+            trial_removed_buffers.add(ir_node.get_name())
         try:
-            CutlassEVTCodegen.ir_to_evt_python_code(
-                ir_node.get_name(),
-                all_epilogue_nodes,
-                trial_removed_buffers,
-            )
-        except (NotImplementedError, AssertionError) as e:
-            log.debug("NVGEMM epilogue fusion: trial EVT codegen failed: %s", e)
-            return False
+            trial_reads: tuple[str, ...] = ()
+            epilogue_dtype = ir_node.get_dtype()
+            pointwise_nodes = epilogue_program.pointwise_nodes
+            codegen_nodes = pointwise_nodes
+            if (
+                reduction_plan is not None
+                and reduction_plan.tensor_epilogue_returns_local_reduce
+            ):
+                codegen_nodes = epilogue_program.capture.nodes
+                generated_nodes = OrderedSet(epilogue_program.reduction_partition.nodes)
+                trial_removed_buffers.update(
+                    node.node.get_name()
+                    for node in generated_nodes
+                    if isinstance(node.node, Buffer)
+                    and node.node.get_name() != reduction_plan.reduction_output
+                )
+            if codegen_nodes:
+                suppressed_outputs = OrderedSet()
+                if (
+                    reduction_plan is not None
+                    and reduction_plan.tensor_epilogue_returns_local_reduce
+                    and reduction_plan.reduction_output is not None
+                ):
+                    suppressed_outputs.add(reduction_plan.reduction_output)
+                lowered_epilogue = self._lower_pointwise_epilogue(
+                    ir_node.get_name(),
+                    codegen_nodes,
+                    trial_removed_buffers,
+                    reduction_geometries,
+                    suppressed_outputs,
+                )
+                trial_reads = lowered_epilogue.reads
+                epilogue_dtype = V.graph.get_dtype(lowered_epilogue.writes[0])
+            if GemmVariant.GEMM in variants:
+                for read_name in trial_reads:
+                    read_buf = name_to_buf.get(read_name)
+                    read_dtype = None if read_buf is None else read_buf.get_dtype()
+                    try:
+                        dtype_supported = read_dtype is None or (
+                            read_dtype.is_floating_point
+                            and torch.promote_types(read_dtype, epilogue_dtype)
+                            == epilogue_dtype
+                        )
+                    except (RuntimeError, TypeError):
+                        dtype_supported = False
+                    if not dtype_supported:
+                        log.debug(
+                            "NVGEMM dense epilogue input %s has dtype %s, which cannot be represented by %s",
+                            read_name,
+                            read_dtype,
+                            epilogue_dtype,
+                        )
+                        return NVGemmVerticalFusionDecision.REJECT
+            if scaled_epilogue:
+                for read_name in trial_reads:
+                    read_buf = name_to_buf.get(read_name)
+                    if read_buf is None:
+                        log.debug(
+                            "NVGEMM scaled epilogue input %s cannot be resolved",
+                            read_name,
+                        )
+                        return NVGemmVerticalFusionDecision.DEFER
+        except NotImplementedError as e:
+            log.debug("NVGEMM epilogue fusion: trial pointwise codegen failed: %s", e)
+            return NVGemmVerticalFusionDecision.DEFER
 
-        return True
+        return NVGemmVerticalFusionDecision.FUSE
 
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         # NVIDIA Universal GEMM templates don't support horizontal fusion yet
         return False
+
+    def has_conflicting_epilogue_reductions(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        read_names = OrderedSet(read.name for read in node1.read_writes.reads)
+        read_names.intersection_update(read.name for read in node2.read_writes.reads)
+        for name in read_names:
+            producer = V.graph.try_get_buffer(name)
+            if not isinstance(producer, Buffer) or not self._has_nvgemm_choice(
+                producer
+            ):
+                continue
+            program = self._lower_epilogue(producer, (node1, node2))
+            if program.has_unclaimed_reduction:
+                return True
+        return False
+
+    @staticmethod
+    def has_bool_output(node: BaseSchedulerNode) -> bool:
+        return any(
+            isinstance(scheduler_node.node, ComputedBuffer)
+            and scheduler_node.node.get_dtype() == torch.bool
+            for scheduler_node in node.get_nodes()
+        )
+
+    def has_nvgemm_bool_output(self, node: BaseSchedulerNode) -> bool:
+        if not self.has_bool_output(node):
+            return False
+        is_template = self.is_nv_universal_gemm_template(node)
+        if is_template or self.is_nv_universal_gemm_fused_template(node):
+            return True
+        return any(
+            isinstance(producer := V.graph.try_get_buffer(read.name), Buffer)
+            and self._has_nvgemm_choice(producer)
+            for read in node.read_writes.reads
+        )
+
+    def get_fusion_pair_priority(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> int:
+        has_reduction = any(
+            isinstance(node.node, ComputedBuffer)
+            and isinstance(node.node.data, Reduction)
+            for node in node1.get_nodes()
+        )
+        if not has_reduction:
+            node1_ir = node1.node if isinstance(node1, SchedulerNode) else None
+            if self._has_nvgemm_choice(node1_ir) and any(
+                isinstance(node.node, ComputedBuffer)
+                and isinstance(node.node.data, Reduction)
+                for node in node2.get_nodes()
+            ):
+                return 1
+            return 2
+        node1_outputs = node1.get_buffer_names()
+        if not any(read.name in node1_outputs for read in node2.read_writes.reads):
+            return 2
+        scheduler = self.scheduler
+        if scheduler is None:
+            return 2
+        for read in node1.read_writes.reads:
+            producer = scheduler.name_to_fused_node.get(read.name)
+            try:
+                producer_buffer = V.graph.get_buffer(read.name)
+            except RuntimeError:
+                producer_buffer = None
+            has_nvgemm_producer = (
+                producer is not None
+                and (
+                    self.is_nv_universal_gemm_template(producer)
+                    or self.is_nv_universal_gemm_fused_template(producer)
+                )
+            ) or self._has_nvgemm_choice(producer_buffer)
+            if has_nvgemm_producer and isinstance(producer_buffer, Buffer):
+                capture = NVGemmEpilogueCapture.from_nodes(
+                    producer_buffer, (node1, node2)
+                )
+                if self._feed_main_config(capture):
+                    return 0
+                combined_partition = self._partition_local_reductions(capture)
+                if combined_partition.owns(node2.get_nodes()):
+                    log.debug(
+                        "prioritizing NVGEMM reduction chain %s -> %s",
+                        node1.get_name(),
+                        node2.get_name(),
+                    )
+                    return 0
+                if combined_partition.owns(node1.get_nodes()):
+                    return 2
+                return 0
+        return 2
+
+    def can_fuse_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        template = node1.get_template_node()
+        if not isinstance(template, Buffer):
+            return False
+        epilogue_nodes = [
+            node
+            for node in node1.get_nodes()
+            if not self.is_nv_universal_gemm_template(node)
+        ]
+        combined_program = self._lower_epilogue(template, (*epilogue_nodes, node2))
+        if not combined_program.supported:
+            return False
+        feed_main_ordered = combined_program.feeds_main and (
+            bool(epilogue_nodes)
+            or all(
+                read.name == template.get_name()
+                for node in node2.get_nodes()
+                for read in node.read_writes.reads
+            )
+        )
+        candidate_nodes = node2.get_nodes()
+        reduction_partition = combined_program.reduction_partition
+        generated_reduction_outputs = combined_program.generated_reduction_geometries
+        generated_reduction = any(
+            isinstance(node.node, ComputedBuffer)
+            and node.node.get_name() in generated_reduction_outputs
+            for node in candidate_nodes
+        )
+        if not (
+            reduction_partition.intersects(candidate_nodes)
+            or feed_main_ordered
+            or generated_reduction
+        ):
+            return False
+        template_snode = next(
+            node
+            for node in node1.get_nodes()
+            if self.is_nv_universal_gemm_template(node)
+        )
+        return (
+            self._can_fuse_epilogue_impl(
+                cast(SchedulerNode, template_snode), epilogue_nodes, node2
+            )
+            is NVGemmVerticalFusionDecision.FUSE
+        )
+
+    @staticmethod
+    def _schedule_reduction_plan(
+        program: NVGemmEpilogueProgram,
+        swap_ab: bool = False,
+    ) -> GemmReductionPlan | None:
+        if not program.supported:
+            return None
+        reduction_plan = program.oriented_reduction_plan(swap_ab)
+        if (
+            reduction_plan is None
+            or not reduction_plan.feeds_main
+            or reduction_plan.reduction_output is None
+        ):
+            return reduction_plan
+        fused_names = OrderedSet(node.get_name() for node in program.capture.nodes)
+        fused_names.add(program.capture.gemm.get_name())
+        if V.graph.scheduler.can_buffer_be_removed_through_fusion(
+            reduction_plan.reduction_output, fused_names
+        ):
+            return dataclasses.replace(reduction_plan, reduction_output=None)
+        return reduction_plan
 
     def define_kernel(
         self, src_code: str, node_schedule, precompile_metadata=None
@@ -395,6 +1205,26 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
         return kernel_name
 
+    @overload
+    def codegen_template(
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
+        *,
+        only_gen_src_code: Literal[False] = False,
+    ) -> str | None: ...
+
+    @overload
+    def codegen_template(
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
+        *,
+        only_gen_src_code: Literal[True],
+    ) -> NVGemmGeneratedSource: ...
+
     def codegen_template(
         self,
         template_node: BaseSchedulerNode,
@@ -402,7 +1232,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         prologue_nodes: Sequence[BaseSchedulerNode],
         *,
         only_gen_src_code: bool = False,
-    ) -> str | None:
+    ) -> str | NVGemmGeneratedSource | None:
         """
         Codegen a NVIDIA Universal GEMM template with optional epilogue fusion.
 
@@ -415,69 +1245,122 @@ class NVUniversalGemmScheduling(BaseScheduling):
             [n.get_name() for n in epilogue_nodes] if epilogue_nodes else [],
             [n.get_name() for n in prologue_nodes] if prologue_nodes else [],
         )
-        assert self.is_nv_universal_gemm_template(template_node), (  # noqa: S101
-            "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
-            "SchedulerNode that wraps a NVUniversalGemmBuffer or MultiTemplateBuffer with NVGEMM choice"
-        )
-        assert not prologue_nodes, (  # noqa: S101
-            "NVIDIA Universal GEMM doesn't support prologue fusion yet"
-        )
+        if not self.is_nv_universal_gemm_template(template_node):
+            raise AssertionError(
+                "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
+                "SchedulerNode that wraps a NVUniversalGemmBuffer or MultiTemplateBuffer with NVGEMM choice"
+            )
+        if prologue_nodes:
+            raise AssertionError(
+                "NVIDIA Universal GEMM doesn't support prologue fusion yet"
+            )
 
         template_node = cast(SchedulerNode, template_node)
 
         original_ir_node = template_node.node
-        assert isinstance(original_ir_node, Buffer)  # noqa: S101
+        if not isinstance(original_ir_node, Buffer):
+            raise AssertionError(f"expected Buffer, got {type(original_ir_node)}")
         original_buffer_name = original_ir_node.get_name()
 
+        epilogue_program = self._lower_epilogue(original_ir_node, epilogue_nodes)
+        epilogue_nodes = epilogue_program.capture.nodes
+        feeds_main = epilogue_program.feeds_main
         ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(
-            template_node, require_epilogue_fusion=bool(epilogue_nodes)
+            template_node,
+            require_epilogue_fusion=bool(epilogue_nodes),
+            min_tile_shape=epilogue_program.min_tile_shape,
         )
+        swap_ab = ctb.swap_ab
+        reduction_geometries = epilogue_program.oriented_reduction_geometries(swap_ab)
 
-        epilogue_fn_code: str | None = None
-        epilogue_reads: list[str] = []
-        epilogue_writes: list[str] = []
-        epilogue_var_renames: dict[str, Any] = {}
+        lowered_epilogue = GemmEpiloguePlan()
+        reduction_plan: GemmReductionPlan | None = None
 
         if epilogue_nodes:
+            scheduler = V.graph.scheduler
             try:
-                removed_buffers_with_gemm = V.graph.removed_buffers | OrderedSet(
-                    [original_buffer_name]
+                reduction_plan = self._schedule_reduction_plan(
+                    epilogue_program, swap_ab
                 )
-
-                reads, writes, var_renames, evt_code = (
-                    CutlassEVTCodegen.ir_to_evt_python_code(
-                        original_buffer_name,
-                        list(epilogue_nodes),
-                        removed_buffers_with_gemm,
-                        fn_name=EPILOGUE_FN_NAME,
-                        as_standalone_function=True,
+                if feeds_main:
+                    if reduction_plan is None:
+                        raise AssertionError("expected feed-main reduction plan")
+                    primary_output = reduction_plan.primary_output
+                    lowered_epilogue = GemmEpiloguePlan(
+                        writes=(primary_output,),
+                        renames={
+                            GEMM_ACCUMULATOR_ARG_NAME: original_buffer_name,
+                            "D": primary_output,
+                        },
+                        source=(
+                            f"def {EPILOGUE_FN_NAME}(accum):\n"
+                            "    D = accum\n    return D"
+                        ),
+                        is_evt_fallback=True,
                     )
+                pointwise_nodes = epilogue_program.pointwise_nodes
+                fused_buffer_names: OrderedSet[str] = OrderedSet(
+                    n.get_name() for n in epilogue_nodes
                 )
-                epilogue_fn_code = evt_code
-                epilogue_reads = reads
-                epilogue_writes = writes
-                epilogue_var_renames = var_renames
+                fused_buffer_names.add(original_buffer_name)
+                removed_buffers_with_gemm = V.graph.removed_buffers.copy()
+                if scheduler.can_buffer_be_removed_through_fusion(
+                    original_buffer_name, fused_buffer_names
+                ):
+                    removed_buffers_with_gemm.add(original_buffer_name)
+
+                codegen_nodes = pointwise_nodes
+                if (
+                    reduction_plan is not None
+                    and reduction_plan.tensor_epilogue_returns_local_reduce
+                ):
+                    codegen_nodes = epilogue_program.capture.nodes
+                    generated_nodes = OrderedSet(
+                        epilogue_program.reduction_partition.nodes
+                    )
+                    removed_buffers_with_gemm.update(
+                        node.node.get_name()
+                        for node in generated_nodes
+                        if isinstance(node.node, Buffer)
+                        and node.node.get_name() != reduction_plan.reduction_output
+                    )
+
+                if codegen_nodes:
+                    suppressed_outputs = OrderedSet()
+                    if (
+                        reduction_plan is not None
+                        and reduction_plan.tensor_epilogue_returns_local_reduce
+                        and reduction_plan.reduction_output is not None
+                    ):
+                        suppressed_outputs.add(reduction_plan.reduction_output)
+                    lowered_epilogue = self._lower_pointwise_epilogue(
+                        original_buffer_name,
+                        codegen_nodes,
+                        removed_buffers_with_gemm,
+                        reduction_geometries,
+                        suppressed_outputs,
+                    )
+                    if feeds_main and reduction_plan is not None:
+                        d_buf = lowered_epilogue.renames.get("D")
+                        if isinstance(d_buf, str):
+                            reduction_plan = dataclasses.replace(
+                                reduction_plan, primary_output=d_buf
+                            )
 
                 if not only_gen_src_code:
-                    fused_buffer_names: OrderedSet[str] = OrderedSet(
-                        n.get_name() for n in epilogue_nodes
-                    )
-                    fused_buffer_names.add(original_buffer_name)
-                    scheduler = V.graph.scheduler
-                    # Must add to removed_buffers BEFORE mark_run: mark_run emits
-                    # AllocateLine eagerly, and codegen_allocation only skips it
-                    # when the name is already in removed_buffers.
+                    write_bufs = OrderedSet(lowered_epilogue.writes)
+                    if reduction_plan is not None:
+                        write_bufs.update(reduction_plan.auxiliary_outputs)
                     for node in epilogue_nodes:
                         node_name = node.get_name()
-                        if epilogue_writes and node_name == epilogue_writes[-1]:
+                        if node_name in write_bufs:
                             continue
                         if scheduler.can_buffer_be_removed_through_fusion(
                             node_name, fused_buffer_names
                         ):
                             V.graph.removed_buffers.add(node_name)
                     if (
-                        epilogue_writes
-                        and original_buffer_name != epilogue_writes[-1]
+                        original_buffer_name not in write_bufs
                         and scheduler.can_buffer_be_removed_through_fusion(
                             original_buffer_name, fused_buffer_names
                         )
@@ -487,22 +1370,23 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         node.mark_run()
 
                 log.debug(
-                    "NVGEMM epilogue fusion: %d nodes, reads=%s, writes=%s",
+                    "NVGEMM epilogue fusion: %d nodes, reads=%s, writes=%s, reduction_plan=%s",
                     len(epilogue_nodes),
-                    epilogue_reads,
-                    epilogue_writes,
+                    lowered_epilogue.reads,
+                    lowered_epilogue.writes,
+                    reduction_plan,
                 )
-            except (NotImplementedError, AssertionError) as e:
-                log.warning("NVGEMM epilogue codegen failed unexpectedly: %s", e)
+            except NotImplementedError as e:
+                log_fn = log.debug if only_gen_src_code else log.warning
+                log_fn("NVGEMM epilogue codegen failed unexpectedly: %s", e)
                 raise
 
-        assert ctb.make_kernel_render is not None  # noqa: S101 # noqa: S101
+        if ctb.make_kernel_render is None:
+            raise AssertionError("expected ctb.make_kernel_render to be not None")
         kernel, render = ctb.make_kernel_render(
             ctb,
-            epilogue_fn_code=epilogue_fn_code,
-            epilogue_reads=epilogue_reads,
-            epilogue_writes=epilogue_writes,
-            epilogue_var_renames=epilogue_var_renames,
+            epilogue=lowered_epilogue,
+            local_reduce=reduction_plan,
         )
 
         if not only_gen_src_code:
@@ -511,7 +1395,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         src_code = render()
 
         if only_gen_src_code:
-            return src_code
+            return NVGemmGeneratedSource(source=src_code, kernel=kernel)
 
         # Precompile only base (non-EFC) kernels. EFC kernels produce
         # closure-wrapped artifacts that can't be serialized to disk cache.
@@ -522,7 +1406,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
         with V.set_kernel_handler(kernel):
             node_schedule: list[BaseSchedulerNode] = [template_node]
-            if epilogue_fn_code and epilogue_nodes:
+            if epilogue_nodes:
                 node_schedule.extend(epilogue_nodes)
             kernel_name = self.define_kernel(
                 src_code, node_schedule, precompile_metadata
@@ -542,21 +1426,22 @@ class NVUniversalGemmScheduling(BaseScheduling):
         symbolic (dynamic shapes), in which case the subprocess will skip
         precompilation and the kernel compiles lazily on first call.
         """
-        if not hasattr(kernel, "_template_input_args"):
-            return None
-
-        precompile_shapes = {}
-        precompile_strides = {}
-        precompile_dtypes = {}
-
         try:
-            for param_name, input_node in kernel._template_input_args:
-                size = input_node.get_size()
-                precompile_shapes[param_name] = [int(s) for s in size]
-                stride = input_node.get_stride()
-                precompile_strides[param_name] = [int(s) for s in stride]
-                precompile_dtypes[param_name] = str(
-                    input_node.get_dtype()
+            precompile_shapes, precompile_strides, precompile_dtypes = (
+                _nvgemm_precompile_input_metadata(kernel)
+            )
+
+            output_scale_name = kernel.epilogue.output_scale
+            if output_scale_name is not None:
+                output_scale = V.graph.get_buffer(output_scale_name)
+                precompile_shapes[output_scale_name] = [
+                    int(s) for s in output_scale.get_size()
+                ]
+                precompile_strides[output_scale_name] = [
+                    int(s) for s in output_scale.get_stride()
+                ]
+                precompile_dtypes[output_scale_name] = str(
+                    output_scale.get_dtype()
                 ).removeprefix("torch.")
 
             out_layout = cast(Layout, ctb.layout)
@@ -589,7 +1474,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
                 k = get_kernel_by_name(kernel_name)
                 if k is not None and hasattr(k, "impl"):
-                    from cutlass_api.providers.cutedsl.utils import (
+                    from cutlass.operators.providers.cutedsl.integration_utils.mma import (
                         get_max_active_clusters,
                     )
 
@@ -616,132 +1501,38 @@ class NVUniversalGemmScheduling(BaseScheduling):
         benchmark_kernel: bool = False,
         hint_override: int | None = None,
     ) -> str:
+        """Generate benchmark source for an NVGEMM template and its epilogue."""
         prologue, template, epilogue = nodes[0].get_prologue_template_epilogue(
             list(nodes)
         )
 
-        epilogue_reads: list[str] = []
-        if epilogue:
-            template_sn = cast(SchedulerNode, template)
-            assert isinstance(template_sn.node, Buffer)  # noqa: S101
-            original_buffer_name = template_sn.node.get_name()
-            removed_buffers_with_gemm = V.graph.removed_buffers | OrderedSet(
-                [original_buffer_name]
-            )
-            try:
-                reads, _, _, _ = CutlassEVTCodegen.ir_to_evt_python_code(
-                    original_buffer_name,
-                    list(epilogue),
-                    removed_buffers_with_gemm,
-                )
-                epilogue_reads = reads
-            except (NotImplementedError, AssertionError) as e:
-                log.warning("NVGEMM benchmark epilogue codegen failed: %s", e)
-
         with config.patch("benchmark_kernel", benchmark_kernel):
-            src_code = self.codegen_template(
-                template,
-                epilogue,
-                prologue,
-                only_gen_src_code=True,
-            )
+            try:
+                generated = self.codegen_template(
+                    template,
+                    epilogue,
+                    prologue,
+                    only_gen_src_code=True,
+                )
+            except NotImplementedError as exc:
+                from ..simd import CantSplit
 
-        assert src_code is not None  # noqa: S101 # noqa: S101
-        src_code = src_code.replace(
-            str(Placeholder.KERNEL_NAME), _BENCHMARK_KERNEL_PREFIX
+                raise CantSplit(
+                    "NVGEMM epilogue", "supported pointwise lowering"
+                ) from exc
+
+        if not isinstance(generated, NVGemmGeneratedSource):
+            raise AssertionError(
+                f"expected NVGemmGeneratedSource, got {type(generated)}"
+            )
+        generated = dataclasses.replace(
+            generated,
+            source=generated.source.replace(
+                str(Placeholder.KERNEL_NAME), _BENCHMARK_KERNEL_PREFIX
+            ),
         )
 
         if benchmark_kernel:
-            src_code = self._add_benchmark_helpers(
-                src_code, template, epilogue, epilogue_reads
-            )
+            return _render_nvgemm_benchmark_helpers(generated)
 
-        return src_code
-
-    def _add_benchmark_helpers(
-        self,
-        src_code: str,
-        template_node: BaseSchedulerNode,
-        epilogue_nodes: Sequence[BaseSchedulerNode],
-        epilogue_reads: list[str],
-    ) -> str:
-        template_node = cast(SchedulerNode, template_node)
-        ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(
-            template_node, require_epilogue_fusion=bool(epilogue_nodes)
-        )
-
-        input_nodes = cast(list[Buffer], ctb.inputs)
-        if epilogue_nodes:
-            final_node = cast(SchedulerNode, epilogue_nodes[-1])
-            output_layout = cast(
-                Layout,
-                final_node.node.get_layout(),  # pyrefly: ignore [missing-attribute]
-            )
-        else:
-            output_layout = cast(Layout, ctb.layout)
-
-        args_code = IndentedBuffer()
-        args_code.writeline("")
-        args_code.writeline("is_nvgemm = True")
-        args_code.writeline("")
-        args_code.writeline("def get_args():")
-        with args_code.indent():
-            args_code.writeline("import torch")
-            args_code.writeline("from torch._dynamo.testing import rand_strided")
-            args_code.writeline("args = []")
-
-            for inp in input_nodes:
-                size = V.graph.sizevars.optimization_hints(inp.get_size())
-                stride = V.graph.sizevars.optimization_hints(inp.get_stride())
-                dtype = inp.get_dtype()
-                device = inp.get_device()
-                args_code.writeline(
-                    f"args.append(rand_strided({size}, {stride}, device='{device}', dtype={dtype}))"
-                )
-
-            out_size = V.graph.sizevars.optimization_hints(output_layout.size)
-            out_stride = V.graph.sizevars.optimization_hints(output_layout.stride)
-            out_dtype = output_layout.dtype
-            out_device = output_layout.device
-            args_code.writeline(
-                f"args.append(rand_strided({out_size}, {out_stride}, device='{out_device}', dtype={out_dtype}))"
-            )
-
-            for read_name in epilogue_reads:
-                buf = V.graph.get_buffer(read_name)
-                size = V.graph.sizevars.optimization_hints(buf.get_size())
-                stride = V.graph.sizevars.optimization_hints(buf.get_stride())
-                dtype = buf.get_dtype()
-                device = buf.get_device()
-                args_code.writeline(
-                    f"args.append(rand_strided({size}, {stride}, device='{device}', dtype={dtype}))"
-                )
-
-            if ctb.workspace_size > 0:
-                args_code.writeline(
-                    f"args.append(torch.empty({ctb.workspace_size}, "
-                    f"device='{out_device}', dtype=torch.int8))"
-                )
-
-            args_code.writeline("return args")
-
-        args_code.writeline("")
-        args_code.writeline("def call(args):")
-        with args_code.indent():
-            args_code.writeline("import torch")
-            num_inputs = len(input_nodes)
-            param_list = [f"args[{i}]" for i in range(num_inputs)]
-            param_list.append(f"args[{num_inputs}]")
-
-            for j in range(len(epilogue_reads)):
-                param_list.append(f"args[{num_inputs + 1 + j}]")
-
-            if ctb.workspace_size > 0:
-                param_list.append(f"args[{num_inputs + 1 + len(epilogue_reads)}]")
-
-            params_str = ", ".join(param_list)
-            args_code.writeline("stream = torch.cuda.current_stream().cuda_stream")
-            bench_fn_name = f"{_BENCHMARK_KERNEL_PREFIX}_{MAIN_SUFFIX}"
-            args_code.writeline(f"{bench_fn_name}({params_str}, stream=stream)")
-
-        return src_code + args_code.getvalue()
+        return generated.source

@@ -4,8 +4,8 @@
 #include <ATen/native/transformers/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/native/transformers/xpu/sdp_utils.h>
-#include <c10/util/Array.h>
-#include <torch/library.h>
+#include <torch/library.h> // NOLINT(misc-header-include-cycle)
+#include <array>
 #include <utility>
 
 namespace {
@@ -13,7 +13,7 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
-  if (query_size_last != key_size_last) {
+  if (!TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last))) {
     if (debug) {
       TORCH_WARN(
           "OneDNN attention requires q,k to have the same last dimension.",
@@ -28,7 +28,7 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
 
   constexpr int MAX_HEAD_DIM = 576;
   const auto max_size_last = query_size_last.max(value_size_last);
-  if (max_size_last > MAX_HEAD_DIM) {
+  if (!TORCH_GUARD_OR_FALSE(max_size_last.sym_le(MAX_HEAD_DIM))) {
     if (debug) {
       TORCH_WARN(
           "OneDNN attention requires q,k,v to have head dimension less than ",
@@ -53,21 +53,25 @@ bool check_no_grad(sdp::sdp_params const& params, bool debug) {
 }
 
 bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
-  constexpr auto supported_dtypes = c10::array_of<at::ScalarType>(
-      at::kFloat, at::kBFloat16, at::kHalf); // double is not supported
+  constexpr auto supported_dtypes = std::to_array<at::ScalarType>(
+      {at::kFloat, at::kBFloat16, at::kHalf}); // double is not supported
 
   // Define gate functions that determine if a flash kernel can be run
-  constexpr auto constraints = c10::array_of<bool (*)(
-      sdp::sdp_params const&, bool)>(
-      sdp::check_nested_tensor,
-      sdp::check_for_dropout,
-      sdp::check_tensor_shapes,
-      sdp::check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
-      sdp::check_attn_mask_shape,
-      sdp::check_nonzero_sequence_lengths_dense,
-      sdp::check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>,
-      check_head_dim_size_xpu,
-      check_no_grad);
+  constexpr auto constraints =
+      std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+          {sdp::check_nested_tensor,
+           sdp::check_for_dropout,
+           sdp::check_tensor_shapes,
+           sdp::check_batch_size_and_num_heads_dense<
+               true /*supports GQA*/,
+               true /*requires_same_num_heads*/,
+               true /*supports_mqa*/>,
+           sdp::check_attn_mask_shape,
+           sdp::check_nonzero_sequence_lengths_dense,
+           sdp::check_last_dim_stride_equals_1_dense<
+               false /*ignore_singleton_dim*/>,
+           check_head_dim_size_xpu,
+           check_no_grad});
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -97,11 +101,16 @@ bool check_head_dim_size_mem_efficient(
     sdp::sdp_params const& params,
     bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
   const int64_t alignment = minimum_gemm_alignment(params);
-  if (!(query_size_last == params.key.sym_size(-1) &&
-        query_size_last % alignment == 0 && query_size_last > 0 &&
-        value_size_last % alignment == 0 && value_size_last > 0)) {
+  const bool valid_alignment =
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last)) &&
+      TORCH_GUARD_OR_FALSE((query_size_last % alignment).sym_eq(0)) &&
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_gt(0)) &&
+      TORCH_GUARD_OR_FALSE((value_size_last % alignment).sym_eq(0)) &&
+      TORCH_GUARD_OR_FALSE(value_size_last.sym_gt(0));
+  if (!valid_alignment) {
     if (debug) {
       TORCH_WARN(
           "Mem efficient attention requires last dimension of inputs to be divisible by ",
@@ -110,9 +119,9 @@ bool check_head_dim_size_mem_efficient(
           "Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
-          params.key.sym_size(-1),
+          key_size_last,
           ", Value.size(-1): ",
-          params.value.sym_size(-1),
+          value_size_last,
           " instead.");
     }
     return false;
@@ -125,10 +134,10 @@ bool can_use_mem_efficient_attention(
     bool debug) {
   // Define gate functions that determine if a mem efficient can be run
   constexpr auto general_constraints =
-      c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-          sdp::check_runtime_disabled_mem_efficient,
-          sdp::check_tensor_shapes,
-          check_head_dim_size_mem_efficient);
+      std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+          {sdp::check_runtime_disabled_mem_efficient,
+           sdp::check_tensor_shapes,
+           check_head_dim_size_mem_efficient});
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -136,10 +145,10 @@ bool can_use_mem_efficient_attention(
   }
   if (has_for_nested_inputs(params)) {
     constexpr auto nested_constraints =
-        c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-            sdp::check_requires_grad_and_nested,
-            sdp::check_batch_size_nested,
-            sdp::check_for_seq_len_0_nested_tensor);
+        std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+            {sdp::check_requires_grad_and_nested,
+             sdp::check_batch_size_nested,
+             sdp::check_for_seq_len_0_nested_tensor});
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -148,10 +157,10 @@ bool can_use_mem_efficient_attention(
   }
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints =
-        c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-            sdp::check_nonzero_sequence_lengths_dense,
-            sdp::check_last_dim_stride_equals_1_dense<false>,
-            sdp::check_batch_size_and_num_heads_dense<false>);
+        std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+            {sdp::check_nonzero_sequence_lengths_dense,
+             sdp::check_last_dim_stride_equals_1_dense<false>,
+             sdp::check_batch_size_and_num_heads_dense<false>});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -253,6 +262,8 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
 } // namespace
 
 namespace at::native {
+// Referenced by native_functions.yaml and REGISTER_XPU_DISPATCH below.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 int64_t _fused_sdp_choice_xpu(
     const at::Tensor& query_,
     const at::Tensor& key,
@@ -262,8 +273,15 @@ int64_t _fused_sdp_choice_xpu(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
-  sdp::sdp_params kernel_params{
-      query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
+  auto kernel_params = sdp::normalize_unbatched_input({
+      .query = query_,
+      .key = key,
+      .value = value,
+      .attn_mask = attn_mask_,
+      .dropout = dropout_p,
+      .is_causal = is_causal,
+      .enable_gqa = enable_gqa,
+  });
   auto backend = select_sdp_backend_xpu(kernel_params);
 
   if (backend == sdp::SDPBackend::error) {
@@ -285,6 +303,8 @@ std::tuple<
     at::Tensor,
     at::Tensor,
     at::Tensor>
+// Referenced by native_functions.yaml.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 _scaled_dot_product_fused_attention_overrideable_xpu(
     const at::Tensor& query,
     const at::Tensor& key,
@@ -327,6 +347,9 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       batch_size, num_head_q, seq_len_q, head_dim_v};
   alloc_with_matching_layout(query, output, output_shape);
   at::Tensor logsumexp, debug_attn_mask; // not supported
+  // rng not used
+  auto philox_seed = at::empty({}, at::dtype(at::kLong));
+  auto philox_offset = at::empty({}, at::dtype(at::kLong));
 
   at::native::onednn::sdpa(
       batch_size,
@@ -344,11 +367,11 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       scale.has_value() ? scale.value() : (1.0 / std::sqrt(head_dim_qk)),
       output,
       false,
-      logsumexp);
+      logsumexp,
+      dropout_p,
+      philox_seed,
+      philox_offset);
 
-  // rng not used
-  auto philox_seed = at::empty({}, at::dtype(at::kLong));
-  auto philox_offset = at::empty({}, at::dtype(at::kLong));
   return std::make_tuple(
       std::move(output),
       std::move(logsumexp),

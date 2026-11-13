@@ -96,15 +96,6 @@ static_assert(
 
 } // namespace c10
 
-namespace std {
-template <>
-struct hash<c10::DeviceType> {
-  std::size_t operator()(c10::DeviceType k) const {
-    return std::hash<int>()(static_cast<int>(k));
-  }
-};
-} // namespace std
-
 HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::COMPILE_TIME_MAX_DEVICE_TYPES;
 using c10::DeviceType;
