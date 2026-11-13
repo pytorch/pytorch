@@ -1135,23 +1135,44 @@ def _create_wrapped_method(cls: type, name: str) -> Callable[..., Any]:
 
 
 class _PatchedFn(NamedTuple):
+    """
+    One replacement of ``frame_dict[fn_name]`` (or ``frame_dict.fn_name``) by
+    ``new_fn``.
+
+    Patches can belong to traces running in different threads, so they go through
+    a process-wide registry guarded by ``_active_patches_lock``: ``patch()`` and
+    ``revert()`` must be called in pairs, and reverting a patch that is not applied
+    is a no-op. Subclasses only implement ``_read``/``_write`` (how to access the
+    slot) and must not override ``patch``/``revert``, or they bypass the registry.
+    ``orig_fn`` is informational: the value restored once the last patch on a slot
+    is reverted is the one read from the slot, under the lock, when its first patch
+    was applied.
+    """
+
     frame_dict: Any  # dict[str, Any] for SetItem/Del, type for SetAttr
     fn_name: str
     orig_fn: Callable[..., Any] | None
     new_fn: Callable[..., Any]
 
-    def _apply(self) -> None:
+    def _read(self) -> Any:
+        """Return the slot's current value, or ``_MISSING`` if it is unset."""
         raise NotImplementedError
 
-    def _restore(self) -> None:
+    def _write(self, value: Any) -> None:
+        """Set the slot to ``value``; ``_MISSING`` unsets it."""
         raise NotImplementedError
 
     def patch(self) -> None:
         key = (id(self.frame_dict), self.fn_name)
+        # Snapshot the original and register the patch in one critical section
+        # (the lock is not reentrant): reading the slot before taking the lock
+        # could pick up another thread's wrapper as the "original".
         with _active_patches_lock:
-            _, active = _active_patches.setdefault(key, (self, []))
-            active.append(self)
-            self._apply()
+            entry = _active_patches.get(key)
+            if entry is None:
+                entry = _active_patches[key] = (self._read(), [])
+            entry[1].append(self)
+            self._write(self.new_fn)
 
     def revert(self) -> None:
         # Patches of traces running in different threads can be reverted in any
@@ -1163,7 +1184,7 @@ class _PatchedFn(NamedTuple):
             entry = _active_patches.get(key)
             if entry is None:
                 return
-            first, active = entry
+            original, active = entry
             for i, patch in enumerate(active):
                 if patch is self:
                     del active[i]
@@ -1171,40 +1192,47 @@ class _PatchedFn(NamedTuple):
             else:
                 return  # not applied
             if active:
-                active[-1]._apply()
+                self._write(active[-1].new_fn)
             else:
                 del _active_patches[key]
-                first._restore()
+                self._write(original)
 
 
-# For each (id(frame_dict), fn_name) currently patched: the first patch applied to
-# it, which holds the original value, and the patches still applied, oldest first.
-_active_patches: dict[tuple[int, str], tuple[_PatchedFn, list[_PatchedFn]]] = {}
+# Marks a slot that held no value before it was patched.
+_MISSING = object()
+
+# For each (id(frame_dict), fn_name) currently patched: the value the slot held
+# before its first patch (or _MISSING), and the patches still applied, oldest first.
+_active_patches: dict[tuple[int, str], tuple[Any, list[_PatchedFn]]] = {}
 _active_patches_lock = threading.Lock()
 
 
 class _PatchedFnSetItem(_PatchedFn):
-    def _restore(self) -> None:
-        self.frame_dict[self.fn_name] = self.orig_fn
+    def _read(self) -> Any:
+        return self.frame_dict.get(self.fn_name, _MISSING)
 
-    def _apply(self) -> None:
-        self.frame_dict[self.fn_name] = self.new_fn
+    def _write(self, value: Any) -> None:
+        if value is _MISSING:
+            self.frame_dict.pop(self.fn_name, None)
+        else:
+            self.frame_dict[self.fn_name] = value
 
 
-class _PatchedFnDel(_PatchedFn):
-    def _restore(self) -> None:
-        del self.frame_dict[self.fn_name]
-
-    def _apply(self) -> None:
-        self.frame_dict[self.fn_name] = self.new_fn
+class _PatchedFnDel(_PatchedFnSetItem):
+    # Shadows a builtin with a new global; restoring removes the global again.
+    pass
 
 
 class _PatchedFnSetAttr(_PatchedFn):
-    def _restore(self) -> None:
-        setattr(self.frame_dict, self.fn_name, self.orig_fn)
+    def _read(self) -> Any:
+        return getattr(self.frame_dict, self.fn_name, _MISSING)
 
-    def _apply(self) -> None:
-        setattr(self.frame_dict, self.fn_name, self.new_fn)
+    def _write(self, value: Any) -> None:
+        if value is _MISSING:
+            if self.fn_name in vars(self.frame_dict):
+                delattr(self.frame_dict, self.fn_name)
+        else:
+            setattr(self.frame_dict, self.fn_name, value)
 
 
 class _Patcher:

@@ -2071,7 +2071,7 @@ assert torch.equal(gm(torch.ones(2)), torch.full((2,), 4.0))
         self.assertIsNone(_get_current_patcher())
 
     def test_patches_reverted_out_of_order(self):
-        # Traces in different threads patch the same method and can finish in any
+        # Traces in different threads patch the same slot and can finish in any
         # order. Reverting one must leave the other's patch applied, and the original
         # must come back once both are reverted.
         from torch.fx._symbolic_trace import _Patcher
@@ -2080,41 +2080,108 @@ assert torch.equal(gm(torch.ones(2)), torch.full((2,), 4.0))
             def f(self):
                 return "orig"
 
+        def first_fn():
+            return "first"
+
+        def second_fn():
+            return "second"
+
         orig = Foo.f
-        first, second = _Patcher(), _Patcher()
-        first.patch_method(Foo, "f", lambda self: "first", deduplicate=False)
-        second.patch_method(Foo, "f", lambda self: "second", deduplicate=False)
-        first.revert_all_patches()
-        self.assertEqual(Foo().f(), "second")
-        second.revert_all_patches()
+        namespace = {"g": "orig"}
+        with _Patcher() as first, _Patcher() as second:
+            first.patch_method(Foo, "f", lambda self: "first", deduplicate=False)
+            first.patch(namespace, "g", first_fn, deduplicate=False)
+            first.patch(namespace, "len", first_fn, deduplicate=False)
+            second.patch_method(Foo, "f", lambda self: "second", deduplicate=False)
+            second.patch(namespace, "g", second_fn, deduplicate=False)
+            second.patch(namespace, "len", second_fn, deduplicate=False)
+            first.revert_all_patches()
+            self.assertEqual(Foo().f(), "second")
+            self.assertEqual(namespace, {"g": second_fn, "len": second_fn})
+            second.revert_all_patches()
+            self.assertIs(Foo.f, orig)
+            self.assertEqual(namespace, {"g": "orig"})
+
+    def test_patch_restores_original_not_stale_wrapper(self):
+        # A patch whose orig_fn is another trace's wrapper (read before that trace
+        # reverted) must still restore the real original once it is the last one.
+        from torch.fx._symbolic_trace import _PatchedFnSetAttr
+
+        class Foo:
+            def f(self):
+                return "orig"
+
+        orig = Foo.f
+
+        def wrapper_a(self):
+            return "a"
+
+        def wrapper_b(self):
+            return "b"
+
+        patch_a = _PatchedFnSetAttr(Foo, "f", orig, wrapper_a)
+        # B reads the slot while A's wrapper is installed ...
+        patch_b = _PatchedFnSetAttr(Foo, "f", wrapper_a, wrapper_b)
+        self.addCleanup(patch_b.revert)
+        self.addCleanup(patch_a.revert)
+        patch_a.patch()
+        # ... but A fully reverts before B applies its patch.
+        patch_a.revert()
+        patch_b.patch()
+        self.assertEqual(Foo().f(), "b")
+        patch_b.revert()
+        self.assertIs(Foo.f, orig)
+
+        # Revert window: B temporarily reverts (e.g. around a Dynamo compile) while
+        # A finishes, then reapplies its patch on top of the restored original.
+        patch_a = _PatchedFnSetAttr(Foo, "f", orig, wrapper_a)
+        patch_b = _PatchedFnSetAttr(Foo, "f", wrapper_a, wrapper_b)
+        self.addCleanup(patch_b.revert)
+        self.addCleanup(patch_a.revert)
+        patch_a.patch()
+        patch_b.patch()
+        patch_b.revert()
+        patch_a.revert()
+        self.assertIs(Foo.f, orig)
+        patch_b.patch()
+        patch_b.revert()
         self.assertIs(Foo.f, orig)
 
     def test_make_fx_in_concurrent_threads(self):
         from torch.fx._symbolic_trace import _orig_module_call, _orig_module_getattr
         from torch.fx.experimental.proxy_tensor import make_fx
 
+        def restore_module_methods():
+            torch.nn.Module.__call__ = _orig_module_call
+            torch.nn.Module.__getattr__ = _orig_module_getattr
+
+        self.addCleanup(restore_module_methods)
+
+        linear = torch.nn.Linear(4, 4)
+
         def fn(x):
-            return torch.sin(x) + torch.cos(x) * 2.0
+            return linear(torch.sin(x)) + torch.cos(x) * 2.0
 
         num_threads = 4
-        barrier = threading.Barrier(num_threads)
+        barrier = threading.Barrier(num_threads, timeout=60)
         errors = []
 
         def worker():
-            barrier.wait()
             try:
+                barrier.wait()
                 for _ in range(5):
                     x = torch.randn(4, 4)
                     self.assertEqual(make_fx(fn)(x)(x), fn(x))
-            except Exception as e:
-                errors.append(e)
+            except Exception:
+                errors.append(traceback.format_exc())
 
-        threads = [threading.Thread(target=worker) for _ in range(num_threads)]
+        threads = [threading.Thread(target=worker, daemon=True) for _ in range(num_threads)]
         for thread in threads:
             thread.start()
         for thread in threads:
-            thread.join()
-        self.assertEqual(errors, [])
+            thread.join(timeout=120)
+        self.assertFalse(any(thread.is_alive() for thread in threads), "worker threads hung")
+        self.assertEqual(errors, [], "\n".join(errors))
         self.assertIs(torch.nn.Module.__call__, _orig_module_call)
         self.assertIs(torch.nn.Module.__getattr__, _orig_module_getattr)
 
