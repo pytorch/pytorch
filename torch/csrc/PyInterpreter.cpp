@@ -1203,7 +1203,7 @@ ActiveFakeMode get_active_fake_mode() {
 // torch/_meta_registrations.py for its static shape case. This callback handles
 // the meta_table exclusion, the decomposition_table lookup with its
 // symbolic/static-shape and sparse eligibility, and the Python
-// CompositeImplicitAutograd lookup. The C++ Fake fallback that calls it handles
+// CompositeImplicitAutograd lookup. It has no caller yet; a caller must handle
 // the cpp_meta_supports_symint and _unbacked_special_fake_handling_ops
 // exclusions, and afterwards the native CompositeImplicitAutograd fallback.
 bool ConcretePyInterpreterVTable::fake_try_decomp(
