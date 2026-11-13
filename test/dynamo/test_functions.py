@@ -8,6 +8,7 @@ import datetime
 import enum
 import functools
 import inspect
+import io
 import itertools
 import keyword
 import math
@@ -33,7 +34,6 @@ from torch import sub
 from torch._dynamo import decorators, trace_rules
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
-from torch._dynamo.source import GetItemSource, SkipGuardSource, TypeMROSource
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
@@ -44,7 +44,6 @@ from torch._dynamo.utils import counters, ifdynstaticdefault, range_iterator, sa
 from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.functions import WrappedMethodDescriptorVariable
 from torch._dynamo.variables.lists import RangeVariable
-from torch._dynamo.variables.object_protocol import mro_attr_source
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -223,181 +222,6 @@ def deque_length_hints():
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
-    def test_shared_mro_owner_base_replacement(self):
-        class Base:
-            scale = 1
-
-        class Other:
-            scale = 7
-
-        class Left(Base):
-            pass
-
-        class Right(Base):
-            pass
-
-        def fn(x, left, right):
-            return x + left.scale + right.scale
-
-        left, right, x = Left(), Right(), torch.ones(1)
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        self.assertEqual(compiled(x, left, right), x + 2)
-        Right.__bases__ = (Other,)
-        self.assertEqual(compiled(x, left, right), x + 8)
-        self.assertEqual(counter.frame_count, 2)
-
-    def test_mro_guards_pin_builtin_object_tail(self):
-        class Base:
-            scale = 1
-
-        class Input(Base):
-            pass
-
-        def fn(x, obj):
-            return x + obj.scale
-
-        x, obj = torch.ones(1), Input()
-        explanation = torch._dynamo.explain(fn)(x, obj)
-        self.assertEqual(explanation.graph_count, 1)
-        guards = {
-            (guard.create_fn_name(), guard.originating_source)
-            for guard in explanation.out_guards
-        }
-        mro_sources = {
-            source
-            for kind, source in guards
-            if kind == "SEQUENCE_LENGTH" and isinstance(source, TypeMROSource)
-        }
-        self.assertEqual(len(mro_sources), 1)
-        for guard in explanation.out_guards:
-            if isinstance(guard.originating_source, TypeMROSource):
-                self.assertNotIn("TYPE_MATCH", guard.guard_types or ())
-        source = mro_sources.pop()
-        self.assertIn(("ID_MATCH", GetItemSource(source, 1)), guards)
-        self.assertIn(("ID_MATCH", GetItemSource(source, 2)), guards)
-
-    @parametrize("initial_builtin", [False, True])
-    def test_shared_mro_owner_non_object_tail(self, initial_builtin):
-        class Tail:
-            def f(self, x):
-                return x + 1
-
-        class OtherTail:
-            def f(self, x):
-                return x + 2
-
-            def __format__(self, spec):
-                return "changed"
-
-        tail = object if initial_builtin else Tail
-
-        class Meta(type):
-            def mro(cls):
-                return [cls, tail] if initial_builtin else [cls, object, tail]
-
-        class LeftBase(metaclass=Meta):
-            pass
-
-        class RightBase(metaclass=Meta):
-            pass
-
-        class InitialBase:
-            pass
-
-        class Left(InitialBase):
-            pass
-
-        class Right(InitialBase):
-            pass
-
-        left, right = (Left, Right) if initial_builtin else (Left(), Right())
-        Left.__bases__ = (LeftBase,)
-        Right.__bases__ = (RightBase,)
-
-        def fn(x, left, right):
-            if initial_builtin:
-                return x + (left.__format__ is right.__format__)
-            return left.f(x) + right.f(x)
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        self.assertEqual(compiled(x, left, right), fn(x, left, right))
-        tail = OtherTail
-        RightBase.__bases__ = (object,)
-        self.assertEqual(compiled(x, left, right), fn(x, left, right))
-        self.assertEqual(counter.frame_count, 2)
-
-    def test_mro_guards_custom_metaclass_fallback(self):
-        class Meta(type):
-            def __getattribute__(cls, name):
-                if name == "__mro__":
-                    return ()
-                return super().__getattribute__(name)
-
-        class Input(metaclass=Meta):
-            @property
-            def scale(self):
-                return 3
-
-        def fn(x, obj):
-            return x + obj.scale
-
-        obj, x = Input(), torch.ones(1)
-        with self.assertRaisesRegex(Unsupported, "Custom metaclass metadata access"):
-            torch.compile(fn, backend="eager", fullgraph=True)(x, obj)
-        self.assertEqual(torch.compile(fn, backend="eager")(x, obj), x + 3)
-
-    @parametrize("suppressed", ["context", "source"])
-    @parametrize("change", ["bases", "shadow"])
-    def test_mro_guards_after_suppressed_lookup(self, suppressed, change):
-        class Base:
-            scale = 1
-
-        class Other:
-            scale = 1
-
-            def __getattribute__(self, name):
-                if name == "scale":
-                    return 7
-                return super().__getattribute__(name)
-
-        class Input(Base):
-            pass
-
-        def prime(ctx):
-            obj = (
-                ctx.get_local("obj")
-                ._i_will_not_complain_if_bc_breaks_VariableTracker()
-                .realize()
-            )
-            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
-            source = obj.cls_source
-            if suppressed == "source":
-                source = SkipGuardSource(source)
-            with patch.object(
-                torch._guards.TracingContext.get().guards_context,
-                "skip_install",
-                suppressed == "context",
-            ):
-                mro_attr_source(tx, obj.python_type(), source, "scale")
-
-        def fn(x, obj):
-            comptime(prime)
-            return x + obj.scale
-
-        obj, x = Input(), torch.ones(1)
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        self.assertEqual(compiled(x, obj), x + 1)
-        if change == "bases":
-            Input.__bases__ = (Other,)
-        else:
-            Input.scale = 7
-        self.assertEqual(compiled(x, obj), x + 7)
-        self.assertEqual(counter.frame_count, 2)
-
     hw_classification = HardwareClassification.GENERIC
 
     @make_test
@@ -3215,6 +3039,49 @@ partial_fn = functools.partial(fn, scale=2)
 
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_union_type_hasattr(self):
+        def fn(x, t):
+            return x + 1, hasattr(t, "__name__"), hasattr(t, "__args__")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(fn(x, int | None), opt_fn(x, int | None))
+
+    def test_hasattr_caching_getattr(self):
+        # Mirrors tempfile._TemporaryFileWrapper: __getattr__ caches into
+        # __dict__, so guards must not call it while they are built.
+        class Wrapper:
+            def __init__(self):
+                self.__dict__["file"] = io.BytesIO()
+
+            def __getattr__(self, name):
+                a = getattr(self.__dict__["file"], name)
+                setattr(self, name, a)
+                return a
+
+        def fn(w, x):
+            if hasattr(w, "seek"):
+                return x + 1
+            return x - 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        w = Wrapper()
+        self.assertEqual(opt_fn(w, x), x + 1)
+        self.assertIn("seek", w.__dict__)
+        self.assertEqual(opt_fn(w, x), x + 1)
+
+        # Found without __getattr__: hasattr must still guard on presence.
+        def fn_tag(w, x):
+            return x + 1 if hasattr(w, "tag") else x - 1
+
+        opt_fn_tag = torch.compile(fn_tag, backend="eager", fullgraph=True)
+        w = Wrapper()
+        w.tag = 1
+        self.assertEqual(opt_fn_tag(w, x), x + 1)
+        del w.tag
+        self.assertEqual(opt_fn_tag(w, x), x - 1)
 
     @make_test
     def test_list_clear(a, b):

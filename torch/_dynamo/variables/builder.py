@@ -81,7 +81,6 @@ from torch._subclasses.fake_tensor import (
     maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
-from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
 from torch.fx.experimental.dynamic_spec import (
@@ -214,7 +213,6 @@ from ..utils import (
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
-    UnsupportedOrderedDictRuntime,
     unwrap_with_attr_name_if_wrapper,
     wrap_fake_exception,
 )
@@ -940,28 +938,15 @@ def _is_dim_dynamic_from_source_dynamism(
 def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
     try:
         return list(enumerate_items_with_dict_position(value))
-    except UnsupportedOrderedDictRuntime as error:
-        unimplemented(
-            gb_type="Unsupported OrderedDict snapshot runtime",
-            context=str(error),
-            explanation="This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
-            hints=[
-                "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+.",
-            ],
-            from_exc=error,
-            skip_frame=True,
-            apply_to_code=False,
-        )
-    except InvalidOrderedDict as error:
+    except InvalidOrderedDict:
         unimplemented(
             gb_type="OrderedDict storage differs from linked keys",
-            context=f"OrderedDict input snapshot: {error}",
-            explanation="Dynamo cannot safely match this OrderedDict's linked order to its dictionary storage.",
+            context="OrderedDict input snapshot",
+            explanation="Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
             hints=[
                 "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
                 *graph_break_hints.FUNDAMENTAL,
             ],
-            from_exc=error,
             skip_frame=True,
             apply_to_code=False,
         )
@@ -3986,7 +3971,6 @@ class VariableBuilder:
             # when specialize_float=False
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda
             or torch._inductor.config.triton.cudagraphs
-            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or (
                 config.assume_static_by_default
                 and frame_state_entry.scalar is not auto_dynamic

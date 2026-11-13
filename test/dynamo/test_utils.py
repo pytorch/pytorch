@@ -6,7 +6,6 @@ import os
 import pprint
 import sys
 import unittest
-from collections import OrderedDict
 from unittest import mock
 from unittest.mock import patch
 
@@ -15,8 +14,6 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch.compiler.config as compiler_config
 from torch._dynamo import utils
-from torch._dynamo.testing import CompileCounter
-from torch._dynamo.variables.builder import _dict_input_snapshot
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -25,10 +22,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
-    parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -38,77 +33,8 @@ from torch.testing._internal.common_utils import (
 _IS_WINDOWS = sys.platform == "win32"
 
 
-@instantiate_parametrized_tests
 class TestUtils(TestCase):
     hw_classification = HardwareClassification.GENERIC
-
-    @parametrize("mutations_locked", [False, True])
-    def test_ordered_snapshot_runtime_safety(self, mutations_locked):
-        mapping = OrderedDict(a=1, b=2)
-        mapping.move_to_end("a")
-        with mock.patch.object(
-            utils, "_ORDERED_DICT_MUTATIONS_LOCKED", mutations_locked
-        ):
-            if not mutations_locked:
-                with mock.patch.object(
-                    torch._C._dynamo.guards,
-                    "ordered_dict_keys",
-                    wraps=torch._C._dynamo.guards.ordered_dict_keys,
-                ) as native:
-                    with self.assertRaisesRegex(
-                        utils.UnsupportedOrderedDictRuntime, r"require Python 3\.14\.1"
-                    ):
-                        list(utils.enumerate_items_with_dict_position(mapping))
-                    self.assertIsNone(torch._dynamo.guards._ordered_dict_order(mapping))
-                    with self.assertRaisesRegex(
-                        torch._dynamo.exc.Unsupported, r"require Python 3\.14\.1"
-                    ):
-                        _dict_input_snapshot(mapping)
-                    self.assertTrue(native.call_args_list)
-                    for call in native.call_args_list:
-                        self.assertEqual(call.kwargs, {"empty_only": True})
-            else:
-                self.assertEqual(
-                    list(utils.enumerate_items_with_dict_position(mapping)),
-                    [(1, "b", 2), (0, "a", 1)],
-                )
-
-    def test_corrupted_empty_ordered_snapshot_older_free_threaded(self):
-        mapping = OrderedDict(a=1)
-        dict.clear(mapping)
-        self.assertEqual(dict.__len__(mapping), 0)
-        self.assertEqual(list(mapping), ["a"])
-        with mock.patch.object(utils, "_ORDERED_DICT_MUTATIONS_LOCKED", False):
-            with self.assertRaisesRegex(
-                utils.UnsupportedOrderedDictRuntime, "Nonempty"
-            ):
-                list(utils.enumerate_items_with_dict_position(mapping))
-            self.assertIsNone(torch._dynamo.guards._ordered_dict_order(mapping))
-
-    def test_empty_ordered_snapshot_older_free_threaded(self):
-        with (
-            mock.patch.object(utils, "_ORDERED_DICT_MUTATIONS_LOCKED", False),
-            mock.patch.object(
-                torch._C._dynamo.guards,
-                "ordered_dict_keys",
-                wraps=torch._C._dynamo.guards.ordered_dict_keys,
-            ) as native,
-        ):
-            self.assertEqual(_dict_input_snapshot(OrderedDict()), [])
-            self.assertEqual(
-                torch._dynamo.guards._ordered_dict_order(OrderedDict()), ()
-            )
-            native.reset_mock()
-            counter = CompileCounter()
-            compiled = torch.compile(
-                lambda x, module: module(x) + 1, backend=counter, fullgraph=True
-            )
-            x = torch.ones(1)
-            self.assertEqual(compiled(x, torch.nn.Identity()), x + 1)
-            self.assertEqual(counter.frame_count, 1)
-            self.assertTrue(native.call_args_list)
-            for call in native.call_args_list:
-                self.assertEqual(call.kwargs, {"empty_only": True})
 
     def test_cleanup_hook_tolerates_missing_name(self):
         # During interpreter shutdown the scope's module __dict__ may already be
