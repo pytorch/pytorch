@@ -872,6 +872,16 @@ print(t.is_pinned())
             props.shared_memory_per_block_optin, props.shared_memory_per_block
         )
 
+    @skipIfRocmVersionLessThan((7, 0))
+    def test_cuda_xcc_count(self):
+        for device in range(torch.cuda.device_count()):
+            xcc_count = torch.cuda.get_device_properties(device).xcc_count
+            if torch.version.hip is None:
+                self.assertIsNone(xcc_count)
+            else:
+                self.assertIsInstance(xcc_count, int)
+                self.assertGreaterEqual(xcc_count, 1)
+
     @unittest.skipIf(
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
