@@ -13,12 +13,14 @@ from . import utils
 class InfoProtocol(Protocol):
     _backward_fn: Callable | None
     _setup_context_fn: Callable | None
+    _non_differentiable: bool
 
 
 @dataclasses.dataclass
 class Info:
     _backward_fn: Callable | None
     _setup_context_fn: Callable | None
+    _non_differentiable: bool = False
 
 
 def _validate_non_differentiable(
@@ -35,13 +37,11 @@ def _validate_non_differentiable(
         )
 
 
-def _call_non_differentiable(
-    fn: Callable[..., Any], /, *args: Any, **kwargs: Any
-) -> Any:
-    with _C._AutoDispatchBelowAutograd():
-        result = fn(*args, **kwargs)
+def _detach_outputs(result: Any) -> Any:
     if isinstance(result, Tensor):
         return result.detach() if result.requires_grad else result
+    if not _pytree.tree_any_only(Tensor, lambda tensor: tensor.requires_grad, result):
+        return result
     return _pytree.tree_map_only(
         Tensor,
         lambda tensor: tensor.detach() if tensor.requires_grad else tensor,
@@ -169,6 +169,8 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                 )
             return redispatch_no_grad(keyset, args, keyword_only_args)
 
+        if info._non_differentiable:
+            return _detach_outputs(redispatch_no_grad(keyset, args, keyword_only_args))
         if _C.is_grad_enabled() and _C._any_requires_grad(*args):
             result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
         else:

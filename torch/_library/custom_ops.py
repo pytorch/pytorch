@@ -407,10 +407,10 @@ class CustomOpDef:
 
         @torch._disable_dynamo
         def wrapped_fn(*args, **kwargs):
-            kernel = self._init_fn if device_type in self._disabled_kernel else fn
-            if self._non_differentiable:
-                return autograd._call_non_differentiable(kernel, *args, **kwargs)
-            return kernel(*args, **kwargs)
+            if device_type in self._disabled_kernel:
+                return self._init_fn(*args, **kwargs)
+            else:
+                return fn(*args, **kwargs)
 
         return wrapped_fn
 
@@ -660,12 +660,9 @@ class CustomOpDef:
         *,
         setup_context: Callable | None = None,
     ) -> None:
-        r"""register_autograd(backward, /, *, setup_context=None) -> None
+        r"""Register a backward formula or declare this custom op non-differentiable.
 
-        Register a backward formula or declare this custom op non-differentiable.
-
-        In order for an operator to work with autograd, you need to register
-        a backward formula:
+        For a differentiable operator, register a backward formula:
         1. You must tell us how to compute gradients during the backward pass
         by providing us a "backward" function.
         2. If you need any values from the forward to compute gradients, you can
@@ -707,8 +704,8 @@ class CustomOpDef:
 
         Pass ``"non-differentiable"`` instead of a backward callable to declare
         that the outputs do not require gradients, even when the inputs do.
-        This registers an Autograd fallthrough instead of invoking a generated
-        :class:`torch.autograd.Function`. ``setup_context`` must be ``None``.
+        No generated :class:`torch.autograd.Function` is invoked in this mode.
+        ``setup_context`` must be ``None``.
         This mode requires a functional operator without aliased outputs.
         Registering a backward callable again restores differentiable behavior.
 
@@ -767,6 +764,9 @@ class CustomOpDef:
             False
 
         """
+        non_differentiable = isinstance(backward, str)
+        if isinstance(backward, str):
+            autograd._validate_non_differentiable(backward, setup_context)
         schema = self._opoverload._schema
         if utils.is_out(self._opoverload):
             raise RuntimeError(
@@ -774,8 +774,13 @@ class CustomOpDef:
                 f"torch.Tag.out: {self}. Out variants do not support autograd."
             )
         if not utils.is_functional_schema(
-            schema, allow_valid_view=not isinstance(backward, str)
+            schema, allow_valid_view=not non_differentiable
         ):
+            if non_differentiable:
+                raise RuntimeError(
+                    "Non-differentiable registration requires a functional "
+                    f"operator without aliased outputs, but got {schema}."
+                )
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
                 f"{self} with schema {schema}. Please create "
@@ -783,19 +788,12 @@ class CustomOpDef:
             )
 
         if isinstance(backward, str):
-            autograd._validate_non_differentiable(backward, setup_context)
-            if not self._non_differentiable:
-                self._lib.impl(
-                    self._name, torch.library.fallthrough_kernel, "Autograd"
-                )
             self._non_differentiable = True
             self._backward_fn = None
             self._setup_context_fn = None
             return
 
-        if self._non_differentiable:
-            self._register_autograd_dispatcher_impl()
-            self._non_differentiable = False
+        self._non_differentiable = False
         self._backward_fn = backward
         self._setup_context_fn = setup_context
 
@@ -842,10 +840,6 @@ class CustomOpDef:
                     f"This is necessary for torch.compile/export/fx tracing to work. "
                     f"Please use `{self._init_fn.__name__}.register_fake` to add an "
                     f"fake impl."
-                )
-            if self._non_differentiable:
-                return autograd._call_non_differentiable(
-                    self._abstract_fn, *args, **kwargs
                 )
             return self._abstract_fn(*args, **kwargs)
 

@@ -1336,12 +1336,9 @@ def register_autograd(
     setup_context: Callable | None = None,
     lib=None,
 ) -> None:
-    r"""register_autograd(op, backward, /, *, setup_context=None, lib=None) -> None
+    r"""Register a backward formula or declare this custom op non-differentiable.
 
-    Register a backward formula or declare this custom op non-differentiable.
-
-    In order for an operator to work with autograd, you need to register
-    a backward formula:
+    For a differentiable operator, register a backward formula:
     1. You must tell us how to compute gradients during the backward pass
     by providing us a "backward" function.
     2. If you need any values from the forward to compute gradients, you can
@@ -1384,9 +1381,9 @@ def register_autograd(
     Pass ``"non-differentiable"`` instead of a backward callable to prevent
     the outputs from requiring gradients, even when the inputs do, without
     invoking a generated :class:`torch.autograd.Function`.
-    Operators created with :func:`torch.library.custom_op` use an Autograd
-    fallthrough; other operators use a no-grad redispatch kernel.
     ``setup_context`` must be ``None``.
+    For operators created with :func:`torch.library.custom_op`, registering a
+    backward callable again restores differentiable behavior.
     This mode requires a functional operator without aliased outputs.
 
     Examples:
@@ -1438,6 +1435,14 @@ def register_autograd(
         >>> y = numpy_mul(x, val=3.14)
         >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
         >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
+        >>>
+        >>> @torch.library.custom_op("mylib::no_grad_clone", mutates_args=())
+        >>> def no_grad_clone(x: Tensor) -> Tensor:
+        >>>     return x.clone()
+        >>>
+        >>> torch.library.register_autograd(no_grad_clone, "non-differentiable")
+        >>> no_grad_clone(torch.randn(3, requires_grad=True)).requires_grad
+        False
 
     """
     op = _resolve_op_for_registration(op, "register_autograd")
@@ -1447,6 +1452,9 @@ def register_autograd(
 
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
+    non_differentiable = isinstance(backward, str)
+    if isinstance(backward, str):
+        _library.autograd._validate_non_differentiable(backward, setup_context)
     schema = op._schema
     if _library.utils.is_out(op):
         raise RuntimeError(
@@ -1454,12 +1462,17 @@ def register_autograd(
             f"torch.Tag.out: {op}. Out variants do not support autograd."
         )
     if not _library.utils.is_functional_schema(schema):
+        if non_differentiable:
+            raise RuntimeError(
+                "Non-differentiable registration requires a functional "
+                f"operator without aliased outputs, but got {schema}."
+            )
         raise RuntimeError(
             f"Cannot register autograd formula for non-functional operator "
             f"{op} with schema {schema}. Please create "
             f"a functional operator and register an autograd formula for that."
         )
-    if _library.utils.has_kwarg_only_tensors(schema):
+    if not non_differentiable and _library.utils.has_kwarg_only_tensors(schema):
         raise NotImplementedError(
             f"register_autograd with kwarg-only Tensor args. In the original "
             f"definition of the op, please make your tensors not kwarg-only. "
@@ -1467,18 +1480,13 @@ def register_autograd(
         )
 
     if isinstance(backward, str):
-        _library.autograd._validate_non_differentiable(backward, setup_context)
-
-        def non_differentiable_kernel(keyset, *args, **kwargs):
-            redispatch_keyset = keyset & torch._C._after_autograd_keyset
-            return _library.autograd._call_non_differentiable(
-                op.redispatch, redispatch_keyset, *args, **kwargs
-            )
-
-        autograd_kernel = non_differentiable_kernel
+        backward_fn = None
     else:
-        info = _library.autograd.Info(backward, setup_context)
-        autograd_kernel = _library.autograd.make_autograd_impl(op, info)
+        backward_fn = backward
+    info = _library.autograd.Info(
+        backward_fn, setup_context, _non_differentiable=non_differentiable
+    )
+    autograd_kernel = _library.autograd.make_autograd_impl(op, info)
     namespace, opname = torch._library.utils.parse_namespace(qualname)
     use_lib = _library_for_registration(namespace, lib)
     use_lib.impl(opname, autograd_kernel, "Autograd", with_keyset=True)
