@@ -41,7 +41,7 @@ def with_comms(func=None):
         # The device arg is injected per device variant by
         # instantiate_device_type_tests; every test method takes it as the
         # first positional argument after self.
-        device_type = self.device_type
+        device_type = torch.device(device).type
         if device_type != "cpu":
             device_count = torch.get_device_module(device_type).device_count()
             if device_count < self.world_size:
