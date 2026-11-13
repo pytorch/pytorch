@@ -58,7 +58,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     skipXPUIf,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -93,10 +92,6 @@ def get_profiler_activities(device_type):
         if device_activity and device_activity in supported_activities():
             activities.append(device_activity)
     return activities
-
-
-def setUpModule():
-    initialize_kineto_with_accelerator()
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -209,7 +204,7 @@ class TestProfilerCUDA(TestCase):
                 """
 import os
 import torch
-from torch.profiler import ProfilerActivity, profile
+from torch.profiler import DeviceType, ProfilerActivity, profile
 
 def add_one(in_: torch.Tensor):
     return in_ + 1
@@ -228,8 +223,11 @@ if out[0] != 1:
 with profile(activities=[ProfilerActivity.CPU]):
     add_one_graphed(zeros)
 
-with profile(activities=[ProfilerActivity.CUDA]):
+with profile(activities=[ProfilerActivity.CUDA]) as prof:
     add_one_graphed(zeros)
+    torch.cuda.synchronize()
+if not any(e.device_type == DeviceType.CUDA for e in prof.events()):
+    raise AssertionError("Expected device events from the graphed callable")
 """,
             ],
             text=True,
@@ -475,6 +473,17 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 x = torch.randn(10, 10).to("cuda")
                 y = torch.mm(x, x)
         self.assertGreater(len(p.events()), 0)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_toggle_cpu_without_cpu_is_noop(self):
+        # Turning CPU back on in a session without CPU collection used to crash.
+        with torch.autograd.profiler.profile(
+            use_cpu=False, use_device="cuda", use_kineto=True
+        ) as p:
+            p.toggle_collection_dynamic(False, [ProfilerActivity.CPU])
+            p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
+            torch.ones(1, device="cuda").add_(1)
+        self.assertFalse(any(e.name.startswith("aten::") for e in p.function_events))
 
     @unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
@@ -2278,8 +2287,8 @@ torch.ones(10) * 2
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
-    # The child deadlocks once the parent has initialized Kineto's XPU profiler,
-    # which setUpModule does on any XPU build.
+    # The child deadlocks once the parent has run an XPU profiling session,
+    # which earlier tests in this file do on XPU builds.
     @unittest.skipIf(
         TEST_XPU,
         "os.fork() deadlocks after Kineto XPU init! Refer https://github.com/intel/torch-xpu-ops/issues/5287",
@@ -2327,6 +2336,29 @@ torch.ones(10) * 2
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
+
+    def test_init_for_cuda_graphs_traces_cuda(self):
+        from torch.profiler._utils import _init_for_cuda_graphs
+
+        cupti = {ProfilerActivity.CPU, ProfilerActivity.CUDA}
+        with (
+            patch("torch.profiler.profile") as profile_mock,
+            patch("torch.profiler.supported_activities", return_value=cupti),
+            patch("torch.version.cuda", "12.8"),
+        ):
+            _init_for_cuda_graphs()
+        profile_mock.assert_called_once_with(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+        )
+
+        # ROCm has no CUPTI to initialize.
+        with (
+            patch("torch.profiler.profile") as profile_mock,
+            patch("torch.profiler.supported_activities", return_value=cupti),
+            patch("torch.version.cuda", None),
+        ):
+            _init_for_cuda_graphs()
+        profile_mock.assert_not_called()
 
 
 class SimpleNet(nn.Module):
@@ -4921,6 +4953,45 @@ class TestProfilerTraceCompression(TestCase):
                 prof.export_chrome_trace(gzip_path, use_python_export=use_python_export)
                 with gzip.open(gzip_path, "rt") as f:
                     self.assertIn("traceEvents", json.load(f))
+
+    @parametrize("use_python_export", [False, True])
+    @parametrize("suffix", [".json", ".json.gz"])
+    def test_export_to_missing_dir(self, use_python_export, suffix):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bad_path = os.path.join(tmpdir, "missing_dir", "trace" + suffix)
+            # Only Kineto's native save raises from C++; the rest fail in open().
+            native = suffix == ".json" and not use_python_export
+            error = RuntimeError if native else FileNotFoundError
+            with self.assertRaisesRegex(error, "missing_dir"):
+                prof.export_chrome_trace(bad_path, use_python_export=use_python_export)
+            # A failed export must not consume the native trace.
+            path = os.path.join(tmpdir, "trace" + suffix)
+            prof.export_chrome_trace(path, use_python_export=use_python_export)
+            opener = gzip.open if suffix.endswith(".gz") else open
+            with opener(path, "rt") as f:
+                self.assertIn("traceEvents", json.load(f))
+
+    def test_failed_compressed_export_keeps_existing_file(self):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+
+        def failing_export(path, *args, **kwargs):
+            raise OSError("export failed")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json.gz")
+            with open(path, "wb") as f:
+                f.write(b"existing trace")
+            with patch.object(prof.profiler, "export_chrome_trace", failing_export):
+                with self.assertRaisesRegex(OSError, "export failed"):
+                    prof.export_chrome_trace(path)
+            with open(path, "rb") as f:
+                self.assertEqual(f.read(), b"existing trace")
+            # The partially written file is cleaned up.
+            self.assertEqual(os.listdir(tmpdir), ["trace.json.gz"])
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
