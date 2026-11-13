@@ -4398,9 +4398,17 @@ class TestTemplateConfigPruning(TestCase):
     _ROCM_LDS_PER_CU = {"gfx942": 64 * 1024, "gfx950": 160 * 1024}
 
     def _rocm_mm_choice_descs(
-        self, arch, m, k, n, choice_regex=None, desc_regex=None, num_cus=None
+        self,
+        arch,
+        m,
+        k,
+        n,
+        choice_regex=None,
+        desc_regex=None,
+        num_cus=None,
+        dtype=torch.bfloat16,
     ):
-        """Compile an ``m x k @ k x n`` bf16 mm with max-autotune while the ROCm
+        """Compile an ``m x k @ k x n`` mm (bf16 by default) with max-autotune while the ROCm
         heuristics see ``arch`` (with ``num_cus`` CUs, default the arch's), check
         the result, and return (choice name, description) for every benchmarked
         choice plus the generated code. With ``choice_regex``/``desc_regex``,
@@ -4421,8 +4429,9 @@ class TestTemplateConfigPruning(TestCase):
             patches["test_configs.autotune_choice_name_regex"] = choice_regex
         if desc_regex is not None:
             patches["test_configs.autotune_choice_desc_regex"] = desc_regex
-        a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+        torch.manual_seed(0)
+        a = torch.randn(m, k, device=GPU_TYPE, dtype=dtype)
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=dtype)
         torch._dynamo.reset()
         clear_feedback_savers()
         add_feedback_saver(saver)
@@ -4449,11 +4458,15 @@ class TestTemplateConfigPruning(TestCase):
                 out, code = run_and_get_code(torch.compile(torch.mm), a, b)
         finally:
             clear_feedback_savers()
-        # Against an fp32 reference: rtol is about one bf16 ulp, and atol covers
-        # fp32 accumulation-order differences on outputs that cancel to ~0, where
-        # comparing two bf16 results at the default atol=1e-5 is flaky.
+        # Against an fp32 reference. fp32 inputs are held to 1e-5. For bf16 output
+        # rtol is about one bf16 ulp, and atol covers fp32 accumulation-order
+        # differences on outputs that cancel to ~0, where 1e-5 is out of reach.
+        tol = 1e-5 if dtype == torch.float32 else None
         torch.testing.assert_close(
-            out.float(), torch.mm(a.float(), b.float()), atol=1e-3, rtol=4e-3
+            out.float(),
+            torch.mm(a.float(), b.float()),
+            atol=tol or 1e-3,
+            rtol=tol or 4e-3,
         )
         return seen, "\n".join(code)
 
@@ -4497,21 +4510,31 @@ class TestTemplateConfigPruning(TestCase):
         # Ragged tile grid; only the configs with the XCD program-id remap are
         # offered. 256 CUs: 8 XCDs, programs split evenly over them. 250 CUs: 7
         # XCDs and a program count that is not a multiple of 7, so the remap's
-        # uneven branch runs.
-        for num_cus, num_xcds in ((256, 8), (250, 7)):
-            with self.subTest(num_cus=num_cus):
+        # uneven branch runs. fp32 (TF32 off) is checked at 1e-5 with a short K:
+        # at K=1024 ATen's own fp32 result is ~2.5e-4 from an fp64 one, so no
+        # kernel with another summation order can match it to 1e-5.
+        cases = [
+            (num_cus, num_xcds, dtype)
+            for num_cus, num_xcds in ((256, 8), (250, 7))
+            for dtype in (torch.bfloat16, torch.float32)
+        ]
+        for num_cus, num_xcds, dtype in cases:
+            with self.subTest(num_cus=num_cus, dtype=dtype):
                 _, code = self._rocm_mm_choice_descs(
                     "gfx950",
                     4000,
-                    1024,
+                    64 if dtype == torch.float32 else 1024,
                     4100,
                     choice_regex="mm_persistent",
                     desc_regex="NUM_XCDS=",
                     num_cus=num_cus,
+                    dtype=dtype,
                 )
                 self.assertIn(f"NUM_XCDS : tl.constexpr = {num_xcds}", code)
                 # The remap block itself was rendered, not just the constexpr.
                 self.assertIn("tall_xcds", code)
+                if dtype == torch.float32:
+                    self.assertIn("ALLOW_TF32 : tl.constexpr = False", code)
 
     def test_scaled_mm_block_k_pruning_excludes_rdna(self):
         import torch._inductor.heuristics.template.triton as triton_heuristics
