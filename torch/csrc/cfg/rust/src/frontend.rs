@@ -355,11 +355,57 @@ impl<'a> Builder<'a> {
                     let val = pop_value!();
                     effect!(off, Op::StoreAttr { obj, name: self.names_base + arg, val });
                 }
+                // Slots below nfree_base are this function's own cells, which
+                // are values like any other local; the ones above are the
+                // cells of its closure.
+                Bc::MakeCell => {
+                    let v = self.read_var(arg, b);
+                    let cell = emit!(off, Op::MakeCell(v));
+                    self.write_var(arg, b, cell);
+                }
                 Bc::LoadDeref => {
+                    let v = if arg < self.nfree_base {
+                        let cell = self.read_var(arg, b);
+                        let name = self.varname_const(arg)?;
+                        emit!(off, Op::CellGet(cell, name))
+                    } else {
+                        emit!(off, Op::LoadDeref(arg - self.nfree_base))
+                    };
+                    stack.push(v);
+                }
+                Bc::StoreDeref => {
+                    let v = pop_value!();
                     if arg < self.nfree_base {
-                        return unsupported("functions that create closures are not supported");
+                        let cell = self.read_var(arg, b);
+                        effect!(off, Op::CellSet(cell, v));
+                    } else {
+                        effect!(off, Op::StoreDeref(arg - self.nfree_base, v));
                     }
-                    let v = emit!(off, Op::LoadDeref(arg - self.nfree_base));
+                }
+                Bc::LoadClosure => {
+                    let v = if arg < self.nfree_base {
+                        self.read_var(arg, b)
+                    } else {
+                        emit!(off, Op::LoadClosure(arg - self.nfree_base))
+                    };
+                    stack.push(v);
+                }
+                Bc::MakeFunction => {
+                    let code = pop_value!();
+                    let mut take = |flag: u32| -> PyResult<V> {
+                        if arg & flag == 0 {
+                            return Ok(NONE);
+                        }
+                        match stack.pop() {
+                            Some(v) if v != NULLMARK => Ok(v),
+                            _ => unsupported("bytecode underflows the stack"),
+                        }
+                    };
+                    let closure = take(0x08)?;
+                    let annotations = take(0x04)?;
+                    let kwdefaults = take(0x02)?;
+                    let defaults = take(0x01)?;
+                    let v = emit!(off, Op::MakeFunction { code, defaults, kwdefaults, annotations, closure });
                     stack.push(v);
                 }
                 Bc::BinaryOp => {
@@ -701,9 +747,6 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         return unsupported("generators and coroutines are not supported");
     }
     let cellvars: Vec<String> = code.getattr("co_cellvars")?.extract()?;
-    if !cellvars.is_empty() {
-        return unsupported("functions that create closures are not supported");
-    }
     let co_code = code.getattr("co_code")?;
     let co_code = co_code.downcast::<PyBytes>()?;
     let instrs = bytecode::decode(table, co_code);
@@ -842,7 +885,14 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     }
     let varnames_tuple = code.getattr("co_varnames")?;
     let varnames_tuple = varnames_tuple.downcast::<PyTuple>()?;
-    let varnames: Vec<String> = varnames_tuple.extract()?;
+    let mut varnames: Vec<String> = varnames_tuple.extract()?;
+    // The frame's slots: the locals, then the cells that are not also
+    // arguments, then (not numbered here) the cells of the closure.
+    for cell in cellvars {
+        if !varnames.contains(&cell) {
+            varnames.push(cell);
+        }
+    }
     let argcount: usize = code.getattr("co_argcount")?.extract()?;
     let posonlyargcount: usize = code.getattr("co_posonlyargcount")?.extract()?;
     let kwonlyargcount: usize = code.getattr("co_kwonlyargcount")?.extract()?;
@@ -1040,6 +1090,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         globals: unsafe { PyObj::from_borrowed(globals.as_ptr()) },
         builtins: unsafe { PyObj::from_borrowed(builtins.as_ptr()) },
         closure: opt_attr("__closure__")?,
+        freevars: code.getattr("co_freevars")?.extract()?,
         defaults: opt_attr("__defaults__")?,
         kwdefaults: opt_attr("__kwdefaults__")?,
         argcount,
@@ -1085,8 +1136,14 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         ($($v:expr),*) => {{ $( *$v = f(*$v)?; )* }};
     }
     match op {
-        Op::Const(_) | Op::LoadGlobal(_) | Op::LoadDeref(_) => {}
+        Op::Const(_) | Op::LoadGlobal(_) | Op::LoadDeref(_) | Op::LoadClosure(_) => {}
+        Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
+            r!(code, defaults, kwdefaults, annotations, closure)
+        }
         Op::LoadAttr(a, _)
+        | Op::StoreDeref(_, a)
+        | Op::MakeCell(a)
+        | Op::CellGet(a, _)
         | Op::StoreGlobal(_, a)
         | Op::Unary(_, a)
         | Op::ToBool(a)
@@ -1111,7 +1168,8 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::ListExtend(a, b)
         | Op::SetUpdate(a, b)
         | Op::DictUpdate(a, b)
-        | Op::DictMerge(a, b) => r!(a, b),
+        | Op::DictMerge(a, b)
+        | Op::CellSet(a, b) => r!(a, b),
         Op::StoreAttr { obj, val, .. } => r!(obj, val),
         Op::SetItem { obj, key, val } => r!(obj, key, val),
         Op::MapAdd(a, b, c) | Op::BuildSlice(a, b, c) => r!(a, b, c),
