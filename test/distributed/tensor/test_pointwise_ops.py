@@ -719,6 +719,37 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(z.placements, (Partial("max"),))
 
     @with_comms
+    @parametrize(
+        "reduce_op,kwargs",
+        [
+            ("max", {}),
+            ("max", {"nan": -50.0, "posinf": -100.0}),
+            ("min", {"nan": 50.0, "neginf": 100.0}),
+        ],
+    )
+    def test_nan_to_num_partial_max_min(self, reduce_op, kwargs):
+        # nan_to_num must not be applied to the local values of a pending
+        # Partial("max"/"min"): max/min propagate nan, which nan_to_num then
+        # replaces, and custom posinf/neginf replacements can make it decreasing.
+        device_mesh = self.build_device_mesh()
+        reduce_fn = torch.amax if reduce_op == "max" else torch.amin
+
+        full = torch.arange(
+            self.world_size * 4, dtype=torch.float32, device=self.device_type
+        ).reshape(self.world_size, 4)
+        full[0, 0] = float("nan")
+        full[-1, 1] = float("inf")
+        full[-1, 2] = float("-inf")
+        expected = torch.nan_to_num(reduce_fn(full, dim=0), **kwargs)
+
+        d_reduced = reduce_fn(distribute_tensor(full, device_mesh, [Shard(0)]), dim=0)
+        self.assertEqual(d_reduced.placements, (Partial(reduce_op),))
+
+        result = torch.nan_to_num(d_reduced, **kwargs)
+        self.assertFalse(result.placements[0].is_partial())
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
     def test_maximum_mixed_partials_redistribution(self):
         # Test that mixing Partial("max") with Partial("sum") correctly
         # redistributes the incompatible partial before computing maximum
