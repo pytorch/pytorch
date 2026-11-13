@@ -9,7 +9,8 @@ during symbolic execution. Used by both ConstDictVariable and SetVariable.
 import functools
 import inspect
 import types
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextvars import ContextVar
 from typing import cast, TYPE_CHECKING
 
 import torch
@@ -55,6 +56,11 @@ _SAFE_KEY_EQUALITIES = (
     torch.Tensor.__eq__,
     torch.device.__eq__,
     torch.Size.__eq__,  # THPSize uses PyTuple_Type.tp_richcompare.
+)
+
+
+_identity_key_iteration: ContextVar[bool] = ContextVar(
+    "identity_key_iteration", default=False
 )
 
 
@@ -111,6 +117,7 @@ def is_hashable(x: VariableTracker) -> bool:
 
 
 class BuiltinMethodKeyTracker:
+    # Per-trace receiver relations and container summaries; never shared across traces.
     def __init__(self) -> None:
         self.receivers: dict[Source, object] = {}
         self.parents: dict[Source, Source] = {}
@@ -201,6 +208,7 @@ class BuiltinMethodKeyTracker:
 
 
 class KeySummary:
+    # Container-local dependencies; insertions update this cache and removals invalidate it.
     def __init__(
         self, tracker: BuiltinMethodKeyTracker, keys: Iterable["HashableTracker"]
     ) -> None:
@@ -605,9 +613,9 @@ class HashableTracker:
             kind = vt.python_type()
         except NotImplementedError:
             kind = None
-        tuple_storage = (
-            isinstance(vt, variables.TupleVariable)
-            and kind is not torch.Size
+        tuple_storage = isinstance(vt, variables.TupleVariable) and (
+            kind is tuple
+            or kind is not torch.Size
             and inspect.getattr_static(kind, "__eq__") is tuple.__eq__
             and inspect.getattr_static(kind, "__hash__") is tuple.__hash__
             and (
@@ -688,6 +696,7 @@ class HashableTracker:
 
     @functools.cached_property
     def equality_sources(self) -> tuple[tuple[Source, type], ...]:
+        # Computing dependencies also finalizes this key's custom-equality flags.
         from .object_protocol import type_is_immutable
 
         sources = []
@@ -757,6 +766,22 @@ class HashableTracker:
     def __hash__(self) -> int:
         return self._hash
 
+    @staticmethod
+    def iter_keys_by_identity(
+        mapping: Iterable["HashableTracker"],
+    ) -> Iterator["HashableTracker"]:
+        # OrderedDict iteration compares known stored keys by identity, without callbacks.
+        iterator = iter(mapping)
+        while True:
+            token = _identity_key_iteration.set(True)
+            try:
+                key = next(iterator)
+            except StopIteration:
+                return
+            finally:
+                _identity_key_iteration.reset(token)
+            yield key
+
     def __eq__(self, other: object) -> bool:
         """
         Checks equality between two HashableTracker instances.
@@ -770,6 +795,8 @@ class HashableTracker:
         Returns:
             True if the underlying variable trackers are Python-equal, False otherwise
         """
+        if _identity_key_iteration.get():
+            return self is other
         if not isinstance(other, HashableTracker):
             return False
         if self.vt is other.vt:
