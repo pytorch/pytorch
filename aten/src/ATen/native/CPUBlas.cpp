@@ -52,20 +52,20 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #endif  // USE_FBGEMM
 
 #if AT_MKLDNN_ENABLED()
-#include <oneapi/dnnl/dnnl_version.h>
+#include <ATen/native/mkldnn/detail/Version.h>
 // Add uKernel API versioning to be compatible with different oneDNN versions
 // oneDNN 3.6.x updates the ukernel APIs of brgemm and brgemm_pack_B
 // brgemm_pack_B is changed to transform and the setting of brgemm beta is changed to set_add_C
-#if (DNNL_VERSION_MAJOR == 3 && DNNL_VERSION_MINOR == 5)
+#if DNNL_PREREQ(3, 5, 0) && !DNNL_PREREQ(3, 6, 0)
 #define ONEDNN_UKERNEL_1
-#elif ((DNNL_VERSION_MAJOR == 3 && DNNL_VERSION_MINOR >= 6) || (DNNL_VERSION_MAJOR > 3))
+#elif DNNL_PREREQ(3, 6, 0)
 #define ONEDNN_UKERNEL_2
 #endif
 #if ((defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
 #define ONEDNN_UKERNEL_ENABLED
 #endif
 
-#if (DNNL_VERSION_MAJOR == 3 && DNNL_VERSION_MINOR >= 9) || (DNNL_VERSION_MAJOR > 3)
+#if DNNL_PREREQ(3, 9, 0)
 #define ONEDNN_FP8_UKERNEL_AVAILABLE
 #endif
 
