@@ -77,7 +77,7 @@ if TYPE_CHECKING:
     from .symbolic_convert import InstructionTranslatorBase
 
 
-def _is_mutable_container(value: VariableTracker) -> bool:
+def _skip_container_constant_probe(value: VariableTracker) -> bool:
     return isinstance(value, (ConstDictVariable, SetVariable)) or (
         isinstance(value, BaseListVariable) and not isinstance(value, TupleVariable)
     )
@@ -165,7 +165,7 @@ class PyCodegen:
             items = value.items
         elif isinstance(value, FrozensetVariable):
             items = [key.vt for key in value.set_items]
-        elif _is_mutable_container(value):
+        elif _skip_container_constant_probe(value):
             # Probing container members would specialize their lazy children.
             return True
         else:
@@ -397,7 +397,7 @@ class PyCodegen:
                 self.add_cache(value)
         elif (
             # Keep container members out of constant probing.
-            not _is_mutable_container(value)
+            not _skip_container_constant_probe(value)
             # Do not embed trace-time child objects in co_consts. Respect this
             # codegen pass's source-reconstruction policy (export stack restoration
             # disables it, but other export codegen paths can keep it enabled).

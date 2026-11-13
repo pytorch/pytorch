@@ -1980,11 +1980,10 @@ class AOTCompiledModel:
             if (i, kind, enabled) in warned:
                 continue
             if enabled:
-                advice = f"Fix or drop input [{i}]: its guard check raised."
+                advice = f"Fix or drop input [{i}]."
             else:
                 advice = (
-                    f"Input [{i}] opted out of guard checks; "
-                    "fix or drop its failing guard artifact."
+                    f"Input [{i}] opted out of guard checks; fix or drop that input."
                 )
             log.warning(
                 "AOT compiled input [%d]'s guard check raised %s: %s; "

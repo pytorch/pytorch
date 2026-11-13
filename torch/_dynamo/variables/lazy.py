@@ -167,6 +167,8 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
             cache = tx.output.variable_tracker_cache
             cached = cache.get(source)
             if cached is not None:
+                if tx.output.current_tracer.parent is not None:
+                    tx.output.current_tracer.traced_sources.add(source)
                 return cached
             vt = LazyVariableTracker(LazyCache(value, source), source=source)
             cache[source] = vt
@@ -294,18 +296,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
                 value, (LazyConstantVariable, ComputedLazyConstantVariable)
             )
             if keep_lazy:
-                if isinstance(value, ComputedLazyConstantVariable):
-                    if value.is_realized():
-                        result = cls.realize_all(
-                            value.realize(), cache, allow_lazy_constant=True
-                        )
-                    else:
-                        # Output bytecode recomputes the value; operands only need TYPE_MATCH
-                        for lazy_var in value._cache.lazy_vars:
-                            lazy_var._ensure_type_guard()
-                        result = value
-                else:
-                    result = value
+                result = value
             else:
                 result = cls.realize_all(
                     value.realize(), cache, allow_lazy_constant=allow_lazy_constant
@@ -332,11 +323,19 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
                 cls.realize_all(v, cache, allow_lazy_constant=allow_lazy_constant)
                 for v in value
             )
-        elif value_cls in (dict, collections.OrderedDict):
+        elif value_cls is dict:
             result = {
                 k: cls.realize_all(v, cache, allow_lazy_constant=allow_lazy_constant)
                 for k, v in list(value.items())
             }
+        elif value_cls is collections.OrderedDict:
+            items, order = list(dict.items(value)), list(value)
+            result = collections.OrderedDict(
+                (k, cls.realize_all(v, cache, allow_lazy_constant=allow_lazy_constant))
+                for k, v in items
+            )
+            for key in order:
+                result.move_to_end(key)
         else:
             result = value
 
@@ -706,6 +705,8 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
     def reconstruct(self, codegen: Any) -> None:
         from ..bytecode_transformation import create_call_function
 
+        # Output bytecode re-runs the op; operand types must match the traced ones
+        self._ensure_operand_type_guards()
         cache = self._cache
         name = cache.op.__name__
         module = "builtins" if getattr(builtins, name, None) is cache.op else "operator"

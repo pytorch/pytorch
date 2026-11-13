@@ -11,7 +11,7 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 import warnings
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
-from typing import cast, overload
+from typing import Any, cast, overload
 
 import torch
 from torch import _vmap_internals
@@ -260,6 +260,8 @@ def backward(
     create_graph: bool = False,
     grad_variables: _TensorOrOptionalTensors | None = None,
     inputs: _TensorOrTensorsOrGradEdge | Mapping[str, torch.Tensor] | None = None,
+    *,
+    disallow_implicit_grad_accumulation: bool = False,
 ) -> None:
     r"""Compute the sum of gradients of given tensors with respect to graph leaves.
 
@@ -319,6 +321,11 @@ def backward(
             :attr:`tensors`. A mapping of tensors (e.g.
             ``dict(model.named_parameters())``) is also accepted, in which case
             the values are used as the input tensors.
+        disallow_implicit_grad_accumulation (bool, optional): When a tensor is used
+            more than once in forward, backward accumulates the gradient
+            contributions from each use. If ``True``, raise an error instead of
+            performing that accumulation. See
+            :ref:`disallow-implicit-grad-accumulation`. Defaults to ``False``.
     """
     if torch._C._are_functorch_transforms_active():
         raise RuntimeError(
@@ -370,6 +377,13 @@ def backward(
     t_inputs = tuple(t for t in inputs_tuple if is_tensor_like(t))
     overridable_args = t_tensors + t_inputs
     if has_torch_function(overridable_args):
+        # Pass the flag only when set, so overrides written against the
+        # signature without it keep working.
+        flag_kwargs: dict[str, Any] = (
+            {"disallow_implicit_grad_accumulation": True}
+            if disallow_implicit_grad_accumulation
+            else {}
+        )
         return handle_torch_function(
             backward,
             overridable_args,
@@ -378,6 +392,7 @@ def backward(
             retain_graph=retain_graph,
             create_graph=create_graph,
             inputs=inputs_tuple if inputs is not None else None,
+            **flag_kwargs,
         )
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
@@ -396,6 +411,7 @@ def backward(
         inputs_tuple,
         allow_unreachable=True,
         accumulate_grad=True,
+        disallow_implicit_grad_accumulation=disallow_implicit_grad_accumulation,
     )
 
 
@@ -410,6 +426,8 @@ def grad(
     allow_unused: bool | None = ...,
     is_grads_batched: bool = ...,
     materialize_grads: bool = ...,
+    *,
+    disallow_implicit_grad_accumulation: bool = ...,
 ) -> tuple[torch.Tensor, ...]: ...
 
 
@@ -424,6 +442,8 @@ def grad(
     allow_unused: bool | None = ...,
     is_grads_batched: bool = ...,
     materialize_grads: bool = ...,
+    *,
+    disallow_implicit_grad_accumulation: bool = ...,
 ) -> OrderedDict[str, torch.Tensor]: ...
 
 
@@ -438,6 +458,8 @@ def grad(
     allow_unused: bool | None = ...,
     is_grads_batched: bool = ...,
     materialize_grads: bool = ...,
+    *,
+    disallow_implicit_grad_accumulation: bool = ...,
 ) -> dict[str, torch.Tensor]: ...
 
 
@@ -451,6 +473,8 @@ def grad(
     allow_unused: bool | None = None,
     is_grads_batched: bool = False,
     materialize_grads: bool = False,
+    *,
+    disallow_implicit_grad_accumulation: bool = False,
 ) -> tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
     r"""Compute and return the sum of gradients of outputs with respect to the inputs.
 
@@ -508,6 +532,11 @@ def grad(
             to zero instead of None. This is useful when computing higher-order derivatives.
             If ``materialize_grads`` is ``True`` and ``allow_unused`` is ``False``, an error
             will be raised. Defaults to ``False``.
+        disallow_implicit_grad_accumulation (bool, optional): When a tensor is used
+            more than once in forward, backward accumulates the gradient
+            contributions from each use. If ``True``, raise an error instead of
+            performing that accumulation. See
+            :ref:`disallow-implicit-grad-accumulation`. Defaults to ``False``.
 
     """
     if materialize_grads and allow_unused is False:
@@ -548,6 +577,13 @@ def grad(
     t_inputs = tuple(i for i in inputs_tuple if is_tensor_like(i))
     overridable_args = t_outputs + t_inputs
     if has_torch_function(overridable_args):
+        # Pass the flag only when set, so overrides written against the
+        # signature without it keep working.
+        flag_kwargs = (
+            {"disallow_implicit_grad_accumulation": True}
+            if disallow_implicit_grad_accumulation
+            else {}
+        )
         result_tuple = handle_torch_function(
             grad,
             overridable_args,
@@ -560,6 +596,7 @@ def grad(
             allow_unused=allow_unused,
             is_grads_batched=is_grads_batched,
             materialize_grads=materialize_grads,
+            **flag_kwargs,
         )
         if inputs_mapping_keys is not None:
             if isinstance(inputs, OrderedDict):
@@ -598,6 +635,7 @@ def grad(
                 inputs_tuple,
                 allow_unused,
                 accumulate_grad=False,
+                disallow_implicit_grad_accumulation=disallow_implicit_grad_accumulation,
             )
 
         result = _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(
@@ -612,6 +650,7 @@ def grad(
             inputs_tuple,
             allow_unused,
             accumulate_grad=False,
+            disallow_implicit_grad_accumulation=disallow_implicit_grad_accumulation,
         )
     if materialize_grads:
         if any(
