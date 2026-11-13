@@ -830,7 +830,11 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("experts_per_rank", [1, 2])
     @parametrize("dim", [0, 1])
-    def test_reduce_scatter_offset(self, experts_per_rank: int, dim: int):
+    @parametrize("implementation", ["cuda", "cute_lsa", "cute_multimem"])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_reduce_scatter_offset(
+        self, experts_per_rank: int, dim: int, implementation, dtype
+    ):
         """reduce_scatter_offset: each expert gradient is reduced to its
         destination rank and written to a separate contiguous tensor; the source
         Grouped GEMM buffer is left unmodified."""
@@ -846,13 +850,13 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # dim=0: experts laid out as row blocks    [n_experts * rows, cols]
         if dim == 1:
             buf = symm_mem.empty(
-                rows, n_experts * cols, dtype=torch.float, device=self.device
+                rows, n_experts * cols, dtype=dtype, device=self.device
             )
             for i in range(n_experts):
                 buf[:, i * cols : (i + 1) * cols] = float((self.rank + 1) * (i + 1))
         else:
             buf = symm_mem.empty(
-                n_experts * rows, cols, dtype=torch.float, device=self.device
+                n_experts * rows, cols, dtype=dtype, device=self.device
             )
             for i in range(n_experts):
                 buf[i * rows : (i + 1) * rows, :] = float((self.rank + 1) * (i + 1))
@@ -862,14 +866,36 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         dst_ranks = [i % self.world_size for i in range(n_experts)]
         n_owned = sum(r == self.rank for r in dst_ranks)
         out = [
-            torch.zeros(rows, cols, dtype=torch.float, device=self.device)
+            torch.zeros(rows, cols, dtype=dtype, device=self.device)
             for _ in range(n_owned)
         ]
         block_size = cols if dim == 1 else rows
         offsets = [i * block_size for i in range(1, n_experts + 1)]
 
-        symm_mem.reduce_scatter_offset(
-            buf, out, group_name, dim=dim, offsets=offsets, dst_ranks=dst_ranks
+        reduce_scatter = symm_mem.reduce_scatter_offset
+        options = {}
+        if implementation != "cuda":
+            try:
+                from torch.distributed._symmetric_memory._nccl_cute_reduce_scatter import (
+                    reduce_scatter_offset,
+                )
+            except ImportError as e:
+                raise SkipTest("nccl4py and CuTeDSL are required") from e
+            reduce_scatter = reduce_scatter_offset
+            options["use_multimem"] = implementation == "cute_multimem"
+            if (
+                options["use_multimem"]
+                and not symm_mem.rendezvous(buf, group=group_name).multicast_ptr
+            ):
+                raise SkipTest("multicast is unavailable")
+        reduce_scatter(
+            buf,
+            out,
+            group_name,
+            dim=dim,
+            offsets=offsets,
+            dst_ranks=dst_ranks,
+            **options,
         )
         torch.cuda.synchronize()
 
@@ -895,7 +921,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
                 torch.full(
                     (rows, cols),
                     float((self.rank + 1) * (i + 1)),
-                    dtype=torch.float,
+                    dtype=dtype,
                     device=self.device,
                 ),
                 msg=lambda msg: f"{msg}\nrank {self.rank}: source buffer block {i} should be unchanged",
@@ -908,7 +934,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(2)
     @parametrize("dim", [0, 1])
-    def test_reduce_scatter_offset_uneven(self, dim: int):
+    @parametrize("implementation", ["cuda", "cute_lsa", "cute_multimem"])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_reduce_scatter_offset_uneven(self, dim: int, implementation, dtype):
         """reduce_scatter_offset with uneven block sizes: j=0 and j=1 own blocks
         of different sizes, verifying that out[j] shapes differ across j."""
         symm_mem.set_backend("NCCL")
@@ -930,13 +958,13 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
         n_experts = 2 * self.world_size
         if dim == 1:
-            buf = symm_mem.empty(rows, total, dtype=torch.float, device=self.device)
+            buf = symm_mem.empty(rows, total, dtype=dtype, device=self.device)
             pos = 0
             for i, sz in enumerate(block_sizes):
                 buf[:, pos : pos + sz] = float((self.rank + 1) * (i + 1))
                 pos += sz
         else:
-            buf = symm_mem.empty(total, cols, dtype=torch.float, device=self.device)
+            buf = symm_mem.empty(total, cols, dtype=dtype, device=self.device)
             pos = 0
             for i, sz in enumerate(block_sizes):
                 buf[pos : pos + sz, :] = float((self.rank + 1) * (i + 1))
@@ -946,17 +974,39 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         dst_ranks = [i % self.world_size for i in range(n_experts)]
         if dim == 1:
             out = [
-                torch.zeros(rows, size_0, dtype=torch.float, device=self.device),
-                torch.zeros(rows, size_1, dtype=torch.float, device=self.device),
+                torch.zeros(rows, size_0, dtype=dtype, device=self.device),
+                torch.zeros(rows, size_1, dtype=dtype, device=self.device),
             ]
         else:
             out = [
-                torch.zeros(size_0, cols, dtype=torch.float, device=self.device),
-                torch.zeros(size_1, cols, dtype=torch.float, device=self.device),
+                torch.zeros(size_0, cols, dtype=dtype, device=self.device),
+                torch.zeros(size_1, cols, dtype=dtype, device=self.device),
             ]
 
-        symm_mem.reduce_scatter_offset(
-            buf, out, group_name, dim=dim, offsets=offsets, dst_ranks=dst_ranks
+        reduce_scatter = symm_mem.reduce_scatter_offset
+        options = {}
+        if implementation != "cuda":
+            try:
+                from torch.distributed._symmetric_memory._nccl_cute_reduce_scatter import (
+                    reduce_scatter_offset,
+                )
+            except ImportError as e:
+                raise SkipTest("nccl4py and CuTeDSL are required") from e
+            reduce_scatter = reduce_scatter_offset
+            options["use_multimem"] = implementation == "cute_multimem"
+            if (
+                options["use_multimem"]
+                and not symm_mem.rendezvous(buf, group=group_name).multicast_ptr
+            ):
+                raise SkipTest("multicast is unavailable")
+        reduce_scatter(
+            buf,
+            out,
+            group_name,
+            dim=dim,
+            offsets=offsets,
+            dst_ranks=dst_ranks,
+            **options,
         )
         torch.cuda.synchronize()
 
@@ -969,6 +1019,40 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
                 torch.full_like(out[j], expected),
                 msg=lambda msg: f"{msg}\nrank {self.rank}: out[{j}] should contain the reduced sum",
             )
+
+        if implementation != "cuda":
+            expected = [output.clone() for output in out]
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                reduce_scatter(
+                    buf,
+                    out,
+                    group_name,
+                    dim=dim,
+                    offsets=offsets,
+                    dst_ranks=dst_ranks,
+                    **options,
+                )
+            torch.cuda.synchronize()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, stream=stream):
+                reduce_scatter(
+                    buf,
+                    out,
+                    group_name,
+                    dim=dim,
+                    offsets=offsets,
+                    dst_ranks=dst_ranks,
+                    **options,
+                )
+            for delta in (1, 2):
+                buf.add_(1)
+                for output in out:
+                    output.fill_(-1)
+                graph.replay()
+                for output, reference in zip(out, expected):
+                    self.assertEqual(output, reference + delta * self.world_size)
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
