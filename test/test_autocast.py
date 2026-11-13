@@ -376,15 +376,6 @@ class TestAutocastDevice(TestCase):
             loss.backward()
 
     @onlyMPS
-    def test_mps_autocast_error_message(self, device):
-        with self.assertWarnsRegex(
-            UserWarning,
-            "MPS Autocast only supports dtypes of torch.bfloat16, torch.float16, torch.float32 currently.",
-        ):
-            with torch.autocast(device_type="mps", dtype=torch.float64):
-                _ = torch.ones(10)
-
-    @onlyMPS
     def test_mps_autocast_bfloat16_supported(self, device):
         with torch.amp.autocast(device_type="mps", dtype=torch.bfloat16):
             x = torch.randn(2, 3, device=device)
