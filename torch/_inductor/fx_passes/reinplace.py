@@ -23,6 +23,7 @@ from torch._inductor.fx_utils import (
     _is_unsupported_inductor_lowering,
     _same_size_stride_and_storage_offset,
     FakeTensorUpdater,
+    get_mutated_input_nodes,
     get_node_storage,
     is_node_realized,
 )
@@ -641,7 +642,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             replaced, replacement
         )
 
-    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node, mutated_arg):
+    def any_use_of_views_after_node(
+        node, shared_view_nodes, *, copy_node, mutated_arg, include_current=False
+    ):
         node_loc = node_order[node]
         copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
@@ -654,7 +657,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             for user in view.users:
                 user_loc = node_order[user]
                 # Skip all users before node
-                if user_loc <= node_loc:
+                if user_loc < node_loc or (
+                    user_loc == node_loc and not include_current
+                ):
                     continue
                 # Ignore uses after the copy_ epilogue node, where the input
                 # has already been mutated anyway
@@ -713,6 +718,36 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             for v in shared_view_nodes
             if _overlap([mutated_arg.meta["val"], v.meta["val"]])
         ]
+
+        result_storage = get_node_storage(node)
+        if result_storage is not None:
+            removable_copyback = copy_node_for_reinplaced_arg(node, mutated_arg)
+            mutated_storage = get_node_storage(mutated_arg)
+            possible_mutations = OrderedSet(
+                user
+                for alias in storage_to_nodes[mutated_storage]
+                for user in alias.users
+            )
+            for mutation in possible_mutations:
+                if not any(
+                    get_node_storage(written) == mutated_storage
+                    for written in get_mutated_input_nodes(mutation)
+                ):
+                    continue
+                if node_order[mutation] <= node_order[node]:
+                    continue
+                # Successful reinplacement removes this copyback, so it cannot
+                # overwrite a live functional result. Other later writes still matter.
+                if mutation is removable_copyback:
+                    continue
+                if any_use_of_views_after_node(
+                    mutation,
+                    storage_to_nodes[result_storage],
+                    copy_node=None,
+                    mutated_arg=node,
+                    include_current=True,
+                ):
+                    return False
 
         if mutated_arg.op in ("placeholder", "get_attr"):
             # Get the first copy_ node that mutates the mutated_arg.
@@ -1016,13 +1051,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         for updated in changed_nodes:
             if updated in node_to_storage:
                 old_storage = node_to_storage[updated]
-                if not updated._erased and old_storage == get_node_storage(updated):
-                    continue
-                storage_to_nodes[old_storage].discard(updated)
-                if not storage_to_nodes[old_storage]:
-                    del storage_to_nodes[old_storage]
-                del node_to_storage[updated]
-            if not updated._erased:
+                if updated._erased or old_storage != get_node_storage(updated):
+                    storage_to_nodes[old_storage].discard(updated)
+                    if not storage_to_nodes[old_storage]:
+                        del storage_to_nodes[old_storage]
+                    del node_to_storage[updated]
+            if not updated._erased and updated not in node_to_storage:
                 storage = get_node_storage(updated)
                 node_to_storage[updated] = storage
                 storage_to_nodes[storage].add(updated)
