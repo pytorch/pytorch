@@ -13,6 +13,7 @@ from torch._dynamo import compiled_autograd
 from torch._dynamo._trace_wrapped_higher_order_op import trace_wrapped
 from torch._dynamo.testing import normalize_gm
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def _multiply(x):
@@ -24,6 +25,8 @@ def _multiply_invoke(grad):
 
 
 class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_invoke_in_eager(self):
         x = torch.tensor([0.5, 0.5], requires_grad=True)
         y = torch.tensor([0.5, 0.5], requires_grad=True)
