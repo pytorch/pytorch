@@ -63,6 +63,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
+    TEST_XPU,
     xfailIf,
 )
 
@@ -3376,8 +3377,10 @@ class TestConvolutionNNDevice(NNTestCase):
         output_cpu = model_cpu(input_tensor.float().cpu())
         self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
 
+    # oneDNN computes the TF32 weight gradient to roughly bf16 precision, which
+    # overshoots 0.005 by ~0.0086, so XPU takes the same tolerance as ROCm.
     @onlyAccelerator
-    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM or TEST_XPU else 0.005)
     def test_Conv2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.Conv2d(3, 3, kernel_size=1)
@@ -3409,7 +3412,7 @@ class TestConvolutionNNDevice(NNTestCase):
         )
 
     @onlyAccelerator
-    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM or TEST_XPU else 0.005)
     def test_ConvTranspose2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.ConvTranspose2d(3, 3, kernel_size=1)

@@ -512,6 +512,21 @@ _tf32_off_lock = threading.Lock()
 _tf32_off_depth = 0
 _tf32_off_saved_precision = None
 _tf32_off_cudnn_ctx = None
+_tf32_off_mkldnn_ctx = None
+
+
+# XPU takes TF32 from oneDNN's fpmath mode rather than from the cuBLAS/cuDNN
+# flags: both aten/src/ATen/native/mkldnn/xpu/detail/Matmul.cpp and
+# .../detail/Utils.cpp select dnnl::fpmath_mode::tf32 from allowTF32OneDNN.
+# Setting that flag on a build without XPU support only emits a TORCH_WARN
+# (Context::setAllowTF32OneDNN), hence the TEST_XPU guard.
+def _mkldnn_tf32(enabled):
+    if not TEST_XPU:
+        return contextlib.nullcontext()
+    # flags() is the only writer left once common_utils has called
+    # disable_global_flags(), and its arguments mean "set to this" rather than
+    # "leave alone", so every unrelated flag has to be passed as None.
+    return torch.backends.mkldnn.flags(enabled=None, deterministic=None, allow_tf32=enabled, fp32_precision=None)
 
 
 # The allow_tf32 setter writes both the legacy Float32MatmulPrecision enum and
@@ -542,13 +557,15 @@ def tf32_off():
     # rank thread over the same process-global flags, so per-entry
     # save/restore can interleave and leak a modified state past the last
     # exit, which the TestCase fp32 precision leak detector then flags.
-    global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
+    global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx, _tf32_off_mkldnn_ctx
     with _tf32_off_lock:
         if _tf32_off_depth == 0:
             _tf32_off_saved_precision = _save_matmul_precision()
             torch.backends.cuda.matmul.allow_tf32 = False
             _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False)
             _tf32_off_cudnn_ctx.__enter__()
+            _tf32_off_mkldnn_ctx = _mkldnn_tf32(False)
+            _tf32_off_mkldnn_ctx.__enter__()
         _tf32_off_depth += 1
     try:
         yield
@@ -556,6 +573,8 @@ def tf32_off():
         with _tf32_off_lock:
             _tf32_off_depth -= 1
             if _tf32_off_depth == 0:
+                _tf32_off_mkldnn_ctx.__exit__(None, None, None)
+                _tf32_off_mkldnn_ctx = None
                 _tf32_off_cudnn_ctx.__exit__(None, None, None)
                 _tf32_off_cudnn_ctx = None
                 _restore_matmul_precision(_tf32_off_saved_precision)
@@ -569,7 +588,8 @@ def tf32_on(self, tf32_precision=1e-5):
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         self.precision = tf32_precision
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True), \
+             _mkldnn_tf32(True):
             yield
     finally:
         _restore_matmul_precision(old_matmul_precision)
@@ -579,7 +599,7 @@ def tf32_on(self, tf32_precision=1e-5):
 @contextlib.contextmanager
 def tf32_enabled():
     """
-    Context manager to temporarily enable TF32 for CUDA operations.
+    Context manager to temporarily enable TF32 for CUDA and XPU operations.
     Restores the previous TF32 state after exiting the context.
     """
     old_matmul_precision = _save_matmul_precision()
@@ -587,7 +607,7 @@ def tf32_enabled():
         torch.backends.cuda.matmul.allow_tf32 = True
         with torch.backends.cudnn.flags(
             enabled=None, benchmark=None, deterministic=None, allow_tf32=True
-        ):
+        ), _mkldnn_tf32(True):
             yield
     finally:
         _restore_matmul_precision(old_matmul_precision)
@@ -617,8 +637,8 @@ def tf32_enabled():
 # def test_my_op(self, device, dtype)
 # @tf32_on_and_off(0.005)
 # def test_my_op(self, dtype)
-# if neither device nor dtype is specified, it will check if the system has ampere device
-# if device is specified, it will check if device is cuda
+# if neither device nor dtype is specified, it will check if the system has a tf32-capable device
+# if device is specified, it will check if that device is a tf32-capable cuda or xpu device
 # if dtype is specified, it will check if dtype is float32 or complex64
 # tf32 and fp32 are different only when all the three checks pass
 def tf32_on_and_off(tf32_precision=1e-5, *, only_if=True):
@@ -637,9 +657,13 @@ def tf32_on_and_off(tf32_precision=1e-5, *, only_if=True):
         @functools.wraps(f)
         def wrapped(*args, **kwargs):
             kwargs.update(zip(arg_names, args, strict=False))
-            cond = torch.cuda.is_tf32_supported() and only_if
             if 'device' in kwargs:
-                cond = cond and (torch.device(kwargs['device']).type == 'cuda')
+                device_type = torch.device(kwargs['device']).type
+                cond = ((device_type == 'cuda' and torch.cuda.is_tf32_supported())
+                        or (device_type == 'xpu' and torch.xpu.is_tf32_supported()))
+            else:
+                cond = torch.cuda.is_tf32_supported() or torch.xpu.is_tf32_supported()
+            cond = cond and only_if
             if 'dtype' in kwargs:
                 cond = cond and (kwargs['dtype'] in {torch.float32, torch.complex64})
             if cond:
