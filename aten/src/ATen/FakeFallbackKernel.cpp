@@ -71,10 +71,6 @@
 // made below autograd, while Python's FakeTensor keeps the requires_grad a Meta
 // kernel set on its meta output.
 //
-// TODO: Python CIA kernels written directly into py_kernels for ops without
-// native CIA kernels are not recorded in the tables. In-tree direct writers
-// (torch.export) override ops with native CIA kernels, which we always probe.
-//
 // TODO: rngprims are not in PrimMeta. Philox also needs the unsupported
 // lift_fresh path to construct its offset tensor.
 
@@ -465,13 +461,28 @@ void fakeFallback(
       if (!resolve) {
         return std::nullopt;
       }
-      const auto resolved =
-          (*c10::impl::getGlobalPyInterpreter())
-              ->_resolve_device_conflict(op, *common_device, input_device);
-      if (resolved == input_device) {
-        common_device = input_device;
-        common_is_cpu_zero_dim = is_cpu_zero_dim;
+      if (mode->prefer_device_type_.has_value()) {
+        const bool common_has_preferred =
+            common_device->type() == *mode->prefer_device_type_;
+        const bool input_has_preferred =
+            input_device.type() == *mode->prefer_device_type_;
+        if (!common_has_preferred && input_has_preferred) {
+          common_device = input_device;
+          common_is_cpu_zero_dim = is_cpu_zero_dim;
+          continue;
+        }
+        if (common_has_preferred && !input_has_preferred) {
+          continue;
+        }
       }
+      TORCH_CHECK(
+          false,
+          "Expected all tensors to be on the same device, but found at least "
+          "two devices, ",
+          *common_device,
+          " and ",
+          input_device,
+          "!");
     }
     return common_device;
   };
@@ -485,16 +496,14 @@ void fakeFallback(
       !cpp_meta_supports_symint(op, categories)) {
     const bool has_cia =
         op.hasKernelForDispatchKey(c10::DispatchKey::CompositeImplicitAutograd);
-    // Probe every native CIA op too: export writes py_kernels directly,
-    // bypassing the registration hook that sets the PythonCIA bit.
     const bool try_decomp =
         (has(FakeDispatchCategory::StaticShapeDecomp) && !has_sparse_inputs) ||
-        has(FakeDispatchCategory::PythonCIA) || has_cia;
-    if (try_decomp) {
+        has(FakeDispatchCategory::PythonCIA);
+    if (try_decomp || has_cia) {
       const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
       auto decompose = [&] {
         bool has_python_cia = false;
-        if (interpreter->fake_try_decomp(
+        if (try_decomp && interpreter->fake_try_decomp(
                 op, stack, /*has_symbolic_sizes=*/false, &has_python_cia)) {
           return true;
         }
@@ -629,8 +638,10 @@ void fakeFallback(
     if (converted_outputs.contains(impl)) {
       return;
     }
-    if (t.is_fake() && impl->fake_tensor_mode() == mode) {
-      // device() reports meta inside the kernel invocation scope.
+    if (t.is_fake()) {
+      TORCH_CHECK(
+          impl->fake_tensor_mode() == mode,
+          "Meta kernel returned a fake tensor from another mode");
       const auto fake_device = impl->fake_device();
       TORCH_CHECK(
           fake_device == output_common_device,
@@ -643,9 +654,6 @@ void fakeFallback(
       }
       return;
     }
-    TORCH_CHECK(
-        !t.is_fake(),
-        "Meta kernel returned a fake tensor from another mode");
     if (!is_alias && t.requires_grad()) {
       // Backend kernels run below autograd, but a Meta kernel can copy
       // requires_grad from an input

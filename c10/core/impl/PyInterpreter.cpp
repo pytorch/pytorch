@@ -154,12 +154,6 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       c10::function_ref<bool()> /*step*/) const override {
     PANIC(fake_run_with_mode_entered);
   }
-  c10::Device _resolve_device_conflict(
-      const c10::OperatorHandle& /*op*/,
-      c10::Device /*common_device*/,
-      c10::Device /*device*/) const override {
-    PANIC(_resolve_device_conflict);
-  }
   void fake_raise_python_error(
       FakePythonError /*kind*/,
       const std::string& /*msg*/) const override {
