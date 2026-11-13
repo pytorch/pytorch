@@ -8,6 +8,7 @@ use crate::inline;
 use crate::ir::*;
 use crate::pyffi::PyObj;
 use crate::spec::{self, CfgPass, PassCx, Pipeline, PyPass, Unit, ValueObs};
+use crate::unroll;
 use crate::vm::{Compiled, Options};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -52,7 +53,7 @@ pub fn builtin_passes() -> Vec<&'static str> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -63,11 +64,15 @@ pub fn compile(
     max_versions: usize,
     max_respecializations: u32,
     inline: bool,
+    unroll: bool,
 ) -> PyResult<CfgFunction> {
     let table = OpcodeTable::load(py)?;
     let mut function = frontend::build(py, &table, func)?;
     if inline {
         inline::inline_calls(py, &table, &mut function, &func.getattr("__code__")?);
+    }
+    if unroll {
+        function.unrolled = unroll::unroll_loops(&mut function);
     }
     let mut pipeline: Vec<Box<dyn CfgPass>> = Vec::new();
     for pass in passes {
@@ -261,6 +266,7 @@ impl CfgFunction {
         out.set_item("unlowered", unlowered)?;
         let inlined: Vec<String> = cf.func.origins[1..].iter().map(|o| o.name.clone()).collect();
         out.set_item("inlined", inlined)?;
+        out.set_item("unrolled_loops", cf.func.unrolled)?;
         out.set_item("log", state.log.clone())?;
         Ok(out.into_any().unbind())
     }
