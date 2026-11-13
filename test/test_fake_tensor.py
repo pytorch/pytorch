@@ -6745,7 +6745,7 @@ class TestCppFakeTensorModeBindings(TestCase):
                 "Meta" if implementation == "meta" else "CompositeImplicitAutograd",
             )
             op = torch.ops._test_fake_fallback.probe.default
-            # Export writes py_kernels directly, bypassing the PythonCIA table.
+            # Direct writes, including patch.dict's update/clear, track PythonCIA.
             overrides = (
                 {}
                 if implementation == "meta"
