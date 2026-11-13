@@ -341,7 +341,7 @@ def _check_trace(
 
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
-            check_mod = torch.jit.trace_module(
+            check_mod = torch.jit._trace.trace_module(
                 getattr(func, "__self__", func),
                 copied_dict,
                 check_trace=False,
@@ -362,7 +362,7 @@ def _check_trace(
                 inputs = (inputs,)
         else:
             if example_inputs_is_kwarg:
-                check_mod = torch.jit.trace(
+                check_mod = torch.jit._trace.trace(
                     func,
                     check_trace=False,
                     strict=strict,
@@ -372,7 +372,7 @@ def _check_trace(
                     _store_inputs=False,
                 )
             else:
-                check_mod = torch.jit.trace(
+                check_mod = torch.jit._trace.trace(
                     func,
                     _clone_inputs(inputs),
                     check_trace=False,
@@ -953,48 +953,6 @@ def trace(
         ``nn.Module``.  If ``func`` is a standalone function, ``trace``
         returns `ScriptFunction`.
 
-    Example (tracing a function):
-
-    .. testcode::
-
-        import torch
-
-        def foo(x, y):
-            return 2 * x + y
-
-        # Run `foo` with the provided inputs and record the tensor operations
-        traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
-
-        # `traced_foo` can now be run with the TorchScript interpreter or saved
-        # and loaded in a Python-free environment
-
-    Example (tracing an existing module)::
-
-        import torch
-        import torch.nn as nn
-
-
-        class Net(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = nn.Conv2d(1, 1, 3)
-
-            def forward(self, x):
-                return self.conv(x)
-
-
-        n = Net()
-        example_weight = torch.rand(1, 1, 3, 3)
-        example_forward_input = torch.rand(1, 1, 3, 3)
-
-        # Trace a specific method and construct `ScriptModule` with
-        # a single `forward` method
-        module = torch.jit.trace(n.forward, example_forward_input)
-
-        # Trace a module (implicitly traces `forward`) and construct a
-        # `ScriptModule` with a single `forward` method
-        module = torch.jit.trace(n, example_forward_input)
-
     """
     if sys.version_info >= (3, 14):
         warnings.warn(
@@ -1430,11 +1388,6 @@ def _get_trace_graph(
         kwargs (dict): the keyword arguments to pass to the function/module
             to be traced.
 
-    Example (trace a cell):
-
-    .. testcode::
-
-        trace = torch.jit.trace(nn.LSTMCell(), (input, hidden))
     """
     if kwargs is None:
         kwargs = {}
