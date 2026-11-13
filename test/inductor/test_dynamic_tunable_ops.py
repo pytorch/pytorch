@@ -27,10 +27,10 @@ to exercise the swapped_mn M<->N mask remap. Not covered: addbmm and other
 batched-add variants, and scaled GEMM beyond the FP8 tensorwise shape.
 
 Platform note: this suite targets ROCm, but OSS CI shards it onto NVIDIA too
-(the fbcode BUCK exclusion does not apply there). On NVIDIA `setUpClass` turns
-on the TunableOp numerical check so the tuner cannot select a candidate that
-disagrees with the untuned kernel by more than the tolerance the assertions
-use.
+(the fbcode BUCK exclusion does not apply there). On NVIDIA `setUpModule`
+disallows bf16 reduced-precision reductions, so the tuner cannot select a
+cuBLASLt split-K solution whose bf16 partial sums exceed the tolerance the
+assertions use.
 """
 
 # pyre-strict
@@ -48,7 +48,7 @@ import torch
 import torch.cuda.tunable
 from torch._inductor import config as inductor_config
 from torch._inductor.kernel_inputs import MMKernelInputs
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 DEVICE: str = "cuda"
@@ -56,6 +56,19 @@ DTYPE: torch.dtype = torch.bfloat16
 GEMM_ATOL: float = 1e-2
 GEMM_RTOL: float = 1e-2
 _TunableResultEntry: TypeAlias = tuple[str, str, str, float]
+_PRIOR_BF16_REDUCTION: bool = True
+
+
+def setUpModule() -> None:
+    global _PRIOR_BF16_REDUCTION
+    matmul = torch.backends.cuda.matmul
+    _PRIOR_BF16_REDUCTION = matmul.allow_bf16_reduced_precision_reduction
+    matmul.allow_bf16_reduced_precision_reduction = False
+
+
+def tearDownModule() -> None:
+    matmul = torch.backends.cuda.matmul
+    matmul.allow_bf16_reduced_precision_reduction = _PRIOR_BF16_REDUCTION
 
 
 def _get_tunable_results() -> list[_TunableResultEntry]:
@@ -284,15 +297,6 @@ class DynamicTunableOpsTest(TestCase):
         cls._tmpdir = tempfile.mkdtemp(prefix="dynamic_tunable_ops_test_")
         cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
         torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
-        # TunableOp's numerical check is off by default, so on NVIDIA the
-        # winning candidate can drift past GEMM_ATOL/GEMM_RTOL from
-        # `gemm_internal` -- the reference every "output matches" assertion
-        # uses. Screening at that same tolerance drops such candidates during
-        # tuning; ROCm does not need it and the check is not free.
-        if not TEST_WITH_ROCM:
-            torch.cuda.tunable.set_numerical_check_tolerances(
-                True, GEMM_ATOL, GEMM_RTOL
-            )
 
     @classmethod
     def tearDownClass(cls) -> None:
