@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.cpp_extension import (
     _get_cuda_arch_flags,
+    _get_rocm_dlink_link_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
     COMMON_MSVC_FLAGS,
@@ -1370,6 +1371,195 @@ except RuntimeError as e:
                 timestamp = os.stat(objects[0]).st_mtime_ns
                 self.assertEqual(alone, compile_first_only(1))
                 self.assertEqual(timestamp, os.stat(objects[0]).st_mtime_ns)
+
+
+class TestRocmDlinkArgs(common.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_dlink_link_flags(self):
+        device_opts = ["-O2", "-Xarch_device", "-O0", "--offload-compress"]
+        device_opts += ["--offload-arch=gfx942"]
+        cases = [
+            (
+                [
+                    "-O2",
+                    "--offload-arch=gfx942",
+                    "--no-offload-new-driver",
+                    "-fgpu-rdc",
+                ],
+                ["-O2", "--offload-arch=gfx942", "--no-offload-new-driver"],
+            ),
+            # Device code is generated at the rdc link, so it needs a debug build's -O0 -g.
+            (
+                ["-O0", "-g", "--offload-arch=gfx942", "-fgpu-rdc", "-DFOO"],
+                ["-O0", "-g", "--offload-arch=gfx942"],
+            ),
+            # Option values and look-alike options are not optimization or debug flags.
+            (
+                ["-O3", "-Xarch_host", "-O0", "-gen-cdb-fragment-path", "/tmp/cdb"]
+                + ["-mllvm", "-gpsize=0", "--offload-arch=gfx942"],
+                ["-O3", "--offload-arch=gfx942"],
+            ),
+            (["--amdgpu-target=gfx90a"], ["--amdgpu-target=gfx90a"]),
+            (["--no-offload-arch=gfx90a"], ["--no-offload-arch=gfx90a"]),
+            # Device-only options also shape the device code generated at the link.
+            (device_opts, device_opts),
+            # No user arch: all PYTORCH_ROCM_ARCH defaults; driver toggles keep their order.
+            (
+                ["-O2", "--offload-new-driver", "--no-offload-new-driver"],
+                ["-O2", "--offload-new-driver", "--no-offload-new-driver"]
+                + ["--offload-arch=gfx90a", "--offload-arch=gfx942"],
+            ),
+        ]
+        with mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx90a;gfx942"}):
+            for nvcc_flags, expected in cases:
+                with self.subTest(nvcc_flags=nvcc_flags):
+                    self.assertEqual(_get_rocm_dlink_link_flags(nvcc_flags), expected)
+
+    def test_dlink_on_windows_rocm_raises(self):
+        with (
+            mock.patch.object(torch.utils.cpp_extension, "IS_HIP_EXTENSION", True),
+            mock.patch.object(torch.utils.cpp_extension, "IS_WINDOWS", True),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "not supported for ROCm extensions on Windows"
+            ):
+                torch.utils.cpp_extension.CUDAExtension("x", ["x.cpp"], dlink=True)
+
+    def _rocm_cuda_extension(self, **kwargs):
+        # CUDAExtension as on Linux ROCm, without needing a ROCm install.
+        with (
+            mock.patch.object(torch.utils.cpp_extension, "IS_HIP_EXTENSION", True),
+            mock.patch.object(torch.utils.cpp_extension, "IS_WINDOWS", False),
+            mock.patch.object(
+                torch.utils.cpp_extension, "library_paths", return_value=[]
+            ),
+            mock.patch.object(
+                torch.utils.cpp_extension, "include_paths", return_value=[]
+            ),
+            mock.patch("torch.utils.hipify.hipify_python.hipify", return_value={}),
+            mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx942"}),
+        ):
+            return torch.utils.cpp_extension.CUDAExtension("x", ["x.cpp"], **kwargs)
+
+    def test_dlink_cuda_extension_args(self):
+        nvcc = [
+            "-O2",
+            "-rdc=true",
+            "-dc",
+            "-rdc",
+            "true",
+            "-dlto",
+            "-dlink",
+            "--device-link",
+        ]
+        args = {"cxx": [], "nvcc": list(nvcc), "nvcc_dlink": ["-dlto"]}
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING") as logs:
+            ext = self._rocm_cuda_extension(dlink=True, extra_compile_args=args)
+        # nvcc's rdc/dlink flags are dropped and nvcc_dlink is ignored with a warning,
+        # without changing the caller's args.
+        self.assertEqual(ext.extra_compile_args["nvcc"], ["-O2", "-fgpu-rdc"])
+        self.assertNotIn("nvcc_dlink", ext.extra_compile_args)
+        self.assertTrue(any("Ignoring nvcc_dlink flags" in o for o in logs.output))
+        self.assertEqual(args, {"cxx": [], "nvcc": nvcc, "nvcc_dlink": ["-dlto"]})
+        # A list of args applies to both compilers.
+        ext = self._rocm_cuda_extension(dlink=True, extra_compile_args=["-g"])
+        self.assertEqual(
+            ext.extra_compile_args, {"cxx": ["-g"], "nvcc": ["-g", "-fgpu-rdc"]}
+        )
+        # dlink_libraries alone turns on dlink.
+        ext = self._rocm_cuda_extension(dlink_libraries=["dlink_lib"])
+        self.assertIn("dlink_lib", ext.libraries)
+        self.assertIn("-fgpu-rdc", ext.extra_compile_args["nvcc"])
+        self.assertIn(torch.utils.cpp_extension._ROCM_DLINK_MARKER, ext.extra_link_args)
+
+    @unittest.skipIf(IS_WINDOWS, "unix compiler only")
+    def test_build_extensions_adds_dlink_link_flags(self):
+        from setuptools import Distribution
+        from setuptools._distutils.ccompiler import new_compiler  # codespell:ignore
+        from setuptools.command.build_ext import build_ext
+
+        cpp_ext = torch.utils.cpp_extension
+
+        def build(extensions):
+            cmd = cpp_ext.BuildExtension(Distribution({"ext_modules": extensions}))
+            cmd.ensure_finalized()
+            cmd.compiler = new_compiler(compiler="unix")
+            # build_extensions extends src_extensions in place; keep that off the class list.
+            cmd.compiler.src_extensions = list(cmd.compiler.src_extensions)
+            with (
+                mock.patch.object(cpp_ext, "IS_HIP_EXTENSION", True),
+                mock.patch.object(cmd, "_check_abi", return_value=("c++", None)),
+                mock.patch.object(build_ext, "build_extensions") as base_build,
+                mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx90a"}),
+            ):
+                cmd.build_extensions()
+            base_build.assert_called_once()
+            return cmd
+
+        # Making the Extension in setup.py must not query the GPUs for archs.
+        with mock.patch.object(cpp_ext, "_get_rocm_arch_flags") as arch_flags:
+            ext = self._rocm_cuda_extension(
+                dlink=True, extra_compile_args={"cxx": [], "nvcc": []}
+            )
+        arch_flags.assert_not_called()
+        # Arch flags changed after the Extension was made still reach the link.
+        ext_user_arch = self._rocm_cuda_extension(
+            dlink=True, extra_compile_args={"cxx": [], "nvcc": []}
+        )
+        ext_user_arch.extra_compile_args["nvcc"].append("--offload-arch=gfx942")
+        cmd = build([ext, ext_user_arch])
+        dlink_args = ["-fgpu-rdc", "--hip-link", cpp_ext._ROCM_DLINK_MARKER]
+        self.assertEqual(ext.extra_link_args, dlink_args + ["--offload-arch=gfx90a"])
+        self.assertEqual(
+            ext_user_arch.extra_link_args, dlink_args + ["--offload-arch=gfx942"]
+        )
+        self.assertIn("link", vars(cmd.compiler))  # hipcc link wrapper installed
+        # Builds without dlink extensions keep the compiler's own link.
+        cmd = build([cpp_ext.CppExtension("y", ["y.cpp"])])
+        self.assertNotIn("link", vars(cmd.compiler))
+
+    @unittest.skipIf(IS_WINDOWS, "unix compiler only")
+    def test_hip_dlink_link_uses_hipcc(self):
+        from setuptools._distutils.ccompiler import new_compiler  # codespell:ignore
+
+        compiler = new_compiler(compiler="unix")
+        # A launcher in front of the compiler, as with CXX="ccache g++".
+        for attr in ("compiler_cxx", "linker_exe", "linker_exe_cxx"):
+            setattr(compiler, attr, ["ccache", "g++"])
+        for attr in ("linker_so", "linker_so_cxx"):
+            setattr(compiler, attr, ["ccache", "g++", "-shared"])
+        cmds = []
+        compiler.spawn = lambda cmd, **kwargs: cmds.append(cmd)
+        with mock.patch.object(
+            torch.utils.cpp_extension, "_get_hipcc_path", return_value="/rocm/bin/hipcc"
+        ):
+            torch.utils.cpp_extension._wrap_hip_dlink_link(compiler)
+            with tempfile.TemporaryDirectory() as d:
+                marker = torch.utils.cpp_extension._ROCM_DLINK_MARKER
+                for name, post in (
+                    ("dlink", ["-fgpu-rdc", "--hip-link", marker]),
+                    ("plain", []),
+                    # Passing --hip-link alone does not opt in to the hipcc link.
+                    ("own_hip_link", ["--hip-link"]),
+                ):
+                    compiler.link_shared_object(
+                        ["a.o"],
+                        os.path.join(d, f"{name}.so"),
+                        extra_postargs=post,
+                        target_lang="c++",
+                    )
+        dlink_cmd, plain_cmd, own_hip_link_cmd = cmds
+        self.assertEqual(dlink_cmd[0], "/rocm/bin/hipcc")
+        self.assertNotIn("g++", dlink_cmd)
+        self.assertNotIn("ccache", dlink_cmd)
+        self.assertIn("--hip-link", dlink_cmd)
+        self.assertIn("-shared", dlink_cmd)
+        self.assertNotIn(marker, dlink_cmd)
+        self.assertEqual(plain_cmd[:2], ["ccache", "g++"])
+        self.assertEqual(own_hip_link_cmd[:2], ["ccache", "g++"])
+        self.assertIn("--hip-link", own_hip_link_cmd)
+        self.assertEqual(compiler.compiler_cxx, ["ccache", "g++"])
 
 
 @unittest.skipIf(not TEST_XPU, "XPU not found")

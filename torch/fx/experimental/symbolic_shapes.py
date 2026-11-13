@@ -7542,7 +7542,7 @@ class ShapeEnv:
             if not self._resimplify_floor_div_axioms:
                 return
             self._resimplify_floor_div_axioms = False
-            new_items = {}
+            new_items: dict[sympy.Expr, sympy.Expr] = {}
             for k, v in list(axioms.items()):
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
                 # to the shapeEnv. This handles such issue but its not ideal. This is the only expression

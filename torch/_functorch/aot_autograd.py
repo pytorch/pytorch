@@ -26,7 +26,7 @@ from torch._dynamo.utils import (
     preserve_rng_state,
     set_feature_use,
 )
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, require_python_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
@@ -1513,7 +1513,7 @@ def aot_compile_joint_with_descriptors(
     # standalone_compile with dynamic_shapes="from_tracing_context".
     tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is None:
-        fake_mode = detect_fake_mode(jd._aot_state.flat_args)
+        fake_mode = require_python_fake_mode(detect_fake_mode(jd._aot_state.flat_args))
         if fake_mode is not None:
             tracing_context = torch._guards.TracingContext(fake_mode)
             tracing_ctx = torch._guards.tracing(tracing_context)
@@ -1940,7 +1940,7 @@ def _aot_export_function(
     fake_mode = None
     if dynamic_shapes is None:
         # Try to infer `dynamic_shapes from inputs and graph nodes
-        fake_mode = detect_fake_mode(flat_args)
+        fake_mode = require_python_fake_mode(detect_fake_mode(flat_args))
         if (
             fake_mode is None
             and hasattr(func, "_orig_mod")
@@ -1951,7 +1951,7 @@ def _aot_export_function(
                 for node in func._orig_mod.graph.nodes
                 if "val" in node.meta
             ]
-            fake_mode = detect_fake_mode(vals)
+            fake_mode = require_python_fake_mode(detect_fake_mode(vals))
         dynamic_shapes = fake_mode is not None and fake_mode.shape_env is not None
 
     # The export use case doesn't care about several bits of AOTConfig
