@@ -172,6 +172,27 @@ class TestStaticTritonLauncherUnit(TestCase):
             asm={"hsaco": b"hsaco"}, global_scratch_size=0, tmem_size=1024
         ).load_kernel(0)
 
+    def test_hip_static_lds_uses_no_dynamic_shared_memory(self):
+        kernel = self._global_scratch_kernel(
+            asm={"hsaco": b"hsaco"},
+            global_scratch_size=0,
+            shared=135040,
+            shared_static=135040,
+        )
+        self.assertEqual(kernel.shared, 0)
+
+    def test_hip_without_static_lds_keeps_dynamic_shared_memory(self):
+        kernel = self._global_scratch_kernel(
+            asm={"hsaco": b"hsaco"}, global_scratch_size=0, shared=135040
+        )
+        self.assertEqual(kernel.shared, 135040)
+
+    def test_cuda_ignores_static_lds_metadata(self):
+        kernel = self._global_scratch_kernel(
+            global_scratch_size=0, shared=1024, shared_static=1024
+        )
+        self.assertEqual(kernel.shared, 1024)
+
     @parametrize("retry_succeeds", [False, True])
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     @skipIfRocm
