@@ -434,17 +434,26 @@ static Tensor dispatch_to_rounded(const Tensor & self, std::optional<Device> dev
   if (!device.has_value()) {
     return convert(self);
   }
-  const auto move = [&](const Tensor& t) {
-    return t.to(t.options().device(*device), non_blocking);
-  };
   static const auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::_to_dtype_rounded", "out");
   const auto has_kernel = [](Device d) {
     return op.hasKernelForDispatchKey(c10::computeDispatchKey(std::nullopt, std::nullopt, d));
   };
-  if (has_kernel(self.device()) && (!self.is_cpu() || !has_kernel(*device))) {
-    return move(convert(self));
+  const auto target = *device;
+  // For a target of the same type (e.g. "cuda" for a tensor on cuda:0), dispatch
+  // decides where to convert.
+  if (target.type() == self.device().type() ||
+      (has_kernel(self.device()) && (!self.is_cpu() || !has_kernel(target)))) {
+    const auto result = convert(self);
+    return result.to(result.options().device(target), non_blocking);
   }
-  return convert(move(self));
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      has_kernel(target),
+      "Tensor.to(..., round=...) converts on CPU or CUDA, but got a conversion from ",
+      self.device(), " to ", target);
+  // The conversion reads the transferred tensor at once, and the caller cannot
+  // synchronize with it: a transfer to the CPU must complete first.
+  return convert(
+      self.to(self.options().device(target), non_blocking && !target.is_cpu()));
 }
 
 static PyObject * THPVariable_cpu(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -1011,7 +1020,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   if (r.has_torch_function()) {
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
-  auto parsed = parse_to_conversion(r, /*allow_copy*/ true, /*allow_round*/ true);
+  auto parsed = parse_to_conversion_with_round(r, /*allow_copy*/ true, /*allow_round*/ true);
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);

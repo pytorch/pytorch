@@ -78,13 +78,19 @@ namespace detail {
 // odd (round_to_odd_float) and then with T's float conversion rounds it once,
 // for binary formats that float covers with at least two more significand
 // bits. Converting a double through T's float conversion directly would round
-// twice.
+// twice. This holds for any T with a complete floating-point numeric_limits
+// specialization whose conversion from float rounds to nearest (with any tie
+// rule) and handles NaN, infinities and overflow as a conversion from double
+// would.
+// Complex types are excluded: their parts are converted on their own.
 template <typename T>
 inline constexpr bool rounds_through_float = [] {
   using L = std::numeric_limits<T>;
   using F = std::numeric_limits<float>;
   // Only floating-point specializations must have the other members.
-  if constexpr (L::is_specialized && !L::is_integer) {
+  if constexpr (
+      L::is_specialized && !L::is_integer &&
+      !torch::headeronly::is_complex<T>::value) {
     return L::radix == 2 && L::digits + 2 <= F::digits &&
         L::max_exponent <= F::max_exponent &&
         L::min_exponent - L::digits >= F::min_exponent - F::digits + 2;

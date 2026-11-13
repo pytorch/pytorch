@@ -38,6 +38,7 @@ TEST(TestDtype, TestFloat8HasDenorm) {
   static_assert(has_denorm_is<Float8_e5m2fnuz>(std::denorm_present));
   static_assert(has_denorm_is<Float8_e5m3fnu>(std::denorm_present));
   static_assert(has_denorm_is<Float8_e8m0fnu>(std::denorm_absent));
+  // denorm_absent, so denorm_min() must equal min().
   using L = std::numeric_limits<Float8_e8m0fnu>;
   static_assert(L::denorm_min().x == L::min().x);
 }

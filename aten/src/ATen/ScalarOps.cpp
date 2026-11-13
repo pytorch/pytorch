@@ -29,7 +29,7 @@ inline void fill_inplace(Tensor& self, const Scalar& value_scalar) {
     //     => RuntimeError: value cannot be converted to type at::Half without overflow
 
     // (Integer and bool Scalars keep rounding through float, like the other
-    // fills.)
+    // fills, which agree with this one up to 2**53.)
     value = value_scalar.isIntegral(/*includeBool=*/true)
         ? static_cast<scalar_t>(value_scalar.to<double>())
         : c10::convert<scalar_t>(value_scalar.to<double>());
