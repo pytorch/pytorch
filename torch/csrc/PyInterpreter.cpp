@@ -12,6 +12,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <string>
 
@@ -1081,8 +1082,7 @@ std::function<py::object(py::object)> make_fake_device_stamp(
         t.device(),
         " tensor; handlers must return Meta or fake tensors, see "
         "Note [C++ fake op_impl outputs]");
-    at::set_and_normalize_fake_device(t.unsafeGetTensorImpl(), common_device);
-    t.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+    at::init_cpp_fake(t.unsafeGetTensorImpl(), common_device, mode);
     return obj;
   };
 }
@@ -1099,7 +1099,7 @@ py::object apply_output_convert(
   if (py::isinstance<py::tuple>(result)) {
     py::tuple tup = result.cast<py::tuple>();
     py::tuple converted(tup.size());
-    for (size_t i = 0; i < tup.size(); i++) {
+    for (const auto i : c10::irange(tup.size())) {
       converted[i] = convert(py::reinterpret_borrow<py::object>(tup[i]));
     }
     return converted;
@@ -1190,7 +1190,6 @@ ActiveFakeMode get_active_fake_mode() {
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
   py::object py_fake_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
-  TORCH_CHECK(!py_fake_mode.is_none(), "CppFakeTensorMode must be set on mode");
   return {std::move(mode), std::move(py_fake_mode)};
 }
 
@@ -1200,12 +1199,13 @@ ActiveFakeMode get_active_fake_mode() {
 //
 // This mirrors the decomposition-selection block in
 // FakeTensorMode._dispatch_impl (torch/_subclasses/fake_tensor.py) and must be
-// kept in sync with it. This callback handles the meta_table exclusion, the
-// decomposition_table lookup with its symbolic/static-shape and sparse
-// eligibility, and the Python CompositeImplicitAutograd lookup. The C++ Fake
-// fallback that calls it handles the cpp_meta_supports_symint and
-// _unbacked_special_fake_handling_ops exclusions, and afterwards the native
-// CompositeImplicitAutograd fallback.
+// kept in sync with it, as must _register_static_shape_decomps in
+// torch/_meta_registrations.py for its static shape case. This callback handles
+// the meta_table exclusion, the decomposition_table lookup with its
+// symbolic/static-shape and sparse eligibility, and the Python
+// CompositeImplicitAutograd lookup. The C++ Fake fallback that calls it handles
+// the cpp_meta_supports_symint and _unbacked_special_fake_handling_ops
+// exclusions, and afterwards the native CompositeImplicitAutograd fallback.
 bool ConcretePyInterpreterVTable::fake_try_decomp(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
@@ -1414,8 +1414,8 @@ bool ConcretePyInterpreterVTable::fake_infer_from_real_out(
       "infer_fake_from_real_out");
 }
 
-// Convert a real tensor to a meta tensor via the mode's converter, then stamp
-// it as a C++ fake on the real tensor's device.
+// Convert a real tensor to a C++ fake of the active mode through the mode's
+// converter (FakeTensorConverter.from_real_tensor).
 c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     const c10::intrusive_ptr<c10::TensorImpl>& real_impl) const {
   py::gil_scoped_acquire gil;
@@ -1427,7 +1427,13 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
   at::Tensor fake_tensor;
   {
     // Exclude Fake so from_real_tensor's meta conversion doesn't re-enter the
-    // fake fallback (the meta factory ops it runs are otherwise plain).
+    // fake fallback (the meta factory ops it runs are otherwise plain). With
+    // allow_non_fake_inputs this also re-fakeifies fakes from another mode; the
+    // describer then reads the source's fake device, which Fake exclusion no
+    // longer hides (see Note [C++ in_kernel_invocation]). from_real_tensor
+    // must only query the source's metadata, build outputs with an explicit
+    // meta device, and run ops on the fakes it makes only under
+    // in_kernel_invocation_manager (as its set_ for a shared storage does).
     c10::impl::ExcludeDispatchKeyGuard exclude_fake(
         {c10::DispatchKeySet(c10::DispatchKey::Fake)});
     auto obj = converter.attr("from_real_tensor")(active.py_fake_mode, real);
@@ -1443,9 +1449,9 @@ bool ConcretePyInterpreterVTable::allow_non_fake_inputs() const {
   if (!override_val.is_none()) {
     return override_val.cast<bool>();
   }
-  auto mode = c10::impl::FakeTensorModeTLS::get_state();
-  TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
-  return mode->allow_non_fake_inputs_;
+  auto handle = c10::impl::FakeTensorModeTLS::get_state();
+  TORCH_CHECK(handle != nullptr, "FakeTensorMode must be active");
+  return handle->allow_non_fake_inputs_;
 }
 
 PyObject* ConcretePyInterpreterVTable::fake_run_real_op(

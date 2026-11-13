@@ -20,11 +20,12 @@ from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch._subclasses import FakeTensorMode
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import SM70OrLater, tf32_off
+from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA, tf32_off
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     ops,
     skip,
@@ -34,6 +35,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     is_iterable_of_tensors,
     run_tests,
@@ -430,7 +432,6 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "meshgrid"),
     # Decomposition registered as Autograd
     (None, None, "nn.functional.hardshrink"),
-    (None, None, "nn.functional.softshrink"),
     # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
     (None, None, "diag"),
     # _softmax_backward_data's CPU kernel for bfloat16 always return the grad_input as float32
@@ -527,7 +528,6 @@ core_backward_failures = {
     skip("native_dropout_backward"),  # slow: fails with --timeout=360 secs
     skip("nn.functional.glu"),  # slow: fails with --timeout=360 secs
     xfail("nn.functional.hardshrink"),
-    xfail("nn.functional.softshrink"),
     skip("nn.functional.unfold"),  # slow: fails with --timeout=360 secs
     xfail("norm"),
     xfail("norm", "fro"),
@@ -576,6 +576,19 @@ comprehensive_failures = {
 }
 
 
+skip_cross_ref = decorateIf(
+    unittest.skip("Op and dtype excluded from decomposition cross-reference tests"),
+    lambda p: any(
+        key in CROSS_REF_EXCLUDE_SET
+        for key in (
+            (torch.device(p["device"]).type, p["dtype"], p["op"].name),
+            (None, p["dtype"], p["op"].name),
+            (None, None, p["op"].name),
+        )
+    ),
+)
+
+
 @unMarkDynamoStrictTest
 class TestDecomp(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -588,6 +601,7 @@ class TestDecomp(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     @ops(_decomp_test_ops)
+    @skip_cross_ref
     def test_quick(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=False)
 
@@ -596,6 +610,19 @@ class TestDecomp(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     @ops(_decomp_test_ops_core_autograd, allowed_dtypes=(torch.float64,))
+    @decorateIf(
+        unittest.skip(
+            "Op and dtype excluded from backward decomposition cross-reference tests"
+        ),
+        lambda p: any(
+            key in CROSS_REF_BACKWARD_EXCLUDE_SET
+            for key in (
+                (torch.device(p["device"]).type, p["dtype"], p["op"].name),
+                (None, p["dtype"], p["op"].name),
+                (None, None, p["op"].name),
+            )
+        ),
+    )
     def test_quick_core_backward(self, device, dtype, op):
         test_keys = [
             (torch.device(device).type, dtype, op.name),
@@ -624,6 +651,7 @@ class TestDecomp(TestCase):
     @skipOps(comprehensive_failures)
     @suppress_warnings
     @ops(op_db)
+    @skip_cross_ref
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
 
@@ -860,6 +888,11 @@ def forward(self, x_1, start_1):
     return convert_element_type""",
         )
 
+    @decorateIf(
+        unittest.skip("only runs on XPU and CUDA and PrivateUse1."),
+        lambda p: torch.device(p["device"]).type
+        not in ("xpu", "cuda", torch._C._get_privateuse1_backend_name()),
+    )
     def test_masked_fill(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -1238,6 +1271,91 @@ class DecompOneOffTests(TestCase):
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
+    def test_softshrink_backward_lambd_range(self, device):
+        # Like the kernel, reject finite lambd outside the computation dtype's
+        # range, but accept inf and nan. (Long enough for the CPU kernel to take
+        # its vectorized path, which the decomposition matches.)
+        from torch._decomp.decompositions import softshrink_backward
+
+        for dtype in (torch.float16, torch.bfloat16, torch.float32):
+            x = torch.tensor([0.0, 1.0, float("nan")], device=device, dtype=dtype)
+            x = x.repeat(64)
+            grad = torch.ones_like(x)
+            limit = torch.finfo(dtype).max
+            for lambd in (limit, -limit, float("inf"), float("nan")):
+                self.assertEqual(
+                    softshrink_backward(grad, x, lambd),
+                    torch.ops.aten.softshrink_backward(grad, x, lambd),
+                )
+            for lambd in (1e40, -1e40, limit * (1 + 2**-20)):
+                with self.assertRaisesRegex(RuntimeError, "overflow"):
+                    torch.ops.aten.softshrink_backward(grad, x, lambd)
+                with self.assertRaisesRegex(RuntimeError, "overflow"):
+                    softshrink_backward(grad, x, lambd)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_softshrink_backward_symbolic_lambd(self, device):
+        # A symbolic lambd is not specialized, and is still range-checked
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def fn(grad, x, lambd):
+            return torch.ops.aten.softshrink_backward(grad, x, lambd)
+
+        grad = torch.ones(4, device=device, dtype=torch.float16)
+        x = torch.tensor([0.0, 3.0, -3.0, 2000.0], device=device, dtype=torch.float16)
+        for lambds in ((1, 2, 1024), (0.5, 1.5, 1024.5)):
+            torch._dynamo.reset()
+            counter = CompileCounterWithBackend("aot_eager_decomp_partition")
+            with torch._dynamo.config.patch(specialize_float=False):
+                compiled = torch.compile(
+                    fn, backend=counter, fullgraph=True, dynamic=True
+                )
+                for lambd in lambds:
+                    self.assertEqual(compiled(grad, x, lambd), fn(grad, x, lambd))
+                self.assertEqual(counter.frame_count, 1)
+                with self.assertRaisesRegex(RuntimeError, "overflow"):
+                    compiled(grad, x, type(lambds[0])(70000))
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_softshrink_matches_kernel_bitwise(self, device, dtype):
+        # NaN and signed zeros differ between backends. The input is long and
+        # contiguous so that the CPU kernel takes its vectorized path.
+        from torch._decomp.decompositions import softshrink_backward
+        from torch._refs.nn.functional import softshrink
+
+        lambd = 0.3
+        bits = torch.int16 if dtype.itemsize == 2 else torch.int32
+        snan = 0x7F81 if dtype.itemsize == 2 else 0x7F800001
+        x = torch.cat(
+            (
+                torch.tensor(
+                    [-1.0, -lambd, -0.25, -0.0, 0.0, 0.25, lambd, 1.0, float("nan")],
+                    device=device,
+                    dtype=dtype,
+                ),
+                torch.tensor([snan], device=device, dtype=bits).view(dtype),
+            )
+        ).repeat(64)
+        grad = torch.tensor([1.5, -0.0], device=device, dtype=dtype).repeat(320)
+        self.assertEqual(
+            softshrink(x, lambd).view(bits),
+            torch.ops.aten.softshrink(x, lambd).view(bits),
+        )
+        self.assertEqual(
+            softshrink_backward(grad, x, lambd).view(bits),
+            torch.ops.aten.softshrink_backward(grad, x, lambd).view(bits),
+        )
+        # With mixed dtypes, lambd is compared in the common dtype
+        self.assertEqual(
+            softshrink_backward(grad.float(), x, lambd),
+            torch.ops.aten.softshrink_backward(grad.float(), x, lambd),
+        )
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
     def test_contiguous_softmax(self, device):
         size = (2, 4, 3, 3)
         stride = (9, 18, 3, 1)
@@ -1264,22 +1382,21 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._log_softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_exponential_non_inf(self, device):
         inp = torch.empty((4, 400, 256), device=device)
-
-        with torch._dynamo.utils.preserve_rng_state():
-            exp_ref = inp.exponential_()
         exp = torch._refs.exponential(inp)
 
-        self.assertEqual(exp, exp_ref)
+        # The CUDA kernel builds each sample from the raw 32-bit draw, which rand_like has already rounded away, so
+        # the ref matches it in distribution rather than elementwise.
         self.assertFalse(exp.isinf().any())
+        self.assertTrue((exp > 0).all())
+        self.assertEqual(exp.mean().item(), 1.0, atol=0.01, rtol=0)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
-    @onlyCUDA
-    def test_amp_batch_norm_backward(self):
-        device = "cuda"
+    @onlyAccelerator
+    def test_amp_batch_norm_backward(self, device):
         grad_out = torch.randn((1, 2, 16, 16), dtype=torch.float16, device=device)
         x = torch.randn((1, 2, 16, 16), dtype=torch.float16, device=device)
         weight = torch.randn((2,), dtype=torch.float32, device=device)
@@ -1378,7 +1495,7 @@ class DecompOneOffTests(TestCase):
                 rtol=1e-2,
             )
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfCrossRef
     def test_fused_dropout_decomposition_extreme_p(self, device):
         input_tensor = torch.randn(10, 10, dtype=torch.float32, device=device)
@@ -1409,7 +1526,7 @@ class DecompOneOffTests(TestCase):
         self.assertEqual(decomp_out, ref_out)
         self.assertEqual(decomp_mask, ref_mask)
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfCrossRef
     def test_fused_dropout_compile_extreme_p(self, device):
         def fn(input_tensor, p, generator):
@@ -1501,8 +1618,8 @@ class DecompOneOffTests(TestCase):
         for o_ref, o in zip(out_ref, out):
             self.assertEqual(o_ref.dtype, o.dtype)
 
-    @onlyCUDA
-    @unittest.skipIf(not SM70OrLater, "triton")
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton requires CUDA with SM>=7.0")
     def test_rms_norm_decomp_cuda(self, device):
         @torch.compile
         def rms_norm_sinh(a, b, c):
@@ -1527,7 +1644,7 @@ class DecompOneOffTests(TestCase):
             in generated_codes[1]
         )
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfCrossRef
     def test_addmm_out_dtype_decomp(self, device):
         cases = [
@@ -1638,7 +1755,7 @@ class DecompOneOffTests(TestCase):
             )
 
 
-instantiate_device_type_tests(DecompOneOffTests, globals())
+instantiate_device_type_tests(DecompOneOffTests, globals(), allow_xpu=True)
 
 
 class HasDecompTest(TestCase):

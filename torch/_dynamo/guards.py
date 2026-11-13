@@ -25,6 +25,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import gc
 import hashlib
 import importlib
 import inspect
@@ -32,6 +33,7 @@ import io
 import itertools
 import logging
 import math
+import pickle
 import sys
 import textwrap
 import traceback
@@ -41,8 +43,8 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
-from typing_extensions import LiteralString, TypeAliasType, TypeVar
+from typing import Any, cast, LiteralString, NamedTuple, NoReturn, TYPE_CHECKING
+from typing_extensions import TypeAliasType, TypeVar
 from weakref import ReferenceType
 
 import torch
@@ -66,9 +68,11 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
+    ORDERED_DICT_ORDER_MATCH,
     profile_guard_manager,
     RelationalGuard,
     RootGuardManager,
@@ -76,6 +80,11 @@ from torch._C._dynamo.guards import (
     TypeDictGuardAccessor,
     TypeGuardAccessor,
     TypeMROGuardAccessor,
+)
+from torch._C._functorch import (
+    get_unwrapped,
+    is_batchedtensor,
+    is_functorch_wrapped_tensor,
 )
 from torch._dynamo.package import (
     _globals_module,
@@ -111,6 +120,7 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
+    StorageOverlapPartition,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
@@ -119,6 +129,9 @@ from torch._logging import structured
 from torch._subclasses.fake_tensor import (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
     FakeTensor,
+    is_fake_tensor,
+    maybe_get_fake_dispatch_keys,
+    maybe_get_fake_pytype,
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
@@ -169,6 +182,7 @@ from .source import (
     ListGetItemSource,
     ListReverseIteratorBackingListSource,
     LocalSource,
+    MappingProxyMappingSource,
     NamedTupleFieldsSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
@@ -203,10 +217,12 @@ from .utils import (
     constants_identical,
     dataclass_fields,
     dict_keys,
+    enumerate_items_with_dict_position,
     get_current_stream,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
     guard_failures,
+    InvalidOrderedDict,
     istype,
     key_is_id,
     key_to_id,
@@ -336,11 +352,42 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
     )
 
 
+def _mapping_proxy_mapping(value: object) -> object:
+    # A mappingproxy's only GC referent is the mapping it wraps.
+    return gc.get_referents(value)[0]
+
+
 def _cow_tensor_matches(value: object, expected: object) -> bool:
     if not isinstance(expected, bool):
         return False
     actual = _try_is_cow_tensor(value)
     return actual is not _COW_TENSOR_UNSUPPORTED and actual == expected
+
+
+def _has_tangent(value: object) -> bool:
+    """Whether `value`, or a functorch layer under it, holds a forward-AD tangent.
+
+    `_unpack_dual` has no batching rule and a BatchedTensor never holds the
+    tangent (under jvp(vmap(f)) it is on an inner layer), so batched layers are
+    skipped. A tensor that cannot be unpacked cannot hold a tangent either:
+    unpacking dispatches `aten.alias`, which a subclass's `__torch_dispatch__`
+    may reject with any exception.
+    """
+    while isinstance(value, torch.Tensor):
+        if not is_batchedtensor(value):
+            try:
+                dual = torch.autograd.forward_ad.unpack_dual(value, level=0)
+            except Exception:
+                pass
+            else:
+                if dual.tangent is not None:
+                    return True
+        value = get_unwrapped(value) if is_functorch_wrapped_tensor(value) else None
+    return False
+
+
+def _has_no_tangent(value: object) -> bool:
+    return not _has_tangent(value)
 
 
 dunder_attrs_assumed_constants = (
@@ -357,10 +404,11 @@ dunder_attrs_assumed_constants = (
 def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
     # Refer to index in the frame's localsplus directly.
     # NOTE: name order for a code object doesn't change.
-    # NOTE: we need to find the LAST matching index because <= 3.10 contains
-    # duplicate names in the case of cells: a name can be both local and cell
-    # and will take up 2 slots of the frame's localsplus. The correct behavior
-    # is to refer to the cell, which has a higher index.
+    # NOTE: we need to find the LAST matching index because localsplus can
+    # contain duplicate names in the case of cells (e.g. in Dynamo's resume
+    # functions): a name can be both local and cell and will take up 2 slots of
+    # the frame's localsplus. The correct behavior is to refer to the cell,
+    # which has a higher index.
     framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
     framelocals_idx = (
         len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
@@ -563,6 +611,16 @@ class GuardManagerWrapper:
                 for accessor, mgr in zip(accessors, child_mgrs)
             )
 
+        def ordered_dict_tag_safe(node: GuardManager) -> bool:
+            # Subclass type changes do not update dictionary version tags.
+            return (
+                node.get_type_of_guarded_value() is collections.OrderedDict
+                or not any(
+                    isinstance(guard, ORDERED_DICT_ORDER_MATCH)
+                    for guard in node.get_leaf_guards()
+                )
+            )
+
         def visit_dict_manager(
             node: DictGuardManager,
         ) -> tuple[list[GuardManager], bool]:
@@ -598,7 +656,7 @@ class GuardManagerWrapper:
             if has_unoptimized_relational_guard:
                 return tag_safe_roots, has_unoptimized_relational_guard
 
-            is_subtree_tag_safe = True
+            is_subtree_tag_safe = ordered_dict_tag_safe(node)
             for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
@@ -656,7 +714,7 @@ class GuardManagerWrapper:
                 is_subtree_tag_safe = all(
                     isinstance(accessor, DictGetItemGuardAccessor) and mgr.is_tag_safe()
                     for accessor, mgr in zip(accessors, child_mgrs)
-                )
+                ) and ordered_dict_tag_safe(node)
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
             elif issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
@@ -950,6 +1008,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: dict.__contains__(b, a),
+            "___ordered_dict_order": _ordered_dict_order,
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
@@ -962,6 +1021,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
             "___cow_tensor_matches": _cow_tensor_matches,
+            "___has_no_tangent": _has_no_tangent,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -1504,6 +1564,16 @@ def unsupported_guard_check_spec(fn):
     """Mark a guard method as unsupported for auto-cache dispatch."""
     fn.guard_check_spec = UnsupportedGuardCheckSpec(fn.__name__)
     return fn
+
+
+def _ordered_dict_order(value: object) -> tuple[int, ...] | None:
+    if not issubclass(type(value), collections.OrderedDict):
+        return None
+    try:
+        value = cast(collections.OrderedDict[Any, Any], value)
+        return tuple(index for index, _, _ in enumerate_items_with_dict_position(value))
+    except InvalidOrderedDict:
+        return None
 
 
 class GuardBuilder(GuardBuilderBase):
@@ -2244,6 +2314,16 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, MappingProxyMappingSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            # TODO: migrate this to a C++ accessor that reads the proxy's mapping.
+            out = base_guard_manager.lambda_manager(
+                python_lambda=_mapping_proxy_mapping,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, AttrProxySource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
@@ -2594,15 +2674,7 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard)
-        if (
-            isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-                value, torch._subclasses.FakeTensor
-            )
-            and value.pytype
-        ):
-            t = value.pytype
-        else:
-            t = type(value)
+        t = maybe_get_fake_pytype(value) or type(value)
 
         if t.__qualname__ != t.__name__:
             # A local-scope type cannot be serialized; serialize_guards raises
@@ -2819,6 +2891,38 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
+            guard, "expected"
+        ),
+        eval_fn=lambda value, metadata: (
+            isinstance(value, torch.Tensor)
+            and torch._C._is_fake_tensor(value) == metadata
+        ),
+    )
+    def FAKE_TENSOR_MATCH(self, guard: Guard, expected: bool | None = None) -> None:
+        # Whether the tensor is a C++ fake, which TENSOR_MATCH does not check.
+        # expected is bound into the guard rather than read from the value,
+        # which is a stand-in when the guard is rebuilt from saved state.
+        if expected is None:
+            raise AssertionError("expected must not be None for FAKE_TENSOR_MATCH")
+        code = [f"torch._C._is_fake_tensor({self.arg_ref(guard)}) == {expected!r}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_fake_tensor_match_guard(
+            expected, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: None,
+        eval_fn=lambda value, metadata: _has_no_tangent(value),
+    )
+    def NO_TANGENT_MATCH(self, guard: Guard) -> None:
+        code = f"___has_no_tangent({self.arg_ref(guard)})"
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            _has_no_tangent, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: None,
         eval_fn=lambda value, metadata: value is None,
     )
@@ -2969,18 +3073,20 @@ class GuardBuilder(GuardBuilderBase):
             )
             return
 
-        def hooks_ids_fn(
-            hooks: tuple[Callable[[torch.Tensor], Any], Callable[[Any], torch.Tensor]],
-        ) -> tuple[int, ...] | None:
-            if not are_inline_hooks(hooks):
-                return None
-
-            return tuple(map(id, hooks))
-
-        guard_hooks_ids = hooks_ids_fn(get_hooks())
+        hooks = get_hooks()
+        guard_hooks_ids: tuple[int, int] | None = None
+        if are_inline_hooks(hooks):
+            # The C++ guard compares only the hooks' addresses, and a freed
+            # hook's address can be reused by new hooks, so freeing either hook
+            # must invalidate this entry.
+            pack, unpack = hooks
+            guard_hooks_ids = (
+                self.id_ref(pack, "saved_tensors_hooks pack hook"),
+                self.id_ref(unpack, "saved_tensors_hooks unpack hook"),
+            )
         if self.save_guards:
             self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
-                get_hooks()
+                hooks
             )
 
         code = [
@@ -3043,12 +3149,25 @@ class GuardBuilder(GuardBuilderBase):
                 return False
 
         metadata = value.__tensor_flatten__()[1]
+        cls = type(value)
+        class_name = f"{cls.__module__}.{cls.__qualname__}"
+        ref = self.arg_ref(guard)
         has_custom_guard = hasattr(value, "__metadata_guard__")
         if has_custom_guard:
             verify_guard_fn_signature(value)
-            cls = type(value)
+            reason = (
+                f"{class_name}.__metadata_guard__() rejected the metadata "
+                f"for {ref}. Keep the metadata stable or change the check "
+                "if this difference is safe."
+            )
         else:
-            _validate_default_subclass_metadata_guard(metadata, type(value))
+            _validate_default_subclass_metadata_guard(metadata, cls)
+            reason = (
+                f"Metadata from {class_name}.__tensor_flatten__() for "
+                f"{ref} no longer matches what Dynamo saw during compilation. "
+                "This metadata can affect tensor subclass behavior; keep it stable "
+                "or define __metadata_guard__() if some differences are safe."
+            )
 
         original_metadata = deepcopy(
             pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
@@ -3073,7 +3192,7 @@ class GuardBuilder(GuardBuilderBase):
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
             metadata_checker,
-            get_verbose_code_parts(global_name, guard),
+            get_verbose_code_parts(global_name, guard, recompile_hint=reason),
             guard.user_stack,
         )
 
@@ -3526,18 +3645,23 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
         t = type(value)
+        remaining = tuple_iterator_len(value)
 
         code = []
-        code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
+        code.append(f"___tuple_iterator_len({ref}) == {remaining}")
         self._set_guard_export_info(guard, code)
+        item_word = "item" if remaining == 1 else "items"
+        reason = (
+            f"Iterator {ref} must be a tuple iterator with {remaining} {item_word} left; "
+            "Dynamo specialized the compiled code on the tuple iterator type and remaining count."
+        )
 
-        t = type(value)
         obj_id = self.id_ref(t, f"type({guard.name})")
 
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
-            tuple_iterator_len(value),
+            remaining,
             obj_id,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
 
@@ -3725,6 +3849,22 @@ class GuardBuilder(GuardBuilderBase):
             code,
             get_verbose_code_parts(code, guard),
             _get_closure_vars() | {"___check_order": guard_fn},
+        )
+        self._set_guard_export_info(guard, code)
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _ordered_dict_order(value),
+        eval_fn=lambda value, order: order is not None
+        and _ordered_dict_order(value) == order,
+    )
+    def ORDERED_DICT_ORDER_MATCH(self, guard: Guard) -> None:
+        order = _ordered_dict_order(self.get(guard))
+        if order is None:
+            raise AssertionError("Expected a valid OrderedDict snapshot")
+        ref = self.arg_ref(guard)
+        code = [f"___ordered_dict_order({ref}) == {order!r}"]
+        self.get_guard_manager(guard).add_ordered_dict_order_guard(
+            order, get_verbose_code_parts(code, guard), guard.user_stack
         )
         self._set_guard_export_info(guard, code)
 
@@ -4152,14 +4292,12 @@ class GuardBuilder(GuardBuilderBase):
             value = value if value is not None else self.get(guard)
 
             pytype = type(value)
-            dispatch_keys = torch._C._dispatch_keys(value)
-            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-                value, torch._subclasses.FakeTensor
-            ):
-                if value.pytype is not None:
-                    pytype = value.pytype
-                if value.dispatch_keys is not None:
-                    dispatch_keys = value.dispatch_keys
+            dispatch_keys = maybe_get_fake_dispatch_keys(value)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(value)
+            fake_pytype = maybe_get_fake_pytype(value)
+            if fake_pytype is not None:
+                pytype = fake_pytype
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -4628,7 +4766,7 @@ def _get_unsupported_types() -> tuple[type, ...]:
         weakref.ReferenceType,
     )
     try:
-        # A concrete backend -- ProcessGroupNCCL, FakeProcessGroup -- is bound as
+        # A concrete C++ backend such as ProcessGroupNCCL is bound as
         # a subclass of Backend, NOT of ProcessGroup, so listing ProcessGroup
         # alone let an unguarded one fail the whole frame with "cannot pickle".
         # The C++ Backend is also the Python backend extension point (a Python
@@ -4861,6 +4999,45 @@ class GuardsStatePickler(FunctionPicklerBase):
     @classmethod
     def _unpickle_dict_keys(cls, elems: list[Any]) -> Any:
         return dict.fromkeys(elems).keys()
+
+    @classmethod
+    def _restore_ordered_dict_state(
+        cls,
+        value: collections.OrderedDict[Any, Any],
+        state: tuple[Any, tuple[int, ...], bool],
+    ) -> None:
+        attrs, order, adopt_attrs = state
+        keys = list(dict.keys(value))
+        for index in order:
+            collections.OrderedDict.move_to_end(value, keys[index])
+        if attrs is None:
+            return
+        try:
+            setstate = cast(Any, value).__setstate__
+        except AttributeError:
+            slots = None
+            if isinstance(attrs, tuple) and tuple.__len__(attrs) == 2:
+                attrs, slots = tuple.__getitem__(attrs, 0), tuple.__getitem__(attrs, 1)
+            # Match CPython's Modules/_pickle.c:load_build, including bad states.
+            if attrs is not None:
+                if not isinstance(attrs, dict):
+                    raise pickle.UnpicklingError("state is not a dictionary") from None
+                if adopt_attrs:
+                    for name, item in dict.items(value.__dict__):
+                        dict.setdefault(attrs, name, item)
+                    object.__setattr__(value, "__dict__", attrs)
+                else:
+                    for name, item in dict.items(attrs):
+                        value.__dict__[name] = item
+            if slots is not None:
+                if not isinstance(slots, dict):
+                    raise pickle.UnpicklingError(
+                        "slot state is not a dictionary"
+                    ) from None
+                for name, item in dict.items(slots):
+                    setattr(value, name, item)
+        else:
+            setstate(attrs)
 
     @classmethod
     def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
@@ -5105,7 +5282,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             code = obj.__code__
             log.debug(
                 "dropping the annotations of %s (%s:%d): %s",
-                getattr(code, "co_qualname", code.co_name),
+                code.co_qualname,
                 code.co_filename,
                 code.co_firstlineno,
                 e,
@@ -5177,6 +5354,51 @@ class GuardsStatePickler(FunctionPicklerBase):
         if id(obj) in self.missing_values:
             return _Missing, ("missing values",)
 
+        if (
+            issubclass(type(obj), collections.OrderedDict)
+            and type(obj) not in copyreg.dispatch_table
+            and inspect.getattr_static(obj, "__reduce__")
+            is collections.OrderedDict.__reduce__
+            and inspect.getattr_static(obj, "__reduce_ex__")
+            is collections.OrderedDict.__reduce_ex__
+        ):
+            if type(obj).__qualname__ != type(obj).__name__:
+                raise_local_type_error(type(obj))
+            # Native pickle normalizes storage to linked order, invalidating
+            # storage-position sources and ORDERED_DICT_ORDER_MATCH on load.
+            # Custom constructors/items/setitem must retain native callback order.
+            preserve_storage = type(type(obj)).__call__ is type.__call__ and all(
+                getattr(type(obj), name) is getattr(collections.OrderedDict, name)
+                for name in ("__new__", "__init__", "__setitem__", "items")
+            )
+            order = _ordered_dict_order(obj)
+            if order is None:
+                # Native pickle may accept raw dict writes on an unguarded value.
+                return NotImplemented
+            if not preserve_storage and order != tuple(range(dict.__len__(obj))):
+                if id(obj) not in self.guard_tree_values:
+                    return NotImplemented
+                raise torch._dynamo.exc.PackageError(
+                    "Cannot preserve OrderedDict storage order with custom "
+                    "construction or item methods"
+                )
+            reduced = obj.__reduce__()
+            state = vars(obj) if type(obj) is collections.OrderedDict else reduced[2]
+            actual_attrs = vars(obj)
+            adopt_attrs = state is actual_attrs or (
+                isinstance(state, tuple)
+                and tuple.__len__(state) == 2
+                and tuple.__getitem__(state, 0) is actual_attrs
+            )
+            return (
+                reduced[0],
+                reduced[1],
+                (state, order if preserve_storage else (), adopt_attrs),
+                reduced[3],
+                iter(dict.items(obj)) if preserve_storage else reduced[4],
+                type(self)._restore_ordered_dict_state,
+            )
+
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -5205,26 +5427,36 @@ class GuardsStatePickler(FunctionPicklerBase):
                     inner_data,
                 )
 
-            # For FakeTensors, use pytype if set, otherwise default to
-            # torch.Tensor. This is important for cross-compilation where
-            # we compile with fake tensors but run with real tensors.
+            # _dispatch_keys() on a fake reports the fake's own keys: besides
+            # the fake device's backend, Python and PythonTLSSnapshot for a
+            # Python FakeTensor and Fake for a C++ fake. A fake may instead
+            # have recorded the real tensor's keys, e.g. a fake of an mkldnn
+            # tensor (see Note [C++ fake dispatch keys] for a C++ fake).
+            dispatch_keys = maybe_get_fake_dispatch_keys(obj)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(obj)
+            is_fake = is_fake_tensor(obj)
+            # For FakeTensors, record the real tensor's type. This is important
+            # for cross-compilation where we compile with fake tensors but run
+            # with real tensors. Only from_meta_and_device sets pytype; a fake
+            # Parameter without one carries the Parameter marker. Guards on a
+            # live fake (TENSOR_MATCH, TYPE_MATCH) must not use this fallback.
             pytype = type(obj)
-            dispatch_keys = torch._C._dispatch_keys(obj)
-            is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            is_param = isinstance(obj, torch.nn.Parameter)
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
-            )
-            if is_fake:
-                pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-                # _dispatch_keys() on a fake reports the Python and
-                # PythonTLSSnapshot keys of the fake itself; the converter may
-                # have recorded the real tensor's keys (from_meta_and_device
-                # always does, from_real_tensor only for an mkldnn source).
-                if obj.dispatch_keys is not None:
-                    dispatch_keys = obj.dispatch_keys
-            # A fake answers empty_like with another fake through its own
-            # __torch_dispatch__, whether or not its FakeTensorMode is active,
-            # and that fake would drag the mode and its converters into the
-            # pickle; no_dispatch makes the template a plain meta tensor.
+            ):
+                default = torch.nn.Parameter if is_param else torch.Tensor
+                pytype = obj.pytype or default
+            elif is_fake and is_param and pytype is torch.Tensor:
+                # A C++ fake's own type is the real type, but a C++ fake
+                # Parameter can be a plain Tensor carrying the marker.
+                pytype = torch.nn.Parameter
+            # A fake answers empty_like with another fake (a Python fake through
+            # its own __torch_dispatch__, whether or not its FakeTensorMode is
+            # active), and that fake would drag the mode and its converters into
+            # the pickle; no_dispatch, which also excludes the Fake dispatch key,
+            # makes the template a plain meta tensor.
             with no_dispatch() if is_fake else contextlib.nullcontext():
                 meta = torch.empty_like(
                     obj, device="meta", requires_grad=obj.requires_grad
@@ -5267,7 +5499,17 @@ class GuardsStatePickler(FunctionPicklerBase):
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
             if is_ddp:
-                return type(self)._unpickle_ddp_module, (obj.__getstate__(),)
+                # Not DDP.__getstate__: its default-process-group check only
+                # protects DDP.__setstate__, which _unpickle_ddp_module never
+                # calls. A guard on a dropped attribute could not be rebuilt
+                # at load, so refuse here, a bypass, rather than save it.
+                for name in obj._unpicklable_attrs:
+                    attr = obj.__dict__.get(name)
+                    if attr is not None and id(attr) in self.guard_tree_values:
+                        raise torch._dynamo.exc.PackageError(
+                            f"a guard reads DistributedDataParallel.{name}, which does not pickle"
+                        )
+                return type(self)._unpickle_ddp_module, (obj._picklable_state(),)
 
             if type(obj).__qualname__ == type(obj).__name__:
                 return NotImplemented
@@ -5605,7 +5847,46 @@ def _resolves_by_reference(value: object) -> bool:
         return False
     if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
         return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
-    return _is_registered_custom_op_def(value)
+    return _is_registered_custom_op_def(value) or _pickles_as_its_own_global(value)
+
+
+def _pickles_as_its_own_global(value: object) -> bool:
+    """Whether ``value``, one of its ``__module__``'s globals, is saved by
+    pickle's default lookup (``copyreg.dispatch_table``, then ``__reduce_ex__``)
+    as a reference to the module global that is ``value`` itself, as for
+    ``typing.List``, which reduces to ``"List"``. Any other value is refused
+    without running its reduction. User objects can raise anywhere in here,
+    which just means no."""
+    if isinstance(value, (torch.Tensor, torch.nn.Module)):
+        return False
+    try:
+        cls = type(value)
+        if cls.__qualname__ != cls.__name__:
+            # GuardsStatePickler.reducer_override, which pickle tries first,
+            # refuses an instance of a nested or local class unless it is a
+            # tuple; this refuses those tuples too, which only drops a guard.
+            return False
+        reduce = copyreg.dispatch_table.get(cls)
+        if (
+            reduce is None
+            and cls.__reduce_ex__ is object.__reduce_ex__
+            and cls.__reduce__ is object.__reduce__
+        ):
+            return False
+        module_name = getattr(value, "__module__", None)
+        module = sys.modules.get(module_name) if isinstance(module_name, str) else None
+        # The reduction is user code, possibly O(size), and this runs per guard:
+        # only reduce a value that is one of its module's own globals. list()
+        # snapshots the dict, which another thread may grow mid-scan.
+        if module is None or not any(v is value for v in list(vars(module).values())):
+            return False
+        name = reduce(value) if reduce else value.__reduce_ex__(_GUARDS_PROTOCOL)
+        return (
+            isinstance(name, str)
+            and FunctionPicklerBase._lookup(module_name, name) is value
+        )
+    except Exception:
+        return False
 
 
 def is_portable_identity_guard(
@@ -5704,6 +5985,11 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
+# _pickles_as_its_own_global predicts GuardsStatePickler's reduction with this
+# protocol and the global copyreg.dispatch_table (the pickler sets none).
+_GUARDS_PROTOCOL = pickle.DEFAULT_PROTOCOL
+
+
 def pickle_guards_state(
     state: GuardsState,
     builder: GuardBuilder,
@@ -5740,6 +6026,7 @@ def pickle_guards_state(
             missing_values,
             builder.value_guarded_containers,
             buf,
+            protocol=_GUARDS_PROTOCOL,
         )
 
         if all(
@@ -5835,6 +6122,9 @@ class CheckFunctionManager:
                 for keep, g in zip(_guard_filter_fn(guards), guards):
                     if not keep:
                         ret.append(False)
+                    elif g.guard_type == "CLOSURE_MATCH":
+                        # Saving rewrites this guard or bypasses packaging.
+                        ret.append(True)
                     elif g.guard_type not in (
                         "TYPE_MATCH",
                         "BUILTIN_MATCH",
@@ -5842,7 +6132,6 @@ class CheckFunctionManager:
                         g.guard_type
                         in (
                             "ID_MATCH",
-                            "CLOSURE_MATCH",
                             "WEAKREF_ALIVE",
                             "DICT_VERSION",
                         )
@@ -6419,6 +6708,23 @@ class CheckFunctionManager:
                 install_storage_overlapping_guard(
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
+                    [code_part],
+                    None,
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOverlapPartition):
+                partition_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.input_sources
+                ]
+                code_part = (
+                    "___check_storage_overlap_partition("
+                    f"[{', '.join(source.name for source in guard.input_sources)}], "
+                    f"{guard.overlapping_indices})"
+                )
+                install_storage_overlap_partition_guard(
+                    partition_guard_managers,
+                    guard.overlapping_indices,
                     [code_part],
                     None,
                 )
