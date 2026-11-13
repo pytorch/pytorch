@@ -402,11 +402,7 @@ class TestDistributedFailure(_FailureTestMixin, ShardedTensorTestBase):
 
 
 class TestNoDistFailure(_FailureTestMixin, TestCase):
-    # These tests assert that no process group is initialized and reference no
-    # device at all, so they are GENERIC and stay un-instantiated. Keeping
-    # them in the ACCELERATOR class above would stop them from being
-    # generated (and run) on CPU-only hosts once ``except_for="cpu"`` filters
-    # that class out.
+    # These device-independent tests require no initialized process group.
     hw_classification = HardwareClassification.GENERIC
 
     def test_save_error_handling_no_dist(self) -> None:

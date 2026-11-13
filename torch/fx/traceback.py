@@ -1,4 +1,3 @@
-import copy
 import logging
 import threading
 import traceback
@@ -126,11 +125,9 @@ class NodeSource:
             self.node_info = self.NodeInfo(
                 name=node.name, target=str(node.target), graph_id=id(node.graph)
             )
-            self.from_node = (
-                copy.deepcopy(node.meta["from_node"])
-                if "from_node" in node.meta
-                else []
-            )
+            # NodeSource records are immutable after construction, so share them
+            # while copying the outer list to preserve its snapshot semantics.
+            self.from_node = list(node.meta.get("from_node", ()))
         else:
             self.node_info = None
             self.from_node = []
@@ -346,18 +343,16 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
     global current_meta
 
     has_custom = "custom" in current_meta
-    old_custom = copy.copy(current_meta.get("custom", {}))
+    old_custom = current_meta.get("custom", {})
 
     try:
-        if not has_custom:
-            current_meta["custom"] = dict[str, Any]()
-
-        # Update with all key-value pairs from the input dict
-        current_meta["custom"].update(annotation_dict)
+        # Rebind instead of updating in place: a shallow copy of current_meta
+        # (e.g. the one preserve_node_meta restores when Dynamo traces a frame
+        # entered under an ambient annotation) shares the enclosing dict.
+        current_meta["custom"] = {**old_custom, **annotation_dict}
         yield
     finally:
         if has_custom:
-            # Restore the original custom dict
             current_meta["custom"] = old_custom
         else:
             del current_meta["custom"]
@@ -368,6 +363,28 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
 # writer and the reader below so the partitioner / AOTAutograd cache read it the
 # same way.
 MEMORY_BUDGET_ANNOTATION_KEY = "_region_activation_memory_budget"
+
+
+@contextmanager
+def _dynamo_region_activation_memory_budget(budget: float) -> Iterator[None]:
+    with (
+        annotate({MEMORY_BUDGET_ANNOTATION_KEY: budget}),
+        preserve_node_meta(),
+    ):
+        yield
+
+
+@contextmanager
+def _dynamo_annotate(
+    annotation_items: tuple[tuple[str, Any], ...],
+) -> Iterator[None]:
+    """Re-enter ``annotate`` in code Dynamo generates to resume after a graph break.
+
+    The annotation is passed as a tuple of items so it can be embedded as a
+    bytecode constant.
+    """
+    with annotate(dict(annotation_items)), preserve_node_meta():
+        yield
 
 
 def _get_memory_budget_annotation(node: Node) -> float | None:
@@ -538,6 +555,12 @@ def set_current_meta(node: Node, pass_name: str = "") -> Iterator[None]:
 @compatibility(is_backward_compatible=False)
 def get_current_meta() -> dict[str, Any]:
     return current_meta
+
+
+def _get_current_annotation() -> dict[str, Any] | None:
+    """Return a copy of the active ``annotate`` metadata, or None when empty."""
+    custom = current_meta.get("custom")
+    return dict(custom) if custom else None
 
 
 @compatibility(is_backward_compatible=False)

@@ -378,10 +378,10 @@ static void pushPackingPastRnn(Block* b) {
       new_sizes.push_back(*oldType->sizes()[0]);
       new_sizes.push_back(*oldType->sizes()[1]);
       if (next->kind() == onnx::Reshape) {
-        // bidirection
+        // bidirectional
         new_sizes.push_back(rnn->i(attr::hidden_size) * 2);
       } else {
-        // unidirection
+        // unidirectional
         new_sizes.push_back(rnn->i(attr::hidden_size));
       }
       TensorTypePtr newType = TensorType::createContiguous(
@@ -707,9 +707,11 @@ static void eraseListUnpack(Node* n, int opset_version) {
   if (n->kind() == prim::ListUnpack) {
     if (opset_version < OPSET_VERSION_11) {
       // onnx::SequenceAt was introduced in onnx opset version 11
-      throw std::runtime_error(
-          "Unsupported: ONNX export of prim::ListUnpack in opset " +
-          std::to_string(opset_version) + ". Please try opset version 11.");
+      TORCH_CHECK(
+          false,
+          "Unsupported: ONNX export of prim::ListUnpack in opset ",
+          opset_version,
+          ". Please try opset version 11.");
     }
 
     auto g = n->owningGraph();

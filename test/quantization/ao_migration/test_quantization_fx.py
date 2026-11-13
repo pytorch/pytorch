@@ -1,11 +1,16 @@
 # Owner(s): ["oncall: quantization"]
 
-from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+)
 
 from .common import AOMigrationTestCase
 
 
 class TestAOMigrationQuantizationFx(AOMigrationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_function_import_quantize_fx(self):
         function_list = [
             "_check_is_graph_module",

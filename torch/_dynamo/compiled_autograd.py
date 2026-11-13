@@ -60,6 +60,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.fx.node import Argument
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.types import FloatLikeType, IntLikeType
 from torch.utils._ordered_set import OrderedSet
@@ -1079,14 +1080,6 @@ class AutogradCompilerInstance:
 
         return []
 
-    def is_sym_node(self, node: Any) -> bool:
-        return (
-            isinstance(node, torch.fx.Node)
-            and node.op == "call_function"
-            and node.target
-            in [torch.ops.aten.sym_size.int, torch.ops.aten.sym_numel.default]
-        )
-
     def dce(self) -> None:
         # Most of these removed nodes would have been removed during Dynamo and AOTDispatch
         # Remove some of these nodes earlier to improve compilation speed
@@ -1290,7 +1283,7 @@ class AutogradCompilerInstance:
         return runtime_wrapper, self.compiler_fn(graph)
 
     @staticmethod
-    def get_all_nodes(args: Sequence[Any]) -> list[torch.fx.Node]:
+    def get_all_nodes(args: Sequence[Argument]) -> list[torch.fx.Node]:
         # filter out non-Node args, like None
         nodes = [n for n in args if type(n) is torch.fx.Node]
         return nodes

@@ -18,10 +18,12 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.utils import clear_caches, fresh_cache
-from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS
 
 
 class PgoTest(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._test_stack = contextlib.ExitStack()
@@ -398,7 +400,7 @@ def run(cnt):
         # Windows can't create unification temp path:
         #   hash(a18a3259)C:/Users/Xuhan/AppData/Local/Temp/tmpx3hfkuqa/example.py
         # Skip hash check
-        self.assertTrue("hash" if IS_WINDOWS else "hash(390fe689)" in state)
+        self.assertTrue(("hash" if IS_WINDOWS else "hash(390fe689)") in state)
         self.assertTrue("/example.py:4:func:" in state)
         self.assertTrue(" L['x']: tensor size=[?] stride=[1]" in state)
         # We should compile this only once due to PGO.

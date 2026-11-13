@@ -102,7 +102,8 @@ class ConjPhysicalOperator(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype != torch.bool
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         return [
             TensorSpec(
                 size=output_spec.size,
@@ -141,7 +142,8 @@ class FillOperator(Operator):
         return isinstance(output_spec, TensorSpec)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         self._value = _random_scalar_for_dtype(output_spec.dtype)
         return [
             TensorSpec(
@@ -194,7 +196,8 @@ class FlipOperator(Operator):
         return isinstance(output_spec, TensorSpec) and len(output_spec.size) >= 1
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         ndim = len(output_spec.size)
         k = random.randint(1, ndim)
         self._dims = tuple(sorted(random.sample(range(ndim), k)))
@@ -249,7 +252,8 @@ class MaskedFillOperator(Operator):
         return isinstance(output_spec, TensorSpec)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         self._value = _random_scalar_for_dtype(output_spec.dtype)
         input_spec = TensorSpec(
             size=output_spec.size,

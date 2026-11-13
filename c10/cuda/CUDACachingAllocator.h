@@ -161,6 +161,18 @@ class CUDAAllocator : public DeviceAllocator {
   // registration, or inductor cudagraph_trees warmup).
   virtual void markCaptureBegin(c10::DeviceIndex /*device*/) {}
   virtual void markCaptureEnd(c10::DeviceIndex /*device*/) {}
+  // Whether the current stream on `device` is inside a CUDA graph capture.
+  // The native allocator answers from the capture count kept by
+  // markCaptureBegin/markCaptureEnd and only queries the driver while a
+  // capture is active on that device, so eager callers pay no driver call.
+  // Allocators that do not track captures fall back to the driver query.
+  // The default stream's handle is nullptr, which the driver resolves
+  // against the current device, so `device` is selected for the query.
+  virtual bool isCaptureContext(c10::DeviceIndex device) {
+    c10::DeviceGuard guard(c10::Device(c10::DeviceType::CUDA, device));
+    return c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+        CaptureStatus::None;
+  }
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
   virtual int getPoolUseCount(
       c10::DeviceIndex /*device*/,
@@ -305,6 +317,23 @@ class CUDAAllocator : public DeviceAllocator {
   virtual CheckpointDelta setCheckpointPoolState(
       c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
+  // See DeviceCachingAllocator::restore_expandable_segment.
+  virtual void restoreExpandableSegment(
+      c10::DeviceIndex device,
+      cudaStream_t stream,
+      MempoolId_t mempool_id,
+      bool is_small,
+      size_t address,
+      size_t reserve_size,
+      size_t segment_size,
+      Expandable_Segments_Handle_Type handle_type,
+      const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not support restoreExpandableSegment. "
+        "If you need it, please file an issue describing your use case.");
+  }
   virtual DataPtr allocateWithAddress(size_t size, void* addr) {
     TORCH_CHECK(
         false,
@@ -422,6 +451,28 @@ inline DataPtr allocateWithAddress(size_t size, void* addr) {
   return get()->allocateWithAddress(size, addr);
 }
 
+inline void restoreExpandableSegment(
+    c10::DeviceIndex device,
+    cudaStream_t stream,
+    MempoolId_t mempool_id,
+    bool is_small,
+    size_t address,
+    size_t reserve_size,
+    size_t segment_size,
+    Expandable_Segments_Handle_Type handle_type,
+    const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
+  get()->restoreExpandableSegment(
+      device,
+      stream,
+      mempool_id,
+      is_small,
+      address,
+      reserve_size,
+      segment_size,
+      handle_type,
+      mapped_ranges);
+}
+
 // CUDAGraph interactions
 inline void beginAllocateToPool(
     c10::DeviceIndex device,
@@ -440,6 +491,10 @@ inline void markCaptureBegin(c10::DeviceIndex device) {
 
 inline void markCaptureEnd(c10::DeviceIndex device) {
   get()->markCaptureEnd(device);
+}
+
+inline bool isCaptureContext(c10::DeviceIndex device) {
+  return get()->isCaptureContext(device);
 }
 
 inline void recordHistory(
@@ -567,6 +622,43 @@ inline std::string getUserMetadata() {
 inline void annotateMemory(const void* ptr, const std::string& metadata) {
   get()->annotateMemory(ptr, metadata);
 }
+
+// Tag (or, with an empty class, untag) a CUDA stream with an opaque reserve
+// class. Expandable segments created for a tagged stream size their virtual
+// address reservation from the per-class reserve in PYTORCH_CUDA_ALLOC_CONF
+// (see expandable_segments_reserve_by_class / expandable_segments_reserve). The
+// class string is opaque to core: downstream callers own the vocabulary. An
+// untagged stream (or the empty class) uses the full historical reserve.
+//
+// Contract: the tag is keyed by the raw cudaStream_t handle and persists until
+// overwritten or cleared. Streams from getStreamFromPool come from a shared,
+// round-robin pool, so tagging such a stream applies the class to every user of
+// that handle and to the (shared) expandable segments created on it. Tag only
+// streams whose (device, stream) identity you control for the intended
+// lifetime, and clear the tag (empty class) if the handle may later be reused
+// for an unrelated purpose.
+C10_CUDA_API void setExpandableSegmentReserveClassForStream(
+    cudaStream_t stream,
+    const std::string& reserve_class);
+C10_CUDA_API std::string getExpandableSegmentReserveClassForStream(
+    cudaStream_t stream);
+
+// Registers a code-side default reserve, expressed as a fraction of total
+// device memory, for a reserve class. Lets serving layers opt their stream
+// classes into a downsized reserve by default without depending on
+// CUDAAllocatorConfig. Explicit operator config (via PYTORCH_CUDA_ALLOC_CONF)
+// wins; see the precedence note on
+// CUDAAllocatorConfig::set_default_reserve_for_class.
+C10_CUDA_API void setDefaultExpandableSegmentReserveFractionForClass(
+    const std::string& reserve_class,
+    double fraction);
+
+// Process-wide expandable-segment virtual-address gauges, for observability
+// (ODS) and out-of-VM diagnostics: total VA bytes reserved by all live
+// ExpandableSegments, and the number of live segments. Cheap relaxed-atomic
+// reads; safe to call at any time.
+C10_CUDA_API size_t getExpandableSegmentsReservedBytes();
+C10_CUDA_API size_t getExpandableSegmentsCount();
 
 } // namespace c10::cuda::CUDACachingAllocator
 

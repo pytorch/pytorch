@@ -16,7 +16,9 @@ from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
     BufferLike,
+    EnterKernelProfileScopeLine,
     EnterSubgraphLine,
+    ExitKernelProfileScopeLine,
     ExitSubgraphLine,
     MemoryPlanningLine,
     MemoryPlanningState,
@@ -125,6 +127,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
         # assert_size_stride would fail to compile.
         return
+
+    # Alignment assertions are queued only for ExternKernel outputs. Fallback
+    # codegen disables stack allocation below, so those values are
+    # RAIIAtenTensorHandle and can use CppWrapperCpu's assertion emitter.
 
     def _codegen_v2_raw_input_bindings(self, code: IndentedBuffer):
         for idx, (input_key, input_value) in enumerate(V.graph.graph_inputs.items()):
@@ -459,15 +465,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         extern "C" AOTIRuntimeError AOTInductorModelRunMinimalArrayrefInterface(
                             AOTInductorModelHandle model_handle,
                             const AOTInductorModelInputs& inputs,
-                            AOTInductorModelOutputs& outputs) {
+                            AOTInductorModelOutputs& outputs) AOTI_RUNTIME_TRY({
                           auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
-                          CONVERT_EXCEPTION_TO_ERROR_CODE({
-                              outputs = model->run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
-                                  inputs,
-                                  (torch::aot_inductor::DeviceStreamType)nullptr,
-                                  nullptr);
-                          })
-                        }
+                          outputs = model->run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
+                              inputs,
+                              (torch::aot_inductor::DeviceStreamType)nullptr,
+                              nullptr);
+                          return AOTI_RUNTIME_SUCCESS;
+                        })
                     """
                     )
 
@@ -482,40 +487,39 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                             int32_t num_inputs,
                             const AOTInductorArrayRefTensor* c_inputs,
                             int32_t num_outputs,
-                            AOTInductorArrayRefTensor* c_outputs) {{
+                            AOTInductorArrayRefTensor* c_outputs) AOTI_RUNTIME_TRY({{
                           constexpr int32_t expected_num_inputs = {len(V.graph.graph_inputs)};
                           constexpr int32_t expected_num_outputs = {len(V.graph.graph_outputs)};
                           auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
-                          CONVERT_EXCEPTION_TO_ERROR_CODE({{
-                              if (num_inputs != expected_num_inputs) {{
-                                throw std::runtime_error(
-                                    std::string("AOTInductorModelRunMinimalArrayrefInterfaceV2 expected ")
-                                    + std::to_string(expected_num_inputs)
-                                    + " inputs but got "
-                                    + std::to_string(num_inputs));
-                              }}
-                              if (num_outputs != expected_num_outputs) {{
-                                throw std::runtime_error(
-                                    std::string("AOTInductorModelRunMinimalArrayrefInterfaceV2 expected ")
-                                    + std::to_string(expected_num_outputs)
-                                    + " outputs but got "
-                                    + std::to_string(num_outputs));
-                              }}
-                              if (num_inputs > 0 && c_inputs == nullptr) {{
-                                throw std::runtime_error(
-                                    "AOTInductorModelRunMinimalArrayrefInterfaceV2 received null input descriptors");
-                              }}
-                              if (num_outputs > 0 && c_outputs == nullptr) {{
-                                throw std::runtime_error(
-                                    "AOTInductorModelRunMinimalArrayrefInterfaceV2 received null output descriptors");
-                              }}
-                              model->run_impl_minimal_arrayref_interface_v2_raw(
-                                  c_inputs,
-                                  c_outputs,
-                                  (torch::aot_inductor::DeviceStreamType)nullptr,
-                                  nullptr);
-                          }})
-                        }}
+                          if (num_inputs != expected_num_inputs) {{
+                            throw std::runtime_error(
+                                std::string("AOTInductorModelRunMinimalArrayrefInterfaceV2 expected ")
+                                + std::to_string(expected_num_inputs)
+                                + " inputs but got "
+                                + std::to_string(num_inputs));
+                          }}
+                          if (num_outputs != expected_num_outputs) {{
+                            throw std::runtime_error(
+                                std::string("AOTInductorModelRunMinimalArrayrefInterfaceV2 expected ")
+                                + std::to_string(expected_num_outputs)
+                                + " outputs but got "
+                                + std::to_string(num_outputs));
+                          }}
+                          if (num_inputs > 0 && c_inputs == nullptr) {{
+                            throw std::runtime_error(
+                                "AOTInductorModelRunMinimalArrayrefInterfaceV2 received null input descriptors");
+                          }}
+                          if (num_outputs > 0 && c_outputs == nullptr) {{
+                            throw std::runtime_error(
+                                "AOTInductorModelRunMinimalArrayrefInterfaceV2 received null output descriptors");
+                          }}
+                          model->run_impl_minimal_arrayref_interface_v2_raw(
+                              c_inputs,
+                              c_outputs,
+                              (torch::aot_inductor::DeviceStreamType)nullptr,
+                              nullptr);
+                          return AOTI_RUNTIME_SUCCESS;
+                        }})
                     """
                     )
                 else:
@@ -805,6 +809,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 planning_states.append(MemoryPlanningState())
             elif isinstance(line, ExitSubgraphLine):
                 past_planning_states.append(planning_states.pop())
+            elif isinstance(line, EnterKernelProfileScopeLine):
+                # A profiling block is a C++ scope, so a buffer reused across
+                # one of its braces would be declared on the wrong side of it.
+                # This mirrors the base wrapper; the two loops differ only in
+                # what they do with the resulting states.
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitKernelProfileScopeLine):
+                past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         if len(planning_states) != 0:
             raise AssertionError(
@@ -991,6 +1003,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             )
             self.writeline(f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);")
 
+    def codegen_invoke_subgraph(self, invoke_subgraph):
+        # The region's outputs are pre-declared as RAIIAtenTensorHandle and
+        # codegen_subgraph_suffix std::moves the region's output buffer into
+        # them. A stack-allocated buffer is an ArrayRefTensor<T>, which has no
+        # conversion to RAIIAtenTensorHandle, so that assignment would not
+        # compile -- the same clash cond and while_loop hit. Turn stack
+        # allocation off for the graph, as the extern-kernel paths below do,
+        # rather than emitting C++ that fails to build.
+        self.allow_stack_allocation = False
+        return super().codegen_invoke_subgraph(invoke_subgraph)
+
     def codegen_while_loop(self, while_loop, stack_output=False):
         if stack_output:
             raise NotImplementedError("NYI cpp wrapper for while_loop_stack_output")
@@ -1050,29 +1073,57 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.writeline("}")
 
     def generate_c_shim_extern_kernel_call(
-        self, kernel: str, args: list[str], device: str, **_
+        self,
+        kernel: str,
+        args: list[str],
+        device: str,
+        *,
+        profiling_args: Sequence[str | None] | None = None,
+        output_handle: str | None = None,
+        **_,
     ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
         # ArrayRefTensor and at::Tensor is still fragile.
         self.allow_stack_allocation = False
 
-        wrapped_args = []
-        for arg in args:
+        def borrow_as_tensor_if_needed(expr: str) -> str:
             # We only really *need* borrow_arrayref_tensor_as_tensor for
             # ArrayRefTensors. The code flowing into here uses `0` for nullptr, which
             # borrow_arrayref_tensor_as_tensor would blindly coerce to int, so just
             # avoid wrapping integers.  Name matching is to find tensor is hacky, but
             # fixing all the ArrayRefTensor issues is not a priority for now.
-            if isinstance(arg, str) and arg.startswith(
+            if isinstance(expr, str) and expr.startswith(
                 ("buf", "arg", "wrap_with_raii_handle_if_needed")
             ):
                 self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
-                arg = f"borrow_arrayref_tensor_as_tensor({arg})"
-            wrapped_args.append(arg)
+                return f"borrow_arrayref_tensor_as_tensor({expr})"
+            return expr
 
+        wrapped_args = [borrow_as_tensor_if_needed(arg) for arg in args]
+
+        # The profiling handles are passed to aoti_torch_tensor_to_ivalue, which
+        # takes an AtenTensorHandle. ArrayRefTensor has no conversion to one, so
+        # borrow it as a tensor exactly like the positional args above. A None
+        # entry stands for a non-tensor argument and has nothing to borrow.
         super().generate_c_shim_extern_kernel_call(
-            kernel, wrapped_args, device, debug_args=args
+            kernel,
+            wrapped_args,
+            device,
+            debug_args=args,
+            profiling_args=(
+                None
+                if profiling_args is None
+                else [
+                    None if arg is None else borrow_as_tensor_if_needed(arg)
+                    for arg in profiling_args
+                ]
+            ),
+            output_handle=(
+                None
+                if output_handle is None
+                else borrow_as_tensor_if_needed(output_handle)
+            ),
         )
 
     def generate_scatter_fallback(self, node: ir.ScatterFallback):
@@ -1086,6 +1137,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x)
             for x in inputs
         ]
+
+    def records_profiling_args(self) -> bool:
+        # An ArrayRefTensor is not an AtenTensorHandle, so the ivalue
+        # conversion the metadata is built from cannot be called on one. The
+        # record is emitted without it, and nothing is built here -- deriving
+        # it would make a reinterpret view mint a handle with no owner.
+        return False
 
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op

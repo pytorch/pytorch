@@ -13,6 +13,7 @@ from torch.nn import Module
 from torch.onnx import producer_name, producer_version
 from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def check_onnx_opset_operator(
@@ -89,6 +90,8 @@ def check_onnx_opsets_operator(
 
 
 class TestONNXOpset(pytorch_test_common.ExportTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_opset_fallback(self):
         class MyModule(Module):
             def forward(self, x):

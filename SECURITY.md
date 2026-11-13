@@ -34,6 +34,8 @@ PyTorch is a framework that executes user-provided code, including model definit
 
 - **Local filesystem and cache trust**: PyTorch heavily uses local caching for performance (e.g., compiled kernel artifacts, Triton cache). These cache should be located in local user-only accessible locations and those are trusted by design. If an attacker has write access to the local filesystem, they can already execute arbitrary code — poisoning a PyTorch cache does not grant any additional capability.
 
+- **Malformed de-serialized objects**: `torch.load` with  `weight_only=True` ensures no RCEs nor out-of-bounds access during the deserialization itself, it doesn't make any guarantees about usability of deserialized objects for future use. Similar to the rule above, such objects can lead to crash and out-of-bound access which are regular issues, not security vulnerabilities.
+
 If your security advisory is closed because it falls into one of these categories, please don't be discouraged — these are still valuable reports. We encourage you to re-file them as a [regular issue](https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml) so they can be tracked and fixed as bugs.
 
 ## Using PyTorch Securely
@@ -83,6 +85,8 @@ If applicable, prepare your model against bad inputs and prompt injections. Some
 PyTorch can be used for distributed computing, and as such there is a `torch.distributed` package. PyTorch Distributed features are intended for internal communication only. They are not built for use in untrusted environments or networks.
 
 For performance reasons, none of the PyTorch Distributed primitives (including c10d, RPC, and TCPStore) include any authorization protocol and will send messages unencrypted. They accept connections from anywhere, and execute the workload sent without performing any checks. Therefore, if you run a PyTorch Distributed program on your network, anybody with access to the network can execute arbitrary code with the privileges of the user running PyTorch.
+
+This same trust assumption extends to distributed checkpoints. Distributed Checkpointing (`torch.distributed.checkpoint`), including the format-conversion utilities in `torch.distributed.checkpoint.format_utils` (e.g. `torch_save_to_dcp` and `BroadcastingTorchSaveReader`), is meant to save and restore the state of a trusted distributed job to and from storage that you control. Checkpoints are produced by your own training job and read back from a trusted store; they are not artifacts you download from the internet or accept from untrusted third parties. Because a checkpoint is always assumed to come from a trusted source, the `weights_only` protections of `torch.load` do not apply here, and loading a checkpoint -- like any other distributed operation -- may execute arbitrary code with the privileges of the user running PyTorch. Only load checkpoints that your own infrastructure produced and stored.
 
 ## Backporting Security Fixes
 

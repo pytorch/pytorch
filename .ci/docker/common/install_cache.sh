@@ -96,10 +96,10 @@ EOF
   chmod a+x "/opt/cache/bin/$1"
 }
 
-# Skip all sccache wrapping for theRock nightly: sccache PATH wrappers
+# Skip all sccache wrapping for TheRock ROCm: sccache PATH wrappers
 # intercept assembly (.s) compilation and fail because the assembler does not
 # produce the .d dependency file that sccache expects.
-if [ "$ROCM_VERSION" != "nightly" ]; then
+if [ -z "$ROCM_VERSION" ]; then
   write_sccache_stub cc
   write_sccache_stub c++
   write_sccache_stub gcc
@@ -124,45 +124,5 @@ if [ -n "$CUDA_VERSION" ]; then
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
-  # Skip sccache wrapping for theRock nightly - sccache has issues parsing
-  # theRock's complex include paths and causes hipconfig to fail
-  if [ "$ROCM_VERSION" = "nightly" ]; then
-    echo "Skipping sccache wrapping for theRock nightly ROCm"
-  else
-    source /etc/rocm_env.sh
-
-    # ROCm compiler is hcc or clang. However, it is commonly invoked via hipcc wrapper.
-    # hipcc will call either hcc or clang using an absolute path starting with $ROCM_PATH,
-    # causing the /opt/cache/bin to be skipped. We must create the sccache wrappers
-    # directly under $ROCM_PATH while also preserving the original compiler names.
-    # Note symlinks will chain as follows: [hcc or clang++] -> clang -> clang-??
-    # Final link in symlink chain must point back to original directory.
-
-    # Original compiler is moved one directory deeper. Wrapper replaces it.
-    function write_sccache_stub_rocm() {
-      OLDCOMP=$1
-      COMPNAME=$(basename $OLDCOMP)
-      TOPDIR=$(dirname $OLDCOMP)
-      WRAPPED="$TOPDIR/original/$COMPNAME"
-      mv "$OLDCOMP" "$WRAPPED"
-      printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" >"$OLDCOMP"
-      chmod a+x "$OLDCOMP"
-    }
-
-    # ROCm 3.5 and beyond use llvm/bin/clang
-    if [[ -e "${ROCM_PATH}/llvm/bin/clang" ]]; then
-      mkdir ${ROCM_PATH}/llvm/bin/original
-      write_sccache_stub_rocm ${ROCM_PATH}/llvm/bin/clang
-      write_sccache_stub_rocm ${ROCM_PATH}/llvm/bin/clang++
-      # Fix last link in symlink chain for traditional ROCm where clang -> clang-17
-      pushd ${ROCM_PATH}/llvm/bin/original
-      if [[ -L clang ]] && [[ "$(readlink clang)" == clang-* ]]; then
-        ln -s ../$(readlink clang)
-      fi
-      popd
-    else
-      echo "Cannot find ROCm compiler."
-      exit 1
-    fi
-  fi
+  echo "Deferring TheRock ROCm compiler launchers to the PyTorch build"
 fi

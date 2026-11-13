@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_nn import freeze_rng_state, NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     run_tests,
     set_default_dtype,
@@ -22,6 +23,7 @@ from torch.testing._internal.common_utils import (
 
 
 class TestDropoutNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -72,6 +74,8 @@ class TestDropoutNN(NNTestCase):
 
 
 class TestDropoutNNDeviceType(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_dropout(self, cls, device, input, memory_format=torch.contiguous_format):
         p = 0.2
         input = input.to(device).fill_(1 - p)
@@ -317,7 +321,9 @@ class TestDropoutNNDeviceType(NNTestCase):
                         )
 
 
-instantiate_device_type_tests(TestDropoutNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(
+    TestDropoutNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_parametrized_tests(TestDropoutNN)
 
 if __name__ == "__main__":

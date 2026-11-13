@@ -1,0 +1,1017 @@
+diff --git a/quack/autotuner.py b/quack/autotuner.py
+index 6787558..8ed8511 100644
+--- a/quack/autotuner.py
++++ b/quack/autotuner.py
+@@ -20,0 +21 @@ from quack.bench.bench_utils import (
++from quack.cache import get_cache_dir
+@@ -45,3 +46 @@ class FileCacheManager(triton.runtime.cache.FileCacheManager):
+-        self.cache_dir = (
+-            os.getenv(f"{PACKAGE_NAME.upper()}_CACHE_DIR", "").strip() or default_cache_dir()
+-        )
++        self.cache_dir = get_cache_dir() or default_cache_dir()
+diff --git a/quack/blockscaled/quantize.py b/quack/blockscaled/quantize.py
+index ce28300..6db3465 100644
+--- a/quack/blockscaled/quantize.py
++++ b/quack/blockscaled/quantize.py
+@@ -18,0 +19 @@ especially on gradient tensors. The FP4 quantizers remain FLOOR-only.
++import functools
+@@ -471,5 +471,0 @@ else:
+-    _dynamo_cfg = torch._dynamo.config
+-    _limit_name = (
+-        "recompile_limit" if hasattr(_dynamo_cfg, "recompile_limit") else "cache_size_limit"
+-    )
+-    setattr(_dynamo_cfg, _limit_name, max(getattr(_dynamo_cfg, _limit_name), 64))
+@@ -477,5 +473,33 @@ else:
+-to_mx_compiled = torch.compile(to_mx, **_COMPILE_KW)
+-to_mx_e5m2_compiled = torch.compile(to_mx_e5m2, **_COMPILE_KW)
+-to_mx_dim0_compiled = torch.compile(to_mx_dim0, **_COMPILE_KW)
+-to_mxfp4_compiled = torch.compile(to_mxfp4, **_COMPILE_KW)
+-to_nvfp4_compiled = torch.compile(to_nvfp4, **_COMPILE_KW)
++
++def _lazy_compile(fn, **compile_kw):
++    """``torch.compile(fn)`` on first call rather than at import.
++
++    ``torch.compile`` imports Dynamo and Inductor (~1.4 s) even though it
++    traces lazily; deferring keeps ``import quack`` cheap in processes that
++    never quantize (compile workers, eager GEMM users).
++    """
++    compiled = None
++
++    @functools.wraps(fn)
++    def wrapper(*args, **kwargs):
++        nonlocal compiled
++        if compiled is None:
++            if "recompile_limit" not in _COMPILE_KW:
++                _dynamo_cfg = torch._dynamo.config
++                _limit_name = (
++                    "recompile_limit"
++                    if hasattr(_dynamo_cfg, "recompile_limit")
++                    else "cache_size_limit"
++                )
++                setattr(_dynamo_cfg, _limit_name, max(getattr(_dynamo_cfg, _limit_name), 64))
++            compiled = torch.compile(fn, **compile_kw)
++        return compiled(*args, **kwargs)
++
++    return wrapper
++
++
++to_mx_compiled = _lazy_compile(to_mx, **_COMPILE_KW)
++to_mx_e5m2_compiled = _lazy_compile(to_mx_e5m2, **_COMPILE_KW)
++to_mx_dim0_compiled = _lazy_compile(to_mx_dim0, **_COMPILE_KW)
++to_mxfp4_compiled = _lazy_compile(to_mxfp4, **_COMPILE_KW)
++to_nvfp4_compiled = _lazy_compile(to_nvfp4, **_COMPILE_KW)
+@@ -486,5 +510,5 @@ to_nvfp4_compiled = torch.compile(to_nvfp4, **_COMPILE_KW)
+-to_mxfp6_e2m3_compiled = torch.compile(to_mxfp6_e2m3, dynamic=True)
+-to_mxfp6_e3m2_compiled = torch.compile(to_mxfp6_e3m2, dynamic=True)
+-to_mxfp6_e2m3_packed_compiled = torch.compile(to_mxfp6_e2m3_packed, dynamic=True)
+-to_mxfp6_e3m2_packed_compiled = torch.compile(to_mxfp6_e3m2_packed, dynamic=True)
+-to_mxfp4_byte_compiled = torch.compile(to_mxfp4_byte, dynamic=True)
++to_mxfp6_e2m3_compiled = _lazy_compile(to_mxfp6_e2m3, dynamic=True)
++to_mxfp6_e3m2_compiled = _lazy_compile(to_mxfp6_e3m2, dynamic=True)
++to_mxfp6_e2m3_packed_compiled = _lazy_compile(to_mxfp6_e2m3_packed, dynamic=True)
++to_mxfp6_e3m2_packed_compiled = _lazy_compile(to_mxfp6_e3m2_packed, dynamic=True)
++to_mxfp4_byte_compiled = _lazy_compile(to_mxfp4_byte, dynamic=True)
+diff --git a/quack/blockscaled/utils.py b/quack/blockscaled/utils.py
+index 513ce77..e957511 100644
+--- a/quack/blockscaled/utils.py
++++ b/quack/blockscaled/utils.py
+@@ -14,5 +14,5 @@ from cutlass import Int32, Float32
+-from quack.compile_utils import make_fake_tensor as fake_tensor
+-from quack.cute_dsl_utils import get_device_capacity, get_max_active_clusters
+-from quack.gemm_config import SplitKMode
+-from quack.gemm_tvm_ffi_utils import div_for_dtype, make_scheduler_args
+-from quack.blockscaled.operand import (
++from torch._vendor.quack.compile_utils import make_fake_tensor as fake_tensor
++from torch._vendor.quack.cute_dsl_utils import get_device_capacity, get_max_active_clusters
++from torch._vendor.quack.gemm_config import SplitKMode
++from torch._vendor.quack.gemm_tvm_ffi_utils import div_for_dtype, make_scheduler_args
++from torch._vendor.quack.blockscaled.operand import (
+@@ -24 +24 @@ from quack.blockscaled.operand import (
+-from quack.blockscaled.quantize import (  # noqa: F401  (pure-torch helpers re-exported)
++from torch._vendor.quack.blockscaled.quantize import (  # noqa: F401  (pure-torch helpers re-exported)
+@@ -27,0 +28 @@ from quack.blockscaled.quantize import (  # noqa: F401  (pure-torch helpers re-e
++    _lazy_compile,
+@@ -36 +37 @@ from quack.blockscaled.quantize import (  # noqa: F401  (pure-torch helpers re-e
+-from quack.varlen_utils import VarlenArguments
++from torch._vendor.quack.varlen_utils import VarlenArguments
+@@ -259 +260 @@ BLOCKSCALED_FORMATS = {
+-_pack_scale_compiled = torch.compile(pack_scale_2d_to_blocked_contig, **_COMPILE_KW)
++_pack_scale_compiled = _lazy_compile(pack_scale_2d_to_blocked_contig, **_COMPILE_KW)
+@@ -295 +296 @@ def blockscaled_quantize_dim0(
+-    from quack.blockscaled.quantize import to_mx_dim0_compiled
++    from torch._vendor.quack.blockscaled.quantize import to_mx_dim0_compiled
+@@ -342 +343 @@ def _blockscaled_format_of(ab_dtype, sf_dtype, sf_vec_size) -> str:
+-    from quack.blockscaled.operand import BlockScaledFormat
++    from torch._vendor.quack.blockscaled.operand import BlockScaledFormat
+@@ -615 +616 @@ def create_blockscaled_varlen_k_operands(
+-    from quack.blockscaled.quantize import to_mx_compiled
++    from torch._vendor.quack.blockscaled.quantize import to_mx_compiled
+@@ -749 +750 @@ def compile_blockscaled_gemm_tvm_ffi(
+-    from quack.gemm_default_epi import GemmDefaultSm100
++    from torch._vendor.quack.gemm_default_epi import GemmDefaultSm100
+@@ -786 +787 @@ def compile_blockscaled_gemm_tvm_ffi(
+-    from quack.gemm_tvm_ffi_utils import make_fake_varlen_args
++    from torch._vendor.quack.gemm_tvm_ffi_utils import make_fake_varlen_args
+diff --git a/quack/cache/__init__.py b/quack/cache/__init__.py
+index 8c9f655..823ba7e 100644
+--- a/quack/cache/__init__.py
++++ b/quack/cache/__init__.py
+@@ -33,0 +34 @@ from __future__ import annotations
++import contextvars
+@@ -34,0 +36 @@ import os
++from contextlib import contextmanager
+@@ -36 +38 @@ from pathlib import Path
+-from typing import List, Optional
++from typing import Iterator, List, Optional
+@@ -39,0 +42,20 @@ CACHE_DIR: Optional[str] = os.getenv("QUACK_CACHE_DIR", None)
++_CACHE_DIR_OVERRIDE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
++    "quack_cache_dir_override", default=None
++)
++
++
++@contextmanager
++def cache_dir_override(cache_dir: Optional[str]) -> Iterator[None]:
++    """Temporarily route persistent artifacts to a caller-owned cache root."""
++    token = _CACHE_DIR_OVERRIDE.set(cache_dir)
++    try:
++        yield
++    finally:
++        _CACHE_DIR_OVERRIDE.reset(token)
++
++
++def get_cache_dir() -> Optional[str]:
++    """Return the scoped cache override or the process-wide default."""
++    override = _CACHE_DIR_OVERRIDE.get()
++    return CACHE_DIR if override is None else override
++
+@@ -70,0 +93,2 @@ __all__ = [
++    "cache_dir_override",
++    "get_cache_dir",
+diff --git a/quack/cache/async_compile.py b/quack/cache/async_compile.py
+index 7e2a11b..ae9d500 100644
+--- a/quack/cache/async_compile.py
++++ b/quack/cache/async_compile.py
+@@ -46,0 +47 @@ import pickle
++import threading
+@@ -64 +65 @@ class PoolPayload(NamedTuple):
+-    data: bytes
++    data: object
+@@ -159 +160 @@ def _detect_arch_env() -> tuple[Optional[str], Optional[str]]:
+-        from quack.cute_dsl_utils import _parse_arch_str
++        from torch._vendor.quack.cute_dsl_utils import _parse_arch_str
+@@ -229,5 +230,3 @@ def _pin_dsl_arch(cute_dsl_arch: Optional[str]) -> None:
+-def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
+-    # GPU-blind compilation: hide devices and pin the target arch via the
+-    # same overrides the CPU-only compile workflow uses. Forked workers must
+-    # never initialize CUDA (fork-safety), and spawned workers save the
+-    # ~1-2 s + ~300 MB of a per-worker CUDA context.
++def pin_worker_arch(quack_arch: Optional[str], cute_dsl_arch: Optional[str]) -> None:
++    """Pin this process's dispatch and ptxas arch for GPU-blind compilation
++    (the :func:`_pool_initializer` body, for hosts that own their workers)."""
+@@ -236 +234,0 @@ def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
+-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+@@ -241 +239 @@ def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
+-    import quack.cache  # noqa: F401
++    import torch._vendor.quack.cache  # noqa: F401
+@@ -253,0 +252,10 @@ def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
++def _pool_initializer(quack_arch: Optional[str], cute_dsl_arch: Optional[str]):
++    # GPU-blind compilation: hide devices and pin the target arch via the
++    # same overrides the CPU-only compile workflow uses. Forked workers must
++    # never initialize CUDA (fork-safety), and spawned workers save the
++    # ~1-2 s + ~300 MB of a per-worker CUDA context.
++    if quack_arch is not None:
++        os.environ["CUDA_VISIBLE_DEVICES"] = ""
++    pin_worker_arch(quack_arch, cute_dsl_arch)
++
++
+@@ -265 +273 @@ def _pool_worker(
+-        import quack.cache as _state
++        import torch._vendor.quack.cache as _state
+@@ -308 +316 @@ def _make_executor(jobs: int) -> ProcessPoolExecutor:
+-        ctx.set_forkserver_preload(["quack.cache._pool_preload"])
++        ctx.set_forkserver_preload(["torch._vendor.quack.cache._pool_preload"])
+@@ -498,0 +507 @@ _suppress_depth = 0
++_thread_pool = threading.local()
+@@ -536 +545,19 @@ def get_active_pool() -> Optional[CompilePool]:
+-    return None if _suppress_depth > 0 else _active_pool
++    if _suppress_depth > 0:
++        return None
++    return getattr(_thread_pool, "pool", None) or _active_pool
++
++
++@contextlib.contextmanager
++def pool_active(pool: CompilePool):
++    """Make ``pool`` the active pool for the calling thread only.
++
++    For hosts that drive compilation from several threads (Inductor's
++    autotune precompile): ``CompilePending`` can only escape into this
++    thread's block, never into other threads' cold misses.
++    """
++    previous = getattr(_thread_pool, "pool", None)
++    _thread_pool.pool = pool
++    try:
++        yield pool
++    finally:
++        _thread_pool.pool = previous
+diff --git a/quack/cache/jit.py b/quack/cache/jit.py
+index 7106526..6ce345f 100644
+--- a/quack/cache/jit.py
++++ b/quack/cache/jit.py
+@@ -48,2 +48,3 @@ def get_cache_path() -> Path:
+-    if _state.CACHE_DIR is not None:
+-        cache_dir = Path(_state.CACHE_DIR)
++    cache_root = _state.get_cache_dir()
++    if cache_root is not None:
++        cache_dir = Path(cache_root)
+diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
+index 1b56f44..46dc637 100644
+--- a/quack/epilogue/frontend.py
++++ b/quack/epilogue/frontend.py
+@@ -163 +163,2 @@ from typing import NamedTuple, Optional
+-
++import torch
++import cutlass
+@@ -164,0 +166 @@ import cutlass.cute as cute
++from cutlass import Boolean, Float32, const_expr
+@@ -166,2 +168,2 @@ import cutlass.cute as cute
+-from quack.cute_dsl_utils import get_device_capacity, mlir_namedtuple, torch2cute_dtype_map
+-from quack.epilogue.ops import (
++from torch._vendor.quack.cute_dsl_utils import get_device_capacity, mlir_namedtuple, torch2cute_dtype_map
++from torch._vendor.quack.epilogue.ops import (
+@@ -175,0 +178 @@ from quack.epilogue.ops import (
++    is_floating_dtype,
+@@ -177,3 +180,3 @@ from quack.epilogue.ops import (
+-from quack.epilogue.math import F2, F16Lanes, Pair, pack, unpack  # noqa: F401  (re-exports)
+-from quack.epilogue.visit import _EpiModMixinBase
+-from quack.gemm_runtime.host import (
++from torch._vendor.quack.epilogue.math import F2, F16Lanes, Pair, pack, unpack  # noqa: F401  (re-exports)
++from torch._vendor.quack.epilogue.visit import _EpiModMixinBase
++from torch._vendor.quack.gemm_runtime.host import (
+@@ -184 +187 @@ from quack.gemm_runtime.host import (
+-from quack.gemm_runtime.identity import (
++from torch._vendor.quack.gemm_runtime.identity import (
+@@ -191 +194,2 @@ from quack.gemm_runtime.identity import (
+-from quack.gemm_config import (
++from torch._vendor.quack.gemm_config import (
++    GemmConfig,
+@@ -197,6 +201,6 @@ from quack.gemm_config import (
+-from quack.gemm_tvm_ffi_utils import tensor_key
+-from quack.gemm_sm80 import GemmSm80
+-from quack.gemm_sm90 import GemmSm90
+-from quack.gemm_sm100 import GemmSm100
+-from quack.gemm_sm120 import GemmSm120
+-from quack.rounding import RoundingMode
++from torch._vendor.quack.gemm_tvm_ffi_utils import tensor_key
++from torch._vendor.quack.gemm_sm80 import GemmSm80
++from torch._vendor.quack.gemm_sm90 import GemmSm90
++from torch._vendor.quack.gemm_sm100 import GemmSm100
++from torch._vendor.quack.gemm_sm120 import GemmSm120
++from torch._vendor.quack.rounding import RoundingMode
+@@ -292,0 +297,111 @@ def _mod_gemm_key(A, B, D, C, epi_args, epi_key_overrides, *tail) -> tuple:
++def _fragment_apply(op, gemm, pstate):
++    """Adapt an apply-port op's per-element ``fn_apply`` to a TensorSSA callable."""
++
++    @cute.jit
++    def apply(value):
++        source = cute.make_rmem_tensor(value.shape, value.element_type)
++        source.store(value)
++        result = cute.make_rmem_tensor(value.shape, value.element_type)
++        for i in cutlass.range(cute.size(source), unroll_full=True):
++            result[i] = op.fn_apply(gemm, pstate, i, source[i])
++        return result.load()
++
++    return apply
++
++
++class _FragmentEpiModMixin(_EpiModMixinBase):
++    """Device adapter for whole-fragment TensorSSA EpiMod callbacks.
++
++    The main fn and the accumulator prepass fn both receive the whole subtile
++    fragment as a TensorSSA (operands broadcast to the same shape) and return
++    TensorSSAs. Sinks may declare ``sink_operands``: names of operands whose
++    per-tile values are handed to ``fn_sink_flush`` by keyword.
++    """
++
++    def _fragment_operand(self, op, kind, fragment, tRS_rD, tRS_rC):
++        """Present one epilogue operand to a TensorSSA callback (or apply callable)."""
++        if const_expr(kind == "scalar"):
++            dtype = op.dtype
++            register_dtype = Float32 if dtype is None or is_floating_dtype(dtype) else dtype
++            filled = cute.make_rmem_tensor(tRS_rD.shape, register_dtype)
++            filled.fill(fragment)
++            return filled.load()
++        if const_expr(kind == "apply"):
++            return _fragment_apply(op, self, op.fn_prepare(self, fragment, False))
++        assert kind in ("c", "row", "col", "tile"), (
++            "TensorSSA callbacks support c/row/col/tile/scalar/apply operands"
++        )
++        if const_expr(kind == "c"):
++            fragment = tRS_rC
++        assert fragment is not None
++        if const_expr(
++            kind == "c" or (kind == "tile" and is_floating_dtype(fragment.element_type))
++        ):
++            fragment = fragment.to(self.acc_dtype)
++        value = fragment.load()
++        if const_expr(kind in ("row", "col")):
++            value = value.reshape(tRS_rD.shape)
++        if const_expr(kind != "c"):
++            dtype = op.dtype
++            if const_expr(dtype is Boolean):
++                value = value != cute.full_like(value, 0)
++            elif const_expr(dtype is not None and not is_floating_dtype(dtype)):
++                value = value.to(dtype)
++        return value
++
++    @cute.jit
++    def _fragment_sink_flush(self, op, state, epi_loop_tensors, value):
++        """Flush one sink's returned plane(s) with the operands it declared."""
++        # Scaled sinks return a (value, scale) pair; see _make_sink_tmps.
++        planes = value if isinstance(value, tuple) else (value,)
++        fragments = []
++        for plane in planes:
++            fragment = cute.make_rmem_tensor(plane.shape, plane.element_type)
++            fragment.store(plane)
++            fragments.append(fragment)
++        operands = {
++            name: epi_loop_tensors[name] for name in getattr(op, "sink_operands", ())
++        }
++        op.fn_sink_flush(self, state, *fragments, **operands)
++
++    @cute.jit
++    def epi_prepass_subtile(self, params, epi_tensors, tRS_rD, epi_coord, epi_idx):
++        pfn = self._epi_mod_prepass_fn
++        ops_by_name = {op.name: op for op in self._epi_ops}
++        values = {}
++        for name, kind in self._epi_mod_prepass_operands:
++            op = ops_by_name[name]
++            state = op.begin_loop(self, epi_tensors[name], epi_coord)
++            values[name] = self._fragment_operand(op, kind, state, tRS_rD, None)
++        result = pfn(tRS_rD.load(), **values)
++        for name in self._epi_mod_prepass_outs:
++            op = ops_by_name[name]
++            state = op.begin_loop(self, epi_tensors[name], epi_coord)
++            self._fragment_sink_flush(op, state, epi_tensors, result[name])
++
++    @cute.jit
++    def epi_visit_subtile(self, params, epi_loop_tensors, tRS_rD, tRS_rC=None):
++        fn = self._epi_mod_fn
++        ops_by_name = {op.name: op for op in self._epi_ops}
++        values = {
++            name: self._fragment_operand(
++                ops_by_name.get(name), kind, epi_loop_tensors.get(name), tRS_rD, tRS_rC
++            )
++            for name, kind in self._epi_mod_operands
++        }
++        result = fn(tRS_rD.load(), **values)
++        if const_expr("D" in result):
++            tRS_rD.store(result["D"].to(self.acc_dtype))
++        outputs = []
++        for name in self._epi_mod_outputs:
++            value = result[name]
++            output = cute.make_rmem_tensor(value.shape, value.element_type)
++            output.store(value)
++            outputs.append(output)
++        for name in self._epi_mod_sinks:
++            self._fragment_sink_flush(
++                ops_by_name[name], epi_loop_tensors[name], epi_loop_tensors, result[name]
++            )
++        return tuple(outputs)
++
++
+@@ -308,0 +424 @@ class EpiMod:
++        fragmentwise=False,
+@@ -348,0 +465,5 @@ class EpiMod:
++        self.fragmentwise = fragmentwise
++        if fragmentwise and (self.mode != "element" or prepass is not None):
++            raise ValueError(
++                "TensorSSA callbacks support element mode without an accumulator prepass"
++            )
+@@ -406 +527,4 @@ class EpiMod:
+-            ("vectorize", self.vectorize),
++            # Preserve the default disk-cache identity while distinguishing
++            # explicit vectorizer choices and whole-fragment callbacks.
++            *(() if self.vectorize is None else (("vectorize", self.vectorize),)),
++            *(() if not self.fragmentwise else (("fragmentwise", True),)),
+@@ -414,0 +539,9 @@ class EpiMod:
++    def supports_swap_ab(self) -> bool:
++        """Whether every orientation-sensitive op supports swap-at-trace."""
++        return (
++            self.mode == "element"
++            and self.prepass is None
++            and all(op.supports_swap_ab for op in self.ops.values())
++            and all(op.supports_swap_ab for op in self.sinks.values())
++        )
++
+@@ -422,0 +556 @@ class EpiMod:
++        state["_call_cache"] = {}
+@@ -527 +661,4 @@ class EpiMod:
+-            (_EpiModMixinBase, _SM_BASE[sm]),
++            (
++                _FragmentEpiModMixin if self.fragmentwise else _EpiModMixinBase,
++                _SM_BASE[sm],
++            ),
+@@ -540,0 +678 @@ class EpiMod:
++                "_epi_mod_fragmentwise": self.fragmentwise,
+@@ -561 +699 @@ class EpiMod:
+-        from quack.gemm_runtime.autotune import tuned_mod_gemm
++        from torch._vendor.quack.gemm_runtime.autotune import tuned_mod_gemm
+@@ -630 +768 @@ class EpiMod:
+-            from quack.operand_transform.host import as_transform_mod
++            from torch._vendor.quack.operand_transform.host import as_transform_mod
+@@ -660,2 +797,0 @@ class EpiMod:
+-            import torch
+-
+@@ -687 +823,3 @@ class EpiMod:
+-            # Swap-at-trace contract: dense, element-mode, sink-less, B (k, n).
++            # Swap-at-trace requires dense element mode, B (k, n), and
++            # orientation-aware EpiOps (supports_swap_ab) that own their
++            # transposed physical geometry.
+@@ -692,2 +830,2 @@ class EpiMod:
+-            if self.mode != "element" or self.sinks:
+-                raise ValueError("swap_ab supports element-mode sink-less epilogues only")
++            if not self.supports_swap_ab():
++                raise ValueError("swap_ab requires element mode and orientation-aware epilogue ops")
+@@ -817,2 +954,0 @@ class EpiMod:
+-            import torch
+-
+@@ -879,2 +1015 @@ class EpiMod:
+-            import torch
+-
++            output_op = self.output_ops.get(out_name)
+@@ -882 +1017,7 @@ class EpiMod:
+-            out_n = n_gemm // 2 if paired_acc else n_gemm
++            out_n = (
++                output_op.output_n(n_gemm)
++                if output_op is not None and hasattr(output_op, "output_n")
++                else n_gemm // 2
++                if paired_acc
++                else n_gemm
++            )
+@@ -1038 +1179 @@ class EpiMod:
+-            from quack.gemm_tvm_ffi_utils import (
++            from torch._vendor.quack.gemm_tvm_ffi_utils import (
+@@ -1183 +1323,0 @@ class EpiMod:
+-        n_store = n // 2 if self.mode == "acc_pair" else n
+@@ -1185,0 +1326,8 @@ class EpiMod:
++                output_op = self.output_ops.get(name)
++                n_store = (
++                    output_op.output_n(n)
++                    if output_op is not None and hasattr(output_op, "output_n")
++                    else n // 2
++                    if self.mode == "acc_pair"
++                    else n
++                )
+@@ -1299 +1447 @@ class EpiMod:
+-        config=None,  # explicit GemmConfig pins; None + tuned=True autotunes
++        config=None,  # exact GemmConfig pin; None selects the mod's default
+@@ -1317,0 +1466 @@ class EpiMod:
++        compile_dispatch: bool = True,
+@@ -1338 +1487,2 @@ class EpiMod:
+-        inside the op body."""
++        inside the op body. Generated runtime callers set ``compile_dispatch=False``
++        because they are already below torch.compile."""
+@@ -1340,0 +1491,3 @@ class EpiMod:
++        if config is not None and type(config) is not GemmConfig:
++            raise TypeError("config must be an exact GemmConfig or None")
++
+@@ -1345 +1498 @@ class EpiMod:
+-                if torch.compiler.is_compiling():
++                if compile_dispatch and torch.compiler.is_compiling():
+@@ -1350 +1503 @@ class EpiMod:
+-                from quack.operand_transform.host import as_transform_mod
++                from torch._vendor.quack.operand_transform.host import as_transform_mod
+@@ -1361 +1514 @@ class EpiMod:
+-            from quack.operand_transform.transform import TransformAOperand
++            from torch._vendor.quack.operand_transform.transform import TransformAOperand
+@@ -1384 +1537 @@ class EpiMod:
+-        if torch.compiler.is_compiling():
++        if compile_dispatch and torch.compiler.is_compiling():
+@@ -1389 +1542 @@ class EpiMod:
+-            from quack.gemm_runtime.torch_op import compile_call
++            from torch._vendor.quack.gemm_runtime.torch_op import compile_call
+@@ -1411,0 +1565 @@ class EpiMod:
++                concat_layout=concat_layout,
+@@ -1439,4 +1593,4 @@ class EpiMod:
+-                # Pinned configs key by identity: they are module-level
+-                # constants in practice; a recreated equal config just
+-                # re-records (correct, one extra cold pass).
+-                None if config is None else id(config),
++                # GemmConfig is a frozen dataclass; key by value so callers
++                # may rebuild an equal config per call (identity keys can
++                # alias a freed config's address and replay its plan).
++                config,
+@@ -1493,0 +1648,2 @@ class EpiMod:
++        from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn
++
+@@ -1495,3 +1651 @@ class EpiMod:
+-        # concat reads B (k, n) through per-call views, so it vetoes the b_kn
+-        # trace-time relabel (the interleave lives in mod.gemm).
+-        b_kn = get_device_capacity(A.device)[0] >= 9 and not concat_layout
++        b_kn = mod_b_kn(A.device, concat_layout)
+@@ -1515 +1669 @@ class EpiMod:
+-            from quack.gemm_runtime.autotune import sink_arg_shapes, tuned_mod_gemm
++            from torch._vendor.quack.gemm_runtime.autotune import sink_arg_shapes, tuned_mod_gemm
+@@ -1531 +1685,6 @@ class EpiMod:
+-                        self, lead[-1], n, l=l, device=A.device, num_seqs=num_seqs
++                        self,
++                        lead[-1],
++                        n,
++                        l=l,
++                        device=A.device,
++                        num_seqs=num_seqs,
+@@ -1586,0 +1746,32 @@ class EpiMod:
++            elif any(
++                hasattr(op, "supports_config")
++                for op in (
++                    *self.ops.values(),
++                    *self.sinks.values(),
++                    *self.output_ops.values(),
++                    *self.extra_ops,
++                )
++            ):
++                from torch._vendor.quack.gemm_runtime.autotune import _legal_mod_configs, mod_selection_args
++
++                selection_args = mod_selection_args(
++                    operands,
++                    {name: out[name] for name in self.outputs},
++                    A=A,
++                    B=B_d,
++                    b_kn=b_kn,
++                    cu_seqlens_m=cu_seqlens_m,
++                    A_idx=A_idx,
++                    SFA=SFA,
++                    concat_layout=concat_layout,
++                )
++                preferred_config = (
++                    blockscaled_default_config(
++                        A.shape[-2], n, device_capacity=get_device_capacity(A.device)[0]
++                    )
++                    if SFA is not None
++                    else self._default_config(A, B, transform_a)
++                )
++                cfg = _legal_mod_configs(
++                    self, A.device, selection_args, preferred_config=preferred_config
++                )[0]
+@@ -1658 +1849 @@ class EpiMod:
+-            from quack.operand_transform.host import as_transform_mod
++            from torch._vendor.quack.operand_transform.host import as_transform_mod
+@@ -1794,0 +1986,16 @@ def gemm_epilogue(
++def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
++    """Decorate a whole-fragment TensorSSA callback using the EpiMod host stack."""
++
++    def wrap(fn):
++        return EpiMod(
++            fn,
++            outputs=outputs,
++            ops=ops,
++            outs=outs,
++            extra_ops=extra_ops,
++            fragmentwise=True,
++        )
++
++    return wrap
++
++
+diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
+index b7e4ae2..153717f 100644
+--- a/quack/epilogue/ops.py
++++ b/quack/epilogue/ops.py
+@@ -320,0 +321 @@ class EpiOp:
++    supports_swap_ab = False
+@@ -520,0 +522 @@ class Scalar(EpiOp):
++    supports_swap_ab = True
+@@ -599 +601,4 @@ class Scalar(EpiOp):
+-            return utils.load_scalar_or_pointer(param, dtype=self.dtype)
++            value = utils.load_scalar_or_pointer(param, dtype=self.dtype)
++            if const_expr(self.dtype in (cutlass.Float16, cutlass.BFloat16)):
++                return Float32(value)
++            return value
+@@ -602,0 +608,5 @@ class Scalar(EpiOp):
++def is_floating_dtype(dtype):
++    """Return whether a static CuTeDSL numeric type is floating-point."""
++    return hasattr(dtype, "__tvm_ffi_float__")
++
++
+@@ -611,0 +622,7 @@ class VecLoad(EpiOp):
++    def __init__(self, name, dtype=None):
++        super().__init__(name)
++        self.dtype = dtype
++
++    def config_key(self):
++        return (self.dtype,)
++
+@@ -636,0 +654,5 @@ class VecLoad(EpiOp):
++    @cute.jit
++    def _valid_extent(self, vector, coord_idx, tile_dim, ctx):
++        """Return the in-bounds vector extent for the current tile."""
++        return min(cute.size(vector, mode=[0]) - coord_idx * tile_dim, tile_dim)
++
+@@ -682 +704 @@ class VecLoad(EpiOp):
+-        limit = min(cute.size(mVec, mode=[0]) - coord_idx * tile_dim, tile_dim)
++        limit = self._valid_extent(mVec, coord_idx, tile_dim, ctx)
+@@ -696 +718 @@ class VecLoad(EpiOp):
+-        # Pre-allocate register tensor reused across begin_loop calls
++        # Pre-allocate register tensor reused across begin_loop calls.
+@@ -698 +720,2 @@ class VecLoad(EpiOp):
+-        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, gemm.acc_dtype)
++        register_dtype = gemm.acc_dtype if is_floating_dtype(dtype) else dtype
++        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, register_dtype)
+@@ -715 +738 @@ class VecLoad(EpiOp):
+-            tDrV_cvt.store(tDrV.load().to(gemm.acc_dtype))
++            tDrV_cvt.store(tDrV.load().to(tDrV_cvt.element_type))
+@@ -723,0 +747 @@ class RowVecLoad(VecLoad):
++    supports_swap_ab = True
+@@ -735,0 +760 @@ class ColVecLoad(VecLoad):
++    supports_swap_ab = True
+@@ -751,15 +776,3 @@ class ColVecLoad(VecLoad):
+-    def begin(self, gemm, param, smem_tensor, ctx):
+-        dtype = param.element_type
+-        num_copy_elems = const_expr(max(32, dtype.width)) // dtype.width
+-        thr_copy = copy_utils.tiled_copy_1d(
+-            dtype, ctx.num_epi_threads, num_copy_elems, is_async=True
+-        ).get_slice(ctx.tidx)
+-        mVec = self._get_gmem_vec(param, ctx)
+-        tile_dim = self._tile_dim(ctx)
+-        coord_idx = ctx.tile_coord_mnkl[self._coord_idx()]
+-        gVec = cute.local_tile(mVec, (tile_dim,), (coord_idx,))
+-        tVgV = thr_copy.partition_S(gVec)
+-        tVsV = thr_copy.partition_D(smem_tensor)
+-        tVcV = thr_copy.partition_S(cute.make_identity_tensor(tile_dim))
+-        # ColVec uses varlen-aware limit
+-        limit = min(
++    def _valid_extent(self, vector, coord_idx, tile_dim, ctx):
++        """Use the active varlen-M extent for column-vector tail predicates."""
++        return min(
+@@ -769,17 +781,0 @@ class ColVecLoad(VecLoad):
+-        for m in cutlass.range(cute.size(tVsV.shape[1]), unroll_full=True):
+-            if tVcV[0, m] < tile_dim:  # Guard to avoid writing beyond the smem we've allocated
+-                pred = cute.make_rmem_tensor(1, Boolean)
+-                pred[0] = tVcV[0, m] < limit
+-                cute.copy(thr_copy, tVgV[None, m], tVsV[None, m], pred=pred)
+-        tDsV = ctx.partition_for_epilogue_fn(
+-            cute.make_tensor(
+-                smem_tensor.iterator,
+-                cute.make_layout((ctx.tile_M, ctx.tile_N), stride=self._broadcast_stride()),
+-            )
+-        )
+-        if const_expr(ctx.tiled_copy_t2r is not None):
+-            tDsV = ctx.tiled_copy_r2s.retile(tDsV)
+-        # Pre-allocate register tensor reused across begin_loop calls
+-        tDsV_sub = cute.group_modes(tDsV, 3, cute.rank(tDsV))[None, None, None, 0]
+-        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, gemm.acc_dtype)
+-        return [tDsV, tDrV_cvt]
+@@ -824,0 +821,2 @@ class TileStore(EpiOp):
++    supports_swap_ab = True
++
+@@ -883,6 +881,3 @@ class TileStore(EpiOp):
+-        # A halved/reshaped tile (epi_tile_fn, e.g. gated postact) has an N
+-        # extent unrelated to the GEMM's n: use a fresh sym. Such tiles are
+-        # n-major by construction (asserted in to_params). Sub-byte (fp4)
+-        # tiles also need a fresh sym: their packed contiguous extent must be
+-        # statically divisible (the FFI packing check).
+-        if self.epi_tile_fn is not None or dtype.width < 8:
++        # A halved/reshaped tile has an N extent unrelated to the GEMM's n,
++        # while only sub-byte storage requires static packing divisibility.
++        if dtype.width < 8:
+@@ -889,0 +885,2 @@ class TileStore(EpiOp):
++        elif self.epi_tile_fn is not None:
++            n = cute.sym_int()
+@@ -1041,0 +1039,6 @@ class TileStore(EpiOp):
++    def store_tile_shape_mn(self, gemm):
++        """Return the logical CTA tile shape written by this store."""
++        if self.gated:
++            return (gemm.cta_tile_shape_mnk[0], gemm.cta_tile_shape_mnk[1] // 2)
++        return gemm.cta_tile_shape_mnk[:2]
++
+@@ -1060,4 +1062,0 @@ class TileStore(EpiOp):
+-        if self.gated:
+-            tile_shape_mn = (gemm.cta_tile_shape_mnk[0], gemm.cta_tile_shape_mnk[1] // 2)
+-        else:
+-            tile_shape_mn = gemm.cta_tile_shape_mnk[:2]
+@@ -1067 +1066 @@ class TileStore(EpiOp):
+-            tile_shape_mn,
++            self.store_tile_shape_mn(gemm),
+@@ -1185,0 +1185 @@ class TileLoad(EpiOp):
++    supports_swap_ab = True
+@@ -1187 +1187 @@ class TileLoad(EpiOp):
+-    def __init__(self, name, epi_tile_fn=None):
++    def __init__(self, name, epi_tile_fn=None, dtype=None):
+@@ -1189,0 +1190 @@ class TileLoad(EpiOp):
++        self.dtype = dtype
+@@ -1192 +1193 @@ class TileLoad(EpiOp):
+-        return (_callable_config_key(self.epi_tile_fn),)
++        return (_callable_config_key(self.epi_tile_fn), self.dtype)
+diff --git a/quack/gemm_runtime/autotune.py b/quack/gemm_runtime/autotune.py
+index 2440581..37e5417 100644
+--- a/quack/gemm_runtime/autotune.py
++++ b/quack/gemm_runtime/autotune.py
+@@ -52,3 +52,3 @@ import torch
+-from quack.autotuner import AutotuneConfig, Autotuner
+-from quack.cute_dsl_utils import get_device_capacity
+-from quack.gemm_config import (
++from torch._vendor.quack.autotuner import AutotuneConfig, Autotuner
++from torch._vendor.quack.cute_dsl_utils import get_device_capacity
++from torch._vendor.quack.gemm_config import (
+@@ -61 +61 @@ from quack.gemm_config import (
+-__all__ = ["tuned_mod_gemm", "sink_arg_shapes", "TunedModGemm"]
++__all__ = ["tuned_mod_gemm", "sink_arg_shapes", "TunedModGemm", "ModProblem", "legal_mod_configs", "mod_b_kn"]
+@@ -73,0 +74,9 @@ def _cdiv(a, b):
++def mod_b_kn(device, concat_layout):
++    """Whether an EpiMod call reads B as (K, N): SM90+ and no concat layout.
++
++    concat reads B (k, n) through per-call views, so it vetoes the b_kn
++    trace-time relabel (the interleave lives in mod.gemm).
++    """
++    return get_device_capacity(device)[0] >= 9 and not concat_layout
++
++
+@@ -82,3 +91,3 @@ def _config_space(mod, device):
+-        # swap_ab rides swap-at-trace (2026-07-14): element-mode sink-less
+-        # mods only, enforced in _prune_for_mod per call.
+-        and not (c.swap_ab and (mod.mode != "element" or mod.sinks))
++        # Swap-at-trace is admitted only when every orientation-sensitive
++        # EpiOp owns its transposed physical geometry.
++        and not (c.swap_ab and not mod.supports_swap_ab())
+@@ -161,0 +171,46 @@ def _slice_sinks(mod, epi_args, config, lead, n_gemm, blockscaled=False, num_seq
++class ModProblem(NamedTuple):
++    """The call metadata EpiMod config pruning reads.
++
++    ``from_args`` extracts it from the tensor argument map; callers that only
++    know shapes (compile-time selection) build it directly.
++    """
++
++    device: torch.device
++    m: int
++    n: int
++    lead: tuple = ()  # (l, m) or (m,), matching EpiMod._lead_shape; read with sink_shapes
++    b_kn: bool = False
++    varlen_m: bool = False
++    gather_A: bool = False
++    blockscaled: bool = False
++    concat: bool = False
++    n_full: int | None = None  # transform_a padded N
++    sink_shapes: dict = {}  # sink name -> caller buffer shape
++
++    @classmethod
++    def from_args(cls, mod, transform_a, named_args):
++        A, B = named_args["A"], named_args["B"]
++        A_idx = named_args.get("A_idx")
++        m_gemm, n_gemm = _gemm_mn(A, B, named_args.get("b_kn", False))
++        if A_idx is not None:
++            m_gemm = A_idx.shape[0]
++        sink_shapes = {
++            name: tuple(named_args[name].shape)
++            for name, op in mod.sinks.items()
++            if getattr(op, "sink_alloc_shape", None) is not None and named_args.get(name) is not None
++        }
++        return cls(
++            device=A.device,
++            m=m_gemm,
++            n=n_gemm,
++            lead=_lead(A, A_idx, m_gemm),
++            b_kn=named_args.get("b_kn", False),
++            varlen_m=named_args.get("cu_seqlens_m") is not None,
++            gather_A=A_idx is not None,
++            blockscaled=named_args.get("SFA") is not None,
++            concat=bool(named_args.get("concat_layout")),
++            n_full=transform_a.padded_n(B) if transform_a is not None else None,
++            sink_shapes=sink_shapes,
++        )
++
++
+@@ -163,8 +218,9 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+-    kwargs = named_args | kwargs
+-    A, B = kwargs["A"], kwargs["B"]
+-    n_full = transform_a.padded_n(B) if transform_a is not None else None
+-    cap = get_device_capacity(A.device)[0]
+-    A_idx = kwargs.get("A_idx")
+-    m_gemm, n_gemm = _gemm_mn(A, B, kwargs.get("b_kn", False))
+-    if A_idx is not None:
+-        m_gemm = A_idx.shape[0]
++    return prune_mod_configs(
++        mod, transform_a, configs, ModProblem.from_args(mod, transform_a, named_args | kwargs)
++    )
++
++
++def prune_mod_configs(mod, transform_a, configs, problem):
++    """Keep the ``configs`` (AutotuneConfig) legal for ``mod`` on ``problem``."""
++    cap = get_device_capacity(problem.device)[0]
++    m_gemm, n_gemm, n_full = problem.m, problem.n, problem.n_full
+@@ -173,5 +229,12 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+-    b_kn_call = kwargs.get("b_kn", False)
+-    varlen_m = kwargs.get("cu_seqlens_m") is not None
+-    varlen_or_gather = varlen_m or A_idx is not None
+-    blockscaled = kwargs.get("SFA") is not None
+-    has_concat = bool(kwargs.get("concat_layout"))
++    varlen_or_gather = problem.varlen_m or problem.gather_A
++    blockscaled = problem.blockscaled
++    epi_ops = tuple(
++        dict.fromkeys(
++            (
++                *mod.ops.values(),
++                *mod.sinks.values(),
++                *mod.output_ops.values(),
++                *mod.extra_ops,
++            )
++        )
++    )
+@@ -182 +245 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+-        if not config_supports(c, gather_A=A_idx is not None, varlen_m=varlen_m):
++        if not config_supports(c, gather_A=problem.gather_A, varlen_m=problem.varlen_m):
+@@ -188,0 +252,12 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
++        if any(
++            not supports(c)
++            for op in epi_ops
++            if (supports := getattr(op, "supports_config", None)) is not None
++        ):
++            continue
++        if any(
++            not supports(c, m_gemm, n_gemm)
++            for op in epi_ops
++            if (supports := getattr(op, "supports_problem", None)) is not None
++        ):
++            continue
+@@ -192 +267,5 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+-            not b_kn_call or varlen_or_gather or has_concat or mod.mode != "element" or mod.sinks
++            not problem.b_kn
++            or n_gemm % 8
++            or varlen_or_gather
++            or problem.concat
++            or not mod.supports_swap_ab()
+@@ -207 +286 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+-            buf = kwargs.get(name)
++            buf_shape = problem.sink_shapes.get(name)
+@@ -209,3 +288,3 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
+-            if buf is not None and alloc is not None:
+-                need = alloc(_lead(A, A_idx, m_gemm), n_gemm, cta_tile_m, c.tile_n)
+-                if any(b < s for b, s in zip(buf.shape, need)):
++            if buf_shape is not None and alloc is not None:
++                need = alloc(problem.lead, n_gemm, cta_tile_m, c.tile_n)
++                if any(b < s for b, s in zip(buf_shape, need)):
+@@ -214,0 +294,13 @@ def _prune_for_mod(mod, transform_a, configs, named_args, **kwargs):
++    if not survivors:
++        raw_configs = tuple(conf.kwargs["config"] for conf in configs)
++        unsupported_ops = [
++            op
++            for op in epi_ops
++            if (supports := getattr(op, "supports_config", None)) is not None
++            and not any(supports(config) for config in raw_configs)
++        ]
++        if len(unsupported_ops) == 1 and hasattr(unsupported_ops[0], "config_support_error"):
++            raise ValueError(
++                f"no supported GemmConfig: {unsupported_ops[0].config_support_error(raw_configs)}"
++            )
++        raise ValueError("no supported GemmConfig for this epilogue and call")
+@@ -381,0 +474,44 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
++def mod_selection_args(
++    operands,
++    outputs,
++    *,
++    A,
++    B,
++    b_kn,
++    cu_seqlens_m=None,
++    A_idx=None,
++    SFA=None,
++    concat_layout=None,
++):
++    """Build the canonical argument map consumed by EpiMod config pruning."""
++    return {
++        **operands,
++        **outputs,
++        "A": A,
++        "B": B,
++        "b_kn": b_kn,
++        "cu_seqlens_m": cu_seqlens_m,
++        "A_idx": A_idx,
++        "SFA": SFA,
++        "concat_layout": concat_layout,
++    }
++
++
++def _legal_mod_configs(mod, device, named_args, *, preferred_config=None, transform_a=None):
++    """Return every supported native config, with the preferred one first when legal."""
++    problem = ModProblem.from_args(mod, transform_a, named_args)
++    return legal_mod_configs(
++        mod, device, problem, preferred_config=preferred_config, transform_a=transform_a
++    )
++
++
++def legal_mod_configs(mod, device, problem, *, preferred_config=None, transform_a=None):
++    """``_legal_mod_configs`` from a ``ModProblem`` instead of tensors."""
++    configs = _config_space(mod, device)
++    if preferred_config in configs:
++        configs = [preferred_config, *(config for config in configs if config != preferred_config)]
++    candidates = [AutotuneConfig(config=config) for config in configs]
++    survivors = prune_mod_configs(mod, transform_a, candidates, problem)
++    return [candidate.kwargs["config"] for candidate in survivors]
++
++
+@@ -413 +549 @@ def tuned_mod_gemm(
+-        from quack.operand_transform.host import as_transform_mod
++        from torch._vendor.quack.operand_transform.host import as_transform_mod
+diff --git a/quack/gemm_runtime/torch_op.py b/quack/gemm_runtime/torch_op.py
+index 3c89e3d..3cd074d 100644
+--- a/quack/gemm_runtime/torch_op.py
++++ b/quack/gemm_runtime/torch_op.py
+@@ -42 +42,2 @@ from quack.blockscaled.operand import BlockScaledFormat
+-from quack.gemm_config import GemmConfig, cta_tile_shape_m, default_config
++from quack.gemm_config import GemmConfig, blockscaled_default_config, cta_tile_shape_m
++from quack.gemm_runtime.autotune import _legal_mod_configs, mod_selection_args
+@@ -49,7 +49,0 @@ from quack.rounding import RoundingMode
+-# The compile-path body below runs under Dynamo, and default_config is host
+-# plumbing whose result is fixed once the input device is guarded: run it
+-# eagerly at trace time and bake the result, instead of letting Dynamo trace
+-# through its lru_cache'd helpers (which it does with a UserWarning per
+-# wrapper). Marks the function object itself; eager calls are unaffected.
+-default_config = torch._dynamo.assume_constant_result(default_config)
+-
+@@ -144,0 +139,43 @@ def _gemm_epi_fake(digest, ins, outs, meta) -> None:
++def _sink_config_from_meta(mod, named, outputs, meta, transform_a):
++    """Resolve the exact sink config outside Dynamo for fake and real allocation."""
++    if meta["config"] is not None:
++        return GemmConfig(**meta["config"])
++    A, B = named["A"], named["B"]
++    b_kn = (
++        A.device.type == "cuda"
++        and torch.cuda.get_device_capability(A.device)[0] >= 9
++        and not meta.get("concat_layout")
++    )
++    B_d = B if b_kn or (transform_a is not None and transform_a.owned_fmt is not None) else B.mT
++    selection_args = mod_selection_args(
++        {
++            **meta["scalar_ops"],
++            **{key[4:]: value for key, value in named.items() if key.startswith("op__")},
++        },
++        outputs,
++        A=A,
++        B=B_d,
++        b_kn=b_kn,
++        cu_seqlens_m=named.get("cu_seqlens_m"),
++        A_idx=named.get("A_idx"),
++        SFA=named.get("SFA"),
++        concat_layout=meta.get("concat_layout"),
++    )
++    if named.get("SFA") is not None:
++        n = transform_a.padded_n(B) if transform_a is not None else B.shape[-1]
++        preferred_config = blockscaled_default_config(
++            A.shape[-2],
++            n,
++            device_capacity=torch.cuda.get_device_capability(A.device)[0],
++        )
++    else:
++        preferred_config = mod._default_config(A, B, transform_a)
++    return _legal_mod_configs(
++        mod,
++        A.device,
++        selection_args,
++        preferred_config=preferred_config,
++        transform_a=transform_a,
++    )[0]
++
++
+@@ -158,0 +196 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
++    transform_a = None
+@@ -160,2 +198,4 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
+-    if t is not None and t["owned"]:
+-        n_ov = _resolve(t["digest"], t["locator"], _TA_REGISTRY, "transform").padded_n(B)
++    if t is not None:
++        transform_a = _resolve(t["digest"], t["locator"], _TA_REGISTRY, "transform")
++        if t["owned"]:
++            n_ov = transform_a.padded_n(B)
+@@ -165 +205,4 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
+-        cfg, lead = m["config"], mod._lead_shape(A, cu, A_idx)
++        cfg = _sink_config_from_meta(
++            mod, named, {name: out[name] for name in m["out_names"]}, m, transform_a
++        )
++        lead = mod._lead_shape(A, cu, A_idx)
+@@ -168 +211,4 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
+-            cfg["tile_m"], cfg["cluster_m"], cfg["device_capacity"], named.get("SFA") is not None
++            cfg.tile_m,
++            cfg.cluster_m,
++            cfg.device_capacity,
++            named.get("SFA") is not None,
+@@ -171 +217 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
+-            shape = mod.sinks[name].sink_alloc_shape(lead, n, cta_tile_m, cfg["tile_n"])
++            shape = mod.sinks[name].sink_alloc_shape(lead, n, cta_tile_m, cfg.tile_n)
+@@ -212,0 +259 @@ def compile_call(
++    concat_layout=None,
+@@ -227,5 +273,0 @@ def compile_call(
+-    if mod.sinks and cfg is None:
+-        # Partials are graph-allocated before the op runs, so the tiling must
+-        # be fixed here — no runtime autotune under compile with sinks.
+-        cfg = default_config(A.device)
+-        tuned = False
+@@ -233,0 +276,9 @@ def compile_call(
++    if sink_names and caller_owned and cfg is None:
++        raise NotImplementedError(
++            "compiled calls with caller-owned outputs and graph-allocated sinks "
++            "require an exact config"
++        )
++    if mod.sinks and cfg is None:
++        # The functional custom op resolves the same deterministic config in
++        # fake and real execution before allocating exact-shaped partials.
++        tuned = False
+@@ -278,0 +330 @@ def compile_call(
++            concat_layout=concat_layout,

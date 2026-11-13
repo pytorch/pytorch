@@ -1,7 +1,6 @@
 #include <torch/csrc/autograd/python_legacy_variable.h>
 
 #include <ATen/ATen.h>
-#include <fmt/format.h>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -50,8 +49,7 @@ static PyObject* THPVariable_pynew(
         "volatile was removed and now has no effect. Use `with torch.no_grad():` "
         "instead.",
         1);
-    if (r != 0)
-      throw python_error();
+    TORCH_CHECK_PYTHON(r == 0);
   }
 
   TORCH_CHECK_VALUE(
@@ -155,9 +153,7 @@ static PyTypeObject THPLegacyVariableType = {
 };
 
 void init_legacy_variable(PyObject* module) {
-  if (PyModule_AddType(module, &THPLegacyVariableType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPLegacyVariableType) >= 0);
 }
 
 } // namespace torch::autograd

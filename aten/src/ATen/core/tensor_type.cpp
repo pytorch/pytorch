@@ -401,12 +401,12 @@ bool TensorType::equals(const c10::Type& rhs) const {
   if (rhs.kind() != kind()) {
     return false;
   }
-  auto rt = rhs.expect<TensorType>();
+  const auto& rt = rhs.expectRef<TensorType>();
 
-  return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
-      stride_properties() == rt->stride_properties() &&
-      device() == rt->device() && requiresGrad() == rt->requiresGrad() &&
-      undefined() == rt->undefined();
+  return scalar_type_ == rt.scalarType() && sizes() == rt.sizes() &&
+      stride_properties() == rt.stride_properties() &&
+      device() == rt.device() && requiresGrad() == rt.requiresGrad() &&
+      undefined() == rt.undefined();
 }
 
 VaryingShape<int64_t> TensorType::strides() const {
@@ -461,9 +461,9 @@ const SymbolicShape& TensorType::symbolic_sizes() const {
 }
 
 bool TensorType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
-  if (auto rhs_p = rhs.cast<TensorType>()) {
+  if (auto* rhs_p = rhs.castRaw<TensorType>()) {
     // if we have the same pointer, avoid computing the merge
-    if (this == rhs_p.get()) {
+    if (this == rhs_p) {
       return true;
     }
     return *merge(*rhs_p) == *rhs_p;
