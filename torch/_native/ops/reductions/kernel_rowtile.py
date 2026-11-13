@@ -236,14 +236,15 @@ def inner_tree_fallback(reason: str) -> None:
 def select_row_order(
     cc: tuple[int, int],
     dtype: torch.dtype,
-    trait_key: str,
     N: int,
     M: int,
     *,
+    trait_type: type,
     nfields: int,
     nouts: int,
-    acc_bits: int = 32,
-    alignment: int = 16,
+    welford_outs: int,
+    acc_bits: int,
+    alignment: int,
 ) -> Literal["linear", "inner_tree"]:
     """Pick the kernel order for an unordered row reduction."""
     return "linear"
