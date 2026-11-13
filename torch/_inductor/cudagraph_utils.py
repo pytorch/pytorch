@@ -104,9 +104,9 @@ class CUDAGraphPolicy:
         real call via an inner closure.  Subclasses that need the
         example inputs for warmup or static-input detection may use them.
 
-        When ``config.graph_partition=True``, setting a CUDAGraphPolicy
-        bypasses ``cudagraph_partition_post_compile`` (which wraps each
-        partition individually) and routes through ``cudagraph_post_compile``
+        When ``CompiledFxGraph.cudagraphs_per_partition=True``, setting a
+        CUDAGraphPolicy bypasses ``cudagraph_partition_post_compile`` (which wraps
+        each partition individually) and routes through ``cudagraph_post_compile``
         instead, so this method wraps the *entire* callable, not individual
         partitions.  Subclasses that need per-partition control should
         handle partitioning internally.
@@ -310,19 +310,14 @@ def check_for_mutation(
     inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> str | None:
-    # doesn't work for non-trees because the warmup run would apply mutation twice
-    if torch._inductor.config.triton.cudagraph_trees:
-        # checking if mutation is only on parameters/static inputs
-        mutation_indices: Sequence[int] = [
-            idx
-            for idx in func.mutated_input_idxs
-            if not (
-                idx in func.static_input_idxs
-                or is_cuda_graph_recorded_tensor(inputs[idx])  # type: ignore[arg-type]
-            )
-        ]
-    else:
-        mutation_indices = func.mutated_input_idxs
+    # Only the tree manager calls this, and tree wrappers allow mutation of static
+    # inputs and cudagraph-recorded tensors regardless of triton.cudagraph_trees.
+    mutation_indices = [
+        idx
+        for idx in func.mutated_input_idxs
+        if idx not in func.static_input_idxs
+        and not is_cuda_graph_recorded_tensor(inputs[idx])  # type: ignore[arg-type]
+    ]
 
     static_inputs_log.debug(
         "check mutation static input indices: %s", func.static_input_idxs

@@ -24,6 +24,10 @@ import torch.fx
 from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
+from torch._higher_order_ops.user_kernel_hop import (
+    get_user_kernel_hop_info,
+    is_user_kernel_mutation_hop,
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     is_custom_class,
@@ -304,10 +308,7 @@ def mark_nodes_dislike_padding(
         )
 
     for cur in reversed(g.nodes):
-        if isinstance(
-            cur.target,
-            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-        ):
+        if is_user_kernel_mutation_hop(cur.target):
             cur.meta["dislike_padding"] = True
             continue
 
@@ -610,12 +611,13 @@ class GraphLowering(torch.fx.Interpreter):
         # Whether codegen splits this graph into partition functions. Codegen and
         # the customized partition wrapper read this instead of
         # config.graph_partition. It defaults to that config, which is patched off
-        # while lowering under cpp_wrapper/aot_mode (maybe_disable_graph_partition)
+        # during cpp_wrapper/fx_wrapper/AOT lowering (maybe_disable_graph_partition)
         # and while generating subgraph code. A nested region asking for its own
         # CUDA Graph forces this on for one compile without patching the config,
         # which ConstructorMoverPass and the cpp_wrapper setup still read; the
-        # scheduler's partition-minimizing reorder reads it together with
-        # cudagraphs_per_partition.
+        # scheduler's partition-minimizing reorder additionally requires
+        # config.graph_partition and config.triton.cudagraphs, preserving the CUDA
+        # Graph optimization opt-in.
         self.split_into_partitions = (
             config.graph_partition
             if split_into_partitions is None
@@ -624,8 +626,8 @@ class GraphLowering(torch.fx.Interpreter):
         # Whether the partitions are for CUDA Graphs (or a customized partition
         # wrapper): the scheduler then splits off cudagraph-unsafe ops, the
         # post-lowering cudagraph checks leave those ops to it, call() leaves
-        # the input asserts to the partition functions, and post_compile captures
-        # the partitions instead of the whole graph.
+        # input alignment and NaN asserts to the partition functions, and
+        # post_compile captures the partitions instead of the whole graph.
         if cudagraphs_per_partition is None:
             cudagraphs_per_partition = self.split_into_partitions and (
                 config.triton.cudagraphs
@@ -1628,7 +1630,7 @@ class GraphLowering(torch.fx.Interpreter):
                         old_args, old_kwargs = normalize(old_args, old_kwargs)
 
                         args, kwargs = constrain_to_fake_tensors(
-                            args, kwargs, fake_args, fake_kwargs
+                            args, kwargs, fake_args, fake_kwargs, fx_node=n
                         )
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
@@ -1959,18 +1961,17 @@ class GraphLowering(torch.fx.Interpreter):
                 return name is not None and name == new_arg.maybe_get_name()
             return False
 
-        if fx_node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+        user_kernel_hop = get_user_kernel_hop_info(fx_node.target, "mutation")
+        if user_kernel_hop is not None:
             kwargs = fx_node.kwargs["kwargs"]
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"Expected dict, got {type(kwargs)}")
-            mutated = torch._higher_order_ops.triton_kernel_wrap.get_mutated_tensors(
-                old_kwargs["kernel_idx"],
-                old_kwargs["constant_args_idx"],
+            mutated = user_kernel_hop.get_mutated_tensors(
+                old_kwargs,
                 {
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
-                old_kwargs["tma_descriptor_metadata"],
             )
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -2157,14 +2158,11 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif (
                 n.op == "call_function"
-                and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
-                and config.triton_kernel_default_layout_constraint != "flexible_layout"
+                and (info := get_user_kernel_hop_info(n.target, "mutation")) is not None
+                and (constraint := info.get_layout_constraint()) != "flexible_layout"
             ):
-                debug("user_defined_triton_kernel_layout_constraints")
-                if (
-                    config.triton_kernel_default_layout_constraint
-                    == "needs_fixed_stride_order"
-                ):
+                debug("user_defined_kernel_layout_constraints")
+                if constraint == "needs_fixed_stride_order":
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
 
@@ -2178,6 +2176,7 @@ class GraphLowering(torch.fx.Interpreter):
                             kwargs,
                             inp_args,
                             inp_kwargs,
+                            fx_node=n,
                         )
                     else:
                         args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
@@ -2185,7 +2184,8 @@ class GraphLowering(torch.fx.Interpreter):
                     self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:
                     raise RuntimeError(
-                        f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
+                        f"Unknown layout constraint for {info.dsl} user kernels: "
+                        f"{constraint}"
                     )
             else:
                 debug("")
