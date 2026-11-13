@@ -85,11 +85,8 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
 .. autofunction:: is_in_onnx_export
     :noindex:
 .. autofunction:: register_custom_translation
-    :noindex:
 .. autofunction:: unregister_custom_translation
-    :noindex:
 .. autofunction:: get_translation_builder
-    :noindex:
 ```
 
 ### Native custom translations
