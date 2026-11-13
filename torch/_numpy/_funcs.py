@@ -1,7 +1,7 @@
-# mypy: ignore-errors
-
 import inspect
 import itertools
+from collections.abc import Callable
+from types import ModuleType
 
 from . import _funcs_impl, _reductions_impl
 from ._normalizations import normalizer
@@ -18,8 +18,8 @@ from ._normalizations import normalizer
 # - Wraps back the outputs into `torch._numpy.ndarrays`
 
 
-def _public_functions(mod):
-    def is_public_function(f):
+def _public_functions(mod: ModuleType) -> list[tuple[str, Callable[..., object]]]:
+    def is_public_function(f: object) -> bool:
         return inspect.isfunction(f) and not f.__name__.startswith("_")
 
     return inspect.getmembers(mod, is_public_function)
@@ -59,10 +59,10 @@ class IndexExpression:
     Cosmetic changes by T. Oliphant 2001
     """
 
-    def __init__(self, maketuple):
+    def __init__(self, maketuple: bool) -> None:
         self.maketuple = maketuple
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: object) -> object:
         if self.maketuple and not isinstance(item, tuple):
             return (item,)
         else:

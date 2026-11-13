@@ -308,7 +308,7 @@ def _check_cpu_rng_sync(
     state_ranks = defaultdict(set)
     for rank, state_tensor in enumerate(all_state_tensors):
         # Summarize the state vector of the CPU rng.
-        # The properties that matter most are (1) its different if there is a state difference, (2) its printable
+        # The properties that matter most are (1) it's different if there is a state difference, (2) it's printable
         # (see desync table- not viable to print whole state vector of size 5k)
         state_ranks[torch.hash_tensor(state_tensor).item()].add(rank)
     return state_ranks, "Generator state hash"

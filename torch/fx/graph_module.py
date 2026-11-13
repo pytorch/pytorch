@@ -230,10 +230,10 @@ def _deserialize_graph_module(
     # Try to retrieve the forward source in a backward-compatible way
     _CodeOnlyModule.forward = forward
 
+    from ._symbolic_trace import Tracer
+
     tracer_cls = body.get("_tracer_cls")
     if tracer_cls is None:
-        from ._symbolic_trace import Tracer
-
         tracer_cls = Tracer
 
     graphmodule_cls_name = body.get("_graphmodule_cls_name", "GraphModule")
@@ -251,7 +251,8 @@ def _deserialize_graph_module(
     com = _CodeOnlyModule(body)
 
     tracer_extras = body.get("_tracer_extras", {})
-    graph = KeepModules().trace(com, **tracer_extras)
+    tracer = KeepModules._graph_module_deserialization_tracer(com)
+    graph = tracer.trace(com, **tracer_extras)
 
     # Recover node.meta["stack_trace"] after re-tracing
     node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace")

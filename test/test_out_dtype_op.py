@@ -8,7 +8,13 @@ import torch._inductor.decomposition
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
-    run_tests, TestCase, IS_WINDOWS, IS_FBCODE, IS_REMOTE_GPU
+    HardwareClassification,
+    IS_FBCODE,
+    IS_REMOTE_GPU,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+    TEST_CUDA,
 )
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing import FileCheck
@@ -18,6 +24,8 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOutDtypeOp(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_out_dtype_make_fx(self):
         class M(torch.nn.Module):
             def __init__(self, weight):
@@ -184,8 +192,10 @@ class TestOutDtypeOp(TestCase):
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestOutDtypeOpDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(IS_WINDOWS, "_int_mm unavailable")
-    @unittest.skipIf(not SM80OrLater, "_int_mm unavailable")
+    @unittest.skipIf(TEST_CUDA and not SM80OrLater, "_int_mm unavailable")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(_get_torch_cuda_version() >= (11, 7), "_int_mm unavailable")
     @skipIfNoDynamoSupport
@@ -233,7 +243,12 @@ def forward(self, x_1, w_1):
     return out_dtype""")
 
 
-instantiate_device_type_tests(TestOutDtypeOpDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestOutDtypeOpDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 if __name__ == '__main__':
     run_tests()

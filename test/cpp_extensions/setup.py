@@ -82,19 +82,28 @@ if torch.xpu.is_available() and USE_NINJA:
 
 
 # todo(mkozuki): Figure out the root cause
-if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
+if (
+    (not IS_WINDOWS)
+    and torch.cuda.is_available()
+    and (CUDA_HOME is not None or ROCM_HOME is not None)
+):
     # malfet: One should not assume that PyTorch re-exports CUDA dependencies
     cublas_extension = CUDAExtension(
         name="torch_test_cpp_extension.cublas_extension",
         sources=["cublas_extension.cpp"],
-        libraries=["cublas"] if torch.version.hip is None else [],
+        libraries=["cublas"] if torch.version.hip is None else ["hipblas"],
     )
     ext_modules.append(cublas_extension)
 
+if (
+    (not IS_WINDOWS)
+    and torch.cuda.is_available()
+    and (CUDA_HOME is not None or ROCM_HOME is not None)
+):
     cusolver_extension = CUDAExtension(
         name="torch_test_cpp_extension.cusolver_extension",
         sources=["cusolver_extension.cpp"],
-        libraries=["cusolver"] if torch.version.hip is None else [],
+        libraries=["cusolver"] if torch.version.hip is None else ["hipsolver"],
     )
     ext_modules.append(cusolver_extension)
 

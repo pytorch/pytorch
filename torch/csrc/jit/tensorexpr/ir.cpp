@@ -92,12 +92,12 @@ ExprPtr flatten_index(
   }
 
   size_t ndim = dims.size();
-  if (ndim != indices.size()) {
-    throw malformed_input("dimensions mismatch in flatten_index");
-  }
-  if (ndim != strides.size()) {
-    throw malformed_input("strides mismatch in flatten_index");
-  }
+  TORCH_CHECK(
+      ndim == indices.size(),
+      "MALFORMED INPUT: dimensions mismatch in flatten_index");
+  TORCH_CHECK(
+      ndim == strides.size(),
+      "MALFORMED INPUT: strides mismatch in flatten_index");
   if (ndim == 0) {
     return alloc<LongImm>(0);
   }
@@ -127,7 +127,7 @@ Dtype Intrinsics::IntrinsicsDtype(
   // TODO: check the op_type and make a real decision
   // Doesn't this fail with kRand?
   if (params.empty()) {
-    throw malformed_input("invalid params in Intrinsics");
+    TORCH_CHECK(false, "MALFORMED INPUT: invalid params in Intrinsics");
   } else if (params.size() == 1) {
     return IntrinsicsDtype(op_type, params[0]->dtype());
   } else if (params.size() == 2) {
@@ -175,7 +175,7 @@ size_t Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     case kRemainder:
       return 2;
     default:
-      throw std::runtime_error("invalid op_type: " + std::to_string(op_type));
+      TORCH_CHECK(false, "invalid op_type: " + std::to_string(op_type));
   }
 }
 

@@ -20,7 +20,7 @@ T = TypeVar("T")
 class Checkpointer(abc.ABC):
     """
     WARNING: This class is experimental, and is created to validate certain ideas,
-    and is subjected to change or deprecation and we strong discourage any usages at
+    and is subjected to change or deprecation and we strongly discourage any usages at
     this time.
 
     Abstract base class that defines the API for checkpointing.
