@@ -948,7 +948,8 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(first, again)
 
     def test_trial_mode_heuristics_score_nothing(self) -> None:
-        self.assertEqual(scorer.TRIAL_HEURISTICS, {"HistoricalClassFailurCorrelation"})
+        trial = {"HistoricalClassFailurCorrelation", "LLMSelection"}
+        self.assertEqual(scorer.TRIAL_HEURISTICS, trial)
         tests = ["b", "d", "a", "c", "e", "f"]
         times = dict.fromkeys(tests, 5.0)
         include, exclude = td_cut(tests, {"f": 1.0})
