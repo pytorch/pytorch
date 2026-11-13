@@ -146,7 +146,9 @@ def forward(self, x, y):
         result = out_graph(torch.randn(5))
         self.assertEqual(result, 5)
 
-    @common_utils.parametrize("value", [2, 2.5, "mode", True, None])
+    @common_utils.parametrize(
+        "value", [2, 2.5, "mode", True, common_utils.subtest(None, name="none")]
+    )
     def test_sourced_constant_outputs_smoke(self, value):
         # Smoke coverage: export remains usable with its specialized Python input.
         def fn(x, value):
