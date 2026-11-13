@@ -64,9 +64,9 @@ from ..runtime.tiling import (
     get_reduction_prefixes,
     get_z_prefixes,
     is_z_prefix,
-    REDUCTION_PREFIXES,
+    pointwise_prefixes,
     reduction_prefixes,
-    SUPPORTED_POINTWISE_PREFIXES,
+    TRITON_LAUNCH_GRID_NDIM,
 )
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..shape_propagation import ShapePropagationOpsHandler
@@ -693,7 +693,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 val: idx for idx, val in enumerate(val for val in seq if val in mask)
             }
 
-        grid_dims = SUPPORTED_POINTWISE_PREFIXES
+        grid_dims = tuple(reversed(pointwise_tensor_dims))
         if no_x_dim:
             tensor_dims = reduction_dims
         elif no_r_dim:
@@ -704,7 +704,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # Filter out unused tensor dims.
         # Convert to dicts for O(1) index lookup.
         tensor_dim_map = filtered_index_map(tensor_dims, active_prefixes)
-        grid_dim_map = dict(zip(grid_dims, range(len(grid_dims))))
+        grid_dim_map = {p: min(i, 2) for i, p in enumerate(grid_dims)}
 
         range_trees = []
         persistent_reduction = (
@@ -5903,7 +5903,11 @@ class SIMDScheduling(BaseScheduling):
 
     @classmethod
     def supported_pointwise_prefixes(cls) -> tuple[str, ...]:
-        return tuple(reversed(SUPPORTED_POINTWISE_PREFIXES))
+        return pointwise_prefixes(get_max_tiles(default=3))
+
+    @classmethod
+    def supported_reduction_prefixes(cls) -> tuple[str, ...]:
+        return reduction_prefixes(get_max_tiles(default=3))
 
     @classmethod
     def create_tiling(
@@ -5913,7 +5917,7 @@ class SIMDScheduling(BaseScheduling):
         Create a tiling dict from pointwise and reduction splits.
         """
         pw_prefixes = cls.supported_pointwise_prefixes()
-        reduction_dims = REDUCTION_PREFIXES
+        reduction_dims = cls.supported_reduction_prefixes()
         if len(pw_tiling) > len(pw_prefixes):
             raise AssertionError(
                 f"expected len(pw_tiling) <= len(pw_prefixes), "
@@ -5990,6 +5994,8 @@ class SIMDScheduling(BaseScheduling):
             dims: Sequence[sympy.Expr],
             fallback_numel: sympy.Expr,
             max_tiles: int | None = None,
+            *,
+            reduction: bool = False,
         ) -> tuple[sympy.Expr, ...]:
             """
             Collapse dimensions to the maximum allowed number of tiles.
@@ -5997,14 +6003,19 @@ class SIMDScheduling(BaseScheduling):
             if not dims:
                 return (fallback_numel,)
             max_tiles = max_tiles if max_tiles is not None else get_max_tiles(2)
-            max_tiles = min(max_tiles, len(cls.supported_pointwise_prefixes()))
+            supported_rank = (
+                len(cls.supported_reduction_prefixes())
+                if reduction
+                else len(cls.supported_pointwise_prefixes())
+            )
+            max_tiles = min(max_tiles, supported_rank)
             num_leading_dims = max(0, len(dims) - max_tiles)
             first_trailing_dim = num_leading_dims + 1
             collapsed_leading_dim = sympy_product(dims[:first_trailing_dim])
             return (collapsed_leading_dim,) + tuple(dims[first_trailing_dim:])
 
         def tile_var_ranges(
-            var_ranges, ranges_to_tile, total_numel
+            var_ranges, ranges_to_tile, total_numel, *, reduction=False
         ) -> tuple[sympy.Expr, ...]:
             # Pattern match the subexpression pertaining to each index variable.
             tiling = []
@@ -6033,7 +6044,7 @@ class SIMDScheduling(BaseScheduling):
                 if not V.graph.sizevars.statically_known_equals(dim, sympy.S.One)
             ]
 
-            return collapse_dims(tiling, total_numel)
+            return collapse_dims(tiling, total_numel, reduction=reduction)
 
         is_pointwise = reduction_numel == 1
         tilings = OrderedSet[immutable_dict[str, sympy.Expr]]()
@@ -6049,7 +6060,9 @@ class SIMDScheduling(BaseScheduling):
 
             # Use the node ranges as the default tiling candidate.
             default_pointwise_tiling = collapse_dims(node_ranges[0], pointwise_numel)
-            default_reduction_tiling = collapse_dims(node_ranges[1], reduction_numel)
+            default_reduction_tiling = collapse_dims(
+                node_ranges[1], reduction_numel, reduction=True
+            )
             node_tilings = [(default_pointwise_tiling, default_reduction_tiling)]
 
             # Search the indexing expressions for more candidates.
@@ -6095,7 +6108,10 @@ class SIMDScheduling(BaseScheduling):
                     (sympy.S.One,)
                     if is_pointwise
                     else tile_var_ranges(
-                        reduction_var_ranges, node_ranges[1], reduction_numel
+                        reduction_var_ranges,
+                        node_ranges[1],
+                        reduction_numel,
+                        reduction=True,
                     )
                 )
 
@@ -6108,7 +6124,8 @@ class SIMDScheduling(BaseScheduling):
                 *zip(*node_tilings)
             ):
                 if (
-                    len(pointwise_tiling) + len(reduction_tiling)
+                    get_max_tiles(default=2) <= TRITON_LAUNCH_GRID_NDIM
+                    and len(pointwise_tiling) + len(reduction_tiling)
                     > TRITON_MAX_TENSOR_DIMS
                 ):
                     pointwise_tiling = collapse_dims(
@@ -6281,8 +6298,13 @@ class SIMDScheduling(BaseScheduling):
                 )
             )
 
-        if get_max_tiles(default=3) == 3 and reduction_numel == 1:
-            for vars_to_use in itertools.combinations(overlapping_iter_vars, 2):
+        if reduction_numel == 1:
+            for vars_to_use in itertools.chain.from_iterable(
+                itertools.combinations(overlapping_iter_vars, n)
+                for n in range(
+                    2, min(get_max_tiles(default=3), len(overlapping_iter_vars) + 1)
+                )
+            ):
                 score_split.append(
                     (
                         process_node_vars(vars_to_use, is_pointwise=True),
@@ -6292,6 +6314,8 @@ class SIMDScheduling(BaseScheduling):
 
         tilings: list[tuple[CandidateTiling, immutable_dict[str, sympy.Expr], int]] = []
         for pw, red in score_split:
+            if len(pw.splits) > len(cls.supported_pointwise_prefixes()):
+                continue
             candidate = CandidateTiling(
                 cls.create_tiling(pw.splits, red.splits),
                 score=sum(pw.split_scores) + sum(red.split_scores),

@@ -23,6 +23,7 @@ from .hints import (
     TRITON_DEFAULT_RSPLIT,
     TRITON_DEFAULT_RSPLIT_SIZE,
 )
+from .tiling import get_z_prefixes
 from .triton_heuristics import CachingAutotuner, PrecomputedGrid
 
 
@@ -229,7 +230,10 @@ def run_triton_kernel_with_autotune(
     else:
         xblocks = [config.get("XBLOCK", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])]
         yblocks = [config.get("YBLOCK", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])]
-        zblocks = [config.get("Z0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["Z0_BLOCK"])]
+        z_prefixes = get_z_prefixes(
+            k.removesuffix("BLOCK").lower() for k in config
+        ) or ("z0_",)
+        zblocks = [config.get(f"{p.upper()}BLOCK", 1) for p in z_prefixes]
         r0blocks = [config.get("R0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])]
     rsplit = config.get("RSPLIT", TRITON_DEFAULT_RSPLIT)
     rsplit_size = config.get("RSPLIT_SIZE", TRITON_DEFAULT_RSPLIT_SIZE)

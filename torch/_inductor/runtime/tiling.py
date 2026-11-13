@@ -7,6 +7,7 @@ lists launch axes from innermost to outermost for template callers.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import TYPE_CHECKING
 
@@ -17,8 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 
-SUPPORTED_POINTWISE_PREFIXES = ("x", "y", "z0_")
-REDUCTION_PREFIXES = ("r0_", "r1_", "r2_")
+TRITON_LAUNCH_GRID_NDIM = 3
 
 
 def get_axis_prefix(name: str) -> str | None:
@@ -93,6 +93,14 @@ def get_pointwise_prefixes(prefixes: Iterable[str]) -> tuple[str, ...]:
     prefixes = tuple(prefixes)
     return tuple(reversed(get_z_prefixes(prefixes))) + _get_prefixes(
         prefixes, (SymT.YBLOCK, SymT.XBLOCK)
+    )
+
+
+def get_pointwise_block_product(
+    block_sizes: Mapping[str, int], *, exclude: str | None = None
+) -> int:
+    return math.prod(
+        block_sizes[p] for p in get_pointwise_prefixes(block_sizes) if p != exclude
     )
 
 

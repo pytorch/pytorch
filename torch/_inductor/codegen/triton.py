@@ -65,7 +65,14 @@ from ..runtime.hints import (
     TritonMeta,
 )
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
-from ..runtime.tiling import get_axis_prefix, get_max_block, is_reduction_prefix
+from ..runtime.tiling import (
+    get_axis_prefix,
+    get_max_block,
+    get_pointwise_prefixes,
+    get_z_prefixes,
+    is_reduction_prefix,
+    is_z_prefix,
+)
 from ..scheduler import (
     BaseSchedulerNode,
     FusedExternTritonKernelSchedulerNode,
@@ -8328,6 +8335,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         inductor_meta = {
             "grid_type": self._get_grid_type().__name__,
+            "pointwise_prefixes": list(get_pointwise_prefixes(self.numels)),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "optimize_mem": optimize_mem,
@@ -8570,10 +8578,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if any(map(self.needs_yz_grid_overflow, self.range_trees)):
                 return triton_heuristics.Grid2DWithYZOverflow
             return triton_heuristics.Grid2D
-        elif n == 3:
-            if self.is_native_matmul:
+        elif n >= 3:
+            if n == 3 and self.is_native_matmul:
                 return triton_heuristics.BatchMatmulGrid3D
-            return triton_heuristics.Grid3D
+            return triton_heuristics.GridND
         raise ValueError(f"Unsupported number of dimensions: {n}")
 
     def add_numel_to_call_args(self, name, call_args, arg_types):
@@ -8671,6 +8679,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return f"tl.full({size}, {value}, {index_dtype})"
 
     def iteration_ranges_get_pid(self, entry: IterationRangesRoot) -> str:
+        z_prefixes = get_z_prefixes(self.numels)
+        if len(z_prefixes) > 1 and is_z_prefix(entry.prefix):
+            pid = "tl.program_id(2)"
+            for prefix in z_prefixes[:-1]:
+                blocks = f"tl.cdiv({prefix}numel, {prefix.upper()}BLOCK)"
+                if prefix == entry.prefix:
+                    return f"({pid} % {blocks}).to({self.index_dtype})"
+                pid = f"({pid} // {blocks})"
+            return f"{pid}.to({self.index_dtype})"
         if entry.grid_dim is None:
             raise AssertionError("entry.grid_dim must not be None")
         key = f"tl.program_id({entry.grid_dim})"
