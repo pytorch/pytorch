@@ -764,6 +764,28 @@ class TpReprTests(TestCase):
         x = torch.randn(4)
         self.assertEqual(compiled(x)[1], fn(x)[1])
 
+    def test_getset_descriptor_repr_guard_reason(self):
+        class Owner:
+            pass
+
+        descriptor = Owner.__dict__["__dict__"]
+
+        def fn(x):
+            return x + len(repr(descriptor))
+
+        reasons = []
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: reasons.append(failure.reason)
+        )(fn)
+        x = torch.tensor(1)
+        compiled(x)
+
+        Owner.__name__ = "RenamedOwner"
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(len(reasons), 1)
+        self.assertIn(".__objclass__.__name__ == 'Owner'", reasons[0])
+        self.assertIn("(HINT: Dynamo computed this descriptor's repr()", reasons[0])
+
 
 if __name__ == "__main__":
     run_tests()

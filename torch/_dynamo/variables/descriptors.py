@@ -1202,7 +1202,20 @@ class GetSetDescriptorVariable(DescriptorVariable):
             # descr_repr reads __objclass__.__name__, which a heap type can rename.
             objclass_source = AttrSource(self.source, "__objclass__")
             name_source = AttrSource(objclass_source, "__name__")
-            install_guard(name_source.make_guard(GuardBuilder.EQUALS_MATCH))
+            install_guard(
+                name_source.make_guard(
+                    functools.partial(
+                        GuardBuilder.EQUALS_MATCH,
+                        recompile_hint=(
+                            "Dynamo computed this descriptor's repr() during tracing "
+                            "and compiled code using that result instead of calling "
+                            "repr() each time. The text includes the owning class name; "
+                            "that name can change without replacing the descriptor, "
+                            "so Dynamo guards it."
+                        ),
+                    )
+                )
+            )
         return descr_repr(tx, self.descriptor, "attribute")
 
     def __repr__(self) -> str:
