@@ -8114,7 +8114,12 @@ def div_mode(a, b, rounding_mode=None):
             raise AssertionError(
                 "truncdiv operands can not be boolean at the same time"
             )
-        return truncdiv(a, b) if both_integer else trunc(div(a, b))
+        if both_integer:
+            return truncdiv(a, b)
+        # A tensor divisor needs div_rn for the same reason as floor above:
+        # 33.0 / 33.0 == 0.99999994 with Triton's default division. A scalar
+        # divisor keeps div()'s reciprocal multiply, like eager's CUDA kernel.
+        return trunc(_div_rn(a, b) if isinstance(b, IRNode) else div(a, b))
     return div(a, b)
 
 

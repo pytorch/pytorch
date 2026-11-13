@@ -4606,6 +4606,21 @@ for dtype in (torch.int32, torch.int64):
                 b = torch.full((8,), b_val, dtype=dtype, device=self.device)
                 self.common(fn, (a, b))
 
+    @parametrize("dtype", [torch.float16, torch.float32])
+    def test_div_trunc_float_accuracy(self, dtype):
+        # Triton's approximate fp32 division gives 33.0 / 33.0 == 0.99999994,
+        # which a naive trunc(a / b) rounds to zero. Eager's CUDA kernel
+        # multiplies by the reciprocal of a scalar divisor: 41.0 / 41.0 is 0.
+        def fn(a, b):
+            by_tensor = torch.div(a, b, rounding_mode="trunc")
+            return by_tensor, torch.div(a, 41.0, rounding_mode="trunc")
+
+        # Products stay below 2**11, so they are exact in fp16 too.
+        q = torch.arange(1, 33, dtype=dtype, device=self.device).repeat_interleave(48)
+        b = torch.arange(1, 49, dtype=dtype, device=self.device).repeat(32)
+        self.common(fn, (q * b, b))
+        self.common(fn, (-q * b, b))
+
     @skip_if_device(
         lambda device: device not in ("cpu", "cuda"), "Only validated on CPU/CUDA"
     )
