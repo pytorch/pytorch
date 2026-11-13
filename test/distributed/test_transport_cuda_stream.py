@@ -9,6 +9,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from transport_test_utils import rdma_device
+
 import torch
 from torch.distributed._transport.nixl import NIXLTransport
 from torch.distributed._transport.nixl._memory import NIXLRemoteBuffer
@@ -16,6 +18,8 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _worker(rank, pipe, capture=False):
+    if device := rdma_device(rank):
+        os.environ["UCX_NET_DEVICES"] = f"{device}:1"
     torch.cuda.set_device(rank)
     transport = NIXLTransport()
     stream = torch.cuda.Stream()
