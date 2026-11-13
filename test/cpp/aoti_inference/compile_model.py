@@ -49,7 +49,7 @@ def make_script_module(lib_path, device, *inputs):
     m = MyAOTIModule(lib_path, device)
     # sanity check
     m(*inputs)
-    return torch.jit.trace(m, inputs)
+    return torch.jit._trace.trace(m, inputs)
 
 
 def compile_model(device, data):
@@ -93,7 +93,7 @@ def main():
     data = {}
     for device in ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]:
         compile_model(device, data)
-    torch.jit.script(TensorSerializer(data)).save("script_data.pt")
+    torch.jit._script.script(TensorSerializer(data)).save("script_data.pt")
 
 
 if __name__ == "__main__":
