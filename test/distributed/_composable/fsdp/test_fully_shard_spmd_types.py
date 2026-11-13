@@ -17,7 +17,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
+from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -88,12 +88,7 @@ class DenseSparseParams(nn.Module):
 
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
 class TestFullyShardSpmdTypes(TestCase):
-    # These tests check how FSDP propagates spmd_types annotations. The
-    # process group is the fake backend and every mesh below is hard-coded to
-    # "cpu" rather than derived from whatever accelerator is present, so this
-    # is CPU-specific by construction, not device-agnostic framework logic --
-    # GENERIC is for things like the Dynamo dispatcher that do not reference
-    # any device at all.
+    # These tests use CPU meshes and a fake process group.
     hw_classification = HardwareClassification.CPU
 
     @classmethod
@@ -600,13 +595,15 @@ class TestFullyShardSpmdTypes(TestCase):
 
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
 class TestFullyShardSpmdGradDtype(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
 
     @skip_if_lt_x_gpu(4)
-    def test_native_spmd_accumulation(self):
-        device = get_devtype().type
+    def test_native_spmd_accumulation(self, device):
+        device = torch.device(device).type
         mesh = init_device_mesh(device, (2, 2), mesh_dim_names=("dp", "tp"))
         dp_axis = spmd.MeshAxis.of(mesh.get_group("dp"))
         tp_axis = spmd.MeshAxis.of(mesh.get_group("tp"))
@@ -678,5 +675,8 @@ class TestFullyShardSpmdGradDtype(FSDPTest):
 
 
 instantiate_device_type_tests(TestFullyShardSpmdTypes, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    TestFullyShardSpmdGradDtype, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
