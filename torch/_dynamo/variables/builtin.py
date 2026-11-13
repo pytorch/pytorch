@@ -3829,23 +3829,10 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
             ]
         if len(args) != 2 or kwargs:
             raise_observed_exception(TypeError, tx)
+        from .object_protocol import generic_hasattr
+
         obj, attr = args
-        if not attr.is_python_constant():
-            raise_observed_exception(TypeError, tx)
-        attr_name = attr.as_python_constant()
-        if not isinstance(attr_name, str):
-            raise_type_error(
-                tx, f"attribute name must be string, not '{attr.python_type_name()}'"
-            )
-        result = obj.call_obj_hasattr(tx, attr_name)
-        if result is None:
-            unimplemented(
-                gb_type="hasattr() on unsupported type",
-                context=f"hasattr({obj}, {attr})",
-                explanation=f"hasattr() is not supported on type {obj.python_type_name()}",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return result
+        return generic_hasattr(tx, obj, attr)
 
 
 class SetAttrBuiltinVariable(BaseBuiltinVariable):
