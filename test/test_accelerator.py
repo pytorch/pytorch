@@ -339,13 +339,14 @@ class TestAccelerator(TestCase):
     def test_set_rng_state_before_lazy_init(self):
         # Use a fresh process since the runtime is already initialized here.
         state = torch.Generator(device=self.device_type).manual_seed(1234).get_state()
+        count = torch.accelerator.device_count()
         script = f"""\
             import torch
             acc = torch.accelerator.current_accelerator()
             mod = torch.get_device_module(acc)
             state = torch.tensor({state.tolist()}, dtype=torch.uint8)
             expected = state.clone()
-            torch.accelerator.random.set_rng_state(state, 0)
+            torch.accelerator.random.set_rng_state_all([state] * {count})
             assert not mod.is_initialized()
             assert not torch._C._accelerator_isInitialized()
             # The deferred callback must not observe later mutations of the input.
@@ -364,6 +365,7 @@ class TestAccelerator(TestCase):
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
 
     def test_random_generator_state(self):
+        seeded_states = []
         for device_idx in range(torch.accelerator.device_count()):
             initial_seed = torch.accelerator.random.initial_seed(device_idx)
             self.assertIsInstance(initial_seed, int)
@@ -373,6 +375,7 @@ class TestAccelerator(TestCase):
             with torch.accelerator.device_index(device_idx):
                 torch.accelerator.random.manual_seed(12345)
             new_state = torch.accelerator.random.get_rng_state(device_idx)
+            seeded_states.append(new_state)
             self.assertNotEqual(old_state, new_state)
             self.assertEqual(12345, torch.accelerator.random.initial_seed(device_idx))
             torch.accelerator.random.set_rng_state(old_state, device_idx)
@@ -390,21 +393,29 @@ class TestAccelerator(TestCase):
             self.assertNotEqual(
                 old_state, torch.accelerator.random.get_rng_state(device_idx)
             )
+        torch.accelerator.random.set_rng_state_all(seeded_states)
+        self.assertEqual(seeded_states, torch.accelerator.random.get_rng_state_all())
+        # device=None resolves to the current device.
+        cur_device = torch.accelerator.current_device_index()
+        torch.accelerator.random.set_rng_state(seeded_states[0])
+        self.assertEqual(
+            torch.accelerator.random.get_rng_state(cur_device), seeded_states[0]
+        )
+        with self.assertRaisesRegex(
+            ValueError, "doesn't match the current accelerator"
+        ):
+            torch.accelerator.random.set_rng_state(seeded_states[0], "cpu")
+
         torch.accelerator.random.manual_seed_all(54321)
-        for device_idx in range(torch.accelerator.device_count()):
-            with torch.accelerator.device_index(device_idx):
-                self.assertEqual(54321, torch.accelerator.random.initial_seed())
-                state = torch.accelerator.random.get_rng_state()
-                self.assertEqual(
-                    torch.accelerator.random.get_rng_state_all(),
-                    [state] * torch.accelerator.device_count(),
-                )
+        count = torch.accelerator.device_count()
+        expected = torch.accelerator.random.get_rng_state(0)
+        self.assertEqual(torch.accelerator.random.get_rng_state_all(), [expected] * count)
         torch.accelerator.random.seed_all()
-        for device_idx in range(torch.accelerator.device_count()):
+        for device_idx in range(count):
             with torch.accelerator.device_index(device_idx):
                 self.assertNotEqual(54321, torch.accelerator.random.initial_seed())
-                torch.accelerator.random.set_rng_state(state)
-                self.assertEqual(state, torch.accelerator.random.get_rng_state())
+                torch.accelerator.random.set_rng_state(expected)
+                self.assertEqual(expected, torch.accelerator.random.get_rng_state())
                 self.assertEqual(54321, torch.accelerator.random.initial_seed())
 
 
