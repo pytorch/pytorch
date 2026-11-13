@@ -987,9 +987,18 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             ((0, 1), True, True),
         ],
     )
-    def test_all_to_all_nd(self, scatter_gather, out_2d, input_3d):
+    @parametrize("use_cute", [False, True])
+    @parametrize("large", [False, True])
+    def test_all_to_all_nd(self, scatter_gather, out_2d, input_3d, use_cute, large):
         """all_to_all_nd: (1,0)/(0,1); 3-D input [rows,G,loc] or [G,loc,cols] where supported."""
         scatter_dim, gather_dim = scatter_gather
+        all_to_all = symm_mem.all_to_all_nd
+        if use_cute:
+            try:
+                from torch.distributed._symmetric_memory._nccl_cute import all_to_all_nd
+            except ImportError as e:
+                raise SkipTest("nccl4py and CuTeDSL are required") from e
+            all_to_all = all_to_all_nd
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
         c10d.all_reduce(torch.ones(1, device=self.device))
@@ -999,8 +1008,8 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         dtype = torch.float
 
         if scatter_dim == 1 and gather_dim == 0:
-            local_cols = 4
-            rows = 8
+            local_cols = 64 if large else 4
+            rows = 257 if large else 8
             if input_3d:
                 buf = symm_mem.empty(
                     rows, p, local_cols, dtype=dtype, device=self.device
@@ -1009,12 +1018,16 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
                 buf = symm_mem.empty(
                     rows, p * local_cols, dtype=dtype, device=self.device
                 ).fill_(float(self.rank))
+            buf.copy_(
+                torch.arange(buf.numel(), device=self.device).view(buf.shape)
+                + self.rank * buf.numel()
+            )
             symm_mem.rendezvous(buf, group=group_name)
             if out_2d:
                 out = torch.empty(p * rows, local_cols, dtype=dtype, device=self.device)
             else:
                 out = torch.empty(p, rows, local_cols, dtype=dtype, device=self.device)
-            symm_mem.all_to_all_nd(
+            all_to_all(
                 buf,
                 out,
                 scatter_dim=scatter_dim,
@@ -1023,20 +1036,18 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             )
             torch.cuda.synchronize()
             out_view = out.view(p, rows, local_cols) if out_2d else out
+            reference = torch.arange(buf.numel(), dtype=dtype).view(
+                rows, p, local_cols
+            )[:, self.rank, :]
             for j in range(p):
                 self.assertEqual(
                     out_view[j],
-                    torch.full(
-                        (rows, local_cols),
-                        float(j),
-                        dtype=dtype,
-                        device=self.device,
-                    ),
+                    reference + j * buf.numel(),
                     msg=f"rank {self.rank}: out[{j}] should be peer {j}'s column block",
                 )
         else:
-            local_rows = 4
-            cols = 4
+            local_rows = 257 if large else 4
+            cols = 64 if large else 4
             if input_3d:
                 buf = symm_mem.empty(
                     p, local_rows, cols, dtype=dtype, device=self.device
@@ -1045,12 +1056,16 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
                 buf = symm_mem.empty(
                     p * local_rows, cols, dtype=dtype, device=self.device
                 ).fill_(float(self.rank))
+            buf.copy_(
+                torch.arange(buf.numel(), device=self.device).view(buf.shape)
+                + self.rank * buf.numel()
+            )
             symm_mem.rendezvous(buf, group=group_name)
             if out_2d:
                 out = torch.empty(local_rows, p * cols, dtype=dtype, device=self.device)
             else:
                 out = torch.empty(local_rows, p, cols, dtype=dtype, device=self.device)
-            symm_mem.all_to_all_nd(
+            all_to_all(
                 buf,
                 out,
                 scatter_dim=scatter_dim,
@@ -1059,17 +1074,31 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             )
             torch.cuda.synchronize()
             out_view = out.view(local_rows, p, cols) if out_2d else out
+            reference = torch.arange(buf.numel(), dtype=dtype).view(
+                p, local_rows, cols
+            )[self.rank]
             for j in range(p):
                 self.assertEqual(
                     out_view[:, j, :],
-                    torch.full(
-                        (local_rows, cols),
-                        float(j),
-                        dtype=dtype,
-                        device=self.device,
-                    ),
+                    reference + j * buf.numel(),
                     msg=f"rank {self.rank}: out[:, {j}, :] should be peer {j}'s row block",
                 )
+
+        if use_cute:
+            expected = out.clone()
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                all_to_all(buf, out, scatter_dim, gather_dim, group=group_name)
+            torch.cuda.synchronize()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, stream=stream):
+                all_to_all(buf, out, scatter_dim, gather_dim, group=group_name)
+            for delta in (1, 2):
+                buf.add_(1)
+                out.fill_(-1)
+                graph.replay()
+                self.assertEqual(out, expected + delta)
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")

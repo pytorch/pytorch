@@ -35,6 +35,7 @@
 #endif
 
 #ifdef USE_C10D_NCCL
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl/NCCLXStub.hpp>
@@ -239,9 +240,54 @@ using SymmetricMemoryPtr =
       symm_mem.get());
   TORCH_CHECK(
       mem != nullptr,
-      "CFT handles are only available on the NCCL symmetric memory backend");
+      "NCCL handles are only available on the NCCL symmetric memory backend");
   return mem;
 }
+
+#if defined(NCCL_HAS_DEVCOMM)
+py::tuple getNcclCuteContext(
+    const SymmetricMemoryPtr& symm_mem,
+    int64_t version) {
+  using ::c10d::getNcclErrorDetailStr;
+  using ::c10d::ncclGetErrorWithVersion;
+  auto* mem = asNcclSymmetricMemory(symm_mem);
+  int runtime_version = 0;
+  C10D_NCCL_CHECK(ncclGetVersion(&runtime_version), "ncclGetVersion failed");
+  TORCH_CHECK(
+      version == NCCL_VERSION_CODE && version == runtime_version,
+      "CuTeDSL requires matching PyTorch NCCL headers, runtime, and nccl4py bindings");
+  c10::cuda::CUDAGuard guard(mem->get_device());
+  auto& manager =
+      ::c10d::symmetric_memory::NCCLDevCommManager::get(mem->get_device());
+  const auto stream = c10::cuda::getCurrentCUDAStream();
+  const auto key = "nccl_cute_" + std::to_string(stream.id());
+  auto devcomm = manager.get_devcomm(mem->get_group_name(), key);
+  if (!devcomm) {
+    TORCH_CHECK(
+        c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+            c10::cuda::CaptureStatus::None,
+        "Warm up NCCL CuTeDSL collectives before CUDA graph capture");
+    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+    reqs.lsaBarrierCount = 1024;
+    reqs.lsaMultimem = mem->has_multicast_support();
+    ncclDevComm created{};
+    C10D_NCCL_CHECK(
+        ncclDevCommCreate(
+            manager.get_comm(mem->get_group_name()), &reqs, &created),
+        "ncclDevCommCreate failed");
+    devcomm = manager.register_devcomm(mem->get_group_name(), created, key);
+  }
+  TORCH_CHECK(
+      devcomm->get().lsaSize == mem->get_world_size(),
+      "NCCL CuTeDSL collectives require all ranks in one LSA team");
+  return py::make_tuple(
+      reinterpret_cast<uintptr_t>(mem->get_window()),
+      mem->get_window_offset(),
+      py::bytes(
+          reinterpret_cast<const char*>(&devcomm->get()), sizeof(ncclDevComm)),
+      mem->has_multicast_support());
+}
+#endif
 
 // Both queries raise on their own when the build predates the host-side CFT
 // API, so there is nothing extra to check here.
@@ -1728,6 +1774,9 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
       .def_property_readonly("offset", &SymmetricMemory::get_offset)
       .def_property_readonly("device", &SymmetricMemory::get_device)
+#if defined(USE_C10D_NCCL) && defined(NCCL_HAS_DEVCOMM)
+      .def("_get_nccl_cute_context", getNcclCuteContext)
+#endif
       // Convert the pybind `_SymmetricMemory` object into the TorchBind custom
       // class object (`__torch__.torch.classes.c10d.SymmetricMemory`) so it can
       // be passed to dispatcher ops that expect the TorchBind type.
