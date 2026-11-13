@@ -73,6 +73,7 @@ class _FakeGraph:
         self.sizevars = sizevars
         # Empty: no buffer is layout-constrained, so strides come from the node.
         self.buffer_layout_constraints = {}
+        self.pending_tunableop_ladder = []
 
 
 def _buffer(name, sizes, strides):
@@ -697,9 +698,20 @@ class TestTunableOpPretune(TestCase):
         retried = {b.input_tensor_meta[0].sizes[0] for b in second}
         self.assertNotIn(tuned_dim, retried, "the tuned rung must be skipped")
 
+    def test_routing_is_wider_than_the_ladder(self):
+        # Two sets, not one: routing covers every tunable GEMM, the ladder
+        # cannot rebuild bias_addmm's meta. Pinned here because one set
+        # shadowing the other is silent, and test_bias_addmm_is_skipped below
+        # does not catch it (its K-dim guard rejects the fixture first).
+        self.assertTrue(tunableop.is_tunableop_gemm("bias_addmm"))
+        self.assertNotIn("bias_addmm", tunableop._TUNABLEOP_LADDER_CHOICES)
+        self.assertLess(
+            tunableop._TUNABLEOP_LADDER_CHOICES, tunableop._TUNABLEOP_ROUTING_CHOICES
+        )
+
     def test_bias_addmm_is_skipped(self):
         # bias_addmm rewrites its own bias before dispatching, so it is absent
-        # from _TUNABLEOP_GEMM_CHOICES and never reaches the density guard.
+        # from _TUNABLEOP_LADDER_CHOICES and never reaches the density guard.
         s = sympy.Symbol("s_biasaddmm", positive=True, integer=True)
         m, k, n = s, 256, 512
         winner = _FakeWinner(
@@ -741,27 +753,117 @@ class TestTunableOpPretune(TestCase):
             batches - {512}, "rungs under the cap must still submit alongside it"
         )
 
-    @parametrize("path", ("single_choice", "deterministic"))
-    def test_algorithm_selector_hook_fires_on_early_return(self, path):
-        # Driven through __call__, not by calling the hook: both early returns
-        # skip benchmarking, and a direct call passes with either line deleted.
+    def test_select_algorithm_hook_queues_until_layouts_are_final(self):
+        # The hook fires while lowering, before finalize() decides layouts, so
+        # it queues on the graph; _update_scheduler drains it afterwards.
+        # Triton winners are ignored by the isinstance gate.
         from torch._inductor import select_algorithm as _sa
 
-        s = sympy.Symbol(f"s_sel_{path}", positive=True, integer=True)
+        s = sympy.Symbol("s_hook", positive=True, integer=True)
+        with _ladder(s) as submitted:
+            _sa._maybe_pretune_tunableop(self._mm_winner("mm", s))
+            _sa._maybe_pretune_tunableop(mock.Mock(spec=[]))
+            self.assertEqual(submitted, [], "the hook must not ladder in place")
+            self.assertEqual(len(V.graph.pending_tunableop_ladder), 1)
+            tunableop.run_queued_pretunes(V.graph)
+            self.assertTrue(submitted, "the drain must ladder the extern winner")
+
+    def test_the_queue_is_empty_unless_tune_mode_is_on(self):
+        # Queuing before the mode check would hold extern IR in every compile
+        # and walk it at scheduling.
+        from torch._inductor import select_algorithm as _sa
+
+        s = sympy.Symbol("s_inert", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        graph = _FakeGraph(_FakeSizevars(s, 512, (2, 2**31 - 1)))
+        with V.set_graph_handler(graph):
+            with config.patch({"cuda.autotune_tunableop_mode": "off"}):
+                _sa._maybe_pretune_tunableop(winner)
+            self.assertEqual(graph.pending_tunableop_ladder, [])
+
+    def test_a_still_flexible_operand_is_not_tuned(self):
+        # finalize() should have decided every layout by drain time; one that
+        # is still flexible means it has not, so guess nothing.
+        s = sympy.Symbol("s_flex", positive=True, integer=True)
+        winner = self._mm_winner("mm", s)
+        winner.input_nodes[0].layout = ir.FlexibleLayout(DEVICE, DTYPE, [s, 256])
+        with _ladder(s) as submitted:
+            V.graph.pending_tunableop_ladder.append(winner)
+            tunableop.run_queued_pretunes(V.graph)
+        self.assertEqual(submitted, [], "a flexible operand must not be tuned")
+
+    @parametrize(
+        "exit_path",
+        ("single_choice", "deterministic", "no_timings", "no_extern", "best_choice"),
+    )
+    def test_algorithm_selector_hook_fires_on_every_exit(self, exit_path):
+        # __call__ returns from five places and each needs its own hook; a
+        # direct call to the hook passes with any of them deleted. The hook is
+        # patched, so no_extern -- whose winner the isinstance gate turns away
+        # -- asserts like the rest. None of this reaches a device.
+        from torch._inductor import select_algorithm as _sa
+
+        s = sympy.Symbol(f"s_sel_{exit_path}", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
         winner.output_node = mock.Mock(return_value=mock.Mock())
-        choices = [winner]
-        if path == "deterministic":
-            choices.append(self._mm_winner("mm", s))
-        with config.patch({"deterministic": path == "deterministic"}):
-            with mock.patch("torch._inductor.tunableop.maybe_range_pretune") as pretune:
-                _, chosen = _sa.AlgorithmSelectorCache()(
-                    "mm", choices, winner.input_nodes, winner.layout
+        triton = mock.Mock(spec=_sa.ChoiceCaller)
+        choices = {"single_choice": [winner], "no_extern": [triton, triton]}.get(
+            exit_path, [winner, triton]
+        )
+        with contextlib.ExitStack() as stack:
+            # The post-benchmark exits reach create_inputs_key, which needs a
+            # graph; the two early returns return before it.
+            stack.enter_context(_ladder(s))
+            stack.enter_context(
+                config.patch({"deterministic": exit_path == "deterministic"})
+            )
+            hook = stack.enter_context(
+                mock.patch.object(_sa, "_maybe_pretune_tunableop")
+            )
+            if exit_path in ("no_timings", "no_extern", "best_choice"):
+                # Past the two early returns, into the post-benchmark exits.
+                stack.enter_context(
+                    mock.patch.object(_sa.AlgorithmSelectorCache, "make_precompile_fn")
                 )
-                # Triton winners are turned away by the isinstance gate.
-                _sa._maybe_pretune_tunableop(mock.Mock(spec=[]))
-        self.assertIs(chosen, winner)
-        pretune.assert_called_once_with(winner)
+                stack.enter_context(
+                    mock.patch.object(
+                        _sa.AlgorithmSelectorCache,
+                        "do_autotuning",
+                        return_value=(
+                            {winner: 1.0, triton: 2.0}
+                            if exit_path == "best_choice"
+                            else {}
+                        ),
+                    )
+                )
+            _, chosen = _sa.AlgorithmSelectorCache()(
+                "mm", choices, winner.input_nodes, winner.layout
+            )
+        hook.assert_called_once_with(chosen)
+
+    def test_benchmark_subgraph_compiles_with_tuning_off(self):
+        # A subgraph candidate's benchmark compile forces ATEN, so every inner
+        # GEMM is a single choice and would reach the hook, spending that
+        # GEMM's whole budget for a candidate that may lose (decompose-K's
+        # inner bmm is one). A winner is re-lowered, so nothing is lost.
+        from torch._inductor.codegen import subgraph as _sg
+
+        modes = []
+        caller = mock.Mock(spec=_sg.SubgraphChoiceCaller)
+        caller.name = "decompose_k_mm_4_split_aten"
+        caller.sym_inputs = []
+        caller.example_inputs = []
+        caller.benchmark_inputs = []
+        caller.gm = mock.Mock()
+        caller.config_patches = {}
+        with mock.patch("torch._inductor.graph.GraphLowering") as graph_lowering:
+            graph_lowering.return_value.compile_to_module.side_effect = (
+                lambda: modes.append(config.cuda.autotune_tunableop_mode)
+            )
+            with V.set_graph_handler(mock.Mock()):
+                with config.patch({"cuda.autotune_tunableop_mode": "tune"}):
+                    _sg.SubgraphChoiceCaller._compile_for_benchmarking(caller)
+        self.assertEqual(modes, ["off"], "a benchmark compile must not tune")
 
     @parametrize("scenario", ("clean", "conflict", "force_extern"))
     def test_finalize_hook_routes_extern_winners(self, scenario):
@@ -821,10 +923,9 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
     the pipe, so it is what proves the rebuilt metas describe shapes
     hipBLASLt accepts and that each reaches the file runtime reads.
 
-    InductorTestCase enters fresh_cache(), isolating the cache dir and
-    clearing _pretuned_gemms. The compile therefore always starts cold, so
-    this does not cover a warm cache, where the FX graph is served from the
-    cache and no autotuning -- hence no ladder -- runs at all.
+    InductorTestCase enters fresh_cache(), which isolates the cache directory
+    per test and clears _pretuned_gemms with it, so the compile always starts
+    cold.
     """
 
     hw_classification = HardwareClassification.CUDA
