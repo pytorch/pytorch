@@ -6645,7 +6645,9 @@ class TestCppFakeTensorModeBindings(TestCase):
 
         def meta_impl(x):
             result = x.detach()
-            self.assertEqual(maybe_get_fake_dispatch_keys(result), keys)
+            self.assertTrue(result.is_meta)
+            self.assertFalse(is_fake_tensor(result))
+            self.assertIsNone(maybe_get_fake_dispatch_keys(result))
             return result
 
         with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
