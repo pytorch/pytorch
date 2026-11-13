@@ -232,9 +232,12 @@ class P2PInitializationTest(TestCase):
             (((0, 1),), ((1, 0),)),
         )
 
-    def test_shared_preconnect_exercises_each_physical_pair_once(self):
+    def test_shared_preconnect_exercises_both_directions_of_each_physical_pair(self):
         parent = MagicMock()
-        works = [MagicMock(), MagicMock()]
+        works = [MagicMock() for _ in range(4)]
+        p2p = MagicMock()
+        p2p.isend.side_effect = works[0::2]
+        p2p.irecv.side_effect = works[1::2]
         with (
             patch(
                 "torch.distributed.pipelining._p2p.dist.get_world_size",
@@ -244,10 +247,8 @@ class P2PInitializationTest(TestCase):
                 "torch.distributed.pipelining._p2p.dist.get_rank",
                 return_value=0,
             ),
-            patch(
-                "torch.distributed.pipelining._p2p.dist.isend",
-                side_effect=works,
-            ) as isend,
+            patch("torch.distributed.pipelining._p2p.dist.isend", p2p.isend),
+            patch("torch.distributed.pipelining._p2p.dist.irecv", p2p.irecv),
             patch("torch.distributed.pipelining._p2p.dist.all_reduce") as sync,
         ):
             _preconnect_shared_p2p_edges(
@@ -256,13 +257,12 @@ class P2PInitializationTest(TestCase):
                 torch.device("cpu"),
             )
 
-        self.assertEqual(
-            [call.kwargs["group_dst"] for call in isend.call_args_list],
-            [1, 3],
-        )
-        self.assertTrue(
-            all(call.kwargs["group"] is parent for call in isend.call_args_list)
-        )
+        ops = [
+            (name, kwargs.get("group_dst", kwargs.get("group_src")))
+            for name, _, kwargs in p2p.mock_calls
+        ]
+        self.assertEqual(ops, [("isend", 1), ("irecv", 1), ("isend", 3), ("irecv", 3)])
+        self.assertTrue(all(call.kwargs["group"] is parent for call in p2p.mock_calls))
         self.assertTrue(all(work.wait.call_count == 1 for work in works))
         self.assertEqual(sync.call_count, 2)
 
@@ -1352,6 +1352,107 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
+    @parametrize(
+        "ScheduleClass",
+        [
+            Schedule1F1B,
+            ScheduleGPipe,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleLoopedBFS,
+        ],
+    )
+    def test_schedule_with_loss_kwarg_mbs(self, ScheduleClass):
+        """
+        Test that each microbatch's loss gets the shared loss_kwargs merged with
+        its own loss_kwarg_mbs entry, including a dict the loss fills.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        try:
+            d_hid, batch_size = 16, 8
+            n_stages = 1
+            num_microbatches = 2
+            device = "cpu"
+
+            mod = torch.nn.Linear(d_hid, d_hid).to(device)
+            ref_mod = copy.deepcopy(mod)
+
+            x = torch.randn(batch_size, d_hid, device=device)
+            target = torch.randn(batch_size, d_hid, device=device)
+            weight = torch.rand(batch_size, 1, device=device)
+            scale = 0.5
+
+            def weighted_loss(output, target, scale, weight):
+                return ((output - target).square() * weight).sum() * scale
+
+            def loss_fn(output, target, *, scale, weight, metrics):
+                loss = weighted_loss(output, target, scale, weight)
+                metrics["loss"] = loss.detach()
+                return loss
+
+            stage = PipelineStage(mod, 0, n_stages, device)
+            if issubclass(ScheduleClass, PipelineScheduleSingle):
+                stages = stage
+            else:
+                stages = [stage]
+            schedule = ScheduleClass(
+                stages,
+                num_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+            )
+
+            x_mbs = torch.tensor_split(x, num_microbatches)
+            target_mbs = list(torch.tensor_split(target, num_microbatches))
+            weight_mbs = torch.tensor_split(weight, num_microbatches)
+            metrics_mbs = [{} for _ in range(num_microbatches)]
+            losses = []
+            schedule.step(
+                arg_mbs=[(x_mb,) for x_mb in x_mbs],
+                target_mbs=target_mbs,
+                losses=losses,
+                loss_kwargs={"scale": scale},
+                loss_kwarg_mbs=[
+                    {"weight": weight_mb, "metrics": metrics}
+                    for weight_mb, metrics in zip(weight_mbs, metrics_mbs, strict=True)
+                ],
+            )
+
+            ref_losses = []
+            for x_mb, target_mb, weight_mb in zip(
+                x_mbs, target_mbs, weight_mbs, strict=True
+            ):
+                ref_loss = weighted_loss(ref_mod(x_mb), target_mb, scale, weight_mb)
+                ref_loss.backward()
+                ref_losses.append(ref_loss.detach())
+
+            self.assertEqual(losses, ref_losses)
+            self.assertEqual(metrics_mbs, [{"loss": loss} for loss in ref_losses])
+            for name, param in mod.named_parameters():
+                self.assertEqual(
+                    param.grad,
+                    ref_mod.get_parameter(name).grad,
+                    msg=f"Gradient mismatch for {name}",
+                )
+
+            with self.assertRaisesRegex(
+                TypeError, "multiple values for keyword argument 'scale'"
+            ):
+                schedule.step(
+                    arg_mbs=[(x_mb,) for x_mb in x_mbs],
+                    target_mbs=target_mbs,
+                    loss_kwargs={"scale": scale},
+                    loss_kwarg_mbs=[
+                        {"scale": scale, "weight": weight_mb, "metrics": {}}
+                        for weight_mb in weight_mbs
+                    ],
+                )
+        finally:
+            torch.distributed.destroy_process_group()
+
     def test_schedule_pre_split_validation(self):
         store = FakeStore()
         torch.distributed.init_process_group(
@@ -1406,6 +1507,23 @@ class ScheduleTest(TestCase):
                     arg_mbs=[(x0,), (x1,)],
                     target_mbs=[x0],
                 )
+
+            with self.assertRaisesRegex(TypeError, "loss_kwarg_mbs must be a list"):
+                schedule.step(arg_mbs=[(x0,), (x1,)], loss_kwarg_mbs={"w": x0})
+
+            with self.assertRaisesRegex(ValueError, "Expecting 2 loss_kwarg_mbs"):
+                schedule.step(arg_mbs=[(x0,), (x1,)], loss_kwarg_mbs=[{}])
+
+            with self.assertRaisesRegex(
+                TypeError, "loss_kwarg_mbs must be a list of dicts"
+            ):
+                schedule.step(arg_mbs=[(x0,), (x1,)], loss_kwarg_mbs=[x0, x1])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "pass pre-split targets through target_mbs",
+            ):
+                schedule.step(target=x0, loss_kwarg_mbs=[{}, {}])
         finally:
             torch.distributed.destroy_process_group()
 

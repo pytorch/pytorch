@@ -38,6 +38,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/reportMemoryUsage_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/scalar_tensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/scalar_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/sorting_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/StorageUtils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/stride_properties_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tensor_iterator_test.cpp
@@ -88,7 +89,6 @@ endif()
 # except the ones listed here.
 set(ATen_HIP_TEST_EXCLUDE
   cuda_cudnn_test # cuDNN only
-  cuda_exchange_device_test # lazy-context ExchangeDevice is CUDA_VERSION >= 12000 only
   )
 foreach(test_src ${ATen_CUDA_TEST_SRCS})
   get_filename_component(test_name ${test_src} NAME_WE)

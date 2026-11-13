@@ -456,8 +456,38 @@ class TestComplexTensor(TestCase):
                 msg=lambda msg: f"{msg}\nne(out)\nactual {actual}\nexpected {expected}",
             )
 
+    @dtypes(*complex_types())
+    def test_complex_div_underflow_overflow(self, device, dtype):
+        finfo = torch.finfo(dtype)
+        nom_lst = [
+            complex(finfo.min / 2, finfo.min / 2),
+            complex(finfo.max / 2, finfo.max / 2),
+            complex(finfo.tiny, finfo.tiny),
+            complex(finfo.tiny, 0.0),
+            complex(0.0, 0.0),
+        ]
+        denom_lst = [
+            complex(finfo.min / 2, finfo.min / 2),
+            complex(finfo.max / 2, finfo.max / 2),
+            complex(finfo.tiny, finfo.tiny),
+            complex(0.0, finfo.tiny),
+            complex(finfo.tiny, finfo.tiny),
+        ]
+        expected_lst = [
+            complex(1.0, 0.0),
+            complex(1.0, 0.0),
+            complex(1.0, 0.0),
+            complex(0.0, -1.0),
+            complex(0.0, 0.0),
+        ]
+        nom = torch.tensor(nom_lst, dtype=dtype, device=device)
+        denom = torch.tensor(denom_lst, dtype=dtype, device=device)
+        expected = torch.tensor(expected_lst, dtype=dtype, device=device)
+        res = nom / denom
+        self.assertEqual(res, expected)
 
-instantiate_device_type_tests(TestComplexTensor, globals())
+
+instantiate_device_type_tests(TestComplexTensor, globals(), allow_mps=True)
 
 if __name__ == "__main__":
     run_tests()
