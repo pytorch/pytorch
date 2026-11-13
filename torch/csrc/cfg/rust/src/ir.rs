@@ -40,7 +40,19 @@ pub enum UnaryKind {
 pub enum Op {
     Const(u32),
     LoadGlobal(u32),
+    /// Reads the cell at this index of the function's closure.
     LoadDeref(u32),
+    StoreDeref(u32, V),
+    /// The cell itself, for a function that passes it on to an inner one.
+    LoadClosure(u32),
+    /// A new cell holding v (empty for the undefined value): a local that
+    /// inner functions share.
+    MakeCell(V),
+    /// The second operand is the constant with the variable's name.
+    CellGet(V, u32),
+    CellSet(V, V),
+    /// Any operand but the code object can be NONE.
+    MakeFunction { code: V, defaults: V, kwdefaults: V, annotations: V, closure: V },
     LoadAttr(V, u32),
     StoreAttr { obj: V, name: u32, val: V },
     StoreGlobal(u32, V),
@@ -176,8 +188,17 @@ impl Op {
             }
         };
         match self {
-            Op::Const(_) | Op::LoadGlobal(_) | Op::LoadDeref(_) => {}
+            Op::Const(_) | Op::LoadGlobal(_) | Op::LoadDeref(_) | Op::LoadClosure(_) => {}
+            Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
+                f(*code);
+                for v in [defaults, kwdefaults, annotations, closure] {
+                    opt(*v, &mut f)
+                }
+            }
             Op::LoadAttr(a, _)
+            | Op::StoreDeref(_, a)
+            | Op::MakeCell(a)
+            | Op::CellGet(a, _)
             | Op::StoreGlobal(_, a)
             | Op::Unary(_, a)
             | Op::ToBool(a)
@@ -202,7 +223,8 @@ impl Op {
             | Op::ListExtend(a, b)
             | Op::SetUpdate(a, b)
             | Op::DictUpdate(a, b)
-            | Op::DictMerge(a, b) => {
+            | Op::DictMerge(a, b)
+            | Op::CellSet(a, b) => {
                 f(*a);
                 f(*b)
             }
@@ -351,6 +373,8 @@ pub struct Function {
     pub globals: PyObj,
     pub builtins: PyObj,
     pub closure: Option<PyObj>,
+    /// Names of the variables the closure's cells hold.
+    pub freevars: Vec<String>,
     pub defaults: Option<PyObj>,
     pub kwdefaults: Option<PyObj>,
     pub argcount: usize,
@@ -437,6 +461,18 @@ impl Function {
             Op::Const(c) => format!("const {}", self.const_repr(*c)),
             Op::LoadGlobal(name) => format!("load_global '{}'", self.name_str(*name)),
             Op::LoadDeref(i) => format!("load_deref {}", i),
+            Op::StoreDeref(i, v) => format!("store_deref {} {}", i, n(v)),
+            Op::LoadClosure(i) => format!("load_closure {}", i),
+            Op::MakeCell(v) => format!("make_cell {}", n(v)),
+            Op::CellGet(c, name) => format!("cell_get {} '{}'", n(c), self.name_str(*name)),
+            Op::CellSet(c, v) => format!("cell_set {} {}", n(c), n(v)),
+            Op::MakeFunction { code, closure, .. } => {
+                if *closure == NONE {
+                    format!("make_function {}", n(code))
+                } else {
+                    format!("make_function {} closure={}", n(code), n(closure))
+                }
+            }
             Op::LoadAttr(a, name) => format!("load_attr {} '{}'", n(a), self.name_str(*name)),
             Op::StoreAttr { obj, name, val } => {
                 format!("store_attr {} '{}' {}", n(obj), self.name_str(*name), n(val))

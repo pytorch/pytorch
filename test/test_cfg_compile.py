@@ -1620,10 +1620,9 @@ class TestCfgCallees(TestCase):
         self.assertEqual(compiled(40), f(40))
         compiled_names, interpreted = self.callees(compiled)
         # The same code object in a new function each time: eight are
-        # compiled, the rest run in the interpreter. make itself creates a
-        # function, which the frontend does not support.
-        self.assertEqual(len(compiled_names), 8)
-        self.assertEqual(len(interpreted), 1)
+        # compiled, next to make itself, and the rest run in the interpreter.
+        self.assertEqual(len(compiled_names), 9)
+        self.assertEqual(interpreted, [])
 
     def test_callees_off(self):
         def f(obj, x):
@@ -1645,6 +1644,102 @@ class TestCfgCallees(TestCase):
         else:
             self.fail("expected NameError")
         self.assertEqual([frame.name for frame in frames[-2:]], ["f", "callee_raises"])
+
+
+@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
+class TestCfgClosures(TestCase):
+    """Functions that create functions: cells, nonlocal, defaults."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_inner_function_shares_a_cell(self):
+        def counter(start):
+            count = start
+
+            def bump(by=1, *, twice=False):
+                nonlocal count
+                count += by * (2 if twice else 1)
+                return count
+
+            return bump
+
+        compiled = torch.cfg_compile(counter, fallback=False)
+        made, expected = compiled(10), counter(10)
+        self.assertEqual(
+            [made(), made(5), made(twice=True)],
+            [expected(), expected(5), expected(twice=True)],
+        )
+        self.assertEqual(made.__qualname__, expected.__qualname__)
+        self.assertEqual(made.__defaults__, (1,))
+        self.assertEqual(made.__kwdefaults__, {"twice": False})
+        self.assertEqual(len(made.__closure__), 1)
+
+    def test_argument_captured_by_an_inner_function(self):
+        def f(x, y):
+            def inner():
+                return x + y
+
+            x = x * 2
+            return inner()
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(compiled(x, y), f(x, y))
+
+    def test_lambdas_with_defaults_and_annotations(self):
+        def adders(ks):
+            return [(lambda v, k=k: v + k) for k in ks]
+
+        def annotated():
+            def inner(a: int, b: "str" = "z") -> float:
+                return 1.0
+
+            return inner
+
+        compiled = torch.cfg_compile(adders, fallback=False)
+        self.assertEqual([add(10) for add in compiled([1, 2, 3])], [11, 12, 13])
+        compiled = torch.cfg_compile(annotated, fallback=False)
+        self.assertEqual(compiled().__annotations__, annotated().__annotations__)
+        self.assertEqual(compiled().__defaults__, ("z",))
+
+    def test_compiled_inner_function_writes_its_closure(self):
+        def outer():
+            total = 0
+
+            def add(v):
+                nonlocal total
+                total += v
+                return total
+
+            return add
+
+        add = outer()
+        compiled = torch.cfg_compile(add, fallback=False)
+        self.assertEqual([compiled(1), compiled(2), add(3)], [1, 3, 6])
+
+    def test_empty_cells_raise_like_python(self):
+        def local_cell():
+            def inner():
+                return value
+
+            del inner
+            return value  # noqa: F821
+            value = 1
+
+        def free_variable():
+            def inner():
+                return late
+
+            return inner()
+            late = 1
+
+        for fn, error in ((local_cell, UnboundLocalError), (free_variable, NameError)):
+            compiled = torch.cfg_compile(fn, fallback=False)
+            with self.assertRaises(error) as expected:
+                fn()
+            with self.assertRaises(error) as got:
+                compiled()
+            self.assertEqual(str(got.exception), str(expected.exception))
 
 
 if __name__ == "__main__":

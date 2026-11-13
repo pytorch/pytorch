@@ -15,6 +15,9 @@ extern "C" {
     pub fn PyMethod_Self(method: Obj) -> Obj;
     // New reference, or null (without an error) for an empty cell.
     pub fn PyCell_Get(cell: Obj) -> Obj;
+    // value may be null, for an empty cell.
+    pub fn PyCell_New(value: Obj) -> Obj;
+    pub fn PyCell_Set(cell: Obj, value: Obj) -> std::os::raw::c_int;
     // Borrowed reference to what the type's MRO holds for name, or null.
     pub fn _PyType_Lookup(ty: *mut ffi::PyTypeObject, name: Obj) -> Obj;
     // Like getattr, but a method comes back unbound: returns 1 with the
