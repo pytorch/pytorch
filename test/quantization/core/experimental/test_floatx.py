@@ -222,10 +222,13 @@ def _round_e8m0(x):
         return math.nan
     if x == 0:
         return 2.0**-127
-    _, e = math.frexp(x)  # x = m * 2**e with 0.5 <= m < 1
-    lo = 2.0 ** (e - 1)
-    rounded = 2 * lo if x >= 1.5 * lo else lo
-    return math.nan if rounded > 2.0**127 else max(rounded, 2.0**-127)
+    m, e = math.frexp(x)  # x = m * 2**e with 0.5 <= m < 1
+    rounded = 2.0**e if m >= 0.75 else 2.0 ** (e - 1)
+    if rounded > 2.0**127:
+        return math.nan
+    if rounded < 2.0**-127:
+        return 2.0**-127
+    return rounded
 
 
 ROUND_TRIP_TEST_CASES = (
