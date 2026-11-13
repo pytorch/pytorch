@@ -186,6 +186,36 @@ def _manual_list_update(list_from: list[Any], list_to: list[Any]) -> None:
     list.extend(list_to, list_from)
 
 
+def _manual_ordered_dict_update(
+    target: collections.OrderedDict[Any, Any],
+    items: tuple[tuple[Any, Any], ...],
+    keys: tuple[Any, ...] | None,
+    has_deleted_keys: bool,
+    has_reordered_keys: bool,
+) -> None:
+    if keys is None:
+        for key, value in items:
+            collections.OrderedDict.__setitem__(target, key, value)
+        return
+    # A pure reorder must not clear/reinsert the underlying dict entries.
+    previous = tuple(dict.items(target))
+    if (
+        has_deleted_keys
+        or len(previous) != len(items)
+        or any(old_key is not key for (old_key, _), (key, _) in zip(previous, items))
+    ):
+        collections.OrderedDict.clear(target)
+        previous = ()
+    for index, (key, value) in enumerate(items):
+        if index >= len(previous) or previous[index][1] is not value:
+            collections.OrderedDict.__setitem__(target, key, value)
+    if has_reordered_keys or any(
+        old is not key for old, key in zip(collections.OrderedDict.keys(target), keys)
+    ):
+        for key in keys:
+            collections.OrderedDict.move_to_end(target, key)
+
+
 def _manual_set_update(set_from: Any, set_to: Any) -> None:
     # Call the set methods directly, not any overridden subclass methods.
     set.clear(set_to)
@@ -1692,6 +1722,31 @@ def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
     #   + only if a key was removed from the input dict
     # (5) update the original dictionary with the dict created in (2)
     if var.has_new_items():
+        if (
+            isinstance(var, variables.OrderedDictVariable)
+            and var.should_reconstruct_all
+        ):
+            var.install_dict_order_guard(cg.tx)
+            cg.add_push_null(
+                lambda: cg.load_import_from(__name__, "_manual_ordered_dict_update")
+            )
+            cg(var.source)
+            # Keep raw storage and linked iteration order separate during replay.
+            for key, value in dict.items(var.items):
+                cg(key.vt)
+                cg(value)
+                cg.append_output(create_instruction("BUILD_TUPLE", arg=2))
+            cg.append_output(create_instruction("BUILD_TUPLE", arg=len(var.items)))
+            for key in var.items:
+                cg(key.vt)
+            cg.append_output(create_instruction("BUILD_TUPLE", arg=len(var.items)))
+            cg(variables.ConstantVariable.create(True))
+            cg(variables.ConstantVariable.create(True))
+            ctx.suffixes.append(
+                [*create_call_function(5, False), create_instruction("POP_TOP")]
+            )
+            ctx.log(var)
+            return
         cg(var.source)  # type: ignore[attr-defined]
         cg.load_method("update")
         cg(var, allow_cache=False)  # Don't codegen via source

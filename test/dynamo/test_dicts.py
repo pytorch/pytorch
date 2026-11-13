@@ -752,6 +752,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertIs(type(actual[1]), type(expected[1]))
         self.assertEqual(list(actual[1]), list(expected[1]))
         self.assertEqual(actual[2:], expected[2:])
+        mapping["c"] = 3
+        self.assertEqual(list(actual[1]), list(expected[1]))
 
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("name", ["keys", "values", "items"])
@@ -772,6 +774,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertIs(type(view), type(expected))
         self.assertEqual(list(view), list(expected))
         self.assertIs(view.mapping["a"], mapping["a"])
+        mapping["b"] = x + 2
+        self.assertEqual(list(view), list(expected))
+        self.assertIs(view.mapping["b"], mapping["b"])
 
     def test_constructed_dict_key_guard(self):
         def fn(x, key):
@@ -1855,6 +1860,23 @@ class DictTests(torch._dynamo.test_case.TestCase):
         # Check recompilation
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(res, fn(x, d))
+
+    def test_sourced_ordered_dict_pop_preserves_storage_views(self):
+        def fn(x, mapping):
+            return x + mapping.pop("c"), mapping.keys(), dict.keys(mapping)
+
+        mapping = OrderedDict(a=1, b=2, c=3)
+        mapping.move_to_end("a")
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        result = compiled(x, mapping)
+        self.assertEqual(result[0], x + 3)
+        self.assertEqual(list(result[1]), ["b", "a"])
+        self.assertEqual(list(result[2]), ["a", "b"])
+        self.assertEqual(list(dict.keys(mapping)), ["a", "b"])
+        mapping["d"] = 4
+        self.assertEqual(list(result[1]), ["b", "a", "d"])
+        self.assertEqual(list(result[2]), ["a", "b", "d"])
 
     def test_ordered_dict_reordered_keys(self):
         d = OrderedDict()
