@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest import skipUnless
 from unittest.mock import patch
 
-from transport_test_utils import TransportTestMixin
+from transport_test_utils import rdma_device, TransportTestMixin
 
 import torch
 from torch.distributed._transport import new_transport, register_transport
@@ -388,32 +388,43 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
 _RUN_INTEGRATION = os.environ.get("RUN_MOONCAKE_INTEGRATION") == "1"
 
 
-@skipUnless(
+_SKIP_INTEGRATION = skipUnless(
     _RUN_INTEGRATION and MooncakeTransport.supported(),
     "set RUN_MOONCAKE_INTEGRATION=1 with a working Mooncake install to run",
 )
-class TestMooncakeTransportIntegration(TransportTestMixin, TestCase):
-    hw_classification = HardwareClassification.GENERIC
+
+
+class _MooncakeIntegrationMixin:
     protocol = os.environ.get("MOONCAKE_PROTOCOL", "rdma")
 
-    def make_transport_pair(self):
-        first = new_transport(
-            "mooncake", "cpu", host="127.0.0.1", protocol=self.protocol
+    def _new_transport(self, index, device="cpu"):
+        return new_transport(
+            "mooncake",
+            device,
+            host="127.0.0.1",
+            protocol=self.protocol,
+            device_name=rdma_device(index) or "",
         )
-        second = new_transport(
-            "mooncake", "cpu", host="127.0.0.1", protocol=self.protocol
-        )
+
+    def make_transport_pair(self, device="cpu"):
+        first = self._new_transport(0, device)
+        second = self._new_transport(1, device)
         self.addCleanup(second.close)
         self.addCleanup(first.close)
         self.assertEqual(first.connect(second.bind()), 0)
         self.assertEqual(second.connect(first.bind()), 0)
         return first, second
 
+
+@_SKIP_INTEGRATION
+class TestMooncakeTransportIntegration(
+    _MooncakeIntegrationMixin, TransportTestMixin, TestCase
+):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_connects_multiple_peers(self):
         first, second = self.make_transport_pair()
-        third = new_transport(
-            "mooncake", "cpu", host="127.0.0.1", protocol=self.protocol
-        )
+        third = self._new_transport(2)
         self.addCleanup(third.close)
         self.assertEqual(first.connect(third.bind()), 0)
         source = torch.arange(64, dtype=torch.uint8)
@@ -433,6 +444,35 @@ class TestMooncakeTransportIntegration(TransportTestMixin, TestCase):
         self.assertEqual(targets[1][:32], source[32:])
         self.assertEqual(targets[0][:16].count_nonzero(), 0)
         self.assertEqual(targets[1][32:].count_nonzero(), 0)
+
+
+@_SKIP_INTEGRATION
+@skipUnless(torch.cuda.is_available(), "requires CUDA")
+class TestMooncakeTransportCUDAIntegration(_MooncakeIntegrationMixin, TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_cuda_transfers(self):
+        # VRAM to VRAM, DRAM to VRAM and VRAM to DRAM, on different GPUs if present.
+        first, second = self.make_transport_pair(device=None)
+        devices = [torch.device("cuda", i % torch.cuda.device_count()) for i in (0, 1)]
+        source = torch.arange(1 << 20, dtype=torch.int32, device=devices[0])
+        host_source = source.cpu()
+        targets = [torch.zeros_like(source, device=devices[1]) for _ in range(2)]
+        host_target = torch.zeros_like(host_source)
+        read_target = torch.zeros_like(source)
+        for device in devices:
+            torch.cuda.synchronize(device)
+        source_memory = first.register_memory(source)
+        remote_vram, remote_from_dram, remote_dram = (
+            second.register_memory(target).to_remote_buffer()
+            for target in (*targets, host_target)
+        )
+        first.write(source_memory.to_view(), remote_vram)
+        first.write(first.register_memory(host_source).to_view(), remote_from_dram)
+        first.write(source_memory.to_view(), remote_dram)
+        first.read(first.register_memory(read_target).to_mutable_view(), remote_vram)
+        for target in (*targets, host_target, read_target):
+            self.assertEqual(target.cpu(), host_source)
 
 
 if __name__ == "__main__":

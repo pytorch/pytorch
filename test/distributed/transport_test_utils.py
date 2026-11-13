@@ -1,7 +1,18 @@
 import asyncio
+import os
 
 import torch
 from torch.distributed._transport import MemoryView, MutableMemoryView, wait_all, Work
+
+
+def rdma_device(index: int) -> str | None:
+    """Round-robin RDMA device for endpoint ``index`` from TORCH_TEST_RDMA_DEVICES.
+
+    Giving each endpoint its own NIC forces traffic between NICs instead of
+    loopback within one.
+    """
+    devices = [d for d in os.environ.get("TORCH_TEST_RDMA_DEVICES", "").split(",") if d]
+    return devices[index % len(devices)] if devices else None
 
 
 class TransportTestMixin:

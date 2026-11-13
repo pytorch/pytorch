@@ -670,6 +670,12 @@ rdma_port_bytes() {
   done | sort
 }
 
+rdma_port_deltas() {
+  rdma_port_bytes > /tmp/rdma_after
+  echo "RDMA port bytes moved (xmit rcv):"
+  join /tmp/rdma_before /tmp/rdma_after | awk '{print $1, ($4-$2)*4, ($5-$3)*4}' || true
+}
+
 test_transport_rdma() {
   # NIXL and Mooncake transports over RoCE/RDMA on the NVIDIA GB300 runner.
   # CUDA jobs exclude GENERIC classes, which include the Mooncake tests; run them here.
@@ -683,9 +689,14 @@ test_transport_rdma() {
   ls -l /dev/infiniband || true
   # Skip xtrace for the per-GID loops.
   set +x
+  local rdma_devices=()
   for port in /sys/class/infiniband/*/ports/*; do
     [[ -e "${port}" ]] || continue
     echo "${port}: $(cat "${port}/state" "${port}/link_layer" "${port}/rate" 2>/dev/null | tr '\n' ' ')"
+    # Tests use port 1 (UCX_NET_DEVICES=<dev>:1).
+    if [[ "$(basename "${port}")" == 1 ]] && grep -q ACTIVE "${port}/state"; then
+      rdma_devices+=("$(basename "$(dirname "$(dirname "${port}")")")")
+    fi
     # Non-zero GIDs with their RoCE version.
     for gid in "${port}"/gids/*; do
       local idx value
@@ -703,6 +714,15 @@ test_transport_rdma() {
   nvidia-smi -q | grep -A3 -i fabric || true
   rdma_port_bytes > /tmp/rdma_before
   set -x
+  if [[ ${#rdma_devices[@]} -lt 2 ]]; then
+    echo "Cross-NIC tests need at least 2 active RDMA ports, found: ${rdma_devices[*]}"
+    exit 1
+  fi
+  # Non-zero deltas show traffic went through the NICs; printed on failure too.
+  trap_add rdma_port_deltas EXIT
+  # Tests give each endpoint its own NIC, round robin, so traffic crosses NICs.
+  TORCH_TEST_RDMA_DEVICES=$(IFS=,; echo "${rdma_devices[*]}")
+  export TORCH_TEST_RDMA_DEVICES
 
   time env TORCH_TEST_CUDA_TRANSPORT=1 python test/run_test.py \
     --include \
@@ -726,10 +746,6 @@ test_transport_rdma() {
   time env RUN_MOONCAKE_INTEGRATION=1 MC_FORCE_HCA=1 python test/run_test.py \
     --include distributed/test_transport_mooncake --verbose --upload-artifacts-while-running
 
-  # Non-zero deltas show traffic went through the NICs.
-  rdma_port_bytes > /tmp/rdma_after
-  echo "RDMA port bytes moved (xmit rcv):"
-  join /tmp/rdma_before /tmp/rdma_after | awk '{print $1, ($4-$2)*4, ($5-$3)*4}'
   assert_git_not_dirty
 }
 
