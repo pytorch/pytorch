@@ -15,6 +15,7 @@ import random
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 import time
 import unittest
@@ -58,6 +59,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
     skipMeta,
     skipXPUIf,
 )
@@ -83,6 +85,7 @@ from torch.testing._internal.common_utils import (
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     skipIfWindows,
+    skipIfXpu,
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
@@ -116,6 +119,17 @@ def graph_desc(fn):
     if next_functions:
         result = result[:-2]
     return result + ")"
+
+
+def _test_type_conversion_backward(test, t):
+    fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
+    fvar.double().sum().backward()
+    test.assertEqual(fvar.grad, torch.ones_like(fvar))
+    test.assertEqual(type(fvar.grad), type(fvar))
+    dvar = Variable(t(torch.randn(5, 5).double()), requires_grad=True)
+    dvar.float().sum().backward()
+    test.assertEqual(dvar.grad, torch.ones_like(dvar))
+    test.assertEqual(type(dvar.grad), type(dvar))
 
 
 class TestAutograd(TestCase):
@@ -4876,38 +4890,10 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, "has been modified by an inplace"):
             y.backward()
 
-    def _test_type_conversion_backward(self, t):
-        fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
-        fvar.double().sum().backward()
-        self.assertEqual(fvar.grad, torch.ones_like(fvar))
-        self.assertEqual(type(fvar.grad), type(fvar))
-        dvar = Variable(t(torch.randn(5, 5).double()), requires_grad=True)
-        dvar.float().sum().backward()
-        self.assertEqual(dvar.grad, torch.ones_like(dvar))
-        self.assertEqual(type(dvar.grad), type(dvar))
-
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
         self.assertIsInstance(x.int(), torch.IntTensor)
-        if torch.cuda.is_available():
-            self.assertIsInstance(x.float().cuda(), torch.cuda.FloatTensor)
-            self.assertIsInstance(x.int().cuda(), torch.cuda.IntTensor)
-            self.assertIsInstance(x.int().cuda().cpu(), torch.IntTensor)
-            if torch.cuda.device_count() >= 2:
-                x2 = x.float().cuda(1)
-                self.assertIsInstance(x2, torch.cuda.FloatTensor)
-                self.assertIs(x2.get_device(), 1)
-                x2 = x.float().cuda()
-                self.assertIsInstance(x2, torch.cuda.FloatTensor)
-                self.assertIs(x2.get_device(), 0)
-                x2 = x2.cuda(1)
-                self.assertIsInstance(x2, torch.cuda.FloatTensor)
-                self.assertIs(x2.get_device(), 1)
-                y = Variable(torch.randn(5).cuda(1), requires_grad=True)
-                y.cpu().sum().backward()
-                self.assertIs(y.grad.get_device(), 1)
-                self.assertIs(y.long().get_device(), 1)
 
         for t in [
             torch.DoubleTensor,
@@ -4925,27 +4911,8 @@ class TestAutograd(TestCase):
                 self.assertIsInstance(x.type(t_dtype), t)
                 self.assertIs(t_dtype, x.type(t_dtype).dtype)
                 self.assertEqual(y.data_ptr(), y.type(t).data_ptr())
-                if torch.cuda.is_available():
-                    for x_cuda in (True, False):
-                        for y_cuda in (True, False):
-                            x_c = x.cuda() if x_cuda else x
-                            y_c = y.cuda() if y_cuda else y
-                            _, y_type = y_c.type().rsplit(".", 1)
-                            y_typestr = ("torch.cuda." if y_cuda else "torch.") + y_type
-                            self.assertEqual(y_c.type(), x_c.type(y_typestr).type())
-                            self.assertIs(y_c.dtype, x_c.type(y_c.dtype).dtype)
-                            self.assertEqual(
-                                y_c.data_ptr(),
-                                y_c.cuda().data_ptr() if y_cuda else y_c.data_ptr(),
-                            )
 
-        self._test_type_conversion_backward(lambda x: x)
-        if torch.cuda.is_available():
-            self._test_type_conversion_backward(lambda x: x.cuda())
-            if torch.cuda.device_count() >= 2:
-                # one of these has to be the non-default device
-                self._test_type_conversion_backward(lambda x: x.cuda(0))
-                self._test_type_conversion_backward(lambda x: x.cuda(1))
+        _test_type_conversion_backward(self, lambda x: x)
 
     def test_isolated_node(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -7931,36 +7898,6 @@ Done""",
             RuntimeError, "must be floating point or complex dtype"
         ):
             a.data = c
-
-    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
-    def test_thread_shutdown(self):
-        code = """import torch
-from torch.autograd import Function
-class MyFunction(Function):
-    @staticmethod
-    def forward(ctx, x):
-        return x
-
-    @staticmethod
-    def backward(ctx, grad):
-        return grad
-
-# Run on the accelerator if available to ensure that the worker thread
-# is properly initialized by the time we exit.
-device = torch.accelerator.current_accelerator() if torch.accelerator.is_available() else "cpu"
-
-for shape in [(1,), ()]:
-    v = torch.ones(shape, requires_grad=True, device=device)
-    MyFunction.apply(v).backward()
-"""
-        s = TestCase.runWithPytorchAPIUsageStderr(code)
-        # The autograd engine creates worker threads only when accelerator devices are present.
-        # So make sure that we do shutdown threads when we're testing an accelerator and make
-        # sure that there is no thread to shutdown when we're not using an accelerator.
-        if torch.accelerator.is_available():
-            self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
-        else:
-            self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
     @unittest.skipIf(
         IS_MACOS,
@@ -16426,6 +16363,7 @@ class TestMultithreadAutograd(TestCase):
         self.assertEqual(err_count[0], 1)
         self.assertEqual(res, "foo")
 
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_dataparallel_saved_tensors_hooks(self):
         def pack(x):
             warnings.warn("pack")
@@ -18083,6 +18021,8 @@ class TestSACAmbientSavedTensorsHooks(_TestSACAmbientSavedTensorsHooksBase):
 
 @skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
 class TestSACAmbientSavedTensorsHooksDeviceType(_TestSACAmbientSavedTensorsHooksBase):
+    setUp = preserves_device_selection(_TestSACAmbientSavedTensorsHooksBase.setUp)
+
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
@@ -19182,8 +19122,93 @@ Outer.apply(x).backward()
             self.fail(error.output.decode("utf-8"))
 
 
+class TestAutogradThreadShutdown(TestCase):
+    # No hw_classification: it checks the engine's device threads both with and
+    # without an accelerator present, so it isn't GENERIC. The test takes no
+    # device parameter and the class doesn't use instantiate_device_type_tests,
+    # so it isn't ACCELERATOR either. Unlabeled, it runs on every job.
+
+    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+    def test_thread_shutdown(self):
+        code = """import torch
+from torch.autograd import Function
+class MyFunction(Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad
+
+# Run on the accelerator if available to ensure that the worker thread
+# is properly initialized by the time we exit.
+device = torch.accelerator.current_accelerator() if torch.accelerator.is_available() else "cpu"
+
+for shape in [(1,), ()]:
+    v = torch.ones(shape, requires_grad=True, device=device)
+    MyFunction.apply(v).backward()
+"""
+        s = TestCase.runWithPytorchAPIUsageStderr(code)
+        # The autograd engine creates worker threads only when accelerator devices are present.
+        # So make sure that we do shutdown threads when we're testing an accelerator and make
+        # sure that there is no thread to shutdown when we're not using an accelerator.
+        if torch.accelerator.is_available():
+            self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
+        else:
+            self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
+
+
 class TestAutogradCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
+
+    def test_type_conversions(self, device):
+        x = torch.randn(5, 5)
+        self.assertIsInstance(x.float().cuda(), torch.cuda.FloatTensor)
+        self.assertIsInstance(x.int().cuda(), torch.cuda.IntTensor)
+        self.assertIsInstance(x.int().cuda().cpu(), torch.IntTensor)
+        if torch.cuda.device_count() >= 2:
+            x2 = x.float().cuda(1)
+            self.assertIsInstance(x2, torch.cuda.FloatTensor)
+            self.assertIs(x2.get_device(), 1)
+            x2 = x.float().cuda()
+            self.assertIsInstance(x2, torch.cuda.FloatTensor)
+            self.assertIs(x2.get_device(), 0)
+            x2 = x2.cuda(1)
+            self.assertIsInstance(x2, torch.cuda.FloatTensor)
+            self.assertIs(x2.get_device(), 1)
+            y = Variable(torch.randn(5).cuda(1), requires_grad=True)
+            y.cpu().sum().backward()
+            self.assertIs(y.grad.get_device(), 1)
+            self.assertIs(y.long().get_device(), 1)
+
+        for t in [
+            torch.DoubleTensor,
+            torch.FloatTensor,
+            torch.IntTensor,
+            torch.ByteTensor,
+        ]:
+            for y_var in (True, False):
+                y = torch.randint(5, (5, 5), dtype=t.dtype)
+                y = Variable(y) if y_var else y
+                for x_cuda in (True, False):
+                    for y_cuda in (True, False):
+                        x_c = x.cuda() if x_cuda else x
+                        y_c = y.cuda() if y_cuda else y
+                        _, y_type = y_c.type().rsplit(".", 1)
+                        y_typestr = ("torch.cuda." if y_cuda else "torch.") + y_type
+                        self.assertEqual(y_c.type(), x_c.type(y_typestr).type())
+                        self.assertIs(y_c.dtype, x_c.type(y_c.dtype).dtype)
+                        self.assertEqual(
+                            y_c.data_ptr(),
+                            y_c.cuda().data_ptr() if y_cuda else y_c.data_ptr(),
+                        )
+
+        _test_type_conversion_backward(self, lambda x: x.cuda())
+        if torch.cuda.device_count() >= 2:
+            # one of these has to be the non-default device
+            _test_type_conversion_backward(self, lambda x: x.cuda(0))
+            _test_type_conversion_backward(self, lambda x: x.cuda(1))
 
     def test_profiler_emit_nvtx(self, device):
         # This test is not intended to ensure correctness of nvtx ranges.
@@ -19246,6 +19271,135 @@ class TestAutogradCudaOnly(TestCase):
                 torch.cuda.memory._record_memory_history(None)
 
 
+@skipIfTorchDynamo("compiled autograd rejects disallow_implicit_grad_accumulation")
+class TestDisallowImplicitGradAccumulation(TestCase):
+    def test_raises_instead_of_summing(self, device):
+        a = torch.randn(3, device=device, requires_grad=True)
+        x = a.sin()
+        loss = (x * 2 + x * 3).sum()
+        msg = "summed implicitly into output 0 of SinBackward0"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            loss.backward(disallow_implicit_grad_accumulation=True)
+        x = a.sin()
+        loss = (x * 2 + x * 3).sum()
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.autograd.grad(loss, a, disallow_implicit_grad_accumulation=True)
+        # Without the flag, gradients are summed as usual.
+        (a.sin() * 2 + a.sin() * 3).sum().backward()
+        self.assertEqual(a.grad, 5 * a.cos())
+
+    def test_message(self, device):
+        def message(fn):
+            with self.assertRaises(RuntimeError) as cm:
+                fn().sum().backward(disallow_implicit_grad_accumulation=True)
+            # Wrapped so the expected message is easy to review.
+            return textwrap.fill(
+                str(cm.exception), 80, break_long_words=False, break_on_hyphens=False
+            )
+
+        a = torch.randn(3, device=device, requires_grad=True)
+        x = a.sin()
+        self.assertExpectedInline(
+            message(lambda: x * x),
+            """\
+Gradients would be summed implicitly into output 0 of SinBackward0 (shape [3],
+dtype float): it already received a gradient, and MulBackward0 produced another.
+backward was run with disallow_implicit_grad_accumulation=True, which raises
+instead of accumulating the gradient contributions of a tensor used more than
+once. To accumulate them yourself, use a custom autograd Function whose forward
+returns the tensor once per use and whose backward sums their gradients. See
+https://pytorch.org/docs/main/notes/autograd.html#disallow-implicit-grad-accumulation
+for an example. Run under torch.autograd.detect_anomaly() to print the forward
+traceback of the operation that produced this gradient.""",
+        )
+        self.assertExpectedInline(
+            message(lambda: a * a),
+            """\
+Gradients would be summed implicitly into a leaf tensor of shape [3] and dtype
+Float: it already received a gradient, and MulBackward0 produced another.
+backward was run with disallow_implicit_grad_accumulation=True, which raises
+instead of accumulating the gradient contributions of a tensor used more than
+once. To accumulate them yourself, use a custom autograd Function whose forward
+returns the tensor once per use and whose backward sums their gradients. See
+https://pytorch.org/docs/main/notes/autograd.html#disallow-implicit-grad-accumulation
+for an example. Run under torch.autograd.detect_anomaly() to print the forward
+traceback of the operation that produced this gradient.""",
+        )
+
+    def test_leaf(self, device):
+        a = torch.randn(3, device=device, requires_grad=True)
+        msg = r"leaf tensor of shape \[3\] and dtype Float"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            (a * 2 + a * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+
+    def test_no_sum_no_error(self, device):
+        a = torch.randn(3, device=device, requires_grad=True)
+        w1 = torch.randn(3, device=device, requires_grad=True)
+        w2 = torch.randn(3, device=device, requires_grad=True)
+        # A use whose result never reaches the loss, and a use only for logging.
+        x = a.sin()
+        unused = x * 2
+        x.sum().item()
+        (x * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+        # Each backward call delivers one gradient per node input.
+        x = a.sin()
+        l1, l2 = (x * 2).sum(), (x * 3).sum()
+        l1.backward(retain_graph=True, disallow_implicit_grad_accumulation=True)
+        l2.backward(disallow_implicit_grad_accumulation=True)
+        # x's node is not on the path to w1, so it does not run.
+        x = a.sin()
+        loss = (x * w1 + x * w2).sum()
+        torch.autograd.grad(loss, w1, disallow_implicit_grad_accumulation=True)
+        # A leaf whose previous graph is still alive.
+        loss = None
+        for _ in range(2):
+            loss = (w1 * 2).sum()
+            loss.backward(disallow_implicit_grad_accumulation=True)
+        del unused
+
+    @parametrize("use_reentrant", [False, True])
+    def test_checkpoint(self, device, use_reentrant):
+        a = torch.randn(3, device=device, requires_grad=True)
+        x = a.sin()
+        out = checkpoint(lambda t: t.cos().exp(), x, use_reentrant=use_reentrant)
+        out.sum().backward(disallow_implicit_grad_accumulation=True)
+        self.assertEqual(a.grad, -a.sin().cos().exp() * a.sin().sin() * a.cos())
+        # With use_reentrant=True this sum happens in the recomputation's own
+        # backward, so it raises only if that backward inherits the flag.
+        out = checkpoint(lambda t: t * t, a.sin(), use_reentrant=use_reentrant)
+        with self.assertRaisesRegex(RuntimeError, "summed implicitly"):
+            out.sum().backward(disallow_implicit_grad_accumulation=True)
+
+    def test_torch_function_kwargs(self, device):
+        # The flag reaches __torch_function__ only when set, so overrides
+        # written against the signatures without it keep working.
+        backward_fns = (
+            torch.Tensor.backward,
+            torch.autograd.backward,
+            torch.autograd.grad,
+        )
+        dispatched_kwargs = []
+
+        class Recorder(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func in backward_fns:
+                    dispatched_kwargs.append(kwargs)
+                    return None
+                return super().__torch_function__(func, types, args, kwargs)
+
+        a = torch.randn(3, device=device, requires_grad=True)
+        x = (a * 2).as_subclass(Recorder)
+        for flag in (False, True):
+            x.backward(disallow_implicit_grad_accumulation=flag)
+            torch.autograd.backward(x, disallow_implicit_grad_accumulation=flag)
+            torch.autograd.grad(x, a, disallow_implicit_grad_accumulation=flag)
+        flags = [
+            k.get("disallow_implicit_grad_accumulation") for k in dispatched_kwargs
+        ]
+        self.assertEqual(flags, [None] * 3 + [True] * 3)
+
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
@@ -19275,6 +19429,7 @@ instantiate_device_type_tests(
     TestSelectiveActivationCheckpointCudaOnly, globals(), only_for="cuda"
 )
 instantiate_device_type_tests(TestInputGradBuffers, globals())
+instantiate_device_type_tests(TestDisallowImplicitGradAccumulation, globals())
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)
