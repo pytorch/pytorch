@@ -71,6 +71,10 @@ pub enum Op {
     StoreSlot(V, V),
     /// The exception a handler block was entered with. First in its block.
     CaughtException,
+    /// Which instruction of the function raised into a handler block, as the
+    /// int the interpreter pushes for handlers that restore it on the way
+    /// out; None where compiled functions have no frame. First in its block.
+    CaughtLasti,
     /// Makes exc the exception being handled; yields the one that was (None
     /// if there was none).
     PushExcInfo(V),
@@ -207,7 +211,9 @@ pub enum Term {
     /// the exception being handled.
     Raise { exc: V, cause: V },
     /// Raises exc again as it is, without a new traceback entry.
-    Reraise(V),
+    /// Raises the exception again; if the second value is there, the frame
+    /// first goes back to the instruction it names (see `Op::CaughtLasti`).
+    Reraise(V, V),
 }
 
 impl Term {
@@ -216,7 +222,13 @@ impl Term {
             Term::Jump(_) => {}
             Term::Br { cond, .. } => f(*cond),
             Term::BrNull { v, .. } => f(*v),
-            Term::Return(v) | Term::Reraise(v) => f(*v),
+            Term::Return(v) => f(*v),
+            Term::Reraise(v, lasti) => {
+                f(*v);
+                if *lasti != NONE {
+                    f(*lasti)
+                }
+            }
             Term::Raise { exc, cause } => {
                 for v in [exc, cause] {
                     if *v != NONE {
@@ -232,7 +244,7 @@ impl Term {
             Term::Jump(b) => vec![*b],
             Term::Br { then_, else_, .. } => vec![*then_, *else_],
             Term::BrNull { null, nonnull, .. } => vec![*nonnull, *null],
-            Term::Return(_) | Term::Raise { .. } | Term::Reraise(_) => vec![],
+            Term::Return(_) | Term::Raise { .. } | Term::Reraise(..) => vec![],
         }
     }
 }
@@ -252,6 +264,7 @@ impl Op {
             | Op::LoadSlot(_)
             | Op::FrameEnter(_)
             | Op::FrameLeave
+            | Op::CaughtLasti
             | Op::CaughtException => {}
             Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
                 f(*code);
@@ -419,6 +432,10 @@ pub struct Block {
     pub term: Term,
     pub preds: Vec<B>,
     pub bc_start: u32,
+    /// Offset of the instruction the terminator was translated from (the
+    /// last instruction of the block, for one that falls through), tagged
+    /// like `Inst::bc`.
+    pub term_bc: u32,
     /// The block that handles an exception raised in this one, or NONE. A
     /// handler block is only entered that way: its `preds` are the blocks it
     /// catches from, and it starts with `caught_exception`.
@@ -563,6 +580,7 @@ impl Function {
             Op::LoadSlot(s) => format!("load_slot {}", n(s)),
             Op::StoreSlot(s, v) => format!("store_slot {} {}", n(s), n(v)),
             Op::CaughtException => "caught_exception".to_string(),
+            Op::CaughtLasti => "caught_lasti".to_string(),
             Op::PushExcInfo(v) => format!("push_exc_info {}", n(v)),
             Op::PopExcInfo(v) => format!("pop_exc_info {}", n(v)),
             Op::ExcMatch(e, t) => format!("exc_match {} {}", n(e), n(t)),
@@ -678,7 +696,10 @@ impl Function {
                 format!("br_exhausted {} b{} b{}", self.value_name(*v), null, nonnull)
             }
             Term::Return(v) => format!("return {}", self.value_name(*v)),
-            Term::Reraise(v) => format!("reraise {}", self.value_name(*v)),
+            Term::Reraise(v, lasti) if *lasti == NONE => format!("reraise {}", self.value_name(*v)),
+            Term::Reraise(v, lasti) => {
+                format!("reraise {} at {}", self.value_name(*v), self.value_name(*lasti))
+            }
             Term::Raise { exc, cause } => {
                 if *exc == NONE {
                     "raise".to_string()

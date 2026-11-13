@@ -9,6 +9,7 @@ import threading
 import traceback
 import unittest
 import warnings
+import weakref
 
 import torch
 from torch.overrides import TorchFunctionMode
@@ -2468,6 +2469,35 @@ def frame_calls_divides(x):
     return frame_divides(x)
 
 
+def frame_raises_in_try():
+    try:
+        1 / 0
+    finally:
+        pass
+
+
+def frame_raises_in_with():
+    with ExcManager([], False):
+        1 / 0
+
+
+def frame_raises_in_except():
+    try:
+        1 / 0
+    except ZeroDivisionError:
+        raise KeyError("from the handler") from None
+
+
+def frame_missing_global():
+    return frame_surely_not_defined  # noqa: F821
+
+
+def frame_unbound_local(flag):
+    if flag:
+        value = 1
+    return value
+
+
 @unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
 class TestCfgFrames(TestCase):
     """A compiled function runs under a frame of the interpreter, with its locals in registers."""
@@ -2550,6 +2580,54 @@ class TestCfgFrames(TestCase):
         self.assertTrue(
             sys._getframe().f_code.co_name.startswith("test_traceback_has_frames")
         )
+
+    @parametrize(
+        "fn",
+        (frame_raises_in_try, frame_raises_in_with, frame_raises_in_except),
+        name_fn=lambda fn: fn.__name__,
+    )
+    def test_frame_that_was_left_reports_the_line_the_interpreter_reports(self, fn):
+        def where(f):
+            try:
+                f()
+            except Exception as e:
+                tb = e.__traceback__.tb_next
+                frame = tb.tb_frame
+                return frame.f_lineno, frame.f_lasti, tb.tb_lineno, tb.tb_lasti
+
+        self.assertEqual(where(torch.cfg_compile(fn, fallback=False)), where(fn))
+
+    def test_name_error_names_the_variable(self):
+        def outcome(f, *args):
+            try:
+                f(*args)
+            except NameError as e:
+                return type(e), str(e), e.name
+
+        for fn, args in ((frame_missing_global, ()), (frame_unbound_local, (False,))):
+            compiled = torch.cfg_compile(fn, fallback=False)
+            self.assertEqual(outcome(compiled, *args), outcome(fn, *args))
+        self.assertEqual(outcome(frame_missing_global)[2], "frame_surely_not_defined")
+
+    def test_traceback_keeps_what_the_locals_hold_alive(self):
+        class Probe:
+            pass
+
+        probes = []
+
+        def fails():
+            probe = Probe()
+            probes.append(weakref.ref(probe))
+            raise ValueError("with a local")
+
+        for fn in (fails, torch.cfg_compile(fails, fallback=False)):
+            try:
+                fn()
+            except ValueError as e:
+                # The traceback has the frame, and the frame the local.
+                self.assertIsNotNone(probes[-1]())
+                traceback.clear_frames(e.__traceback__)
+                self.assertIsNone(probes[-1]())
 
     def test_callee_that_reads_its_frame_runs_in_the_interpreter(self):
         def fmt(name, value):
