@@ -632,8 +632,36 @@ void fakeFallback(
     }
   }
 
-  // Mark the original outputs fake, including tensors retained by a Meta
-  // kernel. Unlike Python's wrapping, this also changes those retained tensors.
+  // Note [In-place conversion of Meta outputs]
+  // The ownership argument for normal dense kernels is that an output is
+  // either an existing fake, handled below without reinitializing it, or a
+  // TensorImpl created by this invocation. A new view has its own TensorImpl
+  // even though it shares storage with an input. Concurrent calls on the same
+  // fake input therefore do not initialize the same output TensorImpl. Extra
+  // references from Python or return-value boxing do not imply that another
+  // invocation can return that object; releasing the GIL does not change this
+  // ownership argument.
+  //
+  // Shared storage is a separate concern: a view's storage was already marked
+  // for fake use when its input was initialized. Reapplying an established
+  // storage marking must be a no-op, rather than another write. Copying the
+  // output TensorImpl would not isolate its shared StorageImpl anyway.
+  //
+  // A custom Meta kernel could instead cache a plain Meta tensor and return
+  // that same TensorImpl across calls. In-place conversion changes that cached
+  // object, so cross-mode reuse can fail and concurrent first conversions would
+  // need synchronization. This is outside the dense ownership argument above;
+  // no such retained-output pattern was established in the supported in-tree
+  // dense kernels. Sparse accessors returning stored component tensors also
+  // need a separate ownership analysis.
+  //
+  // We keep the original TensorImpl instead of allocating a second wrapper.
+  // Shallow-copying each plain Meta output could protect a cached original,
+  // but preserving Python's converter identity across calls would also need
+  // a per-mode memo, synchronized lookup/creation, and weak-reference lifetime
+  // handling, including TensorImpl address reuse. Ordinary dense outputs do
+  // not require that machinery. Retained custom outputs are still converted
+  // in place; this does not promise Python's wrapping/memoization semantics.
   std::optional<c10::Device> output_common_device;
   std::unordered_set<const c10::TensorImpl*> converted_outputs;
   auto wrap = [&](const at::Tensor& t, bool is_alias) {
@@ -670,7 +698,10 @@ void fakeFallback(
         impl, device_argument.value_or(*output_common_device), mode);
     if (!is_alias && t.requires_grad()) {
       // Backend kernels run below autograd, but a Meta kernel can copy
-      // requires_grad from an input
+      // requires_grad from an input. Existing fakes returned above, and
+      // init_cpp_fake checked this output's eligibility before we change its
+      // gradient state. Validation is per output, not a rollback of earlier
+      // outputs if a later one is rejected.
       t.set_requires_grad(false);
     }
     impl->set_real_tensor(nullptr);
