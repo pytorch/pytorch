@@ -357,6 +357,18 @@
       "Hints": []
     }
   ],
+  "GB1108": [
+    {
+      "Gb_type": "Descriptor mutation on a constant-source object",
+      "Context": "name={name_str}, class_source={self.cls_source.name}",
+      "Explanation": "Dynamo cannot guard the class metadata used to resolve a descriptor mutation on an object returned by a constant-result function.",
+      "Hints": [
+        "Pass the object as an input instead of returning it from a function ",
+        "marked with `torch._dynamo.assume_constant_result`.",
+        "Move the descriptor mutation outside the compiled region."
+      ]
+    }
+  ],
   "GB1273": [
     {
       "Gb_type": "Unsupported attribute assignment on traceback object",
@@ -2538,6 +2550,26 @@
       "Explanation": "Missing dynamo support for converting {value} into a list for slice assignment.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4524": [
+    {
+      "Gb_type": "Unsupported OrderedDict snapshot runtime",
+      "Context": "str(error)",
+      "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
+      "Hints": [
+        "Snapshots are not implemented on Python 3.16+. On older free-threaded ",
+        "Python, empty OrderedDicts remain supported; nonempty ones require ",
+        "Python 3.14.1+. Keep unsupported inputs outside fullgraph capture."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported OrderedDict snapshot runtime",
+      "Context": "str(error)",
+      "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
+      "Hints": [
+        "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+."
       ]
     }
   ],
@@ -7229,6 +7261,15 @@
     }
   ],
   "GB8811": [
+    {
+      "Gb_type": "OrderedDict storage differs from linked keys",
+      "Context": "OrderedDict input snapshot: {error}",
+      "Explanation": "Dynamo cannot safely match this OrderedDict's linked order to its dictionary storage.",
+      "Hints": [
+        "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
     {
       "Gb_type": "OrderedDict storage differs from linked keys",
       "Context": "OrderedDict input snapshot",

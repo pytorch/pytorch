@@ -3611,8 +3611,10 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard)
         length = _sequence_length(value)
 
-        if not issubclass(type(value), dict):
-            # C++ DICT_LENGTH checks for type
+        if not issubclass(type(value), dict) and not istype(
+            guard.originating_source, TypeMROSource
+        ):
+            # DICT_LENGTH checks its type; TypeMROSource reads the always-tuple tp_mro.
             self.TYPE_MATCH(guard)
 
         code = []
@@ -5564,9 +5566,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(
             obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
         ):
+            from .variables.object_protocol import type_is_immutable
+
             owner = obj.__objclass__
-            flags = type.__dict__["__flags__"].__get__(owner, type(owner))
-            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+            if not type_is_immutable(owner):
                 raise torch._dynamo.exc.PackageError(
                     f"Cannot serialize {type(obj).__name__} with a mutable owner"
                 )
