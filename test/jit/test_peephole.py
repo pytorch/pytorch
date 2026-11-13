@@ -659,6 +659,35 @@ class TestPeephole(JitTestCase):
         self.run_pass("peephole", foo.graph)
         FileCheck().check_not("aten::Int").run(foo.graph)
 
+    def test_peephole_device_with_index(self):
+        # Scripting already folds constant arguments, so build the graph directly.
+        graph = torch._C.parse_ir(
+            """
+            graph():
+                %type : str = prim::Constant[value="cuda"]()
+                %index : int = prim::Constant[value=1]()
+                %device : Device = aten::device(%type, %index)
+                return (%device)
+            """
+        )
+        self.run_pass("peephole", graph)
+        FileCheck().check_not("aten::device").run(graph)
+        FileCheck().check('Device = prim::Constant[value="cuda:1"]').run(graph)
+
+        @torch.jit.script
+        def dynamic_index(index: int):
+            return torch.device("cuda", index)
+
+        @torch.jit.script
+        def dynamic_type(device_type: str):
+            return torch.device(device_type, 1)
+
+        # Only constant arguments can be folded, and the op computes the rest.
+        for fn, arg in ((dynamic_index, 1), (dynamic_type, "cuda")):
+            self.run_pass("peephole", fn.graph)
+            FileCheck().check("aten::device").run(fn.graph)
+            self.assertEqual(fn(arg), torch.device("cuda", 1))
+
     def test_peephole_arith(self):
         @torch.jit.script
         def foo(input0: int, input1: int, input2: int, input3: int):

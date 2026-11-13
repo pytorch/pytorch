@@ -1086,6 +1086,22 @@ class TupleIteratorGetItemSource(GetItemSource):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class ListReverseIteratorBackingListSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                utils.__name__, "list_reverseiterator_backing_list"
+            )
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return "___list_reverseiterator_backing_list({0})"
+
+
+@dataclass_with_cached_hash(frozen=True)
 class NamedTupleFieldsSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)

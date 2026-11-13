@@ -5,7 +5,7 @@ namespace {
 using namespace c10d::symmetric_memory;
 
 // Alloc functor for MemPool
-void* cuda_symm_alloc(size_t size, int device, void* stream) {
+void* cuda_symm_alloc(size_t size, int device, void* /*stream*/) {
   static auto allocator = get_allocator(c10::DeviceType::CUDA);
   // Note: the group info is now specified at the time of rendezvous instead of
   // allocation. We thus pass `nullopt` for group here.
@@ -13,7 +13,11 @@ void* cuda_symm_alloc(size_t size, int device, void* stream) {
 }
 
 // Free functor for MemPool
-void cuda_symm_free(void* ptr, size_t size, int device, void* stream) {
+void cuda_symm_free(
+    void* ptr,
+    size_t /*size*/,
+    int /*device*/,
+    void* /*stream*/) {
   static auto allocator = get_allocator(c10::DeviceType::CUDA);
   allocator->free(ptr);
 }

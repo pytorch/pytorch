@@ -17,6 +17,8 @@
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
+#include <cstring>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -43,6 +45,13 @@ C10_DIAGNOSTIC_POP()
 namespace {
 
 using namespace at;
+
+bool has_same_dense_layout(const Tensor& self, const Tensor& src) {
+  return self.sizes().equals(src.sizes()) &&
+      ((self.is_contiguous() && src.is_contiguous()) ||
+       (self.is_non_overlapping_and_dense() &&
+        self.strides().equals(src.strides())));
+}
 
 bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
   const int MIN_SZ = 60 * 60;
@@ -152,11 +161,9 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // https://github.com/pytorch/pytorch/issues/88543
   #ifdef USE_FBGEMM
     if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
-         (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
+        (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
         (self.device().is_cpu() && src.device().is_cpu()) &&
-        ((self.is_contiguous() && src.is_contiguous()) ||
-         (self.is_non_overlapping_and_dense() && self.strides() == src.strides())) &&
-        (self.sizes() == src.sizes())) {
+        has_same_dense_layout(self, src)) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
         auto* output_ptr =
             reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
@@ -255,8 +262,9 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   // Exit early if self and src are views of the same data
+  const bool is_alias = self.is_alias_of(src);
   const bool is_same_data = (
-      self.is_alias_of(src) &&
+      is_alias &&
       self.storage_offset() == src.storage_offset() &&
       self.strides().equals(src.strides()) &&
       self.sizes().equals(src.sizes()) &&
@@ -268,6 +276,25 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
+  // The typed bool copy kernel canonicalizes non-standard true values, and
+  // TensorIterator parallelizes copies at or above GRAIN_SIZE.
+  if (self.numel() < at::internal::GRAIN_SIZE &&
+      self.scalar_type() == src.scalar_type() &&
+      self.scalar_type() != at::kBool &&
+      self.device().is_cpu() && src.device().is_cpu() &&
+      !self.is_quantized() &&
+      self.is_conj() == src.is_conj() &&
+      self.is_neg() == src.is_neg() &&
+      !is_alias &&
+      has_same_dense_layout(self, src)) {
+    if (self.numel() > 0) {
+      std::memcpy(
+          self.data_ptr(),
+          src.const_data_ptr(),
+          static_cast<size_t>(self.numel()) * self.itemsize());
+    }
+    return self;
+  }
 
   auto iter = TensorIteratorConfig()
     .add_output(self)

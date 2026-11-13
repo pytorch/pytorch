@@ -51,6 +51,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | C++ | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- | --- |
+| 2.15 | >=3.11, <=(3.15, 3.15t experimental) | C++20 | CUDA 13.2 (CUDNN 9.26.0.51) (NCCL 2.30.7) | CUDA 13.4 (CUDNN 9.26.0.51) (NCCL 2.30.7) | ROCm 7.14 |
 | 2.14 | >=3.10, <=(3.15, 3.15t experimental) | C++20 | CUDA 12.6 (CUDNN 9.10.2.21) (NCCL 2.29.3), CUDA 13.0 (CUDNN 9.24.0.43) (NCCL 2.30.7), CUDA 13.2 (CUDNN 9.24.0.43) (NCCL 2.30.7) | -- | ROCm 7.14 |
 | 2.13 | >=3.10, <=(3.15, 3.15t experimental) | C++20 | CUDA 12.6 (CUDNN 9.10.2.21) (NCCL 2.29.3), CUDA 13.0 (CUDNN 9.20.0.48) (NCCL 2.29.7) | CUDA 13.2 (CUDNN 9.20.0.48) (NCCL 2.29.7) | ROCm 7.2 |
 | 2.12 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21) (NCCL 2.29.3), CUDA 13.0 (CUDNN 9.20.0.48) (NCCL 2.29.7) | CUDA 13.2 (CUDNN 9.20.0.48) (NCCL 2.29.7) | ROCm 7.2 |
@@ -104,7 +105,7 @@ Following is the release cadence. All future dates below are tentative. For late
 | 2.11 | 16 Feb 2026 | 18 Mar 2026 | Not planned | Not planned |
 | 2.12 | 13 Apr 2026 | 13 May 2026 | Jun 2026 | Not planned |
 | 2.13 | 8 Jun 2026 | 8 Jul 2026 | Not planned | Not planned |
-| 2.14 | 10 Aug 2026 | 2 Sept 2026 | (Oct 2026) | Not planned |
+| 2.14 | 10 Aug 2026 | 2 Sept 2026 | Sept 2026 | Not planned |
 | 2.15 | 5 Oct 2026 | 28 Oct 2026 | (Nov 2026) | Not planned |
 | 2.16 | 30 Nov 2026 | 22 Dec 2026 | (Jan 2027) | Not planned |
 | 2.17 | 1 Feb 2027 | 24 Feb 2027 | (Mar 2027) | Not planned |
@@ -479,7 +480,7 @@ Supported OS flavors are summarized in the table below:
 | Operating System family | Architecture | Notes |
 | --- | --- | --- |
 | Linux | aarch64, x86_64 | Wheels are manylinux2014 compatible, i.e. they should be runnable on any Linux system with glibc-2.17 or above. |
-| macOS | arm64 | Builds should be compatible with macOS 11 (Big Sur) or newer, but are actively tested against macOS 14 (Sonoma). MPS support is enabled on macOS 14 (Sonoma) or later. |
+| macOS | arm64 | Builds should be compatible with macOS 11 (Big Sur) or newer, but are actively tested against macOS 15 (Sequoia) and macOS 26 (Tahoe). MPS support is enabled on macOS 15 (Sequoia) or later. |
 | Windows | x86_64 | Builds are compatible with Windows-10 or newer. |
 
 # Submitting Tutorials

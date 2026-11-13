@@ -5,8 +5,6 @@ import copy
 import tempfile
 import unittest
 
-from parameterized import parameterized
-
 import torch
 import torch._dynamo as torchdynamo
 from torch._C._nativert import PyModelRunner
@@ -17,8 +15,17 @@ from torch.nativert.backends._lower_utils import (
     lower_exported_program,
     package_nativert_with_aoti_delegate,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipGPUIf,
+    skipXPUIf,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    parametrize,
+)
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.utils import _pytree as pytree
 
 
@@ -214,86 +221,75 @@ def make_dynamic_cls(cls, strict=False):
     test_class.__module__ = __name__
 
 
+def _single_output_model(device):
+    class M(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.linear = torch.nn.Linear(4, 4)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            return self.relu(self.linear(x))
+
+    return M().to(device), (torch.randn(4, 4, device=device),)
+
+
+def _multi_output_model(device):
+    class M(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.linear = torch.nn.Linear(4, 4)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            return (self.relu(self.linear(x)), x)
+
+    return M().to(device), (torch.randn(4, 4, device=device),)
+
+
+def _pytree_model(device):
+    class M(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.linear1 = torch.nn.Linear(4, 4)
+            self.linear2 = torch.nn.Linear(4, 4)
+
+        def forward(self, x):
+            x1, (x2, x3) = x
+            y1 = self.linear1(x1)
+            y2 = self.linear2(x2)
+            y3 = self.linear2(x3)
+            return (y1, (y2, y3))
+
+    return M().to(device), (
+        (
+            torch.randn(4, 4, device=device),
+            (torch.randn(4, 4, device=device), torch.randn(4, 4, device=device)),
+        ),
+    )
+
+
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 @unittest.skipIf(not is_fbcode(), "FBcode only for now")
-class TestNativeRT(TestCase):
-    @staticmethod
-    def get_module():
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.relu = torch.nn.ReLU()
+class TestNativeRTDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-            def forward(self, x):
-                return self.relu(self.linear(x))
-
-        return M()
-
-    @staticmethod
-    def get_module_multi_output():
-        class MMultiOutput(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                return (self.relu(self.linear(x)), x)
-
-        return MMultiOutput()
-
-    @staticmethod
-    def get_model_pytree():
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear1 = torch.nn.Linear(4, 4)
-                self.linear2 = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                x1, (x2, x3) = x
-                y1 = self.linear1(x1)
-                y2 = self.linear2(x2)
-                y3 = self.linear2(x3)
-                return (y1, (y2, y3))
-
-        return M()
-
-    parameters = []
-    for device in ["cpu", "cuda"]:
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            continue
-        for module, sample_inputs in [
-            (get_module.__func__().to(device), (torch.randn(4, 4).to(device),)),
-            (
-                get_module_multi_output.__func__().to(device),
-                (torch.randn(4, 4).to(device),),
-            ),
-            (
-                get_model_pytree.__func__().to(device),
-                (
-                    (
-                        torch.randn(4, 4).to(device),
-                        (
-                            torch.randn(4, 4).to(device),
-                            torch.randn(4, 4).to(device),
-                        ),
-                    ),
-                ),
-            ),
-        ]:
-            parameters.append(
-                (
-                    device,
-                    module,
-                    sample_inputs,
-                )
-            )
-
-    @parameterized.expand(parameters)
-    def test_aoti(self, device, m, sample_inputs):
+    # nativert's placement layer accepts only CPU/CUDA/meta/MTIA
+    # (torch/nativert/executor/PlacementUtils.cpp), and registers an AOTI runner
+    # for CPU and CUDA only.
+    @skipXPUIf(
+        True,
+        "nativert has no XPU support: https://github.com/intel/torch-xpu-ops/issues/5364",
+    )
+    @skipGPUIf(not HAS_TRITON, "AOTI on an accelerator requires triton")
+    @parametrize(
+        "make_model",
+        [_single_output_model, _multi_output_model, _pytree_model],
+        name_fn=lambda fn: fn.__name__.lstrip("_"),
+    )
+    def test_aoti(self, device, make_model):
+        m, sample_inputs = make_model(device)
         MODEL_NAME = "model"
         BACKEND_ID = "aoti"
 
@@ -380,6 +376,8 @@ class TestNativeRT(TestCase):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 @unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestSelectScalarOverload(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_floor_divide_default_scalar(self) -> None:
         # PT2 export lowers `x // 10` to aten.floor_divide.default with a scalar
         # Int argument (the #90923 Scalar->Tensor broadcast).  Its default
@@ -415,9 +413,12 @@ if is_fbcode():
     del test
 
 
+instantiate_device_type_tests(
+    TestNativeRTDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    # nativert has not been supported on XPU yet.
-    if not torch.xpu.is_available():
-        run_tests()
+    run_tests()

@@ -420,6 +420,9 @@ class LoggingTest(TestCase):
     )
     def test_collect_tlparse_output_preserves_multiple_trace_logs(self):
         repo_root = Path(__file__).resolve().parent.parent
+        torch_trace_sh = repo_root / ".ci/pytorch/torch_trace.sh"
+        if not torch_trace_sh.exists():
+            self.skipTest(f"Missing {torch_trace_sh} script")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -485,7 +488,7 @@ class LoggingTest(TestCase):
                     "RUNNER_TEMP": str(runner_temp),
                     "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
                     "TLPARSE_ARGS_LOG": str(args_log),
-                    "TORCH_TRACE_HELPER": str(repo_root / ".ci/pytorch/torch_trace.sh"),
+                    "TORCH_TRACE_HELPER": str(torch_trace_sh),
                 }
             )
 
