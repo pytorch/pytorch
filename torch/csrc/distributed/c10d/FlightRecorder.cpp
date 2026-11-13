@@ -122,7 +122,7 @@ FlightRecorder<c10::Event>* getFlightRecorder(const std::string& backend) {
 }
 
 bool recordsFlightRecorderNatively(const std::string& backend) {
-  return backend == "gloo" || backend == "nccl" || backend == "xccl";
+  return backend == "nccl" || backend == "xccl";
 }
 
 std::string dump_fr_trace(
