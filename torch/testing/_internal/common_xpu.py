@@ -76,7 +76,7 @@ Xe2_Or_Later = LazyVal(
 
 def evaluate_platform_supports_flash_attention():
     if TEST_XPU:
-        return not IS_WINDOWS and Xe2_Or_Later
+        return not IS_WINDOWS and get_xpu_codename() == XPUCodename.BMG
     return False
 
 
