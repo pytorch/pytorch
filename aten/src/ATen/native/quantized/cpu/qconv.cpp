@@ -1303,24 +1303,24 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
         input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads, sum_scale, sum_zero_point);
     c10::call_once(*cache_initialized_flag, [&](){
         DeconvParams params;
-        ideep::convolution_transpose_forward::prepare(
+        at::native::mkldnn::convolution_transpose_forward_prepare(
             params, src, weights, b, dst_dims, dst,
             strides, padding_l, padding_r, dilates, groups(),
             src_scales, weights_scales, std::vector<float>(1, inv_output_scale),
             src_zero_points, dst_zero_points, op_attr,
             dnnl::algorithm::deconvolution_direct,
             dnnl::prop_kind::forward_inference,
-            ideep::u8s8, ideep::engine::cpu_engine());
+            ideep::u8s8);
         get_deconv_cache() = DeconvPrimitiveCache(cache_key, params);
         auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups());
         weights = weights.reorder_if_differ_in(expected_weight_desc);
     });
     if (get_deconv_cache().hit(cache_key)) {
       DeconvParams& params = get_deconv_cache().get_params();
-      ideep::convolution_transpose_forward::compute<false, false>(
+      at::native::mkldnn::convolution_transpose_forward_compute<false, false>(
           params, src, weights, b, dst);
     } else {
-      ideep::convolution_transpose_forward::compute(
+      at::native::mkldnn::convolution_transpose_forward_compute(
           src, weights, b, dst_dims, dst,
           strides, padding_l, padding_r, dilates,
           groups(), src_scales, weights_scales,
@@ -1328,7 +1328,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
           src_zero_points, dst_zero_points, op_attr,
           dnnl::algorithm::deconvolution_direct,
           dnnl::prop_kind::forward_inference,
-          ideep::u8s8, ideep::engine::cpu_engine());
+          ideep::u8s8);
     }
   } else {  // not transposed
     PrimitiveCacheKey cache_key = std::make_tuple(
