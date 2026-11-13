@@ -453,8 +453,10 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
         __float_as_uint(t) | ((static_cast<double>(t) != x) & (x == x)));
   }
 
-  // Mirrors detail::rounds_through_float in TypeCast.h. The jiterator's Half
-  // and BFloat16 have no numeric_limits, so it lists its only narrower types.
+  // Like detail::rounds_through_float in TypeCast.h, for the jiterator's only
+  // narrower types (its Half and BFloat16 have no numeric_limits), plus
+  // complex<Half>, whose conversion from double is handled here rather than by
+  // a separate complex branch.
   template <typename T>
   constexpr bool rounds_through_float = std::is_same<T, at::Half>::value ||
       std::is_same<T, at::BFloat16>::value ||
