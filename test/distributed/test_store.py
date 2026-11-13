@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -693,12 +694,19 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
 
 def _load_libssl():
-    for name in ("libssl.so.3", "libssl.so.1.1", "libssl.so"):
+    for name in ("libssl.so.3", "libssl.so.1.1"):
         try:
             # SSL_CTX_set_num_tickets excludes OpenSSL 1.1.0, like the C++ loader.
-            if hasattr(ctypes.CDLL(name), "SSL_CTX_set_num_tickets"):
+            lib = ctypes.CDLL(name)
+            lib.OpenSSL_version_num.restype = ctypes.c_ulong
+            lib.OpenSSL_version.restype = ctypes.c_char_p
+            if (
+                lib.OpenSSL_version_num() >= 0x10101000
+                and lib.OpenSSL_version(0).startswith(b"OpenSSL ")
+                and hasattr(lib, "SSL_CTX_set_num_tickets")
+            ):
                 return True
-        except OSError:
+        except (OSError, AttributeError):
             pass
     return False
 
@@ -719,12 +727,12 @@ def _make_ca(d, name):
     return cert, key
 
 
-def _make_cert(d, name, ca):
+def _make_cert(d, name, ca, key_args=None):
     key = os.path.join(d, f"{name}.key")
     csr = os.path.join(d, f"{name}.csr")
     cert = os.path.join(d, f"{name}.pem")
     _openssl(
-        "req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+        "req", "-newkey", *(key_args or ["ec", "-pkeyopt", "ec_paramgen_curve:prime256v1"]),
         "-nodes", "-keyout", key, "-out", csr, "-subj", f"/CN={name}",
     )  # fmt: skip
     _openssl(
@@ -734,7 +742,10 @@ def _make_cert(d, name, ca):
     return cert, key
 
 
-@unittest.skipUnless(sys.platform == "linux", "TCPStore TLS requires Linux")
+@unittest.skipUnless(
+    sys.platform == "linux" and sys.maxsize > 2**32,
+    "TCPStore TLS requires 64-bit Linux",
+)
 class TCPStoreTLSTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -764,13 +775,15 @@ class TCPStoreTLSTest(TestCase):
             "pkey", "-in", cls.client[1], "-aes256", "-passout", "pass:secret",
             "-out", cls.encrypted_key,
         )  # fmt: skip
+        cls.psk = os.urandom(16).hex()
+        cls.other_psk = os.urandom(32).hex()
 
     def setUp(self):
         super().setUp()
         patcher = mock.patch.dict(os.environ)
         patcher.start()
         self.addCleanup(patcher.stop)
-        for name in ("CERT", "KEY", "CA"):
+        for name in ("CERT", "KEY", "CA", "PSK", "PSK_FILE", "REQUIRE"):
             os.environ.pop(f"TORCH_TCPSTORE_TLS_{name}", None)
 
     def _env(self, cert, ca=None):
@@ -779,6 +792,11 @@ class TCPStoreTLSTest(TestCase):
             "TORCH_TCPSTORE_TLS_KEY": cert[1],
             "TORCH_TCPSTORE_TLS_CA": ca or self.ca,
         }
+
+    def _tls(self, mode, cert):
+        if mode == "psk":
+            return {"tls_psk": self.psk}
+        return {"tls_cert": cert[0], "tls_key": cert[1], "tls_ca": self.ca}
 
     def _store(
         self,
@@ -848,8 +866,14 @@ class TCPStoreTLSTest(TestCase):
         self.assertEqual(server.queue_len("q"), 1)
         self.assertEqual(clone.queue_pop("q"), b"x")
 
-    def test_tls_env(self):
-        with mock.patch.dict(os.environ, self._env((self.combined, self.combined))):
+    @parametrize("mode", ["cert", "psk"])
+    def test_tls_env(self, mode):
+        env = (
+            {"TORCH_TCPSTORE_TLS_PSK": self.psk}
+            if mode == "psk"
+            else self._env((self.combined, self.combined))
+        )
+        with mock.patch.dict(os.environ, env):
             server = self._store()
             client = self._store(server.port, False)
             client.set("key", "value")
@@ -861,9 +885,19 @@ class TCPStoreTLSTest(TestCase):
             "Server requires TLS", port=server.port, is_master=False
         )
 
-    def test_tls_options_override_env(self):
-        with mock.patch.dict(os.environ, self._env(self.server)):
-            empty = {"tls_cert": "", "tls_key": "", "tls_ca": ""}
+    @parametrize("mode", ["cert", "psk"])
+    def test_tls_options_override_env(self, mode):
+        env = (
+            self._env(self.server)
+            if mode == "cert"
+            else {"TORCH_TCPSTORE_TLS_PSK": self.psk}
+        )
+        empty = (
+            {"tls_cert": "", "tls_key": "", "tls_ca": ""}
+            if mode == "cert"
+            else {"tls_psk": ""}
+        )
+        with mock.patch.dict(os.environ, env):
             server = self._store(tls=empty)
             client = self._store(server.port, False, tls=empty)
             self.assertEqual(client.clone().add("plain", 1), 1)
@@ -872,11 +906,11 @@ class TCPStoreTLSTest(TestCase):
             with self.assertRaisesRegex(DistStoreError, "missing tls_key, tls_ca"):
                 self._store(tls={"tls_cert": self.server[0]})
 
-    @parametrize("option", ["cert", "key", "ca", "all"])
+    @parametrize("option", ["cert", "key", "ca", "psk", "all"])
     @parametrize("from_env", [False, True])
     @parametrize("is_master", [False, True])
     def test_tls_empty_config(self, option, from_env, is_master):
-        fields = ["cert", "key", "ca"] if option == "all" else [option]
+        fields = ["cert", "key", "ca", "psk"] if option == "all" else [option]
         values = {
             (f"TORCH_TCPSTORE_TLS_{field.upper()}" if from_env else f"tls_{field}"): ""
             for field in fields
@@ -891,7 +925,7 @@ class TCPStoreTLSTest(TestCase):
             self.assertEqual(store.add("plain", 1), 1)
             self.assertEqual(store.clone().get("plain"), b"1")
 
-    @parametrize("option", ["cert", "key", "ca"])
+    @parametrize("option", ["cert", "key", "ca", "psk"])
     @parametrize("from_env", [False, True])
     @parametrize("is_master", [False, True])
     def test_tls_partial_empty_config(self, option, from_env, is_master):
@@ -913,9 +947,11 @@ class TCPStoreTLSTest(TestCase):
             ):
                 self._store(is_master=is_master, tls={} if from_env else values)
 
-    @parametrize("option", ["cert", "key", "ca"])
+    @parametrize("option", ["cert", "key", "ca", "psk"])
     def test_tls_nul_path(self, option):
         tls = {"tls_cert": self.server[0], "tls_key": self.server[1], "tls_ca": self.ca}
+        if option == "psk":
+            tls = {"tls_psk": self.psk}
         tls[f"tls_{option}"] += "\0suffix"
         with self.assertRaisesRegex(
             DistStoreError, f"tls_{option} must not contain NUL"
@@ -1099,6 +1135,125 @@ class TCPStoreTLSTest(TestCase):
             self.assertTrue(response == expected, "GET reply was truncated or corrupt")
             tls.unwrap()  # Verify the peer sent close_notify.
 
+    def _psk_file(self, key=None, mode=0o600):
+        fd, path = tempfile.mkstemp(dir=self._tmpdir.name)
+        self.addCleanup(os.unlink, path)
+        with os.fdopen(fd, "wb") as out:
+            out.write((self.psk if key is None else key).encode())
+        os.chmod(path, mode)
+        return path
+
+    @parametrize("from_env", [False, True])
+    def test_tls_psk_file(self, from_env):
+        path = self._psk_file()
+        if from_env:
+            os.environ["TORCH_TCPSTORE_TLS_PSK_FILE"] = path
+        server = self._store(tls={} if from_env else {"tls_psk_file": path})
+        client = self._store(server.port, False, tls={"tls_psk": self.psk})
+        self.assertEqual(client.add("file", 1), 1)
+        # The resolved key, not the path, survives file rotation and env changes.
+        with open(path, "w") as out:
+            out.write(self.other_psk)
+        self.assertEqual(server.clone().add("file", 1), 2)
+        os.environ["TORCH_TCPSTORE_TLS_PSK_FILE"] = path
+        os.environ["TORCH_TCPSTORE_TLS_PSK"] = self.psk
+        with self.assertRaisesRegex(DistStoreError, "cannot be combined"):
+            self._store()
+
+    @parametrize(
+        "invalid",
+        [
+            "missing",
+            "mode",
+            "directory",
+            "symlink",
+            "fifo",
+            "short",
+            "long",
+            "nul",
+            "mixed",
+        ],
+    )
+    def test_tls_psk_file_invalid(self, invalid):
+        path = self._psk_file()
+        if invalid == "missing":
+            path += ".missing"
+        elif invalid == "mode":
+            os.chmod(path, 0o640)
+        elif invalid == "directory":
+            path = self._tmpdir.name
+        elif invalid in ("symlink", "fifo"):
+            target = path + "." + invalid
+            if invalid == "symlink":
+                os.symlink(path, target)
+            else:
+                os.mkfifo(target, 0o600)
+            self.addCleanup(os.unlink, target)
+            path = target
+        elif invalid in ("short", "long", "nul"):
+            value = {"short": "x" * 31, "long": "x" * 257, "nul": "x" * 31 + "\0"}[
+                invalid
+            ]
+            with open(path, "w") as out:
+                out.write(value)
+        options = {"tls_psk_file": path}
+        if invalid == "mixed":
+            options["tls_psk"] = self.psk
+        with self.assertRaisesRegex(DistStoreError, "PSK"):
+            self._store(tls=options)
+
+    def test_tls_require(self):
+        plain = self._store()
+        os.environ["TORCH_TCPSTORE_TLS_REQUIRE"] = "1"
+        for options in ({}, {"tls_psk": ""}, {"tls_psk_file": ""}):
+            with self.assertRaisesRegex(DistStoreError, "required but not configured"):
+                self._store(tls=options)
+        with self.assertRaisesRegex(DistStoreError, "required but not configured"):
+            plain.clone()
+        secure = self._store(tls={"tls_psk": self.psk})
+        self.assertEqual(secure.add("secure", 1), 1)
+        os.environ["TORCH_TCPSTORE_TLS_REQUIRE"] = "invalid"
+        with self.assertRaisesRegex(DistStoreError, "must be 0 or 1"):
+            self._store(tls={"tls_psk": self.psk})
+
+    def test_tls_cipher_policy(self):
+        ca = (self.ca, os.path.join(self._tmpdir.name, "ca.key"))
+        cert = _make_cert(self._tmpdir.name, "rsa", ca, ["rsa:2048"])
+        server = self._store(cert=cert)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.load_verify_locations(self.ca)
+        ctx.load_cert_chain(*self.client)
+        ctx.minimum_version = ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+        for cipher, accepted in (
+            ("AES128-SHA", False),
+            ("ECDHE-RSA-AES128-SHA256", False),
+            ("ECDHE-RSA-AES128-GCM-SHA256", True),
+        ):
+            ctx.set_ciphers(cipher)
+            with socket.create_connection(
+                ("localhost", server.port), timeout=10
+            ) as sock:
+                if not accepted:
+                    with self.assertRaisesRegex(
+                        ssl.SSLError, "handshake failure|no shared cipher"
+                    ):
+                        ctx.wrap_socket(sock, server_hostname="localhost")
+                    continue
+                with ctx.wrap_socket(sock, server_hostname="localhost") as tls:
+                    self.assertEqual(tls.cipher()[0], cipher)
+
+    def test_tls_server_handshake_timeout(self):
+        server = self._store(cert=self.server)
+        with socket.create_connection(("localhost", server.port), timeout=15) as idle:
+            with socket.create_connection(
+                ("localhost", server.port), timeout=15
+            ) as partial:
+                partial.sendall(b"\x16")
+                self.assertEqual(idle.recv(1), b"")
+                self.assertEqual(partial.recv(1), b"")
+        self.assertEqual(server.add("alive", 1), 1)
+
     def test_tls_untrusted_client(self):
         server = self._store(cert=self.server)
         self._assert_fails_fast(
@@ -1135,19 +1290,222 @@ class TCPStoreTLSTest(TestCase):
         )
         self.assertEqual(server.add("alive", 1), 1)
 
-    def test_tls_server_plaintext_client(self):
-        server = self._store(cert=self.server)
+    @parametrize("mode", ["cert", "psk"])
+    def test_tls_server_plaintext_client(self, mode):
+        server = self._store(tls=self._tls(mode, self.server))
         self._assert_fails_fast(
             "Server requires TLS", port=server.port, is_master=False
         )
         self.assertEqual(server.add("alive", 1), 1)
 
-    def test_plaintext_server_tls_client(self):
+    @parametrize("mode", ["cert", "psk"])
+    def test_plaintext_server_tls_client(self, mode):
         server = self._store()
         self._assert_fails_fast(
-            "protocol version", port=server.port, is_master=False, cert=self.client
+            "protocol version",
+            port=server.port,
+            is_master=False,
+            tls=self._tls(mode, self.client),
         )
         self.assertEqual(server.add("alive", 1), 1)
+
+    def test_tls_psk_ops(self):
+        psk = {"tls_psk": self.psk}
+        server = self._store(tls=psk, multi_tenant=True)
+        client = self._store(server.port, False, tls=psk)
+        client.set("key", "value")
+        self.assertEqual(server.get("key"), b"value")
+        self.assertEqual(client.add("counter", 2), 2)
+        with self.assertRaisesRegex(DistStoreError, "wait timeout"):
+            client.wait(["waited"], timedelta(milliseconds=10))
+        self.assertEqual(client.clone().get("key"), b"value")
+        same = self._store(server.port, tls=psk, multi_tenant=True)
+        self.assertEqual(same.add("counter", 1), 3)
+        with self.assertRaisesRegex(DistStoreError, "different TLS configuration"):
+            self._store(server.port, tls={"tls_psk": self.other_psk}, multi_tenant=True)
+
+    def test_tls_psk_wrong_key(self):
+        server = self._store(tls={"tls_psk": self.psk})
+        # OpenSSL 3.x sends decrypt error, 1.1.1 sends illegal parameter.
+        self._assert_fails_fast(
+            "alert (decrypt error|illegal parameter)",
+            port=server.port,
+            is_master=False,
+            tls={"tls_psk": self.other_psk},
+        )
+        self.assertEqual(server.add("alive", 1), 1)
+
+    @unittest.skipIf(
+        not getattr(ssl, "HAS_PSK", False)
+        or not hasattr(ssl.SSLContext, "set_psk_client_callback"),
+        "needs Python 3.13 with PSK support",
+    )
+    def test_tls_psk_unknown_identity(self):
+        server = self._store(tls={"tls_psk": self.psk})
+        key = self.psk.encode("utf-8")
+
+        def handshake(identity):
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+            ctx.set_psk_client_callback(lambda hint: (identity, key))
+            with socket.create_connection(("localhost", server.port), timeout=10) as s:
+                with ctx.wrap_socket(s) as conn:
+                    return conn.version()
+
+        self.assertEqual(handshake("torch.distributed.TCPStore.psk.v1"), "TLSv1.3")
+        with self.assertRaisesRegex(ssl.SSLError, "alert handshake failure"):
+            handshake("torch.distributed.TCPStore.psk.v0")
+        self.assertEqual(server.add("alive", 1), 1)
+
+    def test_tls_psk_cert_mismatch(self):
+        psk = {"tls_psk": self.psk}
+        server = self._store(tls=psk)
+        self._assert_fails_fast(
+            "alert handshake failure.*same TLS mode",
+            port=server.port,
+            is_master=False,
+            cert=self.client,
+        )
+        self.assertEqual(server.add("alive", 1), 1)
+        server = self._store(cert=self.server)
+        self._assert_fails_fast(
+            "certificate verify failed.*same TLS mode",
+            port=server.port,
+            is_master=False,
+            tls=psk,
+        )
+        self.assertEqual(server.add("alive", 1), 1)
+
+    @parametrize("size", [1, 31, 257])
+    @parametrize("from_env", [False, True])
+    def test_tls_psk_bad_key(self, size, from_env):
+        key = "~" * size
+        env = {"TORCH_TCPSTORE_TLS_PSK": key} if from_env else {}
+        tls = {} if from_env else {"tls_psk": key}
+        with mock.patch.dict(os.environ, env):
+            with self.assertRaisesRegex(
+                DistStoreError, "PSK must contain 32 to 256 bytes"
+            ) as caught:
+                self._store(tls=tls)
+        # Do not include the key in assertion diagnostics, even on failure.
+        self.assertFalse(key in str(caught.exception), "PSK leaked in error")
+
+    @parametrize("size", [32, 256])
+    def test_tls_psk_key_sizes(self, size):
+        psk = {"tls_psk": os.urandom(size // 2).hex()}
+        server = self._store(tls=psk)
+        client = self._store(server.port, False, tls=psk)
+        self.assertEqual(client.add("counter", 1), 1)
+        self.assertEqual(client.clone().add("counter", 1), 2)
+
+    @parametrize(
+        "invalid", ["port", "is_master", "unknown", "missing", "duplicate", "psk_type"]
+    )
+    def test_tls_psk_argument_errors_redacted(self, invalid):
+        args = ["localhost", 0]
+        kwargs = {"tls_psk": self.psk}
+        if invalid == "port":
+            args[1] = "bad port"
+        elif invalid == "is_master":
+            kwargs["is_master"] = "bad bool"
+        elif invalid == "unknown":
+            kwargs["unknown"] = True
+        elif invalid == "missing":
+            args = []
+        elif invalid == "duplicate":
+            kwargs["port"] = 0
+        else:
+            kwargs["tls_psk"] = [self.psk]
+        try:
+            dist.TCPStore(*args, **kwargs)
+        except TypeError as error:
+            self.assertFalse(
+                self.psk in "".join(traceback.format_exception(error)),
+                "PSK leaked in traceback",
+            )
+            self.assertTrue(error.__cause__ is None, "Unexpected exception cause")
+            self.assertTrue(error.__context__ is None, "Unexpected exception context")
+        else:
+            self.fail("Invalid arguments accepted")
+
+    def test_tls_psk_constructor_wrapper(self):
+        class IndexValue:
+            def __index__(self):
+                return 0
+
+        class DerivedStore(dist.TCPStore):
+            pass
+
+        # Keep conversion retries and Python subclass initialization working.
+        server = DerivedStore(
+            "localhost",
+            IndexValue(),
+            is_master=True,
+            wait_for_workers=False,
+            tls_psk=self.psk,
+        )
+        self.assertEqual(server.clone().add("counter", 1), 1)
+        self.assertIn("tls_psk", dist.TCPStore.__init__.__doc__)
+
+    def test_tls_psk_diagnostics_redacted(self):
+        # Capture native stdout/stderr too; never include either in failures.
+        code = """
+import os
+import torch.distributed as dist
+key = os.environ.pop("TCPSTORE_TEST_SECRET")
+def store(**kwargs):
+    return dist.TCPStore("localhost", 0, is_master=True, wait_for_workers=False, **kwargs)
+for kwargs in ({"tls_psk": key[:31]}, {"tls_psk": key + "\\0suffix"},
+               {"tls_psk": key, "tls_ca": "unused"}):
+    try:
+        store(**kwargs)
+    except dist.DistStoreError as error:
+        print(error)
+    else:
+        raise AssertionError("Invalid TLS configuration accepted")
+server = store(tls_psk=key)
+print(server)
+try:
+    dist.TCPStore("localhost", server.port, tls_psk=key[::-1])
+except dist.DistStoreError as error:
+    print(error)
+else:
+    raise AssertionError("Wrong PSK accepted")
+os.environ["TORCH_TCPSTORE_TLS_PSK"] = key[:31]
+try:
+    store()
+except dist.DistStoreError as error:
+    print(error)
+else:
+    raise AssertionError("Invalid environment PSK accepted")
+"""
+        env = {**os.environ, "TCPSTORE_TEST_SECRET": self.psk}
+        result = subprocess.run(
+            [sys.executable, "-c", code], env=env, capture_output=True, timeout=60
+        )
+        output = result.stdout + result.stderr
+        for secret in (self.psk, self.psk[:31], self.psk[::-1]):
+            self.assertFalse(
+                secret.encode() in output, "PSK leaked in native diagnostics"
+            )
+        self.assertEqual(result.returncode, 0, "PSK diagnostic subprocess failed")
+
+    def test_tls_psk_config(self):
+        with self.assertRaisesRegex(DistStoreError, "tls_psk cannot be combined"):
+            self._store(tls={"tls_psk": self.psk, "tls_ca": self.ca})
+        env = self._env(self.server)
+        env["TORCH_TCPSTORE_TLS_PSK"] = self.psk
+        with mock.patch.dict(os.environ, env):
+            with self.assertRaisesRegex(
+                DistStoreError, "TORCH_TCPSTORE_TLS_PSK cannot be combined"
+            ):
+                self._store()
+            # Options are not merged with the env vars.
+            server = self._store(tls={"tls_psk": self.psk})
+            client = self._store(server.port, False, tls={"tls_psk": self.psk})
+            self.assertEqual(client.add("counter", 1), 1)
 
 
 instantiate_parametrized_tests(TCPStoreTLSTest)
