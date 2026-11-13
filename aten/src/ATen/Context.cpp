@@ -935,11 +935,21 @@ bool Context::isXNNPACKAvailable() {
   return xnnpack_backend_available.load(std::memory_order_acquire);
 }
 
+// This thread's own setting; see impl::SparseTensorInvariantChecksGuard
+thread_local static std::optional<std::optional<bool>> thread_sparse_tensor_invariant_checks;
+
 void Context::setCheckSparseTensorInvariants(std::optional<bool> e = std::nullopt) {
+  if (thread_sparse_tensor_invariant_checks.has_value()) {
+    *thread_sparse_tensor_invariant_checks = e;
+    return;
+  }
   enable_sparse_tensor_invariant_checks = e;
 }
 
 std::optional<bool> Context::checkSparseTensorInvariants(bool warn_when_uninitialized) const {
+  if (thread_sparse_tensor_invariant_checks.has_value()) {
+    return *thread_sparse_tensor_invariant_checks;
+  }
   if (warn_when_uninitialized && !enable_sparse_tensor_invariant_checks.has_value()) {
     TORCH_WARN_ONCE(
         "Sparse invariant checks are implicitly disabled. "
@@ -951,6 +961,16 @@ std::optional<bool> Context::checkSparseTensorInvariants(bool warn_when_uninitia
         "for guidance. ");
   }
   return enable_sparse_tensor_invariant_checks;
+}
+
+impl::SparseTensorInvariantChecksGuard::SparseTensorInvariantChecksGuard(
+    bool enabled)
+    : prev_(thread_sparse_tensor_invariant_checks) {
+  thread_sparse_tensor_invariant_checks.emplace(enabled);
+}
+
+impl::SparseTensorInvariantChecksGuard::~SparseTensorInvariantChecksGuard() {
+  thread_sparse_tensor_invariant_checks = prev_;
 }
 
 bool Context::releaseWeightsWhenPrepacking() const {
