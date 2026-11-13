@@ -568,7 +568,13 @@ class Tensor(torch._C.TensorBase):
         return torch._tensor_str._str(self, tensor_contents=tensor_contents)
 
     def backward(
-        self, gradient=None, retain_graph=None, create_graph=False, inputs=None
+        self,
+        gradient=None,
+        retain_graph=None,
+        create_graph=False,
+        inputs=None,
+        *,
+        disallow_implicit_grad_accumulation=False,
     ):
         r"""Computes the gradient of current tensor wrt graph leaves.
 
@@ -613,8 +619,20 @@ class Tensor(torch._C.TensorBase):
                 Tensors that were used to compute the :attr:`tensors`. A mapping of tensors
                 (e.g. ``dict(model.named_parameters())``) is also accepted.
                 Defaults to ``None``.
+            disallow_implicit_grad_accumulation (bool, optional): When a tensor is
+                used more than once in forward, backward accumulates the gradient
+                contributions from each use. If ``True``, raise an error instead of
+                performing that accumulation. See
+                :ref:`disallow-implicit-grad-accumulation`. Defaults to ``False``.
         """
         if has_torch_function_unary(self):
+            # Pass the flag only when set, so overrides written against the
+            # signature without it keep working.
+            flag_kwargs = (
+                {"disallow_implicit_grad_accumulation": True}
+                if disallow_implicit_grad_accumulation
+                else {}
+            )
             return handle_torch_function(
                 Tensor.backward,
                 (self,),
@@ -623,9 +641,15 @@ class Tensor(torch._C.TensorBase):
                 retain_graph=retain_graph,
                 create_graph=create_graph,
                 inputs=inputs,
+                **flag_kwargs,
             )
         torch.autograd.backward(
-            self, gradient, retain_graph, create_graph, inputs=inputs
+            self,
+            gradient,
+            retain_graph,
+            create_graph,
+            inputs=inputs,
+            disallow_implicit_grad_accumulation=disallow_implicit_grad_accumulation,
         )
 
     def index(self, positions, dims):

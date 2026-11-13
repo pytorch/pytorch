@@ -507,6 +507,7 @@
 # /test/simulate_nccl_errors.py
 # /test/slow_tests.json
 # /test/test_accelerator.py
+# /test/test_stream.py
 # /test/test_ao_sparsity.py
 # /test/test_appending_byte_serializer.py
 # /test/test_as_strided.py
