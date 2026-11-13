@@ -54,7 +54,6 @@ env:
   BOLT_PYTHON_VERSIONS: ${{ inputs.python-versions || '3.12' }}
   BOLT_WORKLOAD_VARIANT: ${{ inputs.workload-variant || 'all' }}
   BOLT_WORKLOAD_STEPS: ${{ inputs.workload-steps || '45000' }}
-  # Caps the workload of each Python version.
   BOLT_WORKLOAD_MAX_SECONDS: "1200"
 
 jobs:
@@ -144,7 +143,8 @@ jobs:
           name: bolt-instrumented
           path: bolt-instrumented/
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 7
+          overwrite: true
 
   profile:
     name: profile (${{ matrix.python }}, nv-l-arm64grace-16-200-gb300)
@@ -195,7 +195,8 @@ jobs:
           name: bolt-run-${{ matrix.python }}
           path: bolt-run/
           if-no-files-found: warn
-          retention-days: 3
+          retention-days: 7
+          overwrite: true
 
   finalize:
     name: finalize
@@ -238,3 +239,4 @@ jobs:
           path: bolt-profiles/
           if-no-files-found: warn
           retention-days: 14
+          overwrite: true
