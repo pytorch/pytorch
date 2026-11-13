@@ -629,7 +629,13 @@ namespace {
     if (m != n) {
       // Try using custom kernel for batched inputs,
       // when m <= 1024, and m > 1024 only with the pivoted kernel.
-      if ((1 < batch && batch <= 65535) && ((1 <= m && m <= 1024) || compute_pivots)) {
+      if ((1 < batch && batch <= 65535)
+        && (
+          (1 <= m && m <= 1024)
+          // large size m with pivots -- check that insures loops over grid (1024 threads) does not overflow
+          || (compute_pivots && m <= std::numeric_limits<int>::max() - 1024)
+        )
+      ) {
         return SolverBackend::CUSTOM;
       }
       return SolverBackend::CUSOLVER;

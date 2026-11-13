@@ -286,14 +286,14 @@ setup_pivinfo_kernel(
   const int* ip = ipiv + static_cast<size_t>(batch) * ipiv_stride;
 
   // Initialize identity (1-based absolute row indices, like MAGMA)
-  for (size_t dst = tid + row_offset; dst < row_offset + nrows; dst += BS) {
+  for (int dst = tid + row_offset; dst < row_offset + nrows; dst += BS) {
     piv[dst] = dst + 1;
   }
   __syncthreads();
 
   // Thread 0 replays the sequential swaps
   if (tid == 0) {
-    for (size_t src = row_offset; src < row_offset + nb; ++src) {
+    for (int src = row_offset; src < row_offset + nb; ++src) {
       auto dst = ip[src] - 1;
       if (src != dst) {
         thrust::swap(piv[src], piv[dst]);
@@ -667,7 +667,7 @@ batched_panel_colserial_fused_kernel(
     // 1. Pivot find (warp-shuffle reduction)
     auto my_max = static_cast<real_t>(-1);
     auto my_idx = -1;
-    for (size_t i = k + tid; i < m; i += BS) {
+    for (int i = k + tid; i < m; i += BS) {
       auto v = std::abs(A[LinOff(i, k, lda)]);
       if (v > my_max) {
         my_max = v;
@@ -703,7 +703,7 @@ batched_panel_colserial_fused_kernel(
     __syncthreads();
 
     if (std::abs(sdiag) != 0) {
-      for (size_t i = k + 1 + tid; i < m; i += BS) {
+      for (int i = k + 1 + tid; i < m; i += BS) {
         A[LinOff(i, k, lda)] /= sdiag;
       }
     }
