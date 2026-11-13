@@ -363,6 +363,8 @@ class ROCmGemmConfig(GemmConfig):
     matrix_instr_nonkdim: int = 16
     waves_per_eu: int = 0
     kpack: int = 1
+    # Keep num_stages instead of resetting it to the backend default.
+    pin_num_stages: bool = False
 
 
 @dataclasses.dataclass
@@ -1730,7 +1732,7 @@ class ROCmGemmArchProfile:
     Archs without an entry in _ROCM_GEMM_ARCH_PROFILES get the default profile,
     which keeps the generic ROCm behavior. Configs here are copied before use,
     and their num_stages is reset to the backend default like any other ROCm
-    config.
+    config unless pin_num_stages is set.
     """
 
     # Pool for the non-TMA persistent mm template, replacing
@@ -1760,7 +1762,7 @@ class ROCmGemmArchProfile:
 _ROCM_DEFAULT_GEMM_PROFILE = ROCmGemmArchProfile()
 
 # num_stages=2 below is a placeholder: _filter_configs resets it to the backend
-# default.
+# default unless pin_num_stages is set.
 _ROCM_GEMM_ARCH_PROFILES: dict[str, ROCmGemmArchProfile] = {
     "gfx950": ROCmGemmArchProfile(
         # The shared persistent_mm_configs pool (BLOCK_K=128, or 128x256x64)
@@ -1785,14 +1787,42 @@ _ROCM_GEMM_ARCH_PROFILES: dict[str, ROCmGemmArchProfile] = {
         persistent_max_workgroups_per_cu=2,
         cus_per_xcd=32,
         xcd_remap_tiles=frozenset([(128, 128, 64, 4), (128, 256, 32, 4)]),
-        # 32x32-MFMA versions of large tiles of mm_configs.
         extra_mm_configs=(
+            # 32x32-MFMA versions of large tiles of mm_configs.
             ROCmGemmConfig(128, 128, 64, 2, 4, group_m=16, matrix_instr_nonkdim=32),
             ROCmGemmConfig(128, 128, 64, 2, 8, group_m=8, matrix_instr_nonkdim=32),
             ROCmGemmConfig(128, 256, 32, 2, 4, group_m=16, matrix_instr_nonkdim=32),
             ROCmGemmConfig(128, 256, 64, 2, 8, group_m=4, matrix_instr_nonkdim=32),
             ROCmGemmConfig(256, 128, 32, 2, 4, group_m=4, matrix_instr_nonkdim=32),
             ROCmGemmConfig(256, 128, 64, 2, 8, group_m=4, matrix_instr_nonkdim=32),
+        )
+        # Configs that keep a non-default pipeline depth: 3 stages on large tiles
+        # for long K loops and on small tiles for tiny GEMMs, and 1 stage on two
+        # small tiles for tiny GEMMs.
+        + tuple(
+            ROCmGemmConfig(
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                group_m=group_m,
+                matrix_instr_nonkdim=nonkdim,
+                waves_per_eu=waves_per_eu,
+                pin_num_stages=True,
+            )
+            for block_m, block_n, block_k, num_stages, num_warps, group_m, nonkdim, waves_per_eu in [
+                (256, 128, 64, 3, 8, 4, 16, 0),
+                (128, 256, 64, 3, 8, 4, 16, 0),
+                (128, 256, 32, 3, 4, 16, 32, 0),
+                (256, 128, 32, 3, 4, 4, 32, 0),
+                (128, 128, 64, 3, 8, 8, 32, 0),
+                (256, 64, 64, 3, 8, 4, 16, 0),
+                (64, 32, 64, 3, 8, 8, 16, 0),
+                (32, 32, 128, 3, 4, 8, 16, 0),
+                (64, 16, 128, 1, 4, 8, 16, 2),
+                (32, 64, 64, 1, 4, 8, 16, 0),
+            ]
         ),
     ),
 }
@@ -2180,7 +2210,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         ROCm specific filtering
         """
         for c in configs:
-            c.num_stages = self.default_num_stages
+            if not getattr(c, "pin_num_stages", False):
+                c.num_stages = self.default_num_stages
         return super()._filter_configs(configs)
 
     def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
