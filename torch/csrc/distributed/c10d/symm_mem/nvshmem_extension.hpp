@@ -18,6 +18,19 @@ namespace c10d::nvshmem_extension {
 // Check if NVSHMEM is available
 TORCH_API bool is_nvshmem_available();
 
+enum class ShmemSignalOp : int64_t {};
+enum class ShmemCompareOp : int64_t {};
+
+TORCH_API ShmemSignalOp shmem_signal_set();
+TORCH_API ShmemSignalOp shmem_signal_add();
+
+TORCH_API ShmemCompareOp shmem_cmp_eq();
+TORCH_API ShmemCompareOp shmem_cmp_ne();
+TORCH_API ShmemCompareOp shmem_cmp_gt();
+TORCH_API ShmemCompareOp shmem_cmp_ge();
+TORCH_API ShmemCompareOp shmem_cmp_lt();
+TORCH_API ShmemCompareOp shmem_cmp_le();
+
 // Release the NVSHMEM team pool associated with a process group.
 TORCH_API void release_nvshmem_team_pool(const std::string& group_name);
 
