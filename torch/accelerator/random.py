@@ -60,6 +60,7 @@ def get_rng_state_all() -> list[Tensor]:
 
 def set_rng_state(new_state: Tensor, device: Device = None, /) -> None:
     r"""Set the RNG state of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>` on the given device.
+    If :func:`torch.accelerator.current_accelerator` returns ``None``, this function may be a no-op.
 
     Args:
         new_state (:class:`torch.Tensor`): The desired RNG state. Must be a contiguous CPU tensor of dtype `torch.uint8`.
@@ -67,8 +68,8 @@ def set_rng_state(new_state: Tensor, device: Device = None, /) -> None:
             If not given, uses :func:`torch.accelerator.current_device_index` by default.
 
     .. note::
-        On accelerators that support lazy initialization, the state is deferred
-        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, applying the state may be deferred
+        until the runtime is initialized. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
     if not torch._C._accelerator_isInitialized():
         with torch._C._DisableFuncTorch():
@@ -89,14 +90,17 @@ def set_rng_state(new_state: Tensor, device: Device = None, /) -> None:
 
 
 def set_rng_state_all(new_states: Iterable[Tensor]) -> None:
-    r"""Set the RNG state of the default :class:`torch.Generator` of all devices for the current :ref:`accelerator<accelerators>`.
+    r"""Set the RNG state of the default :class:`torch.Generator` of each device for the current :ref:`accelerator<accelerators>`.
+    The ``i``-th state in ``new_states`` is applied to device ``i``, so at most :func:`torch.accelerator.device_count` states may be given.
+    If :func:`torch.accelerator.current_accelerator` returns ``None``, this function may be a no-op.
 
     Args:
-        new_states (Iterable of :class:`torch.Tensor`): The desired RNG states for each device, each tensor of dtype `torch.uint8`.
+        new_states (Iterable of :class:`torch.Tensor`): The desired RNG states, typically obtained from
+            :func:`torch.accelerator.get_rng_state_all`. Each must be a contiguous CPU tensor of dtype `torch.uint8`.
 
     .. note::
-        On accelerators that support lazy initialization, the state is deferred
-        until the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+        On accelerators that support lazy initialization, applying the states may be deferred
+        until the runtime is initialized. See :ref:`lazy-initialization-and-fork-safety-note`.
     """
     for i, state in enumerate(new_states):
         set_rng_state(state, i)
