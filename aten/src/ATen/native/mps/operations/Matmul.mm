@@ -29,6 +29,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#include <c10/util/env.h>
 #include <c10/util/safe_conv.h>
 #include <algorithm>
 #include <limits>
