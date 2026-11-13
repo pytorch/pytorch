@@ -11719,6 +11719,70 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_simple_average(device, dtype)
 
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
+    @parametrize_test("momentum", [None, 0.1])
+    @parametrize_test("module,shape,empty_shape", [
+        subtest((nn.BatchNorm1d, (4, 2), (0, 2)), name="1d_empty_batch"),
+        subtest((nn.BatchNorm1d, (4, 2, 3), (0, 2, 3)), name="1d_3d_empty_batch"),
+        subtest((nn.BatchNorm1d, (4, 2, 3), (4, 2, 0)), name="1d_empty_spatial"),
+        subtest((nn.BatchNorm2d, (4, 2, 3, 3), (0, 2, 3, 3)), name="2d_empty_batch"),
+        subtest((nn.BatchNorm2d, (4, 2, 3, 3), (4, 2, 0, 3)), name="2d_empty_spatial"),
+        subtest((nn.BatchNorm3d, (4, 2, 3, 3, 3), (0, 2, 3, 3, 3)), name="3d_empty_batch"),
+        subtest((nn.BatchNorm3d, (4, 2, 3, 3, 3), (4, 2, 3, 0, 3)), name="3d_empty_spatial"),
+    ])
+    def test_batchnorm_empty_input_running_stats(self, device, dtype, momentum, module, shape, empty_shape):
+        bn = module(2, momentum=momentum, device=device, dtype=dtype).train()
+        reference = deepcopy(bn)
+        batches = [torch.randn(shape, device=device, dtype=dtype) for _ in range(2)]
+        for step in range(3):
+            for _ in range(2):
+                old_buffers = {name: buffer.clone() for name, buffer in bn.named_buffers()}
+                empty = torch.empty(empty_shape, device=device, dtype=dtype, requires_grad=True)
+                output = bn(empty)
+                self.assertEqual(output.shape, empty.shape)
+                self.assertEqual(output.dtype, dtype)
+                self.assertEqual(output.device, empty.device)
+                self.assertEqual(dict(bn.named_buffers()), old_buffers)
+                output.sum().backward()
+                self.assertEqual(empty.grad, torch.empty_like(empty))
+                self.assertEqual(bn.weight.grad, torch.zeros_like(bn.weight))
+                self.assertEqual(bn.bias.grad, torch.zeros_like(bn.bias))
+                bn.zero_grad(set_to_none=True)
+            if step < len(batches):
+                self.assertEqual(bn(batches[step]), reference(batches[step]))
+                self.assertEqual(dict(bn.named_buffers()), dict(reference.named_buffers()))
+        self.assertEqual(bn.num_batches_tracked, 2)
+
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
+    @parametrize_test("affine", [False, True])
+    @parametrize_test("training,track_running_stats", [(False, True), (False, False), (True, False)])
+    @parametrize_test("module,shape", [
+        subtest((nn.BatchNorm1d, (4, 2)), name="1d"),
+        subtest((nn.BatchNorm2d, (4, 2, 3, 3)), name="2d"),
+        subtest((nn.BatchNorm3d, (4, 2, 3, 3, 3)), name="3d"),
+    ])
+    def test_batchnorm_empty_input_modes(self, device, dtype, affine, training, track_running_stats, module, shape):
+        bn = module(
+            2, momentum=None, affine=affine, track_running_stats=track_running_stats,
+            device=device, dtype=dtype,
+        ).train(training)
+        reference = deepcopy(bn)
+        old_buffers = {name: buffer.clone() for name, buffer in bn.named_buffers()}
+        empty = torch.empty((0,) + shape[1:], device=device, dtype=dtype, requires_grad=True)
+        output = bn(empty)
+        self.assertEqual(output.shape, empty.shape)
+        self.assertEqual(dict(bn.named_buffers()), old_buffers)
+        output.sum().backward()
+        self.assertEqual(empty.grad, torch.empty_like(empty))
+        if affine:
+            self.assertEqual(bn.weight.grad, torch.zeros_like(bn.weight))
+            self.assertEqual(bn.bias.grad, torch.zeros_like(bn.bias))
+        data = torch.randn(shape, device=device, dtype=dtype)
+        self.assertEqual(bn(data), reference(data))
+        self.assertEqual(dict(bn.named_buffers()), dict(reference.named_buffers()))
+
     @onlyAccelerator
     @dtypes(torch.bfloat16, torch.half)
     def test_batchnorm_simple_average_mixed(self, device, dtype):

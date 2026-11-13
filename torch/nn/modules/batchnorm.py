@@ -184,7 +184,8 @@ class _BatchNorm(_NormBase):
         else:
             exponential_average_factor = self.momentum
 
-        if self.training and self.track_running_stats:
+        # Empty inputs do not update running statistics in the native path.
+        if self.training and self.track_running_stats and input.numel() > 0:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:  # type: ignore[has-type]
                 self.num_batches_tracked.add_(1)  # type: ignore[has-type]
