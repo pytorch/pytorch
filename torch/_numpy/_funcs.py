@@ -37,6 +37,33 @@ for name, func in itertools.chain(
     elif name == "einsum":
         # normalized manually
         decorated = func
+    elif name == "arange":
+        # NumPy's arange also accepts `dtype` as a 4th positional argument
+        # (its signature is `arange([start, ]stop, [step, ]dtype=None, ...)`).
+        # The generic normalizer funnels all positional args through the
+        # impl's first-parameter `ArrayLikeOrScalar` annotation (a dtype
+        # object would not survive that conversion), so peel the 4th
+        # positional into the `dtype` kwarg — preserving NumPy's exact error
+        # wording — and then normalize the annotated impl as usual.
+        normalized_impl = normalizer(func)
+
+        def _arangeimpl_positional_dtype(*args: object, **kwargs: object) -> object:
+            if len(args) == 4:
+                if "dtype" in kwargs:
+                    raise TypeError(
+                        "argument for arange() given by name ('dtype') "
+                        "and position (position 3)"
+                    )
+                kwargs["dtype"] = args[3]
+                args = args[:3]
+            elif len(args) > 4:
+                raise TypeError(
+                    "arange() takes from 0 to 4 positional arguments "
+                    f"but {len(args)} were given"
+                )
+            return normalized_impl(*args, **kwargs)
+
+        decorated = _arangeimpl_positional_dtype
     else:
         decorated = normalizer(func)
 
