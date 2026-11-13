@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import dataclasses
 import sys
 from unittest.mock import patch
 
@@ -28,7 +29,11 @@ from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
     DefaultSavePlanner,
 )
-from torch.distributed.checkpoint.filesystem import CURRENT_DCP_VERSION
+from torch.distributed.checkpoint.filesystem import (
+    CURRENT_DCP_VERSION,
+    FileSystemReader,
+)
+from torch.distributed.checkpoint.format_utils import dcp_to_torch_save
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
@@ -273,6 +278,46 @@ class TestSavePlan(TestCase):
         key = planner._cached_plans_key
         SavePlanner._cached_save_plan.pop(key, None)
         SavePlanner._cached_final_save_plan.pop(key, None)
+
+    @with_temp_dir
+    def test_plan_caching_with_flatten_mapping_change(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/204189
+        # Saving a nested state dict and then a flat one whose flattened
+        # FQN collides must not reuse the cached plan: the flatten mapping
+        # lives in planner_data and is merged into the checkpoint metadata.
+        tensor = torch.tensor([[0.0, 0.25], [0.5, 0.75]])
+        planner = DefaultSavePlanner(enable_plan_caching=True)
+        try:
+            # First save populates the plan cache with the nested mapping.
+            dcp.save(
+                {"a": {"b": tensor.clone()}},
+                checkpoint_id=f"{self.temp_dir}/first",
+                planner=planner,
+            )
+            # Same flattened FQN, values, shape and dtype; different nesting.
+            dcp.save(
+                {"a.b": tensor.clone()},
+                checkpoint_id=f"{self.temp_dir}/second",
+                planner=planner,
+            )
+
+            metadata = FileSystemReader(f"{self.temp_dir}/second").read_metadata()
+            self.assertEqual(("a.b",), tuple(metadata.planner_data["a.b"]))
+
+            dcp_to_torch_save(
+                f"{self.temp_dir}/second", f"{self.temp_dir}/converted.pt"
+            )
+            converted = torch.load(f"{self.temp_dir}/converted.pt", weights_only=True)
+            self.assertEqual(["a.b"], list(converted))
+            self.assertTrue(torch.equal(converted["a.b"], tensor))
+        finally:
+            # Clean up class-level caches
+            key = planner._cached_plans_key
+            SavePlanner._cached_save_plan.pop(key, None)
+            SavePlanner._cached_final_save_plan.pop(key, None)
+            SavePlanner._cached_all_plans.pop(key, None)
+            SavePlanner._cached_global_plan.pop(key, None)
+            SavePlanner._cached_metadata.pop(key, None)
 
     def test_global_plan(self):
         def create_data(rank):
@@ -737,6 +782,31 @@ class TestPlannerHelpers(TestCase):
         self.assertFalse(_compare_save_plans(plan1, plan2))
         self.assertTrue(_compare_save_plans(plan1, plan1))
         self.assertTrue(_compare_save_plans(plan2, plan2))
+
+    def test_compare_save_plans_planner_data(self):
+        def create_data(rank):
+            with with_dist(rank=rank, world_size=4):
+                tensor = torch.rand(10)
+                state_dict = {"tensor": tensor}
+                return create_default_local_save_plan(state_dict, rank == 0)
+
+        plan = create_data(0)
+        self.assertIsNone(plan.planner_data)
+
+        # Identical plans with the same planner_data still compare equal.
+        flat_plan = dataclasses.replace(plan, planner_data={"a.b": ("a.b",)})
+        same_flat_plan = dataclasses.replace(plan, planner_data={"a.b": ("a.b",)})
+        self.assertTrue(_compare_save_plans(flat_plan, same_flat_plan))
+
+        # Plans that differ only in planner_data (the flatten mapping)
+        # must not compare equal, in either direction.
+        nested_plan = dataclasses.replace(plan, planner_data={"a.b": ("a", "b")})
+        self.assertFalse(_compare_save_plans(nested_plan, flat_plan))
+        self.assertFalse(_compare_save_plans(flat_plan, nested_plan))
+
+        # planner_data present on only one side also compares unequal.
+        self.assertFalse(_compare_save_plans(plan, flat_plan))
+        self.assertFalse(_compare_save_plans(flat_plan, plan))
 
 
 class TestValidateGlobalPlan(TestCase):
