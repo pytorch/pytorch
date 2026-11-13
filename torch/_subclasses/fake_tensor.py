@@ -204,7 +204,7 @@ def _resolve_device_conflict(
 ) -> torch.device:
     # The device FakeTensor._find_common_device keeps for two fake inputs on
     # devices its other rules do not reconcile; the C++ fake fallback calls it
-    # too, through fake_resolve_device_conflict in c10/core/impl/PyInterpreter.h
+    # too, through _resolve_device_conflict in c10/core/impl/PyInterpreter.h
 
     # if prefer_device_type is set, prefer that device type over others
     prefer_device_type = torch._functorch.config.fake_tensor_prefer_device_type

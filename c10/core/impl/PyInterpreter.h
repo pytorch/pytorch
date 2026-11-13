@@ -250,7 +250,7 @@ struct C10_API PyInterpreterVTable {
   // and for ops that allow mixed devices do not reconcile them: the one whose
   // type torch._functorch.config.fake_tensor_prefer_device_type names, else it
   // raises FakeTensorDeviceMismatchError. Acquires the GIL.
-  virtual c10::Device fake_resolve_device_conflict(
+  virtual c10::Device _resolve_device_conflict(
       const c10::OperatorHandle& op,
       c10::Device common_device,
       c10::Device device) const = 0;
@@ -263,7 +263,7 @@ struct C10_API PyInterpreterVTable {
   // torch._subclasses.fake_tensor._check_for_subclass_arg of self's Python
   // object, false if it has none: whether FakeTensorMode returns
   // NotImplemented for an input of its type. Acquires the GIL.
-  virtual bool fake_is_unrecognized_subclass(const TensorImpl* self) const = 0;
+  virtual bool _check_for_subclass_arg(const TensorImpl* self) const = 0;
 
   // Note [C++ FakeTensor dispatch]
   // A fake tensor models a tensor on a logical device without allocating its
@@ -357,7 +357,7 @@ struct C10_API PyInterpreterVTable {
       PyObject* real) const = 0;
   // Converts real to a fake tensor of mode through mode's fake tensor
   // converter.
-  virtual c10::intrusive_ptr<TensorImpl> to_meta_tensor(
+  virtual c10::intrusive_ptr<TensorImpl> from_real_tensor(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       const c10::intrusive_ptr<TensorImpl>& real) const = 0;
   // Whether real tensor inputs are allowed: fake_tensor_tls's override if set,
