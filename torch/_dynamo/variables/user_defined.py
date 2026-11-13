@@ -117,7 +117,6 @@ from .base import (
     attr_getset,
     AttrMutationKind,
     GetSet,
-    maybe_get_python_type,
     Member,
     Method,
     MutationType,
@@ -145,7 +144,6 @@ from .object_protocol import (
     is_nb_not_implemented,
     mro_attr_source,
     mro_lookup,
-    pycallable_check,
     pynumber_as_ssize_t,
     pynumber_index,
     repr_guard,
@@ -173,8 +171,12 @@ _SAFE_C_SLOTS: OrderedSet[object] | None = None
 def _safe_c_slots() -> OrderedSet[object]:
     """C slot wrappers known to be safe to call at trace time.
 
-    Covers tp_hash and tp_richcompare slots for C extension types.
-    Used by UDOV's tp_hash_impl and tp_richcompare_impl MRO walks.
+    Covers tp_hash and tp_richcompare slots for C extension types, used by
+    UDOV's tp_hash_impl and tp_richcompare_impl MRO walks, and the
+    __getattribute__ wrappers of builtin types whose tp_getattro is
+    PyObject_GenericGetAttr, used by object_generic_getattr. A C type that
+    sets the slot explicitly gets its own wrapper, so identity with
+    object.__getattribute__ is not enough.
     """
     global _SAFE_C_SLOTS
     if _SAFE_C_SLOTS is None:
@@ -196,7 +198,35 @@ def _safe_c_slots() -> OrderedSet[object]:
             for dunder in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"):
                 if hasattr(tp, dunder):
                     _SAFE_C_SLOTS.add(getattr(tp, dunder))
+        for tp in (
+            object,
+            list,
+            tuple,
+            dict,
+            set,
+            frozenset,
+            collections.deque,
+            range,
+            str,
+            bytes,
+            bytearray,
+            int,
+            float,
+            complex,
+            slice,
+            torch.Size,
+        ):
+            _SAFE_C_SLOTS.add(tp.__getattribute__)
     return _SAFE_C_SLOTS
+
+
+def _normalize_custom_hash(value: int) -> int:
+    # slot_tp_hash preserves in-range Py_hash_t values, hashes overflowing
+    # integers, and reserves -1 for errors. Bypass int-subclass overrides.
+    value = int.__index__(value)
+    if not -sys.maxsize - 1 <= value <= sys.maxsize:
+        value = int.__hash__(value)
+    return -2 if value == -1 else value
 
 
 def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
@@ -822,7 +852,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, self.value.__base__, source)
         # __name__, __qualname__, __doc__, __module__,
         # __abstractmethods__, etc. — all C-level getset descriptors on type.
-        resolved = type.__getattribute__(self.value, name)
+        try:
+            resolved = type.__getattribute__(self.value, name)
+        except AttributeError as e:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=list(e.args),
+            )
+
         if source:
             return VariableTracker.build(tx, resolved, source)
         from . import ConstantVariable
@@ -976,7 +1014,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             descriptor_source = (
                 self.get_source_by_walking_mro(tx, name)
                 if self.source is not None
-                else source
+                else None
             )
             return VariableBuilder.create_internal_wrapper_descriptor(
                 cls_attr,
@@ -993,7 +1031,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             descriptor_source = (
                 self.get_source_by_walking_mro(tx, name)
                 if self.source is not None
-                else source
+                else None
             )
             return VariableBuilder.create_internal_method_descriptor(
                 cls_attr,
@@ -1393,16 +1431,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             items = mro.unpack_var_sequence(tx)
             return variables.ListVariable(items, mutation_type=ValueMutationNew())
         elif name == "fromkeys" and issubclass(self.value, dict):
-            if issubclass(self.value, collections.OrderedDict):
-                return tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.odict_fromkeys),
-                    [self, *args],
-                    kwargs,
-                )
-            no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
-            check_positional(tx, "fromkeys", len(args), 1, 2)
+            if not issubclass(self.value, collections.OrderedDict):
+                no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
+                check_positional(tx, "fromkeys", len(args), 1, 2)
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self, *args
+                tx, self, *args, **kwargs
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
@@ -1635,7 +1668,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return variables.DictBuiltinVariable.construct_dict(tx, *args, **kwargs)
+            return variables.DictBuiltinVariable.call_custom_dict(
+                tx, dict, *args, **kwargs
+            )
         elif self.value is collections.deque:
             maxlen = variables.ConstantVariable.create(None)
 
@@ -3698,6 +3733,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             hasattr(type(descriptor), "__set__")
             or hasattr(type(descriptor), "__delete__")
         ):
+            if self.cls_source is not None and is_constant_source(self.cls_source):
+                # Constant sources cannot guard a changed MRO or descriptor between calls.
+                unimplemented(
+                    gb_type="Descriptor mutation on a constant-source object",
+                    context=f"name={name_str}, class_source={self.cls_source.name}",
+                    explanation="Dynamo cannot guard the class metadata used to resolve "
+                    "a descriptor mutation on an object returned by a constant-result function.",
+                    hints=[
+                        "Pass the object as an input instead of returning it from a function "
+                        "marked with `torch._dynamo.assume_constant_result`.",
+                        "Move the descriptor mutation outside the compiled region.",
+                    ],
+                )
             desc_source = None
             if self.cls_source:
                 desc_source = self.get_source_by_walking_mro(tx, name_str)
@@ -4012,35 +4060,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     # Overrides the base __class__ getset to add the cls_source fallback above.
     tp_getset = {"__class__": GetSet(_class_vt, readonly_setter)}
 
-    def guard_attribute_absence(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> None:
-        cls = type(self.value)
-        if self.cls_source:
-            mro_attr_source(tx, cls, self.cls_source, name)
-            if not config.assume_dunder_attributes_remain_unchanged:
-                mro_attr_source(tx, cls, self.cls_source, "__getattr__")
-        effects = tx.output.side_effects
-        if not self.source or any(
-            effects.has_pending_mutation_of_attr(self, attr)
-            for attr in (name, "__dict__")
-        ):
-            return
-        # Guard storage rather than re-running a user getter while building/checking guards.
-        offset = type.__dict__["__dictoffset__"].__get__(cls)
-        if offset and not isinstance(
-            self.lookup_class_mro_attr("__dict__"), types.GetSetDescriptorType
-        ):
-            # Preserve the existing presence check when __dict__ is not a storage accessor.
-            install_guard(
-                self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
-            )
-            return
-        if offset and name not in object.__getattribute__(self.value, "__dict__"):
-            install_not_in_instance_dict_guard(self.source, name)
-
     def generic_getattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -4151,7 +4170,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return result
 
         # Step 7: AttributeError.
-        self.guard_attribute_absence(tx, name)
         raise_observed_exception(
             AttributeError,
             tx,
@@ -4588,42 +4606,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source = self._wrap_source(source)
         return source
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        if self.source:
-            install_guard(
-                self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
-            )
-
-        if not self._object_has_getattribute:
-            type_attr = self.lookup_class_mro_attr(name)
-            if (
-                (type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr))
-                and hasattr(self.value, "__dict__")
-                and not tx.output.side_effects.has_pending_mutation_of_attr(
-                    self,
-                    name,
-                    (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
-                )
-                and not tx.output.side_effects.has_pending_mutation_of_attr(
-                    self, "__dict__", AttrMutationKind.GENERIC_SETATTR
-                )
-                and self.has_key_in_generic_dict(tx, name)
-            ):
-                return variables.ConstantVariable.create(True)
-
-        try:
-            var_vt = self.tp_getattro_impl(tx, name)
-            return VariableTracker.build(
-                tx, not isinstance(var_vt, variables.DeletedVariable)
-            )
-        except ObservedAttributeError:
-            handle_observed_exception(tx)
-            return variables.ConstantVariable.create(False)
-
     def is_hashable(self) -> bool:
         # Mirrors the __hash__ is None check in tp_hash_impl's MRO walk.
         # Returns "Is this hashable in CPython?", not "can Dynamo trace the hash?".
@@ -4663,7 +4645,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if isinstance(result, FakeIdVariable):
                     return result.value, True
                 if isinstance(result, variables.SymNodeVariable):
-                    return int(result.evaluate_expr()), False
+                    return _normalize_custom_hash(int(result.evaluate_expr())), False
                 # CPython's slot_tp_hash validates PyLong_Check(res):
                 # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9543-L9548
                 try:
@@ -4690,10 +4672,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             *graph_break_hints.USER_ERROR,
                         ],
                     )
-                # Normalize int subclasses to a plain int (mirrors CPython's
-                # own PyLong_AsSsize_t-style coercion in slot_tp_hash), since
-                # `ConstantVariable` only holds plain literal types.
-                return int(result.as_python_constant()), False
+                return _normalize_custom_hash(result.as_python_constant()), False
             try:
                 in_allowlist = type_hash in _safe_c_tp_hash_funcs()
             except TypeError:
@@ -5428,15 +5407,20 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        init = self._maybe_get_baseclass_method("__init__")
-        if init is collections.OrderedDict.__init__:
-            return OrderedDictVariable.tp_init_impl(self, tx, args, kwargs)
-        if init is dict.__init__:
+        # Inherited dict/OrderedDict __init__ populates the underlying storage
+        # (CPython dict_init == dict.update); defaultdict.__init__'s first arg
+        # is the default_factory and has its own path.  Mirrors call_method's
+        # __init__ handling.
+        if self._maybe_get_baseclass_method("__init__") in (
+            dict.__init__,
+            collections.OrderedDict.__init__,
+        ):
             # dict_init calls the real C-level update directly, bypassing any
             # subclass override of update() -- self.call_method would
             # dispatch to an override if the subclass defines one, which is
             # wrong here (verified by CPython's test_override_update).
-            return ConstDictVariable.tp_init_impl(self, tx, args, kwargs)
+            ConstDictVariable.call_method(self, tx, "update", args, kwargs)
+            return variables.ConstantVariable.create(None)
         return super().tp_init_impl(tx, args, kwargs)
 
     def debug_repr(self) -> str:
@@ -5529,7 +5513,17 @@ class DefaultDictVariable(ConstDictVariable):
         val = arg.get_real_python_backed_value()
         if val is not NO_SUCH_SUBOBJ:
             return val is None or callable(val)
-        return pycallable_check(maybe_get_python_type(arg))
+        # Callables (functions, builtins, classes) are supported
+        return isinstance(
+            arg,
+            (
+                variables.BaseBuiltinVariable,
+                variables.functions.BaseUserFunctionVariable,
+                variables.functions.PolyfilledFunctionVariable,
+                variables.functions._WrappedSkipFunctionMethodDescriptorCommonVariable,
+                variables.UserDefinedClassVariable,
+            ),
+        )
 
     def is_python_constant(self) -> bool:
         if not self.default_factory.is_python_constant():
@@ -5639,15 +5633,25 @@ class DefaultDictVariable(ConstDictVariable):
         if not pydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
 
-        cls = VariableTracker.build(tx, type).call_function(tx, [self_], {})
-        new = cls.call_function(tx, [self_.default_factory, left], {})
-        if not isinstance(new, ConstDictVariable):
-            # PyDict_Update rejects a non-dict returned by the subclass constructor.
-            raise_observed_exception(
-                SystemError, tx, args=["bad argument to internal function"]
+        # A UserDefinedDictVariable is now itself a ConstDictVariable (MI), so
+        # `left.items` is the storage in both cases.
+        if not isinstance(left, ConstDictVariable):
+            raise AssertionError(
+                f"Expected ConstDictVariable, got {type(left)}: {left}"
             )
-        tx.output.side_effects.mutation(new)
-        new.dict_merge(tx, right)
+        items = left.materialize_keys()
+
+        new = tx.output.side_effects.track_new_user_defined_object(
+            VariableTracker.build(tx, dict),
+            VariableTracker.build(tx, collections.defaultdict),
+            [],
+            tx=tx,
+        )
+        new.default_factory = self.default_factory  # type: ignore[missing-attribute]
+        new.items.update(items)  # type: ignore[missing-attribute]
+        default_factory = new.default_factory  # type: ignore[missing-attribute]
+        tx.output.side_effects.store_attr(new, "default_factory", default_factory)
+        new.call_method(tx, "update", [right], {})
         return new
 
     def nb_inplace_or_impl(
@@ -5655,7 +5659,7 @@ class DefaultDictVariable(ConstDictVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        ConstDictVariable.dict_update(self, tx, [other], {})
+        self.call_method(tx, "update", [other], {})
         return self
 
     def tp_init_impl(

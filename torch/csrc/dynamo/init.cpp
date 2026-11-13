@@ -580,15 +580,10 @@ void initDynamoBindings(PyObject* torch) {
   _register_functions(dynamo);
 
   auto dynamo_module = py::handle(dynamo).cast<py::module>();
-  dynamo_module.def("is_generic_getattr", [](const py::type& type) {
-    return reinterpret_cast<PyTypeObject*>(type.ptr())->tp_getattro ==
-        PyObject_GenericGetAttr;
-  });
   dynamo_module.def(
       "has_slot", [](int64_t slots, const py::object& slot_bit_obj) {
         // Convert slot_bit to int - handle both int and pybind11 enums
-        const auto slot_bit =
-            py::cast<int64_t>(slot_bit_obj.attr("__index__")());
+        int64_t slot_bit = py::cast<int64_t>(slot_bit_obj.attr("__index__")());
         return (slots & (1LL << slot_bit)) != 0;
       });
   py::enum_<PySequenceSlotBit>(dynamo_module, "PySequenceSlots")

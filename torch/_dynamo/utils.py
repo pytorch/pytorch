@@ -1431,15 +1431,12 @@ def unpack_and_apply_fn(
 def lazily_unpack(
     tx: InstructionTranslatorBase,
     iterable: VariableTracker,
-    *,
-    allow_fast_path: bool = True,
 ):
     from .exc import handle_observed_exception, ObservedUserStopIteration
     from .variables.object_protocol import generic_getiter, pyiter_next
 
     iterable = iterable.realize()
-    # Interleaved callbacks may require observing the live iterator state.
-    if allow_fast_path and istype(iterable, _unpack_fast_types()):
+    if istype(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
         return
 
@@ -3150,7 +3147,7 @@ def specialize_symnode(arg: Any) -> Any:
         arg = arg.realize()
 
     if isinstance(arg, SymNodeVariable):
-        return ConstantVariable.create(arg.evaluate_expr())
+        return ConstantVariable.create(arg.evaluate_expr(), source=arg.source)
     return arg
 
 

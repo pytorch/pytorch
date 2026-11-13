@@ -28,11 +28,7 @@ from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, raise_type_error
 from ..guards import GuardBuilder, install_guard
-from ..source import (
-    is_constant_source,
-    is_from_local_source,
-    NonSerializableSetGetItemSource,
-)
+from ..source import is_constant_source, is_from_local_source
 from ..utils import (
     _item_debug_repr,
     check_constant_args,
@@ -259,11 +255,6 @@ class BaseSetVariable(VariableTracker):
         ):
             kwargs["source"] = None
         return super().clone(**kwargs)
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self.python_type(), name))
 
     def install_set_contains_guard(
         self, tx: "InstructionTranslatorBase", key: HashableTracker, contains: bool
@@ -543,25 +534,6 @@ class BaseSetVariable(VariableTracker):
         if self.source and not is_constant_source(self.source):
             tx.output.guard_on_key_order.add(self.source)
         return SetIterator.create(self.items)
-
-    def install_set_order_guard(self, tx: "InstructionTranslatorBase") -> None:
-        from .dicts import _contains_nan, _get_literal_key
-
-        if not self.source or is_constant_source(self.source):
-            return
-        # Literal sets guard membership as a whole. Reading their iteration order
-        # also needs positional guards, including before any traced mutations.
-        for index, key in enumerate(self.original_items):
-            source = NonSerializableSetGetItemSource(self.source, index)
-            if _contains_nan(_get_literal_key(key.vt)):
-                # CONSTANT_MATCH accepts any NaN; iteration observes its identity.
-                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            elif key.vt.source is None:
-                value = key.vt.as_python_constant()
-                if ConstantVariable.is_literal(value):
-                    install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
-                else:
-                    VariableTracker.build(tx, value, source, realize=True)
 
     def nb_or_impl(
         self,
@@ -1071,9 +1043,9 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
         pass
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .iter import DictKeysIterator
+        from .iter import SetIterator
 
-        return DictKeysIterator.create(self.items)
+        return SetIterator.create(self.items)
 
     def debug_repr(self) -> str:
         if not self.items:

@@ -9,6 +9,7 @@ import enum
 import functools
 import gc
 import inspect
+import io
 import itertools
 import keyword
 import math
@@ -395,71 +396,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             Unsupported, "slot-wrapper identity requires receiver guards"
         ):
             self._capture_method(fn, torch.ones(1), methods, capture=capture)
-
-    @parametrize("name", ["__getattr__", "__getattribute__"])
-    @parametrize("inherited", [False, True])
-    @torch._dynamo.config.patch(assume_dunder_attributes_remain_unchanged=False)
-    def test_defaulted_getattr_guards_added_lookup_hook(self, name, inherited):
-        class Base:
-            pass
-
-        class Input(Base):
-            pass
-
-        def getter(self, key):
-            return 7 if key == "value" else object.__getattribute__(self, key)
-
-        def fn(x, obj):
-            return x + getattr(obj, "value", 1)
-
-        x, obj = torch.ones(1), Input()
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        self.assertEqual(compiled(x, obj), x + 1)
-        setattr(Base if inherited else Input, name, getter)
-        self.assertEqual(compiled(x, obj), x + 7)
-        self.assertEqual(counter.frame_count, 2)
-
-    @torch._dynamo.config.patch(assume_dunder_attributes_remain_unchanged=False)
-    def test_defaulted_getattr_guards_replaced_lookup_hook(self):
-        class Input:
-            __getattribute__ = object.__getattribute__
-
-        def getter(self, key):
-            return 7 if key == "value" else object.__getattribute__(self, key)
-
-        def fn(x, obj):
-            return x + getattr(obj, "value", 1)
-
-        x, obj = torch.ones(1), Input()
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        self.assertEqual(compiled(x, obj), x + 1)
-        Input.__getattribute__ = getter
-        self.assertEqual(compiled(x, obj), x + 7)
-        self.assertEqual(counter.frame_count, 2)
-
-    def test_defaulted_getattr_reads_property_once(self):
-        class Input:
-            def __init__(self):
-                self.reads = 0
-
-            @property
-            def value(self):
-                self.reads += 1
-                return self.reads
-
-        def fn(x, obj):
-            return x + getattr(obj, "value", 9), obj.reads
-
-        x, obj = torch.ones(1), Input()
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        for _ in range(2):
-            obj.reads = 0
-            self.assertEqual(compiled(x, obj), (x + 1, 1))
-            self.assertEqual(obj.reads, 1)
-        self.assertEqual(counter.frame_count, 1)
 
     def test_shared_mro_owner_base_replacement(self):
         class Base:
@@ -3453,6 +3389,49 @@ partial_fn = functools.partial(fn, scale=2)
 
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_union_type_hasattr(self):
+        def fn(x, t):
+            return x + 1, hasattr(t, "__name__"), hasattr(t, "__args__")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(fn(x, int | None), opt_fn(x, int | None))
+
+    def test_hasattr_caching_getattr(self):
+        # Mirrors tempfile._TemporaryFileWrapper: __getattr__ caches into
+        # __dict__, so guards must not call it while they are built.
+        class Wrapper:
+            def __init__(self):
+                self.__dict__["file"] = io.BytesIO()
+
+            def __getattr__(self, name):
+                a = getattr(self.__dict__["file"], name)
+                setattr(self, name, a)
+                return a
+
+        def fn(w, x):
+            if hasattr(w, "seek"):
+                return x + 1
+            return x - 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        w = Wrapper()
+        self.assertEqual(opt_fn(w, x), x + 1)
+        self.assertIn("seek", w.__dict__)
+        self.assertEqual(opt_fn(w, x), x + 1)
+
+        # Found without __getattr__: hasattr must still guard on presence.
+        def fn_tag(w, x):
+            return x + 1 if hasattr(w, "tag") else x - 1
+
+        opt_fn_tag = torch.compile(fn_tag, backend="eager", fullgraph=True)
+        w = Wrapper()
+        w.tag = 1
+        self.assertEqual(opt_fn_tag(w, x), x + 1)
+        del w.tag
+        self.assertEqual(opt_fn_tag(w, x), x - 1)
 
     @make_test
     def test_list_clear(a, b):
@@ -7751,7 +7730,7 @@ class GraphModule(torch.nn.Module):
                     Unsupported,
                     "Prebound builtin method identity requires wrapper guards",
                 ):
-                    compiled(x, saved, saved)
+                    self._capture_method(fn, x, saved, saved, capture="cache")
             else:
                 for left, right in ((saved, saved), (saved, fresh), (saved, saved)):
                     self.assertEqual(compiled(x, left, right), fn(x, left, right))
@@ -8195,7 +8174,6 @@ class GraphModule(torch.nn.Module):
             "insert",
             "add",
             "subtract",
-            "dict_compare",
         ],
     )
     def test_builtin_method_cross_container_collisions(self, op):
@@ -8224,8 +8202,6 @@ class GraphModule(torch.nn.Module):
             if op in ("multi_union", "frozen_multi_union"):
                 kind = frozenset if op == "frozen_multi_union" else set
                 return x + len(kind().union({key}, {method}))
-            if op == "dict_compare":
-                return x + ({method: 1} == {key: 1})
             left, right = {method}, {key}
             if op in ("remove", "discard", "pop", "clear"):
                 before = method in right
