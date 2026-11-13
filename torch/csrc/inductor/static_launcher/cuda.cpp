@@ -775,7 +775,7 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
   // (or Parameter). Use CheckExact — a single Py_TYPE pointer comparison —
   // instead of THPVariable_Check which also calls PyObject_IsInstance.
   if (THPVariable_CheckExact(obj)) [[likely]] {
-    auto tensor = THPVariable_Unpack(obj);
+    const auto& tensor = THPVariable_Unpack(obj);
     TORCH_CHECK(
         tensor.defined(),
         "_FastCudaLauncher: received undefined tensor argument");
