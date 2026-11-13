@@ -12,15 +12,20 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/core/TransformationHelper.h>
+#include <array>
 #include <limits>
 #include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_philox_dropout_native.h>
 #include <ATen/ops/_philox_normal_native.h>
 #include <ATen/ops/_philox_randint_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 namespace at::native {
@@ -254,22 +259,26 @@ void philox_distribution_kernel(
   }
 }
 
-// Maps a row-major output index to offsets into two bounds broadcast to the output.
-template <typename index_t>
-OffsetCalculator<2, index_t> make_bounds_offset_calculator(
-    const Tensor& a, const Tensor& b) {
+// Maps a row-major output index to offsets into tensors broadcast to the output.
+template <typename index_t, typename... Ts>
+OffsetCalculator<1 + sizeof...(Ts), index_t> make_row_major_offset_calculator(
+    const Tensor& a, const Ts&... rest) {
+  constexpr int N = 1 + sizeof...(Ts);
   // Empty outputs launch no kernel, and IntDivider can't take a size of 0.
   const int64_t ndim = a.numel() == 0 ? 0 : a.dim();
   TORCH_CHECK(ndim <= MAX_DIMS,
-      "philox: tensor bounds support at most ", MAX_DIMS, " dims, got ", ndim);
+      "philox: tensor arguments support at most ", MAX_DIMS, " dims, got ", ndim);
   auto reversed = [](IntArrayRef r) {
     return c10::SmallVector<int64_t, MAX_DIMS>(r.rbegin(), r.rend());
   };
   auto sizes = reversed(a.sizes());
-  auto a_strides = reversed(a.strides());
-  auto b_strides = reversed(b.strides());
-  const int64_t* strides[] = {a_strides.data(), b_strides.data()};
-  return OffsetCalculator<2, index_t>(ndim, sizes.data(), strides);
+  std::array<c10::SmallVector<int64_t, MAX_DIMS>, N> strides{
+      reversed(a.strides()), reversed(rest.strides())...};
+  const int64_t* stride_ptrs[N];
+  for (int i = 0; i < N; i++) {
+    stride_ptrs[i] = strides[i].data();
+  }
+  return OffsetCalculator<N, index_t>(ndim, sizes.data(), stride_ptrs);
 }
 
 // double packs the four uint32 Philox outputs into two 64-bit values.
@@ -338,7 +347,7 @@ Tensor& _philox_uniform_tensor_cuda_(
     auto index_type = canUse32BitIndexMath(lo) && canUse32BitIndexMath(hi) ? kInt : kLong;
     AT_DISPATCH_INDEX_TYPES(index_type, "_philox_uniform_", [&] {
       using calc_index_t = std::make_unsigned_t<index_t>;
-      auto calc = make_bounds_offset_calculator<calc_index_t>(lo, hi);
+      auto calc = make_row_major_offset_calculator<calc_index_t>(lo, hi);
       auto param_func = [lo_ptr, hi_ptr, calc] __device__ (auto rand, int64_t idx) {
         auto offsets = calc.get(static_cast<calc_index_t>(idx));
         return static_cast<scalar_t>(at::transformation::uniform_real(
@@ -349,6 +358,54 @@ Tensor& _philox_uniform_tensor_cuda_(
     });
   });
   return self;
+}
+
+Tensor _philox_dropout_cuda(const Tensor& self, const Tensor& key, double p) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_dropout: self must be a floating point tensor, got ",
+      self.scalar_type());
+  TORCH_CHECK(p >= 0 && p <= 1, "_philox_dropout: p must be in [0, 1], got ", p);
+  auto result = at::empty_like(self);
+  // The kernel writes a contiguous output, so generate a strided result into a
+  // contiguous buffer rather than have the kernel copy the uninitialized result.
+  auto output = result.is_contiguous() ? result : at::empty(self.sizes(), self.options());
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_dropout", [&] {
+    using compute_t = dist_acctype<scalar_t>;
+    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
+      return uniform_sample<compute_t>(seed, offset);
+    };
+    const scalar_t* in_ptr = self.const_data_ptr<scalar_t>();
+    auto threshold = static_cast<compute_t>(p);
+    auto scale = static_cast<compute_t>(p == 1 ? 0.0 : 1.0 / (1.0 - p));
+    // Note: Multiply rather than select so NaN and inf propagate like native dropout.
+    if (self.is_contiguous()) {
+      auto param_func = [in_ptr, threshold, scale] __device__ (auto rand, int64_t idx) {
+        compute_t u = at::transformation::uniform_real(rand, compute_t(0), compute_t(1));
+        return static_cast<scalar_t>(
+            static_cast<compute_t>(in_ptr[idx]) * (u >= threshold ? scale : compute_t(0)));
+      };
+      philox_distribution_kernel<scalar_t>(
+          "_philox_dropout", output, key, sample_func, param_func);
+    } else {
+      auto index_type = canUse32BitIndexMath(self) ? kInt : kLong;
+      AT_DISPATCH_INDEX_TYPES(index_type, "_philox_dropout", [&] {
+        using calc_index_t = std::make_unsigned_t<index_t>;
+        auto calc = make_row_major_offset_calculator<calc_index_t>(self);
+        auto param_func = [in_ptr, threshold, scale, calc] __device__ (auto rand, int64_t idx) {
+          compute_t u = at::transformation::uniform_real(rand, compute_t(0), compute_t(1));
+          auto in = static_cast<compute_t>(in_ptr[calc.get(static_cast<calc_index_t>(idx))[0]]);
+          return static_cast<scalar_t>(in * (u >= threshold ? scale : compute_t(0)));
+        };
+        philox_distribution_kernel<scalar_t>(
+            "_philox_dropout", output, key, sample_func, param_func);
+      });
+    }
+  });
+  if (!output.is_same(result)) {
+    result.copy_(output);
+  }
+  return result;
 }
 
 Tensor& _philox_normal_cuda_(
@@ -395,7 +452,7 @@ Tensor& _philox_normal_tensor_cuda_(
     auto index_type = canUse32BitIndexMath(mu) && canUse32BitIndexMath(sigma) ? kInt : kLong;
     AT_DISPATCH_INDEX_TYPES(index_type, "_philox_normal_", [&] {
       using calc_index_t = std::make_unsigned_t<index_t>;
-      auto calc = make_bounds_offset_calculator<calc_index_t>(mu, sigma);
+      auto calc = make_row_major_offset_calculator<calc_index_t>(mu, sigma);
       auto param_func = [mu_ptr, sigma_ptr, calc] __device__ (compute_t rand, int64_t idx) {
         auto offsets = calc.get(static_cast<calc_index_t>(idx));
         return static_cast<scalar_t>(rand * sigma_ptr[offsets[1]] + mu_ptr[offsets[0]]);
