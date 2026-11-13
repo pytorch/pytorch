@@ -65,6 +65,17 @@ class CuteDSLTemplate(KernelTemplate):
         Maybe generates a new ChoiceCaller and appends it into existing choices.
         Returns None if success, otherwise returns the error.
         """
+        # CuteDSL template kernels are Python modules called from the Python
+        # wrapper; the C++ wrapper (JIT cpp_wrapper and AOTI) has no way to call
+        # them yet and used to fail late in finalize_prefix with "CudaKernelParamCache
+        # not populated". Refuse them up front so autotuning falls back to the
+        # other choices (same gate as FlyDSLTemplate.maybe_append_choice).
+        if getattr(V.graph, "cpp_wrapper", False) or getattr(
+            V.graph, "aot_mode", False
+        ):
+            return NotImplementedError(
+                "CuteDSL templates are not supported with the C++ wrapper / AOTInductor"
+            )
         try:
             choices.append(self.generate(**kwargs))
             return None
