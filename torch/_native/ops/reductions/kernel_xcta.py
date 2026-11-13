@@ -21,7 +21,7 @@ import torch
 
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
-from ...cutedsl.plan_cache import cached_plan
+from ...cutedsl.plan_cache import cached_plan, LRUCache
 from ...utils.device import check_current
 from . import (  # safe: kernel_general imports us only lazily
     kernel_general as _RB,
@@ -164,9 +164,11 @@ class FusedTwoStage:
         ).launch(grid=[mOuts[0].shape[0], 1, 1], block=[s2.block, 1, 1], stream=stream)
 
 
-# Cache kernels by vector class/config and geometry, boxed arguments (~6us), and declines by N.
+# _PLAN caches kernels by vector class and config. _GEOM caches each width's geometry and
+# boxed arguments (~6us), or its decline, keeping the 1024 most recently used; only _GEOM
+# is an LRU (see the cache note above kernel_general._COMPILE_CACHE for why).
 _PLAN = {}
-_GEOM = {}
+_GEOM = LRUCache(1024)
 
 
 def reduce_row_xcta(
@@ -245,11 +247,13 @@ def _reduce_row_xcta(
         _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
         device,
     )
-    geom = _GEOM.get(gkey)
-    if geom is None and gkey not in _GEOM:
-        geom = _GEOM[gkey] = _build_geom(
+    geom = cached_plan(
+        _GEOM,
+        gkey,
+        lambda: _build_geom(
             trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_target
-        )
+        ),
+    )
     if geom is None:  # memoized refusal (prime / poorly-factored N) -> K0
         return None
     C, s, fn, rexts, rstrides, kexts, kstrides, cnt, pn, s1nc, s1nw = geom
@@ -261,8 +265,10 @@ def _reduce_row_xcta(
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes]
-    fn(
-        _L.read_only(sub),
+    _L.launch(
+        fn,
+        device,
+        sub,
         list(parts),
         list(outs),
         rexts,
@@ -273,7 +279,6 @@ def _reduce_row_xcta(
         pn,
         s1nc,
         s1nw,
-        _L.stream(device),
     )
     # resize_ preserves ATen's non-aliasing scalar output; view-ness is observable.
     if flatten and M == 1:

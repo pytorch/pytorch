@@ -22,7 +22,7 @@ R = TypeVar("R")
 def check_current(index: int) -> None:
     # Plans compile on the current device, so a plan keyed under another device would be
     # handed to that device's later calls.
-    current = torch.cuda.current_device()
+    current = torch._C._cuda_getDevice()
     if index != current:
         raise AssertionError(f"input on cuda:{index}, but cuda:{current} is current")
 
@@ -40,9 +40,10 @@ def cuda_device_guard(
     def guarded(self: torch.Tensor, /, *args: P.args, **kwargs: P.kwargs) -> R:
         if not self.is_cuda:
             return fn(self, *args, **kwargs)
-        # get_device() avoids building a torch.device.
+        # get_device() avoids building a torch.device. _cuda_getDevice() initializes CUDA
+        # itself, so it skips torch.cuda.current_device()'s Python-side init check.
         index = self.get_device()
-        if index == torch.cuda.current_device():
+        if index == torch._C._cuda_getDevice():
             return fn(self, *args, **kwargs)
         with torch.cuda.device(index):
             return fn(self, *args, **kwargs)

@@ -117,7 +117,7 @@ class TestKernelColTile(TestCase):
         before = set(ct._CACHE)
         # One GPU has no other device, so pretend another one is current.
         other = x.get_device() + 1
-        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+        with mock.patch.object(torch._C, "_cuda_getDevice", return_value=other):
             with self.assertRaisesRegex(AssertionError, "is current"):
                 ct.reduce_col_tile(trait, "bydevice", x, torch.float32)
         self.assertEqual(set(ct._CACHE), before)
@@ -971,7 +971,7 @@ class TestOrderedColDevice(TestCase):
         before = set(ct._CACHE)
         # One GPU has no other device, so pretend another one is current.
         other = x.get_device() + 1
-        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+        with mock.patch.object(torch._C, "_cuda_getDevice", return_value=other):
             with self.assertRaisesRegex(AssertionError, "is current"):
                 ct.reduce_ordered_col(trait, "ordered_bydevice", x, [torch.float32], 1)
         self.assertEqual(set(ct._CACHE), before)

@@ -4,7 +4,9 @@
 # numerical coverage.
 
 import collections
+import contextlib
 import itertools
+import os
 import pathlib
 import re
 import sys
@@ -35,6 +37,7 @@ import cutlass.cute as cute
 from cutlass import Int32, Int64
 
 from torch._native.cutedsl import hw_caps as _hw, launch as _L
+from torch._native.cutedsl.plan_cache import LRUCache
 from torch._native.ops import reductions
 from torch._native.ops.reductions import (
     kernel_coltile as ct,
@@ -48,6 +51,31 @@ from torch._native.ops.reductions import (
 
 def _plan_tags(trait_key):
     return {key[0][1] for key in kg._PLAN if len(key[0]) > 2 and key[0][2] == trait_key}
+
+
+def _route_tags(trait_key):
+    """The tags of every plan trait_key's calls launched, from all reduction kernels."""
+    tags = _plan_tags(trait_key)
+    for cache in (rt._CACHE, ct._CACHE, xc._PLAN):
+        tags |= {key[0] for key in cache if key[1] == trait_key}
+    return tags
+
+
+@contextlib.contextmanager
+def _replays_only(test):
+    """Empty the plan caches around the body and check that it left them empty. Replays
+    read none of them, while every full-path launch refills the cache it launches from."""
+    caches = (kg._PLAN, rt._CACHE, ct._CACHE, xc._PLAN, xc._GEOM)
+    saved = [list(cache.items()) for cache in caches]
+    for cache in caches:
+        cache.clear()
+    try:
+        yield
+        test.assertEqual([len(cache) for cache in caches], [0] * len(caches))
+    finally:
+        for cache, items in zip(caches, saved, strict=True):
+            for key, value in items:
+                cache[key] = value
 
 
 class _DecodeProbe:
@@ -85,7 +113,7 @@ class TestKernelGeneral(TestCase):
         before = (set(kg._PLAN), set(kg._COMPILE_CACHE))
         # One GPU has no other device, so pretend another one is current.
         other = x.get_device() + 1
-        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+        with mock.patch.object(torch._C, "_cuda_getDevice", return_value=other):
             with self.assertRaisesRegex(AssertionError, "is current"):
                 kg.reduce_dim(trait, "bydevice", x, [0, 2], torch.float32)
         self.assertEqual((set(kg._PLAN), set(kg._COMPILE_CACHE)), before)
@@ -760,6 +788,292 @@ class TestKernelGeneral(TestCase):
         with self.assertRaisesRegex(AssertionError, "CUDA"):
             xc.reduce_row_xcta(trait, "inv_xcta", xt, torch.float32)
 
+    def _assert_replays(
+        self, key, make, dims, tags, trait=None, out_dtype=torch.float32, ref=None
+    ):
+        """Replay key's recordings on a fresh input from make() and match a fresh call and
+        a torch reference, by default fp32 sums against fp64 ones. The calls must launch
+        exactly the plans tagged `tags`."""
+        trait = trait or (lambda: T.SumOps(acc=cutlass.Float32))
+        # Holding x0 keeps the fresh input from reusing its allocation.
+        x0 = make()
+        first = kg.replay_reduce(trait, key, x0, dims, out_dtype)
+        recorded = first.clone()
+        entries = lambda: {k: r for k, r in kg._REPLAYS.items() if k[0] == key}  # noqa: E731
+        replays = entries()
+        self.assertTrue(replays)
+        self.assertNotIn(None, replays.values())
+        # A fresh input catches a replay that kept the recorded call's tensors.
+        x = make()
+        with _replays_only(self):
+            got = [kg.replay_reduce(trait, key, x, dims, out_dtype) for _ in range(2)]
+        self.assertEqual(entries(), replays)
+        if dims is None:
+            want = kg.reduce_all(trait(), key, x, out_dtype)
+        else:
+            want = kg.reduce_dim(trait(), key, x, dims, out_dtype)
+        with torch.backends.python_native.cutedsl.disabled():
+            if ref is not None:
+                reference = ref(x)
+            else:
+                wide = x.double()
+                reference = wide.sum() if dims is None else wide.sum(dims)
+        tol = (1e-2, 1e-3) if out_dtype.is_floating_point else (0, 0)
+        layout = lambda t: (t.shape, t.stride(), t.storage_offset())  # noqa: E731
+        for out in got:
+            self.assertEqual(out, want, atol=0, rtol=0)
+            self.assertEqual(out, reference.to(out_dtype), atol=tol[0], rtol=tol[1])
+            self.assertEqual(layout(out), layout(want))
+            nbytes = out.untyped_storage().nbytes()
+            self.assertEqual(nbytes, want.untyped_storage().nbytes())
+            self.assertIsNone(out._base)
+        self.assertNotEqual(got[0].data_ptr(), got[1].data_ptr())
+        self.assertEqual(first, recorded, atol=0, rtol=0)
+        self.assertEqual(_route_tags(key), tags)
+
+    @parametrize(
+        "case",
+        [
+            "row",
+            "ragged_row",
+            "wide_row",
+            "prime_row",
+            "column",
+            "batched_column",
+            "general",
+            "general_split",
+            "offset_row",
+            "all_oneshot",
+            "all_xcta",
+            "all_strided",
+        ],
+    )
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
+    def test_replay_matches_a_fresh_call(self, case):
+        split, col = {"gensplit1", "gensplit2"}, {"coltile", "coltile2b"}
+        shapes = {
+            "row": ((64, 256), [1], {"rowtile"}),
+            "ragged_row": ((64, 1023), [1], {"rowtile"}),
+            "wide_row": ((4, 1 << 20), [1], {"xcta"}),
+            "prime_row": ((3, 1000003), [1], split),
+            "column": ((4096, 256), [0], col),
+            "batched_column": ((8, 512, 64), [1], col),
+            "general": ((8, 16, 16), [0, 2], {"reduce"}),
+            "general_split": ((512, 4, 512), [0, 2], split),
+            "offset_row": ((3, 64, 256), [1], {"rowtile"}),
+            "all_oneshot": ((1000,), None, {"rowtile"}),
+            "all_xcta": ((1 << 22,), None, {"xcta"}),
+            "all_strided": ((1 << 21,), None, split),
+        }
+        cc = torch.cuda.get_device_capability()
+        if case == "batched_column" and cc not in kg._BATCHED_COL_CCS:
+            self.skipTest("the batched column route is measured on H100 and B200 only")
+        shape, dims, tags = shapes[case]
+        view = {"offset_row": lambda t: t[1], "all_strided": lambda t: t[::2]}
+        make = lambda: view.get(case, lambda t: t)(torch.randn(shape, device="cuda"))  # noqa: E731
+        key = f"replay_{case}"
+        self._assert_replays(key, make, dims, tags)
+        # The ragged-row route is measured on B200 only; elsewhere these rows take the
+        # non-ragged rowtile kernel.
+        if case == "ragged_row" and cc in kg._B200_CCS:
+            # Row keys carry ragged_vector, so an explicit ragged launch reuses the plan.
+            plans = lambda: {k for k in rt._CACHE if k[:2] == ("rowtile", key)}  # noqa: E731
+            routed = plans()
+            trait, kw = T.SumOps(acc=cutlass.Float32), {"ragged_vector": True}
+            rt.reduce_row_tile(trait, key, make(), [torch.float32], **kw)
+            self.assertEqual(plans(), routed)
+
+    @parametrize("case", ["row", "column", "ordered_column", "general", "all"])
+    def test_replay_matches_a_fresh_inner_tree_call(self, case):
+        # "column" has too few columns for the ordered column kernel, so it takes the
+        # indexed tree. "ordered_column" clears the ordered kernel's split band for narrow
+        # views (C = 128 from R = 32768) with exact partitions, so one stage-1 kernel's
+        # partials fold through the shared indexed-tree combine.
+        shape, dims, tags = {
+            "row": ((64, 256), [1], {"rowitree"}),
+            "column": ((4096, 256), [0], {"genitree"}),
+            "ordered_column": ((65536, 128), [0], {"ordered_col1", "genitree2"}),
+            "general": ((512, 4, 512), [0, 2], {"genitree1", "genitree2"}),
+            "all": ((1 << 22,), None, {"rowitree1", "rowitree2"}),
+        }[case]
+        cc = torch.cuda.get_device_capability()
+        if case == "ordered_column" and cc not in kg._ORDERED_COL_CCS:
+            self.skipTest("the ordered column route is measured on B200 only")
+        make = lambda: torch.randn(shape, device="cuda")  # noqa: E731
+        # Record, replay and the fresh call all run under the inner-tree order.
+        with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}):
+            self._assert_replays(f"replay_itree_{case}", make, dims, tags)
+
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
+    def test_replay_shares_grid_stride_plans_across_offsets(self):
+        # A prime length makes the cross-CTA split decline, leaving the grid-striding
+        # all1/all2 launches, whose plans box the input offset per call.
+        L, key = 1000003, "replay_all_prime"
+        for offset in (0, 1):
+            make = lambda o=offset: torch.randn(L + o, device="cuda")[o:]  # noqa: E731
+            self._assert_replays(key, make, None, {"all1", "all2"})
+        plans = [k for k in kg._PLAN if k[0][2] == key]
+        self.assertEqual(sorted(k[0][1] for k in plans), ["all1", "all2"])
+
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
+    def test_replay_multi_field_traits(self):
+        """Replay a two-field index reduction of a contiguous input."""
+        self._assert_replays(
+            "replay_argmax",
+            lambda: torch.randn(1 << 16, device="cuda"),
+            None,
+            # Index traits decline the cross-CTA split and 256 KiB exceeds one-shot rows.
+            {"all1", "all2"},
+            trait=lambda: T.ArgMaxOps(acc=cutlass.Float32),
+            out_dtype=torch.int64,
+            ref=torch.argmax,
+        )
+
+    def test_replay_declines_work_outside_launches(self):
+        # Index reduce-all copies a strided input with a torch op, which a replay cannot redo.
+        x = torch.randn(1 << 16, device="cuda")[::2]
+        trait = lambda: T.ArgMaxOps(acc=cutlass.Float32)  # noqa: E731
+        kg.replay_reduce(trait, "replay_copy", x, None, torch.int32)
+        (replay,) = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_copy"]
+        self.assertIsNone(replay)
+        x.normal_()
+        got = kg.replay_reduce(trait, "replay_copy", x, None, torch.int32)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.argmax().int()
+        self.assertEqual(got, want)
+        # A cached decline takes the full path without recording again, so a decline stored
+        # for an input that records stays a decline.
+        y = torch.randn(64, 256, device="cuda")
+        sums = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        # Drop a decline left by an earlier run in this process so this call records.
+        for k in [k for k in kg._REPLAYS if k[0] == "replay_seeded"]:
+            kg._REPLAYS.pop(k)
+        kg.replay_reduce(sums, "replay_seeded", y, 1, torch.float32)
+        (seeded,) = [k for k in kg._REPLAYS if k[0] == "replay_seeded"]
+        try:
+            self.assertIsNotNone(kg._REPLAYS.get(seeded))
+            kg._REPLAYS[seeded] = None
+            got = kg.replay_reduce(sums, "replay_seeded", y, 1, torch.float32)
+            self.assertIn(seeded, kg._REPLAYS)
+            self.assertIsNone(kg._REPLAYS.get(seeded))
+        finally:
+            kg._REPLAYS.pop(seeded)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = y.sum(dim=1)
+        self.assertEqual(got, want)
+
+    def test_replay_inside_a_recording_runs_unrecorded(self):
+        # A cold call inside a recording takes the full path and stores nothing, so the
+        # outer recording captures its launches.
+        x = torch.randn(64, 256, device="cuda")
+        trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        with _L.recording(x) as record:
+            out = kg.replay_reduce(trait, "replay_nested", x, 1, torch.float32)
+        self.assertNotIn("replay_nested", [k[0] for k in kg._REPLAYS])
+        replay = record.finish([out])
+        self.assertIsNotNone(replay)
+        fresh = torch.randn(64, 256, device="cuda")
+        with torch.backends.python_native.cutedsl.disabled():
+            want, fresh_want = x.sum(dim=1), fresh.sum(dim=1)
+        self.assertEqual(out, want)
+        self.assertEqual(replay(fresh)[0], fresh_want)
+
+    def test_replay_keeps_a_cow_input_shared(self):
+        # The recording comes from a plain input; the replay must still not materialize x.
+        trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        base = torch.randn(64, 256, device="cuda")
+        kg.replay_reduce(trait, "replay_cow", base, 1, torch.float32)
+        x = torch._lazy_clone(base)
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
+        ptr = x.const_data_ptr()
+        with _replays_only(self):
+            got = kg.replay_reduce(trait, "replay_cow", x, 1, torch.float32)
+        self.assertTrue(torch._C._is_cow_tensor(x))
+        self.assertEqual(x.const_data_ptr(), ptr)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = base.sum(dim=1)
+        self.assertEqual(got, want)
+
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
+    def test_replay_keys_on_alignment_and_inner_tree_order(self):
+        trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        aligned = torch.randn(64, 256, device="cuda")
+        # A storage sliced 4 bytes in matches every other key field.
+        storage = torch.randn(64 * 256 + 1, device="cuda").untyped_storage()[4:]
+        shifted = torch.empty(0, device="cuda").set_(storage, 0, (64, 256), (256, 1))
+        call = lambda x: kg.replay_reduce(trait, "replay_keys", x, 1, torch.float32)  # noqa: E731
+        for x in (shifted, aligned):
+            got = call(x)
+            with torch.backends.python_native.cutedsl.disabled():
+                want = x.sum(dim=1)
+            self.assertEqual(got, want)
+        # Unset, "" and "0" all leave the order off, so each replays the aligned entry.
+        with _replays_only(self):
+            for env in ({}, {rt._INNER_TREE_ENV: ""}, {rt._INNER_TREE_ENV: "0"}):
+                with mock.patch.dict(os.environ, env):
+                    if not env:
+                        os.environ.pop(rt._INNER_TREE_ENV, None)
+                    self.assertEqual(call(aligned), got, atol=0, rtol=0)
+        # "1" and "strict" both select the inner tree, but strict raises where "1" falls
+        # back, so each records its own entry.
+        want = kg.reduce_dim(
+            trait(), "x", aligned, 1, torch.float32, order="inner_tree"
+        )
+        for env in ("1", "strict"):
+            with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: env}):
+                self.assertEqual(call(aligned), want, atol=0, rtol=0)
+        entries = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_keys"]
+        self.assertEqual(len(entries), 4)
+        self.assertNotIn(None, entries)
+
+    def test_replay_keys_on_normalized_dims(self):
+        trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        x = torch.randn(4, 8, 16, device="cuda")
+        call = lambda d: kg.replay_reduce(trait, "replay_dims", x, d, torch.float32)  # noqa: E731
+        # -1 and 2 share one entry, and [2, 0] and [0, -1] another, so the second of each
+        # pair replays.
+        for dims, same in ((-1, 2), ([2, 0], [0, -1])):
+            with torch.backends.python_native.cutedsl.disabled():
+                want = x.sum(dim=dims)
+            self.assertEqual(call(dims), want)
+            with _replays_only(self):
+                self.assertEqual(call(same), want)
+        entries = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_dims"]
+        self.assertEqual(len(entries), 2)
+        self.assertNotIn(None, entries)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    def test_replay_requires_the_current_device(self):
+        # The warm path skips _reduce, so replay_reduce must check the device itself.
+        trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        x = torch.randn(64, 256, device="cuda:0")
+        call = lambda: kg.replay_reduce(trait, "replay_device", x, 1, torch.float32)  # noqa: E731
+        with torch.cuda.device(0):
+            call()
+        (replay,) = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_device"]
+        self.assertIsNotNone(replay)
+        with torch.cuda.device(1), self.assertRaisesRegex(AssertionError, "is current"):
+            call()
+
+    def test_offset_views_share_a_general_plan(self):
+        base = torch.randn(3, 8, 16, 16, device="cuda")
+        trait = T.SumOps(acc=cutlass.Float32)
+        for x in (base[1], base[2]):
+            got = kg.reduce_dim(trait, "offset_plan", x, [0, 2], torch.float32)
+            with torch.backends.python_native.cutedsl.disabled():
+                want = x.sum(dim=(0, 2))
+            self.assertEqual(got, want)
+        self.assertEqual(len([k for k in kg._PLAN if k[0][2] == "offset_plan"]), 1)
+
     def test_no_suppressed_asserts_survive(self):
         # Reject suppressed asserts directly because lint itself can be silenced.
         root = pathlib.Path(reductions.__file__).parent
@@ -770,6 +1084,64 @@ class TestKernelGeneral(TestCase):
             if "noqa: S101" in line
         ]
         self.assertEqual(offenders, [])
+
+
+class TestReplayRecords(TestCase):
+    """Host-side cache and recording checks; they launch nothing."""
+
+    def test_lru_cache_evicts_the_least_recently_used(self):
+        cache = LRUCache(2)
+        cache["a"], cache["b"] = 1, 2
+        cache.get("a")
+        cache["c"] = 3
+        self.assertEqual(list(cache), ["a", "c"])
+        self.assertIsNone(cache.get("b"))
+        self.assertEqual(cache.pop("a"), 1)
+        self.assertEqual(list(cache), ["c"])
+        self.assertIsNone(cache.pop("a", None))
+        with self.assertRaisesRegex(KeyError, "'a'"):
+            cache.pop("a")
+
+    def test_recordings_do_not_nest(self):
+        x = torch.randn(8)
+        with _L.recording(x), self.assertRaisesRegex(RuntimeError, "must not nest"):
+            with _L.recording(x):
+                pass
+
+    def test_launch_record_declines(self):
+        """Decline recordings a replay of the launches alone could not reproduce."""
+        x = torch.randn(8)
+        buf = torch.empty(8)
+        record = _L.LaunchRecord(x)
+        record.add(None, 0, x, (buf,))
+        self.assertIsNotNone(record.finish([buf[:4]]))
+        # A launch may read an earlier launch's output.
+        record = _L.LaunchRecord(x)
+        record.add(None, 0, x, (buf,))
+        record.add(None, 0, [buf], ())
+        self.assertIsNotNone(record.finish([buf]))
+        # A torch-op result returned without a launch writing it.
+        self.assertIsNone(record.finish([buf.clone()]))
+        # Outputs must view distinct buffers.
+        record = _L.LaunchRecord(x)
+        record.add(None, 0, x, (buf,))
+        self.assertIsNone(record.finish([buf, buf[:4]]))
+        # A storage first seen as both input and output of one launch.
+        record = _L.LaunchRecord(x)
+        record.add(None, 0, [buf], (buf,))
+        self.assertIsNone(record.finish([buf]))
+        cases = {
+            # A launch reads a torch-op result before any launch writes it.
+            "torch_op_input": (x * 2, ()),
+            "dtype_view": ([buf.view(torch.int32)], ()),
+            "tuple_hidden": (x, ((buf,),)),
+        }
+        for name, (ins, args) in cases.items():
+            with self.subTest(name):
+                record = _L.LaunchRecord(x)
+                record.add(None, 0, x, (buf,))
+                record.add(None, 0, ins, args)
+                self.assertIsNone(record.finish([buf]))
 
 
 instantiate_parametrized_tests(TestKernelGeneral)

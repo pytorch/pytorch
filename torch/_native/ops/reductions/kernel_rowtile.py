@@ -16,6 +16,7 @@ from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from ...utils.device import check_current
 from . import tile
+from .inner_tree_plan import _INNER_TREE_ENV
 from .kernel_general import (  # safe: kernel_general imports us only lazily
     _SM107_CCS,
     _SM107_DTYPES,
@@ -111,10 +112,10 @@ def one_thread_row_ok(
 
 # --- INNER-TREE ORDER (opt-in) --- Unlike launch-shape orders, this fixes the DAG from N,
 # making it hash-pinnable, and covers every N to prevent silent fallback. It costs
-# 0.92-1.41x the rolled fold and requires per-N compilation. Its independent env var avoids
-# affecting upstream kernels, which register first. `1` prefers the order and warns once when
-# a call cannot use it; `strict` raises instead, as an explicit order= argument does.
-_INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
+# 0.92-1.41x the rolled fold and requires per-N compilation. Its independent env var,
+# inner_tree_plan._INNER_TREE_ENV (PYTORCH_NATIVE_INNER_TREE), avoids affecting upstream
+# kernels, which register first. `1` prefers the order and warns once when a call cannot use
+# it; `strict` raises instead, as an explicit order= argument does.
 _INNER_TREE_STRICT = "strict"
 # Block size for both one-thread-per-row shapes and fixed multirow carry cap.
 _MULTIROW_ROWS_PER_BLOCK = 128
@@ -788,9 +789,8 @@ def _row_args(
     nchunks: Any,
     nwaves: Any,
     project_n: Any,
-    device: int,
 ) -> tuple[Any, ...]:
-    # Row kernels omit the column split and general-axis decode.
+    # Row kernels omit the column split and general-axis decode; the stream follows.
     return (
         inputs,
         outputs,
@@ -805,7 +805,6 @@ def _row_args(
         None,
         None,
         None,
-        _stream(device),
     )
 
 
@@ -815,7 +814,7 @@ def _launch_itree(
     plan: _ItreePlan,
     dt: Any,
     fakes: tuple[Sequence[Any], Sequence[Any]],
-    operands: tuple[Sequence[Any], Sequence[Any]],
+    operands: tuple[list[Any], list[Any]],
     N: int,
     tag: str,
     *,
@@ -851,11 +850,10 @@ def _launch_itree(
         device,
     ) + op.cache_sig
     nchunks, project_n = Int32(N // plan.vec), Int32(N)
-    args = lambda pair: _row_args(  # noqa: E731
-        pair[0], pair[1], nchunks, None, project_n, device
-    )
-    build = lambda: _compile(op, *args(fakes))  # noqa: E731
-    cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*args(operands))
+    args = lambda pair: _row_args(pair[0], pair[1], nchunks, None, project_n)  # noqa: E731
+    build = lambda: _compile(op, *args(fakes), _stream(device))  # noqa: E731
+    fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
+    _L.launch(fn, device, *args(operands))
 
 
 def _run_itree(
@@ -928,7 +926,7 @@ def _run_itree(
                 [fake_in],
                 [fake_1d(o, strided) for o, strided in zip(outs, strided_outs)],
             ),
-            ([_L.read_only(x)], list(outs)),
+            ([x], list(outs)),
             N,
             "rowitree",
             device=device,
@@ -951,7 +949,7 @@ def _run_itree(
         itree,
         dt,
         ([fake_in], [fake_1d(p) for p in parts]),
-        ([_L.read_only(x)], list(parts)),
+        ([x], list(parts)),
         N,
         "rowitree1",
         device=device,
@@ -982,7 +980,7 @@ def _run_itree(
             [fake_1d(p, align=a) for p, a in zip(parts, paligns)],
             [fake_1d(o, strided) for o, strided in zip(outs, strided_outs)],
         ),
-        ([_L.read_only(p) for p in parts], list(outs)),
+        (list(parts), list(outs)),
         N,
         "rowitree2",
         device=device,
@@ -1171,7 +1169,6 @@ def reduce_row_tile(
             nchunks,
             nwaves,
             Int32(N),
-            device,
         )
 
     # Pointer-dependent alignment is compiled, so include it in the key.
@@ -1184,7 +1181,7 @@ def reduce_row_tile(
         align,
         device,
     ) + op.cache_sig
-    build = lambda: _compile(op, *_fake())  # noqa: E731
+    build = lambda: _compile(op, *_fake(), _stream(device))  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
-    fn(*_row_args([_L.read_only(x)], list(outs), nchunks, nwaves, Int32(N), device))
+    _L.launch(fn, device, *_row_args([x], list(outs), nchunks, nwaves, Int32(N)))
     return tuple(outs)
