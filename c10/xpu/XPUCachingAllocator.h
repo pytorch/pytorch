@@ -33,12 +33,14 @@ class XPUAllocator : public DeviceAllocator {
 #if SYCL_COMPILER_VERSION >= 20260200
     namespace syclex = sycl::ext::oneapi::experimental;
     const auto arch = device.get_info<syclex::info::device::architecture>();
-    if (arch < syclex::architecture::intel_gpu_bmg_g21) {
+    // Only Xe2+ discrete GPUs need adjustment; integrated GPUs already account
+    // for the headroom in the reported free memory.
+    if (arch < syclex::architecture::intel_gpu_bmg_g21 ||
+        device.has(sycl::aspect::ext_oneapi_is_integrated_gpu)) {
       return {free, total};
     }
     // See
     // https://github.com/intel/compute-runtime/blob/master/programmers-guide/DEVICE_MEMORY_ACCOUNTING.md#umd-headroom.
-    constexpr double kIntegratedGpuUsableFraction = 0.94;
 #ifdef _WIN32
     constexpr double kDiscreteGpuUsableFraction = 0.98;
 #else
@@ -50,12 +52,8 @@ class XPUAllocator : public DeviceAllocator {
         std::make_tuple(major, minor, patch) > std::make_tuple(1, 18, 40196);
     const double kDiscreteGpuUsableFraction = is_new_driver ? 0.98 : 0.95;
 #endif
-    const double usable_fraction =
-        device.has(sycl::aspect::ext_oneapi_is_integrated_gpu)
-        ? kIntegratedGpuUsableFraction
-        : kDiscreteGpuUsableFraction;
     const size_t free_adjust =
-        free + static_cast<size_t>((1 - usable_fraction) * total);
+        free + static_cast<size_t>((1 - kDiscreteGpuUsableFraction) * total);
     TORCH_CHECK(
         free_adjust <= total, "Calculated free memory exceeds total memory.");
     return {free_adjust, total};
