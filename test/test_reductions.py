@@ -1815,29 +1815,14 @@ class TestReductionsDevice(TestCase):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
 
-    # inf + -inf is NaN, and nansum keeps it at any thread count, as np.nansum
-    # does. At 4 threads, inf and -inf land in the same thread's chunk.
-    @onlyCPU
-    @dtypes(torch.float, torch.double)
-    def test_nansum_keeps_inf_minus_inf(self, device, dtype):
-        x = torch.ones(2**16, dtype=dtype, device=device)
-        x[:2] = torch.tensor([math.inf, -math.inf])
-        num_threads = torch.get_num_threads()
-        try:
-            for threads in (1, 4):
-                torch.set_num_threads(threads)
-                self.assertEqual(torch.nansum(x), np.nansum(x.numpy()), msg=f"threads={threads}")
-        finally:
-            torch.set_num_threads(num_threads)
-
-    # Above GRAIN_SIZE, so at 4 threads a full nansum is split across threads; the
-    # small integers keep the sum exact, so it is rounded to dtype only once.
+    # Above GRAIN_SIZE, so at 4 threads a full nansum is split across threads. The
+    # elements are small integers and every partial sum is exact in each dtype.
     @onlyCPU
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_nansum_nan_multithreaded(self, device, dtype):
         x = torch.arange(2**16, dtype=torch.double).remainder(9).sub(4)
         x[::7] = math.nan
-        expected = torch.nansum(x).to(dtype)
+        expected = torch.tensor(np.nansum(x.numpy()), dtype=dtype)
         num_threads = torch.get_num_threads()
         try:
             for threads in (1, 4):

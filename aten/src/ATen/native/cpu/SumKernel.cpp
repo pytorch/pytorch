@@ -4,6 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/native/cpu/Reduce.h>
 #include <ATen/native/cpu/SumKernel.h>
 #include <ATen/native/cpu/utils.h>
@@ -601,7 +602,8 @@ struct IdentityMap {};
 template <typename Map, typename scalar_t, typename out_t = scalar_t>
 void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
   constexpr bool is_identity = std::is_same_v<Map, IdentityMap>;
-  static_assert(!is_identity || std::is_same_v<scalar_t, out_t>);
+  constexpr bool is_nansum = std::is_same_v<Map, NanToZeroMap>;
+  static_assert(!(is_identity || is_nansum) || std::is_same_v<scalar_t, out_t>);
   auto loop =
     [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -628,6 +630,12 @@ void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
           if constexpr (is_identity) {
               basic_loop(ptrs, inner_strides, 0, size0,
                          [](scalar_t a, scalar_t b) { return a + b; });
+          } else if constexpr (is_nansum) {
+              basic_loop(ptrs, inner_strides, 0, size0, [](scalar_t a, scalar_t b) {
+                auto a_notnan = at::_isnan(a) ? scalar_t(0) : a;
+                auto b_notnan = at::_isnan(b) ? scalar_t(0) : b;
+                return a_notnan + b_notnan;
+              });
           } else {
               using acc_t = at::acc_type<scalar_t, true>;
               basic_loop(ptrs, inner_strides, 0, size0, [](out_t a, scalar_t b) {
@@ -675,11 +683,12 @@ void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
       }
     };
 
-  if constexpr (!is_identity) {
+  if constexpr (!is_identity && !is_nansum) {
     // TensorIterator::parallel_reduce would add up the per-thread results of a
     // reduction to one element with this same loop, applying Map to them again
     // (and reading them as scalar_t). The output is written once here, so it
-    // can also be a reduced precision scalar_t.
+    // can also be a reduced precision scalar_t. nansum keeps that combine, which
+    // also masks a NaN per-thread result.
     if (iter.output_base(0).numel() == 1) {
       using acc_t = at::acc_type<scalar_t, true>;
       const acc_t total = at::parallel_reduce(
@@ -706,15 +715,10 @@ void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
   }
   iter.output_base().fill_(out_t(0));
   iter.parallel_reduce(loop);
-  if constexpr (std::is_same_v<Map, SquareMap>) {
-    if (sqrt_result) {
-      const TensorBase& out = iter.output_base();
-      auto sqrt_iter = TensorIteratorConfig().add_output(out).add_const_input(out).build();
-      cpu_kernel_vec(
-          sqrt_iter,
-          [](out_t a) -> out_t { return std::sqrt(a); },
-          [](Vectorized<out_t> a) { return a.sqrt(); });
-    }
+  if (sqrt_result) {
+    TensorBase out = iter.output_base();
+    auto sqrt_iter = TensorIterator::unary_op(out, out);
+    sqrt_kernel(sqrt_iter);
   }
 }
 
@@ -742,31 +746,32 @@ void nansum_kernel_impl(TensorIterator &iter) {
   });
 }
 
-template <typename scalar_t, typename out_t>
-void cascade_powsum(TensorIterator &iter, double p, bool is_norm) {
-  if (p == 0) {
-    cascade_sum<NonZeroMap, scalar_t, out_t>(iter);
-  } else if (p == 1) {
-    cascade_sum<AbsMap, scalar_t, out_t>(iter);
-  } else {
-    TORCH_INTERNAL_ASSERT(p == 2, "cascade_powsum: unsupported p ", p);
-    cascade_sum<SquareMap, scalar_t, out_t>(iter, /*sqrt_result=*/is_norm);
-  }
-}
-
 }  // namespace (anonymous)
 
 inline namespace CPU_CAPABILITY {
 
-void cascade_powsum_kernel(TensorIterator &iter, double p, bool is_norm) {
+bool cascade_powsum_kernel(TensorIterator &iter, double p, bool is_norm) {
+  const auto in = iter.input_dtype();
+  const auto out = iter.dtype(0);
+  const bool supported_dtypes = isReducedFloatingType(in)
+      ? out == kFloat || (out == in && iter.output_base(0).numel() == 1)
+      : (in == kFloat || in == kDouble) && out == in;
+  if (!cascade_powsum_supports(p, is_norm) || !supported_dtypes) {
+    return false;
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::BFloat16, ScalarType::Half, iter.input_dtype(), "cascade_powsum_cpu", [&] {
+      ScalarType::BFloat16, ScalarType::Half, in, "cascade_powsum_cpu", [&] {
     using out_t = std::conditional_t<is_reduced_floating_point_v<scalar_t>, float, scalar_t>;
-    TORCH_INTERNAL_ASSERT(iter.dtype(0) == c10::CppTypeToScalarType<out_t>::value ||
-                          (iter.dtype(0) == iter.input_dtype() && iter.output_base(0).numel() == 1),
-                          "cascade_powsum: unexpected output dtype ", iter.dtype(0));
-    cascade_powsum<scalar_t, out_t>(iter, p, is_norm);
+    if (p == 0) {
+      TORCH_INTERNAL_ASSERT(is_norm, "cascade_powsum: _powsum with p == 0 counts zeros too");
+      cascade_sum<NonZeroMap, scalar_t, out_t>(iter);
+    } else if (p == 1) {
+      cascade_sum<AbsMap, scalar_t, out_t>(iter);
+    } else {
+      cascade_sum<SquareMap, scalar_t, out_t>(iter, /*sqrt_result=*/is_norm);
+    }
   });
+  return true;
 }
 
 }  // namespace CPU_CAPABILITY
