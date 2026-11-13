@@ -521,7 +521,8 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager")(), fn())
 
-    def test_custom_op_fallback(self):
+    @fake_tensor_modes
+    def test_custom_op_fallback(self, mode_cls):
         from torch.library import _scoped_library, impl
 
         with _scoped_library("my_test_op", "DEF") as test_lib:
@@ -532,12 +533,10 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                 return self.cos()
 
             x = torch.empty(2, 2, device="cpu")
-            exc, msg = expectedIfCppFakeTensor(
-                (RuntimeError, "my_test_op::foo"),
-                (UnsupportedOperatorException, "my_test_op.foo.default"),
-            )
-            with self.assertRaisesRegex(exc, msg):
-                with FakeTensorMode(allow_fallback_kernels=True) as mode:
+            with self.assertRaisesRegex(
+                UnsupportedOperatorException, "my_test_op.foo.default"
+            ):
+                with mode_cls(allow_fallback_kernels=True) as mode:
                     x = mode.from_tensor(x)
                     torch.ops.my_test_op.foo(x)
 
