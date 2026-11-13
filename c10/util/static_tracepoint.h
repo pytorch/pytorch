@@ -9,12 +9,18 @@
 
 #define TORCH_SDT(name, ...) \
   TORCH_SDT_PROBE_N(         \
-      pytorch, name, 0, TORCH_SDT_NARG(0, ##__VA_ARGS__), ##__VA_ARGS__)
+      pytorch,               \
+      name,                  \
+      0,                     \
+      TORCH_SDT_NARG(0 __VA_OPT__(, ) __VA_ARGS__) __VA_OPT__(, ) __VA_ARGS__)
 // Use TORCH_SDT_DEFINE_SEMAPHORE(name) to define the semaphore
 // as global variable before using the TORCH_SDT_WITH_SEMAPHORE macro
 #define TORCH_SDT_WITH_SEMAPHORE(name, ...) \
   TORCH_SDT_PROBE_N(                        \
-      pytorch, name, 1, TORCH_SDT_NARG(0, ##__VA_ARGS__), ##__VA_ARGS__)
+      pytorch,                              \
+      name,                                 \
+      1,                                    \
+      TORCH_SDT_NARG(0 __VA_OPT__(, ) __VA_ARGS__) __VA_OPT__(, ) __VA_ARGS__)
 #define TORCH_SDT_IS_ENABLED(name) (TORCH_SDT_SEMAPHORE(pytorch, name) > 0)
 
 #else
