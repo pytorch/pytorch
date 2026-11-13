@@ -27,7 +27,11 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
@@ -37,9 +41,122 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
     with_comms,
 )
+from torch.utils._debug_mode import DebugMode
 
 
 funcol = torch.ops.c10d_functional
+
+
+F = torch.nn.functional
+
+# name -> (spatial_rank, fn); fn returns a tuple whose first element is pooled values.
+POOL_BACKWARD_FNS = {
+    "avg_pool2d": (2, lambda t: (F.avg_pool2d(t, 2),)),
+    "max_pool2d": (2, lambda t: F.max_pool2d(t, 2, return_indices=True)),
+    "adaptive_avg_pool2d": (2, lambda t: (F.adaptive_avg_pool2d(t, (4, 4)),)),
+    "adaptive_max_pool2d": (
+        2,
+        lambda t: F.adaptive_max_pool2d(t, (4, 4), return_indices=True),
+    ),
+    "avg_pool3d": (3, lambda t: (F.avg_pool3d(t, 2),)),
+    "max_pool3d": (3, lambda t: F.max_pool3d(t, 2, return_indices=True)),
+    "adaptive_avg_pool3d": (3, lambda t: (F.adaptive_avg_pool3d(t, (4, 4, 4)),)),
+    "adaptive_max_pool3d": (
+        3,
+        lambda t: F.adaptive_max_pool3d(t, (4, 4, 4), return_indices=True),
+    ),
+}
+
+
+aten = torch.ops.aten
+
+
+def _max_pool_idx(t):
+    pool = F.max_pool2d if t.ndim == 4 else F.max_pool3d
+    return pool(t, 3, 2, return_indices=True)[1]
+
+
+def _adaptive_max_pool_idx(t):
+    if t.ndim == 4:
+        return F.adaptive_max_pool2d(t, (5, 5), return_indices=True)[1]
+    return F.adaptive_max_pool3d(t, (3, 3, 3), return_indices=True)[1]
+
+
+# name -> (spatial_rank, indices fn, backward fn, linear in grad_output).
+# Kernel 3 / stride 2 and the adaptive output sizes make the windows overlap,
+# so the indices contain duplicates.
+POOL_BACKWARD_PARTIAL_FNS = {
+    "avg_pool2d_backward": (
+        2,
+        _max_pool_idx,
+        lambda g, x, i: aten.avg_pool2d_backward(
+            g, x, [3, 3], [2, 2], [0, 0], False, True, None
+        ),
+        True,
+    ),
+    "avg_pool3d_backward": (
+        3,
+        _max_pool_idx,
+        lambda g, x, i: aten.avg_pool3d_backward(
+            g, x, [3, 3, 3], [2, 2, 2], [0, 0, 0], False, True, None
+        ),
+        True,
+    ),
+    "_adaptive_avg_pool2d_backward": (
+        2,
+        _adaptive_max_pool_idx,
+        lambda g, x, i: aten._adaptive_avg_pool2d_backward(g, x),
+        True,
+    ),
+    "_adaptive_avg_pool3d_backward": (
+        3,
+        _adaptive_max_pool_idx,
+        lambda g, x, i: aten._adaptive_avg_pool3d_backward(g, x),
+        True,
+    ),
+    "max_pool2d_with_indices_backward": (
+        2,
+        _max_pool_idx,
+        lambda g, x, i: aten.max_pool2d_with_indices_backward(
+            g, x, [3, 3], [2, 2], [0, 0], [1, 1], False, i
+        ),
+        True,
+    ),
+    "max_pool3d_with_indices_backward": (
+        3,
+        _max_pool_idx,
+        lambda g, x, i: aten.max_pool3d_with_indices_backward(
+            g, x, [3, 3, 3], [2, 2, 2], [0, 0, 0], [1, 1, 1], False, i
+        ),
+        True,
+    ),
+    "adaptive_max_pool2d_backward": (
+        2,
+        _adaptive_max_pool_idx,
+        lambda g, x, i: aten.adaptive_max_pool2d_backward(g, x, i),
+        True,
+    ),
+    "adaptive_max_pool3d_backward": (
+        3,
+        _adaptive_max_pool_idx,
+        lambda g, x, i: aten.adaptive_max_pool3d_backward(g, x, i),
+        True,
+    ),
+    # max_unpool keeps one of the duplicates instead of adding them, so it is
+    # not linear and a Partial input must be reduced first.
+    "max_unpool2d": (
+        2,
+        _max_pool_idx,
+        lambda g, x, i: aten.max_unpool2d(g, i, x.shape[2:]),
+        False,
+    ),
+    "max_unpool3d": (
+        3,
+        _max_pool_idx,
+        lambda g, x, i: aten.max_unpool3d(g, i, x.shape[2:], [2, 2, 2], [0, 0, 0]),
+        False,
+    ),
+}
 
 
 class DistMathOpsTest(DTensorContinuousTestBase):
@@ -841,6 +958,47 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         # partial result
         partial_out = torch.ops.aten.linalg_vector_norm(partial_grad, 2)
         self.assertEqual(partial_out.full_tensor(), out)
+
+    @with_comms
+    def test_vector_norm_low_precision(self):
+        # A shard norm of 256 squares past the fp16 max of 65504, so the
+        # partial norm must be reduced in fp32 and cast back.
+        device_mesh = self.build_device_mesh()
+        n = 2 * self.world_size
+        inputs = {
+            "one 256": lambda dtype: torch.tensor(
+                [256.0] + [0.0] * (n - 1), dtype=dtype
+            ),
+            "all 200": lambda dtype: torch.full((n,), 200.0, dtype=dtype),
+        }
+        for dtype in (torch.float16, torch.bfloat16):
+            for name, make in inputs.items():
+                with self.subTest(dtype=dtype, input=name):
+                    grad = make(dtype)
+                    out = torch.linalg.vector_norm(grad)
+                    dgrad = distribute_tensor(grad, device_mesh, [Shard(0)])
+                    with DebugMode(record_torchfunction=False) as debug_mode:
+                        sharded_out = torch.linalg.vector_norm(dgrad)
+                        full_out = sharded_out.full_tensor()
+                    self.assertIn(
+                        "_c10d_functional::all_reduce(t: f32[]",
+                        debug_mode.debug_string(),
+                    )
+                    self.assertEqual(sharded_out.dtype, dtype)
+                    self.assertEqual(full_out, out)
+
+                    # clip_grad_norm_ must clip like one device, not zero the grad.
+                    ref = torch.nn.Parameter(torch.zeros_like(grad))
+                    ref.grad = grad.clone()
+                    torch.nn.utils.clip_grad_norm_([ref], max_norm=1.0)
+                    param = torch.nn.Parameter(
+                        distribute_tensor(
+                            torch.zeros_like(grad), device_mesh, [Shard(0)]
+                        )
+                    )
+                    param.grad = distribute_tensor(grad, device_mesh, [Shard(0)])
+                    torch.nn.utils.clip_grad_norm_([param], max_norm=1.0)
+                    self.assertEqual(param.grad.full_tensor(), ref.grad)
 
     @with_comms
     def test_foreach_norm(self):
@@ -1736,6 +1894,69 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertTrue(result.placements[0].is_shard(0))
 
     @with_comms
+    @parametrize("name", list(POOL_BACKWARD_FNS))
+    @parametrize("batched", [True, False])
+    @parametrize("shard_dim", [0, 1])
+    def test_pooling_backward(self, name, batched, shard_dim):
+        spatial_rank, fn = POOL_BACKWARD_FNS[name]
+        device_mesh = self.build_device_mesh()
+        # Spatial size 9 keeps pooling windows misaligned with shard boundaries,
+        # so wrongly sharding a spatial dim gives wrong results or errors.
+        shape = (12,) * (2 if batched else 1) + (9,) * spatial_rank
+        x = torch.randn(*shape, device=self.device_type, requires_grad=True)
+        dt_x = distribute_tensor(x.detach(), device_mesh, [Shard(shard_dim)])
+        dt_x.requires_grad_()
+
+        out = fn(x)
+        out[0].sum().backward()
+        with CommDebugMode() as comm_mode:
+            dt_out = fn(dt_x)
+            dt_out[0].sum().backward()
+
+        for o, dt_o in zip(out, dt_out, strict=True):
+            self.assertEqual(dt_o.full_tensor(), o)
+        self.assertEqual(dt_x.grad.full_tensor(), x.grad)
+        # Unbatched dim 1 is spatial, so it must be redistributed.
+        if batched or shard_dim == 0:
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertTrue(dt_out[0].placements[0].is_shard(shard_dim))
+            self.assertTrue(dt_x.grad.placements[0].is_shard(shard_dim))
+
+    @with_comms
+    @parametrize("op_name", list(POOL_BACKWARD_PARTIAL_FNS))
+    @parametrize("reduce_op", ["sum", "avg"])
+    def test_pooling_backward_partial(self, op_name, reduce_op):
+        spatial_rank, index_fn, fn, linear = POOL_BACKWARD_PARTIAL_FNS[op_name]
+        device_mesh = self.build_device_mesh()
+        size = 16 if spatial_rank == 2 else 8
+        x = torch.randn(12, 12, *(size,) * spatial_rank, device=self.device_type)
+        idx = index_fn(x)
+        # Positions that share an index get the same value, so the reference
+        # does not depend on which duplicate max_unpool happens to keep.
+        values = torch.randn(12, 12, size**spatial_rank, device=self.device_type)
+        g = values.gather(2, idx.flatten(2)).view_as(idx)
+        # Every rank holds a different share; the shares reduce back to g.
+        shares = torch.randn(self.world_size, *g.shape, device=self.device_type)
+        total = g if reduce_op == "sum" else g * self.world_size
+        shares[-1] = total - shares[:-1].sum(0)
+        local_g = map_local_for_rank(self.rank, lambda rank: shares[rank])
+        dt_g = DTensor.from_local(
+            local_g, device_mesh, [Partial(reduce_op)], run_check=False
+        )
+        dt_x = distribute_tensor(x, device_mesh, [Replicate()])
+        dt_idx = distribute_tensor(idx, device_mesh, [Replicate()])
+
+        with CommDebugMode() as comm_mode:
+            dt_out = fn(dt_g, dt_x, dt_idx)
+        if linear:
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(dt_out.placements, (Partial(reduce_op),))
+        else:
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertFalse(dt_out.placements[0].is_partial())
+        self.assertEqual(dt_out.full_tensor(), fn(g, x, idx))
+
+    @with_comms
     @skip_unless_torch_gpu
     def test_nll_loss_backward_comm_counts(self):
         """Test backward comm counts for nll_loss/cross_entropy with Shard(0) inputs.
@@ -2108,6 +2329,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                     self.assertEqual(dt_bias_bwd.grad.full_tensor(), ref_bias.grad)
 
 
+instantiate_parametrized_tests(DistMathOpsTest)
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest, base_class=LocalDTensorContinuousTestBase
 )
