@@ -265,9 +265,9 @@ bool MPSStream::query() {
         // Commit now because `query` must be able to be called in a loop that
         // eventually finishes.
         synchronize(SyncType::COMMIT);
-        // Reset this flag since the query event will only signal after all the
-        // previously enqueued work is finished. This must be done only after
-        // the event is committed, because the commit sets the flag to true.
+        // Reset this flag since the newly encoded event marks the end of all
+        // previously encoded work. Flag should only be reset after the event is
+        // committed, because the commit itself sets the flag to true.
         _hasWorkSinceQuerySignal = false;
       }
       // If all the enqueued query events have signaled then all the work
