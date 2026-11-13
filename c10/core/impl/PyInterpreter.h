@@ -7,15 +7,18 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/FunctionRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 // Forward declarations
 
 namespace c10 {
+struct FakeTensorMode;
 struct IValue;
 class OperatorHandle;
 struct SafePyObject;
@@ -229,6 +232,24 @@ struct C10_API PyInterpreterVTable {
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
 
+  // Runs step with mode entered through CppFakeTensorMode's __enter__/__exit__,
+  // including on exceptions. Keeps one Python thread state alive across both
+  // calls so threading.local entry records survive on native worker threads.
+  // Releases the GIL around step; entries inside step must be balanced.
+  virtual bool fake_run_with_mode_entered(
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
+      c10::function_ref<bool()> step) const = 0;
+  // Calls torch._subclasses.fake_tensor._resolve_device_conflict, which
+  // returns the device FakeTensor._find_common_device keeps for fake inputs of
+  // op on common_device and device, where its rules for zero-dim CPU tensors
+  // and for ops that allow mixed devices do not reconcile them: the one whose
+  // type torch._functorch.config.fake_tensor_prefer_device_type names, else it
+  // raises FakeTensorDeviceMismatchError. Acquires the GIL.
+  virtual c10::Device fake_resolve_device_conflict(
+      const c10::OperatorHandle& op,
+      c10::Device common_device,
+      c10::Device device) const = 0;
+
   // Note [C++ FakeTensor dispatch]
   // A fake tensor models a tensor on a logical device without allocating its
   // data. Running an op on fake tensors must reproduce the outputs' sizes,
@@ -289,22 +310,27 @@ struct C10_API PyInterpreterVTable {
   virtual bool fake_try_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
-  // Needs an active mode. real (nullable, borrowed) is the fake_run_real_op
+  // Takes the fallback's uninstalled mode; run_fake_impl enters it.
+  // real (nullable, borrowed) is the fake_run_real_op
   // result, used if a profile-generated fake kernel has no profile for these
   // inputs.
   virtual bool fake_try_custom_op_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
       PyObject* real) const = 0;
-  // Needs an active mode. Non-fake Meta outputs are converted to fakes on
-  // common_device; this is the only callback that converts its outputs. See
-  // Note [C++ fake op_impl outputs] in torch/csrc/PyInterpreter.cpp.
+  // Takes the fallback's mode, which is uninstalled while handlers run.
+  // Non-fake Meta outputs are converted to fakes on common_device, and are an
+  // error without one. Inputs with irreconcilable devices have no
+  // common_device. Constructors finalize their own output devices. See Note
+  // [C++ fake op_impl outputs] in torch/csrc/PyInterpreter.cpp.
   virtual bool fake_try_op_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
-      c10::Device common_device) const = 0;
-  // Python callback for prims handling: runs the prims op's Python
-  // prim_meta_impl, if it defines one.
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
+      std::optional<c10::Device> common_device) const = 0;
+  // Runs prim_meta_impl with the caller's mode entered. Returns false if
+  // absent; a selected implementation returning NotImplemented raises.
   virtual bool fake_try_prim_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
