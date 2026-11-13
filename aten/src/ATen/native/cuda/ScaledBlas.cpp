@@ -80,6 +80,9 @@ static void check_blockwise_e8m0fnu_arch_supported() {
 #if ROCM_VERSION >= 71400
   mx_archs.push_back("gfx1250");
 #endif
+#if ROCM_VERSION >= 100300
+  mx_archs.push_back("gfx1250-strict");
+#endif
   TORCH_CHECK_NOT_IMPLEMENTED(
       at::detail::getCUDAHooks().isGPUArch(mx_archs),
       "Block-wise scaling for Float8_e8m0fnu is only supported on ",

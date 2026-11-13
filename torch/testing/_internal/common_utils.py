@@ -104,7 +104,7 @@ except ImportError:
     has_pytest = False
 
 SEED = 1234
-MI450_ARCH = ("gfx1250",)
+MI450_ARCH = ("gfx1250", "gfx1250-strict")
 MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a",)

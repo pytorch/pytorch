@@ -4648,6 +4648,7 @@ class TestTemplateConfigPruning(TestCase):
             "gfx1200": [32, 64, 128],
             "gfx950": [128],
             "gfx1250": [128],
+            "gfx1250-strict": [128],
         }
         heuristic = ROCmScaledMMTemplateConfigHeuristic()
         for arch, expected_block_k in expected.items():
@@ -7155,13 +7156,16 @@ def _tdm_fake_kernel(**overrides):
 class TestTDMConfigDenseAndGeneric(TestCase):
     _PREREQS = "torch._inductor.utils._gfx1250_device_prereqs"
 
-    def test_tdm_arch_gate_accepts_only_gfx1250(self):
+    def test_tdm_arch_gate_accepts_gfx1250_peer_targets(self):
         from torch._inductor.utils import is_gfx1250_arch
 
         self.assertTrue(is_gfx1250_arch("gfx1250"))
         self.assertTrue(is_gfx1250_arch("gfx1250:sramecc+:xnack-"))
+        self.assertTrue(is_gfx1250_arch("gfx1250-strict"))
+        self.assertTrue(is_gfx1250_arch("gfx1250-strict:sramecc+:xnack-"))
         self.assertFalse(is_gfx1250_arch("gfx0000"))
         self.assertFalse(is_gfx1250_arch("amd-gfx1250"))
+        self.assertFalse(is_gfx1250_arch("amd-gfx1250-strict"))
 
     def test_tdm_device_prereqs_use_runtime_floor_and_backend_probe(self):
         from torch._inductor.utils import _gfx1250_device_prereqs, _rocm_version_tuple
@@ -8343,7 +8347,7 @@ for _async_test_name in unittest.defaultTestLoader.getTestCaseNames(
 
 @unittest.skipUnless(
     running_on_tdm_device(),
-    "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
+    "requires gfx1250/gfx1250-strict with ROCm 7.14+ and TDM-capable Triton",
 )
 @instantiate_parametrized_tests
 class TestTDMEndToEnd(TestCase):

@@ -1147,8 +1147,8 @@ class TestTritonHeuristics(TestCase):
 
         get_device_capability() on ROCm reports the gfx major/minor, which
         neither orders by capability nor identifies the product line, so gating
-        on `>= (9, 5)` also matches gfx1030, gfx1100 and gfx1250 (MI450) and
-        hands them tables measured on gfx950.
+        on `>= (9, 5)` also matches gfx1030, gfx1100 and gfx1250/gfx1250-strict
+        (MI450) and hands them tables measured on gfx950.
         """
         from torch._inductor.heuristics.template.triton import ROCmConfigHeuristic
         from torch._inductor.utils import rocm_gfx_arch
@@ -1168,7 +1168,7 @@ class TestTritonHeuristics(TestCase):
         unregistered = "gfx000"
         # RDNA3 is deliberately absent: it has its own branch, keyed by sequence
         # length rather than by target, so it is not part of this dispatch.
-        targets = ("gfx942", "gfx950", "gfx1250", unregistered)
+        targets = ("gfx942", "gfx950", "gfx1250", "gfx1250-strict", unregistered)
 
         def configs_for(arch, get_configs):
             with (

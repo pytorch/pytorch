@@ -935,7 +935,7 @@ def _check_int64_decode_narrows_coordinates(
 
 @unittest.skipUnless(
     running_on_tdm_device(),
-    "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
+    "requires gfx1250/gfx1250-strict with ROCm 7.14+ and TDM-capable Triton",
 )
 class TestFlexAttentionTDMEndToEnd(InductorTestCase):
     # Neither length divides any default tile, so every descriptor block has a

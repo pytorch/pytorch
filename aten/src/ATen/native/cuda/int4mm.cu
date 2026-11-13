@@ -1138,7 +1138,8 @@ template<typename T, uint32_t Rank>
 using VecT = T __attribute__((ext_vector_type(Rank)));
 
 static bool isCDNA2orLater(int index) {
-    return at::detail::getCUDAHooks().isGPUArch({"gfx90a", "gfx942", "gfx950", "gfx1250"}, index);
+    return at::detail::getCUDAHooks().isGPUArch(
+        {"gfx90a", "gfx942", "gfx950", "gfx1250", "gfx1250-strict"}, index);
 }
 
 static bool isRDNA3(int index) {
@@ -1301,12 +1302,16 @@ struct RocmMmaGfx12 {
   }
 };
 
-// CDNA5 (gfx1250) wave32: the gfx12 layout. There is no 16x16x16 bf16 WMMA; the
-// 16x16x32 WMMA takes a lane's operands of two consecutive k-tiles as values
-// 0-7 and 8-15, so one instruction covers the pair and cTmp[1] stays zero.
-// Defined only for gfx1250: older compilers (ROCm 7.0) do not declare its WMMA
-// builtin, and a non-template body is parsed for every offload arch.
-#if defined(__gfx1250__)
+// CDNA5 (gfx1250 / gfx1250-strict) wave32: the gfx12 layout. There is no
+// 16x16x16 bf16 WMMA; the 16x16x32 WMMA takes a lane's operands of two
+// consecutive k-tiles as values 0-7 and 8-15, so one instruction covers the
+// pair and cTmp[1] stays zero.
+// Defined only for those processors: older compilers (ROCm 7.0) do not declare
+// the WMMA builtin, and a non-template body is parsed for every offload arch.
+// gfx1250-strict is its own processor, so clang defines __gfx1250_strict__ and
+// __GFX12__ rather than __gfx1250__. Selecting RocmMmaGfx12 for it would emit
+// the 16x16x16 WMMA this part does not have.
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
 struct RocmMmaGfx1250 : RocmMmaGfx12 {
   // gfx1250 has a packed bf16 FMA and no v_dot2_f32_bf16, so dequantizing each
   // B value before the multiply is cheaper than the factored form's row sums
@@ -1386,7 +1391,7 @@ struct RocmMmaGfx11 {
 using RocmMma = RocmMmaCdna;
 #elif defined(__GFX11__)
 using RocmMma = RocmMmaGfx11;
-#elif defined(__gfx1250__)
+#elif defined(__gfx1250__) || defined(__gfx1250_strict__)
 using RocmMma = RocmMmaGfx1250;
 #elif defined(__GFX12__)
 using RocmMma = RocmMmaGfx12;
