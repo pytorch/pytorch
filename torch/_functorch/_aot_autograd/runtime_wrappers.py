@@ -1905,6 +1905,12 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     )
     other_arg_indices: list[int] = field(default_factory=list)
     base_group_names: dict[int, list[str]] = field(default_factory=dict)
+    # Groups whose synthetic base was built from storage (use_storage_base or
+    # no shared autograd base). The runtime wrapper must rebuild the base from
+    # storage for these groups, not from a member's _base, because the traced
+    # graph saw a 1-D whole-storage base whose shape/stride differ from any
+    # member's real autograd base.
+    storage_base_groups: set[int] = field(default_factory=set)
 
     def pre_compile(
         self,
@@ -1920,6 +1926,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             flat_args_with_synthetic_bases,
             flat_args_descs_with_synthetic_bases,
             synthetic_base_info,
+            storage_base_indices,
         ) = merge_view_inputs(
             aot_config,
             flat_args,
@@ -1997,6 +2004,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             ]
             for base_idx, group in self.base_groups.items()
         }
+        self.storage_base_groups = storage_base_indices
 
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
@@ -2157,23 +2165,31 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 group = base_groups[base_idx]
                 group_names = self.base_group_names[base_idx]
                 first_orig = group[0]
-                buf.writeline("_b = None")
-                for orig_idx in group:
-                    buf.writeline(
-                        f"_cdata_{orig_idx} = args[{orig_idx}].untyped_storage()._cdata"
-                    )
-                for orig_idx in group:
-                    buf.writeline("if _b is None:")
-                    with buf.indent():
-                        buf.writeline(
-                            f"_b = _live_view_base(args[{orig_idx}], _cdata_{orig_idx})"
-                        )
-                buf.writeline("if _b is None:")
-                with buf.indent():
+                if base_idx in self.storage_base_groups:
+                    # The traced graph saw a 1-D whole-storage base. Rebuild
+                    # from storage at runtime so shape/stride match the trace.
                     buf.writeline(
                         f"_b = torch.empty((0,), dtype=args[{first_orig}].dtype, device=args[{first_orig}].device)"
                     )
                     buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
+                else:
+                    buf.writeline("_b = None")
+                    for orig_idx in group:
+                        buf.writeline(
+                            f"_cdata_{orig_idx} = args[{orig_idx}].untyped_storage()._cdata"
+                        )
+                    for orig_idx in group:
+                        buf.writeline("if _b is None:")
+                        with buf.indent():
+                            buf.writeline(
+                                f"_b = _live_view_base(args[{orig_idx}], _cdata_{orig_idx})"
+                            )
+                    buf.writeline("if _b is None:")
+                    with buf.indent():
+                        buf.writeline(
+                            f"_b = torch.empty((0,), dtype=args[{first_orig}].dtype, device=args[{first_orig}].device)"
+                        )
+                        buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
                 if len(group) > 1:
                     # Direct AOT callers have no Dynamo recompile path. Name the
                     # current storage groups only on the rare mismatch path.
@@ -2305,7 +2321,7 @@ def merge_view_inputs(
     *,
     # The autograd case currently has more restrictions than the inference case.
     is_inference: bool,
-) -> tuple[list[Any], list[AOTInput], list[int | tuple[int, torch.Tensor]] | None]:
+) -> tuple[list[Any], list[AOTInput], list[int | tuple[int, torch.Tensor]] | None, set[int]]:
     if fwd_inputs_descs is None:
         fwd_inputs_descs = [DummyAOTInput(i) for i in range(len(fwd_inputs))]
 
@@ -2338,7 +2354,7 @@ def merge_view_inputs(
         )
     if not [info for info in mutated_input_info if info.mutates_data]:
         # Return early when there are no mutations.
-        return fwd_inputs, fwd_inputs_descs, None
+        return fwd_inputs, fwd_inputs_descs, None, set()
 
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
     # pyrefly: ignore [implicit-any]
@@ -2347,6 +2363,7 @@ def merge_view_inputs(
     other_args = []
     base_args_descs = []
     other_args_descs = []
+    storage_base_indices: set[int] = set()
     for i, (inpt, source) in enumerate(zip(fwd_inputs, fwd_inputs_descs)):
         if isinstance(inpt, Tensor):
             storage_ref = StorageWeakRef(inpt.untyped_storage())
@@ -2401,6 +2418,19 @@ def merge_view_inputs(
         use_storage_base = has_standalone_alias and (
             is_inference or consistent_leafness
         )
+        # In training, storage mode detaches every member and regenerates views
+        # from a fresh leaf base. If a grad-requiring member's real autograd
+        # base differs from that leaf (e.g. p.detach()[:3] next to p), the
+        # gradient would be lost or misrouted. Keep the existing error for
+        # those groups instead of silently producing wrong gradients.
+        if use_storage_base and not is_inference:
+            if any(
+                fwd_inputs[i].requires_grad
+                and fwd_inputs[i]._base is not None
+                and not fwd_inputs[i]._base.requires_grad
+                for i in aliased_input_indices
+            ):
+                use_storage_base = False
 
         # Here, we attempt to do a more complicated check to detect false aliasing
         # (e.g. if all the tensors have the same storage, but don't actually overlap)
@@ -2520,6 +2550,8 @@ def merge_view_inputs(
                     )
         base_args.append(synthetic_base)
         base_args_descs.append(synthetic_base_desc)
+        if len(non_none_bases) == 0 or use_storage_base:
+            storage_base_indices.add(len(base_args) - 1)
         for curr_view_idx in aliased_input_indices:
             curr_view = fwd_inputs[curr_view_idx]
             if use_storage_base:
@@ -2540,7 +2572,7 @@ def merge_view_inputs(
                 f"got {len(other_args)} != {len(fwd_inputs)}"
             )
         # If no synthetic bases are necessary, just return the original inputs.
-        return fwd_inputs, fwd_inputs_descs, None
+        return fwd_inputs, fwd_inputs_descs, None, set()
     else:
         from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
 
@@ -2591,6 +2623,7 @@ def merge_view_inputs(
             args_to_functionalization,
             args_to_functionalization_descs,
             post_processed_calling_convention_meta,
+            storage_base_indices,
         )
 
 

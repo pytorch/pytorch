@@ -5288,6 +5288,42 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertNotIn("_base", guard_str)
 
+    def test_storage_base_2d_root_inductor(self):
+        # The traced graph saw a 1-D whole-storage base, but the runtime
+        # wrapper must rebuild from storage (not from a member's 2-D _base)
+        # so assert_size_stride matches. Before storage_base_groups the
+        # wrapper passed x (2,5) where the graph expected (10,).
+        def fn(a, b):
+            a.mul_(2)
+            return a + b
+
+        for backend in ["aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                x = torch.zeros(2, 5)
+                v1 = x[0]
+                v2 = torch.empty(5)
+                v2.set_(x.untyped_storage(), 0, (5,), (1,))
+                out = torch.compile(fn, backend=backend)(v1, v2)
+                self.assertEqual(out, torch.zeros(5))
+                self.assertEqual(v1, torch.zeros(5))
+
+    def test_storage_base_training_gradient_guard(self):
+        # p.detach()[:3] next to p: storage mode would detach the base and
+        # lose p's gradient. The guard must keep the existing error instead
+        # of silently producing wrong gradients.
+        def fn(p, v):
+            v.add_(1)
+            return p * 2
+
+        torch._dynamo.reset()
+        p = torch.randn(5, requires_grad=True)
+        v = p.detach()[:3]
+        with self.assertRaisesRegex(
+            AssertionError, "non-differentiable view"
+        ):
+            torch.compile(fn, backend="aot_eager")(p, v)
+
     def test_set_new_base_stays_aliased(self):
         # Regression guard for aliasing the new source after set_(), not the old base.
         def fn(dest, src):
