@@ -15,7 +15,8 @@ The modes are cumulative, each adding one mechanism to the previous one:
                    entering at the top of the chain (skip_autograd=False)
     skip_autograd  + enter below the Autograd kernel when no gradient is tracked
     unboxed        + kernel results get no Python object until Python needs one
-                   (the default configuration)
+    default        what torch.cfg_compile(fn) gives: all of the above, and what
+                   is measured to run faster in the interpreter is left to it
 
 A last section times code that is mostly Python (loops, calls, an nn.Module
 forward, a training step), where the comparison is with the interpreter.
@@ -29,12 +30,17 @@ import time
 import torch
 
 
-MODES = ["eager", "generic", "sites", "skip_autograd", "unboxed"]
+MODES = ["eager", "generic", "sites", "skip_autograd", "unboxed", "default"]
+# The four mechanisms are measured on the VM itself; "default" is what
+# torch.cfg_compile(fn) gives, which also leaves to the interpreter what
+# runs faster there.
+VM = {"demote": False}
 MODE_OPTIONS = {
-    "generic": {"specialize": False},
-    "sites": {"skip_autograd": False, "unboxed": False},
-    "skip_autograd": {"unboxed": False},
-    "unboxed": {},
+    "generic": {"specialize": False, **VM},
+    "sites": {"skip_autograd": False, "unboxed": False, **VM},
+    "skip_autograd": {"unboxed": False, **VM},
+    "unboxed": VM,
+    "default": {},
 }
 COLOR = "#2a78d6"
 
@@ -312,7 +318,9 @@ def bench_narrowing(device):
         ("default", pipeline.default()),
         ("narrowing", pipeline.narrowing()),
     ):
-        compiled = torch.cfg_compile(shape_branch, pipeline=pipe, fallback=False)
+        compiled = torch.cfg_compile(
+            shape_branch, pipeline=pipe, fallback=False, demote=False
+        )
         timings = {}
         for batch in (1, 8):
             x = torch.randn(batch, 16, device=device)
@@ -337,7 +345,7 @@ def bench_unboxing(device):
         ("chain of 9 ops", chain, args[:2]),
         ("for loop, 10 x (3 ops + branch)", for_loop, args),
     ):
-        compiled = torch.cfg_compile(fn, fallback=False)
+        compiled = torch.cfg_compile(fn, fallback=False, demote=False)
         for _ in range(3):
             compiled(*a)
         before = compiled.stats()
@@ -356,9 +364,10 @@ def bench_unboxing(device):
 
 
 def bench_python(device):
-    """Code that is mostly Python: here the VM competes with the interpreter
-    itself, and every call it compiles is a call the interpreter would have
-    made faster."""
+    """Code that is mostly Python. The VM alone ("vm": demote=False) competes
+    here with the interpreter itself and loses; the default configuration
+    measures that and leaves to the interpreter what runs faster there, and
+    it skips the code of nn.Module that sits in front of every module call."""
     n = 1000
     rows = []
 
@@ -366,34 +375,40 @@ def bench_python(device):
         fns = {"eager": fn}
         for label, options in variants.items():
             fns[label] = torch.cfg_compile(fn, fallback=False, **options)
+        # Long enough a warm-up for the measurements of callees to settle.
+        for compiled in fns.values():
+            for _ in range(300 if per == 1 else 60):
+                compiled(*args)
         ns = compare(fns, args, device)
         rows.append({"name": name, "ns": {k: v / per for k, v in ns.items()}})
 
-    plain = {"compiled": {"unroll": False}}
+    plain = {"default": {"unroll": False}, "vm": {"unroll": False, **VM}}
     row("loop: total += i, per iteration", py_loop, (n,), plain, per=n)
     row("loop with a branch, per iteration", py_branches, (n,), plain, per=n)
     row(
         "loop calling a Python function, per iteration",
         py_calls,
         (n,),
-        {
-            "compiled": {"unroll": False},
-            "not inlined": {"unroll": False, "inline": False},
-            "callees interpreted": {"unroll": False, "inline": False, "callees": False},
-        },
+        {**plain, "vm, not inlined": {"unroll": False, "inline": False, **VM}},
         per=n,
     )
-    callees = {"compiled": {}, "callees interpreted": {"callees": False}}
+    modules = {
+        "default": {},
+        "vm": VM,
+        "vm, no shortcuts": {"shortcuts": False, **VM},
+        "vm, callees interpreted": {"callees": False, **VM},
+    }
     net = Net().to(device)
     x, y = torch.randn(32, 16, device=device), torch.randn(32, 1, device=device)
     with torch.no_grad():
-        row("nn.Module forward, 2 Linear layers", module_forward, (net, x), callees)
+        row("nn.Module forward, 2 Linear layers", module_forward, (net, x), modules)
+    row("nn.Module forward, tracking gradients", module_forward, (net, x), modules)
     opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
     row(
         "training step: forward, backward, SGD",
         training_step,
         (net, opt, x, y),
-        callees,
+        modules,
     )
     return rows
 
@@ -428,13 +443,13 @@ def report(results, charts):
 
     out.append("### Workloads\n")
     out.append(
-        "| workload | size | eager | generic | sites | skip autograd | unboxed | speedup |"
+        "| workload | size | eager | generic | sites | skip autograd | unboxed | default | speedup |"
     )
-    out.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+    out.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
     for row in results["workloads"]:
         cells = " | ".join(f"{row['ns'][m]:,.0f}" for m in MODES)
         out.append(
-            f"| {row['name']} | {row['size']} | {cells} | **{speedup(row, 'unboxed'):.2f}x** |"
+            f"| {row['name']} | {row['size']} | {cells} | **{speedup(row, 'default'):.2f}x** |"
         )
     out.append("")
     if charts:
@@ -444,7 +459,7 @@ def report(results, charts):
                 chart(
                     f"Speedup over eager, tensors of {size} elements",
                     [row["name"] for row in rows],
-                    [speedup(row, "unboxed") for row in rows],
+                    [speedup(row, "default") for row in rows],
                     "speedup (x)",
                     high=2.0,
                 )
@@ -533,36 +548,43 @@ def report(results, charts):
     if "python" in results:
         out.append("### Python code, calls and modules\n")
         out.append(
-            "Where most of the work is Python, the VM is measured against the interpreter itself. "
-            "Times are ns; the ratio is the default configuration over eager, so above 1 is slower.\n"
+            "Times are ns. `default` is `torch.cfg_compile(fn)`; `vm` is the VM made to run "
+            "everything itself (`demote=False`). Ratios are over eager: below 1 is faster.\n"
+        )
+        columns = (
+            "eager",
+            "default",
+            "vm",
+            "vm, not inlined",
+            "vm, no shortcuts",
+            "vm, callees interpreted",
         )
         out.append(
-            "| workload | eager | compiled | not inlined | callees interpreted | compiled / eager |"
+            "| workload | " + " | ".join(columns) + " | default / eager | vm / eager |"
         )
-        out.append("|---|---:|---:|---:|---:|---:|")
+        out.append("|---|" + "---:|" * (len(columns) + 2))
         for row in results["python"]:
             ns = row["ns"]
-            cells = " | ".join(
-                f"{ns[k]:,.1f}" if k in ns else ""
-                for k in ("eager", "compiled", "not inlined", "callees interpreted")
-            )
+            cells = " | ".join(f"{ns[k]:,.1f}" if k in ns else "" for k in columns)
             out.append(
-                f"| {row['name']} | {cells} | {ns['compiled'] / ns['eager']:.2f} |"
+                f"| {row['name']} | {cells} | **{ns['default'] / ns['eager']:.2f}** | {ns['vm'] / ns['eager']:.2f} |"
             )
         out.append("")
         if charts:
+            names = [
+                row["name"].split(",")[0].split(":")[0] for row in results["python"]
+            ]
+            names[-2] = "nn.Module forward (grad)"
             out.append(
                 chart(
-                    "Python-heavy code: time relative to eager (below 1 is faster)",
+                    "Python-heavy code, default configuration: time relative to eager (below 1 is faster)",
+                    names,
                     [
-                        row["name"].split(",")[0].split(":")[0]
-                        for row in results["python"]
-                    ],
-                    [
-                        row["ns"]["compiled"] / row["ns"]["eager"]
+                        row["ns"]["default"] / row["ns"]["eager"]
                         for row in results["python"]
                     ],
                     "time / eager",
+                    high=1.5,
                 )
             )
 
