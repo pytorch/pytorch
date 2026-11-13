@@ -62,10 +62,10 @@ class TestClipGradNorm(FSDPTestContinuous):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.lin2(self.lin1(x))
 
-        model = Model().to(self.device_type)
+        model = Model().to(torch.device(device).type)
         model.lin2 = FSDP(model.lin2)
         fsdp_model = FSDP(model)
-        inp = torch.randn((2, 5), device=self.device_type)
+        inp = torch.randn((2, 5), device=torch.device(device).type)
         fsdp_model(inp).sum().backward()
         error_regex = "should only be called on the root FSDP instance"
         with self.assertRaisesRegex(RuntimeError, error_regex):
@@ -112,7 +112,7 @@ class TestClipGradNorm(FSDPTestContinuous):
         fsdp_kwargs = {
             "cpu_offload": CPUOffload(offload_params=offload_params),
             "use_orig_params": use_orig_params,
-            "device_id": self.device_type,
+            "device_id": torch.device(device).type,
         }
         if sharding_strategy == "mixed_strategy":
             fsdp_model = TransformerWithSharedParams.init(
@@ -161,7 +161,7 @@ class TestClipGradNorm(FSDPTestContinuous):
         ddp_optim = torch.optim.Adam(ddp_model.parameters(), lr=LR)
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=LR)
         LARGE_FACTOR = 100
-        inp = ddp_model.module.get_input(self.device_type)
+        inp = ddp_model.module.get_input(torch.device(device).type)
         for model in (ddp_model, fsdp_model):
             out = model(*inp)
             if isinstance(model, (DDP, FSDP)):
@@ -228,7 +228,7 @@ class TestClipGradNorm(FSDPTestContinuous):
             set_to_none = i % 2 == 0  # exercise both
             ddp_optim.zero_grad(set_to_none=set_to_none)
             fsdp_optim.zero_grad(set_to_none=set_to_none)
-            inp = ddp_model.module.get_input(self.device_type)
+            inp = ddp_model.module.get_input(torch.device(device).type)
             for model in (ddp_model, fsdp_model):
                 out = model(*inp)
                 out.sum().backward()
@@ -277,7 +277,7 @@ class TestClipGradNorm(FSDPTestContinuous):
                 reduce_dtype=torch.float16,
                 keep_low_precision_grads=True,
             ),
-            "device_id": self.device_type,
+            "device_id": torch.device(device).type,
         }
         fsdp_model = FSDP(
             NestedWrappedModule.init(
@@ -289,7 +289,7 @@ class TestClipGradNorm(FSDPTestContinuous):
             ),
             **fsdp_kwargs,
         )
-        inp = fsdp_model.module.get_input(self.device_type)
+        inp = fsdp_model.module.get_input(torch.device(device).type)
         out = fsdp_model(*inp)
         out.sum().backward()
         for param in fsdp_model.parameters():
@@ -329,10 +329,10 @@ class TestClipGradNorm(FSDPTestContinuous):
             lin_module,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             mixed_precision=mixed_precision_config,
-            device_id=self.device_type,
+            device_id=torch.device(device).type,
             use_orig_params=use_orig_params,
         )
-        inp = torch.randn(32, 24, device=self.device_type)
+        inp = torch.randn(32, 24, device=torch.device(device).type)
         fsdp_module(inp)
         with self.assertWarnsRegex(
             expected_warning=UserWarning,
@@ -342,12 +342,14 @@ class TestClipGradNorm(FSDPTestContinuous):
         ):
             total_norm = fsdp_module.clip_grad_norm_(1)
         self.assertEqual(total_norm.dtype, torch.float32)
-        self.assertEqual(total_norm, torch.tensor(0.0, device=self.device_type))
+        self.assertEqual(
+            total_norm, torch.tensor(0.0, device=torch.device(device).type)
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_non_uniform_grad_dtype(self, device):
         """Tests clip_grad_norm_ with non-uniform gradient dtypes via MixedPrecision."""
-        device_type = self.device_type
+        device_type = torch.device(device).type
         model = nn.Sequential(nn.Linear(5, 5), nn.Linear(5, 5))
         # bf16 and fp32 params with low-precision grads kept
         model[0] = FSDP(
