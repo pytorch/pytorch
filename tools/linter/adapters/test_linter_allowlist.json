@@ -81,7 +81,6 @@
   "test/distributed/checkpoint/test_save_load_api.py",
   "test/distributed/checkpoint/test_state_dict.py",
   "test/distributed/checkpoint/test_state_dict_stager.py",
-  "test/distributed/checkpoint/test_state_dict_utils.py",
   "test/distributed/checkpoint/test_tp_checkpoint.py",
   "test/distributed/checkpoint/test_utils.py",
   "test/distributed/elastic/agent/server/test/exit_barrier_timeout_test.py",
