@@ -367,7 +367,34 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             m = map(ord, "ab")
             return t + 1, bytes(it), list(it), bytes(m), list(m)
 
-        for fn in (stops_early, bad_type, wrong_exception, unbounded, consumes_iterator):
+        def stops_early_sequences(t):
+            # list/tuple/reversed iterators have a bulk-unpack fast path that
+            # must not be used here.
+            rest = []
+            for it in (iter([1, 256, 3]), iter((1, 256, 3)), reversed([3, 256, 1])):
+                try:
+                    bytes(it)
+                except ValueError:
+                    pass
+                rest.append(list(it))
+            return t + 1, rest
+
+        class Index:
+            def __index__(self):
+                return 65
+
+        def index_items(t):
+            return t + 1, bytes(x for x in [Index(), True])
+
+        for fn in (
+            stops_early,
+            bad_type,
+            wrong_exception,
+            unbounded,
+            consumes_iterator,
+            stops_early_sequences,
+            index_items,
+        ):
             opt = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
 
@@ -383,8 +410,37 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             lambda t: (t + 1, bytes(t.size(0))),
         )
         for fn in fns:
+            counters.clear()
             opt = torch.compile(fn, backend="eager", dynamic=True)
             self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+            breaks = list(counters["graph_break"])
+            self.assertTrue(any("non-constant arguments" in k for k in breaks))
+            self.assertFalse(any("over an iterator" in k for k in breaks))
+
+    def test_bytes_iterator_non_constant_item_graph_breaks(self):
+        # An __index__ returning a SymInt stays non-constant, so bytes() graph
+        # breaks after the generator is partly traced; it must still match eager.
+        class Index:
+            def __init__(self, v):
+                self.v = v
+
+            def __index__(self):
+                return self.v
+
+        def fn(t):
+            return t + 1, bytes(x for x in [1, Index(t.size(0))])
+
+        counters.clear()
+        opt = torch.compile(fn, backend="eager", dynamic=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+        self.assertTrue(any("over an iterator" in k for k in counters["graph_break"]))
+
+    def test_bool_to_bytes(self):
+        def fn(t):
+            return t + 1, True.to_bytes(1, "big"), False.to_bytes(2, "little")
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
 
     def test_heapq_polyfill(self):
         # heapq is a C extension; Dynamo traces it via the pure-Python polyfill

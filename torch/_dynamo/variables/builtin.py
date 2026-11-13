@@ -79,7 +79,6 @@ from ..utils import (
     is_tensor_getset_descriptor,
     is_torch_class,
     istype,
-    lazily_unpack,
     no_keywords,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -135,6 +134,7 @@ from .object_protocol import (
     maybe_get_python_type,
     pycallable_check,
     pyiter_check,
+    pyiter_next,
     pylong_as_ssize_t,
     pylong_from_base,
     pynumber_absolute,
@@ -2199,18 +2199,30 @@ class BuiltinVariable(BaseBuiltinVariable):
             # Other types may define __bytes__, the buffer protocol or
             # __index__, which take priority in CPython.
             out = bytearray()
-            for item in lazily_unpack(tx, args[0]):
+            iterator = generic_getiter(tx, args[0])
+            while True:
+                try:
+                    # Host-side loop with no resumable frame.
+                    with torch._dynamo.config.patch(nested_graph_breaks=False):
+                        item = pyiter_next(tx, iterator)
+                except ObservedUserStopIteration:
+                    handle_observed_exception(tx)
+                    break
+                item = pynumber_index(tx, item)
                 if not item.is_python_constant():
                     unimplemented(
                         gb_type="bytes() over an iterator with non-constant items",
                         context=f"bytes({args[0]}), item {item}",
-                        explanation="bytes() can only be folded when every item is a constant.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
+                        explanation="bytes() can only fold items that are constant ints.",
+                        hints=[
+                            "Pass only constant ints to bytes(), not SymInts or tensors.",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
                     )
-                try:
-                    out += bytes((item.as_python_constant(),))
-                except (TypeError, ValueError) as e:
-                    raise_observed_exception(type(e), tx, args=list(e.args))
+                value = item.as_python_constant()
+                if not 0 <= value < 256:
+                    raise_value_error(tx, "bytes must be in range(0, 256)")
+                out.append(value)
             return VariableTracker.build(tx, bytes(out))
         if all(a.is_python_constant() for a in args) and all(
             v.is_python_constant() for v in kwargs.values()

@@ -391,7 +391,10 @@ class ConstantVariable(VariableTracker):
             if name in ("split", "rsplit", "splitlines"):
                 return ConstantVariable.create(result, mutation_type=ValueMutationNew())
             return ConstantVariable.create(result)
-        elif istype(self.value, (float, int)) and hasattr(self.value, name):
+        elif (
+            istype(self.value, (float, int))
+            or (name == "to_bytes" and istype(self.value, bool))
+        ) and hasattr(self.value, name):
             if not (args or kwargs):
                 try:
                     return ConstantVariable.create(getattr(self.value, name)())
@@ -401,7 +404,7 @@ class ConstantVariable(VariableTracker):
                         tx,
                         args=list(exc.args),
                     )
-            if name == "to_bytes" and istype(self.value, int):
+            if name == "to_bytes" and isinstance(self.value, int):
                 try:
                     return ConstantVariable.create(
                         self.value.to_bytes(*const_args, **const_kwargs)
