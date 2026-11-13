@@ -764,14 +764,14 @@ void fakeFallback(
     TORCH_CHECK(
         !t.is_fake(),
         "Meta kernel returned a fake tensor from another mode");
+    // New views and shallow copies inside the kernel are plain Meta tensors.
+    at::init_cpp_fake(
+        impl, device_argument.value_or(*output_common_device), mode);
     if (!is_alias && t.requires_grad()) {
       // Backend kernels run below autograd, but a Meta kernel can copy
       // requires_grad from an input
       t.set_requires_grad(false);
     }
-    // New views and shallow copies inside the kernel are plain Meta tensors.
-    at::init_cpp_fake(
-        impl, device_argument.value_or(*output_common_device), mode);
     impl->set_real_tensor(nullptr);
     impl->set_fake_dispatch_keys(output_dispatch_keys);
     if (device_argument.has_value() &&
