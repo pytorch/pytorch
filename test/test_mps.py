@@ -15563,10 +15563,11 @@ class TestCommon(TestCase):
     def test_fftn_round_trip(self, device, shape, dtype):
         # Every dim, several passes per axis, and fp16 partials above the half range (amplitude 100 before scaling)
         x = 100 * torch.randn(shape, dtype=torch.complex64)
-        spectrum = torch.fft.fftn(x.to(device)).cpu()
-        self.assertEqual(spectrum, torch.fft.fftn(x), atol=0.5, rtol=1e-4)
+        spectrum, expected = torch.fft.fftn(x.to(device)).cpu(), torch.fft.fftn(x)
+        # float32 rounding scales with the largest output, which a per-element rtol does not model
+        self.assertEqual(spectrum, expected, atol=2e-6 * expected.abs().max().item(), rtol=0)
         result = torch.fft.ifftn(spectrum.to(dtype).to(device)).cpu().to(torch.complex64)
-        self.assertEqual(result, x, atol=1, rtol=0)
+        self.assertEqual(result, x, atol=0.5 if dtype == torch.complex32 else 1e-3, rtol=0)
 
     def test_fft_private_ops_edge_dims(self, device):
         # The private ops wrap negative dims like the CPU
@@ -15586,7 +15587,7 @@ class TestCommon(TestCase):
         reference = op(x.cpu().to(torch.complex128), **kwargs)
         if layout == "out":
             kwargs["out"] = torch.empty(5, 2 * reference.size(-1) + 3, device=device, dtype=complex_dtype)[:, 3::2]
-        result, tol = op(x, **kwargs), 2e-3 if dtype == torch.float16 else 2e-5
+        result, tol = op(x, **kwargs), 2e-3 if dtype == torch.float16 else None  # None: the default tolerance
         self.assertEqual(result.cpu(), reference.to(result.dtype), atol=tol, rtol=tol)
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
