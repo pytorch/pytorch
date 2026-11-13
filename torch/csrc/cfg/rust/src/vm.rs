@@ -232,6 +232,9 @@ pub struct Compiled {
     pub boxed_later: AtomicU64,
     /// Function name and file name of each origin, for traceback entries.
     origin_c: Vec<(CString, CString)>,
+    /// Per handler block: the registers that survive entering it, which are
+    /// what it reads and the frame slots.
+    handler_keep: Vec<Option<analysis::BitSet>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -439,8 +442,19 @@ impl Compiled {
                     && !pyffi::str_to_string(c.as_ptr()).starts_with("__")
             })
             .collect();
+        let mut handler_keep: Vec<Option<analysis::BitSet>> = vec![None; func.blocks.len()];
+        for block in &func.blocks {
+            if block.handler != NONE && handler_keep[block.handler as usize].is_none() {
+                let mut keep = analysis.live_in[block.handler as usize].clone();
+                for slot in &func.slots {
+                    keep.insert(*slot);
+                }
+                handler_keep[block.handler as usize] = Some(keep);
+            }
+        }
         Compiled {
             callees,
+            handler_keep,
             global_cache: empty(),
             module_attr_cache: empty(),
             plain_name,
@@ -642,6 +656,46 @@ impl Compiled {
         self.frames.borrow_mut().push(regs);
         ffi::Py_LeaveRecursiveCall();
         result
+    }
+
+    /// Hands the exception that was raised in block `cur` to the block's
+    /// handler and returns that block; None if the block has no handler and
+    /// the exception leaves the function.
+    unsafe fn catch(&self, regs: &mut [Obj], cur: usize) -> Option<usize> {
+        let handler = self.func.blocks.get_unchecked(cur).handler;
+        if handler == NONE {
+            return None;
+        }
+        let exc = ffi::PyErr_GetRaisedException();
+        if exc.is_null() {
+            return None;
+        }
+        // The handler's phis, for the edge from this block.
+        let block = self.func.blocks.get_unchecked(handler as usize);
+        if !block.phis.is_empty() {
+            let pi = block.preds.iter().position(|p| *p as usize == cur).unwrap_unchecked();
+            let moves = self.analysis.edge_moves.get_unchecked(handler as usize).get_unchecked(pi);
+            let vals: Vec<Obj> = moves
+                .iter()
+                .map(|(_, src)| {
+                    let o = reg(regs, *src);
+                    capi::retain(o);
+                    o
+                })
+                .collect();
+            for ((dst, _), val) in moves.iter().zip(vals) {
+                capi::release(std::mem::replace(regs.get_unchecked_mut(*dst as usize), val));
+            }
+        }
+        // Everything the handler does not read is dead from here on.
+        let keep = self.handler_keep.get_unchecked(handler as usize).as_ref().unwrap_unchecked();
+        for (v, r) in regs.iter_mut().enumerate() {
+            if !r.is_null() && !keep.contains(v as V) {
+                capi::release(std::mem::replace(r, null_mut()));
+            }
+        }
+        *regs.get_unchecked_mut(self.func.exc_reg as usize) = exc;
+        Some(handler as usize)
     }
 
     unsafe fn fail(&self, bc: u32) -> Obj {
@@ -870,6 +924,45 @@ impl Compiled {
                     return Err(());
                 }
                 Ok(v)
+            }
+            Op::LoadSlot(slot) => {
+                let o = reg(regs, *slot);
+                capi::retain(o);
+                Ok(o)
+            }
+            Op::StoreSlot(slot, v) => {
+                let o = reg(regs, *v);
+                capi::retain(o);
+                capi::release(std::mem::replace(regs.get_unchecked_mut(*slot as usize), o));
+                Ok(null_mut())
+            }
+            Op::CaughtException => Ok(take(regs, f.exc_reg)),
+            Op::PushExcInfo(exc) => {
+                let previous = pyffi::PyErr_GetHandledException();
+                pyffi::PyErr_SetHandledException(self.obj(regs, *exc));
+                Ok(if previous.is_null() { new_ref(ffi::Py_None()) } else { previous })
+            }
+            Op::PopExcInfo(previous) => {
+                pyffi::PyErr_SetHandledException(self.obj(regs, *previous));
+                Ok(null_mut())
+            }
+            Op::ExcMatch(exc, class) => {
+                let class = self.obj(regs, *class);
+                let is_class = |c: Obj| ffi::PyExceptionClass_Check(c) != 0;
+                let valid = if ffi::PyTuple_Check(class) != 0 {
+                    (0..ffi::PyTuple_GET_SIZE(class)).all(|i| is_class(ffi::PyTuple_GET_ITEM(class, i)))
+                } else {
+                    is_class(class)
+                };
+                if !valid {
+                    set_error(
+                        ffi::PyExc_TypeError,
+                        "catching classes that do not inherit from BaseException is not allowed"
+                            .to_string(),
+                    );
+                    return Err(());
+                }
+                Ok(py_bool(ffi::PyErr_GivenExceptionMatches(self.obj(regs, *exc), class) != 0))
             }
             Op::StoreDeref(i, v) => {
                 let cell = self.closure_cell(*i)?;
@@ -1780,7 +1873,21 @@ impl Compiled {
         let mut cur: usize = 0;
         let mut pred: usize = usize::MAX;
         let mut back_edges: u32 = 0;
-        loop {
+        // An exception either continues in the handler of the block it was
+        // raised in, entered like the first block, or leaves the function.
+        macro_rules! raised {
+            ($blocks:lifetime, $block:expr) => {
+                match self.catch(regs, $block) {
+                    Some(handler) => {
+                        pred = usize::MAX;
+                        cur = handler;
+                        continue $blocks;
+                    }
+                    None => return null_mut(),
+                }
+            };
+        }
+        'blocks: loop {
             if pred != usize::MAX {
                 let block = func.blocks.get_unchecked(cur);
                 let mut pi = 0;
@@ -1814,7 +1921,8 @@ impl Compiled {
                 if cur <= pred {
                     back_edges = back_edges.wrapping_add(1);
                     if back_edges & 63 == 0 && ffi::PyErr_CheckSignals() != 0 {
-                        return self.fail(block.bc_start);
+                        self.fail(block.bc_start);
+                        raised!('blocks, cur);
                     }
                 }
             }
@@ -1858,7 +1966,10 @@ impl Compiled {
                                     capi::release(take(regs, *v));
                                 }
                             }
-                            Err(()) => return self.fail(inst.bc),
+                            Err(()) => {
+                                self.fail(inst.bc);
+                                raised!('blocks, cur);
+                            }
                         }
                         pc += 1;
                     }
@@ -1877,7 +1988,8 @@ impl Compiled {
                                 } else {
                                     let r = ffi::PyObject_IsTrue(c);
                                     if r < 0 {
-                                        return self.fail(func.blocks[cur].bc_start);
+                                        self.fail(func.blocks[cur].bc_start);
+                                        raised!('blocks, cur);
                                     }
                                     r != 0
                                 };
@@ -1892,11 +2004,31 @@ impl Compiled {
                                 return take(regs, *v);
                             }
                             Term::Raise { exc, cause } => {
-                                let cause =
-                                    if *cause == NONE { null_mut() } else { self.obj(regs, *cause) };
-                                do_raise(self.obj(regs, *exc), cause);
                                 let bc = code_ref.insts.last().map_or(func.blocks[cur].bc_start, |i| i.bc);
-                                return self.fail(bc);
+                                let handled =
+                                    if *exc == NONE { pyffi::PyErr_GetHandledException() } else { null_mut() };
+                                if !handled.is_null() && handled != ffi::Py_None() {
+                                    // A bare raise: the exception being handled
+                                    // goes on as it is.
+                                    ffi::PyErr_SetRaisedException(handled);
+                                } else if *exc == NONE {
+                                    xdecref(handled);
+                                    set_error(
+                                        ffi::PyExc_RuntimeError,
+                                        "No active exception to reraise".to_string(),
+                                    );
+                                    self.fail(bc);
+                                } else {
+                                    let cause =
+                                        if *cause == NONE { null_mut() } else { self.obj(regs, *cause) };
+                                    do_raise(self.obj(regs, *exc), cause);
+                                    self.fail(bc);
+                                }
+                                raised!('blocks, cur);
+                            }
+                            Term::Reraise(exc) => {
+                                ffi::PyErr_SetRaisedException(new_ref(self.obj(regs, *exc)));
+                                raised!('blocks, cur);
                             }
                         };
                         for v in &code_ref.term_kills {

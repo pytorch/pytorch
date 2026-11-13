@@ -774,12 +774,9 @@ class TestCfgFrontend(TestCase):
 
     def test_unsupported(self):
         def f(x):
-            try:
-                return x + 1
-            except RuntimeError:
-                return x
+            yield x + 1
 
-        with self.assertRaisesRegex(torch.cfg_compile.Unsupported, "try/except"):
+        with self.assertRaisesRegex(torch.cfg_compile.Unsupported, "generators"):
             torch.cfg_compile(f, fallback=False)
         self.assertTrue(torch.cfg_compile.is_available())
         with warnings.catch_warnings(record=True) as caught:
@@ -1740,6 +1737,197 @@ class TestCfgClosures(TestCase):
             with self.assertRaises(error) as got:
                 compiled()
             self.assertEqual(str(got.exception), str(expected.exception))
+
+
+def exc_double(x):
+    if x < 0:
+        raise ValueError("negative")
+    return x * 2
+
+
+@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
+class TestCfgExceptions(TestCase):
+    """try, except, finally and raise inside compiled functions."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def outcome(self, fn, *args):
+        args = [list(a) if isinstance(a, list) else a for a in args]
+        try:
+            result = ("returned", fn(*args))
+        except Exception as e:
+            result = ("raised", type(e).__name__, str(e), type(e.__cause__).__name__)
+        return result, [a for a in args if isinstance(a, list)]
+
+    def assertSameOutcome(self, fn, *argsets, **options):
+        compiled = torch.cfg_compile(fn, fallback=False, **options)
+        for args in argsets * 2:
+            self.assertEqual(self.outcome(compiled, *args), self.outcome(fn, *args))
+        return compiled
+
+    def test_except_clause(self):
+        def f(x):
+            try:
+                y = exc_double(x)
+            except ValueError as e:
+                y = len(str(e))
+            return y
+
+        compiled = self.assertSameOutcome(f, (3,), (-3,))
+        self.assertIn("caught_exception", compiled.dump())
+
+    def test_else_and_finally(self):
+        def f(x, log):
+            try:
+                y = exc_double(x)
+                log.append("body")
+            except ValueError:
+                y = -1
+                log.append("except")
+            else:
+                log.append("else")
+            finally:
+                log.append("finally")
+            return y
+
+        self.assertSameOutcome(f, (3, []), (-3, []))
+
+    def test_nested_handlers_and_return_through_finally(self):
+        def f(x):
+            try:
+                try:
+                    return exc_double(x)
+                except KeyError:
+                    return "inner"
+                finally:
+                    x = 100
+            except ValueError as e:
+                return ("outer", str(e), x)
+
+        self.assertSameOutcome(f, (3,), (-3,))
+
+    def test_raise_in_handlers(self):
+        def bare(x):
+            try:
+                return exc_double(x)
+            except ValueError:  # noqa: TRY203
+                raise
+
+        def chained(x):
+            try:
+                return exc_double(x)
+            except ValueError as e:
+                raise RuntimeError("wrapped") from e
+
+        def no_active_exception():
+            raise  # noqa: PLE0704
+
+        self.assertSameOutcome(bare, (3,), (-3,))
+        self.assertSameOutcome(chained, (3,), (-3,))
+        self.assertSameOutcome(no_active_exception, ())
+
+    def test_what_an_except_clause_matches(self):
+        def several(x):
+            try:
+                return exc_double(x)
+            except (KeyError, ValueError):
+                return "caught"
+
+        def other(x):
+            try:
+                return exc_double(x)
+            except KeyError:
+                return "caught"
+
+        def not_a_class(x):
+            try:
+                return exc_double(x)
+            except 3:  # noqa: B030
+                return "caught"
+
+        for fn in (several, other, not_a_class):
+            self.assertSameOutcome(fn, (3,), (-3,))
+
+    def test_try_in_a_loop(self):
+        def f(xs):
+            total = 0
+            for x in xs:
+                try:
+                    total += exc_double(x)
+                except ValueError:
+                    total -= 1
+                    continue
+            return total
+
+        self.assertSameOutcome(f, ([1, -2, 3, -4],))
+
+    def test_handler_sees_the_locals_at_the_raise(self):
+        def f(x):
+            y = "before"
+            try:
+                y = "inside"
+                exc_double(x)
+                y = "after"
+            except ValueError:
+                return y
+            return y
+
+        def unbound(x):
+            try:
+                y = exc_double(x)
+            except ValueError:
+                pass
+            return y
+
+        self.assertSameOutcome(f, (3,), (-3,))
+        self.assertSameOutcome(unbound, (3,), (-3,))
+
+    def test_tensor_code_in_a_try_block_is_specialized(self):
+        def f(x, y):
+            try:
+                z = x * 2 + y
+                return z / y
+            except RuntimeError:
+                return x
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        for _ in range(3):
+            self.assertEqual(compiled(x, y), f(x, y))
+        self.assertEqual(compiled(x, torch.randn(4)), x)
+        self.assertGreaterEqual(compiled.stats()["sites"], 3)
+
+    def test_traceback_through_a_handler(self):
+        def f(x):
+            try:
+                return exc_double(x)
+            except ValueError:  # noqa: TRY203
+                raise
+
+        compiled = torch.cfg_compile(f, fallback=False, inline=False, callees=False)
+        try:
+            compiled(-1)
+        except ValueError:
+            frames = traceback.extract_tb(sys.exc_info()[2])
+        else:
+            self.fail("expected ValueError")
+        self.assertEqual(
+            [(frame.name, frame.line) for frame in frames[-2:]],
+            [
+                ("f", "return exc_double(x)"),
+                ("exc_double", 'raise ValueError("negative")'),
+            ],
+        )
+
+    def test_handled_exception_is_restored(self):
+        def f(x):
+            try:
+                exc_double(x)
+            except ValueError:
+                inside = sys.exc_info()[1]
+            return type(inside).__name__, sys.exc_info()[1]
+
+        self.assertSameOutcome(f, (-1,))
 
 
 if __name__ == "__main__":
