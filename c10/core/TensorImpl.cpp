@@ -102,6 +102,25 @@ TensorImpl::TensorImpl(
 // the Python and PythonTLSSnapshot dispatch keys will be set and all is well.
 // The point is to delay the dispatch key setting until that point.
 
+namespace {
+
+// Note [C++ fake outputs inside Meta kernels]
+// Like Python's removal of subclass keys, new tensors made inside a Meta
+// kernel must not inherit Fake from an input. Their storage is Meta, and the
+// fake fallback assigns their logical device when the kernel returns. An
+// existing fake returned by the kernel keeps its keys and device. As for
+// Python subclass keys, removing Fake retains the backend keys: shallow-copy
+// compatibility checks still use them for copies made inside the kernel.
+DispatchKeySet remove_fake_keys_in_kernel(DispatchKeySet key_set) {
+  if (key_set.has(DispatchKey::Fake) &&
+      impl::FakeTensorModeTLS::in_kernel_invocation()) {
+    key_set = key_set.remove(DispatchKey::Fake);
+  }
+  return key_set;
+}
+
+} // namespace
+
 TensorImpl::TensorImpl(
     ImplType /*type*/,
     Storage&& storage,
@@ -111,7 +130,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(key_set - c10::python_ks) { // See [Note: Python key removal]
+      key_set_(remove_fake_keys_in_kernel(key_set - c10::python_ks)) {
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
@@ -133,6 +152,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
+  key_set = remove_fake_keys_in_kernel(key_set);
   if (!key_set.empty()) {
     TORCH_INTERNAL_ASSERT(
         data_type == ScalarType::Undefined || device_opt_.has_value());
@@ -396,9 +416,8 @@ std::shared_ptr<c10::SafePyObject> TensorImpl::fake_item_memo(uint64_t epoch) {
 }
 
 void TensorImpl::release_resources() {
-  if (extra_meta_ && extra_meta_->fake_constant_) {
+  if (extra_meta_ && extra_meta_->fake_tensor_mode_) {
     auto mode = extra_meta_->fake_tensor_mode_;
-    TORCH_INTERNAL_ASSERT(mode);
     mode->clear_constant(this);
   }
   autograd_meta_.reset();
@@ -682,6 +701,13 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  if (impl->is_fake()) {
+    if (auto mode = impl->fake_tensor_mode()) {
+      if (auto constant = mode->get_constant(this)) {
+        mode->set_constant(impl.get(), std::move(constant));
+      }
+    }
+  }
   return impl;
 }
 
@@ -713,6 +739,8 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
 void TensorImpl::copy_generic_tensor_metadata(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl) {
+  const bool preserve_fake =
+      dest_impl->is_fake() && impl::FakeTensorModeTLS::in_kernel_invocation();
   dest_impl->sizes_and_strides_ = src_impl->sizes_and_strides_;
   dest_impl->has_symbolic_sizes_strides_ =
       src_impl->has_symbolic_sizes_strides_;
@@ -720,7 +748,7 @@ void TensorImpl::copy_generic_tensor_metadata(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->custom_device_ = src_impl->custom_device_;
+  dest_impl->custom_device_ = preserve_fake || src_impl->custom_device_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ =
       src_impl->is_channels_last_contiguous_;
@@ -733,19 +761,38 @@ void TensorImpl::copy_generic_tensor_metadata(
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
   dest_impl->numel_ = src_impl->numel_;
-  if (dest_impl->extra_meta_ != nullptr &&
-      dest_impl->extra_meta_->fake_constant_) {
+  if (!preserve_fake && dest_impl->extra_meta_ != nullptr &&
+      dest_impl->extra_meta_->fake_tensor_mode_) {
     auto mode = dest_impl->extra_meta_->fake_tensor_mode_;
-    TORCH_INTERNAL_ASSERT(mode);
     mode->set_constant(dest_impl, nullptr);
   }
-  if (src_impl->extra_meta_ != nullptr) {
-    dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
-  } else if (dest_impl->extra_meta_ != nullptr) {
-    // Clean dest_impl extra meta data, cause shallow_copy_from dest impl is a
-    // real tensor impl, which maybe take extra meta data. This info will
-    // contaminate the new dest_impl metadata info.
-    dest_impl->extra_meta_.reset(nullptr);
+  auto extra = src_impl->extra_meta_ ? src_impl->extra_meta_->clone() : nullptr;
+  if (preserve_fake) {
+    // Python keeps the destination's fake attributes when a kernel copies
+    // tensor metadata into it. Copy only the non-fake fields of ExtraMeta.
+    ExtraMeta empty;
+    auto& src = extra ? *extra : empty;
+    auto& dest = dest_impl->get_extra_meta();
+    dest.symbolic_shape_meta_ = std::move(src.symbolic_shape_meta_);
+    dest.backend_meta_ = std::move(src.backend_meta_);
+    dest.custom_data_ptr_error_msg_ = std::move(src.custom_data_ptr_error_msg_);
+    dest.custom_storage_error_msg_ = std::move(src.custom_storage_error_msg_);
+    dest.symbolic_wrapped_number_ = std::move(src.symbolic_wrapped_number_);
+  } else {
+    dest_impl->extra_meta_ = std::move(extra);
+  }
+  if (src_impl->is_fake() && !dest_impl->is_fake() &&
+      impl::FakeTensorModeTLS::in_kernel_invocation()) {
+    // A new shallow copy inside a kernel is a Meta tensor. Preserve fake
+    // metadata when copying into an existing fake (e.g. an in-place update).
+    // See Note [C++ fake outputs inside Meta kernels].
+    if (auto& extra = dest_impl->extra_meta_) {
+      extra->fake_device_.reset();
+      extra->fake_tensor_mode_.reset();
+      extra->real_tensor_.reset();
+      extra->fake_dispatch_keys_.reset();
+    }
+    dest_impl->custom_device_ = false;
   }
 
   // NB: symbolic sizes and strides are copied as is custom policy, but python
@@ -762,6 +809,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl,
     bool allow_tensor_metadata_change) {
+  const bool dest_was_fake = dest_impl->is_fake();
   // First call the generic copy function
   copy_generic_tensor_metadata(src_impl, dest_impl);
   // Then copy everything else (see the comment at copy_generic_tensor_metadata
@@ -771,8 +819,16 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   // it should), which means that we have to preserve whatever the
   // original Python keyset was (as it's associated with the PyObject
   // being a tensor subclass or not)
-  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
-      (dest_impl->key_set_ & c10::python_ks);
+  auto key_set = src_impl->key_set_ - c10::python_ks;
+  if (!dest_was_fake) {
+    key_set = remove_fake_keys_in_kernel(key_set);
+  }
+  dest_impl->key_set_ = key_set | (dest_impl->key_set_ & c10::python_ks);
+  if (dest_was_fake && impl::FakeTensorModeTLS::in_kernel_invocation()) {
+    // copy_generic_tensor_metadata kept this existing fake's logical device
+    // and mode, even if the source was a new plain Meta tensor.
+    dest_impl->set_fake_device(*dest_impl->fake_device());
+  }
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
@@ -1185,11 +1241,13 @@ FakeTensorMode::FakeTensorMode(
     std::shared_ptr<c10::SafePyObject> shape_env,
     std::shared_ptr<c10::SafePyObject> converter,
     bool allow_meta,
-    bool allow_unsafe_data_ptr_access)
+    bool allow_unsafe_data_ptr_access,
+    bool propagate_real_tensors)
     : shape_env_(std::move(shape_env)),
       fake_tensor_converter_(std::move(converter)),
       allow_meta_(allow_meta),
-      allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
+      allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access),
+      propagate_real_tensors_(propagate_real_tensors) {}
 
 FakeTensorMode::~FakeTensorMode() = default;
 
@@ -1204,6 +1262,7 @@ void FakeTensorMode::set_constant(
     return;
   }
 
+  std::lock_guard guard(constant_mutex_);
   TORCH_INTERNAL_ASSERT(!extra_meta->fake_constant_);
   TORCH_INTERNAL_ASSERT(!constant->is_fake());
   TORCH_INTERNAL_ASSERT(constant->has_storage());
@@ -1221,9 +1280,12 @@ void FakeTensorMode::set_constant(
 }
 
 void FakeTensorMode::clear_constant(c10::TensorImpl* fake_impl) noexcept {
+  c10::intrusive_ptr<c10::TensorImpl> old_constant;
+  std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> old_aliases;
+  std::lock_guard guard(constant_mutex_);
   auto* extra_meta = fake_impl->maybe_get_extra_meta();
   TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
-  auto old_constant = std::move(extra_meta->fake_constant_);
+  old_constant = std::move(extra_meta->fake_constant_);
   if (!old_constant) {
     return;
   }
@@ -1235,41 +1297,60 @@ void FakeTensorMode::clear_constant(c10::TensorImpl* fake_impl) noexcept {
     return;
   }
 
-  auto& tensors = old_it->second.tensors;
-  tensors.erase(
-      std::remove_if(
-          tensors.begin(),
-          tensors.end(),
-          [&](const c10::weak_intrusive_ptr<c10::TensorImpl>& weak_ref) {
-            auto impl = weak_ref.lock();
-            return !impl || impl.get() == fake_impl;
-          }),
-      tensors.end());
-  if (tensors.empty()) {
+  old_aliases = std::move(old_it->second.tensors);
+  const auto self =
+      c10::weak_intrusive_ptr<c10::TensorImpl>::reclaim_copy(fake_impl);
+  for (const auto& weak_ref : old_aliases) {
+    if (!weak_ref.expired() && weak_ref != self) {
+      old_it->second.tensors.push_back(weak_ref);
+    }
+  }
+  if (old_it->second.tensors.empty()) {
     constant_storage_mapping_.erase(old_it);
   }
 }
 
-const c10::intrusive_ptr<c10::TensorImpl>& FakeTensorMode::get_constant(
-    c10::TensorImpl* fake_impl) const {
-  auto* extra_meta = fake_impl->maybe_get_extra_meta();
-  TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
-  return extra_meta->fake_constant_;
+c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
+    const c10::TensorImpl* fake_impl) const {
+  std::optional<c10::weak_intrusive_ptr<c10::TensorImpl>> weak_constant;
+  {
+    std::lock_guard guard(constant_mutex_);
+    auto* extra_meta = fake_impl->maybe_get_extra_meta();
+    TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
+    if (!extra_meta->fake_constant_) {
+      return nullptr;
+    }
+    weak_constant.emplace(extra_meta->fake_constant_);
+  }
+  // Promotion can acquire the GIL; never do it while holding the mutex.
+  auto constant = weak_constant->lock();
+  std::lock_guard guard(constant_mutex_);
+  if (fake_impl->maybe_get_extra_meta()->fake_constant_ != constant) {
+    return nullptr;
+  }
+  return constant;
 }
 
 void FakeTensorMode::invalidate_constant_aliases(
     c10::StorageImpl* storage_impl) {
-  auto it = constant_storage_mapping_.find(storage_impl);
-  if (it == constant_storage_mapping_.end()) {
-    return;
+  std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> aliases;
+  {
+    std::lock_guard guard(constant_mutex_);
+    auto it = constant_storage_mapping_.find(storage_impl);
+    if (it == constant_storage_mapping_.end()) {
+      return;
+    }
+    aliases = std::move(it->second.tensors);
+    constant_storage_mapping_.erase(it);
   }
-  std::vector<c10::intrusive_ptr<c10::TensorImpl>> constants_to_release;
-  constants_to_release.reserve(it->second.tensors.size());
-  for (const auto& weak_ref : it->second.tensors) {
+  for (const auto& weak_ref : aliases) {
     auto impl = weak_ref.lock();
     if (!impl) {
       continue;
     }
+    // Destruction can reenter the mode or acquire the GIL too.
+    c10::intrusive_ptr<c10::TensorImpl> constant;
+    std::lock_guard guard(constant_mutex_);
     auto* extra_meta = impl->maybe_get_extra_meta();
     if (extra_meta == nullptr || !extra_meta->fake_constant_ ||
         !extra_meta->fake_constant_->has_storage() ||
@@ -1277,46 +1358,42 @@ void FakeTensorMode::invalidate_constant_aliases(
             storage_impl) {
       continue;
     }
-    constants_to_release.emplace_back(std::move(extra_meta->fake_constant_));
+    constant = std::move(extra_meta->fake_constant_);
   }
-  constant_storage_mapping_.erase(it);
 }
 
 void FakeTensorMode::clear_non_cpu_constants() {
-  for (auto it = constant_storage_mapping_.begin();
-       it != constant_storage_mapping_.end();) {
-    std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> live_tensors;
-    c10::intrusive_ptr<c10::TensorImpl> constant;
-    for (auto& weak_ref : it->second.tensors) {
+  decltype(constant_storage_mapping_) snapshot;
+  {
+    std::lock_guard guard(constant_mutex_);
+    snapshot = constant_storage_mapping_;
+    for (auto it = constant_storage_mapping_.begin();
+         it != constant_storage_mapping_.end();) {
+      auto& aliases = it->second.tensors;
+      std::erase_if(
+          aliases, [](const auto& weak_ref) { return weak_ref.expired(); });
+      if (aliases.empty()) {
+        it = constant_storage_mapping_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  for (const auto& [storage_impl, aliases] : snapshot) {
+    for (const auto& weak_ref : aliases.tensors) {
       auto impl = weak_ref.lock();
       if (!impl) {
         continue;
       }
-      auto* extra_meta = impl->maybe_get_extra_meta();
-      if (extra_meta == nullptr || !extra_meta->fake_constant_ ||
-          !extra_meta->fake_constant_->has_storage() ||
-          extra_meta->fake_constant_->storage().unsafeGetStorageImpl() !=
-              it->first) {
+      auto constant = get_constant(impl.get());
+      if (!constant || !constant->has_storage() ||
+          constant->storage().unsafeGetStorageImpl() != storage_impl) {
         continue;
       }
-      live_tensors.push_back(weak_ref);
-      if (!constant) {
-        constant = extra_meta->fake_constant_;
+      if (!constant->device().is_cpu()) {
+        invalidate_constant_aliases(storage_impl);
       }
-    }
-
-    if (!constant) {
-      it = constant_storage_mapping_.erase(it);
-    } else if (constant->device().is_cpu()) {
-      it->second.tensors = std::move(live_tensors);
-      ++it;
-    } else {
-      auto* storage_impl = it->first;
-      ++it;
-      invalidate_constant_aliases(storage_impl);
-      // Reentrant destruction may mutate the map, so do not reuse an iterator
-      // that was live while constants were released.
-      it = constant_storage_mapping_.begin();
+      break;
     }
   }
 }

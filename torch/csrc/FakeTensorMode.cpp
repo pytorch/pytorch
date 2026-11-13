@@ -127,7 +127,12 @@ static int cpp_fake_tensor_mode_init(
       std::make_shared<c10::SafePyObject>(
           Py_NewRef(converter), getPyInterpreter()),
       config.attr("fake_tensor_allow_meta").cast<bool>(),
-      config.attr("fake_tensor_allow_unsafe_data_ptr_access").cast<bool>());
+      config.attr("fake_tensor_allow_unsafe_data_ptr_access").cast<bool>(),
+      config.attr("fake_tensor_propagate_real_tensors").cast<bool>());
+  if (auto prefer = config.attr("fake_tensor_prefer_device_type");
+      !prefer.is_none()) {
+    mode->prefer_device_type_ = c10::Device(prefer.cast<std::string>()).type();
+  }
   if (creation_traceback != Py_None) {
     mode->creation_traceback_ = std::make_shared<c10::SafePyObject>(
         Py_NewRef(creation_traceback), getPyInterpreter());
@@ -212,9 +217,19 @@ static PyGetSetDef mode_properties[] = {
      set_mode_field<&c10::FakeTensorMode::allow_non_fake_inputs_>,
      nullptr,
      nullptr},
+    {"propagate_real_tensors",
+     get_mode_field<&c10::FakeTensorMode::propagate_real_tensors_>,
+     set_mode_field<&c10::FakeTensorMode::propagate_real_tensors_>,
+     nullptr,
+     nullptr},
     {"epoch",
      get_mode_field<&c10::FakeTensorMode::epoch_>,
      set_mode_field<&c10::FakeTensorMode::epoch_>,
+     nullptr,
+     nullptr},
+    {"allow_scalar_outputs",
+     get_mode_field<&c10::FakeTensorMode::allow_scalar_outputs_>,
+     set_mode_field<&c10::FakeTensorMode::allow_scalar_outputs_>,
      nullptr,
      nullptr},
     {"fake_tensor_converter",
