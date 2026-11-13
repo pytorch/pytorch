@@ -12,6 +12,8 @@ struct TensorImpl;
 
 namespace at {
 
+class Tensor;
+
 TORCH_API void set_and_normalize_fake_device(
     c10::TensorImpl* impl,
     c10::Device device);
@@ -33,5 +35,14 @@ TORCH_API void init_cpp_fake(
     c10::TensorImpl* impl,
     c10::Device device,
     const std::shared_ptr<c10::FakeTensorMode>& mode);
+
+namespace impl {
+
+// Metadata-only fake kernels. The caller validates the inputs and disables
+// dispatch, but must not enter InKernelInvocationGuard: the copies stay fake.
+TORCH_API Tensor fake_detach(const Tensor& self);
+TORCH_API Tensor& fake_shallow_copy_data_(Tensor& self, const Tensor& source);
+
+} // namespace impl
 
 } // namespace at
