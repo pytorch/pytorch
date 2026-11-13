@@ -7,6 +7,7 @@ self-hosted-runner:
     - linux.24_04.16x
     # NVIDIA hosted runners
     - nv-l-arm64grace-16-200-gb300
+    - nv-l-arm64grace-16-850-gb300-4
     # Repo-specific IBM hosted S390x runner
     - linux.s390x
     # Organization wide AWS Windows runners

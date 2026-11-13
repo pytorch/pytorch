@@ -10,6 +10,7 @@ ciflow_push_tags:
 - ciflow/docker
 - ciflow/dtensor
 - ciflow/gb300
+- ciflow/gb300-transport
 - ciflow/h100
 - ciflow/h100-cutlass-backend
 - ciflow/h100-distributed

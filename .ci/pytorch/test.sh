@@ -662,6 +662,97 @@ test_python_smoke_b200() {
   assert_git_not_dirty
 }
 
+rdma_port_bytes() {
+  # port_*_data counters are in 4-byte units.
+  for port in /sys/class/infiniband/*/ports/*; do
+    [[ -e "${port}/counters/port_xmit_data" ]] || continue
+    echo "${port} $(cat "${port}/counters/port_xmit_data") $(cat "${port}/counters/port_rcv_data")"
+  done | sort
+}
+
+rdma_port_deltas() {
+  rdma_port_bytes > /tmp/rdma_after
+  if [[ ! -s /tmp/rdma_after ]]; then
+    echo "RDMA port counters not exposed; no byte deltas"
+    return
+  fi
+  echo "RDMA port bytes moved (xmit rcv):"
+  join /tmp/rdma_before /tmp/rdma_after | awk '{print $1, ($4-$2)*4, ($5-$3)*4}' || true
+}
+
+test_transport_rdma() {
+  # NIXL and Mooncake transports over RoCE/RDMA on the NVIDIA GB300 runner.
+  # CUDA jobs exclude GENERIC classes, which include the Mooncake tests; run them here.
+  export PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION=
+  # nixl-cu13 depends on torch, so install it without deps to keep the built torch.
+  pip_install --no-deps nixl==1.5.2 nixl-cu13==1.5.2
+  pip_install mooncake-transfer-engine-cuda13==0.3.14
+  # supported() swallows import errors, which would turn a broken install into skips.
+  python -c "import nixl, mooncake.engine"
+
+  ls -l /dev/infiniband || true
+  # Skip xtrace for the per-GID loops.
+  set +x
+  local rdma_devices=()
+  for port in /sys/class/infiniband/*/ports/*; do
+    [[ -e "${port}" ]] || continue
+    echo "${port}: $(cat "${port}/state" "${port}/link_layer" "${port}/rate" 2>/dev/null | tr '\n' ' ')"
+    # Tests use port 1 (UCX_NET_DEVICES=<dev>:1).
+    if [[ "$(basename "${port}")" == 1 ]] && grep -q ACTIVE "${port}/state"; then
+      rdma_devices+=("$(basename "$(dirname "$(dirname "${port}")")")")
+    fi
+    # Non-zero GIDs with their RoCE version.
+    for gid in "${port}"/gids/*; do
+      local idx value
+      idx=$(basename "${gid}")
+      value=$(cat "${gid}" 2>/dev/null) || continue
+      [[ "${value}" == "0000:0000:0000:0000:0000:0000:0000:0000" ]] && continue
+      echo "  gid ${idx} ${value} $(cat "${port}/gid_attrs/types/${idx}" 2>/dev/null)"
+    done
+  done
+  nvidia-smi topo -m || true
+  echo "memlock: $(ulimit -l)"
+  # GPUDirect RDMA needs nvidia_peermem or dmabuf.
+  grep -E 'peermem|^nvidia' /proc/modules || true
+  ls -l /dev/nvidia-caps /dev/nvidia-caps-imex-channels 2>&1 || true
+  nvidia-smi -q | grep -A3 -i fabric || true
+  rdma_port_bytes > /tmp/rdma_before
+  set -x
+  if [[ ${#rdma_devices[@]} -lt 2 ]]; then
+    echo "Cross-NIC tests need at least 2 active RDMA ports, found: ${rdma_devices[*]}"
+    exit 1
+  fi
+  # Non-zero deltas show traffic went through the NICs; printed on failure too.
+  trap_add rdma_port_deltas EXIT
+  # Tests give each endpoint its own NIC, round robin, so traffic crosses NICs.
+  TORCH_TEST_RDMA_DEVICES=$(IFS=,; echo "${rdma_devices[*]}")
+  export TORCH_TEST_RDMA_DEVICES
+
+  time env TORCH_TEST_CUDA_TRANSPORT=1 python test/run_test.py \
+    --include \
+      distributed/test_transport_registry \
+      distributed/test_transport_bootstrap \
+      distributed/test_transport_cuda_stream \
+      distributed/test_transport_nixl \
+      distributed/test_transport_nixl_work \
+    --verbose --upload-artifacts-while-running
+
+  # Default UCX picks shared memory/cuda_ipc for same-host peers; UCX_TLS=rc forces RDMA.
+  # NIXL rejects UCX_TLS without cuda_copy when GPUs are present.
+  time env TORCH_TEST_CUDA_TRANSPORT=1 UCX_TLS=rc,self,cuda_copy UCX_PROTO_INFO=y python test/run_test.py \
+    --include distributed/test_transport_cuda_stream --verbose --upload-artifacts-while-running
+  time env TORCH_TEST_NIXL=1 python test/run_test.py \
+    --include distributed/test_transport_nixl_native --verbose --upload-artifacts-while-running
+  time env TORCH_TEST_NIXL=1 UCX_TLS=rc,self,cuda_copy UCX_PROTO_INFO=y python test/run_test.py \
+    --include distributed/test_transport_nixl_native --verbose --upload-artifacts-while-running
+
+  # MC_FORCE_HCA=1 fails instead of silently falling back to NVLink without an HCA.
+  time env RUN_MOONCAKE_INTEGRATION=1 MC_FORCE_HCA=1 python test/run_test.py \
+    --include distributed/test_transport_mooncake --verbose --upload-artifacts-while-running
+
+  assert_git_not_dirty
+}
+
 
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
@@ -2924,6 +3015,8 @@ elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
 elif [[ "${TEST_CONFIG}" == smoke_b200 ]]; then
   test_python_smoke_b200
+elif [[ "${TEST_CONFIG}" == transport_rdma ]]; then
+  test_transport_rdma
 elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
   test_python_smoke_xpu
 elif [[ "${TEST_CONFIG}" == dtensor ]]; then

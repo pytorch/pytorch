@@ -5,6 +5,8 @@ import multiprocessing
 import os
 import unittest
 
+from transport_test_utils import rdma_device
+
 import torch
 import torch.distributed as dist
 from torch.distributed._transport import new_transport, wait_all
@@ -93,6 +95,49 @@ def _native_worker(rank, connection, progress_thread):
     connection.close()
 
 
+def _cuda_worker(rank, connection):
+    # VRAM to VRAM, DRAM to VRAM and VRAM to DRAM between processes.
+    device = torch.device("cuda", rank % torch.cuda.device_count())
+    torch.cuda.set_device(device)
+    expected = torch.arange(1 << 20, dtype=torch.float32) + 1 - rank
+    with new_transport("nixl", timeout=10) as transport:
+        connection.send_bytes(transport.bind())
+        transport.connect(_receive(connection))
+        source = torch.arange(1 << 20, dtype=torch.float32, device=device) + rank
+        host_source = source.cpu()
+        targets = [torch.zeros_like(source) for _ in range(3)]
+        host_target = torch.zeros_like(host_source)
+        torch.cuda.synchronize(device)
+        source_memory = transport.register_memory(source)
+        host_view = transport.register_memory(host_source).to_view()
+        target_memories = [transport.register_memory(t) for t in targets]
+        host_memory = transport.register_memory(host_target)
+        source_view = source_memory.to_view()
+        for memory in (source_memory, *target_memories[:2], host_memory):
+            connection.send_bytes(memory.to_remote_buffer().serialize())
+        remote_source, remote_vram, remote_from_dram, remote_dram = (
+            NIXLRemoteBuffer.deserialize(_receive(connection)) for _ in range(4)
+        )
+        works = [
+            transport.write(source_view, remote_vram, async_op=True),
+            transport.write(host_view, remote_from_dram, async_op=True),
+            transport.write(source_view, remote_dram, async_op=True),
+        ]
+        asyncio.run(wait_all(works, timeout=10))
+        transport.read(target_memories[2].to_mutable_view(), remote_source)
+        connection.send_bytes(b"written")
+        if _receive(connection) != b"written":
+            raise AssertionError("unexpected control-plane message")
+        for target in targets:
+            torch.testing.assert_close(target.cpu(), expected)
+        torch.testing.assert_close(host_target, expected)
+        connection.send_bytes(b"finished")
+        if _receive(connection) != b"finished":
+            raise AssertionError("unexpected control-plane message")
+        asyncio.run(transport.close_async(timeout=10))
+    connection.close()
+
+
 def _multi_peer_worker(rank, connections):
     # Rank 0 reads from ranks 1 and 2 through one endpoint.
     with new_transport("nixl", "cpu", timeout=5) as transport:
@@ -159,6 +204,8 @@ def _run_worker(worker, *args):
     # Some NIXL 0.6-1.5 wheels segfault at exit on hosts with libefa, whose UCX modules
     # load a second libnl-route-3: https://github.com/ai-dynamo/nixl/issues/2428
     os.environ.setdefault("UCX_MODULES", "^efa,rdmacm")
+    if device := rdma_device(args[0]):
+        os.environ["UCX_NET_DEVICES"] = f"{device}:1"
     worker(*args)
 
 
@@ -175,6 +222,13 @@ class TestNIXLNative(TestCase):
             _native_worker,
             [(connection, progress_thread) for connection in connections],
             connections,
+        )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
+    def test_two_process_cuda_transfers(self):
+        connections = multiprocessing.Pipe()
+        self._spawn(
+            _cuda_worker, [(connection,) for connection in connections], connections
         )
 
     def test_three_process_cpu_multi_peer(self):
@@ -201,7 +255,7 @@ class TestNIXLNative(TestCase):
             for connection in connections:
                 connection.close()
             for process in processes:
-                process.join(30)
+                process.join(60)
                 self.assertEqual(process.exitcode, 0)
         finally:
             for process in processes:
