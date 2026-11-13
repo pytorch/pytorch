@@ -1585,7 +1585,6 @@ ownership:
     section: compiler_export_fx
     paths:
       - /test/onnx/exporter/test_exportable_module.py
-      - /test/onnx/test_fx_type_promotion.py
       - /test/package/package_bc/test_fx_module.pt
   - name: ai_agent_tooling
     owners: []

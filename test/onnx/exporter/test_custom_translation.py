@@ -22,6 +22,7 @@ from torch.onnx._internal.exporter import (
     _dispatching,
     _registration,
 )
+from torch.onnx._internal.exporter._torchlib.ops import _promotion
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import HardwareClassification
 
@@ -232,6 +233,57 @@ if any(n == 'onnxscript' or n.startswith('onnxscript.') or 'torch_lib' in n for 
         self.assertIn("Sub", types)
         self.assertNotIn("Add", types)
         onnx.checker.check_model(program.model_proto, full_check=True)
+
+    @common_utils.parametrize("legacy", [False, True])
+    @common_utils.parametrize("other_kind", ["scalar", "zero_dim", "tensor"])
+    def test_custom_promotion_ownership(self, legacy, other_kind):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        seen = []
+
+        def native(context, self, other):
+            seen.append((self.dtype, getattr(other, "dtype", None)))
+            return context.Add(*_promotion.promote(context, self, other))
+
+        def adapted(self, other):
+            seen.append((self.dtype, getattr(other, "dtype", None)))
+            return op.Add(self, other)
+
+        kwargs = {}
+        if legacy:
+            kwargs["custom_translation_table"] = {self.target: adapted}
+        else:
+            torch.onnx.register_custom_translation(self.target, native)
+        x = torch.tensor([2, 4], dtype=torch.int32)
+        y = 1.5
+        if other_kind != "scalar":
+            y = torch.tensor(
+                1.5 if other_kind == "zero_dim" else [1.5, 2.5],
+                dtype=torch.float64,
+            )
+        program = torch.onnx.export(
+            Model().eval(),
+            (x, y),
+            opset_version=18,
+            optimize=False,
+            verbose=False,
+            **kwargs,
+        )
+        expected = Model()(x, y)
+        dtype = _core.torch_dtype_to_onnx_dtype(expected.dtype)
+        input_dtype = dtype if legacy else ir.DataType.INT32
+        other_dtype = dtype if legacy else ir.DataType.DOUBLE
+        self.assertEqual(
+            seen, [(input_dtype, None if other_kind == "scalar" else other_dtype)]
+        )
+        onnx.checker.check_model(program.model_proto, full_check=True)
+        feeds = {"x": x.numpy()}
+        if isinstance(y, torch.Tensor):
+            feeds["y"] = y.numpy()
+        actual = ReferenceEvaluator(program.model_proto).run(None, feeds)[0]
+        self.assertEqual(torch.from_numpy(actual), expected)
 
     def test_mutation_during_translation_only_affects_next_export(self):
         def mutating(op, self, other, alpha=1):

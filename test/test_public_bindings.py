@@ -347,7 +347,6 @@ class TestPublicBindings(TestCase):
             "torch.onnx._internal.fx.passes.functionalization",
             "torch.onnx._internal.fx.passes.modularization",
             "torch.onnx._internal.fx.passes.readability",
-            "torch.onnx._internal.fx.passes.type_promotion",
             "torch.onnx._internal.fx.passes.virtualization",
             "torch.onnx._internal.fx.type_utils",
             "torch.testing._internal.common_distributed",
