@@ -1276,6 +1276,28 @@ class TestSparseCSRDevice(TestCase):
         t = torch.sparse_csr_tensor(crow_indices, col_indices, values, (1, 100), dtype=dtype, device=device)
         self.assertEqual(t._nnz(), 0)
 
+    @dtypes(torch.float16, torch.bfloat16, torch.int32)
+    def test_sparse_csr_reduction_accumulate_type(self, device, dtype):
+        # Factors near 1 keep a long product in range, so rounding each partial
+        # product to dtype would show up as a large error; the int32 products
+        # overflow unless accumulated in int64 like the dense prod.
+        if dtype.is_floating_point:
+            x = (1 + (torch.rand(4096, 2, device=device) - 0.5) / 32).to(dtype)
+            x_ref = x.float()
+        else:
+            x = torch.tensor([[70000, 70000], [70000, 1]], dtype=dtype, device=device)
+            x_ref = x.long()
+        for t, t_ref, dim in ((x, x_ref, 0), (x.t(), x_ref.t(), 1), (x, x_ref, (0, 1))):
+            out = torch._sparse_csr_prod(t.to_sparse_csr(), dim=dim, keepdim=True)
+            expected = t_ref.prod(dim, keepdim=True) if dim != (0, 1) else t_ref.prod().view(1, 1)
+            self.assertEqual(out.to_dense(), expected.to(out.dtype))
+
+        if not dtype.is_floating_point:
+            # int32 sums overflow unless the full reduction is computed in int64
+            x = torch.tensor([[2**31 - 1, 2**31 - 1]], dtype=dtype, device=device)
+            out = torch._sparse_csr_sum(x.to_sparse_csr(), dim=(0, 1), keepdim=True)
+            self.assertEqual(out.to_dense(), x.long().sum().view(1, 1))
+
     def test_csr_stride(self, device):
         a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=device, index_dtype=torch.int64)
 
