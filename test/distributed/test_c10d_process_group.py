@@ -153,6 +153,28 @@ class AbstractProcessGroupTest(C10dBackendTestContinuous):
         self.assertEqual(WorkResult(result), WorkResult.SUCCESS)
         self.assertTrue(work.is_completed())
 
+    def test_work_result_future_p2p_and_reduce_scatter(self):
+        # gloo completes p2p results on wait() and composes reduce_scatter
+        # from allreduce works.
+        if not self.supports_work_result:
+            self.skipTest(f"{self.backend_name} does not report work results")
+        send = torch.ones(4, device=self.device)
+        recv = torch.empty(4, device=self.device)
+        works = dist.batch_isend_irecv(
+            [
+                dist.P2POp(dist.isend, send, (self.rank + 1) % self.world_size),
+                dist.P2POp(dist.irecv, recv, (self.rank - 1) % self.world_size),
+            ]
+        )
+        output = torch.empty(1, device=self.device)
+        inputs = [torch.ones(1, device=self.device)] * self.world_size
+        works.append(dist.reduce_scatter(output, inputs, async_op=True))
+
+        for work in works:
+            work.wait()
+            result = work.get_future_result().wait()
+            self.assertEqual(WorkResult(result), WorkResult.SUCCESS)
+
     def test_work_future(self):
         tensor = torch.full((4,), float(self.rank + 1), device=self.device)
         work = dist.all_reduce(tensor, async_op=True)
