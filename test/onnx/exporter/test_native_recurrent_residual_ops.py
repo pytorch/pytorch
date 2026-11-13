@@ -15,7 +15,7 @@ from test_native_torchlib import no_script
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_apis
-from torch.onnx._internal.exporter import _core, _registration
+from torch.onnx._internal.exporter import _registration
 from torch.onnx._internal.exporter._torchlib.ops import embedding, recurrent, residual
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -504,7 +504,6 @@ class TestNativeRecurrentResidualOps(common_utils.TestCase):
             torch.tensor([1, 2, 4], device=device),
             torch.tensor([0, 1], device=device),
         )
-        registry = _registration.ONNXRegistry.from_torchlib(opset_version=18)
         with (
             mock.patch.object(
                 onnxscript_apis,
@@ -513,12 +512,13 @@ class TestNativeRecurrentResidualOps(common_utils.TestCase):
             ),
             no_script(),
         ):
-            program = _core.export(
+            program = torch.onnx.export(
                 model,
                 args,
-                registry=registry,
+                dynamo=True,
                 optimize=optimize,
                 verbose=False,
+                opset_version=18,
             )
         onnx.checker.check_model(program.model_proto, full_check=True)
         session = ort.InferenceSession(
