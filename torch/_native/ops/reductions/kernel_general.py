@@ -20,7 +20,21 @@ from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from ...utils.device import check_current
 from . import tile
-from .traits import NormOps, WARP
+from .inner_tree_plan import _K_INNER_TREE_THRESHOLD, _K_TWO_KERNEL_THRESHOLD
+from .traits import (
+    AbsMaxOps,
+    AbsMinOps,
+    AMaxOps,
+    AMinOps,
+    ArgMaxOps,
+    ArgMinOps,
+    MeanOps,
+    NormOps,
+    ProdOps,
+    SumOps,
+    WARP,
+    welford_outputs,
+)
 
 
 # (extent, element-stride) pairs from TensorIterator, fastest dim first.
@@ -352,6 +366,20 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
     )
 
 
+# Input dtypes of the B200 launch policies.
+_B200_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+_B200_CCS = ((10, 0),)
+# The one-field traits of the B200 ragged-column rule (kernel_coltile.select_col_config).
+_B200_RAGGED_COL_ONE_FIELD = (SumOps, ProdOps, MeanOps, AMaxOps, AMinOps)
+# The wide strided one-field rule's traits (see select_general_config).
+_B200_STRIDED_ONE_FIELD = (SumOps, ProdOps, MeanOps)
+# The B200 index rules' traits; they also need 32-bit accumulators (int32 indices).
+_B200_INDEX = (ArgMaxOps, ArgMinOps)
+# The b200_strided_c256 rule's traits besides Welford (see select_general_config):
+# sum, mean, amax, amin and the index traits were measured under c256, while prod,
+# nansum and the norms were not, so they keep the default config.
+_B200_STRIDED_C256 = (SumOps, MeanOps, AMaxOps, AMinOps, *_B200_INDEX)
+
 # B200 CUDA-graph timings against _try_indexed_itree (sum fp32/bf16/fp16, argmax and
 # var_mean fp32/fp16; R 20-20000, B * C 32-524288; bitwise equal): ordered columns win
 # 1.1-11x once B * C fills the GPU, but one 32-output block per tile leaves SMs idle
@@ -361,17 +389,39 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
 # max.dim, min.dim, aminmax, var and std) runs 1.0-13x. General-p norms (an exp/log
 # leaf; p = 3 measured) run 0.34-2.3x below 16384 outputs and 1.1-2.6x from there.
 # The route starts at the shortest measured win, R = 128 (reduce_ordered_col declines
-# the multirow plans of rows up to 32 for fp32 and 64 for 16-bit inputs anyway), and
-# stops at R = 8192, the longest looped row within reduce_ordered_col's replay cap of
-# tile.MAX_UNROLL leaves (see the compile timings there). Each R compiles once per
-# mapping (see kernel_coltile.OrderedColConfig.min_blocks) and stride width.
-_ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+# the multirow plans of rows up to 32 for fp32 and 64 for 16-bit inputs anyway). The
+# looped route stops at R = 8192, the longest looped row within reduce_ordered_col's
+# replay cap of tile.MAX_UNROLL leaves (see the compile timings there). Each R compiles
+# once per mapping (see kernel_coltile.OrderedColConfig.min_blocks) and stride width.
+# Routing dtypes and ccs, deliberately separate from the launch-policy _B200_DTYPES and
+# _B200_CCS: the route and the policies are measured and extended independently.
 # kernel_coltile._ORDERED_COL_CONFIGS entries for other architectures are not routed.
+_ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
 _ORDERED_COL_MAX_R = 8192
 _ORDERED_COL_MIN_OUTPUTS = {1: 2048, 2: 16384, 3: 32768}
 _ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS = 16384
+# Plans split past _K_TWO_KERNEL_THRESHOLD batches of _K_INNER_TREE_THRESHOLD rows, so
+# above 24576 rows. The split route serves every single-field B = 1 view from C = 128,
+# with no upper R bound. Against the indexed tree on B200 (bitwise equal everywhere),
+# sum, mean, prod, amax, amin, nansum, absmax, absmin and norm1/2 won 1.45-8.5x at R
+# 32768-262144; sum, amax, all, any and count_nonzero won 4.4-39x at R 512K-4M (C
+# 128-4096), and all, any and count_nonzero 1.4-16x at R 32768-1M. At B * C = 32 views
+# ran 0.37-2.6x. Below 192 columns, low R loses: at C = 128, R 24577-28000 ran sum at
+# 1.07-1.21x but all at 0.82-0.96x and bf16 count_nonzero at 0.94-0.97x, while all and
+# any won 1.43-1.49x at R = 32768 and every trait 1.30-2.11x from R = 32769, so narrow
+# views route from R = 32768; C = 192 and 256 won 1.19-3.3x at every R from 24577.
+# General-p norms (an exp/log leaf; p = 3 and 0.5 measured) run 0.34-0.36x at C = 128
+# and R = 32768 but 1.0-2.1x from C = 1024. Routed views compile one stage-one kernel
+# per R, ragged last partitions included: on first call (B200), single-field split
+# views compiled in 1.5-2.4 s with whole partitions and about 3.7 s with a ragged last
+# one (R = 100003, C = 128), against 0.55 s for the indexed tree.
+_ORDERED_SPLIT_MIN_R = _K_TWO_KERNEL_THRESHOLD * _K_INNER_TREE_THRESHOLD + 1
+_ORDERED_SPLIT_MIN_OUTPUTS = 128
+_ORDERED_SPLIT_GENERAL_NORM_MIN_OUTPUTS = 1024
+_ORDERED_SPLIT_NARROW_OUTPUTS = 192
+_ORDERED_SPLIT_NARROW_MIN_R = 32768
 
 
 def _general_norm(trait: Any) -> bool:
@@ -386,8 +436,15 @@ def _ordered_col_route_ok(view: torch.Tensor, trait: Any) -> bool:
     # declines them too.
     if C < WARP:
         return False
+    general_norm = _general_norm(trait)
+    if R >= _ORDERED_SPLIT_MIN_R:
+        min_outputs = _ORDERED_SPLIT_MIN_OUTPUTS
+        if general_norm:
+            min_outputs = _ORDERED_SPLIT_GENERAL_NORM_MIN_OUTPUTS
+        narrow = C < _ORDERED_SPLIT_NARROW_OUTPUTS and R < _ORDERED_SPLIT_NARROW_MIN_R
+        return trait.nfields == 1 and B == 1 and C >= min_outputs and not narrow
     min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(trait.nfields, 3)]
-    if _general_norm(trait):
+    if general_norm:
         min_outputs = _ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS
     return _ORDERED_COL_MIN_R <= R <= _ORDERED_COL_MAX_R and B * C >= min_outputs
 
@@ -407,30 +464,91 @@ _K0_ALL_BLOCK = 256
 _K0_ALL_GRID_MULT = 4
 
 
+class _AllConfig(NamedTuple):
+    block: int = _K0_ALL_BLOCK
+    grid_mult: int = _K0_ALL_GRID_MULT
+
+
+def select_all_config(
+    cc: tuple[int, int],
+    dtype: torch.dtype,
+    count: int,
+    *,
+    trait_type: type,
+    nfields: int,
+    nouts: int,
+    acc_bits: int,
+) -> _AllConfig:
+    size = count * dtype.itemsize
+    if (
+        cc in _B200_CCS
+        and dtype in _B200_DTYPES
+        and size in (256 << 20, 2 << 30)
+        and nfields == 2
+        and nouts == 1
+        and acc_bits == 32
+        and trait_type in _B200_INDEX
+    ):
+        return _AllConfig(block=512, grid_mult=8)
+    return _AllConfig()
+
+
 class _GeneralConfig(NamedTuple):
     block: int = _K0_BLOCK
     kernel_order: Literal["linear", "inner_tree"] = "linear"
     rule: str = "general_default"
+    uniform_tree: bool = False
 
 
 def select_general_config(
     cc: tuple[int, int],
     dtype: torch.dtype,
-    trait_key: str,
     count: int,
     num_o: int,
     red_pairs: Pairs,
     kept_pairs: Pairs,
     *,
+    trait_type: type,
     nfields: int,
     nouts: int,
-    acc_bits: int = 32,
-    alignment: int = 16,
+    welford_outs: int,
+    acc_bits: int,
+    alignment: int,
 ) -> _GeneralConfig:
     # One-output strided reductions on B200 at 512 MiB: 128 threads ran 0.87x (fp32) and
     # 0.65x (bf16) of 256; 1-16 MiB were within 12% either way.
     if num_o == 1:
         return _GeneralConfig(block=_K0_ALL_BLOCK, rule="general_one_output")
+    strided_row = (
+        cc in _B200_CCS
+        and dtype in _B200_DTYPES
+        and tuple(red_pairs) == ((count, 2),)
+        and tuple(kept_pairs) == ((num_o, 2 * count),)
+        and acc_bits == 32
+        and alignment >= 16
+    )
+    # Against the default config on B200 (fp16/bf16/fp32, 2 to 256K outputs), the c256
+    # inner tree ran 1.03-6.2x at every output count (1.8-3.3x at 2-8 outputs). The
+    # wider rules ran 0.76-0.95x below 2048 outputs, which keep the default config (a
+    # two-stage split below sm_count * 4 outputs), and 1.0-3.1x from 2048 with no upper
+    # bound (fp32 sum at count 1024: 1.0x). Amax and amin skip the wide one-field rule:
+    # amax ran 0.88-0.94x at count 4096 and for fp32 at count 1024, against 1.7-2.6x
+    # under c256. Under c256, amin ran 1.14-2.96x and amax 1.17-2.89x (counts 256 and
+    # 257, 2 to 256K outputs).
+    wide = strided_row and count in (1024, 4095, 4096) and num_o >= 2048
+    if (
+        strided_row
+        and count in (256, 257)
+        and (trait_type in _B200_STRIDED_C256 or welford_outs == nouts)
+    ):
+        return _GeneralConfig(kernel_order="inner_tree", rule="b200_strided_c256")
+    if wide and trait_type in _B200_INDEX:
+        block = 32 if count == 1024 and dtype in (torch.float16, torch.bfloat16) else 64
+        return _GeneralConfig(block=block, rule="b200_strided_index")
+    if wide and welford_outs == nouts:
+        return _GeneralConfig(block=64, rule="b200_strided_welford", uniform_tree=True)
+    if wide and trait_type in _B200_STRIDED_ONE_FIELD:
+        return _GeneralConfig(block=32, rule="b200_strided_one_field")
     return _GeneralConfig()
 
 
@@ -445,6 +563,56 @@ def _oneshot_ok(x: torch.Tensor) -> bool:
     vec = math.gcd(N, 128 // width)
     threads_per_row = max(WARP, rt.row_config(N, width).threads_per_row)
     return -(-N // (threads_per_row * vec)) <= _ONESHOT_MAX_LOADS
+
+
+# B200 CUDA-graph timings of ragged-vector rows against the paths they preempt (sum
+# fp16/bf16/fp32, argmax fp32, var_mean; odd N 3 to 2^24 + 1, 4 rows to 256 MiB): they
+# win 1.01-3.9x for 255 <= N <= 16383 (var_mean from N = 1024; bf16 var_mean ran 0.72x
+# at N = 255), but narrow rows (N = 3, 33) run 0.02-0.9x and long rows (N >= 65535)
+# 0.01-2.5x, losing badly when few rows leave the cross-CTA split faster. Inside the
+# band, mean, prod, amax, amin, nansum, norm1/2 and count_nonzero (fp16/bf16/fp32) and
+# argmin, aminmax and max/min.dim (fp32) run 0.97-3.9x. Absmax and absmin (0.88-0.91x)
+# and general-p norms (0.57-0.92x; p = 3 and 0.5) lose at N = 255, so they start at
+# N = 1023. Rows are odd, so Welford traits start at N = 1025; var, std, var_mean and
+# std_mean (fp16/bf16/fp32, N = 1025-16383, 64 and 4096 rows) ran 1.09-2.3x. All and any
+# (fp16/bf16/fp32, N = 255-16383, 2 to 4096 rows) ran 1.07-2.4x, and two- and three-row
+# sums 1.28-1.91x. WelfordOps(return_mean=True) returns a mean, so it starts at N = 255
+# like the mean-like traits, without a measurement of its own.
+# The kernel bakes N, so each new width compiles once (0.17 s on B200).
+_RAGGED_ROW_MIN_N = 255
+_RAGGED_ROW_LATE_MIN_N = 1023
+_RAGGED_ROW_WELFORD_MIN_N = 1025
+_RAGGED_ROW_MAX_N = 16383
+
+
+def _ragged_row_min_n(trait: Any) -> int:
+    """The narrowest row a trait takes ragged vectors at."""
+    if welford_outputs(trait):
+        return _RAGGED_ROW_WELFORD_MIN_N
+    late = isinstance(trait, (AbsMaxOps, AbsMinOps)) or _general_norm(trait)
+    return _RAGGED_ROW_LATE_MIN_N if late else _RAGGED_ROW_MIN_N
+
+
+def _ragged_rows_ok(
+    cc: tuple[int, int],
+    dtype: torch.dtype,
+    N: int,
+    alignment: int,
+    trait: Any,
+    *,
+    acc_bits: int,
+) -> bool:
+    """Whether odd-width rows take the B200 ragged-vector row kernel."""
+    min_n = _ragged_row_min_n(trait)
+    return (
+        cc in _B200_CCS
+        and dtype in _B200_DTYPES
+        and acc_bits == 32
+        and N % 2 == 1
+        and min_n <= N <= _RAGGED_ROW_MAX_N
+        and alignment == tile.TRANSFER_ALIGNMENT
+        and (trait.nfields != 2 or dtype == torch.float32)
+    )
 
 
 def _try_fast_row(
@@ -466,20 +634,34 @@ def _try_fast_row(
 
     # Callers resolve any required order first, so this only serves unordered requests.
     M, itemsize = x.shape[0], x.element_size()
+    cc = _hw.caps(x.device).cc
+    alignment = _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT)
+    acc_bits = max(dt.width for dt in trait.fdtypes)
     kernel_order = rt.select_row_order(
-        _hw.caps(x.device).cc,
+        cc,
         x.dtype,
-        trait_key,
         N,
         M,
+        trait_type=type(trait),
         nfields=trait.nfields,
         nouts=nouts,
-        acc_bits=max(dt.width for dt in trait.fdtypes),
-        alignment=_L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
+        welford_outs=welford_outputs(trait),
+        acc_bits=acc_bits,
+        alignment=alignment,
     )
     if kernel_order == "inner_tree":
         return rt.reduce_row_tile(
             trait, trait_key, x, out_dtypes, nouts=nouts, order="inner_tree"
+        )
+    if _ragged_rows_ok(cc, x.dtype, N, alignment, trait, acc_bits=acc_bits):
+        return rt.reduce_row_tile(
+            trait,
+            trait_key,
+            x,
+            out_dtypes,
+            nouts=nouts,
+            order="linear",
+            ragged_vector=True,
         )
     if rt.one_thread_row_ok(N, itemsize, M, x.device):
         return rt.reduce_row_tile(
@@ -859,16 +1041,19 @@ def _reduce(
     config = select_general_config(
         cc,
         x.dtype,
-        trait_key,
         count,
         num_o,
         red_pairs,
         kept_pairs,
+        trait_type=type(trait),
         nfields=trait.nfields,
         nouts=nouts,
+        welford_outs=welford_outputs(trait),
         acc_bits=max(dt.width for dt in trait.fdtypes),
         alignment=_L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
     )
+    if config.kernel_order not in ("linear", "inner_tree"):
+        raise ValueError(f"unknown kernel order {config.kernel_order!r}")
     if config.kernel_order == "inner_tree":
         ordered = _try_indexed_itree(
             trait, trait_key, x, red_pairs, kept_pairs, num_o, count, out_dtypes, nouts
@@ -896,6 +1081,9 @@ def _reduce(
         if split is not None:
             return tuple(_as_shape(o, out_shape) for o in split)
 
+    # Ineligible shapes keep the serial fold.
+    nred = len(red_pairs)
+    tree_ok = config.uniform_tree and tile.uniform_tree_ok(trait, count, block, nred)
     outs = [torch.empty(out_shape, device=x.device, dtype=d) for d in out_dtypes]
     op = ReduceBlock(
         trait,
@@ -906,6 +1094,7 @@ def _reduce(
         in_base=cast(int, x.storage_offset()),
         nouts=nouts,
         block=block,
+        uniform_tree=tree_ok,
     )
     key = ("reduce", trait_key, x.dtype, tuple(out_dtypes)) + op.cache_sig
     _launch(op, key, [_flat(x)], _flat_outs(outs))
@@ -1044,7 +1233,16 @@ def _reduce_all(
     if res is not None:
         return res
     # If xcta declines, grid-stride any L without reshaping or extent-dependent compile cost.
-    block, grid_mult = _K0_ALL_BLOCK, _K0_ALL_GRID_MULT
+    cfg = select_all_config(
+        _hw.caps(x.device).cc,
+        x.dtype,
+        L,
+        trait_type=type(trait),
+        nfields=trait.nfields,
+        nouts=nouts,
+        acc_bits=max(dt.width for dt in trait.fdtypes),
+    )
+    block, grid_mult = cfg.block, cfg.grid_mult
     sm = _hw.caps(x.device).sm_count
     G = _grid_size(L, block, sm, grid_mult)
     chunk = (L + G - 1) // G

@@ -315,6 +315,38 @@ def _uniform_tree_issue(
     return None
 
 
+def _general_block_issue(threads_per_block) -> str | None:
+    # Non-power-of-two warp counts omit partials in _block_merge, measuring 12-62% low.
+    nwg = threads_per_block // WARP
+    if threads_per_block % WARP or nwg & (nwg - 1):
+        return f"a power-of-two warp count, got {threads_per_block=}"
+    return None
+
+
+def uniform_tree_ok(trait, count, threads_per_block, npairs_red):
+    """Whether TileReduce accepts a general-axis uniform Welford tree of count values per
+    output on a block of threads_per_block threads.
+
+    TileReduce also needs a linear-order fold of inputs (not partials) indexed by r over
+    an unclamped run (no flat tail or ragged chunk), which ReduceBlock's defaults give.
+    """
+    if _general_block_issue(threads_per_block) is not None:
+        return False
+    issue = _uniform_tree_issue(
+        trait,
+        count,
+        threads_per_block,
+        npairs_red,
+        axis="general",
+        order="linear",
+        combine=False,
+        gidx_from="r",
+        flat_tail=False,
+        ragged_chunk=False,
+    )
+    return issue is None
+
+
 def _uniform_combine_issue(trait, split) -> str | None:
     issue = _flag_issue(trait, "has_combine_uniform", "combine_uniform")
     if issue is not None:
@@ -995,6 +1027,12 @@ def _col_group_issue(trait, axis, combine, vec) -> str | None:
     return _flag_issue(trait, "has_combine_equal", "combine_equal")
 
 
+def col_group_ok(trait, vec):
+    """Whether TileReduce accepts col_group > 1 for a col-axis fold of inputs with this
+    vec. trait may be a trait or its type."""
+    return _col_group_issue(trait, "col", False, vec) is None
+
+
 class TileReduce:
     """Reduction kernel parameterized by reduced axis.
 
@@ -1116,13 +1154,10 @@ class TileReduce:
         if axis == "general" and order == "linear":
             # Every block thread folds one output, equivalent to row threads_per_row=threads_per_block.
             threads_per_row = threads_per_block
-            nwg = threads_per_block // WARP
-            if threads_per_block % WARP or nwg & (nwg - 1):
-                # Non-power-of-two warp counts omit partials in _block_merge, measuring
-                # 12-62% low; caller-set block requires validation here.
-                raise ValueError(
-                    f"a general-axis block must be a power-of-two warp count, got {threads_per_block=}"
-                )
+            # Caller-set block requires validation here.
+            issue = _general_block_issue(threads_per_block)
+            if issue is not None:
+                raise ValueError(f"a general-axis block must be {issue}")
         nwpr = threads_per_row // WARP
         if (
             axis == "row"
