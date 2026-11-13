@@ -168,7 +168,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   at::DataPtr& mutable_data_ptr() {
-    if (has_mutable_data_ptr_check_.load(std::memory_order_acquire)) [[unlikely]] {
+    if (has_mutable_data_ptr_check_.load(std::memory_order_acquire))
+        [[unlikely]] {
       if (throw_on_immutable_data_ptr_) {
         throw_data_ptr_access_error();
       }
@@ -233,7 +234,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void* mutable_data() {
-    if (has_mutable_data_ptr_check_.load(std::memory_order_acquire)) [[unlikely]] {
+    if (has_mutable_data_ptr_check_.load(std::memory_order_acquire))
+        [[unlikely]] {
       if (throw_on_immutable_data_ptr_) {
         throw_data_ptr_access_error();
       }
