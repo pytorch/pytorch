@@ -5,7 +5,7 @@ from typing import Any
 
 import torch
 from torch._export.verifier import SpecViolationError
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, require_python_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import (
     get_opaque_type_name,
@@ -210,7 +210,7 @@ def lift_constants_pass(
     )
 
     placeholder_vals = (n.meta["val"] for n in gm.graph.nodes if n.op == "placeholder")
-    fake_mode = detect_fake_mode(tuple(placeholder_vals))
+    fake_mode = require_python_fake_mode(detect_fake_mode(tuple(placeholder_vals)))
 
     first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     used_target_names = set()
