@@ -16,6 +16,7 @@ namespace at::native {
 
 namespace {
 
+#if defined(USE_ROCM) && (ROCM_VERSION >= 70200)
 bool is_cuda_caching_allocator_tensor(const Tensor& self) {
   auto* cuda_allocator = c10::cuda::CUDACachingAllocator::get();
   if (cuda_allocator == nullptr) {
@@ -26,6 +27,7 @@ bool is_cuda_caching_allocator_tensor(const Tensor& self) {
   // the direct dereference path limited to allocator-managed CUDA memory.
   return self.storage().data_ptr().get_deleter() == cuda_allocator->raw_deleter();
 }
+#endif
 
 template <typename scalar_t>
 void _local_scalar_dense_cuda_impl(const Tensor& self, Scalar& r) {
