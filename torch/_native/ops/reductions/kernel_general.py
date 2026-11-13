@@ -576,7 +576,8 @@ def _oneshot_ok(x: torch.Tensor) -> bool:
 # N = 1023. Rows are odd, so Welford traits start at N = 1025; var, std, var_mean and
 # std_mean (fp16/bf16/fp32, N = 1025-16383, 64 and 4096 rows) ran 1.09-2.3x. All and any
 # (fp16/bf16/fp32, N = 255-16383, 2 to 4096 rows) ran 1.07-2.4x, and two- and three-row
-# sums 1.28-1.91x.
+# sums 1.28-1.91x. WelfordOps(return_mean=True) returns a mean, so it starts at N = 255
+# like the mean-like traits, without a measurement of its own.
 # The kernel bakes N, so each new width compiles once (0.17 s on B200).
 _RAGGED_ROW_MIN_N = 255
 _RAGGED_ROW_LATE_MIN_N = 1023

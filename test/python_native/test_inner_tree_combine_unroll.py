@@ -167,12 +167,17 @@ class TestInnerTreeCombineUnroll(TestCase):
         class OptedIn(OwnCombine):
             has_combine_uniform = True
 
+        class KeepsOptIn(OptedIn):
+            pass
+
         split, acc = (1024, 8192, 8192, 512, 512), cutlass.Float32
         self.assertFalse(OwnCombine.has_combine_uniform)
         self.assertTrue(OptedIn.has_combine_uniform)
         self.assertFalse(OptedIn.has_combine_equal)
+        self.assertFalse(KeepsOptIn.has_combine_uniform)
         self.assertFalse(tile.uniform_combine_ok(OwnCombine(acc=acc), split))
         self.assertTrue(tile.uniform_combine_ok(OptedIn(acc=acc), split))
+        self.assertFalse(tile.uniform_combine_ok(KeepsOptIn(acc=acc), split))
 
     @parametrize(
         "updates,msg",
