@@ -2821,7 +2821,7 @@ class ByteArrayVariable(VariableTracker):
             item = item.realize()
             if isinstance(item, ByteArrayVariable):
                 parts.append(item.data)
-            elif istype(item, ConstantVariable):
+            elif ConstantVariable.is_constant_vt(item):
                 # Not UserDefinedConstantVariable: a str or int subclass may
                 # define __buffer__, which must not run at trace time.
                 parts.append(item.as_python_constant())
