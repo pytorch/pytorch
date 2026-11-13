@@ -544,8 +544,8 @@ class _LocalizedTensor(torch.Tensor):
 
         # Mark non-localized inputs as ready on the calling stream so each
         # branch can wait on this event before reading them.
-        default_stream = torch.cuda.current_stream(primary._ctx.device)
-        primary._default_event.record(default_stream)
+        caller_stream = torch.cuda.current_stream(primary._ctx.device)
+        primary._default_event.record(caller_stream)
 
         outputs: list[torch.Tensor] = []
         for b in range(n_branches):
@@ -578,11 +578,14 @@ class _LocalizedTensor(torch.Tensor):
                 evt.record(stream)
             outputs.append(h)
 
-        # Block default stream until all branches are done before cat
-        # (eager-mode sync; see comment on the default-event record above).
+        # Make the caller stream wait for all branches before cat.
         for evt in primary._branch_events:
-            default_stream.wait_event(evt)
-        return torch.cat(outputs, dim=-1)
+            caller_stream.wait_event(evt)
+        result = torch.cat(outputs, dim=-1)
+        # Order branch-buffer reuse after the caller has consumed the outputs.
+        for stream in primary._streams:
+            stream.wait_stream(caller_stream)
+        return result
 
 
 def _localization_supported_or_warn(device: int, *, stacklevel: int = 4) -> bool:

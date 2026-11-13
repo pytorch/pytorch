@@ -27,6 +27,7 @@ import torch.nn.functional as F
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
     HardwareClassification,
     parametrize,
     run_tests,
@@ -1490,6 +1491,37 @@ class TestLocalizationCudagraphs(TestCase):
     def tearDown(self):
         torch._dynamo.reset()
         super().tearDown()
+
+    @_requires_green_contexts
+    @torch.inference_mode()
+    @parametrize("compiled", (False, True))
+    def test_different_caller_streams(self, device, compiled):
+        model = nn.Linear(8, 8, bias=False, device=device)
+        model.weight.fill_(1)
+        x1 = torch.ones(4, 8, device=device)
+        x2 = torch.zeros_like(x1)
+        torch.cuda.localize(model)
+        fn = (
+            torch.compile(model, fullgraph=True, options={"triton.cudagraphs": False})
+            if compiled
+            else model
+        )
+        first, second = torch.cuda.Stream(), torch.cuda.Stream()
+        first.wait_stream(torch.cuda.current_stream())
+        # Warm up allocations so the test exercises buffer reuse.
+        with torch.cuda.stream(first):
+            fn(x1)
+        torch.cuda.synchronize()
+        # Delay cat so the second call can overwrite the first branch's output.
+        delay = int(50 * get_cycles_per_ms())
+        with torch.cuda.stream(model.weight._streams[1]):
+            torch.cuda._sleep(delay)
+        with torch.cuda.stream(first):
+            out = fn(x1)
+        with torch.cuda.stream(second):
+            fn(x2)
+        torch.cuda.synchronize()
+        self.assertEqual(out, torch.full_like(out, 8))
 
     @_requires_green_contexts
     @torch.inference_mode()
