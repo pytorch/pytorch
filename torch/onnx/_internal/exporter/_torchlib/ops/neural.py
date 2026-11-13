@@ -12,6 +12,7 @@ import onnx_ir as ir
 import torch
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 from torch.onnx._internal.exporter._torchlib.ops import (
+    _promotion,
     common as common_ops,
     normalization,
 )
@@ -976,6 +977,10 @@ def aten_mse_loss(
     op: TranslationContext, self: ir.Value, target: ir.Value, reduction: int = 1
 ) -> ir.Value:
     """mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor"""
+    result_dtype = _promotion.dtypes(op, self, target, kind="COMPLEX_TO_FLOAT")[1]
+    self, target = _promotion.promote(
+        op, self, target, kind="COMPLEX_TO_FLOAT", opmath=True
+    )
     # FIXME: When reduction=0, the shape(result) will be different than other case
     result = op.Mul(
         op.Sub(self, target),
@@ -986,7 +991,7 @@ def aten_mse_loss(
     if reduction == 2:  # sum
         result = op.ReduceSum(result, keepdims=False)
 
-    return result
+    return _promotion.cast(op, result, result_dtype)
 
 
 @onnx_impl(aten.nll_loss.default)

@@ -876,9 +876,6 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         "aten", "nll_loss", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
-        "aten", "normal", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    ),
-    ElementwiseTypePromotionRule(
         "aten", "pdist", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(

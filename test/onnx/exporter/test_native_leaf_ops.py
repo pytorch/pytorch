@@ -246,9 +246,6 @@ class TestNativeLeafOps(common_utils.TestCase):
 
     def test_invalid_inputs_are_explicit(self, device):
         x = torch.tensor([1], dtype=torch.int64, device=device)
-        y = torch.tensor([1], dtype=torch.int32, device=device)
-        with self.assertRaisesRegex(ValueError, "matching tensor dtypes.*INT64.*INT32"):
-            _evaluate(core.aten_bitwise_and, [x, y])
         with self.assertRaisesRegex(
             ValueError, "rounding_mode='nearest'.*trunc.*floor"
         ):

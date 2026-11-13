@@ -244,6 +244,7 @@ def _set_shape_type(
     if isinstance(meta_val, tuple):
         logger.warning("Setting shape and type of tensors is not supported yet")
     if isinstance(meta_val, torch.Tensor):
+        value.meta["torch.onnx.original_type"] = meta_val.dtype
         dims = []
         shape: tuple[int, ...]
         if meta_val.dtype == torch.float4_e2m1fn_x2:
@@ -280,14 +281,19 @@ def _set_shape_type(
 
         value.shape = ir.Shape(dims)
     elif isinstance(meta_val, (int, torch.SymInt)):
+        value.meta["torch.onnx.original_type"] = (
+            bool if isinstance(meta_val, bool) else int
+        )
         # aten::sym_size output is an int, not a tensor, which stands
         # for the size of one dim. We treat it as a scalar.
         value.dtype = ir.DataType.INT64
         value.shape = ir.Shape([])
     elif isinstance(meta_val, (bool, torch.SymBool)):
+        value.meta["torch.onnx.original_type"] = bool
         value.dtype = ir.DataType.BOOL
         value.shape = ir.Shape([])
     elif isinstance(meta_val, (float, torch.SymFloat)):
+        value.meta["torch.onnx.original_type"] = float
         value.dtype = ir.DataType.FLOAT
         value.shape = ir.Shape([])
 
@@ -1429,6 +1435,7 @@ def _exported_program_to_onnx_program(
                 "This is unexpected and not yet supported."
             )
 
+        original_dtype = torch_tensor.dtype
         # Turn complex tensors into float tensors when converting to ONNX
         complex_to_float = lower != "none"
         if complex_to_float:
@@ -1442,6 +1449,7 @@ def _exported_program_to_onnx_program(
             torch_tensor,
             complex_to_float=complex_to_float,
         )
+        initializer.meta["torch.onnx.original_type"] = original_dtype
 
     # TODO: Decide if we should keep mutated buffers as inputs/outputs
 

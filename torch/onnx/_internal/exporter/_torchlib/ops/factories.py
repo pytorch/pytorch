@@ -11,7 +11,7 @@ import onnx_ir as ir
 
 import torch
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
-from torch.onnx._internal.exporter._torchlib.ops import common as common_ops
+from torch.onnx._internal.exporter._torchlib.ops import _promotion, common as common_ops
 
 
 if TYPE_CHECKING:
@@ -984,6 +984,7 @@ def aten_normal_tensor_tensor(
 ) -> ir.Value:
     """normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor"""
 
+    std = _promotion.cast(op, std, _promotion.source_dtype(op, mean))
     sampled = op.RandomNormalLike(mean, mean=0.0, scale=1.0, output_types=[mean.type])
     # Transform the distribution to the mean and std
     return op.Add(op.Mul(std, sampled), mean)
