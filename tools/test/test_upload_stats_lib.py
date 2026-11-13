@@ -299,7 +299,7 @@ class TestGithubGet(unittest.TestCase):
             mock.patch.object(upload_stats_lib.time, "time", return_value=1000),
             mock.patch.object(upload_stats_lib.time, "sleep") as sleep,
         ):
-            response = upload_stats_lib._github_get("https://api.github.com/x")
+            response = upload_stats_lib._github_get("url")
         return response.status_code, [call.args[0] for call in sleep.call_args_list]
 
     def test_waits_for_a_used_up_quota_to_reset(self) -> None:
