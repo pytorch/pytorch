@@ -1787,7 +1787,7 @@ if __name__ == "__main__":
                 self.assertTrue(b"libsycl.so" in result)
 
     def test_xpu_header_installed(self):
-        include_dir = os.path.join(os.path.dirname(torch.__file__), "include")
+        include_dir = torch._utils_internal.get_file_path("torch", "include")
         aten_dir = os.path.join(include_dir, "ATen")
         aten_ops_dir = os.path.join(aten_dir, "ops")
         self.assertTrue(os.path.exists(os.path.join(aten_dir, "XPUFunctions.h")))
