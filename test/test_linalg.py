@@ -10748,6 +10748,7 @@ class TestLinalgCudaOnly(TestCase):
                 if torch.version.hip:
                     self.skipTest("_addmm_activation did not use the Lt GemmAndBias path")
                 self.fail("_addmm_activation did not use the Lt GemmAndBias path")
+
             # Both tokens, so that _act_RELU_bias_None is not counted as either
             # _act_RELU or a bias-only record.
             def tokens_of(key):
