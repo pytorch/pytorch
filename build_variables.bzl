@@ -1271,6 +1271,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/detail/DirectCopy.cpp",
     "aten/src/ATen/native/mkldnn/detail/Eltwise.cpp",
     "aten/src/ATen/native/mkldnn/detail/LayerNorm.cpp",
+    "aten/src/ATen/native/mkldnn/detail/Lstm.cpp",
     "aten/src/ATen/native/mkldnn/detail/Pooling.cpp",
     "aten/src/ATen/native/mkldnn/detail/Prelu.cpp",
     "aten/src/ATen/native/mkldnn/detail/Softmax.cpp",
