@@ -339,6 +339,20 @@ def less_match_verbose_code_parts(expected):
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_empty_dict_identity_guard(self):
+        mapping = {}
+        root = RootGuardManager()
+        manager = root.dict_getitem_manager(
+            "mapping",
+            "mapping",
+            mapping,
+            torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
+        )
+        manager.add_id_match_guard(id(mapping), ["mapping identity"], None)
+        self.assertTrue(root.check({"mapping": mapping}))
+        self.assertFalse(root.check({"mapping": {}}))
+        self.assertFalse(root.check_verbose({"mapping": {}}).result)
+
     def test_cpp_shape_guard_missing_windows_compiler_falls_back(self):
         from torch._inductor.codecache import CppCodeCache
         from torch._inductor.cpp_builder import check_compiler_exist_windows
@@ -2480,6 +2494,22 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn([4, 5, 6], expected))
         self.assertTrue(handler.eval_fn((7, 8, 9), expected))
         self.assertFalse(handler.eval_fn([1], expected))
+
+    def test_dictionary_storage_length(self):
+        class Mapping(dict):
+            def __len__(self):
+                return 99
+
+        guard = self._make_guard(GuardBuilder.SEQUENCE_LENGTH)
+        handler = self._get_handler("SEQUENCE_LENGTH")
+        value = Mapping(a=1, b=2)
+        expected = handler.get_metadata_fn(guard, value)
+        root = RootGuardManager()
+        root.add_dict_length_check_guard(expected, [], None)
+        self.assertTrue(root.check(value))
+        self.assertTrue(handler.eval_fn(value, expected))
+        self.assertFalse(root.check(Mapping(a=1)))
+        self.assertFalse(handler.eval_fn(Mapping(a=1), expected))
 
     def test_dict_contains(self):
         from torch._dynamo.guards import GuardBuilder
