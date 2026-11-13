@@ -6,7 +6,9 @@ import pickle
 import torch
 from torch.optim.swa_utils import (
     AveragedModel,
+    get_ema_avg_fn,
     get_ema_multi_avg_fn,
+    get_swa_avg_fn,
     get_swa_multi_avg_fn,
     update_bn,
 )
@@ -55,6 +57,27 @@ class SWATestCNN(torch.nn.Module):
 
 class TestSWAUtilsGeneric(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_averaged_model_discrete_buffers(self):
+        for kwargs in (
+            {},
+            {"multi_avg_fn": get_swa_multi_avg_fn()},
+            {"avg_fn": get_swa_avg_fn()},
+            {"multi_avg_fn": get_ema_multi_avg_fn(0.9)},
+            {"avg_fn": get_ema_avg_fn(0.9)},
+        ):
+            model = torch.nn.BatchNorm1d(2, momentum=None)
+            model.register_buffer("enabled", torch.tensor(True))
+            averaged = AveragedModel(model, use_buffers=True, **kwargs)
+            for step in range(1, 4):
+                model.num_batches_tracked.fill_(step)
+                model.enabled.fill_(step == 1)
+                averaged.update_parameters(model)
+                self.assertEqual(averaged.module.enabled, model.enabled)
+                self.assertEqual(
+                    averaged.module.num_batches_tracked,
+                    model.num_batches_tracked,
+                )
 
     def test_averaged_model_state_dict(self):
         dnn = torch.nn.Sequential(
