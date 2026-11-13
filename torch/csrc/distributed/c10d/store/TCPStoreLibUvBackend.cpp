@@ -34,9 +34,14 @@ Other callbacks don't provide exception safety so avoid there.
 */
 
 // This controls how many un-accepted TCP connections can be waiting in the
-// backlog. This should be at least world size to avoid issues on init. We set
-// it to -1 to use the host max value which is controlled by `soconnmax`.
+// backlog. This should be at least world size to avoid issues on init. -1 uses
+// the host max (`somaxconn`); libuv on Windows asserts a positive backlog, so
+// use SOMAXCONN there.
+#ifdef _WIN32
+auto constexpr DEFAULT_BACKLOG = SOMAXCONN;
+#else
 auto constexpr DEFAULT_BACKLOG = -1;
+#endif
 auto constexpr MAX_KEY_COUNT = static_cast<size_t>(128 * 1024);
 auto constexpr MAX_STRING_LEN = 8 * 1024;
 auto constexpr MAX_PAYLOAD_LEN = 8 * 1024 * 1024;
@@ -220,7 +225,8 @@ class UvTcpServer : public UvTcpSocket {
     auto res = c10::make_intrusive<UvTcpServer>(loop);
     res->handleReady();
     try {
-      int uv_res = uv_tcp_open(res->unsafeGetSocket(), socket);
+      int uv_res = uv_tcp_open(
+          res->unsafeGetSocket(), static_cast<uv_os_sock_t>(socket));
       C10D_CHECK_WITH(
           SocketError,
           uv_res == 0,

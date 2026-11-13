@@ -133,12 +133,14 @@ C10D_BACKENDS = (
         "cpu",
         supports_bitwise_reductions=True,
         supports_work_sequence_number=True,
+        supports_work_result=True,
     ),
     BackendConfig(
         "python-gloo",
         "cpu",
         supports_bitwise_reductions=True,
         supports_work_sequence_number=True,
+        supports_work_result=True,
     ),
     BackendConfig(
         "nccl-legacy",
