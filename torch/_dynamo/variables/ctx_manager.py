@@ -173,6 +173,11 @@ class ContextWrappingVariable(VariableTracker):
             raise AssertionError("Unexpected arg type")
 
     def supports_graph_breaks(self) -> bool:
+        r"""Whether this context can be reconstructed and re-entered in resume bytecode.
+
+        True requires reconstruct_type() and ReenterWith to restore the context;
+        False disallows checkpoints while the context is active.
+        """
         return True
 
     def exit_on_graph_break(self) -> bool:
@@ -1481,6 +1486,9 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         return SourcelessBuilder.create_internal_torch_function(
             _unsafe_set_version_counter
         ).call_function(tx, [self.tensors, self.prev_versions], {})
+
+    def supports_graph_breaks(self) -> bool:
+        return False
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         unimplemented(
