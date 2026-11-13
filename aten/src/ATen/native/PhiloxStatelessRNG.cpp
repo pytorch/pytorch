@@ -315,7 +315,7 @@ Tensor _philox_dropout_cpu(const Tensor& self, const Tensor& key, double p) {
         "_philox_dropout", samples, key, sample_func, param_func);
     auto threshold = static_cast<compute_t>(p);
     auto scale = static_cast<compute_t>(p == 1 ? 0.0 : 1.0 / (1.0 - p));
-    // Multiply rather than select so NaN and inf propagate, like native dropout.
+    // Note: Multiply rather than select so NaN and inf propagate like native dropout.
     cpu_kernel(iter, [threshold, scale](scalar_t x, compute_t u) -> scalar_t {
       return static_cast<scalar_t>(
           static_cast<compute_t>(x) * (u >= threshold ? scale : compute_t(0)));
