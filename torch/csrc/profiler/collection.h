@@ -95,6 +95,11 @@ using op_input_t = std::variant<
     c10::IValue,
     std::nullopt_t>;
 
+struct DecodedInputs {
+  std::vector<op_input_t> shapes;
+  std::vector<op_input_t> concrete;
+};
+
 // Parsed op-argument metadata (shapes, dtypes, concrete inputs). Shared by the
 // KinetoEvent constructor and the Kineto metadata producers.
 struct OpArgData {
@@ -106,9 +111,7 @@ struct OpArgData {
   std::vector<shape> strides;
 };
 
-TORCH_API OpArgData parseArgData(
-    const std::vector<op_input_t>& input_shapes,
-    const std::vector<op_input_t>& concreteInputs);
+TORCH_API OpArgData parseArgData(const DecodedInputs& inputs);
 
 // ============================================================================
 // == ExtraFields =============================================================
@@ -156,8 +159,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       TorchOpBasicFields&& f,
       uint64_t correlation_id,
       c10::time_t end_time_ns,
-      std::vector<op_input_t>&& inputs,
-      std::vector<op_input_t>&& concrete_inputs,
+      DecodedInputs&& inputs,
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
@@ -170,7 +172,6 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         correlation_id_{correlation_id},
         end_time_ns_{end_time_ns},
         inputs_{std::move(inputs)},
-        concrete_inputs_{std::move(concrete_inputs)},
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
@@ -181,8 +182,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         perf_event_counters_{std::move(perf_event_counters)} {}
   uint64_t correlation_id_;
   c10::time_t end_time_ns_;
-  std::vector<op_input_t> inputs_;
-  std::vector<op_input_t> concrete_inputs_;
+  DecodedInputs inputs_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
@@ -493,20 +493,16 @@ constexpr int SCALAR_LIST_LENGTH_LIMIT = 30;
 // contiguous AppendOnlyList so that we no longer create vectors for shapes
 // and dtypes on every op. Those vectors can be created during
 // post-processing.
-// It splits the data into two categories: input shapes and concrete inputs.
 class InputOutputEncoder final {
  public:
   void push(c10::ArrayRef<const c10::IValue> values);
 
   // Used during post-processing to unpack the encoded data.
-  // Each method returns a "supplier" lambda which takes no arguments;
-  // invoking the lambda once will return a list of args that represent
-  // the inputs for one op.
-  // The data is split into two streams: "input shapes" and "concrete inputs".
+  // Returns a decoder lambda which takes no arguments; invoking the lambda once
+  // returns the shape and concrete input views for one op.
   // Note: "auto" only works because these are only used in collection.cpp,
   // where they are implemented.
-  auto getInputShapeGenerator();
-  auto getConcreteInputGenerator();
+  auto getInputDecoder();
 
   bool isSupportedScalarList(const c10::IValue& list_candidate);
 
@@ -522,14 +518,8 @@ class InputOutputEncoder final {
     TERMINATOR
   };
 
-  enum class IOType { Shapes, ConcreteInputs, None };
-
  private:
   void push(const at::Tensor& t);
-
-  // Implementation detail for getInputShapeGenerator and
-  // getConcreteInputGenerator
-  auto getIValueGenerator(const IOType& io_type);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
   AppendOnlyList<RawTensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>

@@ -176,10 +176,7 @@ class TestAsyncProcessExecutor(DTensorTestBase):
 
 
 class TestAsyncProcessExecutorPrefixStore(TestCase):
-    # Builds its own process group with `backend=dist.Backend.GLOO` and a
-    # single rank, not from whatever accelerator is present, so it is tied to
-    # a specific device by construction rather than exercising this device's
-    # accelerator path.
+    # Uses CPU tensors and a single-rank Gloo process group.
     hw_classification = HardwareClassification.CPU
 
     @skip_if_win32()

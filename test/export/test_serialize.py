@@ -14,6 +14,9 @@ from collections import namedtuple
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
+from unittest.mock import patch
+
+import sympy
 
 import torch
 import torch._dynamo as torchdynamo
@@ -32,16 +35,18 @@ from torch._export.serde.serialize import (
     deserialize_torch_artifact,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    GraphModuleDeserializer,
     GraphModuleSerializer,
     serialize,
     SerializeError,
 )
+from torch._export.utils import wrap_method
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._library.opaque_object import get_opaque_type_name, register_custom_class
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
-from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
+from torch.fx.experimental.symbolic_shapes import is_concrete_int, ShapeEnv, ValueRanges
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipMPSIf,
@@ -722,6 +727,20 @@ def forward(self, x):
             g.nodes[1].inputs[0].arg.as_tensor.name,
         )
 
+    def test_canonicalize_empty_output(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x
+
+            def some_method(self) -> list[torch.Tensor]:
+                return []
+
+        ep = export(wrap_method(Module().some_method), (), strict=True)
+        self.assertEqual(ep.graph_signature.output_specs, [])
+        s = ExportedProgramSerializer().serialize(ep)
+        c = canonicalize(s.exported_program)
+        self.assertEqual(c.graph_module.graph.outputs, [])
+
     def test_int_list(self) -> None:
         class M(torch.nn.Module):
             def forward(self, x):
@@ -962,7 +981,7 @@ class _DeserializeGraphMixin:
                 if val1 is None or val2 is None:
                     # Either both are None
                     self.assertEqual(val1, val2)
-                elif isinstance(val1, FakeTensor) and isinstance(val2, FakeTensor):
+                elif is_fake_tensor(val1) and is_fake_tensor(val2):
                     # Or both are fake tensors with the same shape/dtype
                     self.assertEqual(len(val1.shape), len(val2.shape))
                     for s1, s2 in zip(val1.shape, val2.shape):
@@ -979,7 +998,7 @@ class _DeserializeGraphMixin:
                     for v1, v2 in zip(
                         pytree.tree_leaves(val1), pytree.tree_leaves(val2)
                     ):
-                        if isinstance(v1, FakeTensor):
+                        if is_fake_tensor(v1):
                             self.assertEqual(v1.shape, v2.shape)
                             self.assertEqual(v1.dtype, v2.dtype)
                 else:
@@ -1136,14 +1155,14 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
 
         self.assertEqual(len(ep.constants), 1)
         constant_name, fake_constant = next(iter(ep.constants.items()))
-        self.assertIsInstance(fake_constant, FakeTensor)
+        self.assertTrue(is_fake_tensor(fake_constant))
         self.assertFalse(is_concrete_int(fake_constant.shape[0]))
 
         with torch.serialization.safe_globals([_reconstruct_fake_tensor]):
             loaded_ep = deserialize(serialize(ep))
 
         loaded_constant = loaded_ep.constants[constant_name]
-        self.assertIsInstance(loaded_constant, FakeTensor)
+        self.assertTrue(is_fake_tensor(loaded_constant))
         self.assertFalse(is_concrete_int(loaded_constant.shape[0]))
         self.assertEqual(loaded_constant.shape[1], 3)
 
@@ -1925,6 +1944,55 @@ instantiate_parametrized_tests(TestDeserialize)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestDeserializeSymExpr(TestCase):
+    def _deserializer(
+        self, symbol_name_to_range: dict[str, ValueRanges] | None = None
+    ) -> GraphModuleDeserializer:
+        # The state deserialize() sets up before it parses any expression.
+        deserializer = GraphModuleDeserializer()
+        deserializer.shape_env = ShapeEnv()
+        deserializer.sympy_functions = {}
+        deserializer.symbol_name_to_symbol = {}
+        deserializer.symbol_name_to_range = symbol_name_to_range or {}
+        deserializer.unbacked_symbols = set()
+        return deserializer
+
+    def test_parses_the_string_once(self) -> None:
+        deserializer = self._deserializer()
+        expr_str = " + ".join(f"s{i}" for i in range(64))
+
+        with patch.object(sympy, "sympify", wraps=sympy.sympify) as sympify:
+            expr = deserializer._parse_sym_expr(expr_str)
+
+        # Sub-expressions are already sympy objects; parsing them again would
+        # copy the whole symbol table once per node.
+        self.assertEqual(sympify.call_count, 1)
+        self.assertEqual(len(expr.free_symbols), 64)
+        self.assertEqual(len(deserializer.symbol_name_to_symbol), 65)
+
+    def test_processes_nested_subexpressions(self) -> None:
+        deserializer = self._deserializer(
+            {"s0": ValueRanges(2, 8), "u0": ValueRanges(0, 16)}
+        )
+
+        deserializer._parse_sym_expr("Max(s0, 2*u0 + 1)")
+
+        symbols = deserializer.symbol_name_to_symbol
+        s0, u0 = symbols["s0"], symbols["u0"]
+        self.assertIn("2*u0", symbols)
+        self.assertIn("2*u0 + 1", symbols)
+        self.assertEqual(deserializer.unbacked_symbols, {u0})
+        self.assertEqual(deserializer.shape_env.var_to_range[s0], ValueRanges(2, 8))
+        self.assertEqual(deserializer.shape_env.var_to_range[u0], ValueRanges(0, 16))
+
+    def test_hint_applies_to_the_parsed_symbol(self) -> None:
+        deserializer = self._deserializer()
+
+        s3 = deserializer._parse_sym_expr("s3", hint=7)
+
+        self.assertEqual(deserializer.shape_env.backed_var_to_val[s3], 7)
+
+
 class TestSchemaVersioning(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -2357,7 +2425,7 @@ class TestSerializeCustomClass(TestCase):
 
         serialized_vals = serialize(ep)
         ep = deserialize(serialized_vals)
-        self.assertTrue(isinstance(ep.constants["custom_obj"].get(), FakeTensor))
+        self.assertTrue(is_fake_tensor(ep.constants["custom_obj"].get()))
 
     def test_custom_class_input_to_function(self):
         class Foo(torch.nn.Module):

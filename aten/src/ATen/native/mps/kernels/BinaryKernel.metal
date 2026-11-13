@@ -624,6 +624,12 @@ struct logical_xor_functor {
   REGISTER_BINARY_CASTOUT_OP(NAME, uchar, bool);  \
   REGISTER_BINARY_OP(NAME, char, bool);           \
   REGISTER_BINARY_CASTOUT_OP(NAME, char, bool);   \
+  REGISTER_BINARY_OP(NAME, ushort, bool);         \
+  REGISTER_BINARY_CASTOUT_OP(NAME, ushort, bool); \
+  REGISTER_BINARY_OP(NAME, uint, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, uint, bool);   \
+  REGISTER_BINARY_OP(NAME, ulong, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, ulong, bool);  \
   REGISTER_BINARY_OP(NAME, bool, bool);           \
   REGISTER_BINARY_CASTOUT_OP(NAME, bool, bool)
 

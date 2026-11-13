@@ -41,13 +41,15 @@ artifact plus an acceleration cache that a fresh process reloads. No weights are
 so you pass the model again at runtime:
 
 ```python
+# step is a module-level function: def step(model, x): return model(x)
 with torch.compiler.precompile.capture(
-    lambda model, x: model(x), artifact_path="m.py", cache_path="m.cache"
+    step, artifact_path="m.py", cache_path="m.cache"
 ) as cap:
-    y = cap(model, x)
+    y1 = cap(model, x1)
+    y2 = cap(model, x2)
 
-f = torch.compiler.precompile.load("m.py", "m.cache")
-y = f(model, x)
+f = torch.compiler.precompile.load("m.py", "m.cache")  # in a fresh process
+y = f(model, x1)
 ```
 
 See the {ref}`API reference <torch.compiler_api>` for details.

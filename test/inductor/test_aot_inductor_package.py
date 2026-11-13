@@ -35,6 +35,17 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils import _pytree as pytree
 
 
+def standalone_run_env() -> dict[str, str]:
+    # Initializing the GPU here makes ROCm setenv() ROCPROFILER_REGISTER_LIBRARY to
+    # the profiler lib it loaded. os.environ never sees it, but subprocesses inherit
+    # it, and a child that resolves that lib to a different path -- cmake and torch
+    # can pick different ROCm trees -- aborts with SIGABRT before main(). Rebuilding
+    # from os.environ drops it.
+    env = os.environ.copy()
+    env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
+    return env
+
+
 def skipif(predicate: Callable[[str, bool], bool], reason: str):
     def decorator(func):
         @functools.wraps(func)
@@ -178,10 +189,18 @@ class TestAOTInductorPackage(TestCase):
         result = subprocess.run(
             ["./build/main"],
             cwd=base_dir,
-            check=True,
+            check=False,
             capture_output=True,
             text=True,
+            env=standalone_run_env(),
         )
+        if result.returncode != 0:
+            # CalledProcessError would drop stdout/stderr, where the reason lives.
+            raise AssertionError(
+                f"./build/main exited with {result.returncode}\n"
+                f"--- stdout ---\n{result.stdout}\n"
+                f"--- stderr ---\n{result.stderr}"
+            )
 
         return result
 
