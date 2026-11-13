@@ -77,7 +77,13 @@ from ..utils import (
 )
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
-from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
+from .common import (
+    CSEVariable,
+    index_prevent_reordering,
+    Kernel,
+    PythonPrinter,
+    TensorArg,
+)
 from .multi_kernel import MultiKernel, SizeHintMultiKernel
 from .simd_kernel_features import (
     DisableReduction,
@@ -2935,6 +2941,7 @@ class SIMDScheduling(BaseScheduling):
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
     supports_sub_parent_epilogue = False
+    supports_multi_kernel_hints = False
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -4701,11 +4708,26 @@ class SIMDScheduling(BaseScheduling):
             kernel_features.reduction_numel,
             kernel_features.coalesce_analysis,
         )
-        kernels = self.create_kernel_choices(
-            kernel_features,
-            [tiling],
-            {"features": kernel_features, "tiling_scores": tiling_score},
-        )
+        kernel_kwargs: dict[str, Any] = {
+            "features": kernel_features,
+            "tiling_scores": tiling_score,
+        }
+        kernels = self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs)
+        hints: list[int] = []
+        if (
+            self.supports_multi_kernel_hints
+            and config.multi_kernel_hints
+            and len(kernels) == 1
+            and (kernel_features.numel * kernel_features.reduction_numel).free_symbols
+        ):
+            # The variants share the lowering and differ only in size_hints.
+            hints = config.multi_kernel_hints
+            kernels = [
+                self.create_kernel_choices(
+                    kernel_features, [tiling], {**kernel_kwargs, "hint_override": hint}
+                )[0]
+                for hint in hints
+            ]
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
@@ -4724,7 +4746,20 @@ class SIMDScheduling(BaseScheduling):
         del kernel
 
         final_kernel: SIMDKernel | MultiKernel
-        if len(kernels) > 1:
+        if hints:
+            _, call_args, signature, _ = kernels[0].args.python_argdefs()
+            shapes = tuple(
+                tuple(V.graph.get_buffer(name).get_size())
+                for name, arg in zip(call_args, signature)
+                if isinstance(arg, TensorArg)
+            )
+            final_kernel = SizeHintMultiKernel(
+                {
+                    self._make_shape_cache_key(shapes, hint): kernel
+                    for hint, kernel in zip(hints, kernels)
+                }
+            )
+        elif len(kernels) > 1:
             final_kernel = MultiKernel(kernels)
         else:
             (final_kernel,) = kernels
@@ -4989,12 +5024,11 @@ class SIMDScheduling(BaseScheduling):
         )
 
     def _make_shape_cache_key(
-        self, node: MultiTemplateBuffer, hint: int
+        self, shapes: tuple[tuple[sympy.Expr | int, ...], ...], hint: int
     ) -> tuple[tuple[int, ...], ...]:
         """
         Returns cache key for hint-based multi-graph; key is tuple of shapes with hint filled in.
         """
-        shapes = self._get_multikernel_shapes(node)
         return tuple(
             tuple(
                 hint
@@ -5074,7 +5108,9 @@ class SIMDScheduling(BaseScheduling):
                     shape_cache_key = (
                         None
                         if size_hint is None
-                        else self._make_shape_cache_key(template_node.node, size_hint)
+                        else self._make_shape_cache_key(
+                            self._get_multikernel_shapes(template_node.node), size_hint
+                        )
                     )
                     # pyrefly: ignore [unsupported-operation]
                     kernels[shape_cache_key] = kernel

@@ -118,8 +118,6 @@ class MultiKernelState:
                     buf.writeline(f"{name},")
             buf.writeline("], arg_index=arg_index)")
         else:  # call with dict[size hint key, kernel]
-            if not isinstance(kernels[0], TritonTemplateKernel):
-                raise AssertionError("expected kernels[0] to be a TritonTemplateKernel")
             if not isinstance(kernel_shape_keys, list):
                 raise AssertionError("expected kernel_shape_keys to be a list")
             if len(kernels) != len(kernel_shape_keys):
