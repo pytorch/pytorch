@@ -1,9 +1,11 @@
 # Reusable CuteDSL reduction traits and cross-thread helpers. leaf creates a one-element
 # accumulator, combine merges accumulators, and reduce performs a serial update. Tree folds
 # use leaf/combine, so leaf must include every element transform. has_combine_equal opts a
-# trait into combine_equal, a closed-form merge of equal-count states. Other names mirror
-# SharedReduceOps.h. Accumulator dtypes provide their identities. Scalar conditionals lower
-# only inside cute.jit methods; cute.arch.fmax suppresses NaNs, so traits handle them.
+# trait into combine_equal, a closed-form merge of equal-count states, and
+# has_combine_uniform into combine_uniform, which folds equal-count partials deriving
+# counts from their index. Other names mirror SharedReduceOps.h. Accumulator dtypes
+# provide their identities. Scalar conditionals lower only inside cute.jit methods;
+# cute.arch.fmax suppresses NaNs, so traits handle them.
 
 import cutlass
 import cutlass.cute as cute
@@ -164,14 +166,20 @@ def _welford_denom(acc_dtype, nf, correction):
 class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
-    # has_combine_equal enables combine_equal's closed-form equal-count merges. The flag is
-    # not inherited: a subclass that keeps leaf, combine and their helpers must set it.
+    # has_combine_equal enables combine_equal's closed-form equal-count merges.
+    # has_combine_uniform enables uniform-count staged inner-tree combines
+    # (tile.uniform_combine_ok), which rely on combine_uniform, uniform_weight, an FP32
+    # accumulator and the count as the last field: they skip staging it and may stage
+    # the weight in its slot. The flags are not inherited: a subclass that keeps leaf,
+    # combine and their helpers must set each flag it supports.
     nfields = 3
     has_combine_equal = True
+    has_combine_uniform = True
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         cls.has_combine_equal = vars(cls).get("has_combine_equal", False)
+        cls.has_combine_uniform = vars(cls).get("has_combine_uniform", False)
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)
@@ -216,10 +224,41 @@ class WelfordOps:
         elif nb != zero:
             nn = na + nb
             nb_over_n = nb / nn
-            delta = mb - ma
-            mean = ma + delta * nb_over_n
-            m2 = m2a + m2b + delta * delta * na * nb_over_n
+            mean, m2 = self._chan_merge(ma, m2a, na, mb, m2b, nb_over_n)
         return (mean, m2, nn)
+
+    @cute.jit
+    def _chan_merge(self, ma, m2a, na, mb, m2b, w):
+        """Chan's merge of nonempty states, given the weight w = nb / (na + nb)."""
+        delta = mb - ma
+        mean = ma + delta * w
+        m2 = m2a + m2b + delta * delta * na * w
+        return mean, m2
+
+    @cute.jit
+    def combine_uniform(self, a, b, index, count: cutlass.Constexpr, weight=None):
+        """Fold partial `b` into `a` with `combine`'s arithmetic, deriving counts.
+
+        `index` is the number of partials already folded into `a` and must be at least 1:
+        unlike `combine`, nothing passes `b` through for an empty `a`. Every partial holds
+        exactly `count` values, so `index * count` must be exact in the accumulator (fp32).
+        `a[2]` and `b[2]` are ignored. `weight`, if given, replaces `count / ((index + 1) * count)`
+        and must be uniform_weight(index, count).
+        """
+        ma, m2a, _ = a
+        mb, m2b, _ = b
+        na, nb = self.acc(index) * self.acc(count), self.acc(count)
+        nn = na + nb
+        if const_expr(weight is None):
+            weight = self.uniform_weight(index, count)
+        mean, m2 = self._chan_merge(ma, m2a, na, mb, m2b, weight)
+        return (mean, m2, nn)
+
+    @cute.jit
+    def uniform_weight(self, index, count: cutlass.Constexpr):
+        """combine_uniform's nb / nn for partial `index`, with the same arithmetic."""
+        na, nb = self.acc(index) * self.acc(count), self.acc(count)
+        return nb / (na + nb)
 
     @cute.jit
     def combine_equal(self, a, b, count: cutlass.Constexpr):
@@ -779,6 +818,7 @@ class VarMeanOps(WelfordOps):
     # Reuse Welford and project variance/std plus mean; correction and take_sqrt are unchanged.
     nouts = 2
     has_combine_equal = True
+    has_combine_uniform = True
 
     def __init__(self, correction=1, take_sqrt=False, acc=Float32):
         super().__init__(correction=correction, take_sqrt=take_sqrt, acc=acc)
