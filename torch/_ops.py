@@ -361,7 +361,10 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
             return fn(*args, **kwargs)
 
+        from torch._higher_order_ops.utils import _functorch_grad_rule
+
         self.py_impl(DispatchKey.Autograd)(maybe_run_autograd)
+        self.py_impl(TransformType.Grad)(_functorch_grad_rule(self))
 
         return fn
 
