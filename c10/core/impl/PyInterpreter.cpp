@@ -165,9 +165,6 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       const std::string& /*msg*/) const override {
     PANIC(fake_raise_python_error);
   }
-  bool _check_for_subclass_arg(const TensorImpl* /*self*/) const override {
-    PANIC(_check_for_subclass_arg);
-  }
   bool fake_try_decomp(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
