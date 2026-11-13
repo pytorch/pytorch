@@ -3519,6 +3519,18 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self):
                 return func(*args, **kwargs)
 
+        fast_constructor = fast_constructor_impls.get(func)
+        if fast_constructor is not None and not self.propagate_real_tensors:
+            output = fast_constructor(self, func, args, kwargs)
+            if output is not NotImplemented:
+                if self.cache_crosscheck_enabled:
+                    with (
+                        disable_fake_tensor_cache(self),
+                        torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing(),
+                    ):
+                        self._crosscheck_cache_output(output, func, types, args, kwargs)
+                return output
+
         if self.cache_enabled:
             return self._cached_dispatch_impl(func, types, args, kwargs)
         else:
@@ -4422,6 +4434,7 @@ from torch._subclasses.fake_impls import (  # noqa: F401
     _is_tensor_constructor,
     _like_tensor_constructors,
     contains_tensor_types,
+    fast_constructor_impls,
     get_fast_op_impls,
     has_meta,
     maybe_to_dense_mkldnn,
