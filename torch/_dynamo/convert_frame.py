@@ -350,6 +350,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+            import torch._inductor.config as inductor_config
+
+            prior_inductor_deterministic = inductor_config.deterministic
             prior_mobile_allocator_state = (
                 torch._C._is_default_mobile_cpu_allocator_set()
             )
@@ -377,9 +380,15 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
-                torch.use_deterministic_algorithms(
+                torch._C._set_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
+                # Not torch.use_deterministic_algorithms(prior_deterministic): it
+                # would also set Inductor's flag to prior_deterministic, turning
+                # off deterministic mode set through Inductor alone. Restore the
+                # flag to its own prior value instead.
+                if inductor_config.deterministic != prior_inductor_deterministic:
+                    inductor_config.deterministic = prior_inductor_deterministic
                 torch.random.set_rng_state(torch_rng_state)
                 torch.set_default_dtype(prior_dtype)
                 curr_mobile_allocator_state = (
