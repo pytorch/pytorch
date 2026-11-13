@@ -13,6 +13,7 @@ import operator
 import types
 from collections.abc import Callable, Iterable
 from typing import Any, cast, Literal, overload, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 import torch
 from torch._dynamo.source import GetItemSource
@@ -134,6 +135,13 @@ class ConstantVariable(VariableTracker):
     # _PyNone_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L2022
     _cpython_type = (int, float, str, bytes, bool, type(None), complex, type(...))
 
+    @staticmethod
+    def is_constant_vt(vt: VariableTracker) -> TypeIs[ConstantVariable]:
+        """Whether vt is ConstantVariable or one of its per-type subclasses
+        (IntConstantVariable, ...). False for user subclass VTs such as
+        UserDefinedConstantVariable."""
+        return type(vt) in _CONSTANT_VT_CLASSES
+
     # These depend on the wrapped value's type, so they are properties of the VT.
     @property
     def tp_methods(self) -> dict[str, Method]:  # type: ignore[override]
@@ -181,6 +189,10 @@ class ConstantVariable(VariableTracker):
                     return CONSTANT_VARIABLE_FALSE
             if value is NotImplemented:
                 return CONSTANT_VARIABLE_NOT_IMPLEMENTED
+
+        cls = _CONSTANT_VT_FOR_TYPE.get(type(value))
+        if cls is not None:
+            return cls(value, **kwargs)
 
         source = kwargs.get("source")
 
@@ -1030,10 +1042,64 @@ class ConstantVariable(VariableTracker):
         return ConstantVariable.create(~self.value)
 
 
+class IntConstantVariable(ConstantVariable):
+    # PyLong_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L6585
+    _cpython_type = int
+
+
+class BoolConstantVariable(IntConstantVariable):
+    # PyBool_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/boolobject.c#L171
+    # tp_base is PyLong_Type.
+    _cpython_type = bool
+
+
+class FloatConstantVariable(ConstantVariable):
+    # PyFloat_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1880
+    _cpython_type = float
+
+
+class ComplexConstantVariable(ConstantVariable):
+    # PyComplex_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L1099
+    _cpython_type = complex
+
+
+class StrConstantVariable(ConstantVariable):
+    # PyUnicode_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L14931
+    _cpython_type = str
+
+
+class BytesConstantVariable(ConstantVariable):
+    # PyBytes_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L3017
+    _cpython_type = bytes
+
+
+class NoneConstantVariable(ConstantVariable):
+    # _PyNone_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L2022
+    _cpython_type = type(None)
+
+
+class EllipsisConstantVariable(ConstantVariable):
+    # PyEllipsis_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c#L77
+    _cpython_type = type(...)
+
+
+_CONSTANT_VT_FOR_TYPE: dict[type, type[ConstantVariable]] = {
+    int: IntConstantVariable,
+    bool: BoolConstantVariable,
+    float: FloatConstantVariable,
+    complex: ComplexConstantVariable,
+    str: StrConstantVariable,
+    bytes: BytesConstantVariable,
+    type(None): NoneConstantVariable,
+    type(...): EllipsisConstantVariable,
+}
+_CONSTANT_VT_CLASSES = frozenset((ConstantVariable, *_CONSTANT_VT_FOR_TYPE.values()))
+
+
 # These interned singletons back ConstantVariable.create itself.
-CONSTANT_VARIABLE_NONE = ConstantVariable(None)  # noqa: RVT001
-CONSTANT_VARIABLE_TRUE = ConstantVariable(True)  # noqa: RVT001
-CONSTANT_VARIABLE_FALSE = ConstantVariable(False)  # noqa: RVT001
+CONSTANT_VARIABLE_NONE = NoneConstantVariable(None)  # noqa: RVT001
+CONSTANT_VARIABLE_TRUE = BoolConstantVariable(True)  # noqa: RVT001
+CONSTANT_VARIABLE_FALSE = BoolConstantVariable(False)  # noqa: RVT001
 CONSTANT_VARIABLE_NOT_IMPLEMENTED = ConstantVariable(NotImplemented)  # noqa: RVT001
 
 
