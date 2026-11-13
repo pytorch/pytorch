@@ -116,6 +116,36 @@ struct GetScalarType<at::vec::VectorizedN<T, N>> {
 };
 #endif
 
+// std::sqrt for float / double without the errno update -fmath-errno keeps.
+// With errno, each sqrt is a call with a side effect that the compiler must
+// keep as is: it can't hoist it out of a loop or, under fast-math, rewrite
+// 1 / sqrt(x) as a reciprocal-sqrt estimate. Uses sqrtss / sqrtsd where the
+// compiler reports SSE2 (__SSE2__ for gcc / clang; _M_X64 but not ARM64EC, or
+// _M_IX86_FP >= 2 on 32-bit, for MSVC); elsewhere this is std::sqrt.
+#if defined(__SSE2__) || (defined(_M_X64) && !defined(_M_ARM64EC)) || \
+    (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
+#define INDUCTOR_SQRT_WITHOUT_ERRNO_SSE2 1
+#include <emmintrin.h>
+#else
+#define INDUCTOR_SQRT_WITHOUT_ERRNO_SSE2 0
+#endif
+
+template <typename T>
+inline auto sqrt_without_errno(T x) {
+#if INDUCTOR_SQRT_WITHOUT_ERRNO_SSE2
+  if constexpr (std::is_same_v<T, float>) {
+    return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(x)));
+  } else if constexpr (std::is_same_v<T, double>) {
+    __m128d v = _mm_set_sd(x);
+    return _mm_cvtsd_f64(_mm_sqrt_sd(v, v));
+  } else {
+    return std::sqrt(x);
+  }
+#else
+  return std::sqrt(x);
+#endif
+}
+
 inline uint64_t ceil_log2_u64(uint64_t n) {
   if (n <= 1) {
     return 0;
@@ -209,8 +239,17 @@ std::vector<typename GetScalarType<T>::type>
       return temp;
     }();
 
+// Welford reductions call the helpers below for every vector step and every
+// output. cpp.force_inline_welford defines TORCH_INDUCTOR_FORCE_INLINE_WELFORD,
+// which always inlines them instead of leaving the choice to the compiler.
+#ifdef TORCH_INDUCTOR_FORCE_INLINE_WELFORD
+#define INDUCTOR_WELFORD_INLINE C10_ALWAYS_INLINE
+#else
+#define INDUCTOR_WELFORD_INLINE
+#endif
+
 template <typename T>
-Welford<T> welford_combine(
+INDUCTOR_WELFORD_INLINE Welford<T> welford_combine(
     const Welford<T>& a,
     const Welford<T>& b,
     bool use_index = false) {
@@ -248,7 +287,7 @@ Welford<T> welford_combine(
 }
 
 template <typename T, uint64_t kChunkSize = 0>
-Welford<T> welford_combine(
+INDUCTOR_WELFORD_INLINE Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,
     WelfordHelper<T, kChunkSize>* w = nullptr) {
@@ -288,7 +327,9 @@ Welford<T> welford_combine(
 }
 
 template <typename T, uint64_t kChunkSize>
-Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T, kChunkSize>* w) {
+INDUCTOR_WELFORD_INLINE Welford<T> welford_combine(
+    Welford<T>& acc,
+    WelfordHelper<T, kChunkSize>* w) {
   for (const auto i : c10::irange(w->depth)) {
     acc = welford_combine(acc, w->welford_stk[i]);
   }
@@ -305,7 +346,7 @@ struct IndexValue {
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T, uint64_t kChunkSize = 0>
-Welford<T> welford_combine(
+INDUCTOR_WELFORD_INLINE Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,
     int64_t tail_size,
@@ -787,7 +828,7 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
 #endif
 
 template <typename scalar_t>
-Welford<scalar_t> welford_vec_reduce_all(
+INDUCTOR_WELFORD_INLINE Welford<scalar_t> welford_vec_reduce_all(
     Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;
   Welford<scalar_t> result;
@@ -822,13 +863,38 @@ Welford<scalar_t> welford_vec_reduce_all(
 }
 
 template <typename scalar_t>
-Welford<scalar_t> welford_vec_reduce_all(
+INDUCTOR_WELFORD_INLINE Welford<scalar_t> welford_vec_reduce_all(
     Welford<at::vec::VectorizedN<scalar_t, 2>> acc) {
   auto Welford0 = Welford<at::vec::Vectorized<scalar_t>>{
       acc.mean[0], acc.m2[0], acc.weight[0], acc.index};
   auto Welford1 = Welford<at::vec::Vectorized<scalar_t>>{
       acc.mean[1], acc.m2[1], acc.weight[1], acc.index};
   return welford_vec_reduce_all(welford_combine(Welford0, Welford1));
+}
+
+// Same as at::vec::vec_reduce_all, but on AVX2 always reduces float lanes with
+// a shuffle tree. ATen's VecReduceAllSIMD requires __GNUC__ > 5, so clang
+// (__GNUC__ == 4) reduces the lanes serially. Emitted when
+// config.cpp.simd_horizontal_reduction is set.
+template <typename T, int N, typename OP>
+inline T simd_vec_reduce_all(const OP& op, at::vec::VectorizedN<T, N> acc) {
+#ifdef CPU_CAPABILITY_AVX2
+  if constexpr (std::is_same_v<T, float>) {
+    using Vec = at::vec::Vectorized<T>;
+    Vec v = acc[0];
+    for (int i = 1; i < N; i++) {
+      v = op(v, acc[i]);
+    }
+    Vec v1 = _mm256_permute2f128_ps(v, v, 0x1);
+    v = op(v, v1);
+    v1 = _mm256_shuffle_ps(v, v, 0x4E);
+    v = op(v, v1);
+    v1 = _mm256_shuffle_ps(v, v, 0xB1);
+    v = op(v, v1);
+    return _mm256_cvtss_f32(v);
+  }
+#endif
+  return at::vec::vec_reduce_all<T, N>(op, acc);
 }
 #endif
 
