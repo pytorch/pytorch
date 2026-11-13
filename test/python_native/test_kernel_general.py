@@ -209,6 +209,25 @@ class TestKernelGeneral(TestCase):
     @unittest.skipIf(
         rt.inner_tree_order_enabled(), "requires unordered reduction order"
     )
+    def test_broadcast_split_fp32_error_is_no_worse_than_aten(self):
+        """Split a broadcast run with no more fp64-relative fp32 error than ATen, summed
+        over a few seeds."""
+        trait = T.SumOps(acc=cutlass.Float32)
+        ours = aten = 0.0
+        for seed in range(8):
+            gen = torch.Generator("cuda").manual_seed(seed)
+            x = torch.randn(8, 1, 257, device="cuda", generator=gen).expand(8, 33, 257)
+            got = kg.reduce_dim(trait, "broadcast_split", x, [1, 2], torch.float32)
+            with torch.backends.python_native.cutedsl.disabled():
+                ref = x.sum((1, 2))
+            want = x.double().sum((1, 2))
+            ours += (got.double() - want).abs().mean().item()
+            aten += (ref.double() - want).abs().mean().item()
+        self.assertLessEqual(ours, aten, f"CuTeDSL {ours:.3e} vs ATen {aten:.3e}")
+
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
     def test_reduce_all2_route(self):
         """Route one-element two-output reductions through reduce_all2."""
         x = torch.randn(1, 65537, device="cuda")
