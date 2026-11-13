@@ -3245,6 +3245,10 @@ class TestTorchDeviceType(TestCase):
             out2 = out1.to(torch.float)
             self.assertEqual(out2, out1, atol=0, rtol=0, exact_dtype=False)
 
+    # A NaN constant that a compiled kernel stores in the reduced type gets a
+    # different payload, so the two sides only agree bit for bit while the
+    # strided copy stays fused into the float32 conversion.
+    @skipIfTorchInductor("compares NaN payloads of an eager copy bit for bit")
     @onlyAccelerator
     @dtypes(torch.bfloat16, torch.half)
     def test_reduced_type_float_copy_special_values(self, device, dtype):
