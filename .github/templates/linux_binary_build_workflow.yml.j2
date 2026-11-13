@@ -220,7 +220,9 @@ jobs:
             # any failure (404, outage) keeps the ECR path.
             repo="pytorch/!{{ ns.groups[0]['configs'][0]['container_image'] }}"
             tag="!{{ ns.groups[0]['configs'][0]['container_image_tag_prefix'] }}${suffix}"
-            if curl -fsS --retry 3 -o /dev/null "https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"; then
+            if git ls-remote --exit-code --tags origin "refs/tags/ciflow/docker/${GITHUB_REF##*/}" >/dev/null; then
+              echo "ciflow/docker is attached to this PR, so its images are rebuilt; using ECR"
+            elif curl -fsS --retry 3 -o /dev/null "https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"; then
               echo "docker.io/${repo}:${tag} exists; using Docker Hub"
               registry_host=""
             else
