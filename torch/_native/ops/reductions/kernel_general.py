@@ -379,6 +379,30 @@ _B200_INDEX = (ArgMaxOps, ArgMinOps)
 # sum, mean, amax, amin and the index traits were measured under c256, while prod,
 # nansum and the norms were not, so they keep the default config.
 _B200_STRIDED_C256 = (SumOps, MeanOps, AMaxOps, AMinOps, *_B200_INDEX)
+# Input dtypes and view-size anchors of the SM107 launch policies, and the one-field
+# trait types they measured (by rule name). Their rules are named rubin_*. They come from
+# SM107 measurements at the _SM107_SIZES anchors; unlike the B200 rules, the ratios are
+# not recorded here.
+_SM107_DTYPES = (torch.float32, torch.bfloat16)
+_SM107_CCS = ((10, 7),)
+_SM107_MIN_SIZE, _SM107_MID_SIZE = 16 << 20, 64 << 20
+_SM107_256MIB, _SM107_MAX_SIZE = 256 << 20, 2 << 30
+_SM107_SIZES = (_SM107_MIN_SIZE, _SM107_MID_SIZE, _SM107_256MIB, _SM107_MAX_SIZE)
+_SM107_FULL_SIZES = _SM107_SIZES[2:]
+_SM107_ONE_FIELD_NAMES = {SumOps: "sum", MeanOps: "mean", AMaxOps: "amax"}
+_SM107_ONE_FIELD = tuple(_SM107_ONE_FIELD_NAMES)
+
+
+def _sm107_outputs(
+    dtype: torch.dtype, trait_type: type, nfields: int, nouts: int
+) -> tuple[torch.dtype, ...]:
+    """The outputs SM107's column and full-reduction policies were measured with: int64
+    indices, the input dtype for amax and Welford, and fp32 otherwise."""
+    natural = torch.int64 if nfields == 2 else torch.float32
+    if nfields == 3 or trait_type is AMaxOps:
+        natural = dtype
+    return (natural,) * nouts
+
 
 # B200 CUDA-graph timings against _try_indexed_itree (sum fp32/bf16/fp16, argmax and
 # var_mean fp32/fp16; R 20-20000, B * C 32-524288; bitwise equal): ordered columns win
@@ -395,7 +419,7 @@ _B200_STRIDED_C256 = (SumOps, MeanOps, AMaxOps, AMinOps, *_B200_INDEX)
 # once per mapping (see kernel_coltile.OrderedColConfig.min_blocks) and stride width.
 # Routing dtypes and ccs, deliberately separate from the launch-policy _B200_DTYPES and
 # _B200_CCS: the route and the policies are measured and extended independently.
-# kernel_coltile._ORDERED_COL_CONFIGS entries for other architectures are not routed.
+# See the comment on kernel_coltile._ORDERED_COL_CONFIGS for which views reach entries.
 _ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
@@ -519,14 +543,13 @@ def select_general_config(
     # 0.65x (bf16) of 256; 1-16 MiB were within 12% either way.
     if num_o == 1:
         return _GeneralConfig(block=_K0_ALL_BLOCK, rule="general_one_output")
-    strided_row = (
-        cc in _B200_CCS
-        and dtype in _B200_DTYPES
-        and tuple(red_pairs) == ((count, 2),)
+    strided = (
+        tuple(red_pairs) == ((count, 2),)
         and tuple(kept_pairs) == ((num_o, 2 * count),)
         and acc_bits == 32
-        and alignment >= 16
+        and alignment >= tile.TRANSFER_ALIGNMENT
     )
+    strided_row = strided and cc in _B200_CCS and dtype in _B200_DTYPES
     # Against the default config on B200 (fp16/bf16/fp32, 2 to 256K outputs), the c256
     # inner tree ran 1.03-6.2x at every output count (1.8-3.3x at 2-8 outputs). The
     # wider rules ran 0.76-0.95x below 2048 outputs, which keep the default config (a
@@ -549,6 +572,25 @@ def select_general_config(
         return _GeneralConfig(block=64, rule="b200_strided_welford", uniform_tree=True)
     if wide and trait_type in _B200_STRIDED_ONE_FIELD:
         return _GeneralConfig(block=32, rule="b200_strided_one_field")
+    sm107 = cc in _SM107_CCS and dtype in _SM107_DTYPES
+    if not (sm107 and strided and count == 1024):
+        return _GeneralConfig()
+    size = num_o * count * dtype.itemsize
+    if size not in _SM107_SIZES:
+        return _GeneralConfig()
+    if size in _SM107_FULL_SIZES and trait_type is SumOps:
+        return _GeneralConfig(block=64, rule="rubin_strided_sum")
+    if welford_outs == nouts:
+        return _GeneralConfig(kernel_order="inner_tree", rule="rubin_strided_welford")
+    if size > _SM107_MIN_SIZE:
+        if trait_type in _SM107_ONE_FIELD and nfields == 1:
+            return _GeneralConfig(kernel_order="inner_tree", rule="rubin_strided_inner")
+        # Only argmax with int32 indices (32-bit accumulators) was measured.
+        argmax = trait_type is ArgMaxOps
+        if argmax and (dtype == torch.bfloat16 or size == _SM107_MAX_SIZE):
+            return _GeneralConfig(
+                kernel_order="inner_tree", rule="rubin_strided_argmax"
+            )
     return _GeneralConfig()
 
 
