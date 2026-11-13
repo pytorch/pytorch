@@ -151,7 +151,7 @@ function install_126 {
 }
 
 function install_129 {
-  CUDNN_VERSION=9.26.0.51
+  CUDNN_VERSION=9.28.1.4
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 12.9.1 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 12.9.1 in the same container
@@ -170,7 +170,7 @@ function install_129 {
 }
 
 function install_128 {
-  CUDNN_VERSION=9.26.0.51
+  CUDNN_VERSION=9.28.1.4
   CUSPARSELT_VERSION=0.7.1.0
   echo "Installing CUDA 12.8.1 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 12.8.1 in the same container
@@ -189,7 +189,7 @@ function install_128 {
 }
 
 function install_130 {
-  CUDNN_VERSION=9.26.0.51
+  CUDNN_VERSION=9.28.1.4
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.0 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.0 in the same container
@@ -209,7 +209,7 @@ function install_130 {
 
 function install_132 {
   CUBLAS_VERSION=13.4.3.11
-  CUDNN_VERSION=9.26.0.51
+  CUDNN_VERSION=9.28.1.4
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.2 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.2 in the same container
@@ -231,7 +231,7 @@ function install_132 {
 
 function install_134 {
   CUBLAS_VERSION=13.8.1.7
-  CUDNN_VERSION=9.26.0.51
+  CUDNN_VERSION=9.28.1.4
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.4 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.4 in the same container
@@ -252,7 +252,7 @@ function install_134 {
 }
 
 function install_135 {
-  CUDNN_VERSION=9.27.0.42
+  CUDNN_VERSION=9.28.1.4
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.5 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.5 in the same container
