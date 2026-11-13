@@ -244,12 +244,11 @@ struct C10_API PyInterpreterVTable {
   virtual bool fake_run_with_mode_entered(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       c10::function_ref<bool()> step) const = 0;
-  // Calls torch._subclasses.fake_tensor._resolve_device_conflict, which
-  // returns the device FakeTensor._find_common_device keeps for fake inputs of
-  // op on common_device and device, where its rules for zero-dim CPU tensors
-  // and for ops that allow mixed devices do not reconcile them: the one whose
-  // type torch._functorch.config.fake_tensor_prefer_device_type names, else it
-  // raises FakeTensorDeviceMismatchError. Acquires the GIL.
+  // Resolves conflicts left by the CPU-scalar and mixed-device rules.
+  // Matches Python's _resolve_device_conflict in C++: returns the device whose
+  // type contains fake_tensor_prefer_device_type when exactly one matches,
+  // otherwise raises FakeTensorDeviceMismatchError. Acquires the GIL to read
+  // the live Python config and construct the Python exception on failure.
   virtual c10::Device _resolve_device_conflict(
       const c10::OperatorHandle& op,
       c10::Device common_device,
@@ -260,10 +259,6 @@ struct C10_API PyInterpreterVTable {
   virtual void fake_raise_python_error(
       FakePythonError kind,
       const std::string& msg) const = 0;
-  // torch._subclasses.fake_tensor._check_for_subclass_arg of self's Python
-  // object, false if it has none: whether FakeTensorMode returns
-  // NotImplemented for an input of its type. Acquires the GIL.
-  virtual bool _check_for_subclass_arg(const TensorImpl* self) const = 0;
 
   // Note [C++ FakeTensor dispatch]
   // A fake tensor models a tensor on a logical device without allocating its
