@@ -2395,6 +2395,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
+        desyncDebugger_.flush();
         LOG(ERROR) << c10::str(
             pg_->logPrefix(),
             " failure detected by watchdog at work sequence id: ",
@@ -2558,6 +2559,9 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       heartbeat_++;
     }
     done = pg_->workMetaList_.empty();
+
+    lock.unlock();
+    desyncDebugger_.flush();
   }
 }
 
@@ -2590,6 +2594,8 @@ void ProcessGroupNCCL::DesyncDebugger::init(
 void ProcessGroupNCCL::DesyncDebugger::run() {
   if (!enabled_)
     return;
+  // Publish this rank's state before reading the report.
+  flush();
   auto logPrefix = c10::str("Rank ", rank_);
   ::c10d::C10dLoggingData log;
   log.integers["pg_id"] = pgId_;
@@ -2625,7 +2631,6 @@ void ProcessGroupNCCL::DesyncDebugger::run() {
   }
 }
 
-// Log work start to store.
 void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
   if (!enabled_)
     return;
@@ -2633,12 +2638,9 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
     return;
 
   work.startTraceUpdated_ = true;
-  // If not successful, disable the debugger
-  enabled_ = c10d::traceUpdate(
-      store_, traceKeyStart_, work.seq_, opTypeToString(work.opType_));
+  pendingStart_ = {work.seq_, opTypeToString(work.opType_)};
 }
 
-// Log work end to store.
 void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
   if (!enabled_)
     return;
@@ -2648,9 +2650,21 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
     logWorkStart(work);
   }
 
-  // If not successful, disable the debugger
-  enabled_ = c10d::traceUpdate(
-      store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
+  pendingEnd_ = {work.seq_, opTypeToString(work.opType_)};
+}
+
+void ProcessGroupNCCL::DesyncDebugger::flush() {
+  auto start = std::exchange(pendingStart_, std::nullopt);
+  auto end = std::exchange(pendingEnd_, std::nullopt);
+  if (enabled_ && start.has_value()) {
+    // If not successful, disable the debugger
+    enabled_ =
+        c10d::traceUpdate(store_, traceKeyStart_, start->first, start->second);
+  }
+  if (enabled_ && end.has_value()) {
+    // If not successful, disable the debugger
+    enabled_ = c10d::traceUpdate(store_, traceKeyEnd_, end->first, end->second);
+  }
 }
 
 // We want to have both PG ID and global unique ID (guid) for the logging
