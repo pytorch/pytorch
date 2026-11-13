@@ -65,6 +65,7 @@ class ReduceBlock:
         gidx_from: Literal["r", "flat", "chunk"] = "r",
         flat_tail: bool = False,
         ragged_chunk: bool = False,
+        rotate_chunks: bool = False,
         from_partials: bool = False,
         block: int = 128,
         order: Literal["linear", "inner_tree"] = "linear",
@@ -117,6 +118,7 @@ class ReduceBlock:
             gidx_from=gidx_from,
             flat_tail=flat_tail,
             ragged_chunk=ragged_chunk,
+            rotate_chunks=rotate_chunks,
             order=order,
             itree=itree,
             uniform_tree_count=count if uniform_tree else None,
@@ -825,6 +827,8 @@ def _two_stage_general(
         in_base=int(x.storage_offset()),
         limit=count,
         ragged_chunk=True,
+        # Chunks of a broadcast (stride-0) run are copies of one another.
+        rotate_chunks=S == 0,
         gidx_from="chunk" if getattr(trait, "has_index", False) else "r",
         nouts=trait.nfields,
         final=False,
@@ -1208,14 +1212,13 @@ def replay_reduce(
     out_dtype: torch.dtype,
 ) -> torch.Tensor:
     """reduce_dim over `dims`, or reduce_all when None, replaying the launches of an
-    earlier call with the same metadata. x's device must be current. The trait is not
-    keyed: trait_key, with x.dtype and out_dtype, must determine every parameter of the
-    trait make_trait builds. Every route must also follow _L.LaunchRecord's replay
-    contract. Inside an active _L.recording it skips _REPLAYS and runs the full path, so
-    the outer recording captures the launches."""
+    earlier call with the same metadata. x's device must be current; replays do not check
+    it. The trait is not keyed: trait_key, with x.dtype and out_dtype, must determine
+    every parameter of the trait make_trait builds. Every route must also follow
+    _L.LaunchRecord's replay contract. Inside an active _L.recording it skips _REPLAYS and
+    runs the full path, so the outer recording captures the launches."""
     if not x.is_cuda:
         raise AssertionError(f"need a CUDA input, got {x.device}")
-    check_current(x.get_device())
     dims = [dims] if isinstance(dims, int) else (None if dims is None else list(dims))
 
     def run() -> torch.Tensor:
