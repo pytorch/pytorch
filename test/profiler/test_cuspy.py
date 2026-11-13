@@ -2721,9 +2721,9 @@ class TestCuspyHes(TestCase):
             [c.args[0] for c in self.cupti.arm_user_defined_records.call_args_list],
             [subscriber, subscriber],
         )
-        self.assertEqual(
-            self.cupti.disarm_user_defined_records.call_args_list,
-            [call(subscriber), call(subscriber)],
+        self.assertEqual(self.cupti.disarm_user_defined_records.call_count, 2)
+        self.cupti.disarm_user_defined_records.assert_has_calls(
+            [call(subscriber), call(subscriber)]
         )
         cuspy_core._reset_for_test()
         self.cupti.unsubscribe.assert_called_once_with(subscriber)
