@@ -167,6 +167,8 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
             cache = tx.output.variable_tracker_cache
             cached = cache.get(source)
             if cached is not None:
+                if tx.output.current_tracer.parent is not None:
+                    tx.output.current_tracer.traced_sources.add(source)
                 return cached
             vt = LazyVariableTracker(LazyCache(value, source), source=source)
             cache[source] = vt
