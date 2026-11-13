@@ -5962,6 +5962,7 @@ class TestFakeTensorPreferDeviceType(TestCase):
             patch("torch._subclasses.fake_tensor.init_gpu_context", lambda _: None),
             patch.object(mode_cls, "avoid_device_init", True),
             torch.library._scoped_library("_test_fake_device_conflict", "DEF") as lib,
+            torch._functorch.config.patch(fake_tensor_prefer_device_type=preference),
         ):
             mode = mode_cls()
             a, b = (
@@ -5997,12 +5998,12 @@ class TestFakeTensorPreferDeviceType(TestCase):
                     self.assertIs(maybe_get_fake_mode(result), mode)
 
             with mode:
-                check(None)
-                with torch._functorch.config.patch(
-                    fake_tensor_prefer_device_type=preference
-                ):
-                    check(expected_device)
-                check(None)
+                check(expected_device)
+                # C++ modes retain the preference captured at construction;
+                # Python modes read the current config for each conflict.
+                with torch._functorch.config.patch(fake_tensor_prefer_device_type=None):
+                    check(expected_device if mode_cls is CppFakeTensorMode else None)
+                check(expected_device)
 
 
 class TestFakeTensorPreferDeviceTypeDevice(TestCase):
@@ -6014,29 +6015,31 @@ class TestFakeTensorPreferDeviceTypeDevice(TestCase):
     @fake_tensor_modes
     @parametrize("reverse", [False, True])
     def test_fake_tensor_prefer_device_type(self, device, mode_cls, reverse):
-        with mode_cls() as mode:
-            gpu_tensor = torch.randn(3, 4, device=device)
-            cpu_tensor = torch.arange(3).unsqueeze(-1)
-            lhs, rhs = (cpu_tensor, gpu_tensor) if reverse else (gpu_tensor, cpu_tensor)
-            msg = re.escape(
-                f"found at least two devices, {lhs.device} and {rhs.device}!"
-            )
-            with self.assertRaisesRegex(FakeTensorDeviceMismatchError, msg):
-                lhs + rhs
-
-            # Read the preference at dispatch time, even for an existing mode.
-            with torch._functorch.config.patch(
-                fake_tensor_prefer_device_type=self.device_type
+        for preference in (None, self.device_type):
+            with (
+                torch._functorch.config.patch(
+                    fake_tensor_prefer_device_type=preference
+                ),
+                mode_cls() as mode,
             ):
+                gpu_tensor = torch.randn(3, 4, device=device)
+                cpu_tensor = torch.arange(3).unsqueeze(-1)
+                lhs, rhs = (
+                    (cpu_tensor, gpu_tensor) if reverse else (gpu_tensor, cpu_tensor)
+                )
+                if preference is None:
+                    msg = re.escape(
+                        f"found at least two devices, {lhs.device} and {rhs.device}!"
+                    )
+                    with self.assertRaisesRegex(FakeTensorDeviceMismatchError, msg):
+                        lhs + rhs
+                    continue
                 result = lhs + rhs
                 self.assertEqual(result.device, gpu_tensor.device)
                 self.assertEqual(result.shape, (3, 4))
                 self.assertIs(maybe_get_fake_mode(result), mode)
                 for tensor in (gpu_tensor, cpu_tensor):
                     self.assertEqual((tensor + tensor).device, tensor.device)
-
-            with self.assertRaisesRegex(FakeTensorDeviceMismatchError, msg):
-                lhs + rhs
 
 
 instantiate_device_type_tests(
