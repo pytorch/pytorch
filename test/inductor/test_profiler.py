@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
+from unittest import mock
 
 import torch
 import torch._inductor.test_case
@@ -309,6 +310,31 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
         for e in triton_events:
             check_triton_event(e)
+
+    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    def test_profiler_uses_cached_launcher(self):
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        fn = torch.compile(lambda x, y: (x + y).sin().cos())
+        x, y = (torch.rand((4, 4), device=GPU_TYPE) for _ in range(2))
+        fn(x, y)
+        with (
+            mock.patch.object(CachingAutotuner, "_pre_launch") as slow_path,
+            torch.profiler.profile(record_shapes=True) as prof,
+        ):
+            fn(x, y)
+        slow_path.assert_not_called()
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                events = json.load(f)["traceEvents"]
+        ops = {e["args"]["External id"]: e for e in events if e.get("cat") == "cpu_op"}
+        kernels = [e for e in events if e.get("cat") == "kernel"]
+        self.assertTrue(kernels)
+        for kernel in kernels:
+            op = ops[kernel["args"]["External id"]]
+            self.assertTrue(op["name"].startswith("triton_"))
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_cupti_lazy_reinit(self):
