@@ -1318,6 +1318,21 @@ def index_reduce(
             f"and (source) {src.device}"
         ),
     )
+    # Match eager index_func_meta_impl. Without this, the mean path's index_add
+    # lowering accepts a scalar self and returns a value (see #202938).
+    self_sizes = list(self.shape)
+    source_sizes = list(src.shape)
+    if src.dim() != 0 and self.dim() != 0:
+        wrapped_dim = utils.canonicalize_dim(self.dim(), dim)
+        self_sizes.pop(wrapped_dim)
+        source_sizes.pop(wrapped_dim)
+    torch._check(
+        utils.is_same_shape(self_sizes, source_sizes),
+        lambda: (
+            "source tensor shape must match self tensor shape, excluding the specified dimension. "
+            f"Got self.shape = {list(self.shape)} source.shape = {list(src.shape)}"
+        ),
+    )
     if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(
         self.dtype
     ):
