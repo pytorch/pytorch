@@ -117,6 +117,82 @@ INSTANTIATE_MATMUL_MPP_DTYPE(half);
 INSTANTIATE_MATMUL_MPP_DTYPE(bfloat);
 #endif
 
+// Grid (cols, rows, planes).
+template <typename T>
+kernel void matmul_complex_embed(
+    device const vec<T, 2>* X [[buffer(0)]],
+    device T* out [[buffer(1)]],
+    constant MatmulComplexEmbedParams& p [[buffer(2)]],
+    uint3 gid [[thread_position_in_grid]]) {
+  using T2 = vec<T, 2>;
+  const long c = gid.x, r = gid.y;
+  if (c >= p.cols || r >= p.rows) {
+    return;
+  }
+  const float2 x = float2(X[gid.z * p.plane + r * p.rs + c * p.cs]);
+  const float xi = p.sign_in * x.y;
+  const float re = p.alpha_re * x.x - p.alpha_im * xi;
+  const float im = p.alpha_re * xi + p.alpha_im * x.x;
+  device T* o = out + gid.z * p.out_plane + 2 * r * p.ld;
+  if (p.blocks) {
+    *reinterpret_cast<device T2*>(o + 2 * c) = T2(re, im);
+    *reinterpret_cast<device T2*>(o + p.ld + 2 * c) =
+        T2(-p.sign_out * im, p.sign_out * re);
+  } else {
+    o[c] = T(re);
+    o[p.ld + c] = T(im);
+  }
+}
+
+// Grid (N, M, planes).
+template <typename T>
+kernel void matmul_complex_interleave(
+    device const T* F [[buffer(0)]],
+    device vec<T, 2>* C [[buffer(1)]],
+    device const vec<T, 2>* bias [[buffer(2)]],
+    constant MatmulComplexInterleaveParams& p [[buffer(3)]],
+    uint3 gid [[thread_position_in_grid]]) {
+  using T2 = vec<T, 2>;
+  const long n = gid.x, m = gid.y;
+  if (n >= p.N || m >= p.M) {
+    return;
+  }
+  device const T* f = F + gid.z * p.f_plane + 2 * m * p.ldf;
+  float re = float(f[n]), im = float(f[p.ldf + n]);
+  if (p.column_pairs) {
+    const float2 top = float2(*reinterpret_cast<device const T2*>(f + 2 * n));
+    const float2 bottom =
+        float2(*reinterpret_cast<device const T2*>(f + p.ldf + 2 * n));
+    re = top.x - p.sign * bottom.y;
+    im = p.sign * top.y + bottom.x;
+  }
+  if (p.beta_re != 0.0f || p.beta_im != 0.0f) {
+    const float2 b =
+        float2(bias[gid.z * p.bias_plane + m * p.bias_rs + n * p.bias_cs]);
+    re += p.beta_re * b.x - p.beta_im * b.y;
+    im += p.beta_re * b.y + p.beta_im * b.x;
+  }
+  C[gid.z * p.c_plane + m * p.ldc + n] = T2(re, im);
+}
+
+#define INSTANTIATE_MATMUL_COMPLEX(T)                                 \
+  template [[host_name("matmul_complex_embed_" #T)]] kernel void      \
+  matmul_complex_embed<T>(                                            \
+      device const vec<T, 2>*,                                        \
+      device T*,                                                      \
+      constant MatmulComplexEmbedParams&,                             \
+      uint3);                                                         \
+  template [[host_name("matmul_complex_interleave_" #T)]] kernel void \
+  matmul_complex_interleave<T>(                                       \
+      device const T*,                                                \
+      device vec<T, 2>*,                                              \
+      device const vec<T, 2>*,                                        \
+      constant MatmulComplexInterleaveParams&,                        \
+      uint3)
+
+INSTANTIATE_MATMUL_COMPLEX(float);
+INSTANTIATE_MATMUL_COMPLEX(half);
+
 template <typename T1, typename T2, typename TA>
 inline TA matmul_inner(
     device const T1* mat1Data,
