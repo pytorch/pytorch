@@ -145,19 +145,24 @@ class TestFlyDSLTopK(TestCase):
         self._assert_topk_matches_aten(x, k)
 
     def test_supported_dtypes_and_orderings(self):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
         torch.manual_seed(13)
         for dtype in _SUPPORTED_DTYPES:
             for largest in (True, False):
                 for k in (8, 65):
                     n = _test_n(k, dtype)
                     rows = _test_m(k, dtype)
+                    kernel = _expected_kernel(k, n, dtype)
                     with self.subTest(dtype=dtype, largest=largest, k=k, n=n):
                         x = make_tensor(
                             (rows, n),
                             device="cuda",
                             dtype=dtype,
                         )
+                        misses = topk_cache_info(kernel).misses
                         self._assert_topk_matches_aten(x, k, largest=largest)
+                        self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
 
     def test_3d_input(self):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
@@ -206,7 +211,38 @@ class TestFlyDSLTopK(TestCase):
         got_finite = got_v.masked_select(~got_v.isnan()).reshape(m, -1)
         self.assertEqual(got_finite, ref_finite)
 
+    def test_narrow_nan_payloads_are_reloaded(self):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        payloads = {
+            torch.float16: (0x7E01, 0xFE02 - (1 << 16)),
+            torch.bfloat16: (0x7FC1, 0xFFC2 - (1 << 16)),
+        }
+        for dtype, (positive_nan, negative_nan) in payloads.items():
+            for largest in (True, False):
+                for k in (8, 65):
+                    n = _test_n(k, dtype)
+                    m = _test_m(k, dtype)
+                    kernel = _expected_kernel(k, n, dtype)
+                    with self.subTest(dtype=dtype, largest=largest, k=k):
+                        x = torch.empty((m, n), device="cuda", dtype=dtype)
+                        x_bits = x.view(torch.int16)
+                        x_bits[:, 0::2] = positive_nan
+                        x_bits[:, 1::2] = negative_nan
+
+                        misses = topk_cache_info(kernel).misses
+                        got_v, got_i = torch.topk(x, k, largest=largest)
+                        gathered = torch.gather(x, -1, got_i)
+
+                        self.assertTrue(got_v.isnan().all())
+                        self.assertEqual(
+                            gathered.view(torch.int16), got_v.view(torch.int16)
+                        )
+                        self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
+
     def test_out_variant(self):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
         k = 704
         m = _test_m()
         for dtype, largest in ((torch.float32, True), (torch.float16, False)):
@@ -217,6 +253,7 @@ class TestFlyDSLTopK(TestCase):
 
                 out_v = torch.empty(m, k, dtype=dtype, device="cuda")
                 out_i = torch.empty(m, k, dtype=torch.int64, device="cuda")
+                misses = topk_cache_info("radix").misses
                 got_v, got_i = torch.topk(
                     x,
                     k,
@@ -228,6 +265,7 @@ class TestFlyDSLTopK(TestCase):
                 self.assertIs(got_i, out_i)
                 self.assertEqual(got_v, ref_v)
                 self.assertEqual(torch.gather(x, -1, got_i), got_v)
+                self.assertEqual(topk_cache_info("radix").misses, misses + 1)
 
     def test_cow_out_dispatches_and_materializes(self):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
@@ -483,7 +521,7 @@ class TestFlyDSLTopK(TestCase):
             for index in (0, 1):
                 device = torch.device("cuda", index)
                 x = make_tensor(
-                    (_test_m(index), _test_n(k)),
+                    (_test_m(k, device_index=index), _test_n(k)),
                     device=device,
                     dtype=torch.float32,
                 )

@@ -5659,23 +5659,39 @@ def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
-    from torch._native.ops.topk.flydsl_impl import _radix_n_range, _REGISTER_N_BOUNDS
+    from torch._native.ops.topk.flydsl_impl import (
+        _min_rows_for_full_wave,
+        _radix_n_range,
+        _RADIX_MIN_CU_WAVES,
+        _REGISTER_MIN_CU_WAVES,
+        _REGISTER_N_BOUNDS,
+    )
 
     make_arg = partial(_make_dsl_topk_arg, device=device, dtype=dtype)
+    device_index = torch.device(device).index
+    if device_index is None:
+        device_index = torch.cuda.current_device()
+    min_rows = _min_rows_for_full_wave(device_index)
+    radix_rows = min_rows * _RADIX_MIN_CU_WAVES
 
-    # M=256 covers the gfx950 occupancy gate.
-    for K in (64, 256, 257, 383, 384, 831, 832, 1024):
-        n_range = _radix_n_range(K)
+    for K in (64, 256, 257, 512, 513, 1024):
+        n_range = _radix_n_range(K, dtype)
         if n_range is None:
-            raise AssertionError(f"missing radix gate for K={K}")
+            raise AssertionError(f"missing radix gate for K={K} dtype={dtype}")
         N = n_range[0]
-        yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
-        yield SampleInput(make_arg((256, N)).contiguous(), args=(K, -1))
-        yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
+        yield SampleInput(make_arg((radix_rows, N)).contiguous(), args=(K,))
+        yield SampleInput(make_arg((radix_rows, N)).contiguous(), args=(K, -1))
+        yield SampleInput(make_arg((4, radix_rows // 4, N)).contiguous(), args=(K,))
 
-    for K, N in ((2, _REGISTER_N_BOUNDS[0]), (16, _REGISTER_N_BOUNDS[1])):
-        yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
-        yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
+    n_range = _REGISTER_N_BOUNDS.get(dtype)
+    min_cu_waves = _REGISTER_MIN_CU_WAVES.get(dtype)
+    if n_range is not None and min_cu_waves is not None:
+        register_rows = min_rows * min_cu_waves
+        for K, N in ((2, n_range[0]), (16, n_range[1])):
+            yield SampleInput(make_arg((register_rows, N)).contiguous(), args=(K,))
+            yield SampleInput(
+                make_arg((4, register_rows // 4, N)).contiguous(), args=(K,)
+            )
 
 
 def _topk_deterministic(*args, **kwargs):
