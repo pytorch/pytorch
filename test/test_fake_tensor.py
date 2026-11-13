@@ -2661,7 +2661,9 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
         fake_y = mode.from_tensor(y)
 
         with self.assertRaisesRegex(
-            FakeTensorDeviceMismatchError,
+            RuntimeError
+            if mode_cls is CppFakeTensorMode
+            else FakeTensorDeviceMismatchError,
             re.escape(f"found at least two devices, {fake_x.device} and cpu!"),
         ):
             torch.nextafter(fake_x, fake_y)
@@ -2701,7 +2703,9 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             lhs, rhs = (y, x) if reverse else (x, y)
 
             with self.assertRaisesRegex(
-                FakeTensorDeviceMismatchError,
+                RuntimeError
+                if mode_cls is CppFakeTensorMode
+                else FakeTensorDeviceMismatchError,
                 re.escape(
                     f"found at least two devices, {lhs.device} and {rhs.device}!"
                 ),
@@ -5925,29 +5929,45 @@ class TestFakeTensorPreferDeviceTypeDevice(TestCase):
     @fake_tensor_modes
     @parametrize("reverse", [False, True])
     def test_fake_tensor_prefer_device_type(self, device, mode_cls, reverse):
-        with mode_cls() as mode:
-            gpu_tensor = torch.randn(3, 4, device=device)
-            cpu_tensor = torch.arange(3).unsqueeze(-1)
-            lhs, rhs = (cpu_tensor, gpu_tensor) if reverse else (gpu_tensor, cpu_tensor)
-            msg = re.escape(
-                f"found at least two devices, {lhs.device} and {rhs.device}!"
-            )
-            with self.assertRaisesRegex(FakeTensorDeviceMismatchError, msg):
-                lhs + rhs
-
-            # Read the preference at dispatch time, even for an existing mode.
+        is_cpp = mode_cls is CppFakeTensorMode
+        error_type = RuntimeError if is_cpp else FakeTensorDeviceMismatchError
+        for initial_preference in (None, self.device_type):
             with torch._functorch.config.patch(
-                fake_tensor_prefer_device_type=self.device_type
+                fake_tensor_prefer_device_type=initial_preference
             ):
-                result = lhs + rhs
-                self.assertEqual(result.device, gpu_tensor.device)
-                self.assertEqual(result.shape, (3, 4))
-                self.assertIs(maybe_get_fake_mode(result), mode)
-                for tensor in (gpu_tensor, cpu_tensor):
-                    self.assertEqual((tensor + tensor).device, tensor.device)
-
-            with self.assertRaisesRegex(FakeTensorDeviceMismatchError, msg):
-                lhs + rhs
+                mode = mode_cls()
+            with mode:
+                gpu_tensor = torch.randn(3, 4, device=device)
+                cpu_tensor = torch.arange(3).unsqueeze(-1)
+                lhs, rhs = (
+                    (cpu_tensor, gpu_tensor) if reverse else (gpu_tensor, cpu_tensor)
+                )
+                msg = re.escape(
+                    f"found at least two devices, {lhs.device} and {rhs.device}!"
+                )
+                for current_preference in (None, self.device_type):
+                    with self.subTest(
+                        initial=initial_preference, current=current_preference
+                    ):
+                        with torch._functorch.config.patch(
+                            fake_tensor_prefer_device_type=current_preference
+                        ):
+                            # C++ snapshots the preference; Python reads it at dispatch.
+                            preference = (
+                                initial_preference if is_cpp else current_preference
+                            )
+                            if preference is None:
+                                with self.assertRaisesRegex(error_type, msg):
+                                    lhs + rhs
+                            else:
+                                result = lhs + rhs
+                                self.assertEqual(result.device, gpu_tensor.device)
+                                self.assertEqual(result.shape, (3, 4))
+                                self.assertIs(maybe_get_fake_mode(result), mode)
+                            for tensor in (gpu_tensor, cpu_tensor):
+                                self.assertEqual(
+                                    (tensor + tensor).device, tensor.device
+                                )
 
 
 instantiate_device_type_tests(
@@ -7118,7 +7138,7 @@ class TestCppFakeTensorModeBindings(TestCase):
                 "Meta" if implementation == "meta" else "CompositeImplicitAutograd",
             )
             op = torch.ops._test_fake_fallback.probe.default
-            # Export writes py_kernels directly, bypassing the PythonCIA table.
+            # Direct writes, including patch.dict's update/clear, track PythonCIA.
             overrides = (
                 {}
                 if implementation == "meta"
