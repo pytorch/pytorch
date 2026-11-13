@@ -2309,6 +2309,7 @@ def _set_fake_constant(fake: Tensor, constant: Tensor | None) -> None: ...
 def _fake_tensor_to_list(t: Tensor) -> Any: ...
 
 class _CppFakeTensorMode:
+    static_shapes: _bool
     allow_meta: _bool
     _allow_unsafe_data_ptr_access: _bool
     allow_non_fake_inputs: _bool

@@ -921,7 +921,7 @@ def _grad_context_compatible(
 # meta storages. This class will hold weak references to cached tensors
 # and tensor storages.
 class MetaConverter(Generic[_TensorT]):
-    def __init__(self, *, copy_data: bool = False) -> None:
+    def __init__(self, *, copy_data: bool = False, cpp_fakes: bool = False) -> None:
         # Maps MetaStorageId to UntypedStorage
         self.storage_memo: weakref.WeakValueDictionary[
             MetaStorageId, torch.UntypedStorage
@@ -940,6 +940,7 @@ class MetaConverter(Generic[_TensorT]):
         # bearing: FakeTensor relies on real tensor being set to exactly this
         # value
         self.copy_data = copy_data
+        self.cpp_fakes = cpp_fakes
         self.describer = MetaTensorDescriber(copy_data=copy_data)
 
     def successful(self) -> bool:
@@ -1604,6 +1605,7 @@ class MetaConverter(Generic[_TensorT]):
                             is_coalesced=t.is_coalesced,
                         )
                     )
+                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         # Pray that sparse clone doesn't lose information
                         if t.data is None:
@@ -1679,6 +1681,7 @@ class MetaConverter(Generic[_TensorT]):
                             device="meta",
                         )
                     )
+                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         # Pray sparse clone doesn't lose information
                         if t.data is None:
@@ -1724,6 +1727,7 @@ class MetaConverter(Generic[_TensorT]):
                             sizes, strides, dtype=t.dtype, device="meta"
                         )
                     )
+                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
                             if t.size is None:
@@ -1943,6 +1947,7 @@ class MetaConverter(Generic[_TensorT]):
                             torch._dynamo.source.AttrSource(source, "_base"),
                             base_symbolic_context,
                         )
+                    require_python_fake_mode(maybe_get_fake_mode(base))
 
                     def is_c_of_r(
                         complex_dtype: torch.dtype, real_dtype: torch.dtype
@@ -2240,9 +2245,7 @@ class MetaConverter(Generic[_TensorT]):
                                 in_kernel_invocation_manager,
                             )
 
-                            mb_fake_mode = require_python_fake_mode(
-                                maybe_get_fake_mode(r)
-                            )
+                            mb_fake_mode = maybe_get_fake_mode(r)
                             if mb_fake_mode is not None:
                                 maybe_fake_mgr = in_kernel_invocation_manager(
                                     mb_fake_mode
