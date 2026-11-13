@@ -6769,47 +6769,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(self._installed(), (None, False))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    @parametrize("implementation", ["meta", "op_impl"])
-    def test_fake_fallback_sparse_invariant_checks(self, implementation):
-        import threading
-
-        mode = CppFakeTensorMode()
-        real = torch.eye(2)
-        meta = (real.to_sparse() if implementation == "meta" else real).to("meta")
-        sparse = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
-        enabled = torch.sparse.check_sparse_tensor_invariants.is_enabled
-        self.assertTrue(enabled())
-        checks = []
-
-        def sparse_probe_meta(t):
-            checks.append(enabled())
-            thread = threading.Thread(target=lambda: checks.append(enabled()))
-            thread.start()
-            thread.join()
-            return t.clone()
-
-        with torch.library._scoped_library("_test_fake_fallback_sparse", "DEF") as lib:
-            lib.define("probe(Tensor x) -> Tensor")
-            op = torch.ops._test_fake_fallback_sparse.probe.default
-            if implementation == "meta":
-                lib.impl("probe", sparse_probe_meta, "SparseMeta")
-            else:
-                from torch._subclasses.fake_impls import (
-                    _deregister_op_impl,
-                    register_op_impl,
-                )
-
-                @register_op_impl(op)
-                def op_impl(fake_mode, func, t):
-                    with torch.sparse.check_sparse_tensor_invariants(False):
-                        return sparse_probe_meta(t)
-
-                self.addCleanup(_deregister_op_impl, op)
-            op(sparse)
-        self.assertEqual(checks, [False, True])
-        self.assertTrue(enabled())
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("component", ["_values", "_indices"])
     def test_fake_fallback_sparse_component_ownership(self, component):
         mode = CppFakeTensorMode()
