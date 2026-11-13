@@ -25,6 +25,7 @@ import torch.utils.checkpoint
 from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
+from torch._dynamo.variables.lazy import LazyVariableTracker
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -130,8 +131,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(mapping.calls, ["keys", ("getitem", "a")])
         self.assertEqual(counter.frame_count, 1)
 
-    hw_classification = HardwareClassification.GENERIC
-
     @parametrize("case", ["duplicate", "bound", "pending"])
     def test_keyword_mapping_exceptional_fallback(self, case):
         class Mapping(dict):
@@ -182,6 +181,85 @@ class DictTests(torch._dynamo.test_case.TestCase):
         )
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, message):
             torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_ordered_dict_input_move_preserves_writeback_order(self):
+        def fn(x, mapping):
+            mapping["c"], mapping["d"] = 1, 2
+            mapping.move_to_end("c")
+            return x + 1
+
+        actual, expected, x = OrderedDict(a=0), OrderedDict(a=0), torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, actual), fn(x, expected))
+        self.assertEqual(tuple(actual), tuple(expected))
+        self.assertEqual(tuple(dict.items(actual)), tuple(dict.items(expected)))
+
+    def test_dict_repr_custom_new_input_falls_back(self):
+        class Mapping(dict):
+            def __new__(cls, *args, **kwargs):
+                return super().__new__(cls)
+
+        def fn(x, mapping):
+            return x + 1, dict.__repr__(mapping)
+
+        mapping, x = Mapping(a=1), torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+
+    def test_dict_repr_uses_ordered_dict_storage(self):
+        def fn(x, mapping):
+            return x + 1, dict.__repr__(mapping)
+
+        mapping = OrderedDict(a=1, b=2)
+        mapping.move_to_end("a")
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+            mapping.move_to_end(next(iter(mapping)))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_ordered_dict_repr_guards_linked_order(self):
+        def fn(x, mapping):
+            return x + 1, repr(mapping)
+
+        mapping = OrderedDict(a=1, b=2)
+        mapping.move_to_end("a")
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+            mapping.move_to_end(next(iter(mapping)))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_instance_dict_repr_uses_proxy(self):
+        class Box:
+            def __init__(self):
+                self.a = "first"
+                self.b = "second"
+
+        def fn(x, obj):
+            return x + 1, repr(obj.__dict__)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        obj, x = Box(), torch.ones(1)
+        for value in ("second", "third"):
+            obj.b = value
+            self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_realize_all_preserves_ordered_dict_storage(self):
+        mapping = OrderedDict(a=object(), b=object())
+        mapping.move_to_end("a")
+        actual = LazyVariableTracker.realize_all(mapping)
+        self.assertIs(type(actual), OrderedDict)
+        self.assertEqual(list(actual), ["b", "a"])
+        self.assertEqual(list(dict.keys(actual)), ["a", "b"])
+        for key, value in dict.items(mapping):
+            self.assertIs(actual[key], value)
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
     @parametrize(
@@ -354,8 +432,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
+    @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("operation", ["repr", "reversed", "enum"])
-    def test_dict_materialization_order_guard(self, operation):
+    def test_dict_materialization_order_guard(self, mapping_type, operation):
         def fn(x, mapping):
             if operation == "repr":
                 return x + 1, repr(mapping)
@@ -367,9 +446,14 @@ class DictTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
         for keys in ("abc", "acb"):
-            mapping = {key: 1 if operation == "enum" else ord(key) for key in keys}
+            mapping = mapping_type(
+                (key, 1 if operation == "enum" else ord(key)) for key in keys
+            )
             self.assertEqual(compiled(x, mapping), fn(x, mapping))
-            mapping["a"] = mapping.pop("a")
+            if mapping_type is OrderedDict:
+                mapping.move_to_end("a")
+            else:
+                mapping["a"] = mapping.pop("a")
             self.assertEqual(compiled(x, mapping), fn(x, mapping))
         self.assertEqual(counter.frame_count, 4)
 
