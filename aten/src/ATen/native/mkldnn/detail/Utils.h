@@ -4,6 +4,12 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <dnnl.hpp>
+// Ported from ideep/utils.hpp.
+#ifdef _OPENMP
+#include <omp.h>
+#else
+#define omp_get_max_threads() 1
+#endif
 
 #include <algorithm>
 #include <cstdint>

@@ -38,11 +38,6 @@ excluded = [
   'third_party/mslk/external/cutlass/python/LICENSE.txt',
   'third_party/mslk/external/googletest/LICENSE',
   'third_party/mslk/external/hipify_torch/LICENSE.txt',
-  # ideep's nested oneDNN; the build uses third_party/oneDNN instead
-  'third_party/ideep/mkl-dnn/LICENSE',
-  'third_party/ideep/mkl-dnn/third_party/gtest/LICENSE',
-  'third_party/ideep/mkl-dnn/third_party/ittnotify/LICENSE.BSD',
-  'third_party/ideep/mkl-dnn/third_party/opencl/LICENSE',
   # docs / test / nested googletest trees
   'third_party/nlohmann/docs/mkdocs/docs/home/license.md',
   'third_party/oneDNN/third_party/gtest/LICENSE',
@@ -147,7 +142,6 @@ paths = [
   'third_party/flash-attention/third_party/aiter/LICENSE',
   'third_party/fmt/LICENSE',
   'third_party/gloo/gloo/transport/uv/LICENSE.uvw',
-  'third_party/ideep/LICENSE',
   'third_party/mimalloc/LICENSE',
   'third_party/miniz-3.0.2/LICENSE',
   'third_party/mslk/external/composable_kernel/LICENSE',

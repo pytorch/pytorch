@@ -1034,7 +1034,6 @@
 # /third_party/fbgemm
 # /third_party/flash-attention
 # /third_party/gemmlowp/
-# /third_party/ideep
 # /third_party/kleidiai
 # /third_party/oneDNN
 # /third_party/pthreadpool

@@ -866,7 +866,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   PrimitiveCacheKey cache_key = std::make_tuple(
       input_scale, input_zero_point, input_dims, output_scale, output_zero_point, num_threads, /*accum scale*/1.0, /*accum zero point*/0);
   c10::call_once(*cache_initialized_flag, [&](){
-#if IDEEP_PREREQ(3, 13, 0, 4)
+#if DNNL_PREREQ(3, 13, 0)
       // Prepacking does not know the output dtype. Select the layout for this
       // invocation before preparing the cached primitive.
       auto expected_w = w.reorder_if_differ_in(

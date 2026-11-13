@@ -466,7 +466,7 @@ static std::tuple<mkldnn::ITensor, mkldnn::ITensor> get_lstm_packed_weights(
 }
 
 static bool should_use_plain_format(mkldnn::ITensor w) {
-#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3
+#if defined(DNNL_VERSION_MAJOR) && DNNL_VERSION_MAJOR>=3
   return w.get_desc().is_opaque() || w.get_desc().is_plain();
 # else
   return w.get_desc().is_rnn_packed() || w.get_desc().is_plain();
