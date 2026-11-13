@@ -241,6 +241,54 @@ class PythonKernelHolder : public c10::OperatorKernel {
   }
 };
 
+// Bumps a mutated Tensor's version counter, as torch.autograd.graph.
+// increment_version does: inference tensors don't have one.
+static void bump_mutated_version(const at::Tensor& t) {
+  if (!t.is_inference()) {
+    torch::autograd::impl::bump_version(t);
+  }
+}
+
+// The ADInplaceOrView kernel of a custom op that mutates some of its arguments
+// and returns no views of them: bumps the version counter of each mutated
+// Tensor, then redispatches past ADInplaceOrView. (The generic fallback,
+// autogradNotImplementedInplaceOrViewFallback, only bumps mutated returns.)
+// PyObject dispatch does the same itself, without leaving the fast path.
+class MutationVersionBumpKernel : public c10::OperatorKernel {
+ public:
+  explicit MutationVersionBumpKernel(std::vector<size_t> mutated_args)
+      : mutated_args_(std::move(mutated_args)) {}
+
+  // Indices of the mutated arguments in the schema.
+  const std::vector<size_t>& mutated_args() const {
+    return mutated_args_;
+  }
+
+  void operator()(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet keyset,
+      torch::jit::Stack* stack) {
+    const auto arguments =
+        torch::jit::last(*stack, op.schema().arguments().size());
+    for (const auto i : mutated_args_) {
+      const auto& arg = arguments[i];
+      if (arg.isTensor()) {
+        bump_mutated_version(arg.toTensor());
+      } else if (arg.isList()) {
+        for (const auto& elem : arg.toListRef()) {
+          if (elem.isTensor()) {
+            bump_mutated_version(elem.toTensor());
+          }
+        }
+      }
+    }
+    op.redispatchBoxed(keyset & c10::after_ADInplaceOrView_keyset, stack);
+  }
+
+ private:
+  std::vector<size_t> mutated_args_;
+};
+
 // @todo sahanp: Afait only register is used in the codebase. This can be
 // removed / simplified
 static torch::_RegisterOrVerify register_or_verify() {
@@ -424,6 +472,21 @@ static py::object pyobject_dispatch_handle_torch_function(
       /*module_name=*/nullptr);
   TORCH_CHECK_PYTHON(result != nullptr);
   return py::reinterpret_steal<py::object>(result);
+}
+
+// MutationVersionBumpKernel's version bumps, on a PyObject dispatch argument.
+static void pyobject_dispatch_bump_version(PyObject* obj) {
+  if (THPVariable_Check(obj)) {
+    bump_mutated_version(THPVariable_Unpack(obj));
+  } else if (PyList_Check(obj) || PyTuple_Check(obj)) {
+    const Py_ssize_t len = PySequence_Fast_GET_SIZE(obj);
+    PyObject** items = PySequence_Fast_ITEMS(obj);
+    for (const auto i : c10::irange(len)) {
+      if (THPVariable_Check(items[i])) {
+        bump_mutated_version(THPVariable_Unpack(items[i]));
+      }
+    }
+  }
 }
 
 static PyObject* pyobject_dispatch_call_redispatch_cpp(
@@ -1103,6 +1166,22 @@ static PyObject* pyobject_dispatch_with_keyset(
   const auto* holder =
       kernel_function.template boxedKernelFunctor<PythonKernelHolder>();
   if (holder == nullptr && all_args != nullptr && !skip_torch_function) {
+    if (const auto* bump =
+            kernel_function
+                .template boxedKernelFunctor<MutationVersionBumpKernel>()) {
+      for (const auto i : bump->mutated_args()) {
+        pyobject_dispatch_bump_version(all_args[i]);
+      }
+      return pyobject_dispatch_with_keyset(
+          self,
+          key_set & c10::after_ADInplaceOrView_keyset,
+          skip_torch_function,
+          args,
+          nargs,
+          kwnames,
+          op_args_start,
+          all_args);
+    }
     return pyobject_dispatch_call_cpp(
         *self->handle,
         all_args,
@@ -1763,7 +1842,25 @@ void initDispatchBindings(PyObject* module) {
             END_HANDLE_TH_ERRORS_PYBIND
           },
           "",
-          py::arg("name"));
+          py::arg("name"))
+      .def(
+          "register_mutation_version_bump",
+          [](const py::object& self,
+             const char* name,
+             std::vector<size_t> mutated_args) {
+            HANDLE_TH_ERRORS
+            auto& lib = self.cast<torch::Library&>();
+            lib.impl(
+                name,
+                c10::DispatchKey::ADInplaceOrView,
+                torch::CppFunction::makeFromBoxedFunctor(
+                    std::make_unique<MutationVersionBumpKernel>(
+                        std::move(mutated_args))));
+            END_HANDLE_TH_ERRORS_PYBIND
+          },
+          "",
+          py::arg("name"),
+          py::arg("mutated_args"));
 
   m.def(
       "_dispatch_library",
