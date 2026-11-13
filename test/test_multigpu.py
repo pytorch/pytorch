@@ -28,6 +28,7 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     get_cycles_per_ms,
     HardwareClassification,
     IS_JETSON,
@@ -1792,6 +1793,15 @@ class TestCudaComm(TestCase):
 
     def test_gather_neg_dim(self):
         self._test_gather(-1)
+
+    for _test in (test_gather, test_gather_dim, test_gather_neg_dim):
+        add_skip_condition(
+            _test,
+            lambda cls, helper=_test_gather: cls is TestCudaComm
+            and cls._test_gather is helper
+            and not TEST_MULTIGPU,
+            "only one GPU detected",
+        )
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_memory_format_scatter_gather(self):

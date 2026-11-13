@@ -433,6 +433,8 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
 // copy thread count is one. Coalescing zero-fills the inter-constant alignment
 // padding in the device blob, which the per-range path left uninitialized. Call
 // before creating a model/container to affect embedded constant loading.
+// Without this call, AOTI_COPY_USE_PINNED_ASYNC decides, and when it is unset
+// the copies are on for ROCm and off for CUDA.
 AOTI_API AOTIRuntimeError
 AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled);
 
