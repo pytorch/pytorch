@@ -71,18 +71,30 @@ inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
     return exponent;
   }
 
-  // Round to nearest, with ties going up, as e8m0 has no mantissa bits to be
-  // even. The midpoint between 2^e and 2^(e+1) is 1.5 * 2^e, so normal float32
+  // next, we use guard and round bits to implement round to nearest, with ties
+  // going up, as e8m0 has no mantissa bits to be even
+
+  // guard bit - bit 23, or 22 zero-indexed
+  uint8_t g = (f_bits & 0x400000) > 0;
+  // round bit - bit 22, or 21 zero-indexed
+  uint8_t r = (f_bits & 0x200000) > 0;
+
+  // The midpoint between 2^e and 2^(e+1) is 1.5 * 2^e, so normal float32
   // values round up when the top bit of their mantissa (g) is set. float32
   // subnormals (exponent 0) are below 2^-126: those from 1.5 * 2^-127 (top two
   // mantissa bits g and r set) round up to it, and the others become 2^-127,
   // the smallest e8m0 value (biased exponent 0, as e8m0 has no zero).
-  const uint32_t g = (f_bits >> 22) & 1;
-  const uint32_t r = (f_bits >> 21) & 1;
-  const uint32_t round_up = exponent == 0 ? (g & r) : g;
+  bool round_up = exponent > 0 ? g : (g && r);
 
-  // Rounding up from exponent 254 gives 255, e8m0's NaN.
-  return static_cast<uint8_t>(exponent + round_up);
+  if (round_up) {
+    // adjust exponent
+    // note that if exponent was 255 we would have already returned earlier, so
+    // we know we can add one safely without running out of bounds.
+    // on the other hand, rounding up from exponent 254 gives 255, e8m0's NaN.
+    exponent++;
+  }
+
+  return exponent;
 }
 
 } // namespace detail
@@ -194,6 +206,10 @@ class numeric_limits<c10::Float8_e8m0fnu> {
   }
   static constexpr c10::Float8_e8m0fnu quiet_NaN() {
     return c10::Float8_e8m0fnu(0b11111111, c10::Float8_e8m0fnu::from_bits());
+  }
+  static constexpr c10::Float8_e8m0fnu denorm_min() {
+    // no subnormals, so same as min(), as the standard requires
+    return c10::Float8_e8m0fnu(0b00000000, c10::Float8_e8m0fnu::from_bits());
   }
 };
 
