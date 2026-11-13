@@ -52,6 +52,7 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Binary.h>
 #include <ATen/native/mkldnn/detail/Eltwise.h>
 
 namespace at::native {
@@ -90,10 +91,10 @@ Tensor& mkldnn_add_out(
   ideep::tensor& z = itensor_from_mkldnn(result);
   if (result.is_same(other)) {
     const std::vector<float> scales{alpha.to<float>(), 1.0};
-    ideep::sum::compute(scales, {y, x}, z);
+    mkldnn::sum(scales, {y, x}, z);
   } else {
     const std::vector<float> scales{1.0, alpha.to<float>()};
-    ideep::sum::compute(scales, {x, y}, z);
+    mkldnn::sum(scales, {x, y}, z);
   }
 
   return result;
@@ -109,7 +110,7 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, const Scalar& alpha) 
 
   ideep::tensor z;
   const std::vector<float> scales{1.0, alpha.to<float>()};
-  ideep::sum::compute(scales, {x, y}, z);
+  mkldnn::sum(scales, {x, y}, z);
 
   return new_with_itensor_mkldnn(std::move(z), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
@@ -140,7 +141,7 @@ Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) 
       return result.copy_(self.to_dense().mul(other.to_dense()).to_mkldnn());
     }
     ideep::tensor y = itensor_from_mkldnn(other);
-    ideep::binary::compute(x, y, z, dnnl::algorithm::binary_mul);
+    mkldnn::binary(x, y, z, dnnl::algorithm::binary_mul);
 
     return result;
   }
