@@ -3333,6 +3333,26 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(x, expected, **tol)
 
     @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double, torch.cfloat)
+    def test_cumsum_cumprod_no_spurious_overflow(self, device, dtype):
+        # Every run of these inputs has a finite sum and product that is exact in `dtype`, but
+        # folding elements that are not adjacent (e.g. all the 2^e first) overflows. 1-D,
+        # chunked last-dim and chunked outer-dim lines on ROCm.
+        e = {torch.half: 9, torch.bfloat16: 120, torch.float: 120, torch.double: 1000, torch.cfloat: 120}[dtype]
+        cases = [((1_000_000,), 0), ((3, 200_000), 1), ((65536, 2), 0), ((1, 65536, 1), 1)]
+        for (shape, dim), op in product(cases, (torch.cumsum, torch.cumprod)):
+            if op is torch.cumsum:
+                pattern = [2.0**e] * 16 + [-2.0**e] * 16
+            else:
+                pattern = [2.0**e] + [1.0] * 15 + [2.0**-e] + [1.0] * 15
+            n = shape[dim]
+            line = torch.tensor(pattern, dtype=torch.double).repeat(n // len(pattern) + 1)[:n]
+            view = [1] * len(shape)
+            view[dim] = n
+            x = line.view(view).expand(shape).to(dtype).contiguous()
+            self.assertEqual(op(x.to(device), dim), op(x, dim), atol=0, rtol=0)
+
+    @onlyCUDA
     @skipCUDAIfNotRocm
     @largeTensorTest('12GB')
     def test_cumsum_more_than_2_32_elements(self, device):
@@ -3342,13 +3362,16 @@ class TestTorchDeviceType(TestCase):
             # Random values make every chunk and tile carry visible modulo 256.
             x = torch.randint(0, 256, shape, dtype=torch.uint8, device=device)
             res = x.cumsum(dim, dtype=torch.uint8)
+            # res is the cumsum modulo 256 iff it starts with x[0] and each step adds x[i]. Checked in
+            # slices with elementwise ops, so no scan is involved and the temporaries stay small.
             n = shape[dim]
-            for start in (0, n // 2, n - 1024):
-                # Summing in uint8 wraps modulo 256 like the scan, without an int64 copy of the input.
-                prefix = x.narrow(dim, 0, start).sum(dim, keepdim=True, dtype=torch.uint8).cpu()
-                window = x.narrow(dim, start, 1024).cpu().cumsum(dim, dtype=torch.int64)
-                expected = ((prefix + window) % 256).to(torch.uint8)
-                self.assertEqual(res.narrow(dim, start, 1024).cpu(), expected, atol=0, rtol=0)
+            self.assertTrue(torch.equal(res.narrow(dim, 0, 1), x.narrow(dim, 0, 1)))
+            step = 2**27
+            for start in range(1, n, step):
+                length = min(step, n - start)
+                diff = res.narrow(dim, start, length) - res.narrow(dim, start - 1, length)
+                self.assertTrue(torch.equal(diff, x.narrow(dim, start, length)),
+                                f"{shape} along {dim}: wrong result in [{start}, {start + length})")
             del x, res
 
     @onlyCUDA

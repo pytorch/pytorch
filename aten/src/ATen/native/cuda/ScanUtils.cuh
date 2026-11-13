@@ -12,7 +12,9 @@
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Macros.h>
+#include <vector>
 #endif
 
 namespace at::native {
@@ -405,10 +407,9 @@ __global__ void tensor_kernel_scan_innermost_dim(
  * (scan_rows_warp), by a whole block (scan_rows_block), or split into chunks
  * across several blocks (reduce_row_chunks + scan_rows_block) so that a few
  * long rows can still fill the GPU.
- * The chunked paths here and in outer_scan fold pieces of a line out of order, so
- * binary_op must be commutative as well as associative.
- * TODO: in a follow-up PR, add a tag or trait for commutative ops and send other ops
- * to the stock kernels at compile time, instead of listing the known ops by type.
+ * Every combine here and in outer_scan takes two adjacent ranges of a line, the earlier one
+ * first, so binary_op only needs to be associative, and a partial result can overflow only
+ * where some run of the input does.
  */
 namespace inner_scan {
 
@@ -617,15 +618,18 @@ __global__ void scan_rows_block(T* tgt, const T* src,
     T* row_tgt = tgt + row * row_size;
     T carry = init;
     if (partials != nullptr && chunk > 0) {
-      // Fold the earlier chunks' totals across the whole block (binary_op is commutative
-      // whenever partials are used); takes a turn of the warp_totals double buffer.
+      // Fold the earlier chunks' totals across the whole block, each thread taking a contiguous
+      // run of them and neighbours combined first; takes a turn of the warp_totals double buffer.
       const T* row_partials = partials + row * (num_chunks - 1);
+      const uint32_t per_thread = ceil_div<uint32_t>(chunk, kBlock);
+      const uint32_t c0 = threadIdx.x * per_thread;
+      const uint32_t c1 = c0 + per_thread < chunk ? c0 + per_thread : chunk;
       T acc = init;
-      for (uint32_t c = threadIdx.x; c < chunk; c += kBlock) {
+      for (uint32_t c = c0; c < c1; ++c) {
         acc = binary_op(acc, row_partials[c]);
       }
 #pragma unroll
-      for (int offset = kLogicalWarp / 2; offset > 0; offset >>= 1) {
+      for (int offset = 1; offset < kLogicalWarp; offset <<= 1) {
         acc = binary_op(acc, shfl_down(acc, offset, kLogicalWarp));
       }
       T* totals = warp_totals + buf * kWarps;
@@ -674,69 +678,64 @@ __global__ void scan_rows_block(T* tgt, const T* src,
   }
 }
 
-// Per-thread fold of [begin, end), where end - begin is a whole number of tiles.
-// Loads are striped across the block, and kReduceUnroll tiles are issued before
-// any is consumed. Tiles past `end` re-load the first tile of the group (always
-// in bounds) and are discarded, so there is no data-dependent branch.
+// Fold of [begin, end) by one logical warp, where end - begin is a whole number of warp tiles
+// (kLogicalWarp * ITEMS elements); the total ends up in lane 0. As in the scan, every partial
+// is the fold of a contiguous range, so it overflows only where some run of the input does:
+// each lane folds its ITEMS contiguous elements, the lanes of a warp tile are combined
+// neighbours first, and warp tiles are folded in order. kReduceUnroll warp tiles are loaded
+// before any is consumed; tiles past `end` re-load the first one (always in bounds) and are
+// discarded, so there is no data-dependent branch.
 template <bool kVectorized, typename T, int ITEMS, int VEC, class BinaryFunction>
-__device__ __forceinline__ T reduce_tiles(const T* __restrict__ p, uint64_t begin, uint64_t end,
-                                          T init, BinaryFunction binary_op) {
+__device__ __forceinline__ T reduce_span(const T* __restrict__ p, uint64_t begin, uint64_t end, int lane,
+                                         T init, BinaryFunction binary_op) {
   constexpr int kTileBytes = static_cast<int>(ITEMS * sizeof(T));
   constexpr int kReduceUnroll = kTileBytes >= kReduceBytesInFlight ? 1 : kReduceBytesInFlight / kTileBytes;
-  // Both paths give each thread the same elements, so the result doesn't depend on alignment.
-  constexpr int kWidth = VEC;
-  constexpr int kLoads = ITEMS / kWidth;
-  constexpr uint64_t tile = static_cast<uint64_t>(kBlock) * ITEMS;
-  T acc[kReduceUnroll];
-#pragma unroll
-  for (int u = 0; u < kReduceUnroll; ++u) {
-    acc[u] = init;
-  }
+  constexpr uint64_t tile = static_cast<uint64_t>(kLogicalWarp) * ITEMS;
+  T total = init;
   for (uint64_t base = begin; base < end; base += kReduceUnroll * tile) {
-    Vec<T, kWidth> v[kReduceUnroll][kLoads];
+    T x[kReduceUnroll][ITEMS];
 #pragma unroll
     for (int u = 0; u < kReduceUnroll; ++u) {
       const uint64_t tile_base = base + u * tile < end ? base + u * tile : base;
+      const T* q = p + tile_base + static_cast<uint64_t>(lane) * ITEMS;
+      // Both paths give each lane the same elements, so the result doesn't depend on alignment.
+      if constexpr (kVectorized) {
 #pragma unroll
-      for (int l = 0; l < kLoads; ++l) {
-        const T* q = p + tile_base + static_cast<uint64_t>(l * kBlock + threadIdx.x) * kWidth;
-        if constexpr (kVectorized) {
-          const auto g = *reinterpret_cast<const GVec<T, kWidth>*>(q);
+        for (int i = 0; i < ITEMS / VEC; ++i) {
+          const auto g = *reinterpret_cast<const GVec<T, VEC>*>(q + i * VEC);
 #pragma unroll
-          for (int k = 0; k < kWidth; ++k) {
-            v[u][l].v[k] = g.v[k];
+          for (int k = 0; k < VEC; ++k) {
+            x[u][i * VEC + k] = g.v[k];
           }
-        } else {
+        }
+      } else {
 #pragma unroll
-          for (int k = 0; k < kWidth; ++k) {
-            v[u][l].v[k] = q[k];
-          }
+        for (int k = 0; k < ITEMS; ++k) {
+          x[u][k] = q[k];
         }
       }
     }
 #pragma unroll
     for (int u = 0; u < kReduceUnroll; ++u) {
-      const bool live = base + u * tile < end;
+      T s = x[u][0];
 #pragma unroll
-      for (int l = 0; l < kLoads; ++l) {
+      for (int k = 1; k < ITEMS; ++k) {
+        s = binary_op(s, x[u][k]);
+      }
 #pragma unroll
-        for (int k = 0; k < kWidth; ++k) {
-          const T r = binary_op(acc[u], v[u][l].v[k]);
-          acc[u] = live ? r : acc[u];
-        }
+      for (int offset = 1; offset < kLogicalWarp; offset <<= 1) {
+        s = binary_op(s, shfl_down(s, offset, kLogicalWarp));
+      }
+      if (base + u * tile < end) {
+        total = binary_op(total, s);
       }
     }
-  }
-  T total = acc[0];
-#pragma unroll
-  for (int u = 1; u < kReduceUnroll; ++u) {
-    total = binary_op(total, acc[u]);
   }
   return total;
 }
 
-// Totals of every chunk except the last one of each row. Requires a commutative
-// binary_op and chunk_size to be a multiple of kBlock * ITEMS.
+// Totals of every chunk except the last one of each row. Requires chunk_size to be a
+// multiple of kBlock * ITEMS; warp w folds the w-th of kWarps equal spans of a chunk.
 template <typename T, int ITEMS, int VEC, class BinaryFunction>
 C10_LAUNCH_BOUNDS_1(kBlock)
 __global__ void reduce_row_chunks(T* __restrict__ partials, const T* __restrict__ src,
@@ -756,16 +755,13 @@ __global__ void reduce_row_chunks(T* __restrict__ partials, const T* __restrict_
     const uint64_t item = total_work - 1 - work;
     const uint64_t row = item / chunks_to_reduce;
     const uint32_t chunk = static_cast<uint32_t>(item % chunks_to_reduce);
-    const uint64_t begin = static_cast<uint64_t>(chunk) * chunk_size;
-    const uint64_t end = begin + chunk_size;
+    const uint64_t span = chunk_size / kWarps;
+    const uint64_t begin = static_cast<uint64_t>(chunk) * chunk_size + warp * span;
+    const uint64_t end = begin + span;
     const T* row_src = src + row * row_size;
-    T acc = vec_ok
-        ? reduce_tiles<true, T, ITEMS, VEC>(row_src, begin, end, init, binary_op)
-        : reduce_tiles<false, T, ITEMS, VEC>(row_src, begin, end, init, binary_op);
-#pragma unroll
-    for (int offset = kLogicalWarp / 2; offset > 0; offset >>= 1) {
-      acc = binary_op(acc, shfl_down(acc, offset, kLogicalWarp));
-    }
+    const T acc = vec_ok
+        ? reduce_span<true, T, ITEMS, VEC>(row_src, begin, end, lane, init, binary_op)
+        : reduce_span<false, T, ITEMS, VEC>(row_src, begin, end, lane, init, binary_op);
     if (lane == 0) {
       warp_sums[warp] = acc;
     }
@@ -835,7 +831,9 @@ inline Plan make_plan(int64_t num_rows, int64_t row_size, int64_t num_sms, int64
 template <int kItems, int kVec, int kRun, typename T, class BinaryFunction>
 void launch_with(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T init, BinaryFunction binary_op) {
   constexpr uintptr_t kAlign = kGlobalAlign<T>;
-  const bool vec_ok = row_size % kVec == 0 &&
+  // Vector accesses start at a row start plus a multiple of kItems, so only row starts need
+  // kAlign; partial vectors at the end of a row use scalar accesses.
+  const bool vec_ok = static_cast<uintptr_t>(row_size) * sizeof(T) % kAlign == 0 &&
       reinterpret_cast<uintptr_t>(src) % kAlign == 0 &&
       reinterpret_cast<uintptr_t>(tgt) % kAlign == 0;
   const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
@@ -1257,13 +1255,37 @@ __device__ __forceinline__ T scan_tile(T (&x)[Traits<T>::kRows], const T* tile, 
   return running;
 }
 
+// Column totals of one LDS tile, grouped as in scan_tile: each thread folds its kRows rows, then
+// the segments of a column are combined in order, neighbours first. Contains a barrier; callers
+// place another barrier between calls so that `tot` is free again.
+template <typename T, class BinaryFunction>
+__device__ __forceinline__ T reduce_tile(const T* tile, T* tot, const Layout& l, BinaryFunction binary_op) {
+  constexpr int R = Traits<T>::kRows;
+  T s = tile[l.seg * R * l.tile_w + l.col];
+#pragma unroll
+  for (int r = 1; r < R; ++r) {
+    s = binary_op(s, tile[(l.seg * R + r) * l.tile_w + l.col]);
+  }
+  for (uint32_t d = l.lane_stride; d < static_cast<uint32_t>(kWarp); d <<= 1) {
+    s = binary_op(s, inner_scan::shfl_down(s, d, kWarp));
+  }
+  if (l.lane < l.lane_stride) {
+    tot[l.q * l.tile_w + l.col] = s;
+  }
+  __syncthreads();
+  T total = tot[l.col];
+  for (uint32_t i = 1; i < l.nq; ++i) {
+    total = binary_op(total, tot[i * l.tile_w + l.col]);
+  }
+  return total;
+}
+
 // Column totals of every chunk except the last one of each (orow, strip), stored chunk-fastest:
-// partials[orow][irow][chunk]. Requires a commutative binary_op.
+// partials[orow][irow][chunk].
 template <typename T, class BinaryFunction>
 C10_LAUNCH_BOUNDS_1(kBlock)
 __global__ void reduce_chunks(T* __restrict__ partials, const T* __restrict__ src, const Problem p, T init,
                               BinaryFunction binary_op) {
-  constexpr int R = Traits<T>::kRows;
   constexpr int E = Traits<T>::kTileElems;
   extern __shared__ __align__(16) char outer_scan_smem[];
   T* bufs = reinterpret_cast<T*>(outer_scan_smem);
@@ -1290,21 +1312,10 @@ __global__ void reduce_chunks(T* __restrict__ partials, const T* __restrict__ sr
       if (issuer && t + 3 < w.num_tiles) {
         load_tile(bufs + ((t + 3) % kStages) * E, src, tile_at(w, t + 3, p), p);
       }
-      const T* tile = bufs + (t % kStages) * E;
-#pragma unroll
-      for (int r = 0; r < R; ++r) {
-        acc = binary_op(acc, tile[(l.seg * R + r) * l.tile_w + l.col]);
-      }
+      acc = binary_op(acc, reduce_tile(bufs + (t % kStages) * E, tot, l, binary_op));
     }
-    __syncthreads();
-    tot[threadIdx.x] = acc;
-    __syncthreads();
     if (l.seg == 0 && l.col < w.cols) {
-      T total = tot[l.col];
-      for (uint32_t k = 1; k < l.segs; ++k) {
-        total = binary_op(total, tot[k * l.tile_w + l.col]);
-      }
-      partials[(w.orow * p.num_irows + w.col0 + l.col) * chunks + w.chunk] = total;
+      partials[(w.orow * p.num_irows + w.col0 + l.col) * chunks + w.chunk] = acc;
     }
     __syncthreads();
   }
@@ -1411,7 +1422,14 @@ __global__ void scan_chunks(T* tgt, const T* src, const T* __restrict__ partials
 // gfx1250 moves tiles with the Tensor Data Mover; other ROCm targets use ordinary loads and
 // stores (copy_in / copy_out).
 inline bool has_tdm() {
-  return at::detail::getCUDAHooks().isGPUArch({"gfx1250", "gfx1250-strict"});
+  static const std::vector<bool> per_device = [] {
+    std::vector<bool> v(c10::cuda::device_count());
+    for (c10::DeviceIndex d = 0; d < static_cast<c10::DeviceIndex>(v.size()); ++d) {
+      v[d] = at::detail::getCUDAHooks().isGPUArch({"gfx1250", "gfx1250-strict"}, d);
+    }
+    return v;
+  }();
+  return per_device[c10::cuda::current_device()];
 }
 
 template <typename T>
@@ -1576,8 +1594,8 @@ void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
 #endif
 }
 
-// binary_op must be associative, and commutative too: the ROCm kernels combine pieces of a line
-// out of order (see inner_scan).
+// binary_op must be associative. On CUDA it must also be commutative: the stock last-dim kernel
+// passes operands as (later, earlier).
 template<typename scalar_t, typename BinaryFunction>
 void scan_dim(const TensorBase& self, const TensorBase& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
