@@ -278,6 +278,18 @@ def _record_packed_shape(t):
     return t
 
 
+# Defined once: redefining an op per test lets a stale Library's finalizer
+# drop it from torch.library._defs, depending on when gc runs.
+@torch.library.custom_op("test::effectful_marked_input", mutates_args=())
+def _effectful_marked_input(x: torch.Tensor) -> None:
+    pass
+
+
+@_effectful_marked_input.register_fake
+def _(x):
+    pass
+
+
 # `type(c) is`, not isinstance: immutable_list / immutable_dict subclass
 # list / dict, so isinstance cannot tell them apart.
 @torch.fx.wrap
@@ -4912,6 +4924,90 @@ def forward(self, tangents_1):
 
         self.assertNotIn((3,), _packed_shapes)
         self.assertIn((4, 3), _packed_shapes)
+
+    @parametrize("with_effect", [False, True])
+    def test_saved_tensors_hooks_marked_input(self, with_effect):
+        # In the default "donated" mode the hooks see no inputs, unless the
+        # input is marked `_saved_tensors_hooks_input`. The subclass input and
+        # the effect token shift the marked input's placeholder; compiling the
+        # unmarked case first checks that the mark is part of the cache key.
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        def fn(w, x, y):
+            if with_effect:
+                _effectful_marked_input(y)
+            return (w * 2).sum() + x.sin().sum() + y.cos().sum()
+
+        def pack(x):
+            return _record_packed_shape(x)
+
+        def unpack(x):
+            return x
+
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack, unpack, "pack_hash", "unpack_hash"
+        )
+
+        def run(mark):
+            w = TwoTensor(torch.randn(3), torch.randn(3)).requires_grad_()
+            x = torch.randn(4, 3, requires_grad=True)
+            y = torch.randn(5, 3, requires_grad=True)
+            if mark:
+                x._saved_tensors_hooks_input = True
+            torch._dynamo.reset()
+            _packed_shapes.clear()
+            with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
+                torch.compile(fn, backend="aot_eager", fullgraph=True)(
+                    w, x, y
+                ).backward()
+            self.assertEqual(x.grad, x.detach().cos())
+            self.assertEqual(y.grad, -y.detach().sin())
+            return list(_packed_shapes)
+
+        handle = _register_effectful_op(_effectful_marked_input, EffectType.ORDERED)
+        try:
+            self.assertNotIn((4, 3), run(mark=False))
+            self.assertIn((4, 3), run(mark=True))
+        finally:
+            handle.destroy()
+            torch._dynamo.reset()
+
+    @parametrize("backend", ["aot_eager", "aot_eager_decomp_partition"])
+    @parametrize("op", ["mm", "linear_3d", "reshape_mm"])
+    def test_saved_tensors_hooks_marked_input_saved_as_view(self, op, backend):
+        # Backward of mm and linear saves a view of the input (its transpose or
+        # a 2D reshape); the hooks are handed the marked input itself.
+        fns = {
+            "mm": lambda x, w: (x @ w).sum(),
+            "linear_3d": lambda x, w: F.linear(x, w).sum(),
+            "reshape_mm": lambda x, w: (x.reshape(4, 3) @ w).sum(),
+        }
+        shapes = {"mm": (4, 3), "linear_3d": (2, 4, 3), "reshape_mm": (2, 2, 3)}
+        w_shape = (2, 3) if op == "linear_3d" else (3, 2)
+
+        def pack(x):
+            return _record_packed_shape(x)
+
+        def unpack(x):
+            return x
+
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack, unpack, "pack_hash", "unpack_hash"
+        )
+        x = torch.randn(shapes[op], requires_grad=True)
+        w = torch.randn(w_shape, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_()
+        w_ref = w.detach().clone().requires_grad_()
+        fns[op](x_ref, w_ref).backward()
+        x._saved_tensors_hooks_input = True
+        torch._dynamo.reset()
+        _packed_shapes.clear()
+        with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
+            torch.compile(fns[op], backend=backend, fullgraph=True)(x, w).backward()
+        self.assertEqual(_packed_shapes, [shapes[op]])
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(w.grad, w_ref.grad)
 
     @skipIfCppFakeTensor("no nested tensor support")
     def test_mark_activations_dynamic_with_nested(self):

@@ -52,6 +52,7 @@ from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import IntLikeType, py_sym_types
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.checkpoint import CheckpointPolicy
 from torchgen.utils import dataclass_repr
 
 from .. import config
@@ -62,7 +63,7 @@ from .autograd_cache import (
     should_use_remote_autograd_cache,
 )
 from .codegen import aggregate_runtime_wrapper_sources
-from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
+from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTInput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -1500,6 +1501,24 @@ def maybe_inline_graph_saved_tensors_hooks(
         fw_g_inputs = fw_g.find_nodes(op="placeholder")
         exclude_set = {fw_g_inputs[i].name for i in static_input_indices}
 
+    # Marked inputs saved for backward reach the hooks in every mode, which
+    # find them through node.meta["saved_tensors_hooks_input"].
+    marked = set(aot_config.saved_tensors_hooks_input_indices or ())
+    saved = {
+        n
+        # pyrefly: ignore [not-iterable]
+        for n in fw_outs_saved_for_bw
+        if isinstance(n, torch.fx.Node)
+    }
+    for node in fw_g.find_nodes(op="placeholder"):
+        desc = node.meta.get("desc")
+        if isinstance(desc, PlainAOTInput) and desc.idx in marked and node in saved:
+            node.meta["saved_tensors_hooks_input"] = True
+            if allow_set is not None:
+                allow_set.add(node.name)
+            if exclude_set is not None:
+                exclude_set.discard(node.name)
+
     if (allow_set is not None) and (not allow_set):
         # This means we have empty whitelist,
         # No donated (intermediate) saved.
@@ -2002,6 +2021,33 @@ def _partition_joint_graph_into_fw_bw(
             and info.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ):
             node.meta["aot_runtime_epilogue_input_mutation"] = True
+
+    # Backward of mm and linear saves a view of its input (a transpose or a
+    # reshape). Recompute views of marked inputs in backward, so that the
+    # marked input itself is saved and reaches the inlined hooks.
+    marked = set(aot_config.saved_tensors_hooks_input_indices or ())
+    hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks()
+    inlineable = torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
+    if (
+        marked
+        and inlineable(hooks)
+        and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+    ):
+        bases = {
+            node
+            for node in primals
+            if isinstance(node.meta.get("desc"), PlainAOTInput)
+            and node.meta["desc"].idx in marked
+        }
+        for node in fx_g.graph.nodes:
+            if (
+                node.op == "call_function"
+                and isinstance(node.target, torch._ops.OpOverload)
+                and node.target.is_view
+                and node.args[0] in bases
+            ):
+                node.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
+                bases.add(node)
 
     # fx_g's primals are the unwrapped inputs, whose static positions are in
     # inner_meta.
