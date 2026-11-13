@@ -1335,6 +1335,9 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
     def test_init_1d_uneven_shard_largest_dim(self):
         torch.manual_seed(42)
         model = nn.Sequential(nn.Linear(16, 17), nn.Linear(17, 8))
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model)
 
         def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = -1
@@ -1353,10 +1356,39 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
                 )
             return Shard(largest_dim)
 
-        with self.assertRaisesRegex(
-            NotImplementedError, "FSDP does not support uneven sharding on dim 1"
-        ):
-            fully_shard(model, shard_placement_fn=shard_placement_fn)
+        fully_shard(model, shard_placement_fn=shard_placement_fn)
+        self.assertEqual(model[1].weight.placements, (Shard(1),))
+        # The (8, 17) weight's columns split 3, 3, 3, 3, 3, 2, 0, 0 over 8 ranks
+        num_columns = (3, 3, 3, 3, 3, 2, 0, 0)[self.rank]
+        self.assertEqual(model[1].weight.to_local().shape, (8, num_columns))
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertTrue(param.to_local().is_contiguous())
+            self.assertEqual(param.full_tensor(), ref_param)
+
+    @skip_if_lt_x_gpu(1)
+    def test_init_2d_uneven_shard_same_dim(self):
+        # TP shards dim 1 of a stacked (2, F, D) weight evenly, leaving 13 local
+        # rows that FSDP splits 4, 4, 4, 1 over its 4 ranks
+        dp_size, tp_size = self.world_size // 2, 2
+        global_mesh = init_device_mesh(
+            device_type.type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
+        torch.manual_seed(42)
+        weight = torch.randn(2, 26, 4, device=device_type.type)
+        dist.broadcast(weight, src=0)
+        model = nn.Module()
+        model.weight = nn.Parameter(
+            distribute_tensor(weight, global_mesh["tp"], [Shard(1)])
+        )
+        fully_shard(
+            model, mesh=global_mesh["dp"], shard_placement_fn=lambda param: Shard(1)
+        )
+        self.assertEqual(
+            model.weight.placements, (_StridedShard(1, split_factor=tp_size), Shard(1))
+        )
+        num_rows = (4, 4, 4, 1)[global_mesh["dp"].get_local_rank()]
+        self.assertEqual(model.weight.to_local().shape, (2, num_rows, 4))
+        self.assertEqual(model.weight.full_tensor(), weight)
 
     def test_invalid_shard_dim(self):
         model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 8))
