@@ -43,7 +43,7 @@ from torch._inductor.fx_passes.control_dependencies import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import is_builtin
-from torch._logging import LazyString, trace_structured
+from torch._logging import LazyString, trace_structured, warning_once
 from torch._logging._internal import trace_log
 from torch._subclasses.fake_tensor import extract_tensor_metadata, is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -76,9 +76,13 @@ from ._activation_checkpointing.knapsack import (
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
 from ._activation_checkpointing.min_cut import minimum_cut
 from ._aot_autograd.descriptors import (
+    AOTInput,
     AOTOutput,
+    InputMutationAOTOutput,
     SavedForBackwardsAOTOutput,
     SavedForBackwardsNoVcCheckAOTOutput,
+    SubclassGetAttrAOTInput,
+    SubclassGetAttrAOTOutput,
 )
 from ._aot_autograd.functional_utils import _is_functional_graph
 from ._aot_autograd.graph_compile import is_opaque_node
@@ -1687,6 +1691,8 @@ def default_partition(
 
     force_save_effectful_ops(joint_module)
     force_save_bw_mutation_src(joint_module)
+    if not config.unsafe_allow_recompute_of_mutated_input_reads:
+        force_save_fw_mutated_input_readers(joint_module)
 
     if static_lifetime_input_indices is None:
         static_lifetime_input_indices = []
@@ -1702,12 +1708,6 @@ def default_partition(
 
     def is_tensor(node: fx.Node) -> bool:
         return "tensor_meta" in node.meta or is_fake_tensor(node.meta.get("val"))
-
-    def is_multi_output(node: fx.Node) -> bool:
-        return (
-            all(user.target == operator.getitem for user in node.users)
-            and len(node.users) > 0
-        )
 
     def is_impure(node: fx.Node) -> bool:
         # wait tensor is an "impure" op according to DCE's definition of impure
@@ -1756,7 +1756,7 @@ def default_partition(
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
             continue
-        if is_multi_output(node):
+        if _is_tuple_producer(node):
             # Must be ordered before MUST_SAVE tags to avoid saving tuples marked MUST_SAVE.
             continue
         if node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE:
@@ -2172,9 +2172,9 @@ def functionalize_rng_ops(
         return torch.device("cpu")
 
     def get_sample_rng_state(device: torch.device | None) -> torch.Tensor:
-        from torch._guards import detect_fake_mode
+        from torch._guards import detect_fake_mode, require_python_fake_mode
 
-        fake_mode = detect_fake_mode()
+        fake_mode = require_python_fake_mode(detect_fake_mode())
         if fake_mode is None:
             raise AssertionError("fake_mode must not be None")
         with fake_mode:
@@ -2339,6 +2339,26 @@ def functionalize_rng_ops(
     return fw_module, bw_module
 
 
+def _is_tuple_producer(node: fx.Node) -> bool:
+    return bool(node.users) and next(iter(node.users)).target is operator.getitem
+
+
+def _tensor_results(node: fx.Node) -> list[fx.Node]:
+    # A tuple-producing op cannot be saved itself, so return it with every getitem
+    # below it: min-cut never bans a getitem, and nested outputs such as Tensor[]
+    # add levels that checkpoint tags individually.
+    if not _is_tuple_producer(node):
+        return [node]
+    getitems = [user for user in node.users if user.target is operator.getitem]
+    return [node, *(r for getitem in getitems for r in _tensor_results(getitem))]
+
+
+def _leaf_results(node: fx.Node) -> list[fx.Node]:
+    # The results of node that can be saved: the getitem leaves that hold tensors.
+    leaves = [n for n in _tensor_results(node) if not _is_tuple_producer(n)]
+    return [n for n in leaves if not isinstance(n.meta.get("val"), (tuple, list))]
+
+
 def force_save_collectives(joint_module: fx.GraphModule) -> None:
     """
     By default, the partitioner is not allowed to recompute collectives
@@ -2346,22 +2366,14 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
     See Note [Recomputing collectives in the partitioner]
     """
 
-    def mark_leaf_tensor_outputs(node: fx.Node) -> None:
-        getitem_users = [user for user in node.users if user.target is operator.getitem]
-        if getitem_users:
-            for user in getitem_users:
-                mark_leaf_tensor_outputs(user)
-            return
-        if not isinstance(node.meta.get("val"), (tuple, list)):
-            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
-
     for node in joint_module.graph.nodes:
         if (
             isinstance(node.target, torch._ops.OpOverload)
             and node.target.namespace == "_c10d_functional"
             and not must_recompute(node)
         ):
-            mark_leaf_tensor_outputs(node)
+            for leaf in _leaf_results(node):
+                leaf.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
 
 def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
@@ -2382,13 +2394,6 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
     policy instead of emitting an invalid saved-token calling convention.
     """
 
-    def mark_getitem_outputs(node: fx.Node) -> None:
-        for user in node.users:
-            if user.target is operator.getitem:
-                mark_getitem_outputs(user)
-                if not isinstance(user.meta.get("val"), (tuple, list)):
-                    user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
-
     for node in joint_module.graph.nodes:
         if not is_with_effects(node) or _has_tag_is_backward(node):
             continue
@@ -2398,7 +2403,8 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
                 "operations because forward effects cannot join the backward "
                 "effect-token chain."
             )
-        mark_getitem_outputs(node)
+        for leaf in _leaf_results(node):
+            leaf.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
 
 def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
@@ -2422,6 +2428,179 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
             # We do not want to iterate through all the joint graph,
             # so break at the first non-output, non-copy_ node.
             break
+
+
+# Ops whose only tensor argument is read for its metadata, not its values.
+_METADATA_ONLY_OPS = OrderedSet(
+    [
+        aten.empty_like.default,
+        aten.zeros_like.default,
+        aten.ones_like.default,
+        aten.full_like.default,
+        aten.new_empty.default,
+        aten.new_empty_strided.default,
+        aten.new_zeros.default,
+        aten.new_ones.default,
+        aten.new_full.default,
+        aten.sym_size.int,
+        aten.sym_stride.int,
+        aten.sym_numel.default,
+        aten.sym_storage_offset.default,
+    ]
+)
+
+
+def _mutated_input_desc(desc: AOTOutput | None) -> AOTInput | None:
+    match desc:
+        case InputMutationAOTOutput(mutated_input=inp):
+            return inp
+        case SubclassGetAttrAOTOutput(base=base, attr=attr):
+            inp = _mutated_input_desc(base)
+            return None if inp is None else SubclassGetAttrAOTInput(inp, attr)
+    return None
+
+
+def force_save_fw_mutated_input_readers(joint_module: fx.GraphModule) -> None:
+    # Recomputing a read of an input the forward mutates is not equivalent to
+    # saving that read. Example, where x requires grad and buf does not:
+    #
+    #   def f(x, buf):
+    #       y = (x * (buf.view(-1) * 2)).sum()
+    #       buf.add_(1)
+    #       return y
+    #
+    # Simplified joint graph after functionalization:
+    #
+    #   x, buf, tangent = placeholders
+    #   view = aten.view(buf, [-1])
+    #   scale = aten.mul(view, 2)
+    #   loss = aten.sum(aten.mul(x, scale))
+    #   updated_buf = aten.add(buf, 1)
+    #   grad_x = aten.mul(aten.expand(tangent, x.shape), scale)
+    #   aten.copy_(buf, updated_buf)  # forward mutation kept in the graph
+    #   return loss, grad_x
+    #
+    # An incorrect partition saves buf and recomputes scale:
+    #
+    #   forward(x, buf):
+    #       scale = aten.mul(aten.view(buf, [-1]), 2)
+    #       loss = aten.sum(aten.mul(x, scale))
+    #       aten.copy_(buf, aten.add(buf, 1))
+    #       return loss, buf
+    #
+    #   backward(saved_buf, tangent):
+    #       scale = aten.mul(aten.view(saved_buf, [-1]), 2)
+    #       return aten.mul(aten.expand(tangent, scale.shape), scale)
+    #
+    # saved_buf aliases the updated buffer, so recomputation reads buf_old + 1.
+    # With tangent = 1, this computes 2 * (buf_old + 1) instead of 2 * buf_old
+    # (or raises a saved-tensor version-counter error).
+    #
+    # Starting from buf, this pass follows view because it shares buf's storage.
+    # Saving view would have the same aliasing problem. scale has independent
+    # storage, so we mark it MUST_SAVE and stop walking that path.
+    #
+    # A correct partition saves scale:
+    #
+    #   forward(x, buf):
+    #       scale = aten.mul(aten.view(buf, [-1]), 2)
+    #       loss = aten.sum(aten.mul(x, scale))
+    #       aten.copy_(buf, aten.add(buf, 1))
+    #       return loss, scale
+    #
+    #   backward(saved_scale, tangent):
+    #       return aten.mul(aten.expand(tangent, saved_scale.shape), saved_scale)
+    #
+    # saved_scale still contains 2 * buf_old after the mutation. Backward no
+    # longer needs buf or any view of it. At budget zero, scale is explicitly
+    # included in the saved-value candidates to preserve this behavior.
+    #
+    # updated_buf is also a materializing read and gets marked MUST_SAVE, but
+    # backward does not need it, so it does not become a saved activation.
+    #
+    # If the mutation is replayed outside the graph, forward returns updated_buf
+    # for the runtime wrapper to copy into buf. The same protection is needed:
+    # the copy still happens before backward.
+    #
+    # Mutations applied by the runtime epilogue (including metadata-only ones)
+    # are forward outputs described by InputMutationAOTOutput; mutations kept in
+    # the graph are trailing write-backs (copy_, set_, resize_storage_bytes_) tagged
+    # must_be_in_forward, with the mutated input as args[0].
+    placeholders = joint_module.graph.find_nodes(op="placeholder")
+    by_desc = {p.meta["desc"]: p for p in placeholders if "desc" in p.meta}
+    output = joint_module.graph.output_node()
+    runtime = [
+        p
+        for d in output.meta.get("desc", [])
+        if (p := by_desc.get(_mutated_input_desc(d))) is not None
+    ]
+    in_graph = [
+        inp
+        for n in joint_module.graph.nodes
+        if _has_tag_must_be_in_forward(n) and isinstance(inp := n.args[0], fx.Node)
+    ]
+    mutated_inputs = OrderedSet((*runtime, *in_graph))
+    if not mutated_inputs:
+        return
+
+    # Saving a view of a mutated input does not snapshot it. Walk through aliasing
+    # ops and pin the first forward reads of its data. Aliasing is decided by
+    # storage, not op schema, since the getitems of split/chunk/unbind have none.
+    from torch._inductor.fx_utils import get_node_storage
+
+    tainted_storages = OrderedSet(
+        st for st in map(get_node_storage, mutated_inputs) if st is not None
+    )
+
+    def _aliases_mutated_input(node: fx.Node) -> bool:
+        # Via the tensor results, so a tuple-producing view op like split is seen
+        # as aliasing even though its own meta holds a list rather than a tensor.
+        return any(
+            st in tainted_storages
+            for st in map(get_node_storage, _tensor_results(node))
+        )
+
+    tainted = OrderedSet(mutated_inputs)
+    stack = list(mutated_inputs)
+    honored: list[fx.Node] = []
+    while stack:
+        for user in stack.pop().users:
+            if (
+                user.op != "call_function"
+                or user.target in _METADATA_ONLY_OPS
+                or _has_tag_is_backward(user)
+                or _has_tag_must_be_in_backward(user)
+                or _has_tag_must_be_in_forward(user)
+            ):
+                continue
+            if _aliases_mutated_input(user):
+                if user not in tainted:
+                    tainted.add(user)
+                    stack.append(user)
+            else:
+                results = _tensor_results(user)
+                if any(
+                    n.meta.get("recompute") == CheckpointPolicy.MUST_RECOMPUTE
+                    for n in results
+                ):
+                    honored.append(user)
+                    continue
+                for pinned in results:
+                    pinned.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+                    pinned.meta["reads_fw_mutated_input"] = True
+    if honored:
+        warning_once(
+            log,
+            "Honoring MUST_RECOMPUTE on reads of inputs the forward mutates; the "
+            "recompute sees the post-mutation value, so gradients may be wrong. "
+            "To use the pre-mutation value, do not mark these ops MUST_RECOMPUTE, "
+            "or clone the input before mutating it. Set "
+            "TORCH_LOGS=+torch._functorch.partitioners to see the nodes.",
+        )
+        log.debug(
+            "MUST_RECOMPUTE reads of forward-mutated inputs: %s",
+            [n.name for n in honored],
+        )
 
 
 def is_getitem_of_multi_output(node: fx.Node) -> bool:
@@ -2778,8 +2957,10 @@ def solve_min_cut(
         # If a node can't be recomputed (too expensive or involves randomness),
         # we prevent it from being recomputed by adding an inf edge to the source
         # We only need to ban nodes in the fw pass, as those are the only ones that would be recomputed.
+        # Reads of forward-mutated inputs count even if only the backward uses them.
         ban_reason = should_ban_recomputation(node)
-        if node_info.is_required_fw(node) and ban_reason:
+        fw = node_info.is_required_fw(node) or node.meta.get("reads_fw_mutated_input")
+        if fw and ban_reason:
             ban_recomputation_if_allowed(node, ban_reason)
 
         # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
@@ -3533,7 +3714,16 @@ def choose_saved_values_set(
         node.meta.get("aot_runtime_epilogue_input_mutation", False)
         for node in node_info.inputs
     ):
-        return node_info.inputs
+        # Recompute everything except reads of inputs the forward mutates, which a
+        # recompute would see post-mutation. A read counts even if only the backward
+        # uses it, like BatchNorm's save_mean.
+        return node_info.inputs + [
+            n
+            for n in joint_graph.nodes
+            if n.meta.get("reads_fw_mutated_input")
+            and n not in node_info.tangents_closure
+            and not _is_tuple_producer(n)
+        ]
 
     runtime_optimized_saved_values, _ = solve_min_cut(
         joint_graph,
@@ -4251,6 +4441,8 @@ def min_cut_rematerialization_partition(
 
     force_save_effectful_ops(joint_module)
     force_save_bw_mutation_src(joint_module)
+    if not config.unsafe_allow_recompute_of_mutated_input_reads:
+        force_save_fw_mutated_input_readers(joint_module)
 
     if static_lifetime_input_indices is None:
         static_lifetime_input_indices = []

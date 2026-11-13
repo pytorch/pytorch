@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: profiler"]
-name: Limited CI for Cuspy/CUPTI profiler tests on B200
+name: CI for Cuspy tests on B200
 
 # The Cuspy tests need a CUDA >= 13.5 build and libcupti >= 13.5 (TEST_CUPTI_V13_5); the
 # HES and sm_100 kernel-launch tests also need Blackwell. Runs on PRs that touch Cuspy.

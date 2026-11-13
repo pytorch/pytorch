@@ -47,6 +47,10 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  pip_install nccl-extensions==0.1.0
+fi
+
 # Remove onnxruntime if present to avoid interference with non-ONNX tests
 if [[ "$TEST_CONFIG" != "onnx" ]]; then
   pip uninstall -y onnxruntime 2>/dev/null || true
@@ -264,6 +268,17 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # devices on expensive gpu machines. The nogpu_NO_AVX2 job brings back
   # inductor's RUN_CPU classes with PYTORCH_TEST_INDUCTOR_RUN_CPU (below).
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
+  # GENERIC test classes don't use an accelerator, and CPU jobs run them. Keep
+  # them where no CPU job runs the same mode (the nogpu configs, a CUDA build on
+  # a machine without a GPU; slow gradcheck; debug builds), and when specific
+  # tests were requested (TESTS_TO_INCLUDE) or disabled tests are being rerun.
+  # A value set beforehand replaces the default (empty keeps GENERIC classes);
+  # CI workflows don't forward it, so that's for local or direct test.sh runs.
+  if [[ "$TEST_CONFIG" != *nogpu* && "$BUILD_ENVIRONMENT" != *slow-gradcheck* &&
+        "$BUILD_ENVIRONMENT" != *-debug* && -z "$TESTS_TO_INCLUDE" &&
+        "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" != "1" ]]; then
+    export PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION="${PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION-GENERIC}"
+  fi
 elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
@@ -437,6 +452,34 @@ test_tsan() {
   assert_git_not_dirty
 }
 
+test_editable() {
+  # Every other job tests a wheel install. This one replaces it with a redirect-mode
+  # editable install (Python from the checkout, CMake artifacts from the install tree)
+  # and runs the suites that resolve installed files, so a path derived from
+  # __file__ instead of the import system fails here instead of on a developer's box.
+  # WERROR=1 matches build.sh, so the rebuild can reuse the sccache the build job just
+  # filled; the stats printed after it show the hit rate. The test job checks out
+  # without submodules; the build needs them from the license scan onwards.
+  python -m pip uninstall -y torch
+  git submodule sync && git submodule update --init --recursive
+  time WERROR=1 python -m pip install --no-build-isolation --no-deps -v -e .
+  sccache --show-stats || true
+  # From test/, where the checkout is not on sys.path: the Python sources must still come
+  # from the checkout and the extension module from the install tree.
+  (cd test && python -c 'import os, sys, torch; real = os.path.realpath; print(torch.__file__, torch._C.__file__); sys.exit(0 if real(torch.__file__) == real("../torch/__init__.py") and "/build/install/" in real(torch._C.__file__) else "torch is not installed editable")')
+  # Suites that resolve installed files (helpers, cpp_extension, package data) plus the
+  # public-API import sweep. test_fx and test_license are here for #195891: the torchbind
+  # library is still found only through the build/lib fallback and the dist-info license
+  # test skips itself, so both start testing the layout once that issue is fixed.
+  # The list is the point of the job, so TD must not trim it.
+  export NO_TD=1
+  time python test/run_test.py --include \
+    test_utils test_license test_testing test_public_bindings test_cpp_extensions_jit \
+    test_cpp_extensions_aot_ninja test_fx test_serialization --verbose
+  unset NO_TD
+  assert_git_not_dirty
+}
+
 # Call from a subshell so the compat path and cleanup trap stay scoped to the caller.
 setup_cuda_compat_13_5() {
   CUDA_COMPAT_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
@@ -478,6 +521,8 @@ setup_cuda_compat_13_5() {
 
 test_cuspy() {
   (
+    # No CPU lane exercises this CUDA/CUPTI 13.5-only shard.
+    export PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION=""
     setup_cuda_compat_13_5
     # The Cuspy tests skip below CUDA 13.5 + libcupti 13.5 (the CUDA 13.5 image preinstalls
     # libcupti 13.5); fail instead of passing vacuously.
@@ -621,9 +666,9 @@ test_python_smoke_b200() {
     --include \
       test_matmul_cuda \
       test_scaled_matmul_cuda \
+      test_quantize_tensor \
       inductor/test_fp8 \
       nn/attention/test_fa4 \
-      nn/attention/test_open_registry \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
@@ -652,13 +697,13 @@ test_python_smoke_b200() {
     --upload-artifacts-while-running \
     --pytest-xdist-workers 32
 
-  # The CuTeDSL linear_cross_entropy OpInfo variants exist only where the
-  # CuTeDSL runtime does, so they are collected nowhere else.
-  time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  # The variants' expectations live outside test_ops too: two xfails in
-  # test_ops_gradients.py and nine TestOperatorsDevice entries in the shared skip
-  # tuple. An expectation that never runs rots into an unexpected success
-  # without anyone noticing, so collect those suites here as well -- a handful
+  # The CuTeDSL linear_cross_entropy and quantize_tensor OpInfo variants exist
+  # only where the CuTeDSL runtime does, so they are collected nowhere else.
+  time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k "linear_cross_entropy or quantize_tensor" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # The linear_cross_entropy variants' expectations live outside test_ops too:
+  # two xfails in test_ops_gradients.py and nine TestOperatorsDevice entries in the
+  # shared skip tuple. An expectation that never runs rots into an unexpected
+  # success without anyone noticing, so collect those suites here as well -- a handful
   # of tests each once restricted to this op.
   time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops_gradients -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # functorch selects its variants with -k instead: restricting op_db trips
@@ -682,6 +727,8 @@ test_python_smoke_b200() {
 
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
+  # Required by the device info tests in test_xpu, pinned to the XPU wheel's dep
+  pip_install "pyzes==0.1.2"
   time python test/run_test.py --include test_transformers test_xpu $PYTHON_TEST_EXTRA_OPTION
   # Temporary disable sycl-tla backend test for XPU since it's not stable yet. We will re-enable it once the stability is improved.
   # time test_xpu_sycl_tla_backend
@@ -1548,7 +1595,9 @@ test_dynamo_benchmark() {
 
   if [[ "$suite" == "torchbench" &&
         ( "${TEST_CONFIG}" == *perf_compare* ||
-          ( "${TEST_CONFIG}" != *perf* && " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --inductor "* ) ) ]]; then
+          ( "${TEST_CONFIG}" != *perf* &&
+            ( " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --inductor "* ||
+              " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --export-aot-inductor "* ) ) ) ]]; then
     local model
     for model in "${INDUCTOR_TORCHBENCH_MIGRATION_MODELS[@]}"; do
       extra_args+=(--exclude-exact "$model")
@@ -2637,7 +2686,7 @@ test_operator_microbenchmark() {
 
   # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
   # OP_BENCHMARK_TESTS env var can override the default operator list (set via _linux-test.yml matrix)
-  local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
+  local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm grouped_mm}"
   for op in $op_list; do
     $TASKSET python -m "pt.${op}_test" --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}_compile${suffix}.json" \
@@ -2697,6 +2746,8 @@ elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
   test_torchtitan
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
+elif [[ "$TEST_CONFIG" == 'editable' ]]; then
+  test_editable
 elif [[ "$TEST_CONFIG" == 'cuspy' ]]; then
   test_cuspy
 elif [[ "$TEST_CONFIG" == 'quantization' ]]; then

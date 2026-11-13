@@ -35,9 +35,9 @@ from torch.testing._internal.common_device_type import (
     skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
 )
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_CUBLASLT_MNK4, PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
+    SM53OrLater, SM80OrLater, SM90OrLater, PLATFORM_SUPPORTS_MXFP8_CAST, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
@@ -6545,6 +6545,8 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(mt((10, 2)), kwargs=dict(n_fft=10))
     yield SampleInput(mt((6, 3)), kwargs=dict(n_fft=6, onesided=False))
     yield SampleInput(mt((6, 4)), kwargs=dict(n_fft=10, onesided=True))
+    yield SampleInput(mt((13, 1)), kwargs=dict(n_fft=25, center=False))
+    yield SampleInput(mt((25, 1)), kwargs=dict(n_fft=25, center=False, onesided=False))
 
     for center in [False, True]:
         yield SampleInput(mt((10, 10, 6)), kwargs=dict(n_fft=10, center=center))
@@ -7499,6 +7501,37 @@ def sample_inputs_linear_cross_entropy_chunked(op_info, device, dtype, requires_
 
 def sample_inputs_linear_cross_entropy_chunked_none(op_info, device, dtype, requires_grad, **kw):
     yield from sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, chunked=True, chunked_none=True, **kw)
+
+
+def sample_inputs_cutedsl_quantize_tensor(op_info, device, dtype, requires_grad, **kwargs_unused):
+    from torch.nn import functional as F
+
+    # Dtype probes request gradients even for ops that do not support autograd.
+    input = make_tensor((160, 160), device=device, dtype=dtype, requires_grad=False)
+    recipe = {
+        "dim": (-2, -1),
+        "qdata_dtype": torch.float8_e4m3fn,
+        "scaling_algorithm": F.ScalingAlgorithm.MXFP_E8M0_RU,
+        "scaling_type": F.ScalingType.BlockWise1x32,
+        "swizzle_type": F.SwizzleType.NO_SWIZZLE,
+    }
+    yield SampleInput(input, kwargs=recipe)
+    yield SampleInput(input.t(), kwargs={**recipe, "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4})
+    yield SampleInput(input, kwargs={**recipe, "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4,
+                                     "scaling_type_use_square_block_size": True})
+
+
+def sample_inputs_cutedsl_quantize_tensor_dual(op_info, device, dtype, requires_grad, **kwargs_unused):
+    from torch.nn import functional as F
+
+    input = make_tensor((160, 192), device=device, dtype=dtype, requires_grad=False)
+    yield SampleInput(input, kwargs={
+        "dim": (-2, -1),
+        "qdata_dtype": torch.float8_e4m3fn,
+        "scaling_algorithm": F.ScalingAlgorithm.MXFP_E8M0_RU,
+        "scaling_type": F.ScalingType.BlockWise1x32,
+        "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4,
+    })
 
 
 def _cutedsl_linear_cross_entropy_eligible(sample):
@@ -9980,6 +10013,27 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
                 )
             )
 
+
+        if PLATFORM_SUPPORTS_CUBLASLT_MNK4:
+            for recipe, block_size in ((ScalingType.BlockWise1x32, 32), (ScalingType.BlockWise1x128, 128)):
+                scale1 = torch.ones(16 * math.ceil(M / 4) * math.ceil(K / (4 * block_size)),
+                                    device=device, dtype=torch.float8_e8m0fnu)
+                scale2 = torch.ones(16 * math.ceil(N / 4) * math.ceil(K / (4 * block_size)),
+                                    device=device, dtype=torch.float8_e8m0fnu)
+                samples.append(
+                    SampleInput(
+                        mat1,
+                        mat2,
+                        [scale1],
+                        [recipe],
+                        [SwizzleType.SWIZZLE_MN_K4],
+                        [scale2],
+                        [recipe],
+                        [SwizzleType.SWIZZLE_MN_K4],
+                        None,  # bias
+                        torch.bfloat16,  # out_dtype
+                    )
+                )
 
     yield from samples
 
@@ -14020,12 +14074,6 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           skips=(
-               # Exception: Tensor-likes are not close!
-               # torch-xpu-ops: #3296
-               DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive',
-                            device_type='xpu', dtypes=(torch.float16,)),
-            ),
            ),
     OpInfo('istft',
            dtypes=complex_types(),
@@ -17283,7 +17331,7 @@ op_db: list[OpInfo] = [
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[onlyOn(["cuda", "mps"]), skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
+        decorators=[onlyOn(("cuda", "mps")), skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
@@ -19344,8 +19392,7 @@ op_db: list[OpInfo] = [
                          DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-3)}), 'TestUnaryUfuncs'),
                          DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e1, rtol=1e-1),
                                                          torch.float32: tol(atol=1e-4, rtol=1e-2)}),
-                                      'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                      active_if=IS_WINDOWS),
+                                      'TestUnaryUfuncs', 'test_reference_numerics_normal'),
                      ),
                      skips=(
                          # Redundant tests
@@ -19356,7 +19403,7 @@ op_db: list[OpInfo] = [
                          DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                          DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large'),
                      ),
-                     sample_kwargs=lambda device, dtype, input: ({'n': n_}, {'n': n_}),
+                     sample_kwargs=lambda device, dtype, input, n=n_: ({'n': n}, {'n': n}),
                      # polygamma functions have multiple singularities at x having non-positive integer value
                      reference_numerics_filter=NumericsFilter(condition=lambda x: (x < 0.1) & ((x - x.round()).abs() < 1e-4),
                                                               safe_val=1))
@@ -22962,6 +23009,54 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
 )
 
 if "cutedsl" in dsl_ops_by_dsl:
+    dsl_ops_by_dsl["cutedsl"].append(
+        OpInfo(
+            "nn.functional.quantize_tensor",
+            variant_test_name="cutedsl",
+            aten_name="_quantize_tensor",
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            sample_inputs_func=sample_inputs_cutedsl_quantize_tensor,
+            supports_autograd=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            supports_out=False,
+            supports_cow_input_no_materialize_forward=False,
+            decorators=[
+                DecorateInfo(onlyCUDA),
+                DecorateInfo(skipIfNoCuteDSL),
+                DecorateInfo(skipCUDAIf(not PLATFORM_SUPPORTS_MXFP8_CAST, "requires MXFP8 cast support")),
+            ],
+            skips=(
+                DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
+                DecorateInfo(unittest.skip("export is deferred"), "TestExportOnFakeCuda"),
+            ),
+        )
+    )
+    dsl_ops_by_dsl["cutedsl"].append(
+        OpInfo(
+            "nn.functional.quantize_tensor_dual",
+            variant_test_name="cutedsl",
+            aten_name="_quantize_tensor_dual",
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            sample_inputs_func=sample_inputs_cutedsl_quantize_tensor_dual,
+            supports_autograd=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            supports_out=False,
+            supports_cow_input_no_materialize_forward=False,
+            decorators=[
+                DecorateInfo(onlyCUDA),
+                DecorateInfo(skipIfNoCuteDSL),
+                DecorateInfo(skipCUDAIf(not PLATFORM_SUPPORTS_MXFP8_CAST, "requires MXFP8 cast support")),
+            ],
+            skips=(
+                DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
+                DecorateInfo(unittest.skip("export is deferred"), "TestExportOnFakeCuda"),
+            ),
+        )
+    )
     dsl_ops_by_dsl["cutedsl"].append(
         OpInfo(
             "nn.functional.rms_norm",

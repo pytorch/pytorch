@@ -340,6 +340,10 @@ Tensor& add_out_sparse_compressed_cuda(
       return out;
     }
 
+    if (at::sparse_csr::has_noncontiguous_values(out)) {
+      return at::sparse_csr::run_on_contiguous_clone(out, [&](Tensor& r) { add_out_sparse_compressed_cuda(self, other, alpha, r); });
+    }
+
     // csrgeam2 must not read from storage that out is written to and
     // resized into, so operate on clones of any input aliasing out.
     const Tensor self_ = sparse_compressed_members_alias(self, out) ? self.clone() : self;
