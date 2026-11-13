@@ -239,6 +239,10 @@ class DtypePropagationOpsHandler:
         return torch.int64
 
     @staticmethod
+    def philox_rand(seed, offset, idx, dtype: torch.dtype) -> torch.dtype:
+        return torch.float64 if dtype == torch.float64 else torch.float32
+
+    @staticmethod
     def masked(
         mask: DTypeArg, body: Callable[[], DTypeArg], other: DTypeArg
     ) -> torch.dtype:
