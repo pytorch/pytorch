@@ -1197,15 +1197,16 @@ static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& ot
   auto info = at::zeros({1}, input.options().dtype(at::kInt));
   auto info_data = info.data_ptr<int>();
 
+  // The workspace size is fixed for all matrices in this batch. cuSOLVER
+  // operations use the current stream, so sequential calls can reuse it.
+  auto& allocator = *at::cuda::getCUDADeviceAllocator();
+  auto work_data = allocator.allocate(sizeof(scalar_t) * lwork);
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
   for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
     const scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     scalar_t* other_working_ptr = &other_data[i * other_matrix_stride];
     const scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
-    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-
-    // allocate workspace storage
-    auto& allocator = *at::cuda::getCUDADeviceAllocator();
-    auto work_data = allocator.allocate(sizeof(scalar_t)*lwork);
 
     at::cuda::solver::ormqr<scalar_t>(
       handle, side, trans, m, n, k,
@@ -1275,14 +1276,15 @@ static void apply_orgqr(Tensor& self, const Tensor& tau) {
   auto info = at::zeros({1}, self.options().dtype(at::kInt));
   auto info_data = info.data_ptr<int>();
 
+  // The workspace size is fixed for all matrices in this batch. cuSOLVER
+  // operations use the current stream, so sequential calls can reuse it.
+  auto& allocator = *at::cuda::getCUDADeviceAllocator();
+  auto work_data = allocator.allocate(sizeof(scalar_t) * lwork);
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
   for (auto i = decltype(batchsize){0}; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     const scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
-    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-
-    // allocate workspace storage
-    auto& allocator = *at::cuda::getCUDADeviceAllocator();
-    auto work_data = allocator.allocate(sizeof(scalar_t)*lwork);
 
     at::cuda::solver::orgqr<scalar_t>(
       handle, m, n, k,
