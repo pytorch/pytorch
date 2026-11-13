@@ -96,6 +96,28 @@ class FSDPState(_State):
     def _get_enclosing_state(self) -> "FSDPState | None":
         return None if self._enclosing_state is None else self._enclosing_state()
 
+    def _get_root_state(self) -> "FSDPState":
+        """
+        Returns the root of this state's tree: the root that initialized this
+        state, or before lazy init, the state that lazy init makes the root.
+        """
+        if self._is_root is not None:
+            return self._state_ctx.all_states[0]
+        # Multi-module states cannot be the root, so skip them
+        root_state = self
+        state = self._get_enclosing_state()
+        while state is not None:
+            if len(state._modules) == 1:
+                root_state = state
+            state = state._get_enclosing_state()
+        # A module detached after sharding keeps its link, so the outermost
+        # state is the root only if this state is still inside its module tree
+        if root_state is not self and set(self._modules).isdisjoint(
+            root_state._modules[0].modules()
+        ):
+            return self
+        return root_state
+
     @property
     def _fsdp_param_group(self) -> FSDPParamGroup | None:
         """
@@ -203,18 +225,7 @@ class FSDPState(_State):
         """
         if self._is_root is not None:
             return  # no-op: already initialized
-        # Multi-module states cannot be the root, so skip them
-        root_state = None
-        state = self._get_enclosing_state()
-        while state is not None:
-            if len(state._modules) == 1:
-                root_state = state
-            state = state._get_enclosing_state()
-        # A module detached after sharding keeps its link, so initialize the
-        # root only if this state is still inside the root's module tree
-        if root_state is not None and not set(self._modules).isdisjoint(
-            root_state._modules[0].modules()
-        ):
+        if (root_state := self._get_root_state()) is not self:
             root_state._lazy_init()
             if self._is_root is not None:
                 return
@@ -232,7 +243,7 @@ class FSDPState(_State):
             ):
                 raise RuntimeError(
                     "set_manual_backward_finalization must be called on the "
-                    f"root {self._state_name} module"
+                    f"root {self._state_name} module {type(root_module).__name__}"
                 )
         self._is_root = True
         visited_states: set[FSDPState] = set()
