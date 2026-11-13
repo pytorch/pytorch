@@ -158,6 +158,9 @@ def fully_shard(
     initializes it lazily when any FSDP module inside it first runs forward,
     so submodules may run forward before or without the root module, e.g. when
     an inference engine calls the embedding and the decoder layers itself.
+    Such submodules are non-root modules, so with the default
+    ``reshard_after_forward`` they reshard after each forward; pass
+    ``reshard_after_forward=False`` to keep them unsharded.
 
     When called with a list (``fully_shard([a, b, ...])``), the model's
     forward may run only a subset of the grouped modules, with the rest
