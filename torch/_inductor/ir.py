@@ -2343,13 +2343,16 @@ class Reduction(Loops):
         the outer numel closest to split, preferring an even division (an
         uneven one needs a mask). Like the flat split, a full reduction over
         an input whose dense dim is not the last one reduces the dense dim
-        innermost. Returns None when the option is off or a range is symbolic.
+        innermost. Returns None when the option is off, a range is symbolic
+        or there is one reduction dim, whose flat split is affine as it is.
         """
         if not config.avoid_modular_indexing:
             return None
         if not all(_is_static(r) for r in [*reduction_ranges, split]):
             return None
         sizes = [int(r) for r in reduction_ranges]
+        if sum(s != 1 for s in sizes) <= 1:
+            return None
         perm = None
         dense = cls._dense_reduction_dim(sizes, input_node)
         if dense is not None:
@@ -2530,11 +2533,12 @@ class Reduction(Loops):
                 aligned.split,
                 reduction_hint,
                 strict_reduction,
-                # The chunks of the boundary dim can leave the first stage
-                # above the size the split count was chosen for, and above
-                # the size that is split; splitting it again only adds a
-                # kernel.
-                split_first_stage=False,
+                # The split count of an inner reduction makes each partial
+                # one kernel's worth, but the chunks of the boundary dim can
+                # leave the first stage above that size, and splitting it
+                # again would only add a kernel. An outer reduction over few
+                # outputs is split recursively by design.
+                split_first_stage=reduction_hint != ReductionHint.INNER,
             )
 
         # TODO(jansel): realize the reduction so we can do dynamic indexing
@@ -3233,8 +3237,8 @@ class WelfordReduction(MultiOutputReduction):
             new_reduction_ranges,
             reduction_type,
             reduction_hint,
-            # like Reduction.create_multilayer: an aligned first stage is final
-            allow_split=aligned is None,
+            # like Reduction.create_multilayer
+            allow_split=aligned is None or reduction_hint != ReductionHint.INNER,
         )
         for i in intermediates:
             i.realize()
