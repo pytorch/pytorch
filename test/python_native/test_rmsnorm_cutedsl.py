@@ -338,10 +338,55 @@ class TestRmsNormJit(TestCase):
         native_low_precision: bool,
         native_fp32: bool,
     ) -> None:
-        from torch.profiler import profile, ProfilerActivity
-
         if torch.cuda.get_device_capability() not in ((9, 0), (10, 0)):
             self.skipTest("weight-only crossover is tuned for SM90 and SM100")
+        self._check_weight_only_dispatch(
+            device, dtype, n, m, native_low_precision, native_fp32
+        )
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize(
+        "n,m,native_low_precision,native_fp32",
+        [
+            (128, 1023, False, False),
+            (128, 1024, True, True),
+            (512, 2047, False, False),
+            (512, 2048, True, True),
+            (1024, 4095, False, False),
+            (1024, 4096, True, True),
+            (2048, 8192, False, True),
+            (2048, 16384, True, True),
+            (4096, 16384, False, False),
+            (8192, 8191, False, False),
+            (8192, 8192, True, False),
+        ],
+    )
+    def test_weight_only_dispatch_sm103(
+        self,
+        device: str,
+        dtype: torch.dtype,
+        n: int,
+        m: int,
+        native_low_precision: bool,
+        native_fp32: bool,
+    ) -> None:
+        if torch.cuda.get_device_capability() != (10, 3):
+            self.skipTest("weight-only crossover for SM103")
+        self._check_weight_only_dispatch(
+            device, dtype, n, m, native_low_precision, native_fp32
+        )
+
+    def _check_weight_only_dispatch(
+        self,
+        device: str,
+        dtype: torch.dtype,
+        n: int,
+        m: int,
+        native_low_precision: bool,
+        native_fp32: bool,
+    ) -> None:
+        from torch.profiler import profile, ProfilerActivity
+
         x = torch.randn(m, n, device=device, dtype=dtype)
         w = torch.randn(n, device=device, dtype=dtype)
         dy = torch.randn_like(x)
