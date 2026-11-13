@@ -3362,6 +3362,18 @@ class VariableBuilder:
         if value in self.tx.output.side_effects:
             raise AssertionError("Tensor is already tracked in side effects")
 
+        # A ZeroTensor has no storage, so it is materialized in-graph below. Export
+        # skips this: an ExportedProgram has no dispatch key guard to recompile on.
+        is_zerotensor = value._is_zerotensor() and not self.tx.export
+        if is_zerotensor and (value.requires_grad or infer_subclass_type(value)):
+            unimplemented(
+                gb_type="Attempted to wrap a ZeroTensor input that requires grad or is a subclass",
+                context=f"type: {type(value)}; requires_grad: {value.requires_grad}",
+                explanation="torch.compile materializes ZeroTensor inputs as dense "
+                "zeros, which would drop requires_grad and the tensor subclass.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
         is_static_input = get_static_address_type(value) is not None
 
         # When a shapes_spec is provided for this tensor, we must skip the
@@ -3550,11 +3562,7 @@ class VariableBuilder:
             **options,
         )
 
-        # A ZeroTensor has no storage and its fake tensor loses the ZeroTensor
-        # bit, so materialize it in-graph instead of letting compiled kernels
-        # read the null data pointer. The TENSOR_MATCH guard already checks the
-        # dispatch key set, so a dense tensor at this site recompiles.
-        if value._is_zerotensor():
+        if is_zerotensor:
             tensor_variable = wrap_fx_proxy(
                 tx=self.tx,
                 proxy=self.tx.output.root_tracer.create_proxy(
@@ -3582,7 +3590,10 @@ class VariableBuilder:
         guard_type = GuardBuilder.TENSOR_MATCH
 
         if isinstance(source, GradSource) and is_from_optimizer_source(source):
-            guard_type = GuardBuilder.NOT_NONE_MATCH
+            # A materialized ZeroTensor keeps TENSOR_MATCH, which checks the
+            # dispatch key set, so a dense grad at this site recompiles.
+            if not is_zerotensor:
+                guard_type = GuardBuilder.NOT_NONE_MATCH
 
         is_dtensor = torch.distributed.is_available() and isinstance(
             value, torch.distributed.tensor.DTensor
