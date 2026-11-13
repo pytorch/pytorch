@@ -395,7 +395,8 @@ struct Reduction...Op {
 
 Tensor _sparse_csr_..._cuda(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, std::optional<ScalarType> dtype) {
   ...
-      result = reduce_sparse_csr_cuda_template<scalar_t>(input_, dims_to_sum, keepdim, Reduction...Op<scalar_t>());
+      using acc_t = at::acc_type<scalar_t, true>;
+      result = reduce_sparse_csr_cuda_template<scalar_t>(input_, dims_to_sum, keepdim, Reduction...Op<acc_t>());
   ...
   return result;
 }
@@ -635,14 +636,13 @@ Tensor reduce_sparse_csr_dim01_cuda_template(const Tensor& sparse, ReductionOp r
   auto numel = values.numel();
   auto nnz = std::min<int64_t>(1, numel);
 
-  auto result_dtype = at::isIntegralType(values.scalar_type(), /*includeBool=*/true) ? ScalarType::Long : values.scalar_type();
-  Tensor new_values, new_values_acc;
+  using out_t = std::conditional_t<std::is_integral_v<scalar_t>, int64_t, scalar_t>;
+  auto result_dtype = c10::CppTypeToScalarType<out_t>::value;
+  Tensor new_values;
   if (numel > 0) {
     new_values = at::empty({1}, values.options().dtype(result_dtype));
-    new_values_acc = at::empty({1}, values.options());
-    auto iter = TensorIterator::reduce_op(new_values_acc, values);
-    gpu_reduce_kernel<scalar_t, scalar_t>(iter, func_wrapper<scalar_t>(rop), rop.identity_cpu());
-    new_values.copy_(new_values_acc);
+    auto iter = TensorIterator::reduce_op(new_values, values);
+    gpu_reduce_kernel<scalar_t, out_t>(iter, func_wrapper<out_t>(rop), rop.identity_cpu());
   } else {
     new_values = at::empty({}, values.options().dtype(result_dtype));
   }
@@ -808,7 +808,9 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
     kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_prod_cuda",
     [&] {
-      result = reduce_sparse_csr_cuda_template<scalar_t>(input_, dims_to_reduce, keepdim, ReductionMulOp<scalar_t>());
+      // Same accumulate type as _sparse_csr_sum_cuda
+      using acc_t = at::acc_type<scalar_t, true>;
+      result = reduce_sparse_csr_cuda_template<scalar_t>(input_, dims_to_reduce, keepdim, ReductionMulOp<acc_t>());
     });
   return result;
 }
