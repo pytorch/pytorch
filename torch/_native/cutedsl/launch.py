@@ -146,6 +146,7 @@ class LaunchRecord:
 
     def __init__(self, x: torch.Tensor) -> None:
         self._x = x
+        self._device = x.device
         self._slots = {_storage_id(x): -1}
         # Holding the buffers keeps their storage ids unique while recording.
         self._buffers: list[torch.Tensor] = []
@@ -208,7 +209,48 @@ class LaunchRecord:
         slots = [-1 if view is None else view.slot for view in views]
         if not self._ok or not slots or min(slots) < 0 or len(set(slots)) < len(slots):
             return None
-        return LaunchReplay(self._allocs, self._launches, views)
+        devices = list(dict.fromkeys(device for _, device, _, _ in self._launches))
+        launches = [
+            _ReplayLaunch(fn, devices.index(device), *_compile_params([ins, *args]))
+            for fn, device, ins, args in self._launches
+        ]
+        return LaunchReplay(self._device, self._allocs, devices, launches, views)
+
+
+# (path of the list holding the slot, index in it, view, whether a COW input is wrapped)
+_Slot = tuple[tuple[int, ...], int, _View, bool]
+
+
+class _ReplayLaunch(NamedTuple):
+    fn: "Function"
+    device: int  # index into LaunchReplay's devices
+    params: tuple[Any, ...]  # fn's arguments before the stream, tensor slots unfilled
+    lists: tuple[tuple[int, ...], ...]  # paths of lists holding slots, outer first
+    slots: tuple[_Slot, ...]
+
+
+def _compile_params(
+    params: list[Any],
+) -> tuple[tuple[Any, ...], tuple[tuple[int, ...], ...], tuple[_Slot, ...]]:
+    lists: list[tuple[int, ...]] = []
+    slots: list[_Slot] = []
+
+    def walk(values: list[Any], path: tuple[int, ...]) -> bool:
+        start = len(slots)
+        for i, value in enumerate(values):
+            if isinstance(value, _View):
+                # launch() exports ins, params[0], read-only, and only x can be COW.
+                wrapped = (path + (i,))[0] == 0 and value.slot < 0
+                slots.append((path, i, value, wrapped))
+            elif isinstance(value, list):
+                at = len(lists)
+                lists.append(path + (i,))
+                if not walk(value, path + (i,)):
+                    del lists[at:]
+        return len(slots) > start
+
+    walk(params, ())
+    return tuple(params), tuple(lists), tuple(slots)
 
 
 @contextmanager
@@ -230,36 +272,51 @@ def recording_active() -> bool:
 
 
 class LaunchReplay:
-    """Fresh buffers and the recorded launches on them; see LaunchRecord."""
+    """Fresh buffers and the recorded launches on them; see LaunchRecord. Replays call
+    the compiled kernels directly, so no recording sees them; replay_reduce never
+    replays under a recording."""
 
     def __init__(
         self,
+        device: torch.device,
         allocs: list[tuple[int, torch.dtype]],
-        launches: list[tuple["Function", int, Any, tuple[Any, ...]]],
+        devices: list[int],
+        launches: list[_ReplayLaunch],
         outs: list[_View],
     ) -> None:
+        self._device = device
         self._allocs = allocs
+        self._devices = devices
         self._launches = launches
         self._outs = outs
 
     def __call__(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         bufs = [
-            torch.empty(numel, dtype=dtype, device=x.device)
+            torch.empty(numel, dtype=dtype, device=self._device)
             for numel, dtype in self._allocs
         ]
-
-        def resolve(value: Any) -> Any:
-            if isinstance(value, _View):
-                base = x if value.slot < 0 else bufs[value.slot]
-                if value.whole:
-                    return base
-                return base.as_strided(value.size, value.stride, value.offset)
-            if isinstance(value, list):
-                return [resolve(v) for v in value]
-            return value
-
-        for fn, device, ins, args in self._launches:
-            launch(fn, device, resolve(ins), *(resolve(a) for a in args))
+        # Wrapping costs about 1.5 us, so only a COW input (or a subclass, which launch()
+        # would strip) is exported through read_only().
+        wrap = type(x) is not torch.Tensor or torch._C._is_cow_tensor(x)
+        streams = [stream(device) for device in self._devices]
+        for fn, device, template, lists, slots in self._launches:
+            params = list(template)
+            for path in lists:
+                parent = params
+                for i in path[:-1]:
+                    parent = parent[i]
+                parent[path[-1]] = list(parent[path[-1]])
+            for path, i, view, wrapped in slots:
+                t = x if view.slot < 0 else bufs[view.slot]
+                if not view.whole:
+                    t = t.as_strided(view.size, view.stride, view.offset)
+                if wrapped and wrap:
+                    t = read_only(t)
+                parent = params
+                for j in path:
+                    parent = parent[j]
+                parent[i] = t
+            fn(*params, streams[device])
         outs = []
         for view in self._outs:
             out = bufs[view.slot]
