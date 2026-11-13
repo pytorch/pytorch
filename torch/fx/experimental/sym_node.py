@@ -115,7 +115,14 @@ class SymNode:
         self.shape_env = shape_env
         self.pytype = pytype
         self._optimized_summation = optimized_summation
+        # Memo for the `expr` property, i.e. shape_env.replace(self._expr).
+        # replace() depends only on shape_env.replacements and
+        # shape_env.var_to_range, so _expr_cache is valid iff both
+        # _replacements_version_counter == _expr_ver and
+        # _var_to_range_version_counter == _expr_range_ver. -1 means
+        # "never computed".
         self._expr_ver = -1
+        self._expr_range_ver = -1
         self._expr_cache: object | None = None
 
         # What's the difference between hint and constant?
@@ -233,10 +240,17 @@ class SymNode:
         ver = self.shape_env._replacements_version_counter
         if ver == 0:
             return self._expr
-        if self._expr_cache is not None and ver == self._expr_ver:
+        # replace() also depends on value ranges; see ShapeEnv._find.
+        range_ver = self.shape_env._var_to_range_version_counter
+        if (
+            self._expr_cache is not None
+            and ver == self._expr_ver
+            and range_ver == self._expr_range_ver
+        ):
             return self._expr_cache
         result = self.shape_env.replace(self._expr)
         self._expr_ver = ver
+        self._expr_range_ver = range_ver
         self._expr_cache = result
         return result
 
