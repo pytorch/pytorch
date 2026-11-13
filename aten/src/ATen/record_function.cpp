@@ -264,6 +264,7 @@ void GlobalCallbackManager::removeCallback(CallbackHandle handle) {
   if (extractCallback(global_callbacks_, handle).has_value()) {
     ++version_;
     --detail::num_callback_sources;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(detail::num_callback_sources >= 0);
   } else {
     LOG(WARNING) << "Requested callback is not found";
   }
@@ -274,6 +275,7 @@ void GlobalCallbackManager::clearCallbacks() {
   ++version_;
   detail::num_callback_sources -=
       static_cast<int64_t>(global_callbacks_.size());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(detail::num_callback_sources >= 0);
   global_callbacks_.clear();
 }
 
@@ -301,7 +303,7 @@ void CacheEntry::getActiveCallbacksImpl() {
   // reaches zero at the start of this function something has gone wrong.
   TORCH_INTERNAL_ASSERT(sampling_countdown_ > 0, sampling_countdown_);
 
-  if (C10_UNLIKELY(!(--sampling_countdown_))) {
+  if (!(--sampling_countdown_)) [[unlikely]] {
     // Use inferred steps to update sampled callbacks.
     for (auto& i : callbacks_) {
       if (i.tries_left_ > 0) {
@@ -329,7 +331,7 @@ StepCallbacks CacheEntry::getActiveCallbacks() {
 
 std::optional<StepCallbacks> CacheEntry::getActiveCallbacksUnlessEmpty() {
   getActiveCallbacksImpl();
-  if (C10_LIKELY(active_callbacks_.empty())) {
+  if (active_callbacks_.empty()) [[likely]] {
     return std::nullopt;
   }
   return active_callbacks_;
@@ -400,7 +402,11 @@ LocalCallbackManager::LocalCallbackManager() {
 
 LocalCallbackManager::~LocalCallbackManager() {
   if (counted_as_callback_source_) {
+    // Another thread_local's destructor can still remove a callback through
+    // this one; it must not uncount the thread a second time.
+    counted_as_callback_source_ = false;
     --detail::num_callback_sources;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(detail::num_callback_sources >= 0);
   }
 }
 
@@ -409,6 +415,7 @@ void LocalCallbackManager::updateCallbackSourceCount() {
   if (has_callbacks != counted_as_callback_source_) {
     counted_as_callback_source_ = has_callbacks;
     detail::num_callback_sources += has_callbacks ? 1 : -1;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(detail::num_callback_sources >= 0);
   }
 }
 
@@ -418,7 +425,7 @@ const RecordFunctionTLS& LocalCallbackManager::getTLS() const {
 
 void LocalCallbackManager::rebuildActiveCallbacksIfNeeded() {
   const auto global_version = GlobalCallbackManager::get().version();
-  if (C10_UNLIKELY(global_version != global_version_)) {
+  if (global_version != global_version_) [[unlikely]] {
     rebuild_all(GlobalCallbackManager::get().getSnapshot());
   }
 }
@@ -659,6 +666,10 @@ const char* RecordFunction::overload_name() const {
 
 StepCallbacks getStepCallbacks(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacks(scope);
+}
+
+std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(RecordScope scope) {
+  return getStepCallbacksUnlessEmptyInline(scope);
 }
 
 namespace detail {
