@@ -217,6 +217,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 "max_autotune_gemm_backends": "ATEN",
                 "benchmark_fusion": False,
                 "pipeline_max_autotune_gemm": False,
+                # ATEN-only makes every inner GEMM a single choice, so it would
+                # reach the TunableOp hook and spend that GEMM's whole budget
+                # for a candidate that may lose; a winner is re-lowered anyway.
+                "cuda.autotune_tunableop_mode": "off",
                 **self.config_patches,
             }
             with config.patch(benchmark_config):
