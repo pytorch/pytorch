@@ -679,6 +679,38 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         model0_state._lazy_init()
         self.assertTrue(model0_state._is_root)
 
+    def test_fully_shard_lazy_init_after_module_tree_changes(self):
+        """
+        Tests that lazy initialization from a nested state uses the module tree
+        at that time: a module detached after sharding becomes its own root
+        without initializing its former root, and a module moved within the
+        tree still makes the outermost state the root.
+        """
+        model = nn.Sequential(MLP(8), MLP(8), MLP(8))
+        for mlp in model:
+            fully_shard(mlp)
+        fully_shard(model)
+        root_state = fully_shard.state(model)
+
+        detached = model[0]
+        model[0] = nn.Identity()
+        detached_state = fully_shard.state(detached)
+        detached_state._lazy_init()
+        self.assertTrue(detached_state._is_root)
+        self.assertIsNone(root_state._is_root)
+
+        moved = model[2]
+        del model[2]
+        model[1].moved = moved
+        moved_state = fully_shard.state(moved)
+        moved_state._lazy_init()
+        self.assertTrue(root_state._is_root)
+        self.assertFalse(moved_state._is_root)
+        self.assertEqual(
+            root_state._state_ctx.all_states,
+            [root_state, fully_shard.state(model[1]), moved_state],
+        )
+
     def test_fully_shard_double_lazy_init(self):
         model = nn.Sequential(MLP(8), MLP(8))
         fully_shard(model[0].in_proj)

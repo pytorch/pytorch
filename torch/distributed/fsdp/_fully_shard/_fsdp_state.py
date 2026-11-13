@@ -210,7 +210,11 @@ class FSDPState(_State):
             if len(state._modules) == 1:
                 root_state = state
             state = state._get_enclosing_state()
-        if root_state is not None:
+        # A module detached after sharding keeps its link, so initialize the
+        # root only if this state is still inside the root's module tree
+        if root_state is not None and not set(self._modules).isdisjoint(
+            root_state._modules[0].modules()
+        ):
             root_state._lazy_init()
             if self._is_root is not None:
                 return
