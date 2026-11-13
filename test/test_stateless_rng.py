@@ -1631,6 +1631,13 @@ class TestStatelessRNGDropout(TestCase):
         self.assertTrue(gradcheck(f, (x64,), check_forward_ad=True))
         self.assertTrue(gradgradcheck(f, (x64,)))
 
+    @parametrize("requires_grad", [False, True])
+    def test_opcheck(self, device, requires_grad):
+        key = random.key(42, device=device)
+        x = torch.randn(4, 6, device=device, requires_grad=requires_grad)
+        for k, inp in ((key, x), (random.split(key, 4).unsqueeze(-2), x), (key, x.t())):
+            torch.library.opcheck(torch.ops.aten._philox_dropout.default, (inp, k, 0.3))
+
     def test_errors(self, device):
         for mode in (contextlib.nullcontext(), FakeTensorMode()):
             with mode:
