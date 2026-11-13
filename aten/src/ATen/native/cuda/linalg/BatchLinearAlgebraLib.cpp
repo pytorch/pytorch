@@ -1634,6 +1634,8 @@ static void apply_syevj_batched(const Tensor& values, const Tensor& vectors, con
   size_t worksize_host = 0;
   c10::DataPtr work_device_data;
   c10::DataPtr work_host_data;
+  size_t allocated_device_bytes = 0;
+  size_t allocated_host_bytes = 0;
   for (int64_t start = 0; start < batch_size;) {
     int64_t chunk_size = std::min<int64_t>(max_batch_size, batch_size - start);
     auto* chunk_vectors = vectors_data + start * matrix_stride;
@@ -1660,10 +1662,16 @@ static void apply_syevj_batched(const Tensor& values, const Tensor& vectors, con
           chunk_values, &worksize_device, &worksize_host, chunk_size);
 #endif
       queried_batch_size = chunk_size;
-      // Keep the previous buffers alive until their replacement is ready.
-      // The allocator observes the current stream when recycling them.
-      work_device_data = device_allocator.allocate(worksize_device);
-      work_host_data = host_allocator.allocate(worksize_host);
+      // Reuse the allocation when the final chunk needs no more workspace.
+      // The buffer-size query is still required because its size may vary.
+      if (worksize_device > allocated_device_bytes) {
+        work_device_data = device_allocator.allocate(worksize_device);
+        allocated_device_bytes = worksize_device;
+      }
+      if (worksize_host > allocated_host_bytes) {
+        work_host_data = host_allocator.allocate(worksize_host);
+        allocated_host_bytes = worksize_host;
+      }
     }
 
     at::cuda::solver::xsyevBatched<scalar_t>(
