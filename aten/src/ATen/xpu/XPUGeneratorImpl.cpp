@@ -161,9 +161,8 @@ XPUGeneratorImpl::XPUGeneratorImpl(
       state_(std::move(state)) {}
 
 void XPUGeneratorImpl::set_current_seed(uint64_t seed) {
-  if (C10_LIKELY(
-          at::xpu::currentStreamCaptureStatus() ==
-          at::xpu::CaptureStatus::Executing)) {
+  if (at::xpu::currentStreamCaptureStatus() ==
+      at::xpu::CaptureStatus::Executing) [[likely]] {
     state_->seed_ = seed;
     state_->philox_offset_per_thread_ = 0;
   } else {
@@ -259,9 +258,8 @@ c10::intrusive_ptr<c10::GeneratorImpl> XPUGeneratorImpl::graphsafe_get_state()
 
 void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
   TORCH_CHECK(offset % 4 == 0, "offset must be a multiple of 4");
-  if (C10_LIKELY(
-          at::xpu::currentStreamCaptureStatus() ==
-          at::xpu::CaptureStatus::Executing)) {
+  if (at::xpu::currentStreamCaptureStatus() ==
+      at::xpu::CaptureStatus::Executing) [[likely]] {
     state_->philox_offset_per_thread_ = offset;
   } else {
     state_->offset_intragraph_ = offset;
@@ -269,9 +267,8 @@ void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
 }
 
 uint64_t XPUGeneratorImpl::philox_offset_per_thread() const {
-  if (C10_LIKELY(
-          at::xpu::currentStreamCaptureStatus() ==
-          at::xpu::CaptureStatus::Executing)) {
+  if (at::xpu::currentStreamCaptureStatus() ==
+      at::xpu::CaptureStatus::Executing) [[likely]] {
     return state_->philox_offset_per_thread_;
   } else {
     return state_->offset_intragraph_;
