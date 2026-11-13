@@ -894,6 +894,39 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
                 self.assertEqual(model(inp), ref_model(inp))
 
     @skip_if_lt_x_gpu(1)
+    def test_single_rank_unshard_casts_once(self):
+        # Unsharding casts the shards straight into the unsharded parameters
+        mesh = init_device_mesh(
+            device.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )["shard"]
+        model = fully_shard(
+            nn.Linear(16, 33, device=device),
+            mesh=mesh,
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        ops = []
+
+        class RecordOps(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        with RecordOps():
+            model.unshard()
+        # One copy for each of the weight and bias, and no separate casts
+        self.assertNotIn(torch.ops.aten._to_copy.default, ops)
+        self.assertEqual(ops.count(torch.ops.aten.copy_.default), 2)
+        for fsdp_param in model._get_fsdp_state()._fsdp_param_group.fsdp_params:
+            self.assertEqual(
+                fsdp_param.unsharded_param,
+                fsdp_param.sharded_param.to_local().to(torch.bfloat16),
+                atol=0,
+                rtol=0,
+            )
+
+    @skip_if_lt_x_gpu(1)
     def test_copy_fns(self):
         # Records what FSDP passes its copy functions, which delegate to the defaults
         model = nn.Sequential(
