@@ -94,6 +94,11 @@ def lower_cpu(
         mask_graph,
     ) = block_mask
 
+    if query.dtype not in [torch.float, torch.bfloat16, torch.float16]:
+        raise NotImplementedError(
+            "`torch.float` , `torch.float16` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
+            f"Found input tensors are `{query.dtype}`."
+        )
     # Key/value may be in a lower precision than query, e.g. an FP8 KV cache.
     kv_dtypes = [query.dtype, torch.float8_e4m3fn, torch.float8_e5m2]
     if key.dtype not in kv_dtypes or value.dtype not in kv_dtypes:
@@ -246,22 +251,25 @@ def lower_cpu(
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     # In flash decoding, the partition size of doing the parallelism on KV length dim
     PARTITION_SIZE = kernel_options.get("PARTITION_SIZE", 128)
-    if not CppFlexAttentionTemplate.use_flex_decoding(
+    use_decoding = CppFlexAttentionTemplate.use_flex_decoding(
         query, key, PARTITION_SIZE, SPARSE_KV_BLOCK_SIZE
-    ):
-        # Only the decoding template reads lower-precision key/value directly
-        q_dtype = query.get_dtype()
-        if key.get_dtype() != q_dtype or value.get_dtype() != q_dtype:
-            warning_once(
-                log,
-                "CPU flex attention is upcasting the %s key and %s value to the %s query "
-                "dtype on every call. Cast the KV cache to %s once outside the compiled "
-                "function to avoid the repeated conversion.",
-                key.get_dtype(),
-                value.get_dtype(),
-                q_dtype,
-                q_dtype,
-            )
+    )
+    q_dtype = query.get_dtype()
+    lowp_kv = key.get_dtype() != q_dtype or value.get_dtype() != q_dtype
+    if lowp_kv and not use_decoding:
+        warning_once(
+            log,
+            "CPU flex attention is upcasting the %s key and %s value to the %s query "
+            "dtype on every call. Lower-precision key/value are only read directly by "
+            "the flash decoding template, which requires static shapes, a query length "
+            "of 1, a block_mask whose KV block size divides PARTITION_SIZE, and a long "
+            "KV sequence. Otherwise, cast the KV cache to %s once outside the compiled "
+            "function to avoid the repeated conversion.",
+            key.get_dtype(),
+            value.get_dtype(),
+            q_dtype,
+            q_dtype,
+        )
         key = to_dtype(key, q_dtype)
         value = to_dtype(value, q_dtype)
 
@@ -297,11 +305,6 @@ def lower_cpu(
     )
 
     query, key, value = _realize_duplicate_buffer_inputs([query, key, value])
-    if query.get_dtype() not in [torch.float, torch.bfloat16, torch.float16]:
-        raise NotImplementedError(
-            "`torch.float` , `torch.float16` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
-            f"Found input tensors are `{query.get_dtype()}`."
-        )
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
@@ -367,6 +370,7 @@ def lower_cpu(
         kv_block_size=SPARSE_KV_BLOCK_SIZE,
         q_block_size=SPARSE_Q_BLOCK_SIZE,
         partition_size=PARTITION_SIZE,
+        use_decoding=use_decoding,
         has_other_buffer=has_other_buffer,
         no_full_kv_block=no_full_kv_block,
         fake_buffers=fake_buffers,

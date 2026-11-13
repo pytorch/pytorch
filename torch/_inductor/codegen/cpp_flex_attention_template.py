@@ -1120,12 +1120,11 @@ FLEX_DECODING_TEMPLATE = r"""
 
         auto v_addr =
             v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
-        // Fallback Half brgemm is slower than micro gemm
 {%- if lowp_v %}
         // cpublas::brgemm has no overload for a value in a lower precision than query
         {
 {%- else %}
-
+        // Fallback Half brgemm is slower than micro gemm
         if constexpr (!std::is_same_v<scalar_t, at::Half>) {
           at::native::cpublas::brgemm(
                 cur_qSplitSize,
@@ -1279,6 +1278,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         kv_block_size,
         q_block_size,
         partition_size,
+        use_decoding,
         has_other_buffer,
         no_full_kv_block,
         fake_buffers,
@@ -1313,6 +1313,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.kv_block_size = kv_block_size
         self.q_block_size = q_block_size
         self.partition_size = partition_size
+        self.use_decoding = use_decoding
         self.has_other_buffer = has_other_buffer
         self.no_full_kv_block = no_full_kv_block
         self.other_buffer_input_offset = 2
@@ -1519,6 +1520,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         kv_block_size,
         q_block_size,
         partition_size,
+        use_decoding,
         has_other_buffer,
         no_full_kv_block,
         fake_buffers,
@@ -1545,6 +1547,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             kv_block_size=kv_block_size,
             q_block_size=q_block_size,
             partition_size=partition_size,
+            use_decoding=use_decoding,
             has_other_buffer=has_other_buffer,
             no_full_kv_block=no_full_kv_block,
             fake_buffers=fake_buffers,
@@ -1611,14 +1614,6 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.input_dtype = query.layout.dtype
         lowp_k = self.key_dtype != self.input_dtype
         lowp_v = self.value_dtype != self.input_dtype
-        q_node, k_node = self.input_nodes[:2]
-        use_decoding = self.use_flex_decoding(
-            q_node, k_node, self.partition_size, self.kv_block_size
-        )
-        if (lowp_k or lowp_v) and not use_decoding:
-            raise AssertionError(
-                "Only FLEX_DECODING_TEMPLATE supports key/value in a lower precision than query"
-            )
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
@@ -1666,7 +1661,7 @@ class CppFlexAttentionTemplate(CppTemplate):
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
             FLEX_TEMPLATE = (
-                FLEX_DECODING_TEMPLATE if use_decoding else FLEX_ATTENTION_TEMPLATE
+                FLEX_DECODING_TEMPLATE if self.use_decoding else FLEX_ATTENTION_TEMPLATE
             )
             return self._template_from_string(INIT_PARAMS + FLEX_TEMPLATE).render(
                 **options

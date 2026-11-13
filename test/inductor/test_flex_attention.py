@@ -4469,10 +4469,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @expected_not_implemented_on_mps
     def test_mixed_dtypes_compiled(self, device):
-        # MPS doesn't support fp8 dtype conversion; force the fp16/fp32 mix on MPS.
-        use_fp8 = PLATFORM_SUPPORTS_FP8 and not _is_mps_device(device)
-        dtype_high = torch.float16 if use_fp8 else torch.float32
-        dtype_low = e4m3_type if use_fp8 else torch.float16
+        if device == "cpu":
+            # CPU only mixes in OCP fp8 K/V, independent of any GPU on the host.
+            dtype_high, dtype_low = torch.float16, torch.float8_e4m3fn
+        else:
+            # MPS doesn't support fp8 dtype conversion; force the fp16/fp32 mix on MPS.
+            use_fp8 = PLATFORM_SUPPORTS_FP8 and not _is_mps_device(device)
+            dtype_high = torch.float16 if use_fp8 else torch.float32
+            dtype_low = e4m3_type if use_fp8 else torch.float16
         query = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device)
         key = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
             dtype_low

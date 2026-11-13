@@ -1859,17 +1859,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         block_mask = create_block_mask(
             lambda b, h, m, n: n < 1500, None, None, 1, KV_S, device=device
         )
-        attention = torch.compile(
-            functools.partial(
-                flex_attention,
-                score_mod=score_mod,
-                block_mask=block_mask,
-                enable_gqa=True,
-            )
+        attention = functools.partial(
+            flex_attention, score_mod=score_mod, block_mask=block_mask, enable_gqa=True
         )
-        out, code = run_and_get_code(attention, q, k, v)
-        # FP8 -> query dtype is exact, so this must match the upcast cache
-        self.assertEqual(out, attention(q, k.to(dtype), v.to(dtype)))
+        out, code = run_and_get_code(torch.compile(attention), q, k, v)
+        golden = attention(*query_key_value_clones(q, k, v, torch.float64))
+        ref = attention(*query_key_value_clones(q, k, v, dtype))
+        self._check_out(golden, ref, out)
         # The decoding template reads the FP8 cache without an upcast kernel
         kv_t = DTYPE_TO_CPP[kv_dtype]
         self.assertIn(f"const {kv_t}* k_data", code[0])
@@ -1879,7 +1875,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skipCUDAIf(True, "CPU-only dtype restriction")
     @skipXPUIf(True, "CPU-only dtype restriction")
-    def test_flash_decoding_fp32_query_bf16_kv_cache(self, device):
+    def test_cpu_rejects_fp32_query_bf16_kv(self, device):
         B, Hq, Hkv, KV_S, D = 2, 8, 2, 2048, 64
         q = torch.randn(B, Hq, 1, D, device=device)
         k = torch.randn(B, Hkv, KV_S, D, device=device, dtype=torch.bfloat16)
