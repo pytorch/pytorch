@@ -67,7 +67,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocmArch,
     TEST_CUDA,
     TEST_WITH_ROCM,
-    TEST_XPU,
     TestCase,
     TemporaryFileName,
     decorateIf,
@@ -1083,7 +1082,7 @@ class TestMatmulCuda(InductorTestCase):
                     "max_autotune_gemm_backends": "TRITON",
                 }
             )
-            if TEST_XPU:
+            if torch.device(device).type == "xpu":
                 options["max_autotune_gemm_backends"] = "ATEN"
         f = torch.compile(
             f_ref,

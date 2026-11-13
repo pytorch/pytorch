@@ -204,23 +204,27 @@ sycl::event scaled_grouped_matmul(
 
   TORCH_CHECK(
       a_is_2d,
-      "Currently only 2d x 3d and 2d x 2d grouped matmul with offsets is supported on xpu");
+      "Currently only 2d x 3d and 2d x 2d grouped matmul with offsets are supported on xpu");
+  // Pair up each scale with its scaling choice before the || below, otherwise
+  // scales passed without a choice would skip validation and be ignored.
+  TORCH_CHECK(
+      scale_a.has_value() == scaling_choice_a.has_value(),
+      "scale_a and scaling_choice_a must be provided together");
+  TORCH_CHECK(
+      scale_b.has_value() == scaling_choice_b.has_value(),
+      "scale_b and scaling_choice_b must be provided together");
   if (scaling_choice_a.has_value() || scaling_choice_b.has_value()) {
     TORCH_CHECK(
-        scale_a.has_value() && scale_b.has_value(),
-        "Scaling choices provided but corresponding scales are missing");
+        scaling_choice_a.has_value() && scaling_choice_b.has_value(),
+        "Scaling must be provided for both a and b, or for neither");
     TORCH_CHECK(
         scale_a.value().dtype() == scale_b.value().dtype(),
-        "Scaling choices provided but corresponding scales have mismatched datatypes");
-    TORCH_CHECK(
-        scaling_choice_a.has_value() && scaling_choice_b.has_value(),
-        "Scaling choices provided but corresponding scaling choices are missing");
+        "Scales for a and b have mismatched datatypes");
     TORCH_CHECK(
         scaling_choice_a.value() == scaling_choice_b.value(),
         "Scaling choices for a and b must match");
     TORCH_CHECK(
-        !b_is_2d,
-        "Scaled grouped matmul are only supported for 2d x 3d on xpu");
+        !b_is_2d, "Scaled grouped matmul is only supported for 2d x 3d on xpu");
   }
 
   bool is_fp4 = mat_a.scalar_type() == at::kFloat4_e2m1fn_x2;

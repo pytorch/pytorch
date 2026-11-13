@@ -227,8 +227,8 @@ file(GLOB flash_attention_cuda_kernels_cu CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR
 file(GLOB flash_attention_cuda_cpp CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp)
 file(GLOB native_flash_attn_api_cpp CONFIGURE_DEPENDS "native/transformers/cuda/flash_attn/flash_api.cpp")
 
-file(GLOB native_xpu_cpp "native/xpu/*.cpp")
-file(GLOB native_xpu_h "native/xpu/*.h")
+file(GLOB native_xpu_cpp CONFIGURE_DEPENDS "native/xpu/*.cpp")
+file(GLOB native_xpu_h CONFIGURE_DEPENDS "native/xpu/*.h")
 
 # flash_attention hip sources
 file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/*.hip")
