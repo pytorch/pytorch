@@ -274,6 +274,7 @@ class TestColumnCombine(TestCase):
 
     def test_inner_tree_order_hands_off(self, device):
         """inner_tree configs fall back to coltile when the ordered kernel declines."""
+        # test_b200_ragged_c4095_ordered pins the served hand-off, on cc 10.0 only.
         x = torch.randn((257, 16), device=device)
         cfg = ct.ColConfig("test_order", 64, 7, 4, "column", kernel_order="inner_tree")
         trait = T.SumOps(acc=cutlass.Float32)
