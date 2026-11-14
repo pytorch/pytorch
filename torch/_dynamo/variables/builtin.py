@@ -1708,6 +1708,18 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise_observed_exception(TypeError, tx)
         return self._call_frame_locals_snapshot(tx)
 
+    def call_globals(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        if args or kwargs:
+            raise_observed_exception(TypeError, tx)
+        from .dicts import globals_dict_variable
+
+        return globals_dict_variable(tx, tx.f_globals)
+
     @staticmethod
     def _call_frame_locals_snapshot(tx: "InstructionTranslatorBase") -> VariableTracker:
         from .builder import VariableBuilder
@@ -2681,6 +2693,8 @@ class BuiltinVariable(BaseBuiltinVariable):
                 variables.ConstDictVariable,
             ),
         ):
+            if isinstance(args[0], ConstDictVariable):
+                args[0].install_dict_keys_match_guard()
             items = list(args[0].items.keys())
         else:
             items = unpack_iterable(tx, args[0])
@@ -3590,6 +3604,10 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         check_positional(tx, "fromkeys", len(args), 1, 2)
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
+            if isinstance(args[0], ConstDictVariable):
+                args[0].install_dict_keys_match_guard()
+                if args[0].source:
+                    tx.output.guard_on_key_order.add(args[0].source)
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
             return ConstDictVariable(
                 dict.fromkeys(args[0].items.keys(), value),  # type: ignore[arg-type]
@@ -3889,6 +3907,14 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
+        if isinstance(obj, variables.BaseUserFunctionVariable):
+            if name_var.is_python_constant():
+                name = name_var.as_python_constant()
+                if isinstance(name, str):
+                    member = obj.lookup_tp_getset_member(name)
+                    if isinstance(member, Member) and member.setter is readonly_setter:
+                        member.setter(obj, tx, val)
+                        return ConstantVariable.create(None)
         if isinstance(
             obj,
             (

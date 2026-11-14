@@ -2911,6 +2911,16 @@
       ]
     }
   ],
+  "GB8057": [
+    {
+      "Gb_type": "unsafe operation on globals() mapping",
+      "Context": "operation",
+      "Explanation": "Dynamo cannot safely trace operations on the live globals namespace.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB8335": [
     {
       "Gb_type": "Generator reconstruction with mutations",
@@ -3414,6 +3424,16 @@
       ]
     }
   ],
+  "GB1550": [
+    {
+      "Gb_type": "live globals namespace across graph break",
+      "Context": "tx.f_code.co_name",
+      "Explanation": "Dynamo cannot resume a frame with a live globals namespace.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB2483": [
     {
       "Gb_type": "tp_str_impl not implemented",
@@ -3546,6 +3566,70 @@
       ]
     }
   ],
+  "GB6939": [
+    {
+      "Gb_type": "globals() in function with global writes",
+      "Context": "tx.f_code.co_name",
+      "Explanation": "Dynamo cannot safely read globals() alongside global writes or pending module attribute writes.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "globals() in function with global writes",
+      "Context": "tx.f_code.co_name",
+      "Explanation": "Dynamo cannot safely read globals() after or before a STORE_GLOBAL in the same function.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9914": [
+    {
+      "Gb_type": "globals() namespace specialization",
+      "Context": "tx.f_code.co_name",
+      "Explanation": "Dynamo cannot safely specialize the size or order of globals while tracing may still install internal globals.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7716": [
+    {
+      "Gb_type": "specialization of globals() dictionary",
+      "Context": "namespace size or order",
+      "Explanation": "Dynamo cannot safely specialize the size or order of globals while tracing may still install internal globals.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "specialization of globals() dictionary",
+      "Context": "operation",
+      "Explanation": "Dynamo cannot safely specialize the size or order of globals while tracing may still install internal globals.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9280": [
+    {
+      "Gb_type": "mutation of globals() dictionary",
+      "Context": "write to globals()",
+      "Explanation": "Dynamo cannot safely trace writes through globals() because global reads and replayed writes use separate state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "mutation of globals() dictionary",
+      "Context": "operation",
+      "Explanation": "Dynamo cannot safely trace writes through globals() because global reads and replayed writes use separate state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0192": [
     {
       "Gb_type": "input iterator to itertools.cycle has too many items",
@@ -3582,6 +3666,16 @@
       "Hints": [
         "Make sure your arguments are types.",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB2302": [
+    {
+      "Gb_type": "globals() dictionary subclass",
+      "Context": "globals() with overridden dictionary methods",
+      "Explanation": "Dynamo only traces plain globals dictionaries to preserve overridden dictionary methods.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -5799,6 +5893,16 @@
       "Gb_type": "richcompare identity fallback undetermined",
       "Context": "generic_richcompare({lhs}, {rhs}, {op})",
       "Explanation": "Cannot determine object identity for comparison fallback.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5595": [
+    {
+      "Gb_type": "globals() namespace already tracked as dict",
+      "Context": "tx.f_code.co_name",
+      "Explanation": "Dynamo cannot safely reinterpret a tracked globals dict.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

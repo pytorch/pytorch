@@ -24,7 +24,7 @@ import sys
 import types
 import weakref
 from collections.abc import Callable, Iterator
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
 from torch.utils._pytree import MappingKey
@@ -48,6 +48,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     DictGetItemSource,
+    GlobalSource,
     is_constant_source,
     is_from_local_source,
     TypeDictSource,
@@ -998,6 +999,179 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if type_attr is not NO_SUCH_SUBOBJ and _is_method_type(type_attr):
             return variables.CallMethodVariable(self, name)
         return super().tp_getattro_impl(tx, name)
+
+
+class GlobalDictVariable(ConstDictVariable):
+    def _check_pending_writes(self, tx: "InstructionTranslatorBase") -> None:
+        side_effects = tx.output.side_effects
+        pending_module_write = any(
+            isinstance(var, variables.PythonModuleVariable)
+            and side_effects.has_pending_mutation(var)
+            and var.value.__dict__ in side_effects
+            and side_effects[var.value.__dict__] is self
+            for var in side_effects.store_attr_mutations
+        )
+        current_tx = tx
+        while current_tx is not None:
+            if (
+                pending_module_write
+                or current_tx.symbolic_globals
+                or any(
+                    inst.opname in ("STORE_GLOBAL", "DELETE_GLOBAL")
+                    for inst in current_tx.instructions
+                )
+            ):
+                unimplemented(
+                    gb_type="globals() in function with global writes",
+                    context=tx.f_code.co_name,
+                    explanation="Dynamo cannot safely read globals() alongside global writes or pending module attribute writes.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                )
+            current_tx = current_tx.parent
+
+    def getitem_const(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        self._check_pending_writes(tx)
+        return super().getitem_const(tx, arg)
+
+    def getitem_const_raise_exception_if_absent(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        self._check_pending_writes(tx)
+        return super().getitem_const_raise_exception_if_absent(tx, arg)
+
+    def dict_get(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        self._check_pending_writes(tx)
+        return super().dict_get(tx, args, kwargs)
+
+    def sq_contains_impl(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        self._check_pending_writes(tx)
+        return super().sq_contains_impl(tx, item)
+
+    def is_python_constant(self) -> bool:
+        return False
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        if self is other and op in ("__eq__", "__ne__"):
+            return ConstantVariable.create(op == "__eq__")
+        return super().tp_richcompare_impl(tx, other, op)
+
+    def install_dict_keys_match_guard(self) -> NoReturn:
+        # Base dict copy/update helpers bypass method dispatch for unions.
+        unimplemented(
+            gb_type="specialization of globals() dictionary",
+            context="namespace size or order",
+            explanation="Dynamo cannot safely specialize the size or order of globals while tracing may still install internal globals.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+            skip_frame=True,
+        )
+
+    def reject_specialization(
+        self, tx: "InstructionTranslatorBase", *args, **kwargs
+    ) -> NoReturn:
+        self.install_dict_keys_match_guard()
+
+    mp_length_impl = reject_specialization
+    sq_length_impl = reject_specialization
+    tp_iter_impl = reject_specialization
+    tp_repr_impl = reject_specialization
+    tp_str_impl = reject_specialization
+    unpack_var_sequence = reject_specialization
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="mutation of globals() dictionary",
+            context="write to globals()",
+            explanation="Dynamo cannot safely trace writes through globals() because global reads and replayed writes use separate state.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+            skip_frame=True,
+        )
+
+    def reject_mutation(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.mp_ass_subscript_impl(tx, ConstantVariable.create(None), None)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.reject_mutation(tx, args, kwargs)
+
+    def nb_inplace_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.reject_mutation(tx, [other], {})
+
+    tp_methods = dict.fromkeys(
+        ("clear", "pop", "popitem", "update", "setdefault"), Method(reject_mutation)
+    ) | {"get": Method(dict_get)}
+
+
+def globals_dict_variable(
+    tx: "InstructionTranslatorBase", f_globals: dict[str, Any]
+) -> VariableTracker:
+    from ..symbolic_convert import _registered_module_for_globals
+    from .builder import VariableBuilder
+
+    if type(f_globals) is not dict:
+        unimplemented(
+            gb_type="globals() dictionary subclass",
+            context="globals() with overridden dictionary methods",
+            explanation="Dynamo only traces plain globals dictionaries to preserve overridden dictionary methods.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+            skip_frame=True,
+        )
+
+    if f_globals in tx.output.side_effects:
+        tracked = tx.output.side_effects[f_globals]
+        if not isinstance(tracked, GlobalDictVariable):
+            unimplemented(
+                gb_type="globals() namespace already tracked as dict",
+                context=tx.f_code.co_name,
+                explanation="Dynamo cannot safely reinterpret a tracked globals dict.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+            )
+        return tracked
+
+    registered_module = _registered_module_for_globals(
+        f_globals.get("__name__"), f_globals
+    )
+    if registered_module is not None:
+        module_name, _ = registered_module
+        source = AttrSource(tx.import_source(module_name), "__dict__")
+    else:
+        globals_name = tx.output.install_global_by_id("___unnamed_scope", f_globals)
+        source = GlobalSource(globals_name)
+
+    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+    tracked = VariableBuilder(tx, source)(f_globals)
+    tracked.__class__ = GlobalDictVariable
+    return tracked
 
 
 class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
