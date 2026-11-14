@@ -497,7 +497,8 @@ __device__ __forceinline__ T warp_inclusive_scan(T v, int lane, int width, Binar
 // place, so each thread holds the same elements at any alignment and the results don't change.
 // The dwords at either end are shared with the neighbouring elements (or bytes just outside the
 // tensor, in the same dword as one of its elements): they are read but only written element by
-// element.
+// element. store_dwords needs elements aligned to their size; 2-byte elements at an odd address
+// (external memory, e.g. through __cuda_array_interface__) are stored one at a time instead.
 template <typename T, int ITEMS>
 constexpr bool kDwordAccess = sizeof(T) < 4 && ITEMS * sizeof(T) % 16 == 0;
 
@@ -644,7 +645,7 @@ __device__ __forceinline__ void store_items(const T (&x)[ITEMS], T* p, uint64_t 
     return;
   }
   if constexpr (kDwordAccess<T, ITEMS>) {
-    if (col + ITEMS <= end) {
+    if (col + ITEMS <= end && reinterpret_cast<uintptr_t>(p) % sizeof(T) == 0) {
       store_dwords(x, p + col);
       return;
     }

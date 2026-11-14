@@ -3377,11 +3377,14 @@ class TestTorchDeviceType(TestCase):
             del x, res
 
     @onlyCUDA
-    @dtypes(torch.uint8, torch.int16, torch.half)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.half, torch.bfloat16)
     def test_cumsum_cumprod_last_dim_unaligned(self, device, dtype):
         # Rows with an odd length that start one element into their storage, so that rows start at
         # every offset within a dword. On ROCm the 1- and 2-byte elements are read and written as
-        # the whole dwords that cover them; long rows are also split into chunks.
+        # the whole dwords that cover them; long rows are also split into chunks. Runs out of
+        # place, in place and with out=, and checks that the elements on either side of the
+        # result, which share its first and last dwords, are left alone.
+        guard = 7
         for shape in ((2_000_003,), (3, 100_003), (64, 257), (1000, 31), (1000, 33)):
             if dtype.is_floating_point:
                 op = torch.cumprod
@@ -3390,9 +3393,43 @@ class TestTorchDeviceType(TestCase):
                 op = torch.cumsum
                 x = make_tensor(shape, dtype=dtype, device="cpu")
             expected = op(x, -1, dtype=dtype)
-            x_off = torch.empty(x.numel() + 1, dtype=dtype, device=device)[1:].view(shape)
+            n = x.numel()
+            buf = torch.full((n + 2,), guard, dtype=dtype, device=device)
+            x_off = buf[1:n + 1].view(shape)
             x_off.copy_(x)
             self.assertEqual(op(x_off, -1, dtype=dtype), expected, atol=0, rtol=0)
+            getattr(x_off, op.__name__ + "_")(-1)
+            self.assertEqual(x_off, expected, atol=0, rtol=0)
+            out_buf = torch.full((n + 2,), guard, dtype=dtype, device=device)
+            op(x.to(device), -1, dtype=dtype, out=out_buf[1:n + 1].view(shape))
+            self.assertEqual(out_buf[1:n + 1].view(shape), expected, atol=0, rtol=0)
+            for b in (buf, out_buf):
+                self.assertEqual(b[[0, -1]].tolist(), [guard, guard])
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.int16, torch.half)
+    def test_cumsum_cumprod_last_dim_odd_address(self, device, dtype):
+        # A 2-byte tensor at an odd address, which external memory can give (here through
+        # __cuda_array_interface__): its elements straddle dwords, so on ROCm they are stored one
+        # at a time. Skipped on CUDA, which requires 2-byte accesses to be aligned.
+        class Interface:
+            def __init__(self, ptr, shape, typestr):
+                self.__cuda_array_interface__ = {"data": (ptr, False), "shape": shape, "typestr": typestr, "version": 2}
+
+        typestr = {torch.int16: "<i2", torch.half: "<f2"}[dtype]
+        guard = 0x5A
+        for shape in ((4, 33), (64, 257), (3, 100_003)):
+            n = shape[0] * shape[1]
+            raw = torch.full((2 * n + 2,), guard, dtype=torch.uint8, device=device)
+            t = torch.as_tensor(Interface(raw.data_ptr() + 1, shape, typestr), device=device)
+            x = torch.tensor([-1, 1], dtype=dtype)[torch.randint(2, shape)]
+            expected = torch.cumprod(x, -1, dtype=dtype)
+            t.copy_(x)
+            self.assertEqual(torch.cumprod(t, -1, dtype=dtype), expected, atol=0, rtol=0)
+            t.cumprod_(-1)
+            self.assertEqual(t, expected, atol=0, rtol=0)
+            self.assertEqual(raw[[0, -1]].tolist(), [guard, guard])
 
     @onlyCUDA
     @skipCUDAIfNotRocm
