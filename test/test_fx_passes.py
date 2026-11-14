@@ -2,15 +2,27 @@
 # ruff: noqa: F841
 
 from dataclasses import dataclass
+import itertools
 import operator
 import logging
+import random
 import sys
+from unittest.mock import patch
 
 import torch
+from torch._C import _PartitionBitset, _PartitionMask
+from torch.fx import Graph, GraphModule
 from torch.fx._symbolic_trace import symbolic_trace
 
-from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
-from torch.fx.passes.operator_support import OperatorSupport
+from torch.fx.passes.infra._partition_graph import _PartitionGraph
+from torch.fx.passes.infra.partitioner import _DependencyViewer, CapabilityBasedPartitioner
+from torch.fx.passes.operator_support import (
+    chain,
+    create_op_support,
+    OperatorSupport,
+    OperatorSupportBase,
+    OpSupports,
+)
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions, topo_sort
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
@@ -19,6 +31,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TestCase as TorchTestCase,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -299,6 +312,631 @@ class MockOperatorSupport(OperatorSupport):
                                 torch.ops.aten.permute,
                                 torch.ops.aten.std_mean,
                                 _nested_tuple_producer})
+
+class _Support(OperatorSupportBase):
+    def is_node_supported(self, submodules, node):
+        return node.meta.get("supported", False)
+
+
+def _make_graph(parents):
+    graph = Graph()
+    x = graph.placeholder("x")
+    nodes = []
+    for predecessors in parents:
+        args = tuple(nodes[index] for index in predecessors)
+        node = graph.call_function(torch.add, (args[0], args[-1]) if args else (x, x))
+        node.meta["supported"] = True
+        nodes.append(node)
+    graph.output(tuple(nodes))
+    return GraphModule(torch.nn.Module(), graph), nodes
+
+
+def _edges(nodes, owner, keep=None, drop=None):
+    mapping = {node: keep if pid == drop else pid for node, pid in owner.items()}
+    edges = {pid: set() for pid in mapping.values()}
+    for node in nodes:
+        for user in node.users:
+            if mapping[node] != mapping[user]:
+                edges[mapping[node]].add(mapping[user])
+    return edges
+
+
+def _cyclic(edges):
+    degrees = dict.fromkeys(edges, 0)
+    for targets in edges.values():
+        for target in targets:
+            degrees[target] += 1
+    ready = [pid for pid, count in degrees.items() if count == 0]
+    visited = 0
+    while ready:
+        pid = ready.pop()
+        visited += 1
+        for target in edges[pid]:
+            degrees[target] -= 1
+            if degrees[target] == 0:
+                ready.append(target)
+    return visited != len(edges)
+
+
+class _PartitionDebugState:
+    def __init__(self, initial_owner: dict[torch.fx.Node, int]) -> None:
+        self.owner = dict(initial_owner)
+        self.members: dict[int, set[torch.fx.Node]] = {}
+        for node, pid in self.owner.items():
+            self.members.setdefault(pid, set()).add(node)
+
+    def contract(self, keep: int, drop: int) -> None:
+        for node in self.members[drop]:
+            self.owner[node] = keep
+        self.members[keep].update(self.members.pop(drop))
+
+
+@instantiate_parametrized_tests
+class TestPartitionBitset(TorchTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @staticmethod
+    def make_bitset(indices):
+        bits = _PartitionBitset()
+        for index in indices:
+            bits[index] = True
+        return bits
+
+    @parametrize("width", [0, 1, 63, 64, 65, 255, 256, 257, 511, 512, 513])
+    def test_initial_indices(self, width):
+        empty = _PartitionBitset()
+        full = self.make_bitset(range(width))
+        mask = _PartitionMask(width)
+        self.assertEqual(empty.set_bits(), [])
+        self.assertEqual(full.set_bits(), list(range(width)))
+        self.assertTrue(empty.empty())
+        self.assertEqual(full.empty(), width == 0)
+        self.assertFalse(empty.intersects(full, mask))
+        self.assertFalse(full.intersects(empty, mask))
+        self.assertEqual(full.intersects(full, mask), width > 0)
+        capacity = ((width + 255) // 256) * 256
+        probe = self.make_bitset(range(capacity + 1))
+        self.assertEqual(probe.masked(mask).set_bits(), list(range(width)))
+        padding = self.make_bitset(range(width, capacity + 1))
+        self.assertFalse(padding.intersects(padding, mask))
+
+    def test_indexing_and_copy(self):
+        bits = self.make_bitset([0, 63, 64, 65, 255, 256, 257])
+        copied = bits.copy()
+        copied[64] = False
+        copied[1] = True
+        bits[257] = False
+        self.assertEqual(bits.set_bits(), [0, 63, 64, 65, 255, 256])
+        self.assertEqual(copied.set_bits(), [0, 1, 63, 65, 255, 256, 257])
+
+    @parametrize("width", [0, 1, 63, 64, 65, 255, 256, 257, 1000])
+    def test_operations_against_sets(self, width):
+        rng = random.Random(20261019 + width)
+        for _ in range(10):
+            left, right = [
+                {i for i in range(width) if rng.random() < 0.4} for _ in range(2)
+            ]
+            a, b = self.make_bitset(left), self.make_bitset(right)
+            self.assertEqual(set((a & b).set_bits()), left & right)
+            self.assertEqual(set((a | b).set_bits()), left | right)
+            self.assertEqual(set(a.difference(b).set_bits()), left - right)
+            self.assertEqual(a.intersects(b, _PartitionMask(width)), bool(left & right))
+            self.assertEqual(set(a.set_bits()), left)
+            self.assertEqual(set(b.set_bits()), right)
+            result = a.copy()
+            alias = result
+            result |= b
+            self.assertIs(result, alias)
+            self.assertEqual(set(result.set_bits()), left | right)
+            result |= result
+            self.assertEqual(set(result.set_bits()), left | right)
+
+    def test_mask_excludes_inactive_bit(self):
+        a = self.make_bitset([64])
+        b = a.copy()
+        mask = _PartitionMask(65)
+        self.assertTrue(a.intersects(b, mask))
+        mask.reset(64)
+        self.assertFalse(a.intersects(b, mask))
+        self.assertEqual(a.set_bits(), [64])
+        self.assertEqual(b.set_bits(), [64])
+
+    @parametrize("width", [0, 1, 31, 32, 63, 64, 65, 255, 256, 257, 1025])
+    def test_dense_mask_operations(self, width):
+        rng = random.Random(20261103 + width)
+        capacity = ((width + 255) // 256) * 256
+        for _ in range(10):
+            active = _PartitionMask(width)
+            live = {i for i in range(width) if rng.random() < 0.5}
+            for i in set(range(width)) - live:
+                active.reset(i)
+            left, right = [
+                {i for i in range(capacity + 258) if rng.random() < 0.7}
+                for _ in range(2)
+            ]
+            a, b = self.make_bitset(left), self.make_bitset(right)
+            self.assertEqual(a.intersects(b, active), bool(left & right & live))
+            self.assertEqual(b.intersects(a, active), bool(left & right & live))
+            filtered = a.masked(active)
+            self.assertEqual(set(filtered.set_bits()), left & live)
+            filtered[capacity + 300] = True
+            self.assertEqual(set(a.set_bits()), left)
+            a[capacity + 301] = True
+            for i in live:
+                active.reset(i)
+            self.assertEqual(set(filtered.set_bits()), (left & live) | {capacity + 300})
+            self.assertTrue(a.masked(active).empty())
+
+    def test_dense_mask_empty_block_and_late_witness(self):
+        active = _PartitionMask(513)
+        bits = self.make_bitset(range(513))
+        for i in range(512):
+            active.reset(i)
+        filtered = bits.masked(active)
+        self.assertEqual(filtered.set_bits(), [512])
+        self.assertTrue(bits.intersects(bits, active))
+        active.reset(512)
+        self.assertFalse(bits.intersects(bits, active))
+        self.assertTrue(bits.masked(active).empty())
+        self.assertEqual(filtered.set_bits(), [512])
+        filtered[0] = True
+        filtered[512] = False
+        self.assertEqual(filtered.set_bits(), [0])
+
+    @parametrize("size", [-1, (1 << 32) - 1, 1 << 32])
+    def test_invalid_mask_size(self, size):
+        with self.assertRaisesRegex(ValueError, "^Mask size out of range"):
+            _PartitionMask(size)
+
+    @parametrize("size", [0, 1, 63, 64, 65, 255, 256, 257])
+    def test_invalid_mask_index(self, size):
+        active = _PartitionMask(size)
+        for index in {-1, size, size + 1, ((size + 255) // 256) * 256}:
+            with self.subTest(index=index):
+                with self.assertRaisesRegex(IndexError, "^Mask index out of range"):
+                    active.reset(index)
+        bits = self.make_bitset(range(size))
+        self.assertEqual(bits.masked(active).set_bits(), list(range(size)))
+        if size:
+            active.reset(size - 1)
+            self.assertEqual(bits.masked(active).set_bits(), list(range(size - 1)))
+
+    @parametrize("index", [-1, (1 << 32) - 1, 1 << 32])
+    def test_invalid_bitset_index(self, index):
+        bits = _PartitionBitset()
+        with self.assertRaisesRegex(IndexError, "^Bitset index out of range"):
+            bits[index] = True
+        self.assertTrue(bits.empty())
+
+    @parametrize("case", ["missing", "extra", "wrong_mask", "keyword"])
+    def test_masked_arguments(self, case):
+        bits = self.make_bitset([64])
+        active = _PartitionMask(65)
+        calls = {
+            "missing": ((), {}),
+            "extra": ((active, 0), {}),
+            "wrong_mask": ((bits,), {}),
+            "keyword": ((), {"mask": active}),
+        }
+        args, kwargs = calls[case]
+        with self.assertRaisesRegex(TypeError, r"^masked\(\): incompatible function arguments"):
+            bits.masked(*args, **kwargs)
+
+    @parametrize("case", ["missing", "missing_mask", "extra", "wrong_mask", "duplicate", "keywords", "unknown", "wrong_operand"])
+    def test_intersects_arguments(self, case):
+        a = self.make_bitset([64])
+        b = a.copy()
+        mask = _PartitionMask(65)
+        self.assertTrue(a.intersects(b, mask))
+        calls = {
+            "missing": ((), {}),
+            "missing_mask": ((b,), {}),
+            "extra": ((b, mask, mask), {}),
+            "wrong_mask": ((b, b), {}),
+            "duplicate": ((b, mask), {"other": b}),
+            "keywords": ((), {"other": b, "mask": mask}),
+            "unknown": ((b, mask), {"unexpected": True}),
+            "wrong_operand": ((None, mask), {}),
+        }
+        args, kwargs = calls[case]
+        with self.assertRaisesRegex(TypeError, r"^intersects\(\): incompatible function arguments"):
+            a.intersects(*args, **kwargs)
+
+    @parametrize("other", [None, 1, object()])
+    @parametrize("operation", [operator.and_, operator.or_, operator.ior])
+    def test_foreign_operands(self, other, operation):
+        bits = _PartitionBitset()
+        with self.assertRaisesRegex(TypeError, "unsupported operand type.*_PartitionBitset"):
+            operation(bits, other)
+        with self.assertRaisesRegex(TypeError, "unsupported operand type.*_PartitionBitset"):
+            operation(other, bits)
+        with self.assertRaisesRegex(TypeError, r"^difference\(\): incompatible function arguments"):
+            bits.difference(other)
+        with self.assertRaisesRegex(TypeError, r"^intersects\(\): incompatible function arguments"):
+            bits.intersects(other, _PartitionMask(0))
+
+    @parametrize("left,right", [
+        ({0, 1}, {512, 1024}),
+        (set(range(1025)), {1024}),
+        ({1025, 1279, 1280}, {1025, 1279, 1280}),
+        ({0, 255, 256, (1 << 32) - 2}, {1, 255, 256, (1 << 32) - 2}),
+        ({(1 << 32) - 2}, {(1 << 32) - 2}),
+        (set(), {256}),
+    ])
+    def test_masked_intersection_boundaries(self, left, right):
+        mask = _PartitionMask(1025)
+        live = set(range(1025))
+        a, b = self.make_bitset(left), self.make_bitset(right)
+        for inactive in [(), (255,), (256, 1024), (0, 1, 512, 1023)]:
+            for index in inactive:
+                mask.reset(index)
+            live.difference_update(inactive)
+            self.assertEqual(a.intersects(b, mask), bool(left & right & live))
+            self.assertEqual(b.intersects(a, mask), bool(left & right & live))
+            self.assertEqual(set(a.masked(mask).set_bits()), left & live)
+            self.assertEqual(set(a.set_bits()), left)
+            self.assertEqual(set(b.set_bits()), right)
+
+    def test_set_bits_list_survives_mutation(self):
+        bits = self.make_bitset([0, 64, 256])
+        first, second = bits.set_bits(), bits.set_bits()
+        self.assertIsInstance(first, list)
+        self.assertIsNot(first, second)
+        first.append(512)
+        bits[0] = False
+        bits[64] = False
+        bits[256] = False
+        bits[1] = True
+        self.assertEqual(bits.set_bits(), [1])
+        del bits
+        self.assertEqual(first, [0, 64, 256, 512])
+        self.assertEqual(second, [0, 64, 256])
+
+    def test_sparse_distant_blocks(self):
+        positions = [0, 127, 128, 255, 256, 1000000, (1 << 32) - 2]
+        bits = self.make_bitset(positions)
+        other = self.make_bitset([128, (1 << 32) - 2])
+        self.assertEqual(bits.set_bits(), positions)
+        self.assertEqual((bits & other).set_bits(), [128, (1 << 32) - 2])
+        self.assertEqual(bits.difference(other).set_bits(), [0, 127, 255, 256, 1000000])
+        bits[(1 << 32) - 2] = False
+        self.assertEqual(bits.set_bits(), positions[:-1])
+        bits[(1 << 32) - 2] = True
+        self.assertEqual(bits.set_bits(), positions)
+
+    @parametrize("kind", ["index", "bool", "overflow", "float"])
+    def test_argument_conversion_errors(self, kind):
+        class BadIndex:
+            def __index__(self):
+                raise RuntimeError("bad index")
+
+        class BadBool:
+            def __bool__(self):
+                raise RuntimeError("bad bool")
+
+        bits = self.make_bitset([0])
+        args = {
+            "index": (BadIndex(), True),
+            "bool": (0, BadBool()),
+            "overflow": (1 << 100, True),
+            "float": (0.5, True),
+        }
+        index, value = args[kind]
+        with self.assertRaisesRegex(TypeError, r"^__setitem__\(\): incompatible function arguments"):
+            bits[index] = value
+        self.assertEqual(bits.set_bits(), [0])
+
+
+class TestPartitionGraph(TorchTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def assert_closure(self, helper, nodes, state):
+        edges = _edges(nodes, state.owner)
+        self.assertFalse(_cyclic(edges))
+        all_ids = _PartitionBitset()
+        for pid in range(len(nodes)):
+            all_ids[pid] = True
+        self.assertEqual(set(all_ids.masked(helper.mask).set_bits()), set(state.members))
+        self.assertEqual(set(helper.ancestors), set(state.members))
+        self.assertEqual(set(helper.descendants), set(state.members))
+        closure = {}
+        for source in edges:
+            seen = set()
+            stack = list(edges[source])
+            while stack:
+                target = stack.pop()
+                if target not in seen:
+                    seen.add(target)
+                    stack.extend(edges[target])
+            closure[source] = seen
+            self.assertEqual(
+                set(helper.descendants[source].masked(helper.mask).set_bits()), seen
+            )
+        for target in edges:
+            expected = {
+                source for source, reached in closure.items() if target in reached
+            }
+            self.assertEqual(
+                set(helper.ancestors[target].masked(helper.mask).set_bits()), expected
+            )
+
+    def test_direct_edge_and_external_path(self):
+        gm, nodes = _make_graph([[], [0], [1]])
+        helper = _PartitionGraph(gm.graph.nodes)
+        state = _PartitionDebugState(helper.initial_owner)
+        a, b, c = [state.owner[node] for node in nodes]
+        self.assertFalse(helper.would_create_cycle(a, b))
+        self.assertTrue(helper.would_create_cycle(a, c))
+        helper.contract(a, b)
+        state.contract(a, b)
+        self.assertNotIn(b, helper.ancestors)
+        self.assertFalse(helper.would_create_cycle(a, c))
+        helper.contract(a, c)
+        state.contract(a, c)
+        self.assert_closure(helper, tuple(gm.graph.nodes), state)
+
+    def test_horizontal_merge_creates_new_paths(self):
+        gm, nodes = _make_graph([[], [0], [], [2]])
+        helper = _PartitionGraph(gm.graph.nodes)
+        state = _PartitionDebugState(helper.initial_owner)
+        a, b, c, d = [state.owner[node] for node in nodes]
+        self.assertFalse(helper.would_create_cycle(b, c))
+        helper.contract(b, c)
+        state.contract(b, c)
+        self.assertTrue(helper.would_create_cycle(a, d))
+        self.assert_closure(helper, tuple(gm.graph.nodes), state)
+
+    def test_cached_rejection_is_invalidated_by_contraction(self):
+        gm, nodes = _make_graph([[], [0], [1]])
+        helper = _PartitionGraph(gm.graph.nodes)
+        state = _PartitionDebugState(helper.initial_owner)
+        a, b, c = [state.owner[node] for node in nodes]
+        self.assertTrue(helper.would_create_cycle(a, c))
+        self.assertTrue(helper.would_create_cycle(a, c))
+        # Removing the external witness makes the same candidate pair legal.
+        helper.contract(a, b)
+        state.contract(a, b)
+        self.assertFalse(helper.would_create_cycle(a, c))
+        self.assert_closure(helper, tuple(gm.graph.nodes), state)
+
+    def test_rejected_candidates_are_specific_to_the_anchor(self):
+        gm, nodes = _make_graph([[], [0], [1], []])
+        helper = _PartitionGraph(gm.graph.nodes)
+        a, b, c, d = [helper.initial_owner[node] for node in nodes]
+        self.assertTrue(helper.would_create_cycle(a, c))
+        self.assertTrue(helper.would_create_cycle(a, c))
+        self.assertFalse(helper.would_create_cycle(d, c))
+        self.assertTrue(helper.would_create_cycle(a, c))
+        self.assertFalse(helper.would_create_cycle(a, b))
+        with self.assertRaisesRegex(ValueError, "two distinct partitions"):
+            helper.would_create_cycle(a, a)
+
+    def test_contractions_across_blocks(self):
+        gm, nodes = _make_graph([[]] + [[i - 1] for i in range(1, 258)])
+        helper = _PartitionGraph(gm.graph.nodes)
+        state = _PartitionDebugState(helper.initial_owner)
+        keep = state.owner[nodes[0]]
+        last = state.owner[nodes[-1]]
+        self.assertTrue(helper.would_create_cycle(keep, last))
+        for node in nodes[1:]:
+            drop = state.owner[node]
+            self.assertFalse(helper.would_create_cycle(keep, drop))
+            helper.contract(keep, drop)
+            state.contract(keep, drop)
+            self.assertNotIn(drop, helper.ancestors)
+            if drop in (63, 64, 65, 255, 256, 257):
+                self.assert_closure(helper, tuple(gm.graph.nodes), state)
+        self.assertEqual(state.members[keep], set(nodes))
+        self.assert_closure(helper, tuple(gm.graph.nodes), state)
+
+    def test_random_contractions_against_kahn(self):
+        rng = random.Random(20261010)
+        merge_directions = set()
+        for _ in range(100):
+            size = rng.randrange(2, 13)
+            parents = [
+                rng.sample(range(i), min(i, rng.randrange(3))) for i in range(size)
+            ]
+            gm, _ = _make_graph(parents)
+            nodes = tuple(gm.graph.nodes)
+            helper = _PartitionGraph(nodes)
+            state = _PartitionDebugState(helper.initial_owner)
+            self.assert_closure(helper, nodes, state)
+            while len(state.members) > 1:
+                pairs = list(itertools.combinations(state.members, 2))
+                rng.shuffle(pairs)
+                accepted = None
+                for a, b in pairs:
+                    expected = _cyclic(_edges(nodes, state.owner, a, b))
+                    self.assertEqual(helper.would_create_cycle(a, b), expected)
+                    if not expected and accepted is None:
+                        accepted = (a, b)
+                if accepted is None:
+                    break
+                keep, drop = accepted
+                if rng.getrandbits(1):
+                    keep, drop = drop, keep
+                merge_directions.add(keep < drop)
+                self.assertFalse(helper.would_create_cycle(keep, drop))
+                helper.contract(keep, drop)
+                state.contract(keep, drop)
+                self.assert_closure(helper, nodes, state)
+        self.assertEqual(merge_directions, {False, True})
+
+    def test_unsupported_node_blocks_merge(self):
+        gm, nodes = _make_graph([[], [0], [1]])
+        nodes[1].meta["supported"] = False
+        partitions = CapabilityBasedPartitioner(
+            gm, _Support(), allows_single_node_partition=True
+        ).propose_partitions()
+        self.assertEqual(
+            {frozenset(p.nodes) for p in partitions},
+            {frozenset([nodes[0]]), frozenset([nodes[2]])},
+        )
+
+    def test_random_partition_graph_is_acyclic(self):
+        rng = random.Random(20261010)
+        for _ in range(100):
+            graph = Graph()
+            nodes = [graph.placeholder("x")]
+            for i in range(rng.randrange(5, 35)):
+                node = graph.call_function(
+                    operator.add, (rng.choice(nodes), rng.choice(nodes))
+                )
+                node.meta["supported"] = rng.random() < 0.7
+                nodes.append(node)
+            graph.output(tuple(nodes[1:]))
+            gm = GraphModule(torch.nn.Module(), graph)
+            for skip_horizontal in (True, False):
+                for single in (True, False):
+                    partitions = CapabilityBasedPartitioner(
+                        gm,
+                        _Support(),
+                        allows_single_node_partition=single,
+                        skip_horizontal_fusion=skip_horizontal,
+                    ).propose_partitions()
+                    owner = {node: i for i, node in enumerate(graph.nodes)}
+                    for i, partition in enumerate(partitions):
+                        for node in partition.nodes:
+                            owner[node] = -i - 1
+                    self.assertFalse(_cyclic(_edges(tuple(graph.nodes), owner)))
+
+    def test_nested_getitem_postprocessing(self):
+        graph = Graph()
+        x = graph.placeholder("x")
+        producer = graph.call_function(torch.max, (x, 0))
+        first = graph.call_function(operator.getitem, (producer, 0))
+        second = graph.call_function(operator.getitem, (first, 0))
+        graph.output(second)
+        producer.meta["supported"] = True
+        gm = GraphModule(torch.nn.Module(), graph)
+        partitions = CapabilityBasedPartitioner(
+            gm, _Support(), allows_single_node_partition=True
+        ).propose_partitions()
+        self.assertEqual(len(partitions), 1)
+        self.assertEqual(set(partitions[0].nodes), {producer, first, second})
+
+
+def _make_merge_regression_graph():
+    # -1 denotes the input; other indices refer to preceding addition nodes.
+    parents = [
+        (-1, -1),
+        (0, 0),
+        (1, -1),
+        (-1, 1),
+        (-1, 0),
+        (-1, 4),
+        (0, 5),
+        (6, 1),
+        (1, 7),
+        (1, 4),
+        (6, 0),
+        (5, 0),
+        (4, 4),
+        (2, -1),
+        (9, 8),
+        (4, 1),
+        (6, -1),
+        (12, 2),
+        (15, 13),
+        (4, 3),
+        (19, 1),
+    ]
+    graph = Graph()
+    x = graph.placeholder("x")
+    nodes = []
+    coefficients = []
+    for predecessors in parents:
+        args = tuple(x if i == -1 else nodes[i] for i in predecessors)
+        nodes.append(graph.call_function(operator.add, args))
+        coefficients.append(
+            sum(1 if i == -1 else coefficients[i] for i in predecessors)
+        )
+    graph.output(tuple(nodes))
+    return GraphModule(torch.nn.Module(), graph), coefficients
+
+
+@instantiate_parametrized_tests
+class TestCapabilityPartitionerRegressions(TorchTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_dependency_viewer_for_subclasses(self):
+        class LegacyPartitioner(CapabilityBasedPartitioner):
+            def downstreams_of(self, node):
+                return self.dependency_viewer.downstreams_of(node)
+
+        gm = symbolic_trace(lambda x: (x + 1) * 2)
+        x, add, mul, output = gm.graph.nodes
+        support = create_op_support(lambda submodules, node: node.op == "call_function")
+        partitioner = LegacyPartitioner(gm, support)
+        downstreams = partitioner.downstreams_of(x)
+        self.assertEqual(downstreams, {add, mul, output})
+        self.assertEqual(partitioner.downstreams_of(add), {mul, output})
+        self.assertEqual(partitioner.downstreams_of(output), set())
+        partitions = partitioner.propose_partitions()
+        self.assertEqual(
+            [set(partition.nodes) for partition in partitions], [{add, mul}]
+        )
+        self.assertIs(partitioner.downstreams_of(x), downstreams)
+        self.assertEqual(downstreams, {add, mul, output})
+
+        replacement = _DependencyViewer(gm)
+        partitioner.dependency_viewer = replacement
+        self.assertIs(partitioner.dependency_viewer, replacement)
+
+    def test_partitioning_does_not_construct_legacy_dependencies(self):
+        gm = symbolic_trace(lambda x: (x + 1) * 2)
+        support = create_op_support(lambda submodules, node: node.op == "call_function")
+        with patch(
+            "torch.fx.passes.infra.partitioner._DependencyViewer",
+            side_effect=AssertionError("Legacy dependencies should remain lazy"),
+        ):
+            partitioner = CapabilityBasedPartitioner(gm, support)
+            partitions = partitioner.propose_partitions()
+        self.assertEqual(len(partitions), 1)
+
+    @parametrize("retrace", [False, True])
+    @parametrize("skip_horizontal_fusion", [False, True])
+    def test_reachability_after_partition_representative_changes(
+        self, retrace, skip_horizontal_fusion
+    ):
+        gm, coefficients = _make_merge_regression_graph()
+        if retrace:
+            gm = symbolic_trace(gm)
+        gm.graph.lint()
+        x = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+        expected = tuple(x * coefficient for coefficient in coefficients)
+        self.assertEqual(gm(x), expected)
+        declined_names = {
+            "add",
+            "add_5",
+            "add_8",
+            "add_9",
+            "add_11",
+            "add_12",
+            "add_16",
+            "add_18",
+        }
+        self.assertTrue(declined_names <= {node.name for node in gm.graph.nodes})
+        support = chain(
+            create_op_support(lambda submodules, node: node.op == "call_function"),
+            OpSupports.decline_if_node_in_names(declined_names),
+        )
+        partitioner = CapabilityBasedPartitioner(
+            gm,
+            support,
+            allows_single_node_partition=True,
+            skip_horizontal_fusion=skip_horizontal_fusion,
+        )
+        partitions = partitioner.propose_partitions()
+        # A stale reference to partition 2 misses its later representative 11.
+        # With vertical fusion only, the old implementation creates the cycle
+        # P11 -> P9 -> add_12 -> P11 and fuse_partitions raises an AssertionError.
+        fused = partitioner.fuse_partitions(partitions)
+        fused.graph.lint()
+        self.assertEqual(fused(x), expected)
+
+
 
 @instantiate_parametrized_tests
 class TestFXGraphPasses(JitTestCase):
