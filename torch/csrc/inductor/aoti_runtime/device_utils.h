@@ -28,6 +28,12 @@ namespace torch::aot_inductor {
 
 using DeviceStreamType = cudaStream_t;
 
+inline bool is_stream_capturing(cudaStream_t stream) {
+  cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+  AOTI_RUNTIME_CUDA_CHECK(cudaStreamIsCapturing(stream, &status));
+  return status != cudaStreamCaptureStatusNone;
+}
+
 } // namespace torch::aot_inductor
 
 #elif defined(USE_XPU)

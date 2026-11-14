@@ -41,7 +41,7 @@ def tiling_scores_suggest_inner_reduction(
     sizevars = V.graph.sizevars
     non_reduction_score = sum(
         sizevars.optimization_hint(tiling_scores.get(dim, 0), fallback=0)
-        for dim in ("x", "y", "z")
+        for dim in ("x", "y", "z0_")
     )
     non_reduction_score = max(non_reduction_score, 1)
     r_score = sizevars.optimization_hint(tiling_scores["r0_"], fallback=0)

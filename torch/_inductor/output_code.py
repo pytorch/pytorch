@@ -934,9 +934,10 @@ class CompiledFxGraph(OutputCode):
                 # even if lowering recorded a disabled reason. Only a loader whose
                 # box is not the one this graph was compiled with gets here: an
                 # AOTAutograd cache hit (see CompilerConfigExtra.backward_cudagraphs)
-                # or a precompile load, for a backward sharing its forward's box or
-                # a forward whose request was dropped under cpp_wrapper/aot_mode.
-                # So leave that box alone and continue with a local one.
+                # or a precompile load, e.g. for a backward whose request the
+                # pre-AOT graph overestimated, or a graph whose region-only request
+                # was dropped under cpp_wrapper/fx_wrapper/aot_mode. So leave that
+                # box alone and continue with a local one.
                 if reason := self.fx_kwargs.get("cudagraphs_dropped_reason"):
                     log_cudagraph_skip_and_bump_counter(reason)
                 else:

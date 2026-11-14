@@ -1507,7 +1507,7 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(result, fn(x))
         self.assertEqual(len(captures), 0 if region_opts_in else 1)
-        # Only a dropped opt-in is a skip; an opt-out keeps the whole-graph capture.
+        # An opt-out keeps the whole-graph capture, so nothing is skipped.
         self.assertEqual(counters["inductor"]["cudagraph_skips"], int(region_opts_in))
         self.assertNotIn("partition_0", code)
 

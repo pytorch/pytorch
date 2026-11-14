@@ -231,7 +231,7 @@ class TestMaxAutotune(TestCase):
         for size_hints in (
             {"x": 2048},
             {"x": 128, "y": 256},
-            {"x": 64, "y": 64, "z": 64},
+            {"x": 64, "y": 64, "z0_": 64},
         ):
             with self.subTest(size_hints=size_hints):
                 max_autotune_configs = pointwise(
