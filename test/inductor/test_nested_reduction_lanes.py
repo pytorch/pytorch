@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import unittest
 
 import torch
 import torch._inductor.test_operators
@@ -28,7 +29,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_block_ptr
+from torch.utils._triton import has_triton_stable_tma_api
 
 
 # Make the helper files in test/ importable
@@ -468,6 +470,21 @@ class TestNestedLaneForwarding(NestedLaneTestCase):
     hw_classification = HardwareClassification.CUDA
 
     @parametrize("persistent", [False, True])
+    @unittest.skipUnless(
+        has_triton_stable_tma_api(), "requires tensor descriptor support"
+    )
+    @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
+    def test_pair_lane_inputs_tensor_descriptor(self, device, persistent):
+        source = self._check_pair_lane_inputs(device, persistent, 2, "sub", "aligned")
+        self.assertRegex(source, r"(?:tl\.make_tensor_descriptor|TensorDescriptor)\(")
+
+    @requires_block_ptr
+    @config.patch({"triton.use_block_ptr": True, "triton.use_tensor_descriptor": False})
+    def test_pair_lane_inputs_block_ptr(self, device):
+        source = self._check_pair_lane_inputs(device, False, 2, "sub", "aligned")
+        self.assertIn("tl.make_block_ptr", source)
+
+    @parametrize("persistent", [False, True])
     @parametrize("source_before_reduction", [False, True])
     def test_source_lifetime(self, device, persistent, source_before_reduction):
         def fn(x):
@@ -499,6 +516,11 @@ class TestNestedLaneForwarding(NestedLaneTestCase):
         ],
     )
     def test_pair_lane_inputs(self, device, persistent, group_size, operation, pattern):
+        self._check_pair_lane_inputs(device, persistent, group_size, operation, pattern)
+
+    def _check_pair_lane_inputs(
+        self, device, persistent, group_size, operation, pattern
+    ):
         def fn(x):
             groups = realized_rms_groups(x, group_size)
             maximum = groups.abs().amax(-1)
@@ -531,6 +553,7 @@ class TestNestedLaneForwarding(NestedLaneTestCase):
         if pattern == "different_source":
             expected *= 2
         self.assertEqual(source.count("tl.split("), expected)
+        return source
 
     @parametrize("persistent", [False, True])
     @parametrize("dtype", [torch.float16, torch.bfloat16])

@@ -98,6 +98,7 @@ from .static_triton_launcher import (
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
 )
+from .tiling import block_to_prefix, get_max_block
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
@@ -4149,7 +4150,7 @@ def check_config(cfg, *, xnumel=None, ynumel=None, z0_numel=None):
                     f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
                     f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
                 )
-        max_block = TRITON_MAX_BLOCK[label]
+        max_block = get_max_block(label, TRITON_MAX_BLOCK)
         max_block_str = f'config.triton.max_block["{label}"]'
         if max_block % block != 0:
             raise AssertionError(
@@ -4165,8 +4166,8 @@ def check_max_block(cfg: dict[str, int]):
     for var, val in cfg.items():
         block_suffix = "BLOCK"
         if block_suffix in var:
-            prefix = var.removesuffix(block_suffix)
-            max_block = TRITON_MAX_BLOCK[prefix]
+            prefix = block_to_prefix(var)
+            max_block = get_max_block(prefix, TRITON_MAX_BLOCK)
             if val > max_block:
                 raise AssertionError(
                     f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
@@ -4262,13 +4263,13 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        if (
-            frozenset(("YBLOCK", "Z0_BLOCK", "R1_BLOCK", "R2_BLOCK"))
-            & cfg.kwargs.keys()
+        if any(
+            key.endswith("BLOCK") and key not in ("XBLOCK", "R0_BLOCK")
+            for key in cfg.kwargs
         ):
             raise AssertionError(
-                "min_xblock/min_rblock do not support YBLOCK, Z0_BLOCK, "
-                f"R1_BLOCK, or R2_BLOCK configs: {cfg}"
+                "min_xblock/min_rblock do not support YBLOCK, Z blocks, "
+                f"or reduction blocks other than R0_BLOCK: {cfg}"
             )
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
@@ -4500,7 +4501,7 @@ def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, in
     rnumels = {}
     for idx in range(num_reduction_dims - 1, -1, -1):
         prefix = f"r{idx}_"
-        max_size = min(size_hints[prefix], TRITON_MAX_BLOCK[prefix.upper()])
+        max_size = min(size_hints[prefix], get_max_block(prefix, TRITON_MAX_BLOCK))
         dim = min(max_size, remaining)
         if remaining % dim != 0:
             raise AssertionError(
@@ -4702,9 +4703,10 @@ def _combo_coordesc_meta(
                 continue
             field_order.append(key)
             block_key = key.rsplit("_", 1)[0]
-            prefix = block_key.removesuffix("BLOCK").lower()
-            if (max_block := TRITON_MAX_BLOCK.get(prefix.upper())) is not None:
-                field_limits[key] = min(max_block, size_hints_i.get(prefix, max_block))
+            prefix = block_to_prefix(block_key)
+            if prefix in size_hints_i:
+                max_block = get_max_block(prefix, TRITON_MAX_BLOCK)
+                field_limits[key] = min(max_block, size_hints_i[prefix])
             if block_key in min_block_sizes:
                 field_minimums[key] = min_block_sizes[block_key]
     return field_order, field_limits, field_minimums
@@ -4859,10 +4861,10 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 continue
             combined_key = f"{key}_{i}"
             group_coordesc_fields.add(combined_key)
-            prefix = key.removesuffix("BLOCK").lower()
+            prefix = block_to_prefix(key)
             if prefix in size_hints_i:
                 combo_coordesc_field_limits[combined_key] = min(
-                    TRITON_MAX_BLOCK[prefix.upper()],
+                    get_max_block(prefix, TRITON_MAX_BLOCK),
                     size_hints_i[prefix],
                 )
             if key in min_block_sizes_i:
