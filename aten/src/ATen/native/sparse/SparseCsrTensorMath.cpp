@@ -1383,7 +1383,9 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
     kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_prod_cpu",
     [&] {
-      result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_reduce, keepdim, ReductionMulOp<scalar_t>());
+      // Same accumulate type as _sparse_csr_sum_cpu
+      using acc_t = at::acc_type<scalar_t, true>;
+      result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_reduce, keepdim, ReductionMulOp<acc_t>());
     });
   return result;
 }
