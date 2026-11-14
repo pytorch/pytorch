@@ -469,7 +469,10 @@ def foreach_pointwise_tensor(
     tensor2: list[torch.Tensor],
     scalars: torch.Tensor,
 ) -> list[FakeTensor] | None:
-    if scalars.device.type != "cpu":
+    if scalars.device.type != "cpu" and (
+        scalars.device.type != torch._C._get_privateuse1_backend_name()
+        or any(t.device != scalars.device for t in inputs)
+    ):
         raise RuntimeError(
             f"Expected scalars to be on CPU, got {scalars.device} instead."
         )

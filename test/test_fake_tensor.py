@@ -95,6 +95,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TemporaryFileName,
     TEST_ACCELERATOR,
+    TEST_PRIVATEUSE1_DEVICE_TYPE,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
@@ -246,6 +247,70 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(z.shape, (4, 2, 2))
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(is_fake_tensor(z))
+
+    @parametrize("op_name", ["addcdiv", "addcmul"])
+    @parametrize("inplace", [False, True])
+    @parametrize("scalar_device", ["cpu", f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0"])
+    def test_foreach_pointwise_tensor_privateuse1(
+        self, op_name: str, inplace: bool, scalar_device: str
+    ) -> None:
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("propagate_real_tensors requires real accelerator tensors")
+        with FakeTensorMode():
+            inputs = [
+                torch.empty(shape, device=f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0")
+                for shape in ((2, 3), (4,))
+            ]
+            scalars = torch.empty(2, device=scalar_device)
+            result = getattr(
+                aten, f"_foreach_{op_name}{'_' if inplace else ''}"
+            ).Tensor(self=inputs, tensor1=inputs, tensor2=inputs, scalars=scalars)
+            if inplace:
+                self.assertIsNone(result)
+            else:
+                self.assertEqual(len(result), len(inputs))
+                for actual, expected in zip(result, inputs):
+                    self.assertTrue(is_fake_tensor(actual))
+                    self.checkMetaProps(t1=actual, t2=expected)
+
+    @parametrize("op_name", ["addcdiv", "addcmul"])
+    @parametrize("inplace", [False, True])
+    @parametrize(
+        "input_devices,scalar_device",
+        [
+            (
+                (f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0",),
+                f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:1",
+            ),
+            (
+                (
+                    f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0",
+                    f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:1",
+                ),
+                f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0",
+            ),
+            (("cpu",), f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0"),
+            (("cpu",), "meta"),
+            (("cuda:0",), "cuda:0"),
+            (("meta",), "meta"),
+        ],
+    )
+    def test_foreach_pointwise_tensor_scalar_device_mismatch(
+        self,
+        op_name: str,
+        inplace: bool,
+        input_devices: tuple[str, ...],
+        scalar_device: str,
+    ) -> None:
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("propagate_real_tensors requires real accelerator tensors")
+        with FakeTensorMode():
+            inputs = [torch.empty(2, 3, device=device) for device in input_devices]
+            scalars = torch.empty(len(inputs), device=scalar_device)
+            with self.assertRaisesRegex(RuntimeError, "Expected scalars to be on CPU"):
+                getattr(aten, f"_foreach_{op_name}{'_' if inplace else ''}").Tensor(
+                    self=inputs, tensor1=inputs, tensor2=inputs, scalars=scalars
+                )
 
     def test_sparse_compressed_tensor_creation(self):
         def csr():
