@@ -102,6 +102,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     parametrize,
     skipIfCppFakeTensor,
+    skipIfWindowsXPU,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -5501,6 +5502,7 @@ class TestAutotuneCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
+    @skipIfWindowsXPU(msg="https://github.com/intel/torch-xpu-ops/issues/6167")
     @config.patch({"use_static_triton_launcher": True})
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
