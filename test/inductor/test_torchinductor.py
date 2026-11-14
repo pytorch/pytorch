@@ -21880,6 +21880,81 @@ if RUN_CPU:
             _, code_vec = run_and_get_cpp_code(opt_f, x_vec)
             FileCheck().check_not(".abs()").run(code_vec)
 
+        def test_logspace_complex128_explicit_dtype(self):
+            # Regression test for https://github.com/pytorch/pytorch/issues/203185
+            from torch.testing._internal.common_utils import set_default_dtype
+
+            with set_default_dtype(torch.float32):
+                for exponent in (0j, complex(2.0**-30, 0.0)):
+
+                    def fn():
+                        return torch.logspace(
+                            exponent,
+                            exponent,
+                            steps=1,
+                            base=2.0,
+                            dtype=torch.complex128,
+                            device="cpu",
+                        )
+
+                    eager = fn()
+                    compiled = torch.compile(
+                        fn,
+                        backend="inductor",
+                        fullgraph=True,
+                        dynamic=False,
+                    )()
+
+                    with self.subTest(exponent=exponent, check="dtype"):
+                        self.assertEqual(compiled.dtype, torch.complex128)
+
+                    with self.subTest(exponent=exponent, check="precision"):
+                        torch.testing.assert_close(
+                            compiled,
+                            eager,
+                            rtol=0,
+                            atol=1e-12,
+                            check_dtype=False,
+                        )
+
+        def test_logspace_complex_dtype_inference(self):
+            from torch.testing._internal.common_utils import set_default_dtype
+
+            cases = (
+                (torch.float32, None, torch.complex64),
+                (torch.float64, None, torch.complex128),
+                (torch.float32, torch.complex64, torch.complex64),
+            )
+
+            for default_dtype, requested_dtype, expected_dtype in cases:
+                with self.subTest(
+                    default_dtype=default_dtype,
+                    requested_dtype=requested_dtype,
+                ):
+                    with set_default_dtype(default_dtype):
+
+                        def fn():
+                            return torch.logspace(
+                                0j,
+                                1j,
+                                steps=3,
+                                base=2.0,
+                                dtype=requested_dtype,
+                                device="cpu",
+                            )
+
+                        eager = fn()
+                        compiled = torch.compile(
+                            fn,
+                            backend="inductor",
+                            fullgraph=True,
+                            dynamic=False,
+                        )()
+
+                        self.assertEqual(eager.dtype, expected_dtype)
+                        self.assertEqual(compiled.dtype, expected_dtype)
+                        torch.testing.assert_close(compiled, eager)
+
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
 if RUN_GPU or HAS_MPS:
