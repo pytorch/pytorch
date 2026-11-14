@@ -1,11 +1,13 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import copy
 import dis
 import gc
 import importlib
 import math
 import os
+import random
 import signal
 import sys
 import threading
@@ -24,6 +26,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    slowTest,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1198,6 +1201,17 @@ class TestCfgPasses(TestCase):
         ):
             compiled.nothing
 
+    def test_ndim(self):
+        # Nothing is loaded between x and its ndim, unlike for x.dim(): the
+        # pass that turns both into the rank must not look for what is.
+        def rank(x):
+            return x.ndim + 1
+
+        compiled = torch.cfg_compile(rank, fallback=False)
+        for shape in ((2, 3), (2, 3), (4,), (2, 3, 4)):
+            self.assertEqual(compiled(torch.ones(shape)), len(shape) + 1)
+        self.assertIn("tensor_dim", compiled.dump())
+
     def test_pipeline_descriptor(self):
         default = Pipeline.default()
         self.assertNotIn("narrow_dims", default.passes)
@@ -1311,6 +1325,147 @@ class TestCfgPasses(TestCase):
         self.assertIn("3 <= size(%x.1, 0) <= 3", text)
         self.assertIn("5 <= size(%x.1, 0) <= 5", text)
         self.assertEqual(block_stats(compiled, "profile_runs"), [2])
+
+    def test_pass_replaces_a_run_by_a_call(self):
+        # The pass has the VM call `run` where the block had its
+        # instructions; `run` gets the values the instructions took from
+        # before them and gives the ones that are needed after them.
+        made = []
+
+        class Run:
+            def __init__(self, replay):
+                self.replay = replay
+                self.inputs, self.outputs = replay.io(replay.start, replay.end)
+                self.calls = 0
+
+            def __call__(self, *args):
+                self.calls += 1
+                env = dict(zip(self.inputs, args))
+                self.replay.run(self.replay.start, self.replay.end, env)
+                return tuple(env[value] for value in self.outputs)
+
+        def replace(region):
+            insts = region.instructions()
+            if any(inst["op"] == "call_object" for inst in insts):
+                return False
+            work = [i for i, inst in enumerate(insts) if inst["op"] == "binary"]
+            if region.note is None:
+                self.assertTrue(all(insts[i]["replayable"] for i in work))
+                region.note = Run(region.replayer(work[0], work[-1] + 1))
+                made.append(region.note)
+            run = region.note
+            return region.fuse(run.replay.start, run.replay.end, run)
+
+        def f(x, y, k):
+            a = x * y + k
+            b = a - x
+            return a, b * 2
+
+        compiled = torch.cfg_compile(f, pipeline=Pipeline([replace]), fallback=False)
+        for k in range(6):
+            x, y = torch.randn(3), torch.randn(3)
+            self.assertEqual(compiled(x, y, k), f(x, y, k), atol=0, rtol=0)
+        (run,) = made
+        # The first call profiled the block; the others went through `run`.
+        self.assertEqual(run.calls, 5)
+        self.assertEqual(len(run.inputs), 3)
+        # What is returned, and `b`, which the block keeps alive to its end
+        # as the interpreter's frame would.
+        self.assertEqual(len(run.outputs), 3)
+        self.assertIn("call_object", compiled.dump())
+        self.assertEqual(
+            run.replay.name,
+            "TestCfgPasses.test_pass_replaces_a_run_by_a_call.<locals>.f (block 0)",
+        )
+        # Four operators and the constant one of them takes.
+        self.assertEqual(len(run.replay.text(run.replay.start, run.replay.end)), 5)
+
+    def test_replayed_error_names_its_instruction(self):
+        handles = []
+
+        def grab(region):
+            if not handles:
+                handles.append(
+                    (
+                        region.replayer(0, len(region.instructions())),
+                        region.instructions(),
+                    )
+                )
+            return False
+
+        def f(x, y):
+            a = x + 1
+            b = a @ y
+            return b - 1
+
+        compiled = torch.cfg_compile(f, pipeline=Pipeline([grab]), fallback=False)
+        compiled(torch.ones(2, 3), torch.ones(3, 2))
+        ((replay, insts),) = handles
+        binary = [i for i, inst in enumerate(insts) if inst["op"] == "binary"]
+        lo, hi = 0, binary[-1] + 1
+        inputs, outputs = replay.io(lo, hi)
+        self.assertEqual(len(inputs), 2)
+        env = dict(zip(inputs, (torch.ones(2, 3), torch.ones(3, 2))))
+        replay.run(lo, hi, env)
+        # The outputs are in the order they are defined: the result is last.
+        self.assertEqual(env[outputs[-1]], f(torch.ones(2, 3), torch.ones(3, 2)))
+        # The matrix product is the second of the three.
+        env = dict(zip(inputs, (torch.ones(2, 3), torch.ones(4, 2))))
+        with self.assertRaisesRegex(
+            RuntimeError, "shapes cannot be multiplied"
+        ) as caught:
+            replay.run(lo, hi, env)
+        self.assertEqual(caught.exception.cfg_index, binary[1])
+        with self.assertRaisesRegex(IndexError, "outside the range"):
+            replay.io(lo, hi + 100)
+
+    def test_settle_specializes_the_block_again(self):
+        seen = []
+
+        def note_taker(region):
+            seen.append(region.note)
+            if region.note is None:
+                region.note = [region.replayer(0, len(region.instructions()))]
+            return False
+
+        def f(x):
+            return x * 2
+
+        compiled = torch.cfg_compile(
+            f,
+            pipeline=Pipeline([note_taker, *Pipeline.default().passes]),
+            fallback=False,
+        )
+        for _ in range(3):
+            self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 2.0))
+        (note,) = [n for n in seen if n is not None][:1]
+        runs = len(seen)
+        note[0].settle("again")
+        # The pass ran on the block right away, and saw what was left for it.
+        self.assertGreater(len(seen), runs)
+        self.assertEqual(seen[-1], "again")
+        self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 2.0))
+
+    def test_profiling_depth(self):
+        depths = []
+
+        def probe(x):
+            depths.append(cfg_rs.profiling_depth())
+            return x
+
+        def inner(x):
+            return probe(x) + 1
+
+        def outer(x):
+            return inner(x) * 2
+
+        compiled = torch.cfg_compile(outer, fallback=False, inline=False, callees=True)
+        for _ in range(3):
+            compiled(torch.ones(2))
+        # The first run of a block is its profiling run: on the first call
+        # that is outer's, inner's and the one of probe itself.
+        self.assertEqual(depths, [3, 0, 0])
+        self.assertEqual(cfg_rs.profiling_depth(), 0)
 
     def test_region_is_only_valid_during_the_pass(self):
         kept = []
@@ -3070,6 +3225,22 @@ def demote_caller(n, x):
     return demote_python(n), x + 1
 
 
+def demote_chain_1(n):
+    return demote_python(n)
+
+
+def demote_chain_2(n):
+    return demote_chain_1(n)
+
+
+def demote_chain_3(n):
+    return demote_chain_2(n)
+
+
+def demote_chain_4(n):
+    return demote_chain_3(n)
+
+
 @unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
 class TestCfgDemotion(TestCase):
     """What the interpreter runs faster is left to it."""
@@ -3096,6 +3267,43 @@ class TestCfgDemotion(TestCase):
         for _ in range(200):
             self.assertEqual(compiled(300), demote_python(300))
         self.assertTrue(compiled.stats()["demoted"])
+
+    def test_measurement_is_reported(self):
+        compiled = torch.cfg_compile(demote_python, fallback=False, demote=True)
+        self.assertTrue(compiled.stats()["measuring"])
+        for _ in range(200):
+            compiled(300)
+        stats = compiled.stats()
+        self.assertEqual((stats["measuring"], stats["demoted"]), (False, True))
+        unmeasured = torch.cfg_compile(demote_python, fallback=False, demote=False)
+        self.assertFalse(unmeasured.stats()["measuring"])
+
+    def test_chain_of_calls_is_measured_at_once(self):
+        # Five functions deep. Were each measured from scratch once the one
+        # it calls is settled, the outermost would still be at it.
+        compiled = torch.cfg_compile(
+            demote_chain_4, fallback=False, demote=True, inline=False
+        )
+        for _ in range(150):
+            self.assertEqual(compiled(300), demote_python(300))
+        stats = compiled.stats()
+        self.assertFalse(stats["measuring"])
+        # The loop is with the interpreter: on its own, or along with
+        # callers of it, which cost the same either way once it is.
+        self.assertTrue(stats["demoted"] or stats["demoted_callees"])
+
+    def test_measurement_starts_over_when_compiled_code_changes(self):
+        compiled = torch.cfg_compile(demote_python, fallback=False, demote=True)
+        for _ in range(200):
+            # What a pass says when it has replaced part of a block.
+            cfg_rs.plan_changed()
+            compiled(300)
+        stats = compiled.stats()
+        self.assertEqual((stats["measuring"], stats["demoted"]), (True, False))
+        for _ in range(200):
+            compiled(300)
+        stats = compiled.stats()
+        self.assertEqual((stats["measuring"], stats["demoted"]), (False, True))
 
     def test_nothing_is_demoted_when_turned_off(self):
         compiled = torch.cfg_compile(
@@ -3227,6 +3435,739 @@ class TestCfgEndToEnd(TestCase):
 
 
 instantiate_parametrized_tests(TestCfgEndToEnd)
+
+
+class RegionNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 4, 3, padding=1)
+        self.bn = torch.nn.BatchNorm2d(4)
+        self.fc = torch.nn.Linear(4 * 6 * 6, 5)
+
+    def forward(self, x):
+        x = torch.relu(self.bn(self.conv(x)))
+        return self.fc(torch.tanh(x.flatten(1)))
+
+
+class RegionBranch(torch.nn.Module):
+    # Branches on data between two stretches that trace.
+    def __init__(self):
+        super().__init__()
+        self.first = RegionNet()
+        self.second = torch.nn.Sequential(
+            torch.nn.Linear(5, 8),
+            torch.nn.ReLU(),
+            torch.nn.Linear(8, 8),
+            torch.nn.Tanh(),
+        )
+
+    def forward(self, x):
+        h = self.first(x)
+        if h.sum() > 0:
+            h = h * 2
+        return self.second(h)
+
+
+class RegionCounting(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.inner = RegionNet()
+        self.calls = 0
+
+    def forward(self, x):
+        self.calls += 1
+        return self.inner(x)
+
+
+class RegionLayers(torch.nn.Module):
+    # A stack of layers behind a branch on data, so that each layer is a
+    # region of its own.
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            torch.nn.Sequential(
+                torch.nn.Linear(6, 6),
+                torch.nn.Tanh(),
+                torch.nn.Linear(6, 6),
+                torch.nn.ReLU(),
+            )
+            for _ in range(5)
+        )
+
+    def forward(self, x):
+        if x.sum() > 1e6:
+            return x
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+def region_infer(model, x):
+    return model(x)
+
+
+def region_step(model, opt, x, y):
+    opt.zero_grad()
+    loss = torch.nn.functional.cross_entropy(model(x), y)
+    loss.backward()
+    opt.step()
+    return loss
+
+
+def region_step_plain(model, opt, x):
+    opt.zero_grad()
+    loss = model(x).pow(2).mean()
+    loss.backward()
+    opt.step()
+    return loss
+
+
+def region_logging(model, x, log):
+    out = model(x)
+    log.append(out.shape[0])
+    return torch.sin(out).cos().exp().mean()
+
+
+def region_small(x, y):
+    return x + y
+
+
+def region_chain(x, y):
+    return ((x + y).sin() * y).cos().exp().tanh()
+
+
+def region_frozen(model, x):
+    with torch.no_grad():
+        target = model(x)
+    return ((model(x * 2) - target) ** 2).mean()
+
+
+def region_loop(model, batches):
+    total = None
+    for x, scale in zip(batches, (1.0, 2.0, 3.0)):
+        out = model(x).mul(scale).sin().sum()
+        total = out if total is None else total + out
+    return total
+
+
+class RegionOutput:
+    # A plain object, as model code uses for results.
+    def __init__(self, logits, hidden, name):
+        self.logits = logits
+        self.hidden = hidden
+        self.name = name
+
+
+class RegionCache:
+    # State that outlives a call and is changed by it.
+    def __init__(self):
+        self.seen = []
+
+    def update(self, value):
+        self.seen.append(value)
+        return len(self.seen)
+
+
+class RegionStateful(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.inner = RegionNet()
+        self.scale = torch.tensor(2.0)
+
+    def forward(self, x, cache=None):
+        out = self.inner(x) * self.scale
+        if cache is not None:
+            cache.update(out.detach())
+        return RegionOutput(out, [out.sin(), out.cos()], "out")
+
+
+def region_cached(model, x, cache):
+    return model(x, cache)
+
+
+def region_counter(x, i):
+    return ((x + i).sin() * i).cos().exp().tanh()
+
+
+def region_clock(model, x):
+    start = time.perf_counter_ns()
+    out = model(x)
+    return out, start
+
+
+REGION_CONSTANT = torch.full((5,), 3.0)
+
+
+def region_global(model, x):
+    out = model(x)
+    return (out * REGION_CONSTANT).sin().cos().exp()
+
+
+class RegionRecurrent(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lstm = torch.nn.LSTM(6, 8, num_layers=2, bidirectional=True)
+        self.out = torch.nn.Linear(16, 3)
+
+    def forward(self, x):
+        y, _ = self.lstm(x)
+        return self.out(y).tanh()
+
+
+RegionPair = collections.namedtuple("RegionPair", ["left", "right"])
+
+
+def region_pair(pair, kinds):
+    total = (pair.left * pair.right).sin().cos().exp()
+    if "double" in kinds:
+        total = total * 2
+    return RegionPair(total, total.tanh().abs().sqrt().neg())
+
+
+class RegionRandom(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.inner = RegionNet()
+
+    def forward(self, x):
+        return self.inner(x) * random.random()
+
+
+@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
+class TestCfgRegions(TestCase):
+    """Runs of a block compiled as one graph by ``backend=``."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def compiled_regions(self, fn):
+        return [r for r in torch.cfg_compile.regions(fn) if r["state"] == "compiled"]
+
+    def left_to_vm(self, fn, where):
+        return [
+            r["reason"]
+            for r in torch.cfg_compile.regions(fn)
+            if r["state"] == "vm" and r["where"].startswith(where)
+        ]
+
+    def test_module_call_is_one_graph(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for _ in range(6):
+                x = torch.randn(2, 3, 6, 6)
+                self.assertEqual(
+                    compiled(model, x), region_infer(model, x), atol=0, rtol=0
+                )
+        (region,) = self.compiled_regions(compiled)
+        # The call in the function that was compiled took in everything
+        # below it: the regions of the modules it calls were never tried.
+        self.assertTrue(region["where"].startswith("region_infer"))
+        self.assertEqual(region["variants"], 1)
+        self.assertGreaterEqual(region["ops"], 6)
+        self.assertIn("call_object", compiled.dump())
+
+    @parametrize("optimizer", ("sgd", "adam"))
+    def test_training_step_returns_a_compiled_autograd_function(self, optimizer):
+        def train(compile_step):
+            torch.manual_seed(0)
+            model = RegionNet().train()
+            if optimizer == "sgd":
+                opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+            else:
+                opt = torch.optim.Adam(model.parameters(), lr=0.01)
+            step = region_step
+            if compile_step:
+                step = torch.cfg_compile(step, backend="aot_eager", fallback=False)
+            losses, nodes = [], []
+            for _ in range(10):
+                x, y = torch.randn(4, 3, 6, 6), torch.randint(0, 5, (4,))
+                loss = step(model, opt, x, y)
+                losses.append(loss.item())
+                nodes.append(type(loss.grad_fn).__name__)
+            return model.state_dict(), losses, nodes, step
+
+        expected_state, expected_losses, _, _ = train(False)
+        state, losses, nodes, step = train(True)
+        self.assertEqual(losses, expected_losses)
+        # Parameters, and the running statistics the forward updates in place.
+        for name, value in state.items():
+            self.assertTrue(torch.equal(value, expected_state[name]), name)
+        self.assertEqual(state["bn.num_batches_tracked"].item(), 10)
+        # Forward and loss became one graph whose backward was traced ahead
+        # of time; the engine runs it as a single node.
+        self.assertEqual(nodes[-1], "CompiledFunctionBackward")
+        (region,) = self.compiled_regions(step)
+        self.assertTrue(region["where"].startswith("region_step"))
+        # What a graph cannot hold stayed with the VM, each for its reason.
+        reasons = " / ".join(self.left_to_vm(step, "region_step"))
+        self.assertIn("Tensor.backward has an effect", reasons)
+        self.assertIn("a method of a", reasons)
+
+    def test_branch_on_data_stays_a_branch(self):
+        torch.manual_seed(0)
+        model = RegionBranch().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        signs = set()
+        with torch.no_grad():
+            for i in range(24):
+                x = torch.randn(2, 3, 6, 6) * (1 if i % 3 else -1)
+                expected = region_infer(model, x)
+                signs.add(bool(model.first(x).sum() > 0))
+                self.assertEqual(compiled(model, x), expected, atol=0, rtol=0)
+        self.assertEqual(signs, {True, False})
+        # The call of the model does not trace, so the VM runs its forward,
+        # and what is on either side of the branch became graphs.
+        self.assertEqual(len(self.left_to_vm(compiled, "region_infer")), 1)
+        where = sorted(
+            r["where"].split(" (")[0] for r in self.compiled_regions(compiled)
+        )
+        self.assertEqual(where, ["RegionBranch.forward", "RegionBranch.forward"])
+
+    def test_inputs_select_a_variant(self):
+        graphs = []
+
+        def backend(graph, inputs):
+            graphs.append([tuple(i.shape) for i in inputs])
+            return graph
+
+        compiled = torch.cfg_compile(
+            region_chain, backend=backend, fallback=False, region_max_variants=3
+        )
+        sizes = [2, 2, 2, 2, 3, 2, 3, 4, 5, 6, 5, 2]
+        for n in sizes:
+            x, y = torch.randn(n), torch.randn(n)
+            self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
+        # One graph per shape, up to the limit; the shapes after that ran the
+        # instructions as they are.
+        self.assertEqual(graphs, [[(2,), (2,)], [(3,), (3,)], [(4,), (4,)]])
+        x = torch.randn(2, dtype=torch.float64)
+        self.assertEqual(compiled(x, x), region_chain(x, x), atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 3)
+
+    def test_layers_built_alike_share_a_graph(self):
+        graphs = []
+
+        def backend(graph, inputs):
+            graphs.append(graph)
+            return graph
+
+        torch.manual_seed(0)
+        model = RegionLayers().eval()
+        compiled = torch.cfg_compile(region_infer, backend=backend, fallback=False)
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(3, 6)
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        # The call in the loop is a region with one variant per layer, whose
+        # parameters are inputs of its graph: the five traced to one graph.
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("RegionLayers.forward"))
+        self.assertEqual((region["variants"], region["compiles"]), (5, 1))
+        self.assertEqual(len(graphs), 1)
+
+    def test_same_tensor_twice_is_its_own_variant(self):
+        graphs = []
+
+        def backend(graph, inputs):
+            graphs.append(len(inputs))
+            return graph
+
+        compiled = torch.cfg_compile(region_chain, backend=backend, fallback=False)
+        for _ in range(5):
+            x, y = torch.randn(3), torch.randn(3)
+            self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
+            self.assertEqual(compiled(x, x), region_chain(x, x), atol=0, rtol=0)
+        self.assertEqual(sorted(graphs), [1, 2])
+
+    def test_small_region_is_left_to_the_vm(self):
+        compiled = torch.cfg_compile(region_small, backend="aot_eager", fallback=False)
+        for _ in range(6):
+            x, y = torch.randn(3), torch.randn(3)
+            self.assertEqual(compiled(x, y), x + y, atol=0, rtol=0)
+        self.assertEqual(self.compiled_regions(compiled), [])
+        (reason,) = self.left_to_vm(compiled, "region_small")
+        self.assertIn("not worth a graph", reason)
+        # The block is specialized as it is without a backend.
+        self.assertNotIn("call_object", compiled.dump())
+        self.assertGreater(compiled.stats()["sites"], 0)
+
+    def test_module_changes_are_noticed(self):
+        torch.manual_seed(0)
+        model = RegionNet()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+
+        def check():
+            for _ in range(3):
+                x = torch.randn(2, 3, 6, 6)
+                reference = copy.deepcopy(model)
+                expected = reference(x)
+                self.assertEqual(compiled(model, x), expected, atol=0, rtol=0)
+                for name, value in reference.state_dict().items():
+                    self.assertTrue(torch.equal(value, model.state_dict()[name]), name)
+
+        with torch.no_grad():
+            model.eval()
+            check()
+            check()
+            # Train mode updates the running statistics: another graph.
+            model.train()
+            check()
+            # One submodule back in eval mode.
+            model.bn.eval()
+            check()
+            # A parameter replaced by another tensor is read on the next call.
+            model.fc.weight = torch.nn.Parameter(torch.randn(5, 4 * 6 * 6))
+            check()
+            # A submodule replaced by one of another shape.
+            model.fc = torch.nn.Linear(4 * 6 * 6, 7)
+            check()
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 4)
+
+    def test_frozen_parameter(self):
+        torch.manual_seed(0)
+        model = RegionNet().train()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        for i in range(8):
+            if i == 5:
+                model.conv.weight.requires_grad_(False)
+            x = torch.randn(2, 3, 6, 6)
+            model.zero_grad()
+            compiled(model, x).sum().backward()
+            self.assertEqual(model.conv.weight.grad is None, i >= 5)
+            self.assertIsNotNone(model.fc.weight.grad)
+
+    def test_effects_on_python_objects_stay_in_the_vm(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.cfg_compile(
+            region_logging, backend="aot_eager", fallback=False
+        )
+        log, expected_log = [], []
+        with torch.no_grad():
+            for n in (2, 2, 2, 3, 2, 2, 4, 2):
+                x = torch.randn(n, 3, 6, 6)
+                expected = region_logging(model, x, expected_log)
+                self.assertEqual(compiled(model, x, log), expected, atol=0, rtol=0)
+                self.assertEqual(log, expected_log)
+        self.assertEqual(len(self.compiled_regions(compiled)), 2)
+        reasons = " / ".join(self.left_to_vm(compiled, "region_logging"))
+        self.assertIn("changes a list from before the region", reasons)
+
+    def test_module_that_sets_an_attribute(self):
+        torch.manual_seed(0)
+        model = RegionCounting().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for i in range(8):
+                x = torch.randn(2, 3, 6, 6)
+                self.assertEqual(compiled(model, x), model.inner(x), atol=0, rtol=0)
+                self.assertEqual(model.calls, i + 1)
+        (reason,) = self.left_to_vm(compiled, "region_infer")
+        self.assertIn("__setattr__ on a module the region was given", reason)
+        # The call below the store is a graph.
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("RegionCounting.forward"))
+
+    def test_no_grad_section_is_not_differentiated(self):
+        torch.manual_seed(0)
+        model, reference = RegionNet().train(), RegionNet().train()
+        reference.load_state_dict(model.state_dict())
+        compiled = torch.cfg_compile(region_frozen, backend="aot_eager", fallback=False)
+        for _ in range(8):
+            x = torch.randn(2, 3, 6, 6)
+            model.zero_grad()
+            reference.zero_grad()
+            loss, expected = compiled(model, x), region_frozen(reference, x)
+            loss.backward()
+            expected.backward()
+            self.assertEqual(loss, expected, atol=0, rtol=0)
+            self.assertEqual(
+                model.fc.weight.grad, reference.fc.weight.grad, atol=0, rtol=0
+            )
+        # With gradients off and with them on are two regions of the block.
+        self.assertEqual(len(self.compiled_regions(compiled)), 2)
+
+    def test_loop_variable_before_its_first_assignment(self):
+        # `out` and `total` do not exist on the first trip through the loop,
+        # and the block holds them alive: a region must not take them in.
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.cfg_compile(region_loop, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for _ in range(8):
+                batches = [torch.randn(2, 3, 6, 6) for _ in range(3)]
+                expected = region_loop(model, batches)
+                self.assertEqual(compiled(model, batches), expected, atol=0, rtol=0)
+        self.assertGreaterEqual(len(self.compiled_regions(compiled)), 1)
+
+    def test_graph_that_fails_on_its_first_run(self):
+        calls = []
+
+        def backend(graph, inputs):
+            def broken(*args):
+                calls.append(len(args))
+                raise RuntimeError("no such kernel")
+
+            return broken
+
+        compiled = torch.cfg_compile(region_chain, backend=backend, fallback=False)
+        for _ in range(6):
+            x, y = torch.randn(3), torch.randn(3)
+            self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
+        # Tried once; the instructions ran instead, that time and since.
+        self.assertEqual(calls, [2])
+        (reason,) = self.left_to_vm(compiled, "region_chain")
+        self.assertIn("the compiled graph failed: RuntimeError: no such kernel", reason)
+
+    def test_training_step_of_a_recurrent_model(self):
+        # Whatever the backend makes of the RNN, the step is the step.
+        def train(compile_step):
+            torch.manual_seed(0)
+            model = RegionRecurrent().train()
+            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+            step = region_step_plain
+            if compile_step:
+                step = torch.cfg_compile(step, backend="aot_eager", fallback=False)
+            losses = [step(model, opt, torch.randn(5, 4, 6)).item() for _ in range(8)]
+            return model.state_dict(), losses
+
+        expected_state, expected_losses = train(False)
+        state, losses = train(True)
+        self.assertEqual(losses, expected_losses)
+        for name, value in state.items():
+            self.assertTrue(torch.equal(value, expected_state[name]), name)
+
+    def test_error_in_a_region(self):
+        model = RegionNet().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for shape in [(2, 3, 6, 6)] * 4 + [
+                (2, 3, 5, 5),
+                (2, 3, 6, 6),
+                (2, 4, 6, 6),
+            ]:
+                x = torch.randn(shape)
+                outcome, expected = (
+                    call_outcome(compiled, model, x),
+                    call_outcome(region_infer, model, x),
+                )
+                self.assertEqual(outcome[0], expected[0])
+                if outcome[0] == "raised":
+                    self.assertEqual(outcome[1:], expected[1:])
+
+    def test_measurement_starts_over_when_a_region_is_compiled(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.cfg_compile(
+            region_infer, backend="aot_eager", fallback=False, demote=True
+        )
+        with torch.no_grad():
+            x = torch.randn(2, 3, 6, 6)
+            for _ in range(8):
+                compiled(model, x)
+            self.assertTrue(compiled.stats()["measuring"])
+            for _ in range(400):
+                compiled(model, x)
+        self.assertFalse(compiled.stats()["measuring"])
+
+    def test_object_made_by_a_region_is_made_on_every_call(self):
+        torch.manual_seed(0)
+        model = RegionStateful().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        results = []
+        with torch.no_grad():
+            for _ in range(6):
+                x = torch.randn(2, 3, 6, 6)
+                result, expected = compiled(model, x), model(x)
+                self.assertIs(type(result), RegionOutput)
+                self.assertEqual(result.logits, expected.logits, atol=0, rtol=0)
+                self.assertEqual(result.hidden, expected.hidden, atol=0, rtol=0)
+                self.assertEqual(result.name, "out")
+                results.append(result)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_infer"))
+        # Not one object handed out again and again.
+        self.assertEqual(len({id(r) for r in results}), 6)
+        self.assertEqual(len({id(r.hidden) for r in results}), 6)
+
+    def test_object_from_before_a_region_is_left_alone(self):
+        torch.manual_seed(0)
+        model = RegionStateful().eval()
+        compiled = torch.cfg_compile(region_cached, backend="aot_eager", fallback=False)
+        cache, expected_cache = RegionCache(), RegionCache()
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(2, 3, 6, 6)
+                expected = region_cached(model, x, expected_cache)
+                result = compiled(model, x, cache)
+                self.assertEqual(result.logits, expected.logits, atol=0, rtol=0)
+                # A trace that ran the update would have left its own tensors
+                # in the cache, or left it one entry short on later calls.
+                self.assertEqual(cache.seen, expected_cache.seen, atol=0, rtol=0)
+        reasons = " / ".join(self.left_to_vm(compiled, "region_cached"))
+        self.assertIn("takes a RegionCache from before the region", reasons)
+        # The module below the call that takes the cache is a graph.
+        self.assertGreaterEqual(len(self.compiled_regions(compiled)), 1)
+
+    def test_named_tuples_and_sets_of_values_are_inputs(self):
+        compiled = torch.cfg_compile(region_pair, backend="aot_eager", fallback=False)
+        for i in range(8):
+            pair = RegionPair(torch.randn(3), torch.randn(3))
+            kinds = {"double"} if i % 2 else {"single", "plain"}
+            result, expected = compiled(pair, kinds), region_pair(pair, kinds)
+            self.assertIs(type(result), RegionPair)
+            self.assertEqual(tuple(result), tuple(expected), atol=0, rtol=0)
+        self.assertGreaterEqual(len(self.compiled_regions(compiled)), 2)
+        # Neither was turned away as something a trace might change.
+        reasons = " / ".join(self.left_to_vm(compiled, "region_pair"))
+        self.assertNotIn("from before the region", reasons)
+
+    def test_rnn_keeps_its_weights_in_a_list(self):
+        # An RNN rebuilds the list when a weight was replaced, which a trace
+        # does to all of them: the list is put back afterwards.
+        torch.manual_seed(0)
+        model = RegionRecurrent().eval()
+        weights = list(model.lstm._flat_weights)
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for _ in range(6):
+                x = torch.randn(5, 4, 6)
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_infer"))
+        self.assertTrue(all(a is b for a, b in zip(model.lstm._flat_weights, weights)))
+
+    def test_tensor_kept_as_a_plain_attribute(self):
+        torch.manual_seed(0)
+        model = RegionStateful().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for i in range(8):
+                if i == 5:
+                    model.scale = torch.tensor(-1.0)
+                x = torch.randn(2, 3, 6, 6)
+                self.assertEqual(
+                    compiled(model, x).logits, model(x).logits, atol=0, rtol=0
+                )
+        # The attribute is an input of the graph, not a constant in it.
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 1)
+
+    def test_tensor_that_is_not_an_input_is_not_a_constant(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.cfg_compile(region_global, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for i in range(8):
+                if i == 5:
+                    REGION_CONSTANT.fill_(0.5)
+                x = torch.randn(2, 3, 6, 6)
+                self.assertEqual(
+                    compiled(model, x), region_global(model, x), atol=0, rtol=0
+                )
+        REGION_CONSTANT.fill_(3.0)
+        # The VM reads the global, which makes the tensor an input of the
+        # region that follows.
+        (reason,) = self.left_to_vm(compiled, "region_global")
+        self.assertIn("gives a tensor from outside the region", reason)
+        self.assertEqual(len(self.compiled_regions(compiled)), 2)
+
+    def test_values_that_keep_changing_do_not_multiply_graphs(self):
+        graphs = []
+
+        def backend(graph, inputs):
+            graphs.append(1)
+            return graph
+
+        compiled = torch.cfg_compile(region_counter, backend=backend, fallback=False)
+        x = torch.randn(4)
+        for i in range(40):
+            self.assertEqual(compiled(x, i), region_counter(x, i), atol=0, rtol=0)
+        self.assertLessEqual(len(graphs), 3)
+        self.assertEqual(self.compiled_regions(compiled), [])
+        (reason,) = self.left_to_vm(compiled, "region_counter")
+        self.assertIn("ever new values", reason)
+
+    def test_call_without_tensors_is_not_frozen(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.cfg_compile(region_clock, backend="aot_eager", fallback=False)
+        starts = []
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(2, 3, 6, 6)
+                out, start = compiled(model, x)
+                self.assertEqual(out, model(x), atol=0, rtol=0)
+                starts.append(start)
+        self.assertEqual(sorted(set(starts)), starts)
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
+
+    def test_python_random_is_not_frozen(self):
+        torch.manual_seed(0)
+        model = RegionRandom().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            x = torch.randn(2, 3, 6, 6)
+            outputs = []
+            for seed in range(8):
+                random.seed(seed)
+                expected = model(x)
+                random.seed(seed)
+                outputs.append(compiled(model, x))
+                self.assertEqual(outputs[-1], expected, atol=0, rtol=0)
+        self.assertGreater(len({float(o.sum()) for o in outputs}), 6)
+        reasons = " / ".join(self.left_to_vm(compiled, "region_infer"))
+        self.assertIn("draws from Python's random module", reasons)
+
+    def test_library_code_around_tensors_gets_no_regions(self):
+        torch.manual_seed(0)
+        model = RegionNet().train()
+        opt = torch.optim.Adam(model.parameters(), lr=0.01)
+        step = torch.cfg_compile(region_step, backend="aot_eager", fallback=False)
+        for _ in range(8):
+            step(model, opt, torch.randn(4, 3, 6, 6), torch.randint(0, 5, (4,)))
+        callees = step.stats()["compiled_callees"]
+        self.assertIn("Adam.step", callees)
+        where = {r["where"].split(" (")[0] for r in torch.cfg_compile.regions(step)}
+        self.assertIn("region_step", where)
+        # The optimizer is compiled by the VM, but nothing in it is a region.
+        plumbing = ("Adam", "Optimizer", "_single_tensor", "_multi_tensor", "adam")
+        self.assertEqual([w for w in where if w.startswith(plumbing)], [])
+
+    def test_backend_needs_specialization(self):
+        with self.assertRaisesRegex(ValueError, "specialize=True"):
+            torch.cfg_compile(region_infer, backend="aot_eager", specialize=False)
+        with self.assertRaisesRegex(ValueError, "unknown backend"):
+            torch.cfg_compile(region_infer, backend="nope")
+
+    @slowTest
+    def test_inductor(self):
+        def train(compile_step):
+            torch.manual_seed(0)
+            model = RegionNet().train()
+            opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+            step = region_step
+            if compile_step:
+                step = torch.cfg_compile(step, backend="inductor", fallback=False)
+            losses = []
+            for _ in range(8):
+                x, y = torch.randn(4, 3, 6, 6), torch.randint(0, 5, (4,))
+                loss = step(model, opt, x, y)
+                losses.append(loss.item())
+            return model.state_dict(), losses, type(loss.grad_fn).__name__
+
+        expected_state, expected_losses, _ = train(False)
+        state, losses, node = train(True)
+        self.assertEqual(node, "CompiledFunctionBackward")
+        self.assertEqual(losses, expected_losses, atol=1e-4, rtol=1e-4)
+        for name, value in state.items():
+            self.assertEqual(value, expected_state[name], atol=1e-4, rtol=1e-4)
+
+
+instantiate_parametrized_tests(TestCfgRegions)
 
 
 if __name__ == "__main__":
