@@ -273,7 +273,7 @@ def _(pic):
 
 As we discussed earlier, CUDAGraph does not support some ops (e.g., cpu ops) which may limit its adoption. CUDAGraph partition is a compiler solution that automatically splits off these ops, reorders ops to reduce the number of partitions, and applies CUDAGraph to each partition individually. Please set `torch._inductor.config.graph_partition=True` to enable CUDAGraph partition.
 
-Consider the following example where `x` and `y` are gpu inputs but `y_cpu` is a cpu tensor. Without graph partition, this function must be skipped due to cpu ops. With graph partition, the CPU ops are split off, and the remaining GPU ops are cudagraphified, resulting in two separate separate CUDAGraphs.
+Consider the following example where `x` and `y` are gpu inputs but `y_cpu` is a cpu tensor. Without graph partition, this function must be skipped due to cpu ops. With graph partition, the CPU ops are split off, and the remaining GPU ops are cudagraphified, resulting in two separate CUDAGraphs.
 
 ```python
 def f(x, y):
