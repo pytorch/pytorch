@@ -69,6 +69,11 @@ def broadcast_shapes_for_args(args: Sequence[ShapeArg]) -> BlockShapeType:
         elif isinstance(arg, (int, float)):
             if result_shape is None:
                 result_shape = ()
+        elif isinstance(arg, sympy.Expr):
+            # scalar index expression (e.g. the indirect index var of
+            # out-of-tree gather_template ops)
+            if result_shape is None:
+                result_shape = ()
         elif isinstance(arg, torch.dtype):
             continue
         else:
@@ -77,6 +82,10 @@ def broadcast_shapes_for_args(args: Sequence[ShapeArg]) -> BlockShapeType:
             if isinstance(arg, (LoopBodyBlock, LoopBody, OpsValue)):
                 # TODO: fix me
                 return None
+            if isinstance(arg, str):
+                # metadata argument (e.g. the loader name of out-of-tree
+                # gather_template ops); never a shape source
+                continue
             raise TypeError(f"Unknown type: {type(arg)}")
 
     return result_shape

@@ -2501,6 +2501,16 @@ class TritonKernelOverrides(TritonOverrides):
     variables which are assumed to already be defined in the current scope.
     """
 
+    def gather_template(
+        self, loader_name, x_value, index_value, gather_idx, index_boundary
+    ):
+        # Lowered by out-of-tree backends registering a template gather: the
+        # gathered value is already computed as an indirect load; the
+        # remaining arguments are backend-specific metadata. This is the only
+        # inline-gather form that can lower inside pointwise subgraphs where
+        # extern gathers that build buffers are rejected.
+        return x_value
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
