@@ -10,6 +10,7 @@ from .checkpoint import (
     register_optimizer_checkpoint_hook,
     set_state_dict_global_layouts,
 )
+from .clip_grad import clip_grad_norm_
 from .flex_shard import flex_shard, relayout_bucket
 from .param_init import init_from_full
 from .placement_contract import (
@@ -39,6 +40,7 @@ __all__ = [
     "BucketStorageLayout",
     "GlobalLayout",
     "GradientReduction",
+    "clip_grad_norm_",
     "flex_shard",
     "get_flex_shard_global_layouts",
     "get_global_layout",

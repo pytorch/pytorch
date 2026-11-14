@@ -83,12 +83,17 @@ class BucketSpec:
         placement_fn: Required callable that maps this bucket's
             ``(named_params, mesh)`` to per-parameter placements.
             The minimal eager path expects one ``Placement`` per parameter.
-        mesh: The 1D CUDA ``DeviceMesh`` this bucket's collective runs on. A
+        mesh: The CUDA ``DeviceMesh`` this bucket's collectives run on. A
             bucket is one collective over one process group, so the mesh is a
             per-bucket property; ``placement_fn`` receives it. Different buckets
             may use different meshes (e.g. expert params on an expert-parallel
             mesh vs dense params on the data-parallel mesh), but all bucket
-            meshes in one ``flex_shard()`` call must share a device type.
+            meshes in one ``flex_shard()`` call must share a device type. A 2D
+            mesh with ``mesh_dim_names`` shards over its dim 1 and replicates
+            over its dim 0, as ``fully_shard``'s HSDP does: ``placement_fn``
+            receives the 1D shard mesh, and each reduce-scatter's output is
+            all-reduced over the replicas. HSDP requires placements that
+            declare ``matches_fsdp2_collectives``, such as ``Shard``.
         mp_policy: ``fully_shard``'s mixed precision policy, for this bucket's
             parameters: their unsharded dtypes (``param_dtype``,
             ``param_dtype_override_fn``) and the dtype their grads accumulate
@@ -126,6 +131,12 @@ class BucketSpec:
             that no backward follows (e.g. under ``torch.no_grad()``) frees
             them; with False, ``module.parameters()`` returns the unsharded
             params until the bucket reshards (``FlexShardModule.reshard()``).
+            As in FSDP2, an int reshards to groups of that many consecutive
+            ranks of the shard mesh: each rank keeps its group's part of the
+            unsharded parameters after forward, and the group all-gathers them
+            before backward, e.g. within a host. It must divide the shard mesh
+            size (which reshards as True; 1 as False) and requires placements
+            that declare ``matches_fsdp2_collectives``, such as ``Shard``.
             Under ``torch.compile`` the traced graph owns buffer lifetimes
             instead.
         pre_backward_hook: Optional callable run with this bucket's
@@ -176,7 +187,7 @@ class BucketSpec:
     offload_policy: OffloadPolicy | None = None
     gradient_reduce_op: GradientReduceOp = dist.ReduceOp.AVG
     gradient_divide_factor: float | None = None
-    reshard_after_forward: bool = True
+    reshard_after_forward: bool | int = True
     pre_backward_hook: BucketHook | None = None
     post_reduce_hook: BucketHook | None = None
     defer_post_backward: bool = False
