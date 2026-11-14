@@ -24,6 +24,7 @@ from unittest.mock import patch
 import torch
 import torch.multiprocessing as mp
 import torch.xpu._gpu_trace as gpu_trace
+from torch.numa.binding import _get_numa_node_index_for_device_index
 from torch.testing import make_tensor
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
@@ -186,6 +187,22 @@ class TestXpu(TestCase):
             device_capability["is_integrated_gpu"],
         )
 
+    def test_device_properties_pci_address(self):
+        # torch/numa/binding.py reaches the properties through
+        # torch.get_device_module() and formats these three fields into a sysfs
+        # path, so exercise the contract through the same indirection.
+        device_module = torch.get_device_module(torch.accelerator.current_accelerator())
+        props = device_module.get_device_properties(0)
+        self.assertGreaterEqual(props.pci_domain_id, 0)
+        self.assertGreaterEqual(props.pci_bus_id, 0)
+        self.assertGreaterEqual(props.pci_device_id, 0)
+        if IS_LINUX:
+            pci_addr = f"{props.pci_domain_id:04x}:{props.pci_bus_id:02x}:{props.pci_device_id:02x}.0"
+            self.assertTrue(os.path.isdir(f"/sys/bus/pci/devices/{pci_addr}"))
+            self.assertGreaterEqual(
+                _get_numa_node_index_for_device_index(device_index=0), 0
+            )
+
     def test_get_device_capability(self):
         device_capability = torch.xpu.get_device_capability()
         acc_capability = torch.accelerator.get_device_capability()
@@ -199,6 +216,20 @@ class TestXpu(TestCase):
             self.assertIn(torch.double, supported_dtypes)
         if torch.xpu.is_bf16_supported(including_emulation=True):
             self.assertIn(torch.bfloat16, supported_dtypes)
+
+    def test_get_device_capability_excludes_pci_ids(self):
+        # The capability dict feeds Inductor's DeviceProperties.cc (and from
+        # there the Triton metadata and AOTI device metadata); the per-card
+        # PCI location must stay out so identical cards share cache entries.
+        capability = torch.xpu.get_device_capability()
+        self.assertNotIn("pci_domain_id", capability)
+        self.assertNotIn("pci_bus_id", capability)
+        self.assertNotIn("pci_device_id", capability)
+        # The fields remain on the properties object for torch/numa/binding.py.
+        props = torch.xpu.get_device_properties()
+        self.assertIsInstance(props.pci_domain_id, int)
+        self.assertIsInstance(props.pci_bus_id, int)
+        self.assertIsInstance(props.pci_device_id, int)
 
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
