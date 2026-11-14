@@ -1,0 +1,398 @@
+# Owner(s): ["module: ci"]
+# AI-assisted temporary diagnostic. Never merge.
+name: CI BuildKit reported-version canary
+on:
+  pull_request:
+    paths: [.github/workflows/ci-buildkit-version-canary.yml]
+permissions: {}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: false
+jobs:
+  probe:
+    # Inert until exact draft allocation and independent final-tree review.
+    if: ${{ false && github.repository == 'pytorch/pytorch' }}
+    runs-on: mt-l-x86iavx512-8-64
+    timeout-minutes: 5
+    container:
+      image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+    steps:
+      - name: Read existing BuildKit version
+        shell: sh
+        run: |
+          python3 -I - <<'PY'
+          # AI-assisted temporary diagnostic. Never merge.
+          import hashlib
+          import io
+          import json
+          import os
+          import re
+          import resource
+          import selectors
+          import signal
+          import stat
+          import subprocess
+          import tarfile
+          import tempfile
+          import time
+          import urllib.parse
+          import urllib.request
+
+          PR_NUMBER = 0  # Inert until exact allocation and independent receipt review.
+          PLAN = "215518285e7585081dd606b675f12a2bde249ccf5ca8c73df2eeb4e76645f826"
+          BRANCH = "ci-buildkit-version-20261113"
+          URL = "https://github.com/moby/buildkit/releases/download/v0.29.0/buildkit-v0.29.0.linux-amd64.tar.gz"
+          ARCHIVE_SHA = "ab8d93c72253b450f34a43e1c480abc52380f4aec3a8a395aebf09489efef7a0"
+          BINARY_SHA = "aa3c1b84cdc4450e60962ca46419c1f0e25739415479333721efbca556f9fd2f"
+          ADDRESS = "tcp://buildkitd-amd64.buildkit:1234"
+          TEMPLATE = '{"package_matches":{{eq .BuildkitVersion.Package "github.com/moby/buildkit"}},"version_matches":{{eq .BuildkitVersion.Version "v0.29.0"}},"revision_matches":{{eq .BuildkitVersion.Revision "8543ce4428265d547cb009e5ad62348284497a88"}}}'
+          FIELDS = (
+              "context_matches",
+              "client_archive_verified",
+              "client_binary_verified",
+              "info_attempted",
+              "info_succeeded",
+              "response_schema_valid",
+              "package_matches",
+              "version_matches",
+              "revision_matches",
+              "reported_pin_matches",
+              "child_stopped",
+              "cleanup_confirmed",
+              "probe_error",
+          )
+          MATCH_FIELDS = {"package_matches", "version_matches", "revision_matches"}
+
+
+          def unique_object(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise ValueError("duplicate")
+                  result[key] = value
+              return result
+
+
+          def parse_json(data, limit):
+              if len(data) > limit:
+                  raise ValueError("size")
+              return json.loads(data.decode("utf-8"), object_pairs_hook=unique_object)
+
+
+          def context_matches():
+              if (
+                  PR_NUMBER <= 0
+                  or os.environ.get("GITHUB_EVENT_NAME") != "pull_request"
+                  or os.environ.get("GITHUB_REPOSITORY") != "pytorch/pytorch"
+              ):
+                  return False
+              event_path = os.environ["GITHUB_EVENT_PATH"]
+              if not os.path.isabs(event_path):
+                  return False
+              fd = os.open(event_path, os.O_RDONLY | os.O_NOFOLLOW)
+              with os.fdopen(fd, "rb") as source:
+                  if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                      return False
+                  event = parse_json(source.read(1024 * 1024 + 1), 1024 * 1024)
+              pr = event["pull_request"]
+              body = pr["body"]
+              start = "<!-- ci-buildkit-version-selection-v1\n"
+              end = "\n-->"
+              if type(body) is not str or body.count(start) != 1:
+                  return False
+              receipt_text = body.split(start, 1)[1]
+              if receipt_text.count(end) != 1:
+                  return False
+              receipt = parse_json(receipt_text.split(end, 1)[0].encode("utf-8"), 2048)
+              expected = {
+                  "schema": 1,
+                  "repository": "pytorch/pytorch",
+                  "pr": PR_NUMBER,
+                  "author": "ptdbot",
+                  "head_repository": "ptdbot/pytorch",
+                  "head_ref": BRANCH,
+                  "base_ref": "main",
+                  "plan_sha256": PLAN,
+              }
+              if type(receipt) is not dict or set(receipt) != set(expected) | {
+                  "head_sha",
+                  "head_tree",
+              }:
+                  return False
+              if any(
+                  type(receipt[key]) is not type(value) or receipt[key] != value
+                  for key, value in expected.items()
+              ):
+                  return False
+              if any(
+                  type(receipt[key]) is not str
+                  or re.fullmatch("[0-9a-f]{40}", receipt[key]) is None
+                  for key in ("head_sha", "head_tree")
+              ):
+                  return False
+              # The event attests the commit, not its tree. Root verifies the archived
+              # reviewed tree and the platform's normal exact-SHA approval externally.
+              return (
+                  event["repository"]["full_name"] == "pytorch/pytorch"
+                  and type(event["number"]) is int
+                  and event["number"] == PR_NUMBER
+                  and type(pr["number"]) is int
+                  and pr["number"] == PR_NUMBER
+                  and pr["state"] == "open"
+                  and pr["user"]["login"] == "ptdbot"
+                  and pr["head"]["repo"]["full_name"] == "ptdbot/pytorch"
+                  and pr["head"]["ref"] == BRANCH
+                  and pr["head"]["sha"] == receipt["head_sha"]
+                  and pr["base"]["repo"]["full_name"] == "pytorch/pytorch"
+                  and pr["base"]["ref"] == "main"
+              )
+
+
+          def allowed_url(url):
+              parsed = urllib.parse.urlsplit(url)
+              return (
+                  parsed.scheme == "https"
+                  and parsed.hostname in {"github.com", "release-assets.githubusercontent.com"}
+                  and parsed.port in {None, 443}
+                  and parsed.username is None
+                  and parsed.password is None
+                  and not parsed.fragment
+              )
+
+
+          class Redirects(urllib.request.HTTPRedirectHandler):
+              def __init__(self):
+                  self.count = 0
+
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  self.count += 1
+                  if self.count > 3 or not allowed_url(newurl):
+                      raise ValueError("redirect")
+                  return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+          def download_archive():
+              if not allowed_url(URL):
+                  raise ValueError("url")
+              opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), Redirects())
+              request = urllib.request.Request(
+                  URL, headers={"Accept": "application/octet-stream"}
+              )
+              with opener.open(request, timeout=30) as response:
+                  if response.status != 200 or not allowed_url(response.url):
+                      raise ValueError("response")
+                  data = response.read(100 * 1024 * 1024 + 1)
+              if len(data) > 100 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != ARCHIVE_SHA:
+                  raise ValueError("archive")
+              return data
+
+
+          def archive_binary(data):
+              with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+                  matches = [member for member in archive if member.name == "bin/buildctl"]
+                  if (
+                      len(matches) != 1
+                      or not matches[0].isfile()
+                      or not 0 < matches[0].size <= 64 * 1024 * 1024
+                  ):
+                      raise ValueError("member")
+                  with archive.extractfile(matches[0]) as source:
+                      binary = source.read(64 * 1024 * 1024 + 1)
+              if len(binary) != matches[0].size:
+                  raise ValueError("binary size")
+              return binary
+
+
+          def child_environment(directory):
+              return {
+                  "PATH": "/usr/bin:/bin",
+                  "HOME": directory,
+                  "TMPDIR": directory,
+                  "LANG": "C.UTF-8",
+                  "OTEL_TRACES_EXPORTER": "none",
+                  "OTEL_TRACES_SAMPLER": "always_off",
+                  "OTEL_METRICS_EXPORTER": "none",
+                  "OTEL_LOGS_EXPORTER": "none",
+              }
+
+
+          def read_child(argv, environment, result, timeout=30):
+              process = None
+              data = bytearray()
+              try:
+                  process = subprocess.Popen(
+                      argv,
+                      stdin=subprocess.DEVNULL,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.DEVNULL,
+                      env=environment,
+                      start_new_session=True,
+                  )
+                  result["info_attempted"] = True
+                  deadline = time.monotonic() + timeout
+                  with selectors.DefaultSelector() as selector:
+                      selector.register(process.stdout, selectors.EVENT_READ)
+                      while selector.get_map():
+                          remaining = deadline - time.monotonic()
+                          if remaining <= 0:
+                              raise TimeoutError()
+                          for key, _ in selector.select(remaining):
+                              block = os.read(key.fileobj.fileno(), min(4097 - len(data), 4096))
+                              if not block:
+                                  selector.unregister(key.fileobj)
+                                  continue
+                              data.extend(block)
+                              if len(data) > 4096:
+                                  raise ValueError("stdout")
+                  remaining = deadline - time.monotonic()
+                  if remaining <= 0:
+                      raise TimeoutError()
+                  return process.wait(timeout=remaining), bytes(data)
+              finally:
+                  if process is not None:
+                      if process.poll() is None:
+                          try:
+                              os.killpg(process.pid, signal.SIGKILL)
+                          except ProcessLookupError:
+                              pass
+                      process.wait(timeout=5)
+                      process.stdout.close()
+                      result["child_stopped"] = process.returncode is not None
+
+
+          def parse_result(data):
+              value = parse_json(data, 4096)
+              if (
+                  type(value) is not dict
+                  or set(value) != MATCH_FIELDS
+                  or any(type(item) is not bool for item in value.values())
+              ):
+                  raise ValueError("schema")
+              return value
+
+
+          def identity(value):
+              return value.st_dev, value.st_ino, value.st_uid
+
+
+          def run_probe(result):
+              if not context_matches():
+                  result["cleanup_confirmed"] = True
+                  return
+              result["context_matches"] = True
+              parent = os.environ["RUNNER_TEMP"]
+              if not os.path.isabs(parent):
+                  raise ValueError("parent")
+              parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+              directory = None
+              root_identity = None
+              root_fd = None
+              binary_fd = None
+              binary_identity = None
+              try:
+                  directory = tempfile.mkdtemp(prefix="ci-buildkit-version-", dir=parent)
+                  root_identity = identity(os.stat(directory, follow_symlinks=False))
+                  root_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                  root_identity = identity(os.fstat(root_fd))
+                  if (
+                      identity(os.stat(directory, follow_symlinks=False)) != root_identity
+                      or stat.S_IMODE(os.fstat(root_fd).st_mode) != 0o700
+                      or root_identity[2] != os.geteuid()
+                  ):
+                      raise ValueError("root")
+                  archive = download_archive()
+                  result["client_archive_verified"] = True
+                  binary = archive_binary(archive)
+                  if hashlib.sha256(binary).hexdigest() != BINARY_SHA:
+                      raise ValueError("binary")
+                  result["client_binary_verified"] = True
+                  binary_fd = os.open(
+                      "buildctl",
+                      os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                      0o700,
+                      dir_fd=root_fd,
+                  )
+                  binary_identity = identity(os.fstat(binary_fd))
+                  with os.fdopen(os.dup(binary_fd), "wb") as output:
+                      output.write(binary)
+                  os.close(binary_fd)
+                  binary_fd = None
+                  status, data = read_child(
+                      [
+                          os.path.join(directory, "buildctl"),
+                          "--addr",
+                          ADDRESS,
+                          "--timeout",
+                          "5",
+                          "debug",
+                          "info",
+                          "--format",
+                          TEMPLATE,
+                      ],
+                      child_environment(directory),
+                      result,
+                  )
+                  if status != 0:
+                      raise ValueError("child")
+                  result["info_succeeded"] = True
+                  result.update(parse_result(data))
+                  result["response_schema_valid"] = True
+                  result["reported_pin_matches"] = all(result[key] for key in MATCH_FIELDS)
+              finally:
+                  if binary_fd is not None:
+                      os.close(binary_fd)
+                  try:
+                      if result["info_attempted"] and not result["child_stopped"]:
+                          raise ValueError("child still active")
+                      if root_fd is not None:
+                          if identity(os.stat(directory, follow_symlinks=False)) != root_identity:
+                              raise ValueError("root changed")
+                          if binary_identity is not None:
+                              if (
+                                  identity(
+                                      os.stat("buildctl", dir_fd=root_fd, follow_symlinks=False)
+                                  )
+                                  != binary_identity
+                              ):
+                                  raise ValueError("binary changed")
+                              os.unlink("buildctl", dir_fd=root_fd)
+                          os.close(root_fd)
+                          root_fd = None
+                          os.rmdir(directory)
+                          result["cleanup_confirmed"] = not os.path.lexists(directory)
+                      elif directory is None:
+                          result["cleanup_confirmed"] = True
+                      elif (
+                          root_identity is not None
+                          and identity(os.stat(directory, follow_symlinks=False)) == root_identity
+                      ):
+                          os.rmdir(directory)
+                          result["cleanup_confirmed"] = not os.path.lexists(directory)
+                  finally:
+                      if root_fd is not None:
+                          os.close(root_fd)
+                      os.close(parent_fd)
+
+
+          def main():
+              result = dict.fromkeys(FIELDS, False)
+              resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+              def cancelled(_signum, _frame):
+                  signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                  signal.signal(signal.SIGINT, signal.SIG_IGN)
+                  raise InterruptedError()
+
+              signal.signal(signal.SIGTERM, cancelled)
+              signal.signal(signal.SIGINT, cancelled)
+              try:
+                  run_probe(result)
+              except BaseException:
+                  result["probe_error"] = True
+              print(json.dumps(result, sort_keys=True, separators=(",", ":")), flush=True)
+              return 0 if result["reported_pin_matches"] and result["cleanup_confirmed"] else 1
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          PY
