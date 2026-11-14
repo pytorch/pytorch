@@ -38,6 +38,13 @@ struct C10_API FakeTensorMode {
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
 
+  // Snapshot of _avoid_device_init() at construction. We assume backend
+  // availability stays stable for the mode's lifetime; rechecking it is not
+  // worth acquiring the GIL and crossing into Python on each relevant op.
+  // Create a new mode after changing backend availability. Python reads this
+  // same value, including when its wrapper is recreated.
+  bool avoid_device_init_ = false;
+
   // Snapshot of fake_tensor_prefer_device_type for native device resolution.
   // We assume the config stays fixed for the mode's lifetime; we have not found
   // real use cases requiring changes during that lifetime. Python op_impls
