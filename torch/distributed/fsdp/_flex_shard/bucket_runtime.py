@@ -870,6 +870,7 @@ class BucketRuntime:
             requires_all_reduce=storage._requires_all_reduce,
             partial_output=self.partial_reduce_output,
             hook=storage._all_reduce_hook,
+            all_reduce_comm=storage._all_reduce_comm,
         )
 
     @property

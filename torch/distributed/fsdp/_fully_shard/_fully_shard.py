@@ -14,11 +14,11 @@ import torch.nn as nn
 from torch.distributed._composable import contract
 
 from .._flex_shard import module_ops
-from .._flex_shard.all_gather_layout import AllGatherLayout
 from .._flex_shard.module_state import share_context
 from . import _fsdp_engine
 from ._fsdp_api import (
     AllGather,
+    AllReduce,
     DataParallelMeshDims,
     GradientReductionHandle,
     MixedPrecisionPolicy,
@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
     from torch.distributed.tensor import DeviceMesh
 
+    from .._flex_shard.all_gather_layout import AllGatherLayout
     from .._flex_shard.bucket_runtime import BucketRuntime
     from .._flex_shard.bucket_storage import ShardedBucketStorage
 
@@ -379,7 +380,7 @@ class FSDPModule:
         default, this frees the unsharded parameter storage; call
         :meth:`set_keep_unsharded_storage` to preserve it.
         """
-        module_ops.reshard(self._fsdp_runtimes())
+        module_ops.reshard(_fsdp_runtimes(self))
 
     def complete_grouped_forward(self, output: Any = None) -> Any:
         """
@@ -459,14 +460,14 @@ class FSDPModule:
         ``reshard_after_forward``). The root module reports ``False`` for
         ``fully_shard``'s default once its first forward made it the root.
         """
-        return module_ops.get_reshard_after_forward(self._first_storage())
+        return module_ops.get_reshard_after_forward(_first_storage(self))
 
     def get_reshard_after_backward(self) -> bool:
         """
         Returns whether this module reshards its parameters after backward
         (see :meth:`set_reshard_after_backward`).
         """
-        storage = self._first_storage()
+        storage = _first_storage(self)
         return storage._reshard_after_backward if storage is not None else True
 
     def get_requires_gradient_sync(self) -> bool:
@@ -474,7 +475,7 @@ class FSDPModule:
         Returns whether this module reduces its gradients (see
         :meth:`set_requires_gradient_sync`).
         """
-        storage = self._first_storage()
+        storage = _first_storage(self)
         return storage._requires_gradient_sync if storage is not None else True
 
     def get_requires_all_reduce(self) -> bool:
@@ -483,7 +484,7 @@ class FSDPModule:
         with HSDP (see :meth:`set_requires_all_reduce`), which
         :meth:`set_requires_gradient_sync` also sets.
         """
-        storage = self._first_storage()
+        storage = _first_storage(self)
         return storage._requires_all_reduce if storage is not None else True
 
     def get_is_last_backward(self) -> bool:
@@ -507,7 +508,7 @@ class FSDPModule:
             recurse (bool): Whether to set for all FSDP submodules or just the
                 passed-in module.
         """
-        module_ops.set_keep_unsharded_storage(self._fsdp_runtimes(recurse), keep)
+        module_ops.set_keep_unsharded_storage(_fsdp_runtimes(self, recurse), keep)
 
     def unshard(self, async_op: bool = False) -> UnshardHandle | None:
         """
@@ -688,7 +689,7 @@ class FSDPModule:
                 passed-in module.
         """
         module_ops.set_requires_gradient_sync(
-            self._fsdp_storages(recurse), requires_gradient_sync
+            _fsdp_storages(self, recurse), requires_gradient_sync
         )
 
     def set_requires_all_reduce(
@@ -700,7 +701,7 @@ class FSDPModule:
         all-reduce for HSDP.
         """
         module_ops.set_requires_all_reduce(
-            self._fsdp_storages(recurse), requires_all_reduce
+            _fsdp_storages(self, recurse), requires_all_reduce
         )
 
     def set_reshard_after_forward(
@@ -751,7 +752,7 @@ class FSDPModule:
                 passed-in module.
         """
         module_ops.set_reshard_after_backward(
-            self._fsdp_storages(recurse), reshard_after_backward
+            _fsdp_storages(self, recurse), reshard_after_backward
         )
 
     def set_modules_to_forward_prefetch(self, modules: list[FSDPModule]) -> None:
@@ -802,17 +803,17 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
-        This sets only the comm and keeps the installed all-gather layout. A
-        layout whose ``comm_type`` is set requires a comm of that type, which
-        FSDP passes each call's layout metadata: install the comm with this
-        method before the layout, and while the layout is installed, comms of
-        other types are rejected. Otherwise the comm can be replaced at any time,
-        since the layout, not the comm, owns the parameters' outputs.
+        This only works with the default all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`,
+        which packs the comm's input into the output that the comm allocated; a
+        custom layout carries its own comm instead (see
+        :meth:`set_all_gather_layout`). The comm can be replaced at any time,
+        since it owns no outputs.
 
         Args:
             comm (AllGather): Custom all-gather communication.
         """
-        module_ops.set_custom_all_gather(self._fsdp_runtimes(), comm)
+        module_ops.set_custom_all_gather(_fsdp_runtimes(self), comm)
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
         """
@@ -823,7 +824,28 @@ class FSDPModule:
         Args:
             comm (ReduceScatter): Custom reduce_scatter communication.
         """
-        module_ops.set_custom_reduce_scatter(self._fsdp_storages(), comm)
+        module_ops.set_custom_reduce_scatter(_fsdp_storages(self), comm)
+
+    def set_custom_all_reduce(self, comm: AllReduce) -> None:
+        """Override HSDP or ``replicate_with_fsdp`` all-reduce communication.
+
+        See ``AllReduce`` for the in-place reduction and stream contract. The
+        primitive runs on FSDP's internal all-reduce stream, which is distinct
+        from the compute stream. FSDP handles gradient scaling, accumulation,
+        and buffer lifetime, and runs the optional all-reduce hook afterward.
+        ``set_requires_all_reduce(False)`` suppresses this collective.
+
+        This applies to this module's parameter group, not child FSDP modules.
+
+        .. warning::
+            This API is experimental and may change without backward
+            compatibility.
+
+        Args:
+            comm (Optional[AllReduce]): Custom all-reduce communication.
+                ``None`` restores ``DefaultAllReduce``.
+        """
+        module_ops.set_custom_all_reduce(_fsdp_runtimes(self), comm)
 
     def set_all_reduce_hook(
         self,
@@ -845,7 +867,7 @@ class FSDPModule:
         A module with several parameter groups (meshes from ``shard_placement_fn``)
         runs the hook on each group's reduction output.
         """
-        module_ops.set_all_reduce_hook(self._fsdp_storages(), hook, stream)
+        module_ops.set_all_reduce_hook(_fsdp_storages(self), hook, stream)
 
     def set_post_optim_event(self, event: torch.Event) -> None:
         """
@@ -880,7 +902,7 @@ class FSDPModule:
         Args:
             factor (float): Custom divide factor.
         """
-        module_ops.set_gradient_divide_factor(self._fsdp_storages(), factor)
+        module_ops.set_gradient_divide_factor(_fsdp_storages(self), factor)
 
     def set_force_sum_reduction_for_comms(self, enable: bool) -> None:
         """
@@ -899,7 +921,7 @@ class FSDPModule:
         Args:
             enable (bool): Whether to only ever use ReduceOp.SUM for comms.
         """
-        module_ops.set_force_sum_reduction_for_comms(self._fsdp_storages(), enable)
+        module_ops.set_force_sum_reduction_for_comms(_fsdp_storages(self), enable)
 
     def set_all_gather_layout(
         self, layout: AllGatherLayout, /, *, recurse: bool = True
@@ -912,22 +934,24 @@ class FSDPModule:
 
         The layout packs the group's all-gather inputs before the collective and
         turns the collective output into the parameters' all-gather outputs
-        after it completes.
+        after it completes. This is the only way to install a layout.
         :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`
-        packs rank-major input and copies the output with its ``output_fn``,
-        e.g. ``DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)``
-        for the native copy; it works with any comm that produces rank-major
-        output. This is the only way to install a layout. A layout whose
-        ``comm_type`` is set, e.g. one whose collective writes
-        parameter-contiguous output, requires a comm of that type, which FSDP
-        passes each call's layout metadata: install the comm first with
-        :meth:`set_custom_all_gather`. Replacing a layout keeps the installed
-        comm. A layout that keeps no per-call state can serve any number of
-        modules. Set custom layouts before the first unshard: layouts change only
-        between iterations, while no all-gather is pending and parameters are
-        resharded, and never after parameters adopt outputs from a custom
-        layout, since only the layout that created those outputs can refill
-        them. FSDP checks every group before changing any.
+        packs rank-major input into the collective output and copies the output
+        with its ``output_fn``, e.g.
+        ``DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)`` for the
+        native copy. It is the only layout that works with the comms that
+        :meth:`set_custom_all_gather`, :meth:`set_symm_mem_for_comm` and
+        :meth:`set_allocate_memory_from_process_group_for_comm` install, which
+        expect that copy-in. A custom layout, e.g. one whose collective writes
+        parameter-contiguous output, packs its own input and carries its own
+        all-gather as its ``comm``, which FSDP passes each call's layout
+        metadata; without a ``comm``, it runs FSDP's default all-gather. A
+        layout that keeps no per-call state can serve any number of modules. Set
+        custom layouts before the first unshard: layouts change only between
+        iterations, while no all-gather is pending and parameters are resharded,
+        and never after parameters adopt outputs from a custom layout, since
+        only the layout that created those outputs can refill them. FSDP checks
+        every group before changing any.
 
         Args:
             layout (AllGatherLayout): Layout to install; pass
@@ -935,12 +959,7 @@ class FSDPModule:
             recurse (bool): Whether to also set the layout for all nested FSDP
                 modules. Defaults to ``True``.
         """
-        if not isinstance(layout, AllGatherLayout):
-            raise TypeError(
-                f"expected an AllGatherLayout, e.g. DefaultAllGatherLayout(fn), but "
-                f"got {layout!r}"
-            )
-        module_ops.set_all_gather_layout(self._fsdp_runtimes(recurse), layout)
+        module_ops.set_all_gather_layout(_fsdp_runtimes(self, recurse), layout)
 
     def set_reduce_scatter_input_fn(
         self, fn: Callable | None, /, *, recurse: bool = True
@@ -969,7 +988,7 @@ class FSDPModule:
             recurse (bool): Whether to also set the function for all nested FSDP
                 modules. Defaults to ``True``.
         """
-        module_ops.set_reduce_scatter_input_fn(self._fsdp_storages(recurse), fn)
+        module_ops.set_reduce_scatter_input_fn(_fsdp_storages(self, recurse), fn)
 
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True
@@ -993,7 +1012,7 @@ class FSDPModule:
                 the passed-in module.
         """
         module_ops.set_reduce_scatter_unused_params(
-            self._fsdp_storages(recurse), reduce_scatter_unused_params
+            _fsdp_storages(self, recurse), reduce_scatter_unused_params
         )
 
     def set_reduce_scatter_max_input_buffers(
@@ -1061,7 +1080,7 @@ class FSDPModule:
         # Groups are created per set of shard ranks, so meshes that shard over
         # the same ranks share one communicator (typically one total)
         module_ops.set_separate_reduce_scatter_group(
-            self._fsdp_storages(recurse), enable
+            _fsdp_storages(self, recurse), enable
         )
 
     def set_unshard_in_backward(self, unshard_in_backward: bool) -> None:
@@ -1071,7 +1090,7 @@ class FSDPModule:
         parameters in this FSDP module's parameter group are not needed for
         backward computation (e.g. embedding).
         """
-        module_ops.set_unshard_in_backward(self._fsdp_storages(), unshard_in_backward)
+        module_ops.set_unshard_in_backward(_fsdp_storages(self), unshard_in_backward)
 
     def set_allocate_memory_from_process_group_for_comm(self, enable: bool) -> None:
         """
@@ -1085,13 +1104,14 @@ class FSDPModule:
         This cannot be used together with :meth:`set_custom_all_gather` or
         :meth:`set_custom_reduce_scatter` as those APIs allow for
         finer-grained control over each communication, and this method cannot
-        determine their staging buffer allocation strategy. It is rejected under
-        a layout whose ``comm_type`` the resulting comm does not match.
+        determine their staging buffer allocation strategy. ProcessGroup
+        allocation only works with the default all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`.
 
         Args:
             enable (bool): Whether to turn on ProcessGroup allocation.
         """
-        module_ops.set_allocate_memory_from_process_group(self._fsdp_runtimes(), enable)
+        module_ops.set_allocate_memory_from_process_group(_fsdp_runtimes(self), enable)
 
     def set_symm_mem_for_comm(self, backend: Literal["NCCL"] = "NCCL") -> None:
         """
@@ -1117,14 +1137,15 @@ class FSDPModule:
         Collectives](https://docs.pytorch.org/docs/2.11/symmetric_memory.html#copy-engine-collectives).
 
         This cannot be used together with :meth:`set_custom_all_gather` or
-        :meth:`set_custom_reduce_scatter`, and is rejected like
-        :meth:`set_allocate_memory_from_process_group_for_comm` under a layout.
+        :meth:`set_custom_reduce_scatter`, and only works with the default
+        all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`.
 
         Args:
             backend (str): The symmetric memory backend to use. Defaults to
                 ``"NCCL"``. Currently, only ``"NCCL"`` is supported.
         """
-        module_ops.set_symm_mem(self._fsdp_runtimes(), backend)
+        module_ops.set_symm_mem(_fsdp_runtimes(self), backend)
 
     def set_unshard_in_current_stream(
         self, unshard_in_current_stream: bool, *, recurse: bool = True
@@ -1161,7 +1182,7 @@ class FSDPModule:
                 passed-in module.
         """
         module_ops.set_unshard_async_op(
-            self._fsdp_storages(recurse), unshard_in_current_stream
+            _fsdp_storages(self, recurse), unshard_in_current_stream
         )
 
     def _set_unshard_async_op(self, async_op: bool):
@@ -1176,7 +1197,7 @@ class FSDPModule:
         in forward to still get overlap, and the pre-all-gather ops like dtype
         casting and copy-in will not overlap with compute.
         """
-        module_ops.set_unshard_async_op(self._fsdp_storages(recurse=True), async_op)
+        module_ops.set_unshard_async_op(_fsdp_storages(self, recurse=True), async_op)
 
     def _free_sharded_params(self) -> None:
         """
@@ -1185,32 +1206,14 @@ class FSDPModule:
         does not need. Call :meth:`_restore_sharded_params` before reading or
         writing the sharded parameters or unsharding again.
         """
-        module_ops.free_sharded_params(self._fsdp_runtimes())
+        module_ops.free_sharded_params(_fsdp_runtimes(self))
 
     def _restore_sharded_params(self) -> None:
         """
         Re-allocates the storage that :meth:`_free_sharded_params` freed, with
         undefined values, e.g. to load new weights into the sharded parameters.
         """
-        module_ops.restore_sharded_params(self._fsdp_runtimes())
-
-    def _fsdp_states(self, recurse: bool) -> list[FSDPState]:
-        self_module = cast(nn.Module, self)
-        modules = self_module.modules() if recurse else [self_module]
-        return [m._get_fsdp_state() for m in modules if isinstance(m, FSDPModule)]
-
-    def _fsdp_storages(self, recurse: bool = False) -> list[ShardedBucketStorage]:
-        """The engine storages of this module's groups, or of all FSDP
-        modules' under it."""
-        return [st for s in self._fsdp_states(recurse) for st in s.storages]
-
-    def _fsdp_runtimes(self, recurse: bool = False) -> list[BucketRuntime]:
-        return [r for s in self._fsdp_states(recurse) for r in s.runtimes]
-
-    def _first_storage(self) -> ShardedBucketStorage | None:
-        """The storage of the first group, which holds the settings that the
-        setters give all of this module's groups."""
-        return next(iter(self._fsdp_storages()), None)
+        module_ops.restore_sharded_params(_fsdp_runtimes(self))
 
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
@@ -1222,8 +1225,32 @@ class FSDPModule:
     ) -> Any:
         apply = super()._apply  # type: ignore[misc]
         return module_ops.apply_to_params(
-            self._fsdp_runtimes(), lambda: apply(fn, recurse=recurse)
+            _fsdp_runtimes(self), lambda: apply(fn, recurse=recurse)
         )
+
+
+def _fsdp_states(module: FSDPModule, recurse: bool) -> list[FSDPState]:
+    self_module = cast(nn.Module, module)
+    modules = self_module.modules() if recurse else [self_module]
+    return [m._get_fsdp_state() for m in modules if isinstance(m, FSDPModule)]
+
+
+def _fsdp_storages(
+    module: FSDPModule, recurse: bool = False
+) -> list[ShardedBucketStorage]:
+    """The engine storages of ``module``'s groups, or of all FSDP modules'
+    under it."""
+    return [st for s in _fsdp_states(module, recurse) for st in s.storages]
+
+
+def _fsdp_runtimes(module: FSDPModule, recurse: bool = False) -> list[BucketRuntime]:
+    return [r for s in _fsdp_states(module, recurse) for r in s.runtimes]
+
+
+def _first_storage(module: FSDPModule) -> ShardedBucketStorage | None:
+    """The storage of the first group, which holds the settings that the
+    setters give all of ``module``'s groups."""
+    return next(iter(_fsdp_storages(module)), None)
 
 
 def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:

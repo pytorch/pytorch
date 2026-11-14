@@ -308,11 +308,19 @@ def _layout(runtime: BucketRuntime) -> AllGatherLayout:
 
 
 def _check_layout_comm(layout: Any, comm_type: type) -> None:
-    if layout.comm_type is not None and not issubclass(comm_type, layout.comm_type):
+    # Installed comms expect the default copy-in into the output they allocate,
+    # while a custom layout packs its own input and carries its own comm
+    from .all_gather_layout import DefaultAllGatherLayout
+    from .comms import DefaultAllGather
+
+    custom_layout = not isinstance(layout, DefaultAllGatherLayout)
+    if custom_layout and comm_type is not DefaultAllGather:
         raise ValueError(
-            f"all-gather layout {type(layout).__name__} requires a "
-            f"{layout.comm_type.__name__} comm, not {comm_type.__name__}; "
-            "install one with set_custom_all_gather() before the layout"
+            f"all-gather layout {type(layout).__name__} cannot use "
+            f"{comm_type.__name__}: comms from set_custom_all_gather(), "
+            "set_symm_mem_for_comm() and "
+            "set_allocate_memory_from_process_group_for_comm() only work "
+            "with DefaultAllGatherLayout; a custom layout carries its own comm"
         )
 
 
@@ -334,6 +342,22 @@ def set_custom_all_gather(runtimes: Sequence[BucketRuntime], comm: Any) -> None:
         _check_layout_comm(_layout(runtime), type(comm))
     for runtime in runtimes:
         runtime.bucket_storage._all_gather_comm = comm
+
+
+def set_custom_all_reduce(runtimes: Sequence[BucketRuntime], comm: Any) -> None:
+    """Replace the replica all-reduce of HSDP buckets; ``None`` restores the
+    default."""
+    from .comms import DefaultAllReduce
+
+    if len(runtimes) > 1:
+        raise ValueError(
+            "set_custom_all_reduce is not supported with multiple param groups"
+        )
+    for runtime in runtimes:
+        storage = runtime.bucket_storage
+        if storage._replicate_group is None:
+            raise ValueError("set_custom_all_reduce requires a replication mesh")
+        storage._all_reduce_comm = DefaultAllReduce() if comm is None else comm
 
 
 def set_custom_reduce_scatter(

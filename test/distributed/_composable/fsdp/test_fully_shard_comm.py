@@ -21,6 +21,9 @@ import torch.nn.functional as F
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch.distributed._composable import checkpoint, replicate
+from torch.distributed._composable.replicate_with_fsdp import (
+    replicate as replicate_with_fsdp,
+)
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
 )
@@ -36,6 +39,7 @@ from torch.distributed.fsdp._flex_shard.all_gather_layout import (
     foreach_all_gather_copy_out,
 )
 from torch.distributed.fsdp._flex_shard.placement_contract import GradientReduction
+from torch.distributed.fsdp._flex_shard.placements import shard as shard_placement
 from torch.distributed.fsdp._flex_shard.placements.shard import (
     reduce_scatter_input_fn as default_reduce_scatter_input_fn,
 )
@@ -46,6 +50,7 @@ from torch.distributed.fsdp._flex_shard.placements.utils import _gradient_reduce
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     DefaultAllGather,
+    DefaultAllReduce,
     DefaultReduceScatter,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
@@ -92,6 +97,8 @@ from torch.testing._internal.common_fsdp import (
     patch_unshard,
 )
 from torch.testing._internal.common_utils import (
+    device_sleep,
+    get_cycles_per_ms,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda_p2p_access,
@@ -121,6 +128,156 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 device = torch.device(get_devtype())
 device_module = torch.get_device_module(device)
+
+
+class TestFullyShardCustomAllReduceErrors(TestCase):
+    def test_invalid_parameter_groups(self):
+        no_replicas = MagicMock(bucket_storage=MagicMock(_replicate_group=None))
+        cases = [
+            ([], None),
+            ([MagicMock(), MagicMock()], "multiple param groups"),
+            ([no_replicas], "replication mesh"),
+        ]
+        for runtimes, message in cases:
+            with self.subTest(message=message):
+                model = MagicMock(spec=FSDPModule)
+                model._get_fsdp_state.return_value.runtimes = runtimes
+                if message:
+                    with self.assertRaisesRegex(ValueError, message):
+                        FSDPModule.set_custom_all_reduce(model, DefaultAllReduce())
+                else:
+                    FSDPModule.set_custom_all_reduce(model, DefaultAllReduce())
+
+    def test_default_all_reduce(self):
+        tensor, group, work = MagicMock(), MagicMock(), MagicMock()
+        for async_op in (False, True):
+            with self.subTest(async_op=async_op):
+                with patch.object(dist, "all_reduce", return_value=work) as all_reduce:
+                    result = DefaultAllReduce()(
+                        tensor, group, dist.ReduceOp.SUM, async_op=async_op
+                    )
+                self.assertIs(result, work)
+                all_reduce.assert_called_once_with(
+                    tensor, group=group, op=dist.ReduceOp.SUM, async_op=async_op
+                )
+
+
+class TestFullyShardCustomAllReduce(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    def test_custom_all_reduce(self):
+        self.run_subtests(
+            {
+                "use_custom_all_reduce": [False, True],
+                "config": [
+                    (torch.float32, False, None),
+                    (torch.float32, True, None),
+                    (torch.float16, False, None),
+                    (torch.float32, True, 8.0),
+                ],
+            },
+            self._test_custom_all_reduce,
+        )
+
+    def test_custom_all_reduce_replicate(self):
+        self.run_subtests(
+            {
+                "use_custom_all_reduce": [False, True],
+                "config": [
+                    (torch.float32, False, None),
+                    (torch.float16, False, None),
+                ],
+                "use_replicate": [True],
+            },
+            self._test_custom_all_reduce,
+        )
+
+    def _test_custom_all_reduce(
+        self, use_custom_all_reduce: bool, config: tuple, use_replicate: bool = False
+    ):
+        reduce_dtype, force_sum_reduction, divide_factor = config
+        mesh = init_device_mesh(
+            "cpu",
+            (4,) if use_replicate else (2, 2),
+            mesh_dim_names=("replicate",) if use_replicate else ("replicate", "shard"),
+        )
+        model = nn.Linear(4, 4, bias=False, device="cpu")
+        parallelize = replicate_with_fsdp if use_replicate else fully_shard
+        parallelize(
+            model, mesh=mesh, mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype)
+        )
+        model.set_force_sum_reduction_for_comms(force_sum_reduction)
+        if divide_factor is not None:
+            model.set_gradient_divide_factor(divide_factor)
+        custom_all_reduce = MagicMock(wraps=DefaultAllReduce())
+        if use_custom_all_reduce:
+            model.set_custom_all_reduce(custom_all_reduce)
+
+        def hook(_tensor):
+            self.assertEqual(custom_all_reduce.call_count, int(use_custom_all_reduce))
+
+        all_reduce_hook = MagicMock(side_effect=hook)
+        model.set_all_reduce_hook(all_reduce_hook)
+        inp = torch.full((2, 4), float(self.rank + 1), device="cpu")
+        model(inp).sum().backward()
+
+        all_reduce_hook.assert_called_once()
+        if use_custom_all_reduce:
+            custom_all_reduce.assert_called_once()
+            kwargs = custom_all_reduce.call_args.kwargs
+            tensor, group, op = kwargs["tensor"], kwargs["group"], kwargs["op"]
+            self.assertIs(group, mesh.get_group("replicate"))
+            self.assertEqual(tensor.dtype, reduce_dtype)
+            self.assertEqual(
+                op,
+                dist.ReduceOp.SUM
+                if force_sum_reduction or reduce_dtype == torch.float16
+                else dist.ReduceOp.AVG,
+            )
+            self.assertIs(all_reduce_hook.call_args.args[0], tensor)
+        else:
+            custom_all_reduce.assert_not_called()
+        self.assertEqual(
+            model.weight.grad.full_tensor(),
+            torch.full((4, 4), 20.0 / (divide_factor or self.world_size), device="cpu"),
+        )
+
+    def test_custom_all_reduce_accumulation(self):
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("replicate", "shard"))
+        model = nn.Linear(4, 4, bias=False, device="cpu")
+        fully_shard(model, mesh=mesh)
+        custom_all_reduce = MagicMock(wraps=DefaultAllReduce())
+        model.set_custom_all_reduce(custom_all_reduce)
+        hook = MagicMock()
+        model.set_all_reduce_hook(hook)
+        inp = torch.full((2, 4), float(self.rank + 1), device="cpu")
+
+        model.set_requires_all_reduce(False)
+        model(inp).sum().backward()
+        custom_all_reduce.assert_not_called()
+        hook.assert_not_called()
+        model.set_requires_all_reduce(True)
+        model(inp).sum().backward()
+        custom_all_reduce.assert_called_once()
+        hook.assert_called_once()
+        self.assertEqual(model.weight.grad.full_tensor(), torch.full((4, 4), 10.0))
+
+    def test_restore_default_all_reduce(self):
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("replicate", "shard"))
+        model = nn.Linear(4, 4, bias=False, device="cpu")
+        fully_shard(model, mesh=mesh)
+        custom_all_reduce = MagicMock(wraps=DefaultAllReduce())
+        model.set_custom_all_reduce(custom_all_reduce)
+        model.set_custom_all_reduce(None)
+        self.assertIsInstance(
+            model._get_fsdp_state()._fsdp_param_groups[0].storage._all_reduce_comm,
+            DefaultAllReduce,
+        )
+        model(torch.full((2, 4), float(self.rank + 1), device="cpu")).sum().backward()
+        custom_all_reduce.assert_not_called()
+        self.assertEqual(model.weight.grad.full_tensor(), torch.full((4, 4), 5.0))
 
 
 class TestFullyShardChunkCatMixedDtype(TestCase):
@@ -2500,15 +2657,12 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         return 1
 
     @parametrize("divide_factor", [None, 1.0, 2.0])
-    def test_singleton_copy_division(self, divide_factor):
-        divisions = []
+    def test_singleton_reduce_reuses_input(self, divide_factor):
+        ops = []
 
-        division_ops = (torch.ops.aten.div.Tensor, torch.ops.aten.div_.Tensor)
-
-        class RecordDivisions(TorchDispatchMode):
+        class RecordOps(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if func in division_ops:
-                    divisions.append(func)
+                ops.append(func)
                 return func(*args, **(kwargs or {}))
 
         model = nn.Linear(8, 4, bias=False, device=device)
@@ -2517,10 +2671,115 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
             model.set_gradient_divide_factor(divide_factor)
         inp = torch.ones(3, 8, device=device)
         loss = model(inp).sum()
-        with RecordDivisions():
+        allocate = DefaultReduceScatter.allocate
+        with (
+            patch.object(
+                DefaultReduceScatter, "allocate", autospec=True, side_effect=allocate
+            ) as mock_allocate,
+            RecordOps(),
+        ):
             loss.backward()
+        # The comm allocates nothing and the packed input is not copied to an output
+        self.assertEqual(mock_allocate.call_count, 0)
+        self.assertNotIn(torch.ops.aten.copy_.default, ops)
+        div_ops = (torch.ops.aten.div.Tensor, torch.ops.aten.div_.Tensor)
+        divisions = [op for op in ops if op in div_ops]
         self.assertEqual(len(divisions), int(divide_factor not in (None, 1)))
         expected = torch.full_like(inp[:1].expand(4, -1), 3 / (divide_factor or 1))
+        self.assertEqual(model.weight.grad.to_local(), expected)
+
+    @unittest.skipIf(not hasattr(device_module, "_sleep"), "requires device sleep")
+    @parametrize("hsdp", [False, True])
+    def test_singleton_reduce_accumulation_with_delayed_post_reduce(self, hsdp):
+        # Delay reduce-scatter stream work so that reading a buffer released
+        # too early would race with the next module's backward reusing it. The
+        # sleep only widens that window; nothing relies on it for ordering.
+        # hsdp=True checks that partial accumulation keeps a separate output.
+        sleep_cycles = int(50 * get_cycles_per_ms(device.type))
+        reduce_on_one_rank = shard_placement.reduce_grads_on_one_rank
+
+        def delayed_reduce_on_one_rank(grads, reduction):
+            device_sleep(device.type, sleep_cycles)
+            reduce_on_one_rank(grads, reduction)
+
+        torch.manual_seed(42)
+        dim, num_layers, num_microbatches = 2048, 8, 3
+        layers = [nn.Linear(dim, dim, bias=False) for _ in range(num_layers)]
+        ref_model = nn.Sequential(*layers).to(device)
+        model = copy.deepcopy(ref_model)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        for layer in model:
+            fully_shard(layer, mesh=mesh)
+        fully_shard(model, mesh=mesh)
+        with patch.object(
+            shard_placement, "reduce_grads_on_one_rank", delayed_reduce_on_one_rank
+        ):
+            for microbatch_idx in range(num_microbatches):
+                is_last_microbatch = microbatch_idx == num_microbatches - 1
+                if hsdp:
+                    model.set_requires_all_reduce(is_last_microbatch)
+                inp = torch.randn(512, dim, device=device)
+                ref_model(inp).square().mean().backward()
+                model(inp).square().mean().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertEqual(param.grad.to_local(), ref_param.grad)
+
+    @parametrize("hsdp", [False, True])
+    def test_singleton_reduce_custom_comm_persistent_input(self, hsdp):
+        class PersistentInputReduceScatter(DefaultReduceScatter):
+            # Comm allows reusing a persistent buffer for the input
+            def __init__(self):
+                self.buffer = None
+                self.next_allocation_is_input = True
+
+            def allocate(self, size, *, dtype, device):
+                is_input = self.next_allocation_is_input
+                self.next_allocation_is_input = not is_input
+                if not is_input:
+                    return super().allocate(size, dtype=dtype, device=device)
+                if self.buffer is None:
+                    self.buffer = super().allocate(size, dtype=dtype, device=device)
+                return self.buffer
+
+        torch.manual_seed(42)
+        layers = [nn.Linear(16, 16, bias=False) for _ in range(4)]
+        ref_model = nn.Sequential(*layers).to(device)
+        model = copy.deepcopy(ref_model)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        comm = PersistentInputReduceScatter()
+        for layer in model:
+            fully_shard(layer, mesh=mesh)
+            layer.set_custom_reduce_scatter(comm)
+        fully_shard(model, mesh=mesh)
+        inp = torch.randn(8, 16, device=device)
+        ref_model(inp).square().mean().backward()
+        model(inp).square().mean().backward()
+        # No reduce-scatter runs, so the comm is never asked for a buffer
+        self.assertIsNone(comm.buffer)
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertEqual(param.grad.to_local(), ref_param.grad)
+
+    @parametrize("hsdp", [False, True])
+    @parametrize("split_by", ["fp16_reduce", "force_sum"])
+    def test_singleton_split_divide_factor(self, split_by, hsdp):
+        # fp16 and forced-sum reductions split the divide factor into pre/post
+        # factors, so the singleton path must not divide by it again
+        model = nn.Linear(8, 4, bias=False, device=device)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        reduce_dtype = torch.float16 if split_by == "fp16_reduce" else None
+        mp_policy = MixedPrecisionPolicy(reduce_dtype=reduce_dtype)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+        model.set_gradient_divide_factor(4.0)
+        model.set_force_sum_reduction_for_comms(split_by == "force_sum")
+        inp = torch.ones(3, 8, device=device)
+        model(inp).sum().backward()
+        expected = torch.full_like(inp[:1].expand(4, -1), 3 / 4)
         self.assertEqual(model.weight.grad.to_local(), expected)
 
     def test_size1_reduceop(self):
@@ -2735,20 +2994,20 @@ class _ParamContiguousAllGather(DefaultAllGather):
 
 
 class _ParamContiguousLayout(AllGatherLayout):
-    """Backs a group's parameters with one FSDP-owned buffer that a
-    ``_ParamContiguousAllGather``'s parameter-contiguous output refills with a
-    single copy.
+    """Backs a group's parameters with one FSDP-owned buffer that the
+    parameter-contiguous output of its ``comm``, a ``_ParamContiguousAllGather``,
+    refills with a single copy.
 
     ``mode`` is "custom" to always select parameter-contiguous output,
     "rank_major" to always fall back, or "alternate" to fall back on the first
     all-gather and then alternate. "rank_major" never selects
-    parameter-contiguous output, so it also runs with any comm, as
-    ``comm_type=None``.
+    parameter-contiguous output, so it also runs without a ``comm``, on FSDP's
+    default all-gather.
     """
 
-    def __init__(self, mode, comm_type=_ParamContiguousAllGather):
+    def __init__(self, mode, comm=None):
         self.mode = mode
-        self.comm_type = comm_type
+        self.comm = comm
         self.num_prepares = 0
         # This call's choice, which finalize checks against FSDP's metadata
         self.split_sizes = None
@@ -2966,52 +3225,46 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    def test_layout_comm_type(self):
+    def test_layout_comm(self):
         model = nn.Linear(8, 8)
         fully_shard(model, mesh=init_device_mesh("cpu", (self.world_size,)))
         group = model._get_fsdp_state()._fsdp_param_groups[0]
         native = DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
-        comm = DefaultAllGather()
-        # Neither setter replaces what the other installed
+        comm = _ParamContiguousAllGather()
+        # Under the default layout, neither setter replaces what the other installed
         model.set_all_gather_layout(native)
         model.set_custom_all_gather(comm)
         self.assertIs(group.all_gather_layout, native)
         self.assertIs(group.storage._all_gather_comm, comm)
-        # A layout that requires a comm type needs that comm installed first and
-        # then rejects comms of other types, also from FSDP's comm setters
-        layout = _ParamContiguousLayout("custom")
-        mismatch = "requires a _ParamContiguousAllGather comm, not DefaultAllGather"
-        with self.assertRaisesRegex(ValueError, mismatch):
+        # Installed comms only work with the default layout: a custom layout, which
+        # carries its own comm, is rejected while one is installed and then rejects
+        # them, also from FSDP's comm setters
+        layout = _ParamContiguousLayout("custom", _ParamContiguousAllGather())
+        rejected = "cannot use _ParamContiguousAllGather"
+        with self.assertRaisesRegex(ValueError, rejected):
             model.set_all_gather_layout(layout)
         self.assertIs(group.all_gather_layout, native)
-        model.set_custom_all_gather(_ParamContiguousAllGather())
+        default_comm = DefaultAllGather()
+        model.set_custom_all_gather(default_comm)
         model.set_all_gather_layout(layout)
-        model.set_custom_all_gather(_ParamContiguousAllGather())  # same type
-        with self.assertRaisesRegex(ValueError, mismatch):
+        with self.assertRaisesRegex(ValueError, rejected):
             model.set_custom_all_gather(comm)
-        with self.assertRaisesRegex(ValueError, "not ProcessGroupAllocAllGather"):
+        with self.assertRaisesRegex(ValueError, "cannot use ProcessGroupAlloc"):
             model.set_allocate_memory_from_process_group_for_comm(True)
-        with self.assertRaisesRegex(ValueError, "not SymmMemAllGather"):
+        with self.assertRaisesRegex(ValueError, "cannot use SymmMemAllGather"):
             model.set_symm_mem_for_comm()
-        self.assertIs(type(group.storage._all_gather_comm), _ParamContiguousAllGather)
-        # The comm keeps no per-call state, so it can serve another module too
+        self.assertIs(group.storage._all_gather_comm, default_comm)
+        # The layout's comm keeps no per-call state, so another module's layout can
+        # carry it too
         other = nn.Linear(8, 8)
         fully_shard(other, mesh=init_device_mesh("cpu", (self.world_size,)))
-        other.set_custom_all_gather(group.storage._all_gather_comm)
-        other.set_all_gather_layout(_ParamContiguousLayout("custom"))
-        # Replacing the layout keeps the comm. The layout must be given, and 2.15's
-        # hook fails loudly
-        model.set_all_gather_layout(DefaultAllGatherLayout())
-        self.assertIs(type(group.storage._all_gather_comm), _ParamContiguousAllGather)
-        for not_a_layout in (None, all_gather_output_fn_with_native_copy):
-            with self.assertRaisesRegex(TypeError, "expected an AllGatherLayout"):
-                model.set_all_gather_layout(not_a_layout)
+        other.set_all_gather_layout(_ParamContiguousLayout("custom", layout.comm))
+        # 2.15's hook fails loudly
         with self.assertRaisesRegex(AttributeError, "set_all_gather_layout"):
             group._all_gather_output_fn = all_gather_output_fn_with_native_copy
         with self.assertRaisesRegex(AttributeError, "set_all_gather_layout"):
             group._all_gather_output_fn
-        # A module with several parameter groups cannot install a custom comm, so
-        # neither a layout that requires one
+        # A layout reaches every parameter group of a module
         mesh = init_device_mesh("cpu", (self.world_size, 1), mesh_dim_names=("a", "b"))
         bias_placement = ShardPlacementResult(Shard(0), FSDPMeshInfo(mesh["a"], 0))
         model = nn.Linear(8, 8)
@@ -3020,8 +3273,6 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             mesh=mesh["b"],
             shard_placement_fn=lambda p: bias_placement if p is model.bias else None,
         )
-        with self.assertRaisesRegex(ValueError, mismatch):
-            model.set_all_gather_layout(_ParamContiguousLayout("custom"))
         model.set_all_gather_layout(native)
         groups = model._get_fsdp_state()._fsdp_param_groups
         self.assertEqual([group.all_gather_layout for group in groups], [native] * 2)
@@ -3036,7 +3287,7 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         # Layouts, default ones too, change only between iterations, and FSDP
         # checks every group before replacing any layout
         model[1].unshard()
-        rank_major = _ParamContiguousLayout("rank_major", comm_type=None)
+        rank_major = _ParamContiguousLayout("rank_major")
         for layout in (rank_major, native):
             with self.assertRaisesRegex(RuntimeError, "cannot replace"):
                 model.set_all_gather_layout(layout)
@@ -3060,13 +3311,21 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         handle.wait()
         with self.assertRaisesRegex(RuntimeError, "cannot replace"):
             model[0].set_all_gather_layout(native, recurse=False)
-        model[0].set_allocate_memory_from_process_group_for_comm(True)
-        self.assertIsNot(groups[0].storage._all_gather_comm, comm)
+        # Process-group allocation needs the default layout, even where a custom
+        # layout falls back to rank-major output on every call
+        with self.assertRaisesRegex(ValueError, "cannot use ProcessGroupAlloc"):
+            model[0].set_allocate_memory_from_process_group_for_comm(True)
+        self.assertIs(groups[0].storage._all_gather_comm, comm)
         model[0].reshard()
         model[0].set_all_gather_layout(native, recurse=False)
         self.assertIs(groups[0].all_gather_layout, native)
+        model[0].set_allocate_memory_from_process_group_for_comm(True)
+        with self.assertRaisesRegex(ValueError, "cannot use ProcessGroupAlloc"):
+            model[0].set_all_gather_layout(rank_major, recurse=False)
+        self.assertIs(groups[0].all_gather_layout, native)
 
-        # FSDP adopts nothing from a rejected result, so another layout can follow
+        # FSDP adopts nothing from a rejected result, so after reset_iter_state()
+        # another layout can follow
         class ShortLayout(AllGatherLayout):
             def prepare_output(self, metadata):
                 return True
@@ -3085,10 +3344,11 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         inp = torch.randn(2, 8)
         with self.assertRaisesRegex(ValueError, "contiguous 1-D tensor"):
             model(inp)
+        model.reset_iter_state()
         model.set_all_gather_layout(DefaultAllGatherLayout())
         model(inp).sum().backward()
 
-        # A rejected refill frees what it re-allocated: the shared buffer, or the
+        # A refill is rejected whether it refills the shared buffer or the
         # parameters' own outputs after a rank-major first unshard
         class RejectedRefill(_ParamContiguousLayout):
             def finalize_outputs(self, metadata):
@@ -3100,8 +3360,8 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         for mode in ("custom", "alternate"):
             model = nn.Linear(8, 8)
             fully_shard(model, mesh=mesh, reshard_after_forward=True)
-            model.set_custom_all_gather(_ParamContiguousAllGather())
-            model.set_all_gather_layout(RejectedRefill(mode))
+            layout = RejectedRefill(mode, _ParamContiguousAllGather())
+            model.set_all_gather_layout(layout)
             model(inp)
             with self.assertRaisesRegex(ValueError, "did not refill"):
                 model(inp)
@@ -3139,9 +3399,8 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             local_tensor = param._local_tensor
             local_tensor.fsdp_pre_all_gather = pre_all_gather.__get__(local_tensor)
             local_tensor.fsdp_post_all_gather = post.__get__(local_tensor)
-        layout = _ParamContiguousLayout("alternate")
+        layout = _ParamContiguousLayout("alternate", _ParamContiguousAllGather())
         layout.num_prepares = 1  # custom first, then fall back every other unshard
-        model.set_custom_all_gather(_ParamContiguousAllGather())
         model.set_all_gather_layout(layout)
         inp = torch.randn(2, 8)
         for _ in range(3):
@@ -3162,8 +3421,8 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         ref_model = copy.deepcopy(model)
         mesh = init_device_mesh("cpu", (self.world_size,))
         fully_shard(model, mesh=mesh, reshard_after_forward=True)
-        model.set_custom_all_gather(_ParamContiguousAllGather())
-        model.set_all_gather_layout(_ParamContiguousLayout("custom"))
+        layout = _ParamContiguousLayout("custom", _ParamContiguousAllGather())
+        model.set_all_gather_layout(layout)
         inp = torch.randn(2, 8)
         with torch.inference_mode():
             for _ in range(2):  # adopts, then refills
@@ -3200,9 +3459,8 @@ def _check_layout_training(test, device, mode, reshard, async_op, mixed, keep):
     # One comm serves every block, whose all-gathers overlap, while each block has
     # its own layout, which keeps per-call state
     comm = _ParamContiguousAllGather()
-    layouts = [_ParamContiguousLayout(mode) for _ in model]
+    layouts = [_ParamContiguousLayout(mode, comm) for _ in model]
     for block, layout in zip(model, layouts):
-        block.set_custom_all_gather(comm)
         block.set_all_gather_layout(layout, recurse=False)
     groups = [block._get_fsdp_state()._fsdp_param_groups[0] for block in model]
     ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
@@ -3264,7 +3522,6 @@ def _check_layout_training(test, device, mode, reshard, async_op, mixed, keep):
     if mode == "custom":
         for block, layout in zip(model, layouts):
             test.assertGreater(layout.single_copy_refills, 0)
-            block.set_custom_all_gather(_ParamContiguousAllGather())  # any time
             block.set_all_gather_layout(layout, recurse=False)  # a no-op
             with test.assertRaisesRegex(RuntimeError, "cannot replace"):
                 block.set_all_gather_layout(DefaultAllGatherLayout())

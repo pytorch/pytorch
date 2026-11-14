@@ -1622,7 +1622,7 @@ void _linalg_check_errors(
 
   // If it's all zeros, we return early.
   // We optimise for the most likely case.
-  if (C10_LIKELY(!infos.any().item<bool>())) {
+  if (!infos.any().item<bool>()) [[likely]] {
     return;
   }
 
@@ -3929,9 +3929,9 @@ Tensor& linalg_solve_triangular_out(
 
   Tensor out_f; // the out that will go into fortran
   // We use C10_LIKELY mostly for documentation as it helps following what's the most likely path
-  if C10_LIKELY (is_row_or_column_contiguous(out)) {
+  if (is_row_or_column_contiguous(out)) [[likely]] {
     out_f = out;
-    if C10_LIKELY (!out.is_same(B_)) {
+    if (!out.is_same(B_)) [[likely]] {
       out_f.copy_(B_);
     }
   } else {
@@ -3964,7 +3964,7 @@ Tensor& linalg_solve_triangular_out(
   bool A_is_conj = A_f.is_conj() != out_f.is_conj();
   bool A_is_neg = A_f.is_neg() != out_f.is_neg();
   bool A_is_f_contig = (A_f.stride(-1) == 1) == transpose_A;
-  if C10_UNLIKELY (!is_row_or_column_contiguous(A_f)) {
+  if (!is_row_or_column_contiguous(A_f)) [[unlikely]] {
     // We first annotate with flags on A_f all the conj / transpose / neg coming from out
     // and then we clone the resulting tensor to resolve all of them in memory
     if (out_f.is_conj()) {
@@ -3983,8 +3983,8 @@ Tensor& linalg_solve_triangular_out(
     A_f = transpose_A ? A_f.clone(at::MemoryFormat::Contiguous)
                       : cloneBatchedColumnMajor(A_f);
     A_is_f_contig = true;
-  } else if C10_UNLIKELY (A_is_f_contig && A_is_conj) {
-    if C10_UNLIKELY (A_f.is_neg() || out_f.is_neg()) {
+  } else if (A_is_f_contig && A_is_conj) [[unlikely]] {
+    if (A_f.is_neg() || out_f.is_neg()) [[unlikely]] {
       // Cases A_is_neg (remember that B.is_neg() iff out_f.is_same(B))
       // -AX = -B => A(-X) = B. Swap neg of A_f. Nothing to do on X as X.is_same(B).
       // -AX = B. We resolve the neg in memory
@@ -4006,7 +4006,7 @@ Tensor& linalg_solve_triangular_out(
     }
     // As we've already resolved the conj of A in the clone
     A_is_conj = out_f.is_conj();
-  } else if C10_UNLIKELY (A_is_neg) {
+  } else if (A_is_neg) [[unlikely]] {
     // We follow the same logic as above, only that in this case we need to perform the
     // negation in memory
     if (out_f.is_neg()) {

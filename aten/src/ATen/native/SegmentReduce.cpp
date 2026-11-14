@@ -4,6 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
 
@@ -53,6 +54,7 @@ void _segment_reduce_lengths_cpu_kernel1(
       kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", [&]() {
         auto* output_data = output.data_ptr<scalar_t>();
         const auto* values_data = data.const_data_ptr<scalar_t>();
+        using opmath_t = at::opmath_type<scalar_t>;
         for (const auto outer_idx : c10::irange(outer_offset)) {
           int64_t segment_start, segment_length;
           int64_t segment_end = is_offsets_like ?
@@ -70,17 +72,17 @@ void _segment_reduce_lengths_cpu_kernel1(
             }
             for (const auto inner_idx : c10::irange(inner_offset)) {
               // ===== step1: initialize starting value
-              scalar_t initial_value = 0;
+              opmath_t initial_value = 0;
               if (initial.has_value()) {
-                initial_value = initial.value().to<scalar_t>();
+                initial_value = initial.value().to<opmath_t>();
               } else if (reduction == ReductionType::MAX) {
-                initial_value = -std::numeric_limits<scalar_t>::infinity();
+                initial_value = -std::numeric_limits<opmath_t>::infinity();
               } else if (
                   reduction == ReductionType::MEAN ||
                   reduction == ReductionType::SUM) {
                 initial_value = 0;
               } else if (reduction == ReductionType::MIN) {
-                initial_value = std::numeric_limits<scalar_t>::infinity();
+                initial_value = std::numeric_limits<opmath_t>::infinity();
               } else if (reduction == ReductionType::PROD) {
                 initial_value = 1;
               }
@@ -89,11 +91,11 @@ void _segment_reduce_lengths_cpu_kernel1(
               for (const auto j : c10::irange(segment_start, segment_end)) {
                 int64_t data_index = outer_idx * data_stride_axis * data_size_axis
                                      + j * data_stride_axis + inner_idx;
-                const auto val = values_data[data_index];
+                const auto val = static_cast<opmath_t>(values_data[data_index]);
                 if (reduction == ReductionType::MAX) {
                   initial_value = at::_isnan(val)
                       ? val
-                      : std::max<scalar_t>(initial_value, val);
+                      : std::max(initial_value, val);
                 } else if (
                     reduction == ReductionType::MEAN ||
                     reduction == ReductionType::SUM) {
@@ -101,7 +103,7 @@ void _segment_reduce_lengths_cpu_kernel1(
                 } else if (reduction == ReductionType::MIN) {
                   initial_value = at::_isnan(val)
                       ? val
-                      : std::min<scalar_t>(initial_value, val);
+                      : std::min(initial_value, val);
                 } else if (reduction == ReductionType::PROD) {
                   initial_value = initial_value * val;
                 }
@@ -112,7 +114,7 @@ void _segment_reduce_lengths_cpu_kernel1(
 
               if (segment_length == 0 && !initial.has_value() &&
                   reduction == ReductionType::MEAN) {
-                initial_value = static_cast<scalar_t>(NAN);
+                initial_value = static_cast<opmath_t>(NAN);
               } else if (
                   reduction == ReductionType::MEAN &&
                   segment_length > 0 && !at::_isnan(initial_value)) {
@@ -120,7 +122,7 @@ void _segment_reduce_lengths_cpu_kernel1(
               }
               int64_t output_index = outer_idx * output_stride_axis * output_size_axis
                                      + dim_idx * output_stride_axis + inner_idx;
-              output_data[output_index] = initial_value;
+              output_data[output_index] = static_cast<scalar_t>(initial_value);
             }
           }
         }

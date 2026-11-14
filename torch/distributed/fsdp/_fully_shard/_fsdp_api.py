@@ -1,8 +1,11 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
 
+from torch.distributed.fsdp._flex_shard.all_gather_layout import AllGatherInput
 from torch.distributed.fsdp._flex_shard.api import (
+    _ReduceOp,  # noqa: F401
     AllGather,
+    AllReduce,
     Comm,
     CPUOffloadPolicy,
     GradientReductionHandle,
@@ -15,6 +18,8 @@ from torch.distributed.fsdp._flex_shard.api import (
 
 __all__ = [
     "AllGather",
+    "AllGatherInput",
+    "AllReduce",
     "Comm",
     "CPUOffloadPolicy",
     "DataParallelMeshDims",

@@ -4,6 +4,7 @@
 from .._flex_shard.comms import (  # noqa: F401
     DefaultAllGather,
     DefaultAllocMixin,
+    DefaultAllReduce,
     DefaultReduceScatter,
     ProcessGroupAllocAllGather,
     ProcessGroupAllocMixin,

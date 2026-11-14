@@ -167,7 +167,7 @@ class AllGather(Comm):
     """
     Interface for all_gather comm primitive
 
-    A comm whose type an all-gather layout requires as its ``comm_type`` is also
+    A comm that a custom all-gather layout carries as its ``comm`` is also
     called with ``output_metadata``: the metadata that the layout prepared for
     the call, or ``None`` for a call with rank-major output.
     """
@@ -178,6 +178,30 @@ class AllGather(Comm):
         output_tensor: torch.Tensor,
         input_tensor: torch.Tensor,
         group: dist.ProcessGroup,
+        async_op: bool = False,
+    ) -> dist.Work | None: ...
+
+
+class AllReduce(Comm):
+    """Interface for an in-place all-reduce communication primitive.
+
+    FSDP calls this primitive synchronously on its internal all-reduce stream
+    with ``SUM`` or ``AVG``. ``AVG`` must divide by the process-group size.
+    Implementations using another stream must wait on the calling stream
+    before accessing the tensor and join it before returning, so that FSDP's
+    completion event covers the collective and protects the buffer lifetime.
+
+    The input buffer is allocated by the reduce-scatter primitive, so FSDP
+    does not call this primitive's ``allocate`` method. Implementations needing
+    registered memory may require a matching custom ``ReduceScatter``.
+    """
+
+    @abstractmethod
+    def __call__(
+        self,
+        tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        op: _ReduceOp,
         async_op: bool = False,
     ) -> dist.Work | None: ...
 
