@@ -2,6 +2,8 @@
 
 #include <array>
 #include <cstring>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include <ATen/Parallel.h>
@@ -16,6 +18,21 @@ inline namespace CPU_CAPABILITY {
 template<typename T> using opmath_t = at::opmath_type<T>;
 
 constexpr int64_t kChunkSize = 16;
+
+// Each Welford accumulator spans 256 bits (a register pair on 128-bit ISAs) so
+// that every lane sees the same elements on every ISA and the moments match AVX2.
+template <typename T>
+constexpr int kMomentsVecRegs =
+    vec::Vectorized<opmath_t<T>>::size() * sizeof(opmath_t<T>) < 32 ? 2 : 1;
+
+template <typename T>
+using MomentsVec = std::conditional_t<
+    kMomentsVecRegs<T> == 1,
+    vec::Vectorized<opmath_t<T>>,
+    vec::VectorizedN<opmath_t<T>, kMomentsVecRegs<T>>>;
+
+template <typename T>
+constexpr int64_t kMomentsVecSize = vec::Vectorized<T>::size() * kMomentsVecRegs<T>;
 
 template <typename T>
 void AddMoments(
@@ -33,15 +50,15 @@ void AddMoments(
   m0 = n;
 }
 
-template <typename T>
+template <typename Vec>
 C10_ALWAYS_INLINE void AddMomentsVec(
     int64_t m0_add,
-    const vec::Vectorized<T>& m1_add,
-    const vec::Vectorized<T>& m2_add,
+    const Vec& m1_add,
+    const Vec& m2_add,
     int64_t& m0,
-    vec::Vectorized<T>& m1,
-    vec::Vectorized<T>& m2) {
-  using Vec = vec::Vectorized<T>;
+    Vec& m1,
+    Vec& m2) {
+  using T = typename Vec::value_type;
   const int64_t n = m0 + m0_add;
   const T c = n == 0 ? static_cast<T>(0) : static_cast<T>(m0_add) / static_cast<T>(n);
   const Vec c_vec(c);
@@ -59,11 +76,11 @@ inline std::enable_if_t<std::is_same_v<T, opmath_t<T>>, void>
 UpdateMomentsVec(
     int64_t m0,
     const T* X_ptr,
-    const std::array<vec::Vectorized<opmath_t<T>>, kChunkSize>& c_vecs,
+    const std::array<MomentsVec<T>, kChunkSize>& c_vecs,
     int64_t& m0_stk0,
-    vec::Vectorized<opmath_t<T>>& m1_stk0,
-    vec::Vectorized<opmath_t<T>>& m2_stk0) {
-  using Vec = vec::Vectorized<opmath_t<T>>;
+    MomentsVec<T>& m1_stk0,
+    MomentsVec<T>& m2_stk0) {
+  using Vec = MomentsVec<T>;
   Vec m1_vec(0);
   Vec m2_vec(0);
   for (const auto j : c10::irange(m0)) {
@@ -77,6 +94,20 @@ UpdateMomentsVec(
   AddMomentsVec(m0, m1_vec, m2_vec, m0_stk0, m1_stk0, m2_stk0);
 }
 
+// Loads kMomentsVecSize<T> reduced-precision scalars as two float vectors:
+// the first holds scalars [0, kMomentsVecSize<T> / 2), the second the rest.
+template <typename T>
+inline std::tuple<MomentsVec<T>, MomentsVec<T>> LoadMomentsVec(const T* ptr) {
+  using Vec = vec::Vectorized<T>;
+  if constexpr (kMomentsVecRegs<T> == 1) {
+    return convert_to_float<T>(Vec::loadu(ptr));
+  } else {
+    auto [x0, x1] = convert_to_float<T>(Vec::loadu(ptr));
+    auto [x2, x3] = convert_to_float<T>(Vec::loadu(ptr + Vec::size()));
+    return {MomentsVec<T>(x0, x1), MomentsVec<T>(x2, x3)};
+  }
+}
+
 // each bfloat16/half vector will be converted to two float vectors,
 // and accumulated successively on m1_stk0/m2_stk0.
 template <typename T>
@@ -84,18 +115,16 @@ inline std::enable_if_t<!std::is_same_v<T, at::opmath_type<T>>, void>
 UpdateMomentsVec(
     int64_t m0,
     const T* X_ptr,
-    const std::array<vec::Vectorized<at::opmath_type<T>>, kChunkSize>& c_vecs,
+    const std::array<MomentsVec<T>, kChunkSize>& c_vecs,
     int64_t& m0_stk0,
-    vec::Vectorized<at::opmath_type<T>>& m1_stk0,
-    vec::Vectorized<at::opmath_type<T>>& m2_stk0) {
-  using Vec = vec::Vectorized<T>;
-  using fVec = vec::Vectorized<at::opmath_type<T>>;
+    MomentsVec<T>& m1_stk0,
+    MomentsVec<T>& m2_stk0) {
+  using fVec = MomentsVec<T>;
   fVec m1_fvec0(0), m1_fvec1(0);
   fVec m2_fvec0(0), m2_fvec1(0);
   for (const auto j : c10::irange(m0)) {
-    const Vec x_bvec = Vec::loadu(X_ptr + j * Vec::size());
     const fVec tmpVec = c_vecs[j];
-    auto [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
+    auto [x_fvec0, x_fvec1] = LoadMomentsVec(X_ptr + j * kMomentsVecSize<T>);
     const fVec delta_fvec0 = x_fvec0 - m1_fvec0;
     const fVec delta_fvec1 = x_fvec1 - m1_fvec1;
     m1_fvec0 = fmadd(delta_fvec0, tmpVec, m1_fvec0);
@@ -117,13 +146,13 @@ template <typename T, int64_t kMaxDepth>
 std::pair<opmath_t<T>, opmath_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
   using math_t = opmath_t<T>;
 
-  constexpr int64_t kVecSize = vec::Vectorized<T>::size();
-  constexpr int64_t kAccVecSize = vec::Vectorized<math_t>::size();
+  using Vec = MomentsVec<T>;
+  constexpr int64_t kVecSize = kMomentsVecSize<T>;
+  constexpr int64_t kAccVecSize = Vec::size();
   const int64_t n = N / kVecSize;
   const int64_t m = divup(n, kChunkSize);
   const int64_t depth = utils::CeilLog2(m);
 
-  using Vec = vec::Vectorized<math_t>;
   const Vec kZeroVec(math_t(0));
   std::array<int64_t, kMaxDepth> m0_stk = {{0}};
   std::array<Vec, kMaxDepth> m1_stk;
@@ -189,8 +218,7 @@ std::pair<opmath_t<T>, opmath_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, in
 
 template <typename T>
 std::pair<opmath_t<T>, opmath_t<T>> RowwiseMoments(const T* X, int64_t N, int64_t ddof = 0) {
-  using Vec = vec::Vectorized<T>;
-  constexpr int64_t kVecSize = Vec::size();
+  constexpr int64_t kVecSize = kMomentsVecSize<T>;
   const int64_t n = N / kVecSize;
   const int64_t m = divup(n, kChunkSize);
   const int64_t depth = utils::CeilLog2(m);

@@ -127,8 +127,10 @@ void layer_norm_kernel_mixed_type(
       rstd_val = float(1) / std::sqrt(rstd_val + eps);
       const float scale = rstd_val;
       const float bias = -rstd_val * mean_val;
+      // Vector/scalar split at the AVX2 width so each element takes the same
+      // (unfused vector or contracted scalar) path on every ISA.
       int64_t d = 0;
-      for (; d < N - (N % bVec::size()); d += bVec::size()) {
+      for (; d < N - (N % kMomentsVecSize<T>); d += bVec::size()) {
         bVec x_bvec = bVec::loadu(X_ptr + d);
         auto [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
         auto [gamma_fvec0, gamma_fvec1] = gamma_null ? std::make_tuple(fVec(1), fVec(1)) : load2f(gamma_data + d);
