@@ -255,6 +255,43 @@ class TestHwClassificationLinter(unittest.TestCase):
         """
         self.assertEqual(self._run(src), [])
 
+    def test_multiple_device_classifications(self) -> None:
+        for declaration in (
+            "hw_classification = (HardwareClassification.CUDA, HardwareClassification.XPU)",
+            "hw_classification = (HardwareClassification.CPU,)",
+            "hw_classification: tuple[HardwareClassification, ...] = (HardwareClassification.CUDA, HardwareClassification.XPU)",
+        ):
+            with self.subTest(declaration=declaration):
+                src = f"""\
+                    from torch.testing._internal.common_utils import HardwareClassification, TestCase
+                    class TestFoo(TestCase):
+                        {declaration}
+                        def test_x(self, device): pass
+                    instantiate_device_type_tests(TestFoo, globals(), only_for=("cuda", "xpu"))
+                """
+                self.assertEqual(self._run(src), [])
+
+    def test_invalid_multiple_classifications(self) -> None:
+        for value in (
+            "()",
+            "(HardwareClassification.CUDA, 'xpu')",
+            "[HardwareClassification.CUDA, HardwareClassification.XPU]",
+            "(HardwareClassification.GENERIC, HardwareClassification.CUDA)",
+            "(HardwareClassification.ACCELERATOR, HardwareClassification.XPU)",
+            "(HardwareClassification.CUDA, HardwareClassification.UNKNOWN)",
+            "(HardwareClassification.CUDA, (HardwareClassification.XPU,))",
+        ):
+            with self.subTest(value=value):
+                src = f"""\
+                    from torch.testing._internal.common_utils import HardwareClassification, TestCase
+                    class TestFoo(TestCase):
+                        hw_classification = {value}
+                        def test_x(self): pass
+                """
+                msgs = self._run(src)
+                self.assertEqual(len(msgs), 1)
+                self.assertEqual(msgs[0].name, "[hw_classification]")
+
     def test_generic_classification_with_device_param(self) -> None:
         for param in ("device", "devices"):
             src = f"""\

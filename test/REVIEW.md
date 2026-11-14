@@ -71,8 +71,8 @@ A class's responsibility is one of three kinds:
 - **Accelerator-agnostic**: all tests in the class can run on multiple
   accelerators, and every accelerator should run them to ensure quality.
 - **Accelerator-specific**: all tests in the class are only applicable to
-  one particular device, e.g. `CUDA`, `MPS`, `XPU`, `CPU`. Running them on
-  other accelerators will fail.
+  a specific device or subset of devices, e.g. `CUDA` and `XPU`. Running them
+  on other accelerators will fail.
 
 Notes:
 
@@ -85,19 +85,29 @@ Notes:
 ## Rule 2: Correct `hw_classification` on every test class
 
 Every single-responsibility test class (any class that defines a `test*`
-method) must declare exactly one:
+method) must declare a classification:
 
     hw_classification = HardwareClassification.<MEMBER>
 
 Valid values of `<MEMBER>` are `GENERIC`, `ACCELERATOR`, `CPU`, `CUDA`,
 `MPS`, `XPU`.
 
+Tests shared by a specific subset of devices may declare a non-empty tuple
+of `CPU`/`CUDA`/`MPS`/`XPU` members instead:
+
+    hw_classification = (HardwareClassification.CUDA, HardwareClassification.XPU)
+
+Every test in the class must apply to every listed device. `GENERIC` and
+`ACCELERATOR` must be used individually. Selection matches any listed member;
+exclusion of any member drops the whole class. These labels only select test
+classes; device instantiation remains controlled by `instantiate_device_type_tests`.
+
 The `hw_classification` value must match the class's single responsibility;
 responsibilities map to HardwareClassification values as follows:
 
 - **Generic** <-> `GENERIC`
 - **Accelerator-agnostic** <-> `ACCELERATOR`
-- **Accelerator-specific** <-> `CPU`/`CUDA`/`MPS`/`XPU`
+- **Accelerator-specific** <-> `CPU`/`CUDA`/`MPS`/`XPU`, or a tuple of these
 
 ## Rule 3: Requirements for `GENERIC` classes
 

@@ -22,7 +22,8 @@ A test class is any class defining a `test*` method; detection is by the
 presence of test methods rather than by `TestCase` inheritance, which cannot
 be resolved reliably through the AST. Every such class must declare a valid
 `hw_classification` attribute. Supported values are `GENERIC`, `ACCELERATOR`,
-`CPU`, `CUDA`, `MPS`, and `XPU`.
+`CPU`, `CUDA`, `MPS`, and `XPU`. A non-empty tuple of device-specific members
+is also supported for tests shared by a subset of devices.
 
 The requirements for each `hw_classification` are summarized below:
 
@@ -207,15 +208,14 @@ def _is_test_class(node: ast.ClassDef) -> bool:
 
 def _get_hw_classification(
     node: ast.ClassDef,
-) -> HardwareClassification | None:
-    """Parse the `hw_classification` attribute from *node*.
+) -> HardwareClassification | tuple[HardwareClassification, ...] | None:
+    r"""Parse the `hw_classification` attribute from *node*.
 
-    The value is returned as a `HardwareClassification` enum member.
-
-    Only accepts the exact forms:
+    Accepts a member or a non-empty tuple of device-specific members:
 
         hw_classification = HardwareClassification.<MEMBER>
         hw_classification: HardwareClassification = HardwareClassification.<MEMBER>
+        hw_classification = (HardwareClassification.CUDA, HardwareClassification.XPU)
 
     Returns `None` if the attribute is absent or does not match one of the
     supported forms.
@@ -236,27 +236,35 @@ def _get_hw_classification(
                 isinstance(target, ast.Name) and target.id == HW_CLASSIFICATION_ATTR
             ):
                 continue
-            if not (
-                isinstance(stmt.annotation, ast.Name)
-                and stmt.annotation.id == HardwareClassification.__name__
-                and stmt.value is not None
-            ):
+            if stmt.value is None:
                 return None
             value = stmt.value
         else:
             continue
 
-        if (
-            isinstance(value, ast.Attribute)
-            and isinstance(value.value, ast.Name)
-            and value.value.id == HardwareClassification.__name__
-        ):
+        values = value.elts if isinstance(value, ast.Tuple) else [value]
+        classifications = []
+        for member in values:
+            if not (
+                isinstance(member, ast.Attribute)
+                and isinstance(member.value, ast.Name)
+                and member.value.id == HardwareClassification.__name__
+            ):
+                return None
             try:
-                return HardwareClassification[value.attr]
+                classifications.append(HardwareClassification[member.attr])
             except KeyError:
                 return None
 
-        return None
+        if isinstance(value, ast.Tuple):
+            if not classifications or any(
+                member
+                in (HardwareClassification.GENERIC, HardwareClassification.ACCELERATOR)
+                for member in classifications
+            ):
+                return None
+            return tuple(classifications)
+        return classifications[0]
 
     return None
 
@@ -534,6 +542,8 @@ class HwClassificationRule(Rule):
         "Every test class must declare a valid hw_classification attribute "
         "(GENERIC, ACCELERATOR, CPU, CUDA, MPS, or XPU) so test "
         "infrastructure knows which hardware the tests target.\n"
+        "A non-empty tuple of CPU/CUDA/MPS/XPU members may label tests shared "
+        "by specific devices. GENERIC and ACCELERATOR must be used individually.\n"
         "GENERIC marks device-agnostic tests, ACCELERATOR marks tests that "
         "run on every accelerator via instantiate_device_type_tests, and "
         "CPU/CUDA/MPS/XPU mark device-specific classes. Declare the "
@@ -544,7 +554,10 @@ class HwClassificationRule(Rule):
     @classmethod
     def parse(
         cls, filename: str, node: ast.ClassDef
-    ) -> tuple[HardwareClassification | None, list[LintMessage]]:
+    ) -> tuple[
+        HardwareClassification | tuple[HardwareClassification, ...] | None,
+        list[LintMessage],
+    ]:
         """Parse and validate the class's hw_classification declaration.
 
         Returns the classification and any errors (non-empty iff the
@@ -803,10 +816,10 @@ def check_file(filename: str) -> list[LintMessage]:
         node = entry.class_def
         classification, errors = HwClassificationRule.parse(filename, node)
         messages.extend(errors)
-        if classification is None:
+        if classification is None or isinstance(classification, tuple):
+            # Device-specific tuples have no additional rules.
             continue
 
-        # Dispatch to registered rules for this classification
         ctx = RuleContext.from_node(
             filename=filename,
             class_node=node,

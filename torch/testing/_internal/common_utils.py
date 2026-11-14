@@ -127,11 +127,11 @@ class ProfilingMode(Enum):
     PROFILING = 3
 
 class HardwareClassification(Enum):
-    """Hardware classification metadata for test classes.
+    r"""Hardware classification metadata for test classes.
 
     Test classes declare a ``hw_classification`` class attribute to indicate
     the kind of hardware their tests require.  When ``--hw-classification``
-    is passed, only tests whose classification matches one of the requested
+    is passed, only tests whose classifications match any of the requested
     values are executed.  ``PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION``, a
     comma-separated list, instead drops the listed classifications (they are
     not reported as skipped) and keeps unclassified tests; with both set, both
@@ -154,8 +154,16 @@ class HardwareClassification(Enum):
       :func:`~torch.testing._internal.common_utils.instantiate_device_type_tests`.
 
     * ``CPU``, ``CUDA``, ``MPS``, ``XPU`` – tests tied to a specific device.
-      Use sparingly, and only for device-specific behavior.  These replace
-      ``@onlyCPU``, ``@onlyCUDA``, and similar decorators
+      Use sparingly, and only for device-specific behavior. A non-empty tuple
+      of these members can label tests shared by specific devices, e.g.
+      ``(HardwareClassification.CUDA, HardwareClassification.XPU)``. These
+      replace ``@onlyCPU``, ``@onlyCUDA``, and similar decorators.
+
+    Tuple labels match if any member is requested. An excluded member drops
+    the entire class, even if another member is requested. Labels only control
+    class selection; ``instantiate_device_type_tests`` still controls which
+    device variants are generated. ``GENERIC`` and ``ACCELERATOR`` must be
+    used individually.
 
     Usage::
 
@@ -200,15 +208,24 @@ HW_CLASSIFICATION : set[HardwareClassification] | None = None
 
 def get_hw_classification(
     test_case_cls: type[unittest.TestCase],
-) -> HardwareClassification | None:
+) -> HardwareClassification | tuple[HardwareClassification, ...] | None:
     requirement = getattr(test_case_cls, "hw_classification", None)
-    if requirement is None:
-        return None
+    if requirement is None or isinstance(requirement, HardwareClassification):
+        return requirement
 
-    if not isinstance(requirement, HardwareClassification):
+    if not (
+        isinstance(requirement, tuple)
+        and requirement
+        and all(
+            isinstance(item, HardwareClassification)
+            and item not in (HardwareClassification.GENERIC, HardwareClassification.ACCELERATOR)
+            for item in requirement
+        )
+    ):
         raise TypeError(
             f"{test_case_cls.__module__}.{test_case_cls.__name__}."
-            "hw_classification must be a HardwareClassification"
+            "hw_classification must be a HardwareClassification or a non-empty "
+            "tuple of CPU, CUDA, MPS, or XPU HardwareClassification members"
         )
 
     return requirement
@@ -222,24 +239,25 @@ def filter_by_hw_classification(
     on_match: Callable[[Any], None],
     exclude: frozenset[HardwareClassification] = frozenset(),
 ) -> int:
-    """Filter items by hardware classification, print a summary, and return the
+    r"""Filter items by hardware classification, print a summary, and return the
     number of items dropped.
 
     For each item, `get_class` extracts the associated test class. Items whose
-    hardware classification is in `requirement` and not in `exclude` are passed
-    to `on_match`. A `requirement` of None accepts every classification,
-    including unclassified and classless items. The summary counts each dropped
-    item once, by the reason it was dropped, and is printed when a requirement
-    is set or something was dropped.
+    hardware classifications intersect `requirement` and do not intersect
+    `exclude` are passed to `on_match`. A `requirement` of None accepts every
+    classification, including unclassified and classless items. The summary
+    counts each dropped item once, by the reason it was dropped, and is printed
+    when a requirement is set or something was dropped.
     """
     total = passed = excluded = mismatched = unclassified = no_class = 0
     for item in items:
         total += 1
         cls = get_class(item)
         classification = None if cls is None else get_hw_classification(cls)
-        if classification in exclude:
+        classifications = classification if isinstance(classification, tuple) else (classification,)
+        if any(value in exclude for value in classifications):
             excluded += 1
-        elif requirement is None or classification in requirement:
+        elif requirement is None or any(value in requirement for value in classifications):
             passed += 1
             on_match(item)
         elif cls is None:
