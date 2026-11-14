@@ -292,9 +292,9 @@ struct C10_API PyInterpreterVTable {
   //    logical-device rules and data-dependent output sizes. Built-in ops use
   //    FakeTensorMode's op_implementations handlers (fake_try_op_impl), matched
   //    either by exact op or by a predicate over a family of ops. Custom ops
-  //    use torch.library.register_fake kernels (fake_try_custom_op_impl), which
+  //    use torch.library.register_fake kernels (run_fake_impl), which
   //    reach the fake impl context through torch.library.get_ctx().
-  //  - Prims (fake_try_prim_meta) run the prim's prim_meta_impl.
+  //  - Prims (prim_meta_impl) run the prim's prim_meta_impl.
   //
   // Real-tensor propagation (FakeTensorMode's propagate_real_tensors) is a
   // separate concern. When every fake input has a real tensor behind it,
@@ -307,17 +307,24 @@ struct C10_API PyInterpreterVTable {
   // so fake execution must not depend on reading real data.
   //
   // Contracts shared by the callbacks below:
-  //  - fake_try_* and fake_infer_from_real_out take the op's arguments in
-  //    schema order on top of stack. On true they have replaced them with the
+  //  - Dispatch callbacks take the op's arguments in schema order on top of
+  //    stack. On true they have replaced them with the
   //    op's outputs in schema order. On false (the implementation doesn't apply
   //    or returned NotImplemented) or on an exception, stack is unchanged.
   //    Exceptions propagate.
   //  - Every callback acquires the GIL.
   //  - Callbacks noted as needing an active mode error if no C++
   //    FakeTensorMode is active.
-  //  - fake_try_* callbacks other than fake_try_meta re-enable the Fake key, so
+  //  - Dispatch callbacks other than fake_try_meta re-enable the Fake key, so
   //    ops inside the Python implementation dispatch back to Fake.
 
+  // Looks up get_fast_op_impls()[op] and invokes it with the explicit mode
+  // uninstalled, as in FakeTensorMode._dispatch_impl. False means no entry;
+  // a selected implementation returning NotImplemented raises.
+  virtual bool fake_try_fast_impl(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
   // has_python_cia is set if op has a Python CIA override, even when this
   // returns false.
   virtual bool fake_try_decomp(
@@ -333,7 +340,7 @@ struct C10_API PyInterpreterVTable {
   // real (nullable, borrowed) is the fake_run_real_op
   // result, used if a profile-generated fake kernel has no profile for these
   // inputs.
-  virtual bool fake_try_custom_op_impl(
+  virtual bool run_fake_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       const std::shared_ptr<c10::FakeTensorMode>& mode,
@@ -350,7 +357,7 @@ struct C10_API PyInterpreterVTable {
       std::optional<c10::Device> common_device) const = 0;
   // Runs prim_meta_impl with the caller's mode entered. Returns false if
   // absent; a selected implementation returning NotImplemented raises.
-  virtual bool fake_try_prim_meta(
+  virtual bool prim_meta_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
   // Needs an active mode. Returns false if op has a fake kernel. real

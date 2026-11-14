@@ -59,6 +59,9 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
+  // Temporary scalar-output override, as in Python's FakeTensorMode.
+  bool allow_scalar_outputs_ = false;
+
   // Default used by from_tensor when its static_shapes argument is None.
   bool static_shapes_ = shape_env_ == nullptr;
 
