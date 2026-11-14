@@ -6984,17 +6984,27 @@ class TestCppFakeTensorModeBindings(TestCase):
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @fake_tensor_modes
     @parametrize("size", [1, 2])
-    def test_fake_fallback_lift_storage(self, mode_cls, size):
-        mode = mode_cls()
+    @parametrize("parameter", [False, True])
+    @parametrize("allow", [False, True])
+    def test_fake_fallback_lift_storage(self, mode_cls, size, parameter, allow):
+        mode = mode_cls(allow_non_fake_inputs=allow)
         real = torch.arange(size, dtype=torch.float32)
+        if parameter:
+            real = torch.nn.Parameter(real, requires_grad=False)
         expected = real.clone()
         with mode:
+            if parameter and not allow:
+                with self.assertRaisesRegex(
+                    AssertionError, "Please convert all Tensors"
+                ):
+                    aten.lift_fresh.default(real)
+                return
             lifted = aten.lift_fresh.default(real)
             repeated = aten.lift_fresh.default(real)
             self.assertIs(torch._guards.active_fake_mode(), mode)
         self.assertIs(maybe_get_fake_mode(lifted), mode)
         prims.utils.compare_tensor_meta(lifted, real, check_strides=True)
-        if size == 1:
+        if size == 1 and not parameter:
             constant = maybe_get_fake_constant(lifted)
             self.assertEqual(constant, expected)
             self.assertNotEqual(constant.data_ptr(), real.data_ptr())
@@ -7003,8 +7013,18 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertIsNot(lifted, repeated)
         else:
             self.assertIsNone(maybe_get_fake_constant(lifted))
-            self.assertIs(lifted, repeated)
-            self.assertIs(mode.from_tensor(real), lifted)
+            converted = mode.from_tensor(real)
+            if parameter:
+                # Normal dispatch lifts the converted Parameter into fresh aliases.
+                self.assertIsNot(lifted, repeated)
+                for alias in (repeated, converted):
+                    self.assertEqual(
+                        alias.untyped_storage()._cdata,
+                        lifted.untyped_storage()._cdata,
+                    )
+            else:
+                self.assertIs(lifted, repeated)
+                self.assertIs(converted, lifted)
             with mode:
                 relifted = aten.lift_fresh.default(lifted)
             self.assertIs(maybe_get_fake_mode(relifted), mode)

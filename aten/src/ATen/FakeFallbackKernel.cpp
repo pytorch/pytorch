@@ -96,6 +96,8 @@
 
 namespace {
 
+using at::impl::may_turn_const;
+
 template <typename Fn>
 void for_each_tensor(
     torch::jit::Stack* stack,
@@ -261,24 +263,11 @@ bool cpp_meta_supports_symint(
           categories, at::impl::FakeDispatchCategory::CppMetaSupportsSymint);
 }
 
-bool is_plain_tensor(const at::Tensor& t) {
-  if (!t.defined() || t.is_fake()) {
-    return false;
-  }
-  const auto* impl = t.unsafeGetTensorImpl();
-  // Fresh native outputs have no Python object and need no type callback.
-  // Otherwise check the exact type: Parameters and subclasses without
-  // __torch_dispatch__ also lack the Python dispatch key.
-  return !impl->key_set().has(c10::DispatchKey::Python) &&
-      (impl->pyobj_slot()->load_pyobj() == nullptr ||
-       (*c10::impl::getGlobalPyInterpreter())
-           ->fake_has_plain_tensor_type(impl));
-}
-
-// FakeTensorMode.may_turn_const with CONSTANT_NUMEL_LIMIT == 1.
-bool may_turn_const(const at::Tensor& t) {
-  return t.numel() <= 1 && !t.is_sparse() &&
-      !t.unsafeGetTensorImpl()->is_sparse_compressed() && !t.device().is_meta();
+bool may_be_plain_tensor(const at::Tensor& t) {
+  // Reject known subclasses natively; conversion checks the exact Python type
+  // under the GIL, including Parameters without the Python dispatch key.
+  return t.defined() && !t.is_fake() &&
+      !t.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
 }
 
 void fakeFallback(
@@ -410,35 +399,35 @@ void fakeFallback(
       op.callBoxed(outputs);
     }
     if (outputs.size() == 1 && outputs[0].isTensor() &&
-        is_plain_tensor(outputs[0].toTensor()) &&
-        may_turn_const(outputs[0].toTensor())) {
-      at::Tensor constant;
-      {
-        c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
-            {c10::DispatchKey::Python,
-             c10::DispatchKey::PreDispatch,
-             c10::DispatchKey::Fake,
-             c10::DispatchKey::PythonTLSSnapshot}));
-        constant = outputs[0].toTensor().clone();
+        may_be_plain_tensor(outputs[0].toTensor()) &&
+        (outputs[0].toTensor().unsafeGetTensorImpl()->pyobj_slot()->load_pyobj() ||
+         may_turn_const(outputs[0].toTensor()))) {
+      // With a Python object, check its type before querying constant
+      // eligibility. Native outputs can skip the GIL when already ineligible.
+      auto fake = (*c10::impl::getGlobalPyInterpreter())
+                      ->from_real_tensor(
+                          mode,
+                          outputs[0].toTensor().getIntrusivePtr(),
+                          c10::impl::FakeTensorConversion::ClonedConstant);
+      if (fake) {
+        torch::jit::drop(*stack, num_arguments);
+        torch::jit::push(*stack, at::Tensor(std::move(fake)));
+        return;
       }
-      at::Tensor fake(
-          (*c10::impl::getGlobalPyInterpreter())
-              ->from_real_tensor(
-                  mode, constant.getIntrusivePtr(), /*make_constant=*/true));
-      torch::jit::drop(*stack, num_arguments);
-      torch::jit::push(*stack, std::move(fake));
-      return;
     }
   }
   // Larger plain lifts use the converter's existing alias and memo behavior.
-  if (is_lift && is_plain_tensor((*stack)[arguments_begin].toTensor())) {
-    at::Tensor fake(
-        (*c10::impl::getGlobalPyInterpreter())
-            ->from_real_tensor(
-                mode, (*stack)[arguments_begin].toTensor().getIntrusivePtr()));
-    torch::jit::drop(*stack, num_arguments);
-    torch::jit::push(*stack, std::move(fake));
-    return;
+  if (is_lift && may_be_plain_tensor((*stack)[arguments_begin].toTensor())) {
+    auto fake = (*c10::impl::getGlobalPyInterpreter())
+                    ->from_real_tensor(
+                        mode,
+                        (*stack)[arguments_begin].toTensor().getIntrusivePtr(),
+                        c10::impl::FakeTensorConversion::PlainTensor);
+    if (fake) {
+      torch::jit::drop(*stack, num_arguments);
+      torch::jit::push(*stack, at::Tensor(std::move(fake)));
+      return;
+    }
   }
   replace_each_tensor(
       stack,
