@@ -84,6 +84,9 @@ static inline scalar_t clip_coordinates_set_grad(scalar_t in, int64_t clip_limit
 // Reflects coordinates until they fall between low and high (inclusive).
 // The bounds are passed as twice their value so that half-integer values
 // can be represented as ints.
+// The fold count is kept in the float domain: an int fold count is
+// undefined past INT32_MAX, which silently flips the reflection of every
+// coordinate beyond that magnitude.
 template<typename scalar_t>
 static inline scalar_t reflect_coordinates(scalar_t in, int64_t twice_low,
                                            int64_t twice_high) {
@@ -95,8 +98,8 @@ static inline scalar_t reflect_coordinates(scalar_t in, int64_t twice_low,
   in = std::fabs(in - min);
   // `fmod` returns same sign as `in`, which is positive after the `fabs` above.
   scalar_t extra = std::fmod(in, span);
-  int flips = static_cast<int>(std::floor(in / span));
-  if (flips % 2 == 0) {
+  scalar_t flips = std::floor(in / span);
+  if (std::fmod(flips, static_cast<scalar_t>(2)) == 0) {
     return extra + min;
   } else {
     return span - extra + min;
@@ -126,8 +129,8 @@ static inline scalar_t reflect_coordinates_set_grad(scalar_t in, int64_t twice_l
   }
   // `fmod` returns same sign as `in`, which is positive after the `if` above.
   scalar_t extra = std::fmod(in, span);
-  int flips = static_cast<int>(std::floor(in / span));
-  if (flips % 2 == 0) {
+  scalar_t flips = std::floor(in / span);
+  if (std::fmod(flips, static_cast<scalar_t>(2)) == 0) {
     *grad_in = static_cast<scalar_t>(grad_in_mult_);
     return extra + min;
   } else {
