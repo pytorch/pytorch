@@ -2928,7 +2928,9 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_inputs()
 
             # Under cudagraph partitioning, leave NaN/alignment checks to partitions
-            # to avoid duplicates; call()-only inputs do not get these checks.
+            # to avoid duplicates; call()-only inputs do not get these checks. Read
+            # the decision off the graph: with a regional cudagraph request the
+            # ambient triton.cudagraphs stays off while partitions are still emitted.
             if not (
                 V.graph.cudagraphs_per_partition
                 and not is_codegen_graph_partition_subgraph(self)
