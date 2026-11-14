@@ -329,6 +329,28 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
+@contextlib.contextmanager
+def _unset_fake_mode_for_fake_key(
+    args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Iterator[Any]:
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+    with unset_fake_temporarily() as mode:
+        if mode is not None:
+            yield mode
+            return
+        for arg in pytree.arg_tree_leaves(*args, **kwargs):
+            if isinstance(arg, torch.Tensor):
+                mode = torch._C._maybe_get_fake_mode(arg)
+                if mode is not None:
+                    # Match FakeTensor.__torch_dispatch__ entering its mode
+                    # before the Python dispatcher pops it for the handler.
+                    with mode, unset_fake_temporarily():
+                        yield mode
+                    return
+        yield None
+
+
 _higher_order_ops: dict[str, "HigherOrderOperator"] = {}
 
 _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
@@ -581,6 +603,33 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         # This can current fail due to backend fallbacks.  You just have to
         # register them by hand for HigherOrderOperator.
         if final_key not in self.py_kernels:
+            if dispatch_key == DispatchKey.Fake:
+                from torch._higher_order_ops.utils import registered_hop_fake_fns
+                from torch._subclasses.fake_tensor import FakeTensorMode
+
+                handler = self.python_key_table.get(FakeTensorMode)
+                with _unset_fake_mode_for_fake_key(args, kwargs) as mode:
+                    if mode is not None and handler is not None:
+                        if self not in registered_hop_fake_fns:
+                            return handler(mode, *args, **kwargs)
+                        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+                        flat_args, _ = (
+                            FakeTensorMode.validate_and_convert_non_fake_tensors(
+                                mode,
+                                self,
+                                mode.fake_tensor_converter,
+                                flat_args,
+                                args_spec,
+                            )
+                        )
+                        args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
+                        ignore_unbacked = (
+                            contextlib.nullcontext()
+                            if mode.shape_env is None
+                            else mode.shape_env.ignore_fresh_unbacked_symbols()
+                        )
+                        with mode, ignore_unbacked:
+                            return registered_hop_fake_fns[self](*args, **kwargs)
             raise NotImplementedError(
                 f"could not find kernel for HigherOrderOperator {self._name} "
                 f"at dispatch key {final_key} (resolved from {dispatch_key})"
@@ -1159,6 +1208,21 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
                 # Also, not caching means that we don't have to reset the cache when any existing
                 # modes go out of scope (which in of itself takes time to loop through all operators).
                 return handler
+
+        if key == DispatchKey.Fake:
+            from torch._subclasses.fake_tensor import FakeTensorMode
+
+            fake_handler = self.python_key_table.get(FakeTensorMode)
+            if fake_handler is not None:
+
+                def fake_mode_handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+                    with _unset_fake_mode_for_fake_key(args, kwargs) as mode:
+                        if mode is not None:
+                            return fake_handler(mode, *args, **kwargs)
+                    return self._op_dk(key, *args, **kwargs)
+
+                # Like PreDispatch, the active mode is resolved on each call.
+                return fake_mode_handler
 
         final_key = resolve_key(self, key)
 
