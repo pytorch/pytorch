@@ -1454,16 +1454,11 @@ class LoopOrderingTest(TestCase):
 
         FileCheck().check("def call(").run(code[0])
         # Prologue fused with mm: 1 kernel. Unfused: 2 kernels (expand+add + mm).
-        # With benchmark_kernel, add 1 for the benchmarking code path.
-        base_expected = 1 + int(inductor_config.benchmark_kernel)
+        # Under benchmark_kernel the harness stays in the per-kernel modules.
         run_count = code[0].count(".run(")
-        self.assertGreaterEqual(
-            run_count, base_expected, "Expected at least one kernel launch"
-        )
+        self.assertGreaterEqual(run_count, 1, "Expected at least one kernel launch")
         self.assertLessEqual(
-            run_count,
-            base_expected + 1,
-            "Prologue fusion produces 1 kernel; unfused produces 2",
+            run_count, 2, "Prologue fusion produces 1 kernel; unfused produces 2"
         )
 
     @inductor_config.patch(
@@ -2216,7 +2211,7 @@ class TestTiling(TestCase):
         f_c = torch.compile(f, dynamic=dynamic)
         out, code = run_and_get_code(f_c, *inps)
 
-        FileCheck().check_dag("znumel").check_dag("ynumel").check_dag("xnumel").run(
+        FileCheck().check_dag("z0_numel").check_dag("ynumel").check_dag("xnumel").run(
             code[0]
         )
         self.assertEqual(out, f(*inps))

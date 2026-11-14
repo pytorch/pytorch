@@ -52,6 +52,7 @@ TORCH_DECLARE_REGISTRY(HPUHooksRegistry, HPUHooksInterface, HPUHooksArgs);
 namespace detail {
 
 TORCH_API const at::HPUHooksInterface& getHPUHooks();
+TORCH_API bool isHPUHooksBuilt();
 
 } // namespace detail
 } // namespace at

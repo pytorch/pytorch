@@ -166,8 +166,8 @@ class TestXpu(TestCase):
             device_capability["has_subgroup_matrix_multiply_accumulate"],
         )
         self.assertEqual(
-            device_properties.has_subgroup_matrix_multiply_accumulate_tensor_float32,
-            device_capability["has_subgroup_matrix_multiply_accumulate_tensor_float32"],
+            device_properties.has_subgroup_matrix_multiply_accumulate_tf32,
+            device_capability["has_subgroup_matrix_multiply_accumulate_tf32"],
         )
         self.assertEqual(
             device_properties.has_subgroup_2d_block_io,
@@ -205,16 +205,17 @@ class TestXpu(TestCase):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
             """\
 import torch
-from torch.multiprocessing import Process
+from torch.multiprocessing import get_context
 def run(rank):
     torch.xpu.set_device(rank)
 if __name__ == "__main__":
     size = 2
     processes = []
+    ctx = get_context("fork")
     for rank in range(size):
         # it would work fine without the line below
         torch.xpu.set_device(0)
-        p = Process(target=run, args=(rank,))
+        p = ctx.Process(target=run, args=(rank,))
         p.start()
         processes.append(p)
     for p in processes:
@@ -292,6 +293,37 @@ if __name__ == "__main__":
             _parse_visible_devices("0.0,0.1", strict=True)
         with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
             _parse_visible_devices("one, two", strict=True)
+
+        # ONEAPI_DEVICE_SELECTOR is not honored by Sysman; it overrides
+        # ZE_AFFINITY_MASK, returning [] or raising ValueError in strict mode
+        with patch.dict(
+            os.environ,
+            {"ZE_AFFINITY_MASK": "0, 1", "ONEAPI_DEVICE_SELECTOR": "level_zero:0"},
+            clear=True,
+        ):
+            self.assertEqual(torch.xpu._parse_visible_devices(), [])
+            with self.assertRaisesRegex(
+                ValueError, "Unsupported ONEAPI_DEVICE_SELECTOR format"
+            ):
+                torch.xpu._parse_visible_devices(strict=True)
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_info_api_raises_with_oneapi_device_selector(self):
+        torch.xpu._cached_zes_device_infos.clear()
+        with patch.dict(os.environ, {"ONEAPI_DEVICE_SELECTOR": "level_zero:0"}):
+            for api in (
+                torch.xpu.temperature,
+                torch.xpu.clock_rate,
+                torch.xpu.power_draw,
+                torch.xpu.utilization,
+                torch.xpu.memory_usage,
+                torch.xpu.device_memory_used,
+                torch.xpu.list_gpu_processes,
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "Unsupported ONEAPI_DEVICE_SELECTOR format"
+                ):
+                    api()
 
     def test_device_info_api_raises_import_error_without_pyzes(self):
         with unittest.mock.patch.dict("sys.modules", {"pyzes": None}):
@@ -404,6 +436,7 @@ if __name__ == "__main__":
         current_device = torch.xpu.current_device()
         self.assertRegex(processes_info, rf"GPU:\s*{current_device}\b")
 
+    @unittest.skip("https://github.com/intel/torch-xpu-ops/issues/6131")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_device_count_respects_affinity_mask(self):
         def _run(mask: str) -> str:
@@ -431,6 +464,21 @@ print(f"{{r1}}, {{r2}}")
         if TEST_MULTIXPU:
             # Valid mask selecting device 1 on a multi-GPU system → both return 1
             self.assertEqual(_run("1"), "1, 1")
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_count_respects_oneapi_device_selector(self):
+        test_script = """\
+import torch
+print(f"{torch.xpu._device_count_zes()}, {torch.xpu.device_count()}")
+"""
+        env = {**os.environ, "ONEAPI_DEVICE_SELECTOR": "!*:gpu"}
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script], env=env)
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+        self.assertEqual(r, "-1, 0")
 
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
@@ -566,36 +614,32 @@ print(torch.xpu.is_initialized())
             "Importing torch._inductor.lowering should not initialize XPU",
         )
 
-    def test_streams(self):
-        s0 = torch.xpu.Stream()
-        torch.xpu.set_stream(s0)
-        s1 = torch.xpu.current_stream()
-        self.assertEqual(s0, s1)
-        s2 = torch.xpu.Stream()
-        self.assertFalse(s0 == s2)
-        torch.xpu.set_stream(s2)
-        with torch.xpu.stream(s0):
-            self.assertEqual(s0, torch.xpu.current_stream())
-        self.assertEqual(s2, torch.xpu.current_stream())
-
     def test_stream_priority(self):
         low, high = torch.xpu.Stream.priority_range()
-        s0 = torch.xpu.Stream(device=0, priority=low)
+        for priority in range(high, low + 1):
+            s = torch.xpu.Stream(device=0, priority=priority)
+            self.assertEqual(priority, s.priority)
+            self.assertEqual(torch.device("xpu:0"), s.device)
 
-        self.assertEqual(low, s0.priority)
-        self.assertEqual(torch.device("xpu:0"), s0.device)
+            e = torch.xpu.Event()
+            e.record()
+            s.wait_event(e)
+            s.synchronize()
+            self.assertTrue(s.query())
 
-        s1 = torch.xpu.Stream(device=0, priority=high)
+            x = torch.randn(2, 3, 8, 8)
+            w = torch.randn(4, 3, 3, 3)
+            expected = torch.nn.functional.conv2d(x, w)
+            with s:
+                # Run a oneDNN op on a stream of each priority.
+                out = torch.nn.functional.conv2d(x.to("xpu"), w.to("xpu"))
+            s.synchronize()
+            self.assertEqual(out.cpu(), expected)
 
-        self.assertEqual(high, s1.priority)
-        self.assertEqual(torch.device("xpu:0"), s1.device)
-
-    def test_stream_event_repr(self):
-        s = torch.xpu.current_stream()
-        self.assertTrue("torch.xpu.Stream" in str(s))
+    def test_event_repr(self):
         e = torch.xpu.Event()
         self.assertTrue("torch.xpu.Event(uninitialized)" in str(e))
-        s.record_event(e)
+        torch.xpu.current_stream().record_event(e)
         self.assertTrue("torch.xpu.Event" in str(e))
 
     def test_events(self):
@@ -621,6 +665,28 @@ print(torch.xpu.is_initialized())
         self.assertNotEqual(event.sycl_event, 0)
         self.assertNotEqual(event.event_id, 0)
         self.assertEqual(event.sycl_event, event.event_id)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    def test_multi_events_elapsed_time(self):
+        s0 = torch.xpu.current_stream(0)
+        s1 = torch.xpu.current_stream(1)
+
+        with s0:
+            start_event = torch.xpu.Event(enable_timing=True)
+            start_event.record()
+            _ = torch.randn(1000, device="xpu")
+
+        with s1:
+            end_event = torch.xpu.Event(enable_timing=True)
+            s0.synchronize()
+            end_event.record()
+
+        start_event.synchronize()
+        end_event.synchronize()
+        with self.assertRaisesRegex(
+            RuntimeError, "Both events must be on the same device"
+        ):
+            start_event.elapsed_time(end_event)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
@@ -819,12 +885,6 @@ print(torch.xpu.is_initialized())
             self.assertEqual(torch.xpu.current_device(), 1)
         self.assertEqual(torch.xpu.current_device(), src_device)
 
-    def test_stream_context_manager(self):
-        prev_stream = torch.xpu.current_stream()
-        with torch.xpu.Stream() as stream:
-            self.assertEqual(stream, torch.xpu.current_stream())
-        self.assertEqual(prev_stream, torch.xpu.current_stream())
-
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
     def test_multi_device_stream_context_manager(self):
         src_device = 0
@@ -843,7 +903,7 @@ print(torch.xpu.is_initialized())
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_sleep(self):
         # clock_rate() returns MHz; multiply by 1e6 to get ~1 second of device cycles.
-        cycles = torch.xpu.clock_rate() * 1_000_000
+        cycles = int(torch.xpu.clock_rate() * 1_000_000)
         # Some Xe GPU's bundled IGC is too old to support it.
         if not Xe2_Or_Later:
             with self.assertRaisesRegex(
@@ -1378,7 +1438,7 @@ print(torch.xpu.is_initialized())
             torch.xpu.memory.empty_cache()
             torch.xpu.memory._record_memory_history("state", stacks="python")
 
-            @torch.jit.script
+            @torch.jit._script.script
             def foo():
                 return torch.rand(311, 411, device="xpu")
 
@@ -1858,8 +1918,6 @@ if __name__ == "__main__":
             self.skipTest("Skipping DLPack test for expandable segments allocator.")
         x = make_tensor((5,), dtype=torch.float32, device="xpu")
 
-        # Same-device exercises maybeCopyTensor's dlDeviceToTorchDevice path which requires
-        # the data pointer for XPU.
         z = torch.from_dlpack(x, device=x.device, copy=copy)
         self.assertEqual(z, x)
         self.assertEqual(z.device, x.device)
@@ -1947,11 +2005,6 @@ if __name__ == "__main__":
             # Return the original generator and its two states
             return generator, old_state, new_state
 
-        def register_states_to_graph(generator_state, graph):
-            _, old_state, new_state = generator_state
-            graph.register_generator_state(old_state)
-            graph.register_generator_state(new_state)
-
         # Define a function to perform specific RNG actions using the generator's states
         def perform_random_generation_steps(generator_state):
             generator, old_state, new_state = generator_state
@@ -1985,7 +2038,6 @@ if __name__ == "__main__":
         s = torch.xpu.Stream()
         default_generator = torch.xpu.default_generators[0]
         default_generator_state = create_states(default_generator)
-        register_states_to_graph(default_generator_state, g)
 
         # Perform random number generation within a XPU graph
         with torch.xpu.stream(s):
@@ -2492,14 +2544,8 @@ if __name__ == "__main__":
             delta_xpuMalloc_bytes_post_del_g,
             pool_string,
         ) in cases:
-            if pool_string == "small_pool":
-                delta_active_blocks = 3  # one from "b" plus a sneaky two from XPUGraph's one-element rng seed and offset holders
-                delta_active_bytes = (
-                    numel * elem + 1024
-                )  # + 1024 for XPUGraph's rng seed and offset holders each
-            else:
-                delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
-                delta_active_bytes = numel * elem
+            delta_active_blocks = 1
+            delta_active_bytes = numel * elem
 
             g = torch.xpu.XPUGraph()
             s.wait_stream(torch.xpu.current_stream())
@@ -3169,6 +3215,169 @@ class TestBlockStateAbsorption(TestCase):
 
         del outputs
         self.assertTrue(check(set()))
+
+
+class TestXpuGraphRng(TestCase):
+    @parametrize("use_default_generator", [False, True])
+    def test_graph_rng_overlapping_captures(self, device, use_default_generator):
+        generator = (
+            torch.xpu.default_generators[torch.xpu.current_device()]
+            if use_default_generator
+            else torch.Generator(device=device)
+        )
+        rng_generator = None if use_default_generator else generator
+        outputs = [torch.empty(4096, device=device) for _ in range(4)]
+        for output in outputs:
+            output.uniform_(generator=rng_generator)
+        generator.manual_seed(1234)
+        generator.set_offset(4)
+        reference_generator = generator.clone_state()
+        initial_state = generator.get_state()
+        first_graph = torch.xpu.XPUGraph()
+        second_graph = torch.xpu.XPUGraph()
+        first_stream = torch.xpu.Stream()
+        second_stream = torch.xpu.Stream()
+        first_stream.wait_stream(torch.xpu.current_stream())
+        second_stream.wait_stream(torch.xpu.current_stream())
+
+        with torch.xpu.stream(first_stream):
+            first_graph.capture_begin()
+            outputs[0].uniform_(generator=rng_generator)
+        with torch.xpu.stream(second_stream):
+            second_graph.capture_begin()
+            outputs[1].uniform_(generator=rng_generator)
+        with torch.xpu.stream(first_stream):
+            first_graph.capture_end()
+        with torch.xpu.stream(second_stream):
+            outputs[2].uniform_(generator=rng_generator)
+            second_graph.capture_end()
+        torch.xpu.current_stream().wait_stream(first_stream)
+        torch.xpu.current_stream().wait_stream(second_stream)
+        self.assertEqual(generator.get_state(), initial_state)
+
+        def replay_and_check(graph, graph_outputs):
+            expected = [
+                torch.empty_like(output).uniform_(generator=reference_generator)
+                for output in graph_outputs
+            ]
+            graph.replay()
+            self.assertEqual(graph_outputs, expected, atol=0, rtol=0)
+            self.assertEqual(generator.get_offset(), reference_generator.get_offset())
+
+        for _ in range(3):
+            replay_and_check(second_graph, outputs[1:3])
+            replay_and_check(first_graph, outputs[:1])
+
+        first_graph.reset()
+        replay_and_check(second_graph, outputs[1:3])
+        with torch.xpu.graph(first_graph, stream=first_stream):
+            outputs[0].uniform_(generator=rng_generator)
+            outputs[3].uniform_(generator=rng_generator)
+        replay_and_check(first_graph, [outputs[0], outputs[3]])
+        replay_and_check(second_graph, outputs[1:3])
+        torch.xpu.synchronize()
+
+    @parametrize("use_default_generator", [False, True])
+    @parametrize("inference_mode", [False, True])
+    def test_graph_rng_concurrent_replay_on_different_streams(
+        self, device, use_default_generator, inference_mode
+    ):
+        generator = (
+            torch.xpu.default_generators[torch.xpu.current_device()]
+            if use_default_generator
+            else torch.Generator(device=device)
+        )
+        rng_generator = None if use_default_generator else generator
+        outputs = [torch.empty(4096, device=device) for _ in range(2)]
+        for output in outputs:
+            output.uniform_(generator=rng_generator)
+        generator.manual_seed(1234)
+        reference_generator = generator.clone_state()
+        graphs = [torch.xpu.XPUGraph() for _ in outputs]
+        capture_stream = torch.xpu.Stream()
+        for graph, output in zip(graphs, outputs):
+            with torch.inference_mode(inference_mode):
+                with torch.xpu.graph(graph, stream=capture_stream):
+                    output.uniform_(generator=rng_generator)
+        self.assertEqual(generator.get_state(), reference_generator.get_state())
+
+        replay_streams = [torch.xpu.Stream() for _ in graphs]
+        for seed in (1234, 5678):
+            generator.manual_seed(seed)
+            reference_generator.manual_seed(seed)
+            for _ in range(3):
+                expected = [
+                    torch.empty_like(output).uniform_(generator=reference_generator)
+                    for output in outputs
+                ]
+                for graph, stream in zip(graphs, replay_streams):
+                    stream.wait_stream(torch.xpu.current_stream())
+                    with torch.xpu.stream(stream):
+                        graph.replay()
+                torch.xpu.synchronize()
+                self.assertEqual(outputs, expected, atol=0, rtol=0)
+                self.assertEqual(
+                    generator.get_offset(), reference_generator.get_offset()
+                )
+
+    @serialTest()
+    @parametrize("num_graphs,num_generators", [(1, 0), (1, 1), (3, 2)])
+    def test_memory_stats_of_multiple_generators_and_graphs(
+        self, device, num_graphs, num_generators
+    ):
+        output = torch.empty(128, device=device)
+        output.uniform_()
+        generators = [torch.Generator(device=device) for _ in range(num_generators)]
+        unused_generator = torch.Generator(device=device)
+        unused_state = unused_generator.get_state()
+        graphs = [torch.xpu.XPUGraph() for _ in range(num_graphs)]
+        stream = torch.xpu.Stream()
+        torch.xpu.synchronize()
+        gc.collect()
+        torch.xpu.empty_cache()
+        baseline = torch.xpu.memory_stats()
+
+        for graph in graphs:
+            graph.register_generator_state(unused_generator)
+            with torch.xpu.graph(graph, stream=stream):
+                output.fill_(0)
+                for generator in generators:
+                    output.uniform_(generator=generator)
+            graph.replay()
+        torch.xpu.synchronize()
+
+        stats = torch.xpu.memory_stats()
+        expected_blocks = 2 * num_graphs * num_generators
+        self.assertEqual(
+            stats["active.all.current"] - baseline["active.all.current"],
+            expected_blocks,
+        )
+        self.assertEqual(
+            stats["active_bytes.all.current"] - baseline["active_bytes.all.current"],
+            512 * expected_blocks,
+        )
+        self.assertEqual(unused_generator.get_state(), unused_state)
+        pool_ids = {graph.pool() for graph in graphs}
+        for segment in torch.xpu.memory.memory_snapshot():
+            if segment["segment_pool_id"] in pool_ids:
+                for block in segment["blocks"]:
+                    self.assertEqual(block["state"], "inactive")
+
+        for index, graph in enumerate(graphs):
+            graph.reset()
+            torch.xpu.synchronize()
+            torch.xpu.empty_cache()
+            stats = torch.xpu.memory_stats()
+            remaining_blocks = 2 * (num_graphs - index - 1) * num_generators
+            self.assertEqual(
+                stats["active.all.current"] - baseline["active.all.current"],
+                remaining_blocks,
+            )
+            self.assertEqual(
+                stats["active_bytes.all.current"]
+                - baseline["active_bytes.all.current"],
+                512 * remaining_blocks,
+            )
 
 
 @instantiate_parametrized_tests
@@ -4064,6 +4273,37 @@ class TestMemPool(TestCase):
         # mempool id creation is atomic
         self.assertEqual(len(set(pool_ids)), 4)
 
+    @serialTest()
+    def test_nested_mempool(self):
+        torch.xpu.empty_cache()
+        pool1 = torch.xpu.MemPool()
+        pool2 = torch.xpu.MemPool()
+        pool3 = torch.xpu.MemPool()
+
+        data = []
+        nelem_1mb = 1024 * 1024 // 4
+
+        def allocate_data():
+            x = torch.empty(nelem_1mb * 20, device="xpu")
+            data.append(x)
+
+        with torch.xpu.use_mem_pool(pool1):
+            allocate_data()
+            with torch.xpu.use_mem_pool(pool2):
+                allocate_data()
+                with torch.xpu.use_mem_pool(pool3):
+                    allocate_data()
+                allocate_data()
+            allocate_data()
+
+        pool1_segments = torch.xpu.memory.memory_snapshot(pool1.id)
+        pool2_segments = torch.xpu.memory.memory_snapshot(pool2.id)
+        pool3_segments = torch.xpu.memory.memory_snapshot(pool3.id)
+
+        self.assertEqual(len(pool1_segments), 2)
+        self.assertEqual(len(pool2_segments), 2)
+        self.assertEqual(len(pool3_segments), 1)
+
     def test_mempool_empty_cache(self):
         torch.xpu.empty_cache()
         pool = torch.xpu.MemPool()
@@ -4272,6 +4512,12 @@ class TestMemPool(TestCase):
 
 
 instantiate_parametrized_tests(TestXpu)
+instantiate_device_type_tests(
+    TestXpuGraphRng, globals(), only_for="xpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestXPUMultiprocessing, globals(), only_for="xpu", allow_xpu=True
+)
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
 instantiate_device_type_tests(TestXpuOptims, globals())
 

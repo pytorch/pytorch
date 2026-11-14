@@ -226,6 +226,7 @@ class optims(_TestParametrizer):
                 def test_wrapper(*args, **kwargs):
                     return test(*args, **kwargs)
 
+                test_wrapper._preserves_device_arguments = test_wrapper
                 decorator_fn = functools.partial(
                     optim_info.get_decorators,
                     generic_cls.__name__,
@@ -2000,6 +2001,16 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=(),
         not_og_supported_flags=(),
         supports_complex=False,
+        decorators=(
+            # XPU backend kernels accumulate float32 rounding differently from CPU,
+            # resulting in small but tolerable numerical drift in state_dict parity.
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1.3e-6)}),
+                "TestOptimRenewed",
+                "test_state_dict_cross_device",
+                device_type="xpu",
+            ),
+        ),
         skips=(
             # Note on numerical differences: `compile` applies different matmul tuning,
             # which leads to deviations compared to eager mode. In the Newton-Schulz

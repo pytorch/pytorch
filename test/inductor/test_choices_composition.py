@@ -3,19 +3,24 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from torch._inductor import config
+import torch
+from torch._inductor import config, ir, select_algorithm
 from torch._inductor.choices import (
     create_inductor_choices,
     InductorChoices,
+    MultiTemplateFusionDecision,
     register_inductor_choices,
     registered_inductor_choices,
     unregister_inductor_choices,
 )
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.virtualized import _choices, threadlocal, V
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.utils._ordered_set import OrderedSet
 
 
 _UNSET = object()
@@ -437,6 +442,133 @@ class ChoicesCompositionTest(TestCase):
 
 def _as_choices(obj: Any) -> InductorChoices:
     return obj
+
+
+class _FixedFusionDecision(InductorChoices):
+    def __init__(self, decision: MultiTemplateFusionDecision) -> None:
+        super().__init__()
+        self.decision = decision
+        self.calls = 0
+
+    def uuid(self) -> str:
+        return "fixed-fusion-decision"
+
+    def multi_template_fusion_decision(
+        self, scheduler: Any, multi_node: Any, other_nodes: Any, epilogue: bool
+    ) -> MultiTemplateFusionDecision:
+        self.calls += 1
+        return self.decision
+
+
+def _scheduler_node(
+    name: str, template: Any = None, buffers: tuple[str, ...] = (), children=()
+) -> Any:
+    node = SimpleNamespace(
+        get_name=lambda: name,
+        get_template_node=lambda: template,
+        get_buffer_names=lambda: OrderedSet(buffers or (name,)),
+    )
+    node.get_nodes = lambda: [*children, node]
+    return node
+
+
+class MultiTemplateFusionDecisionContractTest(TestCase):
+    """Checks an accepted multi_template_fusion_decision must pass, on a real
+    MultiTemplateBuffer with concrete Triton template callers. The hook's
+    behavior in compilations is tested in test_benchmark_fusion.py.
+
+    The scheduler's later layout-conflict check is recorded and declines: a
+    control decision that passes the check under test reaches it, so a
+    declined decision that does not was stopped by that check."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        names = iter(f"buf{i}" for i in range(100))
+        graph = SimpleNamespace(
+            register_buffer=lambda buffer, set_name=False: next(names),
+            register_operation=lambda op: "op0",
+        )
+        for ctx in (V.set_graph_handler(graph), config.patch(multi_kernel_hints=[])):
+            ctx.__enter__()
+            self.addCleanup(ctx.__exit__, None, None, None)
+        self.layout = ir.FixedLayout(
+            torch.device("cuda"), torch.float16, [64, 32], [32, 1]
+        )
+        self.arg0 = ir.InputBuffer(name="arg0", layout=self.layout)
+        self.reached_later_checks: list[Any] = []
+        self.scheduler = SimpleNamespace(
+            _has_layout_conflict_for_template=lambda node: (
+                self.reached_later_checks.append(node) or True
+            )
+        )
+
+    def caller(self, layout: Any = None, prologue_inputs: tuple[str, ...] = ()) -> Any:
+        return select_algorithm.TritonTemplateCaller(
+            "triton_mm",
+            [self.arg0],
+            layout or self.layout,
+            None,
+            "",
+            SimpleNamespace(num_stages=1, num_warps=4),
+            load_input_fusion_allowed_inputs=OrderedSet(prologue_inputs),
+        )
+
+    def decide(
+        self, callers: list[Any], chosen: Any, producer_fused: bool = False
+    ) -> tuple[Any, Any]:
+        """Offers an epilogue to a buffer of ``callers`` with a hook choosing
+        ``chosen``; with ``producer_fused``, a producer of arg0 is already
+        fused into the template. The fusion result and the buffer."""
+        multi = ir.MultiTemplateBuffer(
+            self.layout,
+            [self.arg0],
+            lambda hint: {},
+            callers,
+            OrderedSet(["arg0"]),
+            OrderedSet(),
+        )
+        multi.allow_prologue_fusion = True
+        producer = _scheduler_node("producer", buffers=("arg0",))
+        template = _scheduler_node(
+            "template", template=multi, children=[producer] if producer_fused else []
+        )
+        choices = _FixedFusionDecision(
+            MultiTemplateFusionDecision(fuse=True, choice=chosen)
+        )
+        self.reached_later_checks.clear()
+        with V.set_choices_handler(choices):
+            result = Scheduler._multi_template_fusion_decision(
+                self.scheduler, template, _scheduler_node("epilogue")
+            )
+        self.assertEqual(choices.calls, 1)
+        return result, multi
+
+    def test_a_choice_with_another_output_layout_is_declined(self) -> None:
+        transposed = ir.FixedLayout(
+            torch.device("cuda"), torch.float16, [64, 32], [1, 64]
+        )
+        same, other = self.caller(), self.caller(transposed)
+
+        result, multi = self.decide([same, other], other)
+        self.assertFalse(result.should_fuse)
+        self.assertEqual(self.reached_later_checks, [])
+        self.assertIsNone(multi._render_caller)
+
+        self.decide([same, other], same)
+        self.assertEqual(len(self.reached_later_checks), 1)
+
+    def test_an_epilogue_after_a_fused_producer_needs_a_template_taking_it(
+        self,
+    ) -> None:
+        takes, refuses = self.caller(prologue_inputs=("arg0",)), self.caller()
+
+        result, multi = self.decide([takes, refuses], refuses, producer_fused=True)
+        self.assertFalse(result.should_fuse)
+        self.assertEqual(self.reached_later_checks, [])
+        self.assertIsNone(multi._render_caller)
+
+        self.decide([takes, refuses], takes, producer_fused=True)
+        self.assertEqual(len(self.reached_later_checks), 1)
 
 
 if __name__ == "__main__":

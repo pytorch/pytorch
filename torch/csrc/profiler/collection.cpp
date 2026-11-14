@@ -207,13 +207,13 @@ bool InputOutputEncoder::isSupportedScalarList(
     return false;
   }
   auto list_ref = list_candidate.toListRef();
-  if (C10_UNLIKELY(list_ref.empty())) {
+  if (list_ref.empty()) [[unlikely]] {
     return true;
   }
-  if (C10_UNLIKELY(!list_ref[0].isScalar())) {
+  if (!list_ref[0].isScalar()) [[unlikely]] {
     return false;
   }
-  if (C10_UNLIKELY(list_ref.size() > SCALAR_LIST_LENGTH_LIMIT)) {
+  if (list_ref.size() > SCALAR_LIST_LENGTH_LIMIT) [[unlikely]] {
     return false;
   }
   return true;
@@ -1483,12 +1483,22 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
       return;
     }
 
+    // A Python frame can end before a TorchOp it contains that never ended,
+    // e.g. when the Python tracer stops mid-session. Leave such an op
+    // unfinished so it gets the session end, as in the exported trace, instead
+    // of borrowing the frame's end.
+    const bool python_event =
+        event->tag() == EventType::PyCall || event->tag() == EventType::PyCCall;
     auto start_tid = event->start_tid_;
     auto frame = stacks.at(start_tid);
 
     while (frame.get() != event.get()) {
       TORCH_INTERNAL_ASSERT(frame != nullptr);
-      mark_finished(frame);
+      const auto* op = std::get_if<op_fields>(&frame->extra_fields_);
+      if (!python_event || !op ||
+          op->end_time_ns_ != std::numeric_limits<c10::time_t>::min()) {
+        mark_finished(frame);
+      }
       TORCH_INTERNAL_ASSERT(!frame->parent_.expired());
       frame = frame->parent_.lock();
     }
