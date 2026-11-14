@@ -1291,6 +1291,40 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_dtensor_grad_dtype_recompile(self):
+        # exact in float32, rounds to 1 in bfloat16
+        fp32_only = 1 + 2**-8
+
+        class Fp32Backward(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad.float() * fp32_only
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x):
+            return Fp32Backward.apply(x)
+
+        full_x = torch.ones(8, 8, dtype=torch.bfloat16)
+        x = distribute_tensor(full_x, mesh, [Shard(0)]).requires_grad_()
+        # FSDP2 switches an unsharded param between float32 and None
+        for grad_dtype in (torch.float32, None, None, torch.float32):
+            x.grad = None
+            x.grad_dtype = grad_dtype
+            f(x).sum().backward()
+            local_grad = x.grad.to_local()
+            self.assertEqual(local_grad.dtype, torch.float32)
+            self.assertEqual(
+                local_grad, torch.full_like(local_grad, fp32_only), atol=0, rtol=0
+            )
+        self.assertEqual(cnt.frame_count, 2)
+
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177751")
     @with_comms
     @torch._dynamo.config.patch(trace_autograd_ops=True)

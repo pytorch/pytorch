@@ -3502,12 +3502,12 @@ class VariableBuilder:
 
         if (
             safe_has_grad(value)
-            and safe_grad(value) is not None
-            # type: ignore[attr-defined]
-            and value.dtype != safe_grad(value).dtype
+            and (grad_value := safe_grad(value)) is not None
+            and value.dtype != grad_value.dtype
+            # a leaf's grad_dtype may allow the mismatch (FSDP2 fp32 grads)
+            and not (value.is_leaf and value.grad_dtype in (None, grad_value.dtype))
         ):
-            safe_grad_val = safe_grad(value)
-            grad_str = str(safe_grad_val.dtype) if safe_grad_val is not None else "None"
+            grad_str = str(grad_value.dtype)
             unimplemented(
                 gb_type="dtype mismatch between tensor and its gradient",
                 context=f"tensor dtype: {value.dtype}; grad dtype: {grad_str}",
@@ -3644,6 +3644,13 @@ class VariableBuilder:
                         GuardBuilder.EQUALS_MATCH
                     )
                 )
+                # TENSOR_MATCH checks grad_dtype, but DTensor skips it
+                if value.requires_grad:
+                    install_guard(
+                        AttrSource(self.source, "grad_dtype").make_guard(
+                            GuardBuilder.EQUALS_MATCH
+                        )
+                    )
             elif is_polymorphic_act:
                 # Guard only on the unwrapped inner tensor (inner_source below).
                 # Installing no type/metadata guard on the ACT wrapper is what

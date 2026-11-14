@@ -1399,24 +1399,11 @@ class FakeTensorConverter:
         if t.is_mkldnn:
             maybe_set_fake_dispatch_keys(out, torch._C._dispatch_keys(t))
 
-        # Propagate grad_dtype here rather than in meta_converter because
-        # meta tensors don't carry autograd metadata.
-        # Unwrap FunctionalTensor because accessing is_leaf/grad_fn on a
-        # FunctionalTensor view whose base was mutated (e.g. via set_())
-        # triggers lazy view replay through __torch_dispatch__, which
-        # errors without an active FunctionalTensorMode.
         inner_t = (
             torch._from_functional_tensor(t.elem)
             if isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor)
             else t
         )
-        if (
-            inner_t.requires_grad
-            and inner_t.is_leaf
-            and inner_t.grad_dtype != inner_t.dtype
-            and out.is_leaf
-        ):
-            out.grad_dtype = inner_t.grad_dtype
 
         # Propagate backend-specific metadata (e.g. PrivateUse1 BackendMeta) from
         # the (unwrapped) real tensor onto the fake tensor. for_fake lets the

@@ -211,6 +211,18 @@ class CurrentDeviceIndexCacheScope {
   std::optional<c10::DeviceIndex> cache_;
   std::optional<c10::DeviceIndex>* previous_cache_;
 };
+
+// Only a leaf carries a grad_dtype policy; a non-leaf receives its own dtype.
+// Reads autograd meta directly: Python's Tensor.is_leaf and Tensor.grad_dtype
+// go through grad_fn(), which raises for multi-output views modified in place.
+std::optional<at::ScalarType> receiving_grad_dtype(const at::Tensor& v) {
+  return v.is_leaf() ? v.grad_dtype()
+                     : std::optional<at::ScalarType>(v.scalar_type());
+}
+
+std::string grad_dtype_repr(std::optional<at::ScalarType> grad_dtype) {
+  return grad_dtype.has_value() ? c10::toString(*grad_dtype) : "None";
+}
 } // namespace
 
 TensorCheck::TensorCheck(
@@ -229,6 +241,7 @@ TensorCheck::TensorCheck(
               ? std::nullopt
               : std::optional<c10::DeviceIndex>(v.device().index())),
       requires_grad_(v.requires_grad()),
+      grad_dtype_(receiving_grad_dtype(v)),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {
@@ -250,6 +263,7 @@ TensorCheck::TensorCheck(
       dtype_(dtype),
       device_index_(device_index),
       requires_grad_(requires_grad),
+      grad_dtype_(dtype),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {}
@@ -281,13 +295,14 @@ bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
   }
 
   return check(
-      state,
-      v.key_set(),
-      v.dtype().toScalarType(),
-      v.device(),
-      v.sym_sizes(),
-      sym_strides,
-      v.requires_grad());
+             state,
+             v.key_set(),
+             v.dtype().toScalarType(),
+             v.device(),
+             v.sym_sizes(),
+             sym_strides,
+             v.requires_grad()) &&
+      (!requires_grad_ || grad_dtype_ == receiving_grad_dtype(v));
 }
 
 bool TensorCheck::check(
@@ -362,6 +377,11 @@ std::string TensorCheck::check_verbose(
     // requires_grad_);
     fail_reason << "requires_grad mismatch. expected requires_grad="
                 << requires_grad_;
+    return std::move(fail_reason).str();
+  } else if (requires_grad_ && grad_dtype_ != receiving_grad_dtype(v)) {
+    fail_reason << "grad_dtype mismatch. expected "
+                << grad_dtype_repr(grad_dtype_) << ", actual "
+                << grad_dtype_repr(receiving_grad_dtype(v));
     return std::move(fail_reason).str();
   }
   auto ndim = v.ndimension();

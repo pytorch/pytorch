@@ -3851,6 +3851,22 @@ class TestFakeTensorConverter(TestCase):
         fake_t = mode.from_tensor(t)
         self.assertIsNone(fake_t.grad_dtype)
 
+    def test_grad_dtype_preserved_with_existing_grad(self):
+        t = torch.randn(4, dtype=torch.bfloat16, requires_grad=True)
+        t.grad_dtype = torch.float32
+        t.grad = torch.ones(4)
+        fake_t = FakeTensorMode().from_tensor(t)
+        self.assertEqual(fake_t.grad_dtype, torch.float32)
+        self.assertEqual(fake_t.grad.dtype, torch.float32)
+
+    def test_grad_dtype_override_matches_real(self):
+        """An unset grad_dtype must stay unset on the fake, so it keeps following
+        dtype instead of pinning it."""
+        t = torch.randn(4, requires_grad=True)
+        self.assertFalse(FakeTensorMode().from_tensor(t)._has_grad_dtype_override)
+        t.grad_dtype = torch.float32
+        self.assertTrue(FakeTensorMode().from_tensor(t)._has_grad_dtype_override)
+
     def test_grad_dtype_functional_tensor_no_crash(self):
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
