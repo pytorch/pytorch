@@ -447,6 +447,11 @@ class Vectorized<double> {
   DEFINE_MEMBER_OP(operator|, double, vec_or)
   DEFINE_MEMBER_OP(operator^, double, vec_xor)
   DEFINE_MEMBER_TERNARY_OP(madd, double, vec_madd)
+  double reduce_max() const {
+    vfloat64 max0 = vec_max(_vec0, _vec1);
+    vfloat64 max1 = vec_max(max0, vec_sld(max0, max0, 8));
+    return vec_extract(max1, 0);
+  }
 };
 template <>
 Vectorized<double> inline maximum(
