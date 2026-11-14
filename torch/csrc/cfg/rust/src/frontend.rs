@@ -884,8 +884,11 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     if instrs.is_empty() {
         return unsupported("empty bytecode");
     }
-    let index_of_off: HashMap<u32, usize> =
-        instrs.iter().enumerate().map(|(i, ins)| (ins.off, i)).collect();
+    let index_of_off: HashMap<u32, usize> = instrs
+        .iter()
+        .enumerate()
+        .flat_map(|(i, ins)| [(ins.off, i), (ins.start, i)])
+        .collect();
 
     let exc_table = code.getattr("co_exceptiontable")?;
     let exc_table = exc_table.downcast::<PyBytes>()?;
