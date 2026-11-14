@@ -409,7 +409,6 @@
   "test/inductor/test_fp8.py",
   "test/inductor/test_fused_attention.py",
   "test/inductor/test_fusion_regions.py",
-  "test/inductor/test_fuzzer.py",
   "test/inductor/test_fx_fusion.py",
   "test/inductor/test_fxir_backend.py",
   "test/inductor/test_gpu_cpp_wrapper.py",
