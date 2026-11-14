@@ -1191,6 +1191,72 @@ It is also possible to add `new` native functions using {mod}`torch.library`. Th
 
 You can find many examples of ``__torch_dispatch__``-based subclasses in the [subclass zoo](https://github.com/albanD/subclass_zoo) repo.
 
+(tensor-subclass-flattening)=
+
+### Wrapper tensor subclasses with {func}`torch.compile`
+
+To let {func}`torch.compile` trace through a wrapper tensor subclass, implement
+``__tensor_flatten__`` and ``__tensor_unflatten__`` in addition to
+``__torch_dispatch__``. These methods describe how to separate the wrapper into
+its inner values and metadata, and how to reconstruct it after those inner
+values have been transformed. They do not flatten the dimensions of a tensor
+like {func}`torch.flatten` does.
+
+```{warning}
+This protocol is experimental and may change. Implementing these methods is
+necessary but not sufficient for compilation: ``__torch_dispatch__`` must also
+use traceable dispatcher operations and preserve the operations' aliasing
+semantics.
+```
+
+- ``__tensor_flatten__(self)`` returns ``(names, metadata)``. ``names`` is a
+  sequence of stable attribute names, not the inner tensors themselves. For a
+  wrapper storing a tensor in ``self.elem``, return ``["elem"]``. Include the
+  inner values that participate in tracing; put additional information needed
+  to reconstruct the wrapper in ``metadata``.
+- ``__tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride)``
+  is a static method or class method that returns a new instance of the wrapper.
+  ``inner_tensors`` maps the names returned by ``__tensor_flatten__`` to their
+  transformed values, and ``metadata`` is the accompanying reconstruction
+  metadata. ``outer_size`` and ``outer_stride`` specify the requested size and
+  stride of the wrapper, which the returned instance must preserve. Their
+  entries may be symbolic integers; do not convert them to Python ``int``.
+
+For example, a wrapper that stores an inner tensor as ``elem`` and a string
+label as ``label`` could define the following methods. This excerpt assumes its
+constructor accepts ``outer_size`` and ``outer_stride`` and uses them when
+creating the wrapper, and that it already implements ``__torch_dispatch__``:
+
+```{code-block} python
+
+    def __tensor_flatten__(self):
+        return ["elem"], self.label
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, metadata, outer_size, outer_stride):
+        return cls(
+            inner_tensors["elem"],
+            label=metadata,
+            outer_size=outer_size,
+            outer_stride=outer_stride,
+        )
+```
+
+The methods must round-trip: for an instance ``x``, the following reconstruction
+should produce an equivalent wrapper with the same size, stride, inner values,
+and metadata:
+
+```{code-block} python
+
+    names, metadata = x.__tensor_flatten__()
+    rebuilt = type(x).__tensor_unflatten__(
+        {name: getattr(x, name) for name in names},
+        metadata,
+        x.size(),
+        x.stride(),
+    )
+```
+
 (torch-dispatch-calling-convention)=
 
 ### ``__torch_dispatch__`` calling convention
