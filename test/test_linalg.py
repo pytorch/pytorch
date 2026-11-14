@@ -6516,7 +6516,6 @@ class TestLinalg(TestCase):
                 self.assertNotEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
         # NOTE: We're just exercising terrible failures here.
-        version = _get_torch_cuda_version()
         SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
         SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
         SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
@@ -6525,8 +6524,8 @@ class TestLinalg(TestCase):
             _test(17, k, n, use_transpose_a, use_transpose_b, True)
         else:
             if not use_transpose_a and use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
-                    _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
+                if SM80OrLater or SM70 or SM75:
+                    _test(17, k, n, use_transpose_a, use_transpose_b, True)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
                                                 "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
@@ -6543,7 +6542,7 @@ class TestLinalg(TestCase):
                     _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if not use_transpose_a and not use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
+                if SM80OrLater or SM70 or SM75:
                     _test(17, k, n, use_transpose_a, use_transpose_b)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
