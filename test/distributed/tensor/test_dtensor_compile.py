@@ -2410,6 +2410,14 @@ class outer_fn(torch.nn.Module):
                 "Expected _get_submesh call to derive the FSDP submesh from "
                 "the tracked concatenated ancestor mesh",
             )
+            for node in submesh_ops:
+                self.assertIsInstance(
+                    node.target,
+                    torch._ops.OpOverload,
+                    "_get_submesh emitted as an OpOverloadPacket; Inductor's "
+                    "implicit fallback needs a concrete schema to build an "
+                    "extern kernel from",
+                )
         finally:
             dist.destroy_process_group()
             dist.init_process_group(
