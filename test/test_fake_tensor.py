@@ -599,14 +599,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             fake_impl_calls.append(True)
             return torch.empty_like(weight)
 
+        op = custom_op._opoverload
+
         class DispatchParameter(torch.nn.Parameter):
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 dispatch_calls.append(func)
-                if (
-                    func
-                    is torch.ops._torch_testing.fake_tensor_dispatch_parameter_subclass.default
-                ):
+                if func is op:
                     weight = args[0]
                     return torch.empty(
                         weight.shape, dtype=weight.dtype, device=weight.device
@@ -615,18 +614,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
         weight = DispatchParameter(torch.randn(10, 10))
         with mode_cls() as mode:
-            result = torch.ops._torch_testing.fake_tensor_dispatch_parameter_subclass(
-                weight
-            )
+            result = op(weight)
 
         self.assertTrue(is_fake_tensor(result))
         self.assertIs(maybe_get_fake_mode(result), mode)
         self.assertEqual(result.shape, weight.shape)
         self.assertEqual(result.device, torch.device("cpu"))
-        self.assertEqual(
-            dispatch_calls,
-            [torch.ops._torch_testing.fake_tensor_dispatch_parameter_subclass.default],
-        )
+        self.assertEqual(dispatch_calls, [op])
         self.assertEqual(fake_impl_calls, [])
 
     def test_check_for_subclass_arg_parameter_subclass(self):
