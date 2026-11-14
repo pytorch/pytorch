@@ -6,7 +6,9 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 #include <c10/util/Exception.h>
+#include <climits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -28,9 +30,9 @@ __host__ __device__ __forceinline__ T ceilDiv(T a, T b) {
   return (a + b - 1) / b;
 }
 
-template <typename T>
+template <typename T, typename index_t>
 __global__ void max_unpooling2d_forward_kernel(
-    const int64_t numInputElements,
+    const index_t numInputElements,
     const T* input,
     const int64_t* indices,
     const int64_t numChannels,
@@ -40,7 +42,7 @@ __global__ void max_unpooling2d_forward_kernel(
     const int64_t outputWidth,
     T* output) {
   int64_t outputImageSize = outputHeight * outputWidth;
-  CUDA_KERNEL_LOOP(linearIndex, numInputElements) {
+  CUDA_KERNEL_LOOP_TYPE(linearIndex, numInputElements, index_t) {
     int c = (linearIndex / inputWidth / inputHeight) % numChannels;
     int n = linearIndex / inputWidth / inputHeight / numChannels;
     output += (n * numChannels + c) * outputHeight * outputWidth;
@@ -161,21 +163,27 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
   if (count != 0 && oheight != 0 && owidth != 0) {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16,
         self.scalar_type(), "max_unpooling2d_forward_kernel", ([&] {
-          max_unpooling2d_forward_kernel<<<
-              GET_BLOCKS(count),
-              CUDA_NUM_THREADS,
-              0,
-              at::cuda::getCurrentCUDAStream()>>>(
-              self.numel(),
-              self.const_data_ptr<scalar_t>(),
-              indices.const_data_ptr<int64_t>(),
-              numChannels,
-              inputHeight,
-              inputWidth,
-              oheight,
-              owidth,
-              output.mutable_data_ptr<scalar_t>());
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
+          // The loop index ranges over the INPUT, so key the 32-bit choice on `self`.
+          AT_DISPATCH_INDEX_TYPES(
+              at::native::canUse32BitIndexMath(self, INT_MAX) ? ScalarType::Int
+                                                              : ScalarType::Long,
+              "max_unpooling2d_forward_index", ([&] {
+                max_unpooling2d_forward_kernel<scalar_t, index_t><<<
+                    GET_BLOCKS(count),
+                    CUDA_NUM_THREADS,
+                    0,
+                    at::cuda::getCurrentCUDAStream()>>>(
+                    static_cast<index_t>(self.numel()),
+                    self.const_data_ptr<scalar_t>(),
+                    indices.const_data_ptr<int64_t>(),
+                    numChannels,
+                    inputHeight,
+                    inputWidth,
+                    oheight,
+                    owidth,
+                    output.mutable_data_ptr<scalar_t>());
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+              }));
         }));
   }
   if (self.ndimension() == 3) {
