@@ -5425,6 +5425,15 @@ class TestSparseAny(TestCase):
             count += 1
 
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            if (torch.device(device).type == "xpu" and layout == torch.sparse_csr
+                    and op.name == "sum" and t_inp._nnz() == 0 and t_kwargs.get("dim") is not None
+                    and torch.masked._canonical_dim(t_kwargs["dim"], 2) in ((), (0, 1))):
+                # https://github.com/intel/torch-xpu-ops/issues/6197, remove this block when fixed
+                with self.assertRaisesRegex(RuntimeError, "values must have dimensionality > sum of batch and block"):
+                    result = op.op(t_inp, *t_args, **t_kwargs)
+                    torch._validate_sparse_compressed_tensor_args(
+                        result.crow_indices(), result.col_indices(), result.values(), result.shape, result.layout)
+                continue
             result = op.op(t_inp, *t_args, **t_kwargs)
 
             #  Checking invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
@@ -5443,6 +5452,15 @@ class TestSparseAny(TestCase):
         count = 0
         for sample in op.sample_inputs_sparse(layout, device, dtype, requires_grad=True):
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            if (torch.device(device).type == "xpu" and layout == torch.sparse_csr
+                    and op.name == "sum" and t_inp._nnz() == 0 and t_kwargs.get("dim") is not None
+                    and torch.masked._canonical_dim(t_kwargs["dim"], 2) in ((), (0, 1))):
+                # https://github.com/intel/torch-xpu-ops/issues/6197, remove this block when fixed
+                with self.assertRaisesRegex(RuntimeError, "values must have dimensionality > sum of batch and block"):
+                    r = op.op(t_inp, *t_args, **t_kwargs)
+                    torch._validate_sparse_compressed_tensor_args(
+                        r.crow_indices(), r.col_indices(), r.values(), r.shape, r.layout)
+                continue
             r = op.op(t_inp, *t_args, **t_kwargs)
             if r.numel() != 0:
                 r = r.sum()
