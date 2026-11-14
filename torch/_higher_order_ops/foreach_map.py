@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import functools
 from collections.abc import Callable
 from typing import Any
 
@@ -21,4 +22,8 @@ _foreach_map = ForeachMap()
 def foreach_map(op: Callable, *operands: Any, **kwargs: dict[str, Any]):
     from torch._dynamo.polyfills import foreach_map_fn
 
-    return _foreach_map(foreach_map_fn, op, *operands, **kwargs)
+    # BaseHOP treats its own kwargs as HOP config and never forwards them to the
+    # subgraph, so bind them to op instead.
+    if kwargs:
+        op = functools.partial(op, **kwargs)
+    return _foreach_map(foreach_map_fn, op, *operands)

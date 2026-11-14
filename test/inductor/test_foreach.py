@@ -726,6 +726,23 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @unittest.skipIf(IS_FBCODE, "cpp compile not supported in fbcode")
+    def test_foreach_map_kwargs(self):
+        def fn(xs, ys):
+            return foreach_map(torch.add, xs, ys, alpha=10)
+
+        xs = [torch.rand(s, requires_grad=True) for s in ((10, 10), (20,))]
+        ys = [torch.rand(s, requires_grad=True) for s in ((10, 10), (20,))]
+        expected = [torch.add(x, y, alpha=10) for x, y in zip(xs, ys)]
+
+        with torch.no_grad():
+            self.assertEqual(fn(xs, ys), expected)
+        actual = torch.compile(fn, fullgraph=True)(xs, ys)
+        self.assertEqual(actual, expected)
+
+        sum(t.sum() for t in actual).backward()
+        self.assertEqual(ys[0].grad, torch.full_like(ys[0], 10))
+
     @requires_gpu
     @decomp_ops
     def test_decomp(self, op):
