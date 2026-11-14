@@ -1530,14 +1530,9 @@ class TensorVariable(VariableTracker):
             from .torch_function import TensorWithTFOverrideVariable
 
             py_cls = cls.as_python_constant()
-            var = TensorWithTFOverrideVariable.from_tensor_var(
+            return TensorWithTFOverrideVariable.from_tensor_var(
                 tx, self, py_cls, cls.source
             )
-            # See NOTE [Side effect tracking for newly constructed tensor]
-            tx.output.side_effects._track_obj(
-                object(), var, mutation_type_cls=AttributeMutationNew
-            )
-            return var
         unimplemented(
             gb_type="Argument of `as_subclass` must be a non-dispatcher-style tensor subclass",
             context=f"{self}.as_subclass({cls})",
@@ -2483,9 +2478,9 @@ class TensorVariable(VariableTracker):
         node = self.as_proxy().node
         example_value = node.meta["example_value"]
         if example_value.requires_grad != requires_grad:
-            # For graph inputs (tensors with source), requires_grad_() is a
+            # For graph inputs (tensors with source or aliasing graph inputs), requires_grad_() is a
             # metadata mutation that we can't trace — graph break as before.
-            if self.source:
+            if self.graph_input_source(tx) is not None:
                 unimplemented(
                     gb_type="Unsupported Tensor.requires_grad_() call",
                     context=f"call_method {self} requires_grad_",
@@ -3856,10 +3851,11 @@ class TensorSubclassVariable(UserDefinedClassVariable):
         if init_func is not torch.Tensor.__init__:
             VariableTracker.build(tx, init_func).call_function(tx, [var], kwargs)
 
-        # See NOTE [Side effect tracking for newly constructed tensor]
-        tx.output.side_effects._track_obj(
-            object(), var, mutation_type_cls=AttributeMutationNew
-        )
+        if not tx.output.side_effects.is_attribute_mutation(var):
+            # See NOTE [Side effect tracking for newly constructed tensor]
+            tx.output.side_effects._track_obj(
+                object(), var, mutation_type_cls=AttributeMutationNew
+            )
         return var
 
     def as_python_constant(self) -> type:

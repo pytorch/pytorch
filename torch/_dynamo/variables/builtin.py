@@ -3929,7 +3929,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                 if name == "requires_grad":
                     dtype = obj.dtype  # type: ignore[attr-defined]
                     if (
-                        obj.source is None
+                        obj.graph_input_source(tx) is None
                         and val.is_python_constant()
                         and val.as_python_constant() is True
                         and not obj.requires_grad  # type: ignore[attr-defined]
