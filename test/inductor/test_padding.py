@@ -978,6 +978,27 @@ class PaddingTest(TestCaseBase):
 
         self.assertEqual(eager, compiled)
 
+    @config.patch(
+        {
+            "force_shape_pad": True,
+            "comprehensive_padding": True,
+            "fx_graph_cache": False,
+            "autotune_local_cache": False,
+        }
+    )
+    def test_template_input_padding_no_layout_conflict(self):
+        """A padded mm input feeding a user-visible addmm must be padded the same
+        way when the template records its layout and when the buffer is frozen."""
+        x = torch.randn(256, 2540, dtype=torch.bfloat16, device=GPU_TYPE)
+        w = torch.randn(2540, 256, dtype=torch.bfloat16, device=GPU_TYPE)
+        b = torch.randn(256, dtype=torch.bfloat16, device=GPU_TYPE)
+
+        compiled = torch.compile(torch.addmm, mode="max-autotune-no-cudagraphs")
+        with self.assertNoLogs("torch._inductor.scheduler", level="WARNING"):
+            out = compiled(b, x, w)
+
+        torch.testing.assert_close(out, torch.addmm(b, x, w), rtol=2e-2, atol=2e-2)
+
 
 if __name__ == "__main__":
     if HAS_GPU:
