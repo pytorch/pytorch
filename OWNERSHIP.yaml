@@ -900,8 +900,10 @@ ownership:
       - /test/dynamo_skips/
       - /test/export/test_dynamic_shapes.py
       - /test/onnx/exporter/test_dynamic_shapes.py
+      - /test/test_cfg_compile.py
       - /test/test_cpython_diff_sync.py
       - /torch/_dynamo/
+      - /torch/csrc/cfg/
       - /torch/csrc/dynamo/
   - name: tvm_dynamo
     labels: ["module: dynamo", "module: tvm"]
