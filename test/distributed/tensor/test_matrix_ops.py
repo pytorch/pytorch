@@ -30,10 +30,12 @@ from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MX_GEMM,
     SM90OrLater,
 )
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_quantized import to_blocked
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -460,19 +462,16 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         expected_placements = (Replicate(),)
         self.assertEqual(out.placements, expected_placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
-    @with_comms
-    @skip_unless_torch_gpu
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
-    )
-    def test_scaled_mm(self):
+    def _check_scaled_mm_placements(self, scaled_mm):
+        """Run the TensorWise/RowWise placement table through scaled_mm(a, b,
+        scale_a, scale_b, recipe), where b is the transposed (k, n) operand."""
         device_mesh = self.build_device_mesh()
         shrd0 = Shard(0)
         shrd1 = Shard(1)
         repl = Replicate()
         part = Partial()
+        tw = F.ScalingType.TensorWise
+        rw = F.ScalingType.RowWise
 
         ws = self.world_size
         # _scaled_mm requires all dimensions to be multiples of 16. Since we'll
@@ -483,6 +482,7 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         t2 = torch.randn(n, k, device=self.device_type, dtype=torch.bfloat16)
 
         for (
+            recipe,
             output_spec,
             t1_spec,
             t2_spec,
@@ -493,18 +493,18 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         ) in [
             # Tensor-wise scaling
             # Replicated, zero-dim scale
-            (repl, repl, repl, (), (), repl, repl),
+            (tw, repl, repl, repl, (), (), repl, repl),
             # Column-parallel, two-dim scale
-            (shrd1, repl, shrd0, (1, 1), (1, 1), repl, repl),
+            (tw, shrd1, repl, shrd0, (1, 1), (1, 1), repl, repl),
             # Row-parallel, one-dim scale
-            (part, shrd1, shrd1, (1,), (1,), repl, repl),
+            (tw, part, shrd1, shrd1, (1,), (1,), repl, repl),
             # Row-wise scaling
             # Replicated
-            (repl, repl, repl, (m, 1), (n, 1), repl, repl),
+            (rw, repl, repl, repl, (m, 1), (n, 1), repl, repl),
             # Column-parallel
-            (shrd1, repl, shrd0, (m, 1), (n, 1), repl, shrd0),
+            (rw, shrd1, repl, shrd0, (m, 1), (n, 1), repl, shrd0),
             # Row-parallel
-            (part, shrd1, shrd1, (m, 1), (n, 1), repl, repl),
+            (rw, part, shrd1, shrd1, (m, 1), (n, 1), repl, repl),
         ]:
             full_ref_res = t1 @ t2.t()
 
@@ -519,12 +519,12 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             with CommDebugMode() as comm_mode:
                 dist_res = cast(
                     DTensor,
-                    torch._scaled_mm(
+                    scaled_mm(
                         dist_t1_fp8,
                         dist_t2_fp8.t(),
-                        scale_a=dist_scale1,
-                        scale_b=dist_scale2.t(),
-                        out_dtype=torch.bfloat16,
+                        dist_scale1,
+                        dist_scale2.t(),
+                        recipe,
                     ),
                 )
 
@@ -535,6 +535,106 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             self.assertEqual(full_dist_res, full_ref_res, atol=1.5, rtol=7e-2)
 
             self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
+    @with_comms
+    @skip_unless_torch_gpu
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm(self):
+        self._check_scaled_mm_placements(
+            lambda a, b, scale_a, scale_b, recipe: torch._scaled_mm(
+                a, b, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.bfloat16
+            )
+        )
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
+    @with_comms
+    @skip_unless_torch_gpu
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm_v2(self):
+        self._check_scaled_mm_placements(
+            lambda a, b, scale_a, scale_b, recipe: F.scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_recipe_a=recipe,
+                scale_b=scale_b,
+                scale_recipe_b=recipe,
+                output_dtype=torch.bfloat16,
+            )
+        )
+
+    @skipIfRocm(msg="builds the CUDA SWIZZLE_32_4_4 scale layout")
+    @with_comms
+    @skip_unless_torch_gpu
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "MX GEMM is not supported")
+    def test_scaled_mm_v2_swizzled_scales(self):
+        """Sharded data with replicated swizzled MXFP8 scales must be gathered
+        before the GEMM instead of slicing the swizzled scale tensor. With
+        m=128 a row shard cuts through a 128-row scale tile, so slicing the
+        swizzled scale like the data would apply the wrong scales."""
+        device_mesh = self.build_device_mesh()
+        m, n, k = 128, 128, 128
+
+        def e8m0_scales(rows, cols):
+            # Exponents 2^-4 .. 2^3, different for every block, so a scale
+            # applied to the wrong block changes the result.
+            exponents = torch.randint(
+                123, 131, (rows, cols), device=self.device_type, dtype=torch.uint8
+            )
+            return exponents.view(torch.float8_e8m0fnu)
+
+        a = torch.randn(m, k, device=self.device_type).to(torch.float8_e4m3fn)
+        b = torch.randn(n, k, device=self.device_type).to(torch.float8_e4m3fn)
+        scale_a = to_blocked(e8m0_scales(m, k // 32))
+        scale_b = to_blocked(e8m0_scales(n, k // 32))
+        ref = F.scaled_mm(
+            a,
+            b.t(),
+            scale_a=scale_a,
+            scale_recipe_a=F.ScalingType.BlockWise1x32,
+            scale_b=scale_b,
+            scale_recipe_b=F.ScalingType.BlockWise1x32,
+            swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+            output_dtype=torch.bfloat16,
+        )
+
+        # The scales are identical on every rank (same seed). NCCL cannot
+        # broadcast float8_e8m0fnu, so wrap them as replicated DTensors
+        # without communication.
+        dist_a = distribute_tensor(a, device_mesh, [Shard(0)])
+        dist_b = distribute_tensor(b, device_mesh, [Replicate()])
+        with CommDebugMode() as comm_mode:
+            dist_res = cast(
+                DTensor,
+                F.scaled_mm(
+                    dist_a,
+                    dist_b.t(),
+                    scale_a=DTensor.from_local(
+                        scale_a, device_mesh, [Replicate()], run_check=False
+                    ),
+                    scale_recipe_a=F.ScalingType.BlockWise1x32,
+                    scale_b=DTensor.from_local(
+                        scale_b, device_mesh, [Replicate()], run_check=False
+                    ),
+                    scale_recipe_b=F.ScalingType.BlockWise1x32,
+                    swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+                    swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+                    output_dtype=torch.bfloat16,
+                ),
+            )
+        # The Shard(0) operand is all-gathered and the GEMM runs replicated.
+        self.assertEqual(dist_res.placements, (Replicate(),))
+        self.assertEqual(comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1)
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        self.assertEqual(dist_res.full_tensor(), ref)
 
     def test_scaled_mm_blockwise_1d_scale_placement(self):
         """Test that _scaled_mm_scale_placement handles 1D blockwise scales correctly.
@@ -614,6 +714,222 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         )
         self.assertIsNotNone(result)
         self.assertEqual(result, Replicate())
+
+    def _scaled_mm_v2_strategies(
+        self,
+        scale_a,
+        recipe_a,
+        scale_b,
+        recipe_b,
+        swizzle_a=(),
+        swizzle_b=(),
+        bias=None,
+    ):
+        """Run the _scaled_mm_v2 single-dim strategy on (m, k) @ (k, n) metas
+        with the given scale shapes, recipes and swizzles."""
+        from torch.distributed.tensor._dtensor_spec import TensorMeta
+        from torch.distributed.tensor._ops._matrix_ops import (
+            scaled_mm_v2_single_dim_strategy,
+        )
+
+        def meta(shape):
+            return TensorMeta(torch.Size(shape), (1,) * len(shape), torch.float32)
+
+        m, k, n = 256, 512, 384
+        args = (
+            meta((m, k)),
+            meta((k, n)),
+            [meta(s) for s in scale_a],
+            [int(r) for r in recipe_a],
+            [int(s) for s in swizzle_a],
+            [meta(s) for s in scale_b],
+            [int(r) for r in recipe_b],
+            [int(s) for s in swizzle_b],
+            None if bias is None else meta(bias),
+            torch.bfloat16,
+            [],
+            False,
+        )
+        return scaled_mm_v2_single_dim_strategy(
+            torch.ops.aten._scaled_mm_v2.default, args, {}
+        )
+
+    def test_scaled_mm_v2_rowwise_scale_follows_operand(self):
+        """TensorWise and RowWise scales are indexed by their operand's dims,
+        so the operand may be sharded and the scale follows it."""
+        m, n = 256, 384
+        rw = F.ScalingType.RowWise
+        tw = F.ScalingType.TensorWise
+
+        def sharded(p):
+            return isinstance(p, (_ShardingPlaceholder, Shard))
+
+        def dim(p):
+            return p.dim if sharded(p) else None
+
+        # [output, self, mat2, scale_a, scale_b]
+        rowwise = self._scaled_mm_v2_strategies([(m, 1)], [rw], [(1, n)], [rw])
+        pairs = {(dim(s[1]), dim(s[3])) for s in rowwise}
+        pairs |= {(dim(s[2]), dim(s[4])) for s in rowwise}
+        # self Shard(0) (M) -> scale_a Shard(0); mat2 Shard(1) (N) ->
+        # scale_b Shard(1); a shard on K leaves the scale replicated.
+        self.assertIn((0, 0), pairs)
+        self.assertIn((1, 1), pairs)
+        self.assertIn((1, None), pairs)
+        self.assertIn((0, None), pairs)
+        self.assertNotIn((0, 1), pairs)
+        self.assertNotIn((1, 0), pairs)
+        # An empty swizzle list means no swizzle. (_ShardingPlaceholder has no
+        # __eq__, so compare the reprs.)
+        no_swizzle = [F.SwizzleType.NO_SWIZZLE]
+        self.assertEqual(
+            str(
+                self._scaled_mm_v2_strategies(
+                    [(m, 1)], [rw], [(1, n)], [rw], no_swizzle, no_swizzle
+                )
+            ),
+            str(rowwise),
+        )
+
+        tensorwise = self._scaled_mm_v2_strategies([()], [tw], [(1, 1)], [tw])
+        self.assertTrue(any(sharded(s[1]) for s in tensorwise))
+        self.assertTrue(any(sharded(s[2]) for s in tensorwise))
+        self.assertTrue(all(s[3] == Replicate() for s in tensorwise))
+        self.assertTrue(all(s[4] == Replicate() for s in tensorwise))
+
+        # The kernel also takes an [N, 1] RowWise scale_b, whose dim 0 is N,
+        # not mat2's dim 0 (K). Don't shard mat2 then; self is unaffected.
+        transposed = self._scaled_mm_v2_strategies([(m, 1)], [rw], [(n, 1)], [rw])
+        self.assertFalse(any(sharded(s[2]) or sharded(s[4]) for s in transposed))
+        self.assertTrue(any(sharded(s[1]) for s in transposed))
+
+        # A bias isn't supported; say so instead of failing as an internal bug.
+        with self.assertRaisesRegex(NotImplementedError, "add the bias"):
+            self._scaled_mm_v2_strategies([(m, 1)], [rw], [(1, n)], [rw], bias=(n,))
+
+    def test_scaled_mm_v2_blockwise_operand_is_not_sharded(self):
+        """Block-wise scales are block-granular and laid out per backend
+        (e.g. a CUDA BlockWise1x128 scale_b is [N, ceil(K/128)] for a [K, N]
+        mat2, and a BlockWise128x128 scale_a is transposed and padded), and
+        swizzled scales are tiled, so the operand must stay Replicate or
+        Partial with a replicated scale."""
+        m, k, n = 256, 512, 384
+        b1x128 = F.ScalingType.BlockWise1x128
+        b128x128 = F.ScalingType.BlockWise128x128
+        mx = F.ScalingType.BlockWise1x32
+        nvfp4 = F.ScalingType.BlockWise1x16
+        tw = F.ScalingType.TensorWise
+        swz = F.SwizzleType.SWIZZLE_32_4_4
+        kb = k // 128
+        kb_pad = (kb + 3) // 4 * 4
+
+        def blocked(rows, cols):
+            return ((rows + 127) // 128 * 128 * ((cols + 3) // 4 * 4),)
+
+        cases = {
+            # CUDA DeepSeek-style layouts (ScaledBlas.cpp)
+            "1x128_1x128": ([(m, kb)], [b1x128], [(n, kb)], [b1x128], (), ()),
+            "1x128_128x128": (
+                [(m, kb)],
+                [b1x128],
+                [(kb_pad, n // 128)],
+                [b128x128],
+                (),
+                (),
+            ),
+            "128x128_1x128": (
+                [(kb_pad, m // 128)],
+                [b128x128],
+                [(n, kb)],
+                [b1x128],
+                (),
+                (),
+            ),
+            # Unswizzled MX scales, [M, K/32] and [N, K/32]
+            "mx_unswizzled": ([(m, k // 32)], [mx], [(n, k // 32)], [mx], (), ()),
+            "mx_swizzled": (
+                [blocked(m, k // 32)],
+                [mx],
+                [blocked(n, k // 32)],
+                [mx],
+                [swz],
+                [swz],
+            ),
+            # Two-level NVFP4: swizzled block scale plus a tensor-wise scale
+            "nvfp4_two_level": (
+                [blocked(m, k // 16), ()],
+                [nvfp4, tw],
+                [blocked(n, k // 16), ()],
+                [nvfp4, tw],
+                [swz, F.SwizzleType.NO_SWIZZLE],
+                [swz, F.SwizzleType.NO_SWIZZLE],
+            ),
+        }
+        for name, case in cases.items():
+            with self.subTest(name):
+                strategies = self._scaled_mm_v2_strategies(*case)
+                self.assertTrue(strategies)
+                for s in strategies:
+                    self.assertFalse(isinstance(s[1], (_ShardingPlaceholder, Shard)))
+                    self.assertFalse(isinstance(s[2], (_ShardingPlaceholder, Shard)))
+                    self.assertTrue(all(p == Replicate() for p in s[3:]))
+                # Partial inputs (row-parallel style reductions) stay allowed.
+                self.assertTrue(any(isinstance(s[1], Partial) for s in strategies))
+                self.assertTrue(any(isinstance(s[2], Partial) for s in strategies))
+
+        # Only the block-wise operand is held back: a RowWise operand next to
+        # a swizzled one is still sharded.
+        mixed = self._scaled_mm_v2_strategies(
+            [blocked(m, k // 32)],
+            [mx],
+            [(1, n)],
+            [F.ScalingType.RowWise],
+            [swz],
+            [],
+        )
+        self.assertFalse(any(isinstance(s[1], _ShardingPlaceholder) for s in mixed))
+        self.assertTrue(any(isinstance(s[2], _ShardingPlaceholder) for s in mixed))
+
+    def test_scaled_mm_v2_swizzle_is_in_cache_key(self):
+        """The _scaled_mm_v2 strategy depends on the recipes and swizzles, so
+        they must be part of the sharding propagation cache key."""
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+        from torch.distributed.tensor._op_schema import OpSchema
+
+        mesh = self.build_device_mesh()
+        op = torch.ops.aten._scaled_mm_v2.default
+        propagator = DTensor._op_dispatcher.sharding_propagator
+        schema_info = propagator.op_to_schema_info_for_single_dim_strategy[op]
+        recipe = int(F.ScalingType.BlockWise1x32)
+        no_swizzle = [int(F.SwizzleType.NO_SWIZZLE)]
+        swizzle = [int(F.SwizzleType.SWIZZLE_32_4_4)]
+
+        def spec(rows, cols):
+            meta = TensorMeta(torch.Size((rows, cols)), (cols, 1), torch.float32)
+            return DTensorSpec(mesh, (Replicate(),), tensor_meta=meta)
+
+        def schema(swizzle_b, recipe_b=recipe):
+            args = (
+                spec(128, 128),
+                spec(128, 128),
+                [spec(128, 4)],
+                [recipe],
+                swizzle,
+                [spec(128, 4)],
+                [recipe_b],
+                swizzle_b,
+                None,
+                torch.bfloat16,
+                [],
+                False,
+            )
+            return OpSchema(op, args, {}, schema_info=schema_info)
+
+        self.assertNotEqual(schema(no_swizzle), schema(swizzle))
+        self.assertEqual(schema(swizzle), schema(swizzle))
+        self.assertNotEqual(
+            schema(no_swizzle), schema(no_swizzle, int(F.ScalingType.RowWise))
+        )
 
     @with_comms
     def test_matmul(self):
