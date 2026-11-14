@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, SampleInput)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, precisionOverride)
+    (dtypes, instantiate_device_type_tests, ops, precisionOverride)
 
 
 def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
@@ -276,6 +276,57 @@ class mask_layouts(_TestParametrizer):
 
 class TestMasked(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @suppress_warnings
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
+            torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("op_name", ["argmax", "argmin"])
+    @parametrize("dim, keepdim", [(None, False), (1, False), (-1, True)])
+    @parametrize("mask_kind", ["none", "all", "partial", "empty"])
+    def test_arg_reduction_default_dtype(self, device, dtype, op_name, dim, keepdim, mask_kind):
+        index = {torch.uint8: 300, torch.int16: 33000, torch.float16: 69000,
+                 torch.bfloat16: 301}.get(dtype, 150)
+        is_max = op_name == "argmax"
+        data = torch.full((2, index + 2), 0 if is_max else 2, dtype=dtype, device=device)
+        data[:, index] = 1
+        mask = torch.ones_like(data, dtype=torch.bool)
+        if mask_kind == "partial":
+            data[:, -1] = 2 if is_max else 0
+            mask[:, -1] = False
+        elif mask_kind == "empty":
+            mask.fill_(False)
+        kwargs = {} if dim is None else dict(dim=dim, keepdim=keepdim)
+        identity = torch.finfo(dtype).min if dtype.is_floating_point else torch.iinfo(dtype).min
+        if not is_max:
+            identity = torch.finfo(dtype).max if dtype.is_floating_point else torch.iinfo(dtype).max
+        expected = getattr(torch, op_name)(data.masked_fill(~mask, identity), **kwargs)
+        output_mask = mask.any() if dim is None else mask.any(dim=dim, keepdim=keepdim)
+
+        masked_op = getattr(torch.masked, op_name)
+        result = masked_op(data, mask=None if mask_kind == "none" else mask, **kwargs)
+        self.assertEqual(result.dtype, torch.int64)
+        self.assertEqual(result[output_mask], expected[output_mask])
+        result_none = masked_op(data, dtype=None, mask=None if mask_kind == "none" else mask, **kwargs)
+        self.assertEqual(result_none.dtype, torch.int64)
+        self.assertEqual(result_none[output_mask], expected[output_mask])
+
+        # MaskedTensor does not support uint8 or bfloat16 inputs.
+        if dtype not in (torch.uint8, torch.bfloat16):
+            mt_result = getattr(torch.masked.masked_tensor(data, mask), op_name)(**kwargs)
+            self.assertEqual(mt_result.get_data().dtype, torch.int64)
+            self.assertEqual(mt_result.get_mask(), output_mask)
+            self.assertEqual(mt_result.get_data()[output_mask], expected[output_mask])
+
+    @suppress_warnings
+    @parametrize("op_name", ["argmax", "argmin"])
+    @parametrize("output_dtype", [torch.int8, torch.int32, torch.float32])
+    def test_arg_reduction_explicit_dtype(self, device, op_name, output_dtype):
+        data = torch.zeros(200, dtype=torch.int8, device=device)
+        data[150] = 1 if op_name == "argmax" else -1
+        expected = getattr(torch, op_name)(data).to(output_dtype)
+        result = getattr(torch.masked, op_name)(data, dtype=output_dtype)
+        self.assertEqual(result.dtype, output_dtype)
+        self.assertEqual(result, expected)
 
     def assertEqualMasked(self, actual, expected, mask):
         strided = to_strided(actual)

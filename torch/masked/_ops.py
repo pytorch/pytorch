@@ -235,6 +235,11 @@ Example::
     Default: None that is equivalent to ``torch.ones(input.shape, dtype=torch.bool)``.""",
     }
 
+    if func.__name__ in {"argmax", "argmin"}:
+        argument_declarations["dtype"] = """\
+    dtype (:class:`torch.dtype`, optional): the desired data type
+    of returned indices. Default: ``torch.int64``."""
+
     definitions = {
         "softmax": """\
     Let ``x`` be a sequence of unmasked elements of one-dimensional slice
@@ -1346,7 +1351,7 @@ def argmax(
 {reduction_args}
 {reduction_example}"""
     if dtype is None:
-        dtype = input.dtype
+        dtype = torch.int64
     mask_input = _combine_input_and_mask(argmax, input, mask)
     if mask_input.layout == torch.strided:
         return torch.argmax(mask_input, dim, bool(keepdim)).to(dtype=dtype)
@@ -1372,7 +1377,7 @@ def argmin(
 {reduction_args}
 {reduction_example}"""
     if dtype is None:
-        dtype = input.dtype
+        dtype = torch.int64
     mask_input = _combine_input_and_mask(argmin, input, mask)
     if mask_input.layout == torch.strided:
         return torch.argmin(mask_input, dim, bool(keepdim)).to(dtype=dtype)

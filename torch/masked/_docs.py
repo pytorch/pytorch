@@ -192,9 +192,7 @@ Keyword args:
     keepdim (bool, optional): whether the output tensor has
       :attr:`dim` retained or not. Default: False.
     dtype (:class:`torch.dtype`, optional): the desired data type
-      of returned tensor.  If specified, the input tensor is
-      casted to :attr:`dtype` before the operation is
-      performed. Default: None.
+      of returned indices. Default: ``torch.int64``.
     mask (:class:`torch.Tensor`, optional): the boolean tensor
       containing the binary mask of validity of input tensor
       elements.
@@ -257,9 +255,7 @@ Keyword args:
     keepdim (bool, optional): whether the output tensor has
       :attr:`dim` retained or not. Default: False.
     dtype (:class:`torch.dtype`, optional): the desired data type
-      of returned tensor.  If specified, the input tensor is
-      casted to :attr:`dtype` before the operation is
-      performed. Default: None.
+      of returned indices. Default: ``torch.int64``.
     mask (:class:`torch.Tensor`, optional): the boolean tensor
       containing the binary mask of validity of input tensor
       elements.
