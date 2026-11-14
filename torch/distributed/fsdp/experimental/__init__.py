@@ -1,23 +1,21 @@
 r"""Experimental FSDP2 customization APIs.
 
-FSDP copies nonzero-dimension shards through intermediate buffers by default.
-Use the ``with_native_copy`` functions to copy directly between parameter
-layouts and collective buffers. Each direction can be selected independently
-on a fully sharded model::
+FSDP copies shards directly between parameter layouts and collective buffers
+with its native collective copies. The ``with_native_copy`` functions run the
+same copies as callbacks, for a layout or reduce-scatter input function that
+builds on them::
 
     model.set_all_gather_layout(
         DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
     )
     model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
 
-The native CUDA copies write contiguous tensors without intermediate buffers and
-can improve performance for wide tensors with small ``outer_size`` (the product of
-dimensions before the shard dimension), such as ``Shard(1)`` over ``[2, F, D]``.
-Their CPU time, GPU time, and metadata memory grow with the total outer size of a
-parameter group, and strided collective buffers take a slower path. Benchmark
-the callbacks on the target workload before enabling them. Groups with
-parameters sharded unevenly on a nonzero dim take the default copy-out, and the
-native reduce-scatter copy-in rejects their gradients.
+The native CUDA copies write contiguous tensors without intermediate buffers.
+Their CPU time, GPU time, and metadata memory grow with the total outer size
+(the product of dimensions before the shard dimension) of a parameter group,
+and strided collective buffers take a slower path. Parameters sharded unevenly
+on a nonzero dim are copied out one at a time, and the native reduce-scatter
+copy-in callback rejects their gradients.
 
 All-gather extensions can return ``AllGatherInput`` records from
 ``fsdp_pre_all_gather`` to declare each payload's concatenation dimension. FSDP
@@ -32,12 +30,10 @@ parameter. Existing hooks returning tensors remain supported.
 from collections.abc import Callable
 
 import torch
-from torch.distributed.fsdp._fully_shard._all_gather_layout import (
-    DefaultAllGatherLayout,
-)
-from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
-from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+from torch.distributed.fsdp._flex_shard.all_gather_layout import (
     _default_all_gather_output_fn,
+    AllGatherInput,
+    DefaultAllGatherLayout,
 )
 
 
@@ -62,8 +58,7 @@ def all_gather_output_fn_with_native_copy(
 ) -> None:
     r"""Copy gathered payloads directly into their final layout.
 
-    Use as the ``output_fn`` of :class:`DefaultAllGatherLayout`.
-    See the module documentation for the performance tradeoffs. Groups with a
+    Use as the ``output_fn`` of :class:`DefaultAllGatherLayout`. Groups with a
     tensor payload smaller than its cached output, or with an output smaller than
     its gathered chunks, as of parameters sharded unevenly on a nonzero dim, use
     the default copy-out.
@@ -99,7 +94,6 @@ def reduce_scatter_input_fn_with_native_copy(
 
     Register with
     :meth:`torch.distributed.fsdp.FSDPModule.set_reduce_scatter_input_fn`.
-    See the module documentation for the performance tradeoffs.
 
     Contiguous nonzero-dimension shards copy directly into the collective buffer.
     Noncontiguous gradients sharded on a nonzero dim use the existing

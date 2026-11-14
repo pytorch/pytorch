@@ -29,6 +29,7 @@ from .utils import _get_single_placement, _set_param_on_module
 
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.fsdp._fully_shard._fsdp_api import CPUOffloadPolicy
 
     from .bucket_runtime import BucketCommContext, BucketRuntime
     from .placement_contract import (
@@ -203,8 +204,12 @@ class BucketSpec:
             receives them as a ``GradientReduction``.
         reshard_after_forward: Whether to free this bucket's unsharded
             parameters after forward and re-gather them before backward. This
-            defaults to True. Under ``torch.compile`` the traced graph owns
-            buffer lifetimes instead.
+            defaults to True. As in FSDP2, it also decides whether a forward
+            that no backward follows (e.g. under ``torch.no_grad()``) frees
+            them; with False, ``module.parameters()`` returns the unsharded
+            params until the bucket reshards (``FlexShardModule.reshard()``).
+            Under ``torch.compile`` the traced graph owns buffer lifetimes
+            instead.
         pre_backward_hook: Optional callable run with this bucket's
             ``(fqn, unsharded param)`` pairs once they are unsharded and before
             its backward runs: in its pre-backward hook, and when activation
@@ -392,12 +397,49 @@ class ShardedBucketStorage:
         self._reshard_after_backward = True
         # See set_separate_reduce_scatter_group.
         self._reduce_mesh: DeviceMesh | None = None
+        # The group over the replicas of the mesh that gradients are all-reduced
+        # over after the reduce-scatter (HSDP), whether they are, and a hook on
+        # the reduced shard, as FSDP2's set_requires_all_reduce and
+        # set_all_reduce_hook.
+        self._replicate_group: dist.ProcessGroup | None = None
+        self._requires_all_reduce = True
+        self._all_reduce_hook: Callable[[torch.Tensor], None] | None = None
+        self._all_reduce_hook_stream: torch.Stream | None = None
+        # The smaller group a reshard after forward keeps chunks for, as
+        # FSDP2's reshard_after_forward=int (see BucketRuntime.reshard).
+        self._post_forward_group: dist.ProcessGroup | None = None
+        # The all-gather replacing the placement's (FSDP2's custom AllGather).
+        self._all_gather_comm: Any = None
+        # See set_cpu_offload
+        self._cpu_offload: CPUOffloadPolicy | None = None
+        self._compute_device: torch.device | None = None
+        # FSDP2's custom ReduceScatter and set_reduce_scatter_input_fn.
+        self._reduce_scatter_comm: Any = None
+        # FSDP2's AllReduce for the replica all-reduce, or None for dist.all_reduce
+        self._all_reduce_comm: Any = None
+        self._reduce_scatter_input_fn: Any = None
+        # FSDP2's set_unshard_in_backward and set_reduce_scatter_unused_params.
+        self._unshard_in_backward = True
+        self._reduce_scatter_unused_params = False
+        # FSDP2's _set_unshard_async_op: unshards run as asynchronous
+        # collectives on the current stream instead of on the unshard stream
+        self._unshard_async_op = False
         # See set_buckets_to_forward_prefetch and set_buckets_to_backward_prefetch.
         self._forward_prefetch: list[ShardedBucketStorage] | None = None
         self._backward_prefetch: list[ShardedBucketStorage] | None = None
         self._gradient_reduction = GradientReduction(
             gradient_reduce_op, gradient_divide_factor
         )
+
+    def set_cpu_offload(
+        self, policy: CPUOffloadPolicy, compute_device: torch.device
+    ) -> None:
+        """Keep the sharded parameters and their grads on the CPU, as FSDP2's
+        ``CPUOffloadPolicy``: unshards gather onto ``compute_device``, and
+        reduced grads are copied back to the CPU (see
+        ``BucketRuntime._offload_sharded_grads``)."""
+        self._cpu_offload = policy
+        self._compute_device = compute_device
 
     @classmethod
     def from_bucket(
@@ -792,6 +834,21 @@ class ShardedBucketStorage:
             self._gradient_reduction, divide_factor=factor
         )
 
+    def set_replicate_group(self, group: dist.ProcessGroup | None) -> None:
+        """All-reduce this bucket's reduced gradients over ``group``, the
+        replicas of its mesh (HSDP); the default divide factor then counts
+        them too."""
+        self._replicate_group = group
+        self._gradient_reduction = replace(
+            self._gradient_reduction,
+            replicate_size=1 if group is None else group.size(),
+        )
+
+    def set_force_sum_reduction_for_comms(self, enable: bool) -> None:
+        """Make the gradient collectives sum and divide separately, as FSDP2's
+        ``set_force_sum_reduction_for_comms``."""
+        self._gradient_reduction = replace(self._gradient_reduction, force_sum=enable)
+
     @property
     def reduce_mesh(self) -> DeviceMesh:
         """The mesh this bucket reduce-scatters its gradients over: its mesh,
@@ -860,7 +917,7 @@ class ShardedBucketStorage:
         self._requires_gradient_sync = requires_gradient_sync
 
     def set_reshard_after_backward(self, reshard_after_backward: bool) -> None:
-        """Set whether a backward without gradient sync reshards this bucket.
+        """Set whether backward reshards this bucket.
 
         ``FlexShardModule.set_reshard_after_backward`` documents the behavior
         and sets every bucket.
@@ -869,9 +926,20 @@ class ShardedBucketStorage:
 
     @property
     def reshard_after_backward(self) -> bool:
-        """Whether a backward without gradient sync reshards this bucket; see
+        """Whether backward reshards this bucket; see
         ``set_reshard_after_backward``."""
         return self._reshard_after_backward
+
+    def set_reduce_scatter_unused_params(
+        self, reduce_scatter_unused_params: bool
+    ) -> None:
+        """Set whether this bucket reduce-scatters zeros for params without
+        grads.
+
+        ``FlexShardModule.set_reduce_scatter_unused_params`` documents the
+        behavior and sets every bucket.
+        """
+        self._reduce_scatter_unused_params = reduce_scatter_unused_params
 
     @property
     def reshard_after_forward(self) -> bool:
