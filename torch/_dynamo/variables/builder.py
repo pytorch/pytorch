@@ -1557,6 +1557,9 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
+                # A lazy VT for a globals dict realized after a delete in the
+                # trace hands out a stale model.
+                self.tx.output.check_deleted_global_dict_handout(value)
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
                     source=self.source,
