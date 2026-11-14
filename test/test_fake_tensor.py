@@ -576,13 +576,8 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         dispatch_calls = []
         fake_impl_calls = []
 
-        op_name = (
-            "_torch_testing::fake_tensor_dispatch_parameter_subclass"
-            f"_{type(self).__name__}_{mode_cls.__name__}"
-        )
-
         @torch.library.custom_op(
-            op_name,
+            "_torch_testing::fake_tensor_dispatch_parameter_subclass",
             mutates_args=(),
         )
         def custom_op(weight: torch.Tensor) -> torch.Tensor:
@@ -1130,12 +1125,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
     @fake_tensor_modes
     @parametrize("symbolic", [False, True])
-    @parametrize("active", [False, True])
-    def test_mkldnn_to_dense(self, mode_cls, symbolic, active):
-        if not active and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(
-                "Dynamo cannot guard explicit MKLDNN fakes outside their mode"
-            )
+    def test_mkldnn_to_dense(self, mode_cls, symbolic):
         if mode_cls is CppFakeTensorMode and TEST_WITH_TORCHDYNAMO:
             self.skipTest(
                 "Dynamo guards on MKLDNN keys differ from the C++ fake's dispatch keys"
@@ -1148,16 +1138,10 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
         real = torch.randn(2, 3).to_mkldnn()
-        fake_mode = mode_cls(shape_env=ShapeEnv() if symbolic else None)
-        with fake_mode:
+        with mode_cls(shape_env=ShapeEnv() if symbolic else None) as fake_mode:
             x = fake_mode.from_tensor(real)
-            dense = torch.randn(2, 3)
-        with fake_mode if active else contextlib.nullcontext():
             self.assertTrue(x.is_mkldnn)
             self.assertEqual(x.layout, torch._mkldnn)  # type: ignore[attr-defined]
-            with in_kernel_invocation_manager(fake_mode):
-                self.assertTrue(x.is_mkldnn)
-                self.assertEqual(x.layout, torch._mkldnn)  # type: ignore[attr-defined]
 
             y = x.to_dense()
             self.assertFalse(y.is_mkldnn)
@@ -1190,6 +1174,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(y.layout, torch.strided)
             self.assertEqual(y.stride(), (3, 1))
 
+            dense = torch.randn(2, 3)
             mkldnn = torch.ops.aten.to_mkldnn.default(dense)
             self.assertTrue(mkldnn.is_mkldnn)
             y = torch.ops.aten.to_dense.default(mkldnn)
@@ -1215,67 +1200,16 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
     @skipIfPropagateRealTensors("Propagate real tensor not supported")
     @fake_tensor_modes
-    @parametrize("symbolic", [False, True])
-    @parametrize("active", [False, True])
-    @parametrize(
-        "op",
-        [
-            "reshape",
-            "linear",
-            "max_pool2d",
-            "max_pool3d",
-            "adaptive_avg_pool2d",
-            "backward",
-        ],
-    )
-    def test_mkldnn_composite(self, mode_cls, symbolic, active, op):
-        if not active and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(
-                "Dynamo cannot guard explicit MKLDNN fakes outside their mode"
-            )
-        if op == "backward" and TEST_WITH_TORCHDYNAMO:
-            self.skipTest("Compiled autograd does not support explicit MKLDNN fakes")
+    def test_mkldnn_unsafe_fallback(self, mode_cls):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
-        shape = (2, 3, 8, 8, 8) if op == "max_pool3d" else (2, 3, 8, 8)
-        real = torch.randn(shape).to_mkldnn().requires_grad_(op == "backward")
-        real_weight = torch.randn(4, 8) if op == "linear" else None
-        fake_mode = mode_cls(shape_env=ShapeEnv() if symbolic else None)
-        with fake_mode:
+        real = torch.randn(1, 2, 8, 8).to_mkldnn()
+        with mode_cls() as fake_mode:
             x = fake_mode.from_tensor(real)
-            weight = fake_mode.from_tensor(real_weight) if op == "linear" else None
-        with fake_mode if active else contextlib.nullcontext():
-            if op == "reshape":
-                y = x.reshape(x.shape[0], -1)
-                expected_shape = (2, 192)
-                self.assertEqual(y.untyped_storage()._cdata, x.untyped_storage()._cdata)
-            elif op == "linear":
-                y = torch.nn.functional.linear(x, weight)
-                expected_shape = (2, 3, 8, 4)
-            elif op == "max_pool2d":
-                y = torch.nn.functional.max_pool2d(x, 3, 2, 1)
-                expected_shape = (2, 3, 4, 4)
-            elif op == "max_pool3d":
-                if symbolic:
-                    # Python's Meta kernel reads the MKLDNN property in new_empty.
-                    with self.assertRaisesRegex(
-                        UnsupportedOperatorException, "aten.max_pool3d_with_indices"
-                    ):
-                        torch.nn.functional.max_pool3d(x, 3, 2, 1)
-                    return
-                y = torch.nn.functional.max_pool3d(x, 3, 2, 1)
-                expected_shape = (2, 3, 4, 4, 4)
-            elif op == "adaptive_avg_pool2d":
-                y = torch.nn.functional.adaptive_avg_pool2d(x, (4, 4))
-                expected_shape = (2, 3, 4, 4)
-            else:
-                x.relu().to_dense().sum().backward()
-                y = x.grad
-                expected_shape = shape
-        self.assertTrue(is_fake_tensor(y))
-        self.assertEqual(y.shape, expected_shape)
-        self.assertFalse(y.is_mkldnn)
-        self.assertEqual(y.layout, torch.strided)
+            y = torch.nn.functional.max_pool2d(x, 3, 2, 1)
+            self.assertTrue(is_fake_tensor(y))
+            self.assertEqual(y.shape, (1, 2, 4, 4))
+            self.assertEqual(y.is_mkldnn, mode_cls is CppFakeTensorMode)
 
     @fake_tensor_modes
     def test_compare_tensor_meta_unbacked_numel(self, mode_cls):

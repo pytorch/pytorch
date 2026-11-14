@@ -674,14 +674,6 @@ Tensor to_dense(
   if (tensor.layout() == c10::kMkldnn) {
     return tensor._to_dense(dtype, masked_grad);
   }
-  if (tensor.is_fake()) {
-    // Match FakeTensor.to_dense() without exposing MKLDNN to native layout
-    // queries.
-    const auto keys = tensor.unsafeGetTensorImpl()->fake_dispatch_keys();
-    if (keys.has_value() && keys->has_all(c10::mkldnn_ks)) {
-      return tensor._to_dense(dtype, masked_grad);
-    }
-  }
   TORCH_CHECK(
       tensor.layout() == c10::kStrided,
       "to_dense does not support layout ",
