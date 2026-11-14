@@ -114,6 +114,24 @@ pub unsafe fn type_name(o: Obj) -> String {
     std::ffi::CStr::from_ptr((*tp).tp_name).to_string_lossy().into_owned()
 }
 
+/// `tp_name` of a class.
+pub unsafe fn class_name(class: Obj) -> String {
+    let tp = class as *mut ffi::PyTypeObject;
+    std::ffi::CStr::from_ptr((*tp).tp_name).to_string_lossy().into_owned()
+}
+
+/// `repr(o)`; a question mark if that raises.
+pub unsafe fn repr(o: Obj) -> String {
+    let r = ffi::PyObject_Repr(o);
+    if r.is_null() {
+        ffi::PyErr_Clear();
+        return "?".to_string();
+    }
+    let text = str_to_string(r);
+    ffi::Py_DECREF(r);
+    text
+}
+
 /// A cell for state that is only touched with the GIL held. Borrows must not
 /// be held across calls into Python: those can re-enter the compiled function
 /// or let another thread run it.

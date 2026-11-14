@@ -2192,6 +2192,56 @@ class BytecodeChild(BytecodeBase):
         return "child of " + super().name
 
 
+class MatchPoint:
+    __match_args__ = ("x", "y")
+
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
+def match_describe(value):
+    match value:
+        case []:
+            return "empty"
+        case [only]:
+            return "one", only
+        case [first, *rest]:
+            return "many", first, rest
+        case {"kind": kind, **others}:
+            return "mapping", kind, others
+        case MatchPoint(0, y=height):
+            return "on the axis", height
+        case MatchPoint(x, y):
+            return "point", x, y
+        case int() | float() as number if number > 0:
+            return "positive", number
+        case str(text):
+            return "text", text
+        case complex(real=real, imag=imag):
+            return "complex", real, imag
+        case _:
+            return "other"
+
+
+def match_too_many(value):
+    match value:
+        case MatchPoint(a, b, c):
+            return a, b, c
+
+
+def match_same_attribute_twice(value):
+    match value:
+        case MatchPoint(a, x=b):
+            return a, b
+
+
+def match_not_a_class(value, pattern):
+    match value:
+        case pattern():
+            return True
+
+
 @unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
 class TestCfgMoreBytecodes(TestCase):
     """Imports inside functions, super() and star unpacking."""
@@ -2309,6 +2359,40 @@ class TestCfgMoreBytecodes(TestCase):
             compiled = torch.cfg_compile(fn, fallback=False)
             self.assertEqual(call_outcome(compiled, *args), call_outcome(fn, *args))
         self.assertNotIn("bytecode_global", globals())
+
+    def test_match_statement(self):
+        compiled = torch.cfg_compile(match_describe, fallback=False)
+        subjects = (
+            [],
+            [1],
+            [1, 2, 3],
+            (4, 5),
+            "ab",
+            {"kind": "k", "n": 1},
+            {"other": 1},
+            collections.defaultdict(list, kind=3),
+            MatchPoint(0, 2),
+            MatchPoint(1, 2),
+            5,
+            -5,
+            2.5,
+            True,
+            1 + 2j,
+            None,
+            torch.ones(2),
+        )
+        for subject in subjects:
+            self.assertEqual(compiled(subject), match_describe(subject))
+        # Looking for the key did not create it.
+        self.assertEqual(len(subjects[7]), 1)
+        for fn, args in (
+            (match_too_many, (MatchPoint(1, 2),)),
+            (match_same_attribute_twice, (MatchPoint(1, 2),)),
+            (match_not_a_class, (1, 2)),
+        ):
+            outcome = call_outcome(torch.cfg_compile(fn, fallback=False), *args)
+            self.assertEqual(outcome, call_outcome(fn, *args))
+            self.assertIs(outcome[0], TypeError)
 
     def test_jump_to_an_instruction_with_extended_arg(self):
         # A loop long enough that its header takes an EXTENDED_ARG prefix,

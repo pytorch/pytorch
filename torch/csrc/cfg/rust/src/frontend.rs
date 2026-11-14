@@ -678,6 +678,28 @@ impl<'a> Builder<'a> {
                         stack.push(v);
                     }
                 }
+                // The instructions of `match`. The first three leave the
+                // subject where it is and push what they found.
+                Bc::GetLen => {
+                    let v = emit!(off, Op::GetLen(peek!(1)));
+                    stack.push(v);
+                }
+                Bc::MatchSequence | Bc::MatchMapping => {
+                    let v = emit!(off, Op::MatchKind(peek!(1), ins.op == Bc::MatchMapping));
+                    self.bool_values.insert(v);
+                    stack.push(v);
+                }
+                Bc::MatchKeys => {
+                    let v = emit!(off, Op::MatchKeys(peek!(2), peek!(1)));
+                    stack.push(v);
+                }
+                Bc::MatchClass => {
+                    let names = pop_value!();
+                    let class = pop_value!();
+                    let subject = pop_value!();
+                    let v = emit!(off, Op::MatchClass { subject, class, nargs: arg, names });
+                    stack.push(v);
+                }
                 Bc::UnpackEx => {
                     // a, *b, c = seq: the low byte counts the names before the
                     // star, the next one those after it.
@@ -1451,6 +1473,8 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::ListToTuple(a)
         | Op::Unpack(a, _)
         | Op::UnpackEx(a, _, _)
+        | Op::GetLen(a)
+        | Op::MatchKind(a, _)
         | Op::TupleGet(a, _)
         | Op::GetIter(a)
         | Op::IterNext(a)
@@ -1471,8 +1495,10 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::DictUpdate(a, b)
         | Op::DictMerge(a, b)
         | Op::ExcMatch(a, b)
+        | Op::MatchKeys(a, b)
         | Op::WithExceptStart { exit: a, exc: b }
         | Op::CellSet(a, b) => r!(a, b),
+        Op::MatchClass { subject, class, names, .. } => r!(subject, class, names),
         Op::StoreAttr { obj, val, .. } => r!(obj, val),
         Op::SetItem { obj, key, val } => r!(obj, key, val),
         Op::MapAdd(a, b, c) | Op::BuildSlice(a, b, c) => r!(a, b, c),
