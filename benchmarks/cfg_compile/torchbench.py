@@ -202,8 +202,19 @@ def run_one(args):
         else:
             compiled = torch.cfg_compile(fn, backend="inductor", fallback=False)
 
+        def compiled_so_far():
+            # Changes whenever the compiler compiled something.
+            if mode == "compile":
+                from torch._dynamo.utils import counters
+
+                return sum(counters["frames"].values())
+            if mode == "cfg":
+                regions = torch.cfg_compile.regions(compiled)
+                return len(regions), sum(r.get("variants", 0) for r in regions)
+            return None
+
         opt = optimizer(model) if training else None
-        warm, worst, quiet, calm = [], 0.0, 0.0, 0
+        warm, worst, quiet, calm, before = [], 0.0, 0.0, 0, None
         for i in range(args.max_warmup):
             sync()
             start = time.perf_counter()
@@ -217,11 +228,15 @@ def run_one(args):
             if reference and (i < len(reference) if training else True):
                 d = difference(r, reference[i] if training else reference[0])
                 worst = float("inf") if d is None else max(worst, d)
-            # A JIT is warm when it has stopped changing its mind: cfg_compile
-            # goes on measuring compiled code against the interpreter for a
-            # while after it has compiled, the function and what it calls.
+            # A JIT is warm when it has stopped compiling and changing its
+            # mind: a region gets another graph for inputs it has not seen,
+            # torch.compile recompiles, and cfg_compile goes on measuring
+            # compiled code against the interpreter for a while after it has
+            # compiled, the function and what it calls.
             measuring = mode == "cfg" and compiled.stats()["measuring"]
-            calm = 0 if measuring else calm + 1
+            now = compiled_so_far()
+            calm = 0 if measuring or now != before else calm + 1
+            before = now
             enough = i + 1 >= args.warmup or (
                 i + 1 >= 6 and sum(warm) > args.warmup_seconds
             )
