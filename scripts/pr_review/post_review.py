@@ -10,11 +10,13 @@ take no row: they mark the previous review in progress for RUN_ID, or put it
 back (see Invariants). `--too-large`, and a `skipped_too_large` row, post a
 notice that the PR is over the size limit instead of a verdict.
 `--withdraw-opted-out` takes no row either: it runs when the opt-out label is
-added.
+added. `--approved-commit FILE` writes the commit of the binding approval
+(`binding_approval`) to FILE, for the review job to build the interdiff
+since it.
 
 Invariants:
-- A `changes_requested` verdict is REQUEST_CHANGES; anything else is COMMENT,
-  never APPROVE.
+- A `changes_requested` verdict is REQUEST_CHANGES (but see the approval
+  rule below); anything else is COMMENT, never APPROVE.
 - A new review is posted before earlier ones are hidden. Hiding folds the
   review's body into a collapsed section, deletes its inline comments that
   nobody replied to, resolves the replied threads where it can, and minimizes
@@ -25,6 +27,13 @@ Invariants:
   goes in the body with a link to that thread, not on the line again. The
   match is by position only, so the link says where, not that it is the same
   finding.
+- A `changes_requested` verdict is a COMMENT instead when a human approval
+  of the reviewed commit meets merge_rules.yaml's approval requirement for the
+  PR's files (`binding_approval`), and is then cleared like a clean verdict.
+  After an approval of an earlier commit that the review was told to block
+  only on the changes since (APPROVED_SHA), the verdict stands. Anything that
+  check cannot read leaves the verdict blocking, and a clean verdict told of
+  an approval that no longer binds withdraws no earlier request.
 - A newer REQUEST_CHANGES replaces an older one in the review decision. A
   COMMENT does not, so after a clean verdict earlier requests are dismissed.
   The only other dismissals are a run retracting its own review because the
@@ -51,7 +60,7 @@ Invariants:
   such as one put back defused, is replaced. A change request it leaves
   standing stays after an opt-out until a maintainer dismisses it.
 - API errors are warnings. The step fails only when an earlier change request
-  may still stand after a clean verdict.
+  may still stand after a clean or approved verdict.
 """
 
 from __future__ import annotations
@@ -68,6 +77,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import NamedTuple
 
 from extract_verdict import (
     is_neutral_prose,
@@ -393,6 +403,7 @@ def review_body(
     repo: str,
     inline: bool,
     report: str = "",
+    approval=None,
 ) -> str:
     """Verdict, summary, and the findings not posted inline (non-blocking ones
     folded). Over MAX_BODY, findings are dropped from the end and counted."""
@@ -411,6 +422,7 @@ def review_body(
             folded[:keep_folded],
             len(in_body) - keep_body + len(folded) - keep_folded,
             report,
+            approval,
         )
         if len(body) <= MAX_BODY or keep_body + keep_folded == 0:
             return body
@@ -421,11 +433,24 @@ def review_body(
 
 
 def _compose(
-    verdict, summary, sha, repo, n_inline, in_body, folded, omitted, report=""
+    verdict,
+    summary,
+    sha,
+    repo,
+    n_inline,
+    in_body,
+    folded,
+    omitted,
+    report="",
+    approval=None,
 ) -> str:
+    line = _VERDICT_LINE[verdict]
+    on_head = approval is not None and approval.commit == sha
+    if on_head:
+        line = "blocking findings, posted as a comment because the PR is approved"
     lines = [
         MARKER,
-        f"**Automated review** of {sha[:12]}: {_VERDICT_LINE[verdict]}.",
+        f"**Automated review** of {sha[:12]}: {line}.",
         "",
         *contained(summary),
         "",
@@ -452,7 +477,24 @@ def _compose(
             "comment lists them.",
             "",
         ]
-    if verdict == "changes_requested":
+    names = ", ".join(f"`{login}`" for login in approval.approvers) if approval else ""
+    if on_head:
+        lines += [
+            f"An approval from {names} meets merge_rules.yaml's approval "
+            "requirement for these files, so this review does not block "
+            "merging. Please consider the findings before you merge.",
+            "",
+        ]
+    elif verdict == "changes_requested":
+        if approval:
+            lines += [
+                f"An approval from {names} of {approval.commit[:12]} meets "
+                "merge_rules.yaml's approval requirement for these files, so "
+                "this review blocks only on problems in the changes made since "
+                "that commit, and on code here that changes to the base since "
+                "then have broken.",
+                "",
+            ]
         lines += [
             "Please address the findings and push; a new commit normally gets "
             "a fresh automated review.",
@@ -470,13 +512,23 @@ def _compose(
 
 
 def post(
-    gh: GitHub, pr: int, sha: str, verdict, summary, findings, run_link: str = ""
+    gh: GitHub,
+    pr: int,
+    sha: str,
+    verdict,
+    summary,
+    findings,
+    run_link: str = "",
+    approval=None,
 ) -> dict:
     """Create the review. If GitHub refuses the inline comments (422), they go
-    into the body; if it refuses REQUEST_CHANGES, the review is a COMMENT."""
+    into the body; if it refuses REQUEST_CHANGES, the review is a COMMENT.
+    With an `approval` of `sha` a change request is posted as a COMMENT."""
     path = f"/repos/{gh.repo}/pulls/{pr}/reviews"
     report = report_url(gh.repo, pr, sha, run_link)
-    event = "REQUEST_CHANGES" if verdict == "changes_requested" else "COMMENT"
+    on_head = approval is not None and approval.commit == sha
+    blocks = verdict == "changes_requested" and not on_head
+    event = "REQUEST_CHANGES" if blocks else "COMMENT"
     base = {"commit_id": sha, "event": event}
     comments = [
         {
@@ -490,7 +542,14 @@ def post(
     ]
     if comments:
         body = review_body(
-            verdict, summary, findings, sha, gh.repo, inline=True, report=report
+            verdict,
+            summary,
+            findings,
+            sha,
+            gh.repo,
+            inline=True,
+            report=report,
+            approval=approval,
         )
         try:
             return gh.request(
@@ -503,7 +562,14 @@ def post(
                 f"GitHub refused the inline comments ({exc}); posting them in the body"
             )
     body = review_body(
-        verdict, summary, findings, sha, gh.repo, inline=False, report=report
+        verdict,
+        summary,
+        findings,
+        sha,
+        gh.repo,
+        inline=False,
+        report=report,
+        approval=approval,
     )
     try:
         return gh.request("POST", path, {**base, "body": body})
@@ -1157,6 +1223,102 @@ def opted_out(gh: GitHub, pr: int, opt_out: str) -> bool:
     return any(str(lb.get("name", "")).lower() == opt_out.lower() for lb in labels)
 
 
+# The trusted checkout this runs from: mergebot's rules and matcher, read where
+# trymerge.py reads them.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def trymerge():
+    """mergebot's own module, so its rules parse and match as they do there."""
+    scripts = str(REPO_ROOT / ".github" / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import trymerge as module
+
+    return module
+
+
+def merge_rules() -> list:
+    """merge_rules.yaml as trymerge.py parses it."""
+    import yaml
+
+    tm = trymerge()
+    text = (REPO_ROOT / tm.MERGE_RULE_PATH).read_text()
+    return [tm.MergeRule(**x) for x in yaml.safe_load(text)]
+
+
+class Approval(NamedTuple):
+    """Human approvals mergebot would accept, and the commit they cover."""
+
+    approvers: tuple[str, ...]
+    commit: str
+
+
+def binding_approval(gh: GitHub, pr: int, head: str) -> Approval | None:
+    """The human approval mergebot would accept for this PR's files, if any.
+
+    trymerge.py's approval check without its CI checks: each reviewer's latest
+    review that is not a comment counts, and an approval binds when some rule
+    covers every changed file and names the approver, or names no approvers
+    at all. Logins match case-sensitively, as there. Team approvers do not
+    count: the workflow token cannot list a team's members. Bots, by
+    greenlight's test, are not human approvers.
+
+    The commit is `head` when any binding approval was given on it, otherwise
+    that of the most recently submitted one; the approvers are those whose
+    approval is of that commit. Any failure yields None, so the review blocks
+    on every finding.
+    """
+    try:
+        latest: dict[str, dict] = {}
+        for r in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews"):
+            login = (r.get("user") or {}).get("login")
+            if login and r.get("state") not in ("COMMENTED", "PENDING", None):
+                latest[login] = r
+        tm = trymerge()
+        from greenlight_identity import is_known_bot
+
+        humans = {
+            login
+            for login, r in latest.items()
+            if r["state"] == "APPROVED"
+            and r["user"].get("type") != "Bot"
+            and not is_known_bot(login)
+        }
+        if not humans:
+            return None
+        unmatched = tm._find_non_matching_files
+        rules = merge_rules()
+        files = [f["filename"] for f in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/files")]
+        if not files:
+            return None
+        binding: set[str] = set()
+        for rule in rules:
+            if unmatched(rule.patterns, files):
+                continue
+            if not rule.approved_by:  # trymerge needs no approver for it
+                binding |= humans
+            else:
+                binding |= humans & {r for r in rule.approved_by if "/" not in r}
+        if not binding:
+            return None
+        reviews = [latest[login] for login in binding]
+        if any(r.get("commit_id") == head for r in reviews):
+            commit = head
+        else:
+            newest = max(reviews, key=lambda r: str(r.get("submitted_at") or ""))
+            commit = str(newest.get("commit_id") or "")
+        if not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise ValueError(f"approval on an unreadable commit: {commit!r}")
+        on_commit = (
+            login for login in binding if latest[login].get("commit_id") == commit
+        )
+        return Approval(tuple(sorted(on_commit)), commit)
+    except Exception as exc:  # noqa: BLE001 - falls back to the blocking review
+        warn(f"could not check for a merge-rules approval: {exc!r}")
+        return None
+
+
 # The second line of a notice that the PR was too large to review.
 TOO_LARGE_TAG = "<!-- hardened-pr-review-too-large -->"
 _PLAIN_LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._/-]*")
@@ -1269,7 +1431,10 @@ def run(
     opt_out: str,
     author: str,
     limits: tuple[int, int] | None = None,
+    approved_sha: str = "",
 ) -> int:
+    """`approved_sha` is the approved commit the review was told to block only
+    on the changes since; empty if none."""
     if row.get("status") == "skipped_too_large":
         return decline(gh, pr, sha, author, opt_out, limits)
     review = load_review(row)
@@ -1285,13 +1450,51 @@ def run(
         print(f"status={row.get('status')}; no review to post")
         return 0
     verdict, summary, findings = review
-    clean = verdict == "ready_for_human_review"
+    # A clean verdict told of an earlier approved commit may rest on it.
+    leaned = verdict == "ready_for_human_review" and approved_sha not in ("", sha)
+    approval = (
+        binding_approval(gh, pr, sha)
+        if verdict == "changes_requested" or leaned
+        else None
+    )
+    if approval and approval.commit not in (sha, approved_sha):
+        # An approval of an earlier commit this review was not told about (it
+        # arrived after `prepare`): the verdict blocks on every finding.
+        approval = None
+    if verdict != "changes_requested":
+        # Only a change request is posted differently for an approval.
+        approval, standing = None, approval
+    else:
+        standing = approval
+    on_head = approval is not None and approval.commit == sha
+    # A PR approved at this commit is cleared like a clean verdict, and a clean
+    # verdict is not when the approval it was told of no longer binds: the
+    # earlier change requests stand until a review that knows.
+    clean = on_head or (
+        verdict == "ready_for_human_review" and not (leaned and standing is None)
+    )
+    reason = (
+        f"Withdrawn: {sha[:12]} is approved under merge_rules.yaml, so its "
+        "automated review is a comment."
+        if on_head
+        else None
+    )
     try:
         new_id = publish(
-            gh, pr, sha, author, verdict, summary, findings, run_url(gh.repo, row)
+            gh,
+            pr,
+            sha,
+            author,
+            verdict,
+            summary,
+            findings,
+            run_url(gh.repo, row),
+            approval,
         )
     except GitHubError as exc:
-        if not clean:
+        # Unless the verdict is clean, the unposted review carries findings,
+        # so nothing is withdrawn in its name.
+        if verdict != "ready_for_human_review" or not clean:
             raise
         warn(f"automated review not posted: {exc}")
         # Without our review id, spare this commit's requests (overlapping run).
@@ -1299,10 +1502,12 @@ def run(
     if new_id is RETRACTED:
         return 0
     if new_id is None:
-        return clear_after_clean(gh, pr, sha, author, keep_commit=sha) if clean else 0
+        if not clean:
+            return 0
+        return clear_after_clean(gh, pr, sha, author, keep_commit=sha, reason=reason)
     rc = 0
     if clean:
-        rc = clear_after_clean(gh, pr, sha, author, older_than=new_id)
+        rc = clear_after_clean(gh, pr, sha, author, older_than=new_id, reason=reason)
         # Hide the requests just dismissed; any still standing stay visible.
         try:
             hide_earlier(gh, pr, author, {"id": new_id, "state": "COMMENTED"})
@@ -1313,29 +1518,40 @@ def run(
 
 
 def clear_after_clean(
-    gh: GitHub, pr: int, sha: str, author: str, keep_commit=None, older_than=None
+    gh: GitHub,
+    pr: int,
+    sha: str,
+    author: str,
+    keep_commit=None,
+    older_than=None,
+    reason=None,
 ) -> int:
-    """Dismiss earlier change requests after a clean verdict; 1 if any may remain.
+    """Dismiss earlier change requests after a clean or approved verdict; 1 if
+    any may remain.
 
     A COMMENT does not clear them, and after `ready for review` no later push
     is reviewed, so a leftover request fails the step, as does an API error.
     """
     try:
-        return _clear_after_clean(gh, pr, sha, author, keep_commit, older_than)
+        return _clear_after_clean(gh, pr, sha, author, keep_commit, older_than, reason)
     except GitHubError as exc:
         print(
             "::error::could not confirm that earlier automated change requests "
-            f"were withdrawn after a clean verdict; check the PR's reviews: {exc}"
+            "were withdrawn after a clean or approved verdict; check the PR's "
+            f"reviews: {exc}"
         )
         return 1
 
 
-def _clear_after_clean(gh, pr, sha, author, keep_commit, older_than) -> int:
+def _clear_after_clean(
+    gh, pr, sha, author, keep_commit, older_than, reason=None
+) -> int:
     withdraw(
         gh,
         pr,
         author,
-        f"Withdrawn: the automated review of {sha[:12]} found nothing blocking.",
+        reason
+        or f"Withdrawn: the automated review of {sha[:12]} found nothing blocking.",
         head=sha,
         keep_commit=keep_commit,
         older_than=older_than,
@@ -1351,7 +1567,7 @@ def _clear_after_clean(gh, pr, sha, author, keep_commit, older_than) -> int:
     for r in left:
         print(
             f"::error::change request {r.get('html_url', r['id'])} still stands "
-            "after a clean verdict; dismiss it by hand"
+            "after a clean or approved verdict; dismiss it by hand"
         )
     return 1 if left else 0
 
@@ -1359,12 +1575,14 @@ def _clear_after_clean(gh, pr, sha, author, keep_commit, older_than) -> int:
 RETRACTED = object()
 
 
-def publish(gh, pr, sha, author, verdict, summary, findings, run_link: str = ""):
+def publish(
+    gh, pr, sha, author, verdict, summary, findings, run_link: str = "", approval=None
+):
     """Post the review and hide earlier ones. Returns the new id, None if GitHub
     gave none, or RETRACTED if the head moved while posting."""
     findings = with_removed(gh, pr, findings[:MAX_FINDINGS])
     findings = with_discussions(gh, pr, author, findings)
-    new = post(gh, pr, sha, verdict, summary, findings, run_link)
+    new = post(gh, pr, sha, verdict, summary, findings, run_link, approval)
     print(f"posted automated review {new.get('id')}: {new.get('html_url')}")
     if not isinstance(new.get("id"), int):
         warn("GitHub returned no review id; leaving earlier reviews in place")
@@ -1431,6 +1649,12 @@ def main() -> int:
         help="say the PR at REVIEWED_SHA is too large to review",
     )
     mode.add_argument(
+        "--approved-commit",
+        metavar="FILE",
+        help="write the commit of the binding approval of REVIEWED_SHA or an "
+        "earlier commit to FILE",
+    )
+    mode.add_argument(
         "--withdraw-opted-out",
         action="store_true",
         help="dismiss the automated change requests of a PR that opted out",
@@ -1438,6 +1662,12 @@ def main() -> int:
     args = ap.parse_args()
     try:
         gh = GitHub(os.environ["GH_TOKEN"], os.environ["REPO"])
+        if args.approved_commit:
+            approval = binding_approval(
+                gh, int(os.environ["PR_NUMBER"]), os.environ["REVIEWED_SHA"]
+            )
+            Path(args.approved_commit).write_text(approval.commit if approval else "")
+            return 0
         if args.too_large:
             return decline(
                 gh,
@@ -1482,6 +1712,7 @@ def main() -> int:
             os.environ.get("OPT_OUT_LABEL", "no automated review"),
             os.environ.get("REVIEW_AUTHOR", DEFAULT_AUTHOR),
             size_limits(),
+            os.environ.get("APPROVED_SHA", ""),
         )
     except Exception as exc:  # noqa: BLE001 - an API failure never fails the job
         if args.row_file or args.too_large:
@@ -1490,6 +1721,8 @@ def main() -> int:
             what = "marked"
         elif args.restore_pending:
             what = "put back"
+        elif args.approved_commit:
+            what = "checked for an approval"
         else:
             what = "withdrawn"
         warn(f"automated review not {what}: {exc!r}")
