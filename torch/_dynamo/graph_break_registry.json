@@ -6412,6 +6412,16 @@
       ]
     }
   ],
+  "GB4358": [
+    {
+      "Gb_type": "Constant-folded class call raised a user-defined exception",
+      "Context": "{self.value} raised {exc_type}",
+      "Explanation": "Dynamo rebuilds the exception from its args, which only reproduces exceptions whose __init__ keeps its arguments as they are.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0336": [
     {
       "Gb_type": "out_dtype: unexpected kwargs",
