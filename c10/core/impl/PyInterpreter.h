@@ -126,7 +126,7 @@ struct C10_API PyInterpreter;
 // still fit inside three eight word cache lines.  If you need to penny pinch
 // another word consider doing this!
 
-// The Python exception types PyInterpreterVTable::fake_raise_python_error
+// The Python exception types PyInterpreterVTable::raise_python_error
 // raises, for those the C++ fake fallback raises where FakeTensorMode does and
 // no c10 error type becomes
 enum class FakePythonError { AssertionError };
@@ -260,9 +260,8 @@ struct C10_API PyInterpreterVTable {
   // Raises a Python exception of type kind with message msg, for errors the
   // C++ fake fallback raises where FakeTensorMode raises them. Acquires the
   // GIL.
-  virtual void fake_raise_python_error(
-      FakePythonError kind,
-      const std::string& msg) const = 0;
+  virtual void raise_python_error(FakePythonError kind, const std::string& msg)
+      const = 0;
 
   // Note [C++ FakeTensor dispatch]
   // A fake tensor models a tensor on a logical device without allocating its
