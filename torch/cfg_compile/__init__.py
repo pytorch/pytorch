@@ -233,7 +233,10 @@ def cfg_compile(
             what runs faster there: the VM gains on tensor operations and loses
             on plain Python, and library code is often mostly the latter.
             ``stats()["demoted_callees"]`` lists the callees that were left,
-            and ``stats()["demoted"]`` says whether the function itself was.
+            ``stats()["demoted"]`` says whether the function itself was, and
+            ``stats()["measuring"]`` whether that is still open for the
+            function, or for calls that took a noticeable part (1/64) of
+            its last call.
             On by default; the environment variable
             ``TORCH_CFG_COMPILE_DEMOTE=0`` turns the default off, for looking
             at the VM itself.
