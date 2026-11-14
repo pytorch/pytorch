@@ -43,6 +43,7 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     markDynamoStrictTest,
     parametrize,
@@ -1188,6 +1189,18 @@ class TestOptimRenewed(TestCase):
             torch.float16,
         ),
     )
+    @decorateIf(
+        unittest.skip("Optimizer does not support this device or implementation"),
+        lambda p: _get_device_type(p["device"])
+        not in p["optim_info"].supports_fused_on,
+    )
+    @decorateIf(
+        unittest.skip(
+            "MPS supports only torch.float16, torch.float32 and torch.bfloat16"
+        ),
+        lambda p: _get_device_type(p["device"]) == "mps"
+        and p["dtype"] not in (torch.float16, torch.float32, torch.bfloat16),
+    )
     def test_fused_matches_forloop(self, device, dtype, optim_info):
         if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(
@@ -1214,6 +1227,11 @@ class TestOptimRenewed(TestCase):
     # Vectorized::size() is at most 32 elements (AVX512, bf16/fp16), so 64 tests
     # two full blocks with no remainder, and 65 adds a scalar remainder.
     @parametrize("numel", [64, 65])
+    @decorateIf(
+        unittest.skip("Optimizer does not support this device or implementation"),
+        lambda p: _get_device_type(p["device"])
+        not in p["optim_info"].supports_fused_on,
+    )
     def test_fused_vectorized_block_matches_scalar(
         self, device, dtype, optim_info, numel
     ):
@@ -1252,6 +1270,11 @@ class TestOptimRenewed(TestCase):
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=(torch.float32,),
     )
+    @decorateIf(
+        unittest.skip("Optimizer does not support this device or implementation"),
+        lambda p: _get_device_type(p["device"])
+        not in p["optim_info"].supports_fused_on,
+    )
     def test_fused_error_on_params_on_meta(self, device, dtype, optim_info):
         if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(
@@ -1289,6 +1312,11 @@ class TestOptimRenewed(TestCase):
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float16],
     )
+    @decorateIf(
+        unittest.skip("Optimizer does not support this device or implementation"),
+        lambda p: _get_device_type(p["device"])
+        not in p["optim_info"].supports_fused_on,
+    )
     def test_fused_large_tensor(self, device, dtype, optim_info):
         if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(
@@ -1315,6 +1343,11 @@ class TestOptimRenewed(TestCase):
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float32],
+    )
+    @decorateIf(
+        unittest.skip("Optimizer does not support this device or implementation"),
+        lambda p: _get_device_type(p["device"])
+        not in p["optim_info"].supports_fused_on,
     )
     def test_fused_does_not_step_if_foundinf(self, device, dtype, optim_info):
         if _get_device_type(device) not in optim_info.supports_fused_on:
@@ -1353,6 +1386,20 @@ class TestOptimRenewed(TestCase):
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float32],
+    )
+    @decorateIf(
+        unittest.skip("Optimizer does not support this device or implementation"),
+        lambda p: p["optim_info"].optim_cls.__name__ in ("SGD", "Adagrad")
+        and p["impl"] == "capturable",
+    )
+    @decorateIf(
+        unittest.skip("Test is only for non-cpu devices"),
+        lambda p: _get_device_type(p["device"]) == "cpu"
+        or (
+            p["impl"] == "fused"
+            and _get_device_type(p["device"]) not in p["optim_info"].supports_fused_on
+        )
+        or (p["impl"] == "capturable" and _get_device_type(p["device"]) == "mps"),
     )
     def test_cpu_load_state_dict(self, device, dtype, impl, optim_info):
         # NOTE: This SIMULATES a fused/capturable optimizer with state moved to CPU, issue 103256
@@ -1799,6 +1846,16 @@ class TestOptimRenewed(TestCase):
     @skipMPS
     @parametrize("impl", ["forloop", "fused", "capturable"])
     @optims(optim_db, dtypes=[torch.float32])
+    @decorateIf(
+        unittest.skip("Optimizer does not support fused"),
+        lambda p: p["impl"] == "fused"
+        and "fused" not in p["optim_info"].supported_impls,
+    )
+    @decorateIf(
+        unittest.skip("Optimizer does not support capturable"),
+        lambda p: p["impl"] == "capturable"
+        and (not p["optim_info"].has_capturable_arg),
+    )
     def test_load_state_dict_preserves_optimizer_state_dtype(
         self, device, dtype, optim_info, impl
     ):
@@ -2573,6 +2630,11 @@ class TestOptimRenewed(TestCase):
             torch.bfloat16,
             torch.float16,
         ),
+    )
+    @decorateIf(
+        unittest.skip("Optimizer does not support this device or implementation"),
+        lambda p: _get_device_type(p["device"])
+        not in p["optim_info"].supports_fused_on,
     )
     def test_fused_cpu_matches_device(self, device, dtype, optim_info):
         if _get_device_type(device) not in optim_info.supports_fused_on:

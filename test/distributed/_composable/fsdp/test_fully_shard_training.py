@@ -3827,7 +3827,11 @@ class TestFullyShardShareCommContext(FSDPTest):
 
         from torch.distributed.fsdp._fully_shard._fsdp_api import (
             AllGather,
+            AllReduce,
             ReduceScatter,
+        )
+        from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+            DefaultAllReduce,
         )
         from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam
 
@@ -3876,6 +3880,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             force_sum_reduction_for_comms: bool = False,
             *,
             prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
+            all_reduce_comm: AllReduce = DefaultAllReduce(),
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -3895,6 +3900,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 all_reduce_hook,
                 force_sum_reduction_for_comms,
                 prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
+                all_reduce_comm=all_reduce_comm,
             )
 
         with (
