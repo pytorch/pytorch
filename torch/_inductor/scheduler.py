@@ -115,6 +115,7 @@ def _real_dep_names(deps: OrderedSet[Dep]) -> OrderedSet[str]:
 
 
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
+_BENCHMARK_FLOOR_MS: dict[tuple[str, str], float] = {}
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 compute_dependencies_log = torch._logging.getArtifactLogger(
     __name__, "compute_dependencies"
@@ -7718,6 +7719,60 @@ class Scheduler:
         multi_node.finalize_as_triton_caller(choice)
         return FusionResult.fuse(True)
 
+    @staticmethod
+    def _benchmark_floor_ms(device: torch.device) -> float:
+        """Fixed per-measurement cost of the benchmarker, in ms.
+
+        Measured by timing a one-element ``zero_`` (a near-empty kernel) with
+        ``benchmarker.benchmark``, the same event-timed path that times the
+        epilogue and the fused kernel in the template fusion decision. Cached per
+        (device, benchmarker class).
+        """
+        from torch._inductor.runtime.benchmarking import benchmarker
+
+        key = (str(device), type(benchmarker).__qualname__)
+        if key not in _BENCHMARK_FLOOR_MS:
+            t = torch.empty(1, device=device)
+            _BENCHMARK_FLOOR_MS[key] = benchmarker.benchmark(
+                lambda: t.zero_(), device=device
+            )
+        return _BENCHMARK_FLOOR_MS[key]
+
+    @staticmethod
+    def _template_fusion_floor_applies(
+        device: torch.device, min_choice: ir.ChoiceCaller | None
+    ) -> bool:
+        """Whether ms1 (the min choice's autotune timing) carries the same fixed
+        per-benchmark cost as the scheduler's event-timed ms2 / fused timings.
+
+        Only event-timed extern and Triton template choices on CUDA qualify;
+        CUDA-graph timing (per choice or ``autotune_cudagraph_benchmarking``),
+        profiler timing, and other caller types (subgraph/decomposeK, NVGEMM,
+        CUTLASS, ...) are left uncorrected.
+        """
+        from .select_algorithm import ExternKernelCaller, TritonTemplateCaller
+
+        if not config.template_fusion_subtract_benchmark_floor:
+            return False
+        if device.type != "cuda" or torch.version.hip is not None:
+            return False
+        if (
+            config.profile_bandwidth_with_do_bench_using_profiling
+            or config.autotune_cudagraph_benchmarking
+        ):
+            return False
+        if not isinstance(min_choice, (ExternKernelCaller, TritonTemplateCaller)):
+            return False
+        if getattr(min_choice, "_benchmark_with_cudagraphs", False):
+            return False
+        bmreq = getattr(min_choice, "bmreq", None)
+        if bmreq is not None and (
+            getattr(bmreq, "benchmark_with_cudagraphs", False)
+            or getattr(bmreq, "config_cudagraph_benchmarking", False)
+        ):
+            return False
+        return True
+
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> FusionResult:
@@ -7997,11 +8052,27 @@ class Scheduler:
                     multi_node.finalize_as_triton_caller(best)
                 return FusionResult.fuse(True)
 
+            # Unfused cost the fused candidate must beat. ms1 and ms2 are two
+            # standalone benchmarks, each paying the benchmarker's fixed
+            # per-measurement cost, while the fused kernel is a single benchmark;
+            # subtract one floor so the sum doesn't double-count it.
+            ms_unfused = float("inf")
             if benchmark_template_fusion:
                 ms2, path2 = (
                     self.benchmark_fused_nodes(node_list_2)
                     if consumer_fusion
                     else self.benchmark_fused_nodes(node_list_1)
+                )
+                floor = 0.0
+                if self._template_fusion_floor_applies(device, min_choice):
+                    floor = min(self._benchmark_floor_ms(device), ms1, ms2)
+                ms_unfused = ms1 + ms2 - floor
+                fusion_log.debug(
+                    "template fusion unfused cost: ms1=%.4f (%s) ms2=%.4f floor=%.4f",
+                    ms1,
+                    getattr(min_choice, "name", None),
+                    ms2,
+                    floor,
                 )
             else:
                 # By default, don't do producer fusion. Generally slower
@@ -8035,7 +8106,7 @@ class Scheduler:
                 if is_triton and not choice_supports_fusion(choice):
                     continue
 
-                if benchmark_template_fusion and unfused_time >= ms1 + ms2:
+                if benchmark_template_fusion and unfused_time >= ms_unfused:
                     break
 
                 if template_choices >= config.max_template_fusion_benchmarked_choices:
@@ -8179,10 +8250,10 @@ class Scheduler:
                                 break
 
                 if benchmark_template_fusion:
-                    log_fusion(min_ms_fused, ms1, ms2)
+                    log_fusion(min_ms_fused, ms_unfused, 0.0)
 
                 if (
-                    not benchmark_template_fusion or min_ms_fused < (ms1 + ms2)
+                    not benchmark_template_fusion or min_ms_fused < ms_unfused
                 ) and ms_fused_choice is not None:
                     is_nvgemm = isinstance(ms_fused_choice, NVUniversalGemmCaller)
                     if is_nvgemm:

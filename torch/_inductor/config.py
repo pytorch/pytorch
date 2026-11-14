@@ -1137,6 +1137,17 @@ benchmark_epilogue_fusion: bool = Config(
 # Maximum number of top template choices to benchmark with fusion.
 max_template_fusion_benchmarked_choices: int = 1
 
+# Fused-vs-unfused template decision: the unfused time is the sum of two
+# standalone benchmarks (template + epilogue/prologue) and the fused time is one,
+# so a fixed per-benchmark cost (event timing, launch) is counted twice on the
+# unfused side and biases small GEMMs toward fusion. When True, one measured
+# benchmark floor is subtracted from the unfused sum, only on CUDA and only when
+# the min choice was event-timed like the epilogue/fused benchmarks.
+# Off by default while it is validated.
+template_fusion_subtract_benchmark_floor: bool = (
+    os.environ.get("TORCHINDUCTOR_TEMPLATE_FUSION_SUBTRACT_BENCHMARK_FLOOR", "0") == "1"
+)
+
 # Deprecated compatibility alias for max_template_fusion_benchmarked_choices.
 max_epilogue_benchmarked_choices: int = Config(
     alias="torch._inductor.config.max_template_fusion_benchmarked_choices",
