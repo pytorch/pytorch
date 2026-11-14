@@ -231,20 +231,15 @@ static py::object dynamo_call_callback(
     py::handle callback,
     THP_EVAL_API_FRAME_OBJECT* _frame,
     FrameLocalsMapping* locals,
-    CacheEntry* cache_entry,
+    py::handle cache_entry,
     FrameState* frame_state) {
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
   TORCH_CHECK(
       frame, "Dynamo failed to initialize CPython interpreter frame wrapper");
   frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
 
-  py::object cache_entry_obj = py::none();
-  if (cache_entry) {
-    cache_entry_obj = py::cast(cache_entry, py::return_value_policy::reference);
-  }
-
   py::object result = callback(
-      py::handle((PyObject*)frame), cache_entry_obj, py::handle(frame_state));
+      py::handle((PyObject*)frame), cache_entry, py::handle(frame_state));
   Py_DECREF(frame);
   return result;
 }
@@ -309,6 +304,36 @@ struct CRecursionLimitRAII {
 };
 
 #endif
+
+// Looks the frame up in its code object's cache.  Out of line so that the
+// snapshot, and the references it holds, are gone before the frame runs.
+// Returns whether the region or the default bucket had any entries.
+static C10_NOINLINE bool lookup_cache(
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    int64_t isolate_recompiles_id,
+    PyObject* backend,
+    std::unique_ptr<FrameLocalsMapping>& locals,
+    CacheLookupResult* cache_hit) {
+  PyCodeObject* code = F_CODE(frame);
+  bool is_skip_guard_eval_unsafe = get_skip_guard_eval_unsafe();
+  CacheSnapshot snapshot = snapshot_cache(
+      code, isolate_recompiles_id, backend, is_skip_guard_eval_unsafe);
+  if (!try_lookup_without_guard_eval(
+          code, snapshot, backend, is_skip_guard_eval_unsafe, cache_hit)) {
+    locals = std::make_unique<FrameLocalsMapping>(frame);
+    _PytorchRecordFunctionState* rf =
+        _pytorch_record_function_enter(cache_lookup_profiler_str);
+    lookup(
+        code,
+        snapshot,
+        locals.get(),
+        backend,
+        is_skip_guard_eval_unsafe,
+        cache_hit);
+    _pytorch_record_function_exit(rf);
+  }
+  return snapshot.has_relevant_entries;
+}
 
 // frame and callback are borrowed references.
 // Returns new reference.
@@ -500,24 +525,8 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
   std::unique_ptr<FrameLocalsMapping> locals;
-  if (!try_lookup_without_guard_eval(
-          code,
-          backend,
-          isolate_recompiles_id,
-          get_skip_guard_eval_unsafe(),
-          &cache_hit)) {
-    locals = std::make_unique<FrameLocalsMapping>(frame);
-    _PytorchRecordFunctionState* rf =
-        _pytorch_record_function_enter(cache_lookup_profiler_str);
-    lookup(
-        code,
-        locals.get(),
-        backend,
-        isolate_recompiles_id,
-        get_skip_guard_eval_unsafe(),
-        &cache_hit);
-    _pytorch_record_function_exit(rf);
-  }
+  bool has_relevant_entries = lookup_cache(
+      frame, isolate_recompiles_id, backend, locals, &cache_hit);
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
@@ -537,8 +546,6 @@ PyObject* dynamo__custom_eval_frame(
   // for the current region (or the default region); this reduces
   // overtriggering and we don't need to do guard collectives the very first
   // time we've seen a frame in this region.
-  bool has_relevant_entries =
-      has_relevant_cache_entries(code, isolate_recompiles_id);
   if (guard_complete_hook != nullptr && has_relevant_entries) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
@@ -577,7 +584,6 @@ PyObject* dynamo__custom_eval_frame(
   if (locals == nullptr) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
-  CompileInputs inputs = get_compile_inputs(code, isolate_recompiles_id);
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
@@ -591,6 +597,9 @@ PyObject* dynamo__custom_eval_frame(
       return eval_result;
     }
     PreserveGlobalState preserve_global_state;
+    // Scoped to the callback, so its copy of the entry is not held while the
+    // frame runs.
+    CompileInputs inputs = get_compile_inputs(code, isolate_recompiles_id);
     callback_result = dynamo_call_callback(
         callback,
         frame,
