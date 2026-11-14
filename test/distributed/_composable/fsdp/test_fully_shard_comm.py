@@ -27,6 +27,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
     MixedPrecisionPolicy,
@@ -1132,6 +1133,274 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         self.assertEqual(record_copy_ins(), [None, [1]])
         model.set_reduce_scatter_input_fn(None)
         self.assertEqual(record_copy_ins(), [None, None])
+
+
+class _RecordFuncs(TorchDispatchMode):
+    """Records the ops that run under it and returns their list on entry."""
+
+    def __enter__(self) -> list[torch._ops.OpOverload]:
+        super().__enter__()
+        self.funcs: list[torch._ops.OpOverload] = []
+        return self.funcs
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        self.funcs.append(func)
+        return func(*args, **(kwargs or {}))
+
+
+class TestFullyShardSingleRank(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _shard_mesh(self) -> DeviceMesh:
+        # A size-1 shard group inside a world of 2
+        return init_device_mesh(
+            device.type, (self.world_size, 1), mesh_dim_names=("replicate", "shard")
+        )["shard"]
+
+    def _init_models(
+        self,
+        dtype: torch.dtype = torch.float32,
+        bias_grad_dtype: torch.dtype | None = None,
+        **fully_shard_kwargs,
+    ) -> tuple[nn.Module, nn.Module]:
+        # The reference takes foreach_reduce since its input fn is not the default
+        model = nn.Sequential(
+            nn.Linear(16, 33, device=device, dtype=dtype),
+            nn.ReLU(),
+            nn.Linear(33, 7, device=device, dtype=dtype),
+        )
+        # Gets no gradient in forward
+        model[0].register_parameter(
+            "unused", nn.Parameter(torch.randn(5, device=device, dtype=dtype))
+        )
+        ref_model = copy.deepcopy(model)
+        for module in (model, ref_model):
+            if bias_grad_dtype is not None:  # deepcopy does not copy it
+                module[2].bias.grad_dtype = bias_grad_dtype
+            for submodule in (module[0], module[2], module):
+                fully_shard(
+                    submodule,
+                    shard_placement_fn=lambda param: Shard(param.ndim - 1),
+                    **fully_shard_kwargs,
+                )
+        ref_model.set_reduce_scatter_input_fn(
+            functools.partial(_default_reduce_scatter_input_fn)
+        )
+        return model, ref_model
+
+    def _check_parity(
+        self,
+        model: nn.Module,
+        ref_model: nn.Module,
+        dtype: torch.dtype,
+        num_sync_microbatches: int = 3,
+    ) -> None:
+        """Trains both models and checks that they match bitwise. Only the last
+        ``num_sync_microbatches`` of 3 microbatches reduce gradients."""
+        optims = [
+            # Plain SGD supports gradients with a dtype other than the parameter's
+            torch.optim.SGD(module.parameters(), lr=1e-2, foreach=False)
+            for module in (model, ref_model)
+        ]
+        hook_grads: list[list[torch.Tensor]] = [[], []]
+        for module, grads in zip((model, ref_model), hook_grads):
+            for param in module.parameters():
+                param.register_post_accumulate_grad_hook(
+                    lambda param, grads=grads: grads.append(
+                        param.grad.to_local().clone()
+                    )
+                )
+        generator = torch.Generator(device).manual_seed(self.rank)
+        # Covers new sharded gradients and adds into zeroed ones
+        for set_to_none in (True, False, True):
+            for microbatch in range(3):
+                inp = torch.randn(4, 16, device=device, generator=generator).to(dtype)
+                sync = microbatch >= 3 - num_sync_microbatches
+                losses, copy_ins = [], []
+                for module in (model, ref_model):
+                    module.set_requires_gradient_sync(sync)
+                    losses.append(module(inp).sum())
+                    with _RecordFuncs() as funcs:
+                        losses[-1].backward()
+                    copy_ins.append(
+                        funcs.count(torch.ops.fsdp.chunk_cat_mixed_dtype.default)
+                    )
+                self.assertEqual(losses[0], losses[1], atol=0, rtol=0)
+                # Only the reference copies into reduce-scatter inputs
+                self.assertEqual(copy_ins, [0, 2 if sync else 0])
+            for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+                if (
+                    ref_param.grad is None
+                ):  # unused without reduce_scatter_unused_params
+                    self.assertIsNone(param.grad)
+                    continue
+                grad, ref_grad = param.grad.to_local(), ref_param.grad.to_local()
+                self.assertEqual(grad.dtype, ref_grad.dtype)
+                self.assertEqual(grad.stride(), ref_grad.stride())
+                self.assertEqual(grad, ref_grad, atol=0, rtol=0)
+            for optim in optims:
+                optim.step()
+                optim.zero_grad(set_to_none=set_to_none)
+        self.assertEqual(len(hook_grads[0]), len(hook_grads[1]))
+        self.assertEqual(hook_grads[0], hook_grads[1], atol=0, rtol=0)
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.to_local(), ref_param.to_local(), atol=0, rtol=0)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_matches_reduce_scatter_path(self):
+        self.run_subtests(
+            {
+                # (orig_dtype, param_dtype, reduce_dtype)
+                "dtypes": [
+                    (torch.float32, None, None),
+                    (torch.float32, None, torch.bfloat16),
+                    (torch.float32, torch.bfloat16, torch.float32),
+                    (torch.float32, torch.bfloat16, torch.bfloat16),
+                    (torch.float32, torch.float16, torch.float16),
+                    (torch.bfloat16, None, torch.float32),
+                ],
+                # (gradient divide factor, sum-only reductions)
+                "division": [(None, False), (3.0, False), (3.0, True)],
+            },
+            self._test_single_rank_matches_reduce_scatter_path,
+        )
+
+    def _test_single_rank_matches_reduce_scatter_path(
+        self,
+        dtypes: tuple[torch.dtype, torch.dtype | None, torch.dtype | None],
+        division: tuple[float | None, bool],
+    ):
+        orig_dtype, param_dtype, reduce_dtype = dtypes
+        divide_factor, force_sum = division
+        model, ref_model = self._init_models(
+            orig_dtype,
+            mesh=self._shard_mesh(),
+            mp_policy=MixedPrecisionPolicy(param_dtype, reduce_dtype),
+        )
+        for module in (model, ref_model):
+            for submodule in (module[0], module[2]):
+                if divide_factor is not None:
+                    submodule.set_gradient_divide_factor(divide_factor)
+                submodule.set_force_sum_reduction_for_comms(force_sum)
+        self._check_parity(model, ref_model, param_dtype or orig_dtype)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_mixed_grad_dtypes(self):
+        # A bf16 bias gradient next to fp32 gradients in one group, zero gradients
+        # for an unused parameter, and gradients accumulated without sync
+        self.run_subtests(
+            {"num_sync_microbatches": [3, 1]},
+            self._test_single_rank_mixed_grad_dtypes,
+        )
+
+    def _test_single_rank_mixed_grad_dtypes(self, num_sync_microbatches: int):
+        model, ref_model = self._init_models(
+            bias_grad_dtype=torch.bfloat16,
+            mesh=self._shard_mesh(),
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        for module in (model, ref_model):
+            module.set_reduce_scatter_unused_params(True)
+        for module in (model, ref_model):
+            self.assertEqual(module[2].bias.grad_dtype, torch.bfloat16)
+        self._check_parity(model, ref_model, torch.bfloat16, num_sync_microbatches)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_grads_do_not_alias(self):
+        # Without casts or divisions, new sharded gradients copy the unsharded ones
+        model, ref_model = self._init_models(mesh=self._shard_mesh())
+        inp = torch.randn(4, 16, device=device)
+        for module in (model, ref_model):
+            loss = module(inp).sum()
+            unsharded_grads: list[torch.Tensor] = []
+            for state in (module[0]._get_fsdp_state(), module[2]._get_fsdp_state()):
+                for fsdp_param in state._fsdp_param_group.fsdp_params:
+                    fsdp_param.unsharded_param.register_post_accumulate_grad_hook(
+                        lambda param: unsharded_grads.append(param.grad)
+                    )
+            loss.backward()
+            for grad in unsharded_grads:
+                grad.fill_(float("nan"))
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            if ref_param.grad is not None:
+                self.assertEqual(param.grad.to_local(), ref_param.grad.to_local())
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_hook_reads_grad_before_free(self):
+        # A hook that reads the gradient late on the reduce-scatter stream and
+        # then drops it, as an optimizer step in backward does, reads the same
+        # values as on the buffered path. The gradients are large enough that
+        # the next group's copies reuse their blocks once freed.
+        dim = 1024
+        model = nn.Sequential(
+            *(nn.Linear(dim, dim, bias=False, device=device) for _ in range(2))
+        )
+        ref_model = copy.deepcopy(model)
+        for module in (model, ref_model):
+            for submodule in (module[0], module[1], module):
+                fully_shard(submodule, mesh=self._shard_mesh())
+        ref_model.set_reduce_scatter_input_fn(
+            functools.partial(_default_reduce_scatter_input_fn)
+        )
+        inp = torch.randn(4, dim, device=device)
+        hook_grads: list[list[torch.Tensor]] = [[], []]
+        for module, grads in zip((model, ref_model), hook_grads):
+
+            def hook(param: nn.Parameter, grads=grads) -> None:
+                torch.cuda._sleep(100_000_000)
+                grads.append(param.grad.to_local().clone())
+                param.grad = None
+
+            for param in module.parameters():
+                param.register_post_accumulate_grad_hook(hook)
+            module(inp).sum().backward()
+        device_module.synchronize()
+        self.assertEqual(hook_grads[0], hook_grads[1], atol=0, rtol=0)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_reduce_fallbacks(self):
+        # Returns how many reduce-scatter copy-ins one backward runs
+        def num_copy_ins(model: FSDPModule) -> int:
+            loss = model(torch.randn(2, 8, device=device)).sum()
+            with _RecordFuncs() as funcs:
+                loss.backward()
+            return funcs.count(torch.ops.fsdp.chunk_cat_mixed_dtype.default)
+
+        def init_model(**kwargs: object) -> FSDPModule:
+            linear_device = "cpu" if "offload_policy" in kwargs else device
+            kwargs.setdefault("mesh", self._shard_mesh())
+            return fully_shard(nn.Linear(8, 8, device=linear_device), **kwargs)
+
+        model = init_model()
+        self.assertEqual(num_copy_ins(model), 0)
+        model.set_allocate_memory_from_process_group_for_comm(True)
+        self.assertEqual(num_copy_ins(model), 0)
+
+        # A size-1 group never calls the comm, so any comm takes the fast path
+        class CustomReduceScatter(DefaultReduceScatter):
+            pass
+
+        model.set_custom_reduce_scatter(CustomReduceScatter())
+        self.assertEqual(num_copy_ins(model), 0)
+
+        model = init_model()
+        model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
+        self.assertEqual(num_copy_ins(model), 1)
+
+        model = init_model()
+        model.set_all_reduce_hook(lambda output: None)
+        self.assertEqual(num_copy_ins(model), 1)
+
+        model = init_model(offload_policy=CPUOffloadPolicy())
+        self.assertEqual(num_copy_ins(model), 1)
+
+        # HSDP with a size-1 shard dim all-reduces over the replicate dim
+        mesh = init_device_mesh(
+            device.type, (self.world_size, 1), mesh_dim_names=("replicate", "shard")
+        )
+        self.assertEqual(num_copy_ins(init_model(mesh=mesh)), 1)
 
 
 class TestFullyShardCustomAllocation(FSDPTestMultiThread):
@@ -3116,6 +3385,25 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         self.assertIsNone(comm.buffer)
         for ref_param, param in zip(ref_model.parameters(), model.parameters()):
             self.assertEqual(param.grad.to_local(), ref_param.grad)
+
+    @parametrize("hsdp", [False, True])
+    @parametrize("split_by", ["fp16_reduce", "force_sum"])
+    def test_singleton_split_divide_factor(self, split_by, hsdp):
+        # fp16 and forced-sum reductions split the divide factor into pre/post
+        # factors, so the singleton path must not divide by it again
+        model = nn.Linear(8, 4, bias=False, device=device)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        reduce_dtype = torch.float16 if split_by == "fp16_reduce" else None
+        mp_policy = MixedPrecisionPolicy(reduce_dtype=reduce_dtype)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+        model.set_gradient_divide_factor(4.0)
+        model.set_force_sum_reduction_for_comms(split_by == "force_sum")
+        inp = torch.ones(3, 8, device=device)
+        model(inp).sum().backward()
+        expected = torch.full_like(inp[:1].expand(4, -1), 3 / 4)
+        self.assertEqual(model.weight.grad.to_local(), expected)
 
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp
