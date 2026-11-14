@@ -157,6 +157,7 @@ def cfg_compile(
     specialize: bool = True,
     skip_autograd: bool = True,
     unboxed: bool = True,
+    inline: bool = True,
     max_versions: int = 4,
     max_respecializations: int = 6,
 ) -> Any:
@@ -178,6 +179,9 @@ def cfg_compile(
         unboxed: keep the tensors that kernels return without a Python object
             until Python code needs one. A tensor that only flows from one
             kernel call into others then never gets one.
+        inline: replace calls of Python functions defined in the same module
+            by their graph, under a guard on the callee; the call itself stays
+            as the other side of that guard.
         max_versions: how many specialized versions a block can have at once.
         max_respecializations: how many times a block may be profiled and
             specialized again before it settles on code without guards.
@@ -192,6 +196,7 @@ def cfg_compile(
         "specialize": specialize,
         "skip_autograd": skip_autograd,
         "unboxed": unboxed,
+        "inline": inline,
         "max_versions": max_versions,
         "max_respecializations": max_respecializations,
     }
@@ -215,6 +220,7 @@ def cfg_compile(
             specialize=specialize,
             skip_autograd=skip_autograd,
             unboxed=unboxed,
+            inline=inline,
             max_versions=max_versions,
             max_respecializations=max_respecializations,
         )
