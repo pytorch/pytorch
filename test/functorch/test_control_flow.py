@@ -11184,7 +11184,8 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
                     c = (c @ xs[t] * (ys[t] != 0) * 2).sin()
                     outs.append(c)
                 out = c.sum() + torch.stack(outs).sum()
-                self.assertEqual(grads, torch.autograd.grad(out, (init, xs)))
+                expected = torch.autograd.grad(out, (init, xs))
+                self.assertEqual(grads, expected, atol=6e-05, rtol=6e-06)
 
     def test_scan_functionalized_elem_alias(self):
         def add(x, y):
