@@ -3348,7 +3348,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         left: VariableTracker,
         right: VariableTracker,
     ) -> VariableTracker:
-        from .tensor import supported_tensor_comparison_op_values
+        from .tensor import _richcompare_operand, supported_tensor_comparison_op_values
 
         op = self.fn
 
@@ -3365,16 +3365,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         # must be a type that can participate in a traced numeric comparison.
         # Anything else (classes, DataPtrVariable, etc.) is a different type
         # entirely — the comparison result is known at compile time.
-        non_symnode = right if isinstance(left, SymNodeVariable) else left
-        if not isinstance(
-            non_symnode, (SymNodeVariable, ConstantVariable, TensorVariable)
-        ):
+        if isinstance(left, SymNodeVariable):
+            args = (left.as_proxy(), _richcompare_operand(right))
+        else:
+            args = (_richcompare_operand(left), right.as_proxy())
+        if any(arg is NotImplemented for arg in args):
             # pyrefly: ignore [bad-argument-type]
             return VariableTracker.build(tx, op(object(), None))
 
-        proxy = tx.output.create_proxy(
-            "call_function", op, (left.as_proxy(), right.as_proxy()), {}
-        )
+        proxy = tx.output.create_proxy("call_function", op, args, {})
         return SymNodeVariable.create(
             tx,
             proxy,
