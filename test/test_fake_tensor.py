@@ -7014,7 +7014,8 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertIsNone(maybe_get_fake_constant(relifted))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    def test_fake_fallback_clears_inherited_dispatch_keys(self):
+    @parametrize("alias", ["detach", "data"])
+    def test_fake_fallback_clears_inherited_dispatch_keys(self, alias):
         mode = CppFakeTensorMode()
         real = torch.randn(2, 3)
         fake = mode.from_tensor(real)
@@ -7022,7 +7023,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         torch._C._set_fake_dispatch_keys(fake, keys)
 
         def meta_impl(x):
-            result = x.detach()
+            result = x.detach() if alias == "detach" else x.data
             self.assertTrue(result.is_meta)
             self.assertFalse(is_fake_tensor(result))
             self.assertIsNone(maybe_get_fake_dispatch_keys(result))
