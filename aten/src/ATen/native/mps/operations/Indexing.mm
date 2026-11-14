@@ -31,6 +31,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/native/IndexKernel.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/index.h>
 #include <ATen/ops/index_add_native.h>
 #include <ATen/ops/index_copy_native.h>
@@ -44,6 +45,7 @@
 #include <ATen/ops/nonzero_native.h>
 #include <ATen/ops/nonzero_static_native.h>
 #include <ATen/ops/ones_like.h>
+#include <ATen/ops/sort.h>
 #endif
 
 namespace at::native {
@@ -101,13 +103,15 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
                                   IntArrayRef index_size,
                                   IntArrayRef index_stride,
                                   const std::string& kernel_name,
-                                  const bool serial = false) {
+                                  const bool serial = false,
+                                  const Tensor& offsets = {}) {
   validateInputData(iter, index_size, index_stride, "index.Tensor_out");
   if (iter.numel() == 0)
     return;
   if (!iter.can_use_32bit_indexing()) {
+    TORCH_INTERNAL_ASSERT(!offsets.defined());
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      dispatch_index_kernel(sub_iter, index_size, index_stride, kernel_name);
+      dispatch_index_kernel(sub_iter, index_size, index_stride, kernel_name, serial);
     }
     return;
   }
@@ -140,7 +144,33 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
                    index_stride,
                    ndim_nindiees,
                    mpsStream->getErrorBuffer());
+    if (offsets.defined()) {
+      mtl_setArgs<11>(computeEncoder, offsets);
+    }
     mtl_dispatch1DJob(computeEncoder, indexSelectPSO, serial ? 1 : iter.numel());
+  });
+}
+
+static void index_put_accumulate_deterministic(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+  if (iter.numel() == 0) {
+    return;
+  }
+  auto offsets = at::empty({iter.numel()}, iter.tensor_base(0).options().dtype(kLong));
+  dispatch_index_kernel(iter, index_size, index_stride, "index_put_offsets", false, offsets);
+  Tensor sorted_offsets, order;
+  std::tie(sorted_offsets, order) = at::sort(offsets, /*stable=*/true, /*dim=*/0, /*descending=*/false);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    auto encoder = stream->commandEncoder();
+    auto pso = lib.getPipelineStateForFunc(fmt::format("index_put_accumulate_grouped_{}{}",
+                                                       scalarToMetalTypeString(iter.tensor_base(0)),
+                                                       iter.ndim() == 1 ? "_1d" : ""));
+    [encoder setComputePipelineState:pso];
+    bind_iter_tensors(encoder, iter, 2);
+    const std::array<uint32_t, 2> ndim_numel = {static_cast<uint32_t>(iter.ndim()),
+                                                static_cast<uint32_t>(iter.numel())};
+    mtl_setArgs<2>(encoder, sorted_offsets, order, iter.shape(), iter.strides(1), ndim_numel);
+    mtl_dispatch1DJob(encoder, pso, iter.numel());
   });
 }
 
@@ -157,11 +187,16 @@ static void index_put_kernel_mps(TensorIterator& iter,
   @autoreleasepool {
     validateInputData(iter, index_size, index_stride, "index_put_impl");
     if (accumulate) {
-      // Metal atomic-add is non-associative for floating/complex types, so
-      // duplicate indices race on the result. Integer adds are associative
-      // and remain deterministic
       const auto dtype = iter.tensor_base(0).scalar_type();
-      if (at::isFloatingType(dtype) || at::isComplexType(dtype)) {
+      const bool needs_determinism =
+          at::globalContext().deterministicAlgorithms() && (at::isFloatingType(dtype) || at::isComplexType(dtype));
+      // Separate dispatches for split iterators can update the same output.
+      // Do not claim determinism for those until their ordering is guaranteed.
+      if (needs_determinism && iter.can_use_32bit_indexing()) {
+        index_put_accumulate_deterministic(iter, index_size, index_stride);
+        return;
+      }
+      if (needs_determinism) {
         at::globalContext().alertNotDeterministic("index_put_with_accumulate_mps");
       }
       dispatch_index_kernel(iter,
@@ -240,6 +275,16 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
   const auto indices_numel = index.numel();
   const auto slice_numel = source.numel() / indices_numel;
   if (slice_numel == 0) {
+    return;
+  }
+
+  // Duplicate indices race in the copy kernel. Match CUDA/XPU: in deterministic
+  // mode, route through index_put_, whose serial path makes the last write win.
+  if (globalContext().deterministicAlgorithms()) {
+    torch::List<std::optional<Tensor>> indices;
+    indices.resize(dim + 1);
+    indices.set(dim, index.to(at::kLong));
+    result.index_put_(indices, source, /*accumulate=*/false);
     return;
   }
 
