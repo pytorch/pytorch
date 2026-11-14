@@ -2,7 +2,12 @@
 import sys
 
 import torch
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class DummyPrivateUse1Module:
@@ -32,6 +37,8 @@ class DummyPrivateUse1Module:
 
 
 class TestExtensionUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         # Clean up
         backend_name = torch._C._get_privateuse1_backend_name()
