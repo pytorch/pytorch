@@ -38,6 +38,7 @@ from torch._prims_common import (
     ShapeType,
 )
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     DataDependentOutputException,
     DynamicOutputShapeException,
     FakeTensor,
@@ -307,6 +308,9 @@ def constructors(
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     if r.device.type == "meta":
+        # An out overload returns its out argument, which may be a meta fake
+        if fake_mode.is_our_fake(r):
+            return r
         return fake_mode.fake_tensor_converter.from_meta_and_device(
             fake_mode, r, out_device
         )
@@ -2614,13 +2618,14 @@ def make_fast_binary_impl(
 # disable the python dispatcher to avoid decomposing detach() further
 # (proxy_mode should still decompose detach() though)
 def fast_detach(
-    fake_mode: FakeTensorMode | None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None,
     x: FakeTensor | torch.Tensor,
     include_real: bool = False,
 ) -> torch.Tensor:
     if (
         not isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
         or fake_mode is None
+        or isinstance(fake_mode, CppFakeTensorMode)
     ):
         raise AssertionError(
             "type widening added for cpp faketensor but this is not used yet"

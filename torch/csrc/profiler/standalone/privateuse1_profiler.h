@@ -32,7 +32,9 @@ using PrivateUse1ProfilerFactory =
 // integration without modifying Kineto code.
 //
 // Usage:
-//   1. Backend implements libkineto::IActivityProfiler
+//   1. Backend implements libkineto::IActivityProfiler. Its configure returns
+//      no session when config.deviceTracingEnabled() is false, which PyTorch
+//      sets for sessions that request no device activity.
 //   2. Backend uses REGISTER_PRIVATEUSE1_PROFILER macro to register
 //   3. PyTorch forwards the factory to Kineto during initialization
 //

@@ -124,6 +124,17 @@ def register_force_test(
     return register_complex(op, func_impl)
 
 
+REAL_TO_COMPLEX_OPS: set[OpOverload] = set()
+
+
+def register_real_to_complex(
+    op: OpOverload, func_impl: Callable[..., Any] | None = None
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
+    """Register a real-input op that constructs a ComplexTensor under WrapComplexMode."""
+    REAL_TO_COMPLEX_OPS.add(op)
+    return register_complex(op, func_impl)
+
+
 DECOMPOSITIONS = get_decompositions(list(torch.ops.aten))  # type: ignore[no-matching-overload]
 
 
@@ -323,6 +334,10 @@ class WrapComplexMode(TorchDispatchMode):
             kwargs = {}
         args = tree_map(_as_complex_tensor, args)
         kwargs = tree_map(_as_complex_tensor, kwargs)
+        if func in REAL_TO_COMPLEX_OPS:
+            impl = lookup_complex(func, *args, **kwargs)
+            if impl is not None:
+                return tree_map(_as_complex_tensor, impl(*args, **kwargs))
         return tree_map(_as_complex_tensor, func(*args, **kwargs))
 
 

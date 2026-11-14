@@ -203,6 +203,8 @@ class PostReduceScatter:
     requires_all_reduce: bool = True
     partial_output: torch.Tensor | None = None
     hook: Callable[[torch.Tensor], None] | None = None
+    # FSDP2's AllReduce replacing dist.all_reduce, called in place by keyword
+    all_reduce_comm: Any = None
 
 
 def begin_reduce_grad(
@@ -276,7 +278,11 @@ def begin_reduce_grad(
         post_stream = post.stream
         post_stream.wait_event(event)
         with device_handle.stream(post_stream):
-            if all_reduce:
+            if all_reduce and post.all_reduce_comm is not None:
+                post.all_reduce_comm(
+                    tensor=output, group=post.replicate_group, op=all_reduce_op
+                )
+            elif all_reduce:
                 dist.all_reduce(output, group=post.replicate_group, op=all_reduce_op)
             if post.hook is not None:
                 post.hook(output)

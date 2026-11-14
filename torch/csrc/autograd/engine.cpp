@@ -1,6 +1,7 @@
 #include <torch/csrc/autograd/engine.h>
 
 #include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
@@ -35,6 +36,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -1165,6 +1167,42 @@ static variable_list call_function(
   return call_post_hooks(fn, std::move(outputs), inputs, has_post_hooks);
 }
 
+namespace {
+// The error for a disallowed implicit gradient accumulation into output
+// `output_nr` of `slot_fn`, triggered by a gradient from `producer`.
+std::string implicit_grad_accumulation_error(
+    Node* slot_fn,
+    uint32_t output_nr,
+    const Node& producer) {
+  std::ostringstream msg;
+  msg << "Gradients would be summed implicitly into ";
+  auto* acc = dynamic_cast<AccumulateGrad*>(slot_fn);
+  if (acc != nullptr && acc->variable.defined()) {
+    msg << "a leaf tensor of shape " << acc->variable.sym_sizes()
+        << " and dtype " << acc->variable.scalar_type();
+  } else {
+    msg << "output " << output_nr << " of " << slot_fn->name();
+    if (output_nr < slot_fn->num_inputs() &&
+        !slot_fn->input_metadata(output_nr).is_nested_tensor()) {
+      const auto& meta = slot_fn->input_metadata(output_nr);
+      msg << " (shape " << meta.shape_as_dim_vector() << ", dtype "
+          << meta.options().dtype() << ")";
+    }
+  }
+  msg << ": it already received a gradient, and " << producer.name()
+      << " produced another. backward was run with "
+      << "disallow_implicit_grad_accumulation=True, which raises instead of "
+      << "accumulating the gradient contributions of a tensor used more than "
+      << "once. To accumulate them yourself, use a custom autograd Function "
+      << "whose forward returns the tensor once per use and whose backward "
+      << "sums their gradients. See "
+      << "https://pytorch.org/docs/main/notes/autograd.html#disallow-implicit-grad-accumulation "
+      << "for an example. Run under torch.autograd.detect_anomaly() to print "
+      << "the forward traceback of the operation that produced this gradient.";
+  return msg.str();
+}
+} // namespace
+
 void Engine::evaluate_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
@@ -1327,6 +1365,13 @@ void Engine::evaluate_function(
     } else {
       // The function already has a buffer
       auto& input_buffer = not_ready_it->second;
+      if (C10_UNLIKELY(graph_task->disallow_implicit_grad_accumulation_) &&
+          output.defined() && input_buffer.buffer[next.input_nr].defined()) {
+        TORCH_CHECK(
+            false,
+            implicit_grad_accumulation_error(
+                next.function.get(), next.input_nr, fn));
+      }
 
       input_buffer.add(
           next.input_nr,
@@ -1431,7 +1476,8 @@ auto Engine::execute(
     bool keep_graph,
     bool create_graph,
     bool accumulate_grad,
-    const edge_list& outputs) -> variable_list {
+    const edge_list& outputs,
+    bool disallow_implicit_grad_accumulation) -> variable_list {
   TORCH_CHECK(
       !input_grad_buffer_exposed,
       "Calling backward or grad reentrantly after accessing a non-None "
@@ -1479,6 +1525,12 @@ auto Engine::execute(
       /* reentrant_depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
       /* cpu_ready_queue */ local_ready_queue,
       /* graph_roots */ std::move(temp_roots));
+  // A backward started while another runs (e.g. reentrant checkpoint)
+  // inherits the setting.
+  graph_task->disallow_implicit_grad_accumulation_ =
+      disallow_implicit_grad_accumulation ||
+      (current_graph_task &&
+       current_graph_task->disallow_implicit_grad_accumulation_);
 
   // If we receive a single root, skip creating extra root node
   bool skip_dummy_node = root_edges.size() == 1 && compiled_autograd == nullptr;
@@ -1502,6 +1554,9 @@ auto Engine::execute(
     TORCH_CHECK_NOT_IMPLEMENTED(
         num_threads_in_compiled_autograd.load() == 0,
         "Re-entrant into Compiled Autograd from a parent Compiled Autograd call is not yet supported. Consider disabling Compiled Autograd on the re-entrant call.");
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        !graph_task->disallow_implicit_grad_accumulation_,
+        "disallow_implicit_grad_accumulation=True is not supported with Compiled Autograd.");
     // Allows us to assert no other threads are in backwards
     CompiledAutogradThreadingDebugCheck _thread_check;
     // see [Note: Compiled Autograd]

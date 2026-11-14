@@ -484,3 +484,15 @@ def get_member_type(cls: Any, member_name: str) -> MemberType | None:
     if info is None:
         return None
     return info.members.get(member_name)
+
+
+class OpaqueStr(str, CustomClassBase):
+    """
+    A str boxed as a symbolic opaque object, so torch.compile can pass a string
+    into a graph as a runtime input instead of specializing on its value.
+    """
+
+    __slots__ = ()
+
+
+register_custom_class(OpaqueStr, typ="symbolic")

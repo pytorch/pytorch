@@ -49,13 +49,15 @@ _PYTEST_SUITE = _TEST_DIR / "junit_xml_testdata/pytest_suite.py"
 _REPORT_TESTDATA = Path(__file__).resolve().parent / "testdata"
 # Run the fixture as the default config: drop the job's CI / PYTORCH_TEST_* /
 # PYTEST_ADDOPTS settings and a PYTHONPATH whose repo root would shadow the
-# installed torch, and don't write bytecode into test/.
+# installed torch, and don't write bytecode into test/. These tests pin how
+# skipped tests are reported, so keep test/conftest.py's collection pruner from
+# deselecting the mark-skipped fixtures.
 _CHILD_ENV = {
     k: v
     for k, v in os.environ.items()
     if k not in ("PYTHONPATH", "CI", "PYTEST_ADDOPTS")
     and not k.startswith("PYTORCH_TEST_")
-} | {"PYTHONDONTWRITEBYTECODE": "1"}
+} | {"PYTHONDONTWRITEBYTECODE": "1", "PYTEST_ADDOPTS": "-p no:prune_skips_plugin"}
 
 # The fixture's run context, which the report records, without the job's device
 # filter (XPU and CUDA jobs set PYTORCH_TESTING_DEVICE_ONLY_FOR).

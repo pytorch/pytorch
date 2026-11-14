@@ -11,6 +11,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -963,6 +964,10 @@ class ForeachTests(TestCase):
         torch.compile(fn)(*args)
         return torch._inductor.metrics.ir_nodes_pre_fusion
 
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] != "cpu" and (not HAS_GPU),
+    )
     @parametrize("case", ("add", "mul_self", "sgd_momentum"))
     @parametrize("device", ("cpu", GPU_TYPE))
     def test_inplace_foreach_computed_into_target(self, device, case):
@@ -999,6 +1004,10 @@ class ForeachTests(TestCase):
         self.assertEqual(self._nodes_pre_fusion(fn, x, y), 1)
         self.assertEqual(x, x_eager)
 
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] != "cpu" and (not HAS_GPU),
+    )
     @parametrize("device", ("cpu", GPU_TYPE))
     def test_inplace_foreach_reads_target_elsewhere(self, device):
         # https://github.com/pytorch/pytorch/issues/198033: computed straight
