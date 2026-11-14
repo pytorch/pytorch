@@ -566,6 +566,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.trace,
             aten.transpose.int,
             aten.transpose_copy,
+            aten._trilinear,
             aten.tril,
             aten.tril_,
             aten.triu,
