@@ -742,9 +742,18 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     def test_barrier_async_block_current_stream(self) -> None:
         # Catches #202500 where barrier ignored async_op and defaulted to host-blocking,
         # deadlocking when block_current_stream was called.
-        for _ in range(5):
+        store = dist.distributed_c10d._get_default_store()
+        # Connect the ring first: the first collective blocks until peers join.
+        dist.barrier(device_ids=[self.rank])
+        for i in range(5):
+            # Holding the peer back keeps rank 0's barrier pending, so a host sync
+            # in block_current_stream() can't return.
+            if self.rank != 0:
+                store.wait([f"barrier_block_go_{i}"], timedelta(seconds=60))
             work = dist.barrier(async_op=True, device_ids=[self.rank])
             work.block_current_stream()
+            if self.rank == 0:
+                store.set(f"barrier_block_go_{i}", "1")
             torch.cuda.synchronize(self.device)
             self.assertTrue(work.is_completed())
 
