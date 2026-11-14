@@ -51,8 +51,9 @@ TORCH_API void register_backend();
 // calling backward(), and at::launch tasks inherit the launching thread's
 // override. Each autograd Node also records the override active when its
 // forward op ran, and the engine runs the node under it, so backward follows
-// the forward op's scope; nodes created without an override use the policy
-// of the thread calling backward(). New Python threads and at::parallel_for
+// the forward op's scope; nodes created without an override, and leaf
+// gradient accumulators (shared across forwards), use the policy of the
+// thread calling backward(). New Python threads and at::parallel_for
 // workers do not inherit overrides; read the setting before entering a
 // parallel region.
 struct DeterministicAlgorithmsSetting {

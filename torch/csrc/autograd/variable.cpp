@@ -14,6 +14,7 @@
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/MemoryOverlap.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 
 #include <memory>
 #include <mutex>
@@ -729,6 +730,19 @@ const c10::intrusive_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       // TODO: Potentially the following logic can be replaced by special logic
       // in VariableType_x.cpp
       //       that would provide a way to recreate the grad_fn chain.
+      //
+      // Create the node under the deterministic algorithms override of the
+      // base's grad_fn (the in-place op that invalidated this view), not
+      // whatever is active when grad_fn is first read. See
+      // Note [Scoped deterministic algorithms].
+      const auto& base_grad_fn = view_info.base_.grad_fn();
+      const auto previous_override = at::getDeterministicAlgorithmsOverride();
+      at::setDeterministicAlgorithmsOverride(
+          base_grad_fn ? base_grad_fn->deterministic_algorithms_override()
+                       : std::nullopt);
+      auto restore_override = c10::make_scope_exit([&previous_override]() {
+        at::setDeterministicAlgorithmsOverride(previous_override);
+      });
       if (view_info.has_view_fn()) {
         auto& view_fn = view_info.view_fn();
         Tensor diff_view;

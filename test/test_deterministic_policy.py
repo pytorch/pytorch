@@ -159,6 +159,32 @@ class TestDeterministicPolicy(_PolicyTestCase):
         with torch.deterministic_policy("default"):
             self.assertEqual(_run_in_thread(_state), (True, False))
 
+    def test_accumulate_grad_uses_backward_call_site(self):
+        # A leaf's accumulator outlives the forward that created it, so it must
+        # not keep that forward's scope.
+        w = torch.randn(4, requires_grad=True)
+        seen = []
+        w.register_post_accumulate_grad_hook(lambda p: seen.append(_state()))
+        with torch.deterministic_policy("error"):
+            loss = (w * 2).sum()
+        loss.backward()
+        with torch.deterministic_policy("default"):
+            loss = (w * 3).sum()  # reuses the accumulator from the first forward
+        with torch.deterministic_policy("warn"):
+            loss.backward()
+        self.assertEqual(seen, [(False, False), (True, True)])
+
+    def test_regenerated_view_grad_fn_uses_inplace_scope(self):
+        base = torch.randn(4, 4, requires_grad=True).clone()
+        view = base[0]
+        with torch.deterministic_policy("error"):
+            base.mul_(2)
+        seen = []
+        # Reading grad_fn outside the scope regenerates the view's node.
+        view.grad_fn.register_prehook(lambda grad: seen.append(_state()))
+        view.sum().backward()
+        self.assertEqual(seen, [(True, False)])
+
     def test_dynamo_guards_on_resolved_policy(self):
         cnt = torch._dynamo.testing.CompileCounter()
 

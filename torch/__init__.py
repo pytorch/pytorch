@@ -2000,8 +2000,9 @@ def deterministic_policy(
     without changing an active override.
 
     Backward ops run under the override that was active when their forward op
-    ran; ops recorded outside any scope use the policy of the thread calling
-    backward(). ``at::launch`` tasks inherit the launching thread's override.
+    ran. Ops recorded outside any scope, and gradient accumulation into leaf
+    tensors (including post-accumulate-grad hooks), use the policy of the
+    thread calling backward(). ``at::launch`` tasks inherit the launching thread's override.
     New Python threads and ``at::parallel_for`` workers do not inherit overrides.
 
     Compiled functions guard on the resolved policy.

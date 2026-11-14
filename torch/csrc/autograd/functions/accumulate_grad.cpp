@@ -86,6 +86,11 @@ variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
 AccumulateGrad::AccumulateGrad(Variable variable_)
     : Node(/*sequence_nr=*/UINT64_MAX), variable(std::move(variable_)) {
   add_input_metadata(variable);
+  // A leaf's accumulator is cached and shared by every forward that uses the
+  // leaf, so no single forward scope applies: accumulation and its hooks use
+  // the policy of the backward() call site. See
+  // Note [Scoped deterministic algorithms].
+  deterministic_algorithms_override_ = std::nullopt;
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
