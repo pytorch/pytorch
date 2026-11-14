@@ -1000,6 +1000,49 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
+    @config.patch({**tiled_reduction_config, "split_reductions": False})
+    @parametrize("ndims", [4, 5])
+    @parametrize("persistent", [False, True])
+    @parametrize("broadcast", [False, True])
+    def test_nd_reduction_padded_tensor(self, ndims, persistent, broadcast):
+        def fn(a, b):
+            return (a * b if broadcast else a).sum()
+
+        view = self._discontiguous_tensor((3,) * (ndims - 1) + (8,), self.device)
+        b = torch.randn((1,) * (ndims - 1) + (8,), device=self.device)
+
+        class FixedReductionBlocks(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                if not persistent:
+                    kernel_kwargs["fixed_config"] = FixedTritonConfig(
+                        {
+                            "XBLOCK": 1,
+                            **{
+                                f"R{i}_BLOCK": 4 if i == ndims - 1 else 2
+                                for i in range(ndims)
+                            },
+                        }
+                    )
+                return kernel_kwargs
+
+        with V.set_choices_handler(FixedReductionBlocks()):
+            _result, (code,) = self._run_and_compare(
+                fn,
+                view,
+                b,
+                expected_num_block_pointers=2 if broadcast else 1,
+                config_patches={
+                    "triton.max_tiles": ndims,
+                    "triton.persistent_reductions": persistent,
+                },
+                rtol=1e-4,
+                atol=1e-4,
+            )
+        self._assert_reduction_ndims(code, ndims)
+        if not persistent:
+            for i in range(ndims):
+                self.assertIn(f"for r{i}_offset in tl.range(0, r{i}_numel", code)
+
     @test_torchinductor.skip_if_triton_cpu  # Illegal instruction  File; cannot xfail because it crashes process
     def test_2d_reduction_multi_kernel(self):
         """
@@ -2898,6 +2941,136 @@ if GPU_TYPE == "cuda":
             TritonHostSideTMATestCUDA.test_ensure_integral_dims_and_strides_cuda
         )
     )
+
+
+@instantiate_parametrized_tests
+class TestNDPointwiseTiling(InductorTestCase):
+    @requires_gpu()
+    @config.patch(
+        {
+            "triton.max_tiles": 4,
+            "triton.prefer_nd_tiling": True,
+            "triton.use_tensor_descriptor": False,
+        }
+    )
+    @parametrize("block_ptr", [False, subtest(True, decorators=[requires_block_ptr])])
+    @parametrize("shape", [(2, 3, 5, 16), (3, 5, 7, 17)])
+    def test_nd_pointwise_broadcast(self, block_ptr, shape):
+        def fn(a, b, c, d):
+            return a + b + c + d
+
+        inputs = [
+            torch.randn(
+                tuple(n if axis == i else 1 for axis, n in enumerate(shape)),
+                device=GPU_TYPE,
+            )
+            for i in range(4)
+        ]
+        with config.patch({"triton.use_block_ptr": block_ptr}):
+            actual, code = run_and_get_code(torch.compile(fn), *inputs)
+        self.assertEqual(actual, fn(*inputs))
+        source = "\n".join(code)
+        self.assertIn("Z1_BLOCK", source)
+        if block_ptr:
+            self.assertIn("tl.make_block_ptr", source)
+
+    @requires_gpu()
+    @config.patch({"triton.max_tiles": 5, "triton.prefer_nd_tiling": True})
+    def test_nd_pointwise_permute_reshape(self):
+        def fn(x):
+            return x.permute(1, 3, 0, 2).contiguous().reshape(x.shape) + x
+
+        x = torch.randn((3, 7, 5, 15), device=GPU_TYPE)
+        actual, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(actual, fn(x))
+        self.assertIn("Z2_BLOCK", "\n".join(code))
+
+    @unittest.skipIf(
+        not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
+        or torch.version.hip,
+        "Requires CUDA compute capability >= 9.0 and Triton tensor descriptors",
+    )
+    @config.patch(
+        {
+            "triton.max_tiles": 5,
+            "triton.prefer_nd_tiling": True,
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    def test_nd_pointwise_permute_tensor_descriptor(self):
+        def fn(x, y):
+            return x.permute(1, 3, 0, 4, 2) + y
+
+        x = torch.randn((8, 8, 8, 8, 16), device=GPU_TYPE)
+        y = torch.randn((8, 8, 8, 16, 8), device=GPU_TYPE)
+        actual, code = run_and_get_code(torch.compile(fn), x, y)
+        self.assertEqual(actual, fn(x, y))
+        source = "\n".join(code)
+        self.assertIn("Z2_BLOCK", source)
+        self.assertIn("tl.make_tensor_descriptor", source)
+
+    @requires_gpu()
+    @config.patch(
+        {
+            **tiled_reduction_config,
+            "triton.max_tiles": 4,
+            "triton.use_tensor_descriptor": False,
+        }
+    )
+    @parametrize("block_ptr", [False, subtest(True, decorators=[requires_block_ptr])])
+    @parametrize("reduction_ndims", [2, 4])
+    def test_nd_pointwise_permute_broadcast_reduction(self, block_ptr, reduction_ndims):
+        def fn(a, b):
+            permutation = (1, 3, 0, 2, *reversed(range(4, a.ndim)))
+            return (a.permute(permutation) * b).sum(dim=tuple(range(4, a.ndim)))
+
+        reduction_shape = (3, 7, 5, 8)[:reduction_ndims]
+        a = torch.randn((5, 2, 7, 3, *reduction_shape), device=GPU_TYPE)
+        b = torch.randn((2, 3, 1, 1, *reversed(reduction_shape)), device=GPU_TYPE)
+        with config.patch({"triton.use_block_ptr": block_ptr}):
+            actual, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(actual, fn(a, b), rtol=1e-4, atol=1e-4)
+        source = "\n".join(code)
+        self.assertEqual(source.count("@triton.jit"), 1)
+        self.assertIn("Z1_BLOCK", source)
+        self.assertIn(f"R{reduction_ndims - 1}_BLOCK", source)
+        if block_ptr:
+            self.assertIn("tl.make_block_ptr", source)
+
+    @requires_gpu()
+    @config.patch({"cpp_wrapper": True, "triton.prefer_nd_tiling": True})
+    @parametrize("rank", [4, 5])
+    def test_nd_pointwise_cpp_wrapper(self, rank):
+        def fn(a, b):
+            return a + b
+
+        shape = (3,) * (rank - 1) + (17,)
+        a = torch.randn(
+            tuple(n if i % 2 else 1 for i, n in enumerate(shape)), device=GPU_TYPE
+        )
+        b = torch.randn(
+            tuple(1 if i % 2 else n for i, n in enumerate(shape)), device=GPU_TYPE
+        )
+        with config.patch({"triton.max_tiles": rank}):
+            actual, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(actual, fn(a, b))
+        self.assertIn(f"Z{rank - 3}_BLOCK", "\n".join(code))
+
+    @requires_gpu()
+    @config.patch({"triton.max_tiles": 4, "triton.prefer_nd_tiling": True})
+    def test_nd_pointwise_dynamic_shapes(self):
+        def fn(a, b):
+            return a + b
+
+        compiled = torch.compile(fn, dynamic=True)
+        for m, n in [(3, 5), (7, 9), (0, 5)]:
+            a = torch.randn((m, 1, 7, 17), device=GPU_TYPE)
+            b = torch.randn((1, n, 1, 17), device=GPU_TYPE)
+            actual, code = run_and_get_code(compiled, a, b)
+            self.assertEqual(actual, fn(a, b))
+            if m:
+                self.assertIn("Z1_BLOCK", "\n".join(code))
 
 
 class HostTMAHelperTest(InductorTestCase):

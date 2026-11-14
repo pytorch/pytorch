@@ -7,6 +7,7 @@ lists launch axes from innermost to outermost for template callers.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import TYPE_CHECKING
 
@@ -17,8 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 
-SUPPORTED_POINTWISE_PREFIXES = ("x", "y", "z0_")
-REDUCTION_PREFIXES = ("r0_", "r1_", "r2_")
+TRITON_LAUNCH_GRID_NDIM = 3
 
 
 def get_axis_prefix(name: str) -> str | None:
@@ -96,12 +96,30 @@ def get_pointwise_prefixes(prefixes: Iterable[str]) -> tuple[str, ...]:
     )
 
 
-def get_max_block(prefix: str, max_blocks: Mapping[str, int]) -> int:
-    """Use the shared Z0_ limit for Z axes and R1_ for unlisted reductions."""
+def get_pointwise_block_product(
+    block_sizes: Mapping[str, int], *, exclude: str | None = None
+) -> int:
+    return math.prod(
+        block_sizes[p] for p in get_pointwise_prefixes(block_sizes) if p != exclude
+    )
+
+
+def get_max_block_prefix(prefix: str, max_blocks: Mapping[str, int]) -> str:
     key = "Z0_" if is_z_prefix(prefix.lower()) else prefix.upper()
     if is_reduction_prefix(prefix.lower()) and key not in max_blocks:
         key = "R1_"
-    return max_blocks[key]
+    return key
+
+
+def get_max_block(prefix: str, max_blocks: Mapping[str, int]) -> int:
+    """Use the shared Z0_ limit for Z axes and R1_ for unlisted reductions."""
+    return max_blocks[get_max_block_prefix(prefix, max_blocks)]
+
+
+def get_z_blocks(config: Mapping[str, int]) -> list[int]:
+    """List single-kernel Z blocks from innermost to outermost."""
+    prefixes = get_z_prefixes(block_to_prefix(k) for k in config) or ("z0_",)
+    return [config.get(f"{p.upper()}BLOCK", 1) for p in prefixes]
 
 
 def block_to_prefix(block: str) -> str:

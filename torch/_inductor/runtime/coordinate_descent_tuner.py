@@ -22,8 +22,9 @@ from .tiling import (
     get_max_block,
     get_pointwise_prefixes,
     get_reduction_prefixes,
-    REDUCTION_PREFIXES,
-    SUPPORTED_POINTWISE_PREFIXES,
+    pointwise_prefixes,
+    reduction_prefixes,
+    TRITON_LAUNCH_GRID_NDIM,
 )
 
 
@@ -132,7 +133,7 @@ class CoordescTuner:
                 f"{p.upper()}BLOCK"
                 for p in reversed(
                     get_pointwise_prefixes(
-                        self.size_hints or SUPPORTED_POINTWISE_PREFIXES
+                        self.size_hints or pointwise_prefixes(TRITON_LAUNCH_GRID_NDIM)
                     )
                 )
             ),
@@ -141,7 +142,9 @@ class CoordescTuner:
             # does not have the R0_BLOCK field to guarantee that.
             *(
                 f"{p.upper()}BLOCK"
-                for p in get_reduction_prefixes(self.size_hints or REDUCTION_PREFIXES)
+                for p in get_reduction_prefixes(
+                    self.size_hints or reduction_prefixes(TRITON_LAUNCH_GRID_NDIM)
+                )
             ),
             # the following 3 are for mm
             "BLOCK_M",
