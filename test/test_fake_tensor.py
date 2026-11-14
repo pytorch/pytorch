@@ -5916,8 +5916,9 @@ class TestFakeTensorPreferDeviceType(TestCase):
 
             with mode:
                 check(expected_device)
-                # C++ modes retain the preference captured at construction;
-                # Python modes read the current config for each conflict.
+                # This Meta-output path uses C++'s captured preference; Python
+                # mode reads live config. Python op_impls also read live config
+                # for C++ modes; see Note [C++ fake fallback].
                 with torch._functorch.config.patch(fake_tensor_prefer_device_type=None):
                     check(expected_device if mode_cls is CppFakeTensorMode else None)
                 check(expected_device)
