@@ -97,6 +97,18 @@ print(model(torch.randn(8, 10, device=device)))
 
 The input at inference time should have the same size, dtype, and stride as the input at export time.
 
+```{note}
+On Windows CPU builds using native MSVC and its VCOMP OpenMP runtime,
+AOTInductor retains the OpenMP runtime until process exit so worker threads cannot
+race its unloading. Model DLLs can still unload after their runners are destroyed,
+and output tensors can outlive the runners.
+
+Recompile existing packages to include this behavior. It relies on the native
+MSVC `omp.h` declarations and excludes Clang and LLVM OpenMP. Retaining the runtime
+does not guarantee that its threads or handles are reclaimed after each model;
+package extraction and temporary-file cleanup are separate concerns.
+```
+
 ## Inference in C++
 
 Next, we use the following example C++ file `inference.cpp` to load the compiled artifact,
