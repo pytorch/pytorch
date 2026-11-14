@@ -9,7 +9,12 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    onlyCPU,
+    skipXPUIf,
+)
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
 from torch.testing._internal.common_utils import (
     find_free_port,
@@ -33,15 +38,6 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
     @property
     def _rank_value(self):
         return self.rank + 1
-
-    def _requires_cuda(self):
-        """Return True when the test variant is NOT cuda.
-
-        MultiProcContinuousTest workers wrap unittest.SkipTest as RuntimeError,
-        so @onlyCUDA / self.skipTest() poison the entire class.  Tests that
-        need NCCL should call this and ``return`` early instead.
-        """
-        return self.device_type != "cuda"
 
     def _skip_if_product_overflows(self, op):
         if op == dist.ReduceOp.PRODUCT and self.world_size > 12:
@@ -222,13 +218,12 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         # If we reach this point, the barrier succeeded without deadlock
         self.assertTrue(True)
 
+    @onlyCPU
     def test_monitored_barrier(self):
         # monitored_barrier is gloo-only; the default PG is gloo only on the
-        # cpu variant (nccl on cuda/xpu), so run there. This drives the full
+        # cpu variant (nccl on cuda, xccl on xpu), so run there. This drives the full
         # dist.monitored_barrier dispatch onto BackendWrapper::monitoredBarrier
         # (the torchcomms reimplementation of ProcessGroupGloo::monitoredBarrier).
-        if self.device_type != "cpu":
-            return
         self.assertEqual(dist.get_backend(self.pg), dist.Backend.GLOO)
         # All ranks check in -> the health-checking barrier returns cleanly.
         dist.monitored_barrier(
@@ -259,27 +254,37 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
+    @onlyAccelerator
     def test_new_group_bare_default_backend_is_auto_qualified(self):
-        if self._requires_cuda():
-            return
         ranks = list(range(self.world_size))
-        ng = dist.new_group(ranks=ranks, backend="nccl")
+        backend = dist.get_default_backend_for_device(self.device_type)
+        ng = dist.new_group(ranks=ranks, backend=backend)
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
+    @skipXPUIf(
+        True,
+        "passes alone, but hangs when run after test_new_group_delegates_to_split_group "
+        "in the same workers (subgroup new_group() under torchcomms): "
+        "https://github.com/intel/torch-xpu-ops/issues/6001",
+    )
+    @onlyAccelerator
     def test_new_group_qualified_backend_passes_through(self):
-        if self._requires_cuda():
-            return
         ranks = list(range(self.world_size))
-        ng = dist.new_group(ranks=ranks, backend="cuda:nccl")
+        backend = dist.get_default_backend_for_device(self.device_type)
+        ng = dist.new_group(ranks=ranks, backend=f"{self.device_type}:{backend}")
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
+    @skipXPUIf(
+        True,
+        "ProcessGroupXCCL.Options has no config knobs equivalent to "
+        "ncclConfig_t: https://github.com/intel/torch-xpu-ops/issues/5385",
+    )
+    @onlyAccelerator
     def test_new_group_with_pg_options(self):
-        if self._requires_cuda():
-            return
         ranks = list(range(self.world_size))
         opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
         opts.config.cga_cluster_size = 2
@@ -289,9 +294,13 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
+    @skipXPUIf(
+        True,
+        "ProcessGroupXCCL.Options has no config knobs equivalent to "
+        "ncclConfig_t: https://github.com/intel/torch-xpu-ops/issues/5385",
+    )
+    @onlyAccelerator
     def test_new_group_sequential_pg_options_produce_distinct_groups(self):
-        if self._requires_cuda():
-            return
         ranks = list(range(self.world_size))
         opts_a = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
         opts_a.config.cga_cluster_size = 2
@@ -1246,6 +1255,102 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             self.assertEqual(comm_a.finalize_calls, 1)
             self.assertEqual(comm_b.finalize_calls, 1)
             self.assertEqual(c10d._world.comms, [])
+
+    def _register_abortable_pg(self, calls, comm, name):
+        # _abort_process_group also looks up the backend of the current
+        # accelerator, so answer for any device.
+        backend = _FakeOtherBackend() if comm is None else _FakeBackendWrapper(comm)
+        pg = self._register_pg({"cuda": backend}, name=name)
+        pg._get_backend.side_effect = lambda dev: backend
+        calls.attach_mock(pg.abort, f"abort_{name}")
+        return pg
+
+    def test_abort_finalizes_comms_and_releases_nvshmem_teams(self):
+        # Releases what destroy_process_group does, but only after the abort,
+        # so that finalizing a comm skips its collective destroy.
+        calls = mock.Mock()
+        comm_a, comm_b = calls.comm_a, calls.comm_b
+        world = self._register_abortable_pg(calls, None, "world")
+        group_a = self._register_abortable_pg(calls, comm_a, "a")
+        self._register_abortable_pg(calls, comm_b, "b")
+        c10d._world.default_pg = world
+        c10d._world.comms.extend([comm_a, comm_b])
+        call = mock.call
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _release_nvshmem_team_pool=calls.release,
+            _unregister_process_group=lambda group_name: None,
+            _unregister_all_process_groups=lambda: None,
+            _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
+            create=True,
+        ):
+            c10d._abort_process_group(group_a)
+            group_a_calls = [call.abort_a(), call.comm_a.finalize(), call.release("a")]
+            self.assertListEqual(calls.mock_calls, group_a_calls)
+            self.assertEqual(c10d._world.comms, [comm_b])
+
+            calls.reset_mock()
+            c10d._abort_process_group()
+            aborts = [call.abort_world(), call.abort_b()]
+            freed = [call.comm_b.finalize(), call.release("world"), call.release("b")]
+            self.assertCountEqual(calls.mock_calls[:2], aborts)
+            self.assertCountEqual(calls.mock_calls[2:], freed)
+            self.assertEqual(c10d._world.comms, [])
+
+    def test_abort_cleanup_continues_when_finalize_and_release_raise(self):
+        calls = mock.Mock()
+        comm_a, comm_b = calls.comm_a, calls.comm_b
+        world = self._register_abortable_pg(calls, None, "world")
+        group_a = self._register_abortable_pg(calls, comm_a, "a")
+        group_b = self._register_abortable_pg(calls, comm_b, "b")
+        c10d._world.default_pg = world
+        c10d._world.comms.extend([comm_a, comm_b])
+        timeout = RuntimeError("Work timed out during finalize")
+        comm_a.finalize.side_effect = comm_b.finalize.side_effect = timeout
+        sticky_error = RuntimeError("CUDA error: unspecified launch failure")
+        calls.release.side_effect = sticky_error
+        finalize_failed = "Failed to finalize TorchComms communicator after abort"
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _release_nvshmem_team_pool=calls.release,
+            _unregister_process_group=lambda group_name: None,
+            _unregister_all_process_groups=lambda: None,
+            _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
+            create=True,
+        ):
+            with self.assertLogs(c10d.logger, level="WARNING") as logs:
+                c10d._abort_process_group(group_a)
+            output = "\n".join(logs.output)
+            self.assertIn(finalize_failed, output)
+            self.assertIn("NVSHMEM team pool of group a", output)
+            calls.release.assert_called_once_with("a")
+            self.assertEqual(c10d._world.comms, [comm_b])
+            self.assertNotIn(group_a, c10d._world.pg_map)
+            self.assertNotIn(group_a, c10d._world.pg_names)
+            self.assertNotIn(group_a, c10d._world.pg_group_ranks)
+            self.assertIn(group_b, c10d._world.pg_map)
+
+            calls.reset_mock()
+            with self.assertLogs(c10d.logger, level="WARNING") as logs:
+                c10d._abort_process_group()
+            output = "\n".join(logs.output)
+            self.assertIn(finalize_failed, output)
+            self.assertIn("NVSHMEM team pool of group world", output)
+            self.assertIn("NVSHMEM team pool of group b", output)
+            calls.release.assert_has_calls(
+                [mock.call("world"), mock.call("b")], any_order=True
+            )
+            self.assertEqual(c10d._world.comms, [])
+            self.assertEqual(c10d._world.pg_map, {})
+            self.assertEqual(c10d._world.pg_names, {})
+            self.assertEqual(c10d._world.pg_group_ranks, {})
+            self.assertIsNone(c10d._world.default_pg)
 
 
 class TestC10dTorchCommsBackendConfig(TestCase):

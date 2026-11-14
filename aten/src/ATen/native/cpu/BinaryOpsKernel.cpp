@@ -659,6 +659,19 @@ void ne_kernel(TensorIteratorBase& iter) {
   }
 }
 
+// std::min and std::max return their first argument when the two compare equal,
+// so they keep the sign of a zero; a hardware min/max does not. Restore `a`
+// where both operands are zeros -- their bitwise or is +-0, which still
+// compares equal to zero.
+template <typename scalar_t>
+Vectorized<scalar_t> keep_zero_sign(
+    const Vectorized<scalar_t>& res,
+    const Vectorized<scalar_t>& a,
+    const Vectorized<scalar_t>& b) {
+  const auto both_zero = (a | b) == Vectorized<scalar_t>(scalar_t(0));
+  return Vectorized<scalar_t>::blendv(res, a, both_zero);
+}
+
 void maximum_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [](bool a, bool b) -> bool { return a || b; });
@@ -688,7 +701,7 @@ void maximum_kernel(TensorIteratorBase& iter) {
                 }
               },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-                return at::vec::maximum(a, b);
+                return keep_zero_sign(at::vec::maximum(a, b), a, b);
               });
         });
   }
@@ -723,7 +736,7 @@ void minimum_kernel(TensorIteratorBase& iter) {
                 }
               },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-                return at::vec::minimum(a, b);
+                return keep_zero_sign(at::vec::minimum(a, b), a, b);
               });
         });
   }

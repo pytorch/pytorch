@@ -16,11 +16,14 @@ from functools import partial
 from numbers import Number
 from typing import (
     Any,
+    assert_never,
     cast,
     ClassVar,
     Literal,
+    Never,
     overload,
     Protocol,
+    Self,
     SupportsFloat,
     SupportsInt,
     TYPE_CHECKING,
@@ -28,15 +31,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import (
-    assert_never,
-    Never,
-    override,
-    ParamSpec,
-    Self,
-    TypedDict,
-    TypeIs,
-)
+from typing_extensions import override, ParamSpec, TypedDict, TypeIs
 from unittest.mock import patch
 
 import sympy
@@ -47,6 +42,7 @@ import torch._library.custom_ops as custom_ops
 import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
+import torch.fx.experimental._config as symbolic_shapes_config
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import identity
@@ -508,6 +504,9 @@ def is_aligned_realized_tensor(x: Buffer | TensorBox, alignment: int) -> bool:
     if (
         not isinstance(x, IRNode)
         or x.maybe_get_stride() is None
+        # FlexibleLayout strides are provisional: the layout can still be frozen in a
+        # different order (e.g. by decide_layout() in ExternKernel.process_kernel).
+        or isinstance(x.maybe_get_layout(), FlexibleLayout)
         or free_unbacked_symbols(x.get_stride())
         or free_unbacked_symbols(x.get_size())
     ):
@@ -1703,11 +1702,15 @@ class Reduction(Loops):
             strides = V.graph.sizevars.stride_hints(
                 j, reduction_vars, list(ranges1.keys())
             )
-            # A read that is constant across the whole reduction (e.g. a per-group
-            # mask broadcast within each group) hits the same address on every
-            # reduction step: it is neither contiguous nor strided along the
-            # reduction, so it abstains instead of voting OUTER.
-            if all(s == 0 for s in strides):
+            # A read that doesn't move over the first reduction steps (e.g. a
+            # per-group mask broadcast within each group) abstains instead of
+            # voting OUTER. Step 1 alone is not enough: x.t() repeat-interleaved
+            # by 2 doesn't move at step 1 but jumps a full row at step 2.
+            zero = dict.fromkeys(ranges1, sympy.S.Zero)
+            if all(s == 0 for s in strides) and all(
+                sympy_subs(j, {**zero, v: 2}) == sympy_subs(j, zero)
+                for v in reduction_vars
+            ):
                 continue
             # A 0 stride does not make a reduction contiguous.
             # This can happen when the reduction ranges contains a 1.
@@ -4415,15 +4418,17 @@ class SliceView(View):
         sizevars = V.graph.sizevars
         dim_size = x.get_size()[dim]
 
-        if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
-            min_func = Min
-            max_func = Max
-        elif any(
-            # Only needed when backed_size_oblivious is on.
-            x.has(sympy.Min, sympy.Max, Min, Max)
-            for x in (start, end, dim_size)
-            if isinstance(x, Expr)
+        if (
+            symbolic_shapes_config.backed_size_oblivious
+            or any(free_unbacked_symbols(x) for x in (start, end, dim_size))
+            or any(
+                x.has(sympy.Min, sympy.Max, Min, Max)
+                for x in (start, end, dim_size)
+                if isinstance(x, Expr)
+            )
         ):
+            # Avoid hint-based comparisons for size-oblivious and unbacked bounds;
+            # preserve symbolic Min/Max already present in the inputs.
             min_func = Min
             max_func = Max
         else:
@@ -8810,32 +8815,19 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_kernel_and_metadata(self) -> tuple[Kernel, Any, list[str], list[str]]:
         from triton.runtime.autotuner import Autotuner
 
-        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            get_reset_to_zero_args,
+            get_restore_value_args,
+            kernel_side_table,
+        )
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
         configs = []
         restore_value_args: list[str] = []
         reset_to_zero_args: list[str] = []
         if isinstance(kernel, Autotuner):
-            # https://github.com/triton-lang/triton/pull/5083
-            # changes kernel.restore_idx to kernel.restore_value
-            if hasattr(kernel, "restore_idx"):
-                restore_value_args.extend(
-                    kernel.fn.arg_names[i] for i in kernel.restore_idx
-                )
-            else:
-                if not hasattr(kernel, "restore_value"):
-                    raise AssertionError('Expected hasattr(kernel, "restore_value")')
-                restore_value_args.extend(kernel.restore_value)
-
-            if hasattr(kernel, "reset_idx"):
-                for i in kernel.reset_idx:
-                    reset_to_zero_args.append(kernel.fn.arg_names[i])
-            else:
-                if not hasattr(kernel, "reset_to_zero"):
-                    raise AssertionError('Expected hasattr(kernel, "reset_to_zero")')
-                reset_to_zero_args.extend(kernel.reset_to_zero)
-
+            restore_value_args = get_restore_value_args(kernel)
+            reset_to_zero_args = get_reset_to_zero_args(kernel)
             configs = kernel.configs
             kernel = kernel.fn
 
@@ -9441,9 +9433,10 @@ class DeviceCopy(ExternKernelOut):
         ):
             if V.graph.cpp_wrapper:
                 # Even if x is promoted to be a device constant, we still need to
-                # register device info to construct the correct CppWrapper class later
+                # register device info to construct the correct CppWrapper class later.
+                # Nothing runs on x_device, so cudagraph checks ignore it.
                 V.graph.add_device_info(device)
-                V.graph.add_device_info(x_device)
+                V.graph.add_device_info(x_device, runs_work=False)
             return x.constant_to_device(device)
 
         V.graph.add_device_info(device)
@@ -9881,7 +9874,7 @@ class FallbackKernel(ExternKernelAlloc):
         )
 
     def codegen_outputs(self) -> Sequence[Any]:
-        if self.outputs:
+        if self.outputs or isinstance(self.layout, MultiOutputLayout):
             return self.outputs
         if isinstance(self.layout, Layout):
             return [self]
@@ -10206,6 +10199,8 @@ class FallbackKernel(ExternKernelAlloc):
             wrapper.generate_fallback_kernel(self)
 
         self.codegen_unbacked_symbol_defs(wrapper)
+        # After the unbacked symbol defs, which may read an unused output's size.
+        wrapper.codegen_free_unused_outputs(self)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
             self.codegen_alignment_asserts(wrapper)
@@ -11289,7 +11284,10 @@ class StorageBox(MutableBox):
                     return True
             if self.has_large_inner_fn():
                 return True
-            return graph_reuse and self.num_reads() > config.realize_reads_threshold
+            broadcast_reuse = users >= config.realize_broadcast_reuse_threshold
+            return (graph_reuse or broadcast_reuse) and (
+                self.num_reads() > config.realize_reads_threshold
+            )
         return False
 
     def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:
@@ -12251,6 +12249,14 @@ class _CollectiveKernel(FallbackKernel):
 
     def has_side_effects(self) -> bool:
         return True
+
+    def codegen_outputs(self) -> Sequence[Any]:
+        # See NOTE: [special handling of all_reduce_coalesced_'s return value]
+        # Collective lowerings such as batch_p2p_ops carry list returns as
+        # mutation outputs, so empty `outputs` does not mean an empty return.
+        if not self.outputs and isinstance(self.layout, MultiOutputLayout):
+            return self.mutation_outputs
+        return super().codegen_outputs()
 
     # This is identical to FallbackKernel.set_cpp_kernel(), minus the
     # part that checks against input aliasing and mutation.
