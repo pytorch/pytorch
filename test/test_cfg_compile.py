@@ -3713,6 +3713,13 @@ class RegionCounting(torch.nn.Module):
         return self.inner(x)
 
 
+class RegionCountingQuietly(RegionCounting):
+    def forward(self, x):
+        # Not through a method of the module.
+        vars(self)["calls"] += 1
+        return self.inner(x)
+
+
 class RegionLayers(torch.nn.Module):
     # A stack of layers behind a branch on data, so that each layer is a
     # region of its own.
@@ -4093,8 +4100,11 @@ class TestCfgRegions(TestCase):
             # A submodule replaced by one of another shape.
             model.fc = torch.nn.Linear(4 * 6 * 6, 7)
             check()
+            # A parameter taken away, without a method of the module.
+            model.fc._parameters["bias"] = None
+            check()
         (region,) = self.compiled_regions(compiled)
-        self.assertEqual(region["variants"], 4)
+        self.assertEqual(region["variants"], 5)
 
     def test_frozen_parameter(self):
         torch.manual_seed(0)
@@ -4140,6 +4150,54 @@ class TestCfgRegions(TestCase):
         # The call below the store is a graph.
         (region,) = self.compiled_regions(compiled)
         self.assertTrue(region["where"].startswith("RegionCounting.forward"))
+
+    def test_module_changed_without_one_of_its_methods(self):
+        # A trace runs the code of the call on the module itself. What it
+        # does to the module is taken back, and the call is not a region.
+        torch.manual_seed(0)
+        model = RegionCountingQuietly().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for i in range(8):
+                x = torch.randn(2, 3, 6, 6)
+                self.assertEqual(compiled(model, x), model.inner(x), atol=0, rtol=0)
+                self.assertEqual(model.calls, i + 1)
+        (reason,) = self.left_to_vm(compiled, "region_infer")
+        self.assertIn("changes a module the region was given", reason)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("RegionCountingQuietly.forward"))
+
+    def test_nothing_of_nn_module_is_replaced(self):
+        # A region notices a change of a module by looking at the module, not
+        # by wrapping what changes it: torch.compile, for one, traces
+        # Module.__setattr__ and has to find the one it knows.
+        class MakesAModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return torch.nn.Softmax(dim=-1)(self.linear(x).sin().cos())
+
+        def f(model, x):
+            return model(x)
+
+        before = {
+            name: vars(torch.nn.Module)[name]
+            for name in ("__setattr__", "__delattr__", "add_module", "register_buffer")
+        }
+        backward = vars(torch.Tensor)["backward"]
+        model, x = MakesAModule(), torch.randn(2, 4)
+        compiled = torch.cfg_compile(f, backend="aot_eager", fallback=False)
+        for _ in range(5):
+            self.assertEqual(compiled(model, x), f(model, x), atol=0, rtol=0)
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
+        for name, function in before.items():
+            self.assertIs(vars(torch.nn.Module)[name], function)
+        self.assertIs(vars(torch.Tensor)["backward"], backward)
+        self.assertNotIn("grad", vars(torch.Tensor))
+        dynamo = torch.compile(f, backend="eager")
+        self.assertEqual(dynamo(model, x), f(model, x))
 
     def test_module_with_a_hook(self):
         torch.manual_seed(0)
