@@ -692,9 +692,15 @@ def _create_fake_pg(common_opts, backend_opts):
 
 
 def _register_fake_backend() -> None:
+    # Include a PrivateUse1 backend only if its module is already loaded
+    # when registration runs; later module loads do not refresh registration.
+    devices = ["cpu", "cuda", "hpu", "xpu"]
+    privateuse1 = torch._C._get_privateuse1_backend_name()
+    if hasattr(torch, privateuse1):
+        devices.append(privateuse1)
     dist.Backend.register_backend(
         dist.Backend.FAKE,
         _create_fake_pg,
         extended_api=True,
-        devices=["cpu", "cuda", "hpu", "xpu"],
+        devices=devices,
     )
