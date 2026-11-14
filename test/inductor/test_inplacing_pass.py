@@ -14,7 +14,10 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._inductor import inductor_prims
 from torch._inductor.compile_fx import compile_fx_inner
-from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._inductor.fx_passes.reinplace import (
+    reinplace_inplaceable_ops,
+    reinplace_inplaceable_ops_core,
+)
 from torch._inductor.fx_utils import FakeTensorUpdater, get_node_storage
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.virtualized import V
@@ -1076,6 +1079,160 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         finally:
             if my_wait_functional._opoverload in inplaceable_ops:
                 del inplaceable_ops[my_wait_functional._opoverload]
+
+    @parametrize("layout", ["stacked", "per_layer"])
+    def test_index_copy_into_view_of_input(self, layout):
+        # https://github.com/pytorch/pytorch/issues/203980
+        def f(cache, pos, x):
+            for i in range(3):
+                cache[i][0].index_copy_(1, pos, x + i)
+
+        def make_cache():
+            if layout == "stacked":
+                return torch.zeros(3, 1, 2, 16, 8, device=device)
+            return [torch.zeros(1, 2, 16, 8, device=device) for _ in range(3)]
+
+        pos = torch.tensor([3], device=device)
+        x = torch.randn(2, 1, 8, device=device)
+        expected, actual = make_cache(), make_cache()
+        f(expected, pos, x)
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            torch.compile(f, fullgraph=True)(actual, pos, x)
+        post_grad_graphs = log_stream.getvalue()
+
+        # Each write goes straight into the cache: no clone of the view, no
+        # scatter back into the input.
+        self.assertEqual(post_grad_graphs.count("aten.index_put_.default"), 3)
+        self.assertEqual(post_grad_graphs.count("aten.index_put.default"), 0)
+        self.assertEqual(post_grad_graphs.count("aten.copy_.default"), 0)
+        self.assertEqual(actual, expected)
+
+    def test_index_put_into_view_of_input_then_read(self):
+        # The values read the rows being written, and the view is read after.
+        def f(cache, pos, q):
+            out = []
+            for i in range(cache.size(0)):
+                layer = cache[i][0]
+                layer[:, pos] = layer[:, pos.flip(0)] * 2
+                out.append(q @ layer.transpose(-1, -2))
+            return out
+
+        cache = torch.randn(2, 1, 2, 16, 8, device=device)
+        pos = torch.tensor([3, 5], device=device)
+        q = torch.randn(2, 1, 8, device=device)
+        expected_cache, actual_cache = cache.clone(), cache.clone()
+        expected = f(expected_cache, pos, q)
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            actual = torch.compile(f, fullgraph=True)(actual_cache, pos, q)
+        post_grad_graphs = log_stream.getvalue()
+
+        self.assertEqual(post_grad_graphs.count("aten.index_put_.default"), 2)
+        self.assertEqual(post_grad_graphs.count("aten.index_put.default"), 0)
+        self.assertEqual(post_grad_graphs.count("aten.copy_.default"), 0)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_cache, expected_cache)
+
+    @parametrize(
+        "case",
+        [
+            "reinplaced",
+            "reinplaced_unsafe_index_put",
+            "read_before_scatter",
+            "read_after_scatter",
+            "index_put_has_other_user",
+            "different_view",
+            "base_not_input",
+            "no_copy_back",
+            "values_alias_base",
+            "copy_into_view_before_scatter",
+            "copy_back_of_other_value",
+            "copy_back_of_input_itself",
+            "two_copies_into_input",
+        ],
+    )
+    def test_index_put_into_view_scattered_back(self, case):
+        unsafe = case == "reinplaced_unsafe_index_put"
+        op = aten._unsafe_index_put.default if unsafe else aten.index_put.default
+        inplace_op = {
+            aten.index_put.default: aten.index_put_.default,
+            aten._unsafe_index_put.default: inductor_prims._unsafe_index_put_,
+        }[op]
+
+        def f(cache, pos, val, other):
+            base = aten.mul.Tensor(cache, 2) if case == "base_not_input" else cache
+            view = aten.select.int(base, 0, 0)
+            if case == "values_alias_base":
+                val = aten.slice.Tensor(aten.select.int(base, 0, 1), 0, 0, 1)
+            updated = op(view, [pos], val)
+            out = []
+            if case == "read_before_scatter":
+                out.append(aten.sin.default(view))
+            if case == "index_put_has_other_user":
+                out.append(aten.sin.default(updated))
+            if case == "copy_into_view_before_scatter":
+                aten.copy_.default(view, other[0])
+            index = 1 if case == "different_view" else 0
+            new_base = aten.select_scatter.default(base, updated, 0, index)
+            if case == "read_after_scatter":
+                out.append(aten.sin.default(view))
+            if case in ("base_not_input", "no_copy_back"):
+                out.append(new_base)
+            elif case == "copy_back_of_other_value":
+                out.append(aten.select.int(new_base, 0, 0))
+                aten.copy_.default(cache, other)
+            elif case == "copy_back_of_input_itself":
+                out.append(aten.sin.default(new_base))
+                aten.copy_.default(cache, cache)
+            elif case == "two_copies_into_input":
+                aten.copy_.default(cache, new_base)
+                updated = op(aten.select.int(new_base, 0, 1), [pos], val)
+                out.append(aten.sin.default(cache))
+                new_base = aten.select_scatter.default(new_base, updated, 0, 1)
+                aten.copy_.default(cache, new_base)
+            else:
+                aten.copy_.default(cache, new_base)
+            return out
+
+        args = (
+            torch.randn(2, 4, 8, device=device),
+            torch.tensor([1], device=device),
+            torch.randn(1, 8, device=device),
+            torch.randn(2, 4, 8, device=device),
+        )
+        gm = make_fx(f, tracing_mode="fake")(*args)
+        # As after functionalization, later uses of a copy_ dst read the dst.
+        copies = gm.graph.find_nodes(op="call_function", target=aten.copy_.default)
+        for node in copies:
+            node.replace_all_uses_with(node.args[0])
+        fake_mode = detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        if case.startswith("reinplaced"):
+            self.assertIn(inplace_op, targets)
+            self.assertNotIn(op, targets)
+            self.assertNotIn(aten.select_scatter.default, targets)
+            self.assertNotIn(aten.copy_.default, targets)
+            if unsafe:
+                # prims._unsafe_index_put_ can't be run outside of Inductor.
+                return
+        else:
+            self.assertIn(op, targets)
+            self.assertNotIn(inplace_op, targets)
+
+        expected_args = [a.clone() for a in args]
+        actual_args = [a.clone() for a in args]
+        self.assertEqual(gm(*actual_args), f(*expected_args))
+        self.assertEqual(actual_args, expected_args)
 
 
 instantiate_parametrized_tests(TestReinplacingPassCorrectness)

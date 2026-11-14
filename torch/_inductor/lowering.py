@@ -5270,6 +5270,9 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
             # the load of `values` might contain modified value from the store of `self`.
             # To address this, store values in a temporary buffer in such cases.
             values.realize()
+        for index in indices:  # the same holds for indices computed from self
+            if index is not None and ir.try_get_name(self) in index.get_read_names():
+                index.realize()
 
     # Dispatch to masked fill for single boolean index with single value
     if (

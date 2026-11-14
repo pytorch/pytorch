@@ -1937,6 +1937,25 @@ class CPUReproTests(TestCase):
             torch.compile(fn)(y_clone, index0_clone, index1_clone)
             self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
 
+    @config.patch({"cpp.simdlen": 1})
+    def test_index_put_indices_read_self(self):
+        # The indices are computed from the tensor being written, so they must
+        # be computed before the scatter writes it. The second case writes a
+        # view of an input (https://github.com/pytorch/pytorch/issues/203980).
+        def fn(x, z):
+            x.index_put_((x.neg() + 3,), z)
+
+        def fn_view(x, z):
+            x[0].index_put_((x[0].neg() + 3,), z)
+
+        for f, x in ((fn, torch.arange(4)), (fn_view, torch.arange(4).view(1, 4))):
+            torch._dynamo.reset()
+            z = torch.zeros(4, dtype=torch.int64)
+            expected, actual = x.clone(), x.clone()
+            f(expected, z)
+            torch.compile(f)(actual, z)
+            self.assertEqual(actual, expected)
+
     def test_index_put_bool_accumulate_codegen(self):
         # https://github.com/pytorch/pytorch/issues/113692
         def fn(x, index, values):
