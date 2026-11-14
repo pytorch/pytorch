@@ -7387,8 +7387,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 ShapeProp(gm)
 
-    # Dynamo keeps references that stop the mode being collected
-    @xfailIfTorchDynamo
     @parametrize(
         "callback,propagate_real_tensors",
         [
