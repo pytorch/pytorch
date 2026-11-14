@@ -18,6 +18,7 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import (
+    _validate_and_convert_non_fake_tensors,
     FakeTensor,
     FakeTensorMode,
     is_fake_tensor,
@@ -1356,7 +1357,7 @@ def register_fake(hop, fn=None, *, skip_cache=False):
         @_fake_mode_handler
         def cpp_fake_tensor_mode(mode, *args, **kwargs):
             flat_args, args_spec = pytree.tree_flatten((args, kwargs))
-            flat_args, _ = FakeTensorMode.validate_and_convert_non_fake_tensors(
+            flat_args, _ = _validate_and_convert_non_fake_tensors(
                 mode,
                 hop,
                 mode.fake_tensor_converter,
