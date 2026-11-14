@@ -7267,7 +7267,8 @@ add_docstr(
 nanmean(input, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes the mean of all `non-NaN` elements along the specified dimensions.
-Input must be floating point or complex.
+Input must be floating point or complex. Complex inputs are supported on CUDA,
+but not on CPU.
 
 This function is identical to :func:`torch.mean` when there are no `NaN` values
 in the :attr:`input` tensor. In the presence of `NaN`, :func:`torch.mean` will
