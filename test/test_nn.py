@@ -10266,6 +10266,94 @@ class TestNNDeviceType(NNTestCase):
         t_out = F.interpolate(t_in, size=(2, 2), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
 
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("mode", ["bilinear", "bicubic", "lanczos"])
+    @parametrize_test("antialias", [True, False])
+    @parametrize_test("num_channels", [1, 3, 5])
+    @dtypes(torch.float32, torch.uint8)
+    @onlyNativeDeviceTypes
+    @decorateIf(
+        unittest.skip('Lanczos mode is only supported on CPU'),
+        lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type != 'cpu',
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode requires antialias=True'),
+        lambda p: p['mode'] == 'lanczos' and not p['antialias'],
+    )
+    @decorateIf(
+        unittest.skip('uint8 is only supported on CPU'),
+        lambda p: p['dtype'] == torch.uint8 and torch.device(p['device']).type != 'cpu',
+    )
+    def test_upsamplingBiMode2d_singleton_spatial_dim(
+        self, device, dtype, memory_format, mode, antialias, num_channels
+    ):
+        # Regression test for https://github.com/pytorch/pytorch/issues/200568
+        # When the output width is 1 the CPU separable kernel used the indices
+        # and weights of the first output row for every output row, so all rows
+        # were identical. The same happened in channels_last with
+        # num_channels == 1. The separable kernel is used for antialias=True,
+        # and for uint8 whenever the AVX2/NEON uint8 kernels do not apply
+        # (e.g. num_channels > 4 on AVX2, so num_channels == 5 reaches it on
+        # x86 CI). The other configurations check the non-separable kernels.
+        # The single output pixel cases also cover the AVX2 uint8 kernel, which
+        # mixed up its packed and unpacked layouts when the output spatial dims
+        # are all 1 (contiguous and channels_last are indistinguishable then).
+        kwargs = dict(mode=mode, align_corners=False, antialias=antialias)
+
+        def to_mf(t):
+            return t.contiguous(memory_format=memory_format)
+
+        def reference(x, out_size):
+            # Resize one spatial dim at a time, like the separable CPU kernel does,
+            # but duplicate the singleton spatial dim first so that the
+            # interpolated dim is never the innermost loop of the kernel.
+            ih, iw = x.shape[-2:]
+            oh, ow = out_size
+            if ow != iw:
+                rep_h = 2 if ih == 1 else 1
+                x = F.interpolate(to_mf(x.repeat(1, 1, rep_h, 1)), size=(ih * rep_h, ow), **kwargs)
+                x = x[:, :, :ih, :]
+            if oh != ih:
+                rep_w = 2 if ow == 1 else 1
+                x = F.interpolate(to_mf(x.repeat(1, 1, 1, rep_w)), size=(oh, ow * rep_w), **kwargs)
+                x = x[:, :, :, :ow]
+            return x
+
+        if dtype == torch.uint8:
+            tol = dict(atol=1, rtol=0)
+        else:
+            tol = dict(atol=1e-5, rtol=1e-5)
+
+        torch.manual_seed(0)
+        # (input_h, input_w, output_h, output_w)
+        for in_h, in_w, out_h, out_w in [
+            (2, 1, 4, 1),  # output width 1, upsample height (the reported case)
+            (5, 1, 3, 1),  # output width 1, downsample height
+            (1, 1, 3, 1),  # single input pixel column
+            (3, 1, 1, 1),  # single output pixel, vertical pass only
+            (1, 3, 1, 1),  # single output pixel, horizontal pass only
+            (1, 5, 1, 3),  # output height 1, horizontal pass only
+            (4, 3, 2, 1),  # two passes, width 1 intermediate for the vertical pass
+            (3, 4, 1, 2),  # two passes, output height 1
+        ]:
+            if dtype == torch.uint8:
+                # keep away from 0 and 255 so that bicubic/lanczos overshoot does not clip
+                in_t = torch.randint(30, 220, (2, num_channels, in_h, in_w), dtype=dtype, device=device)
+            else:
+                in_t = torch.rand(2, num_channels, in_h, in_w, dtype=dtype, device=device)
+            in_t = to_mf(in_t)
+
+            out_t = F.interpolate(in_t, size=(out_h, out_w), **kwargs)
+            expected = reference(in_t, (out_h, out_w))
+            self.assertEqual(out_t, expected, **tol, msg=f"size=({in_h}, {in_w}) -> ({out_h}, {out_w})")
+
+        if mode == "bilinear" and dtype == torch.float32:
+            # Explicit values for the reported case
+            in_t = torch.tensor([0., 1.], device=device).reshape(1, 1, 2, 1)
+            out_t = F.interpolate(to_mf(in_t.expand(1, num_channels, 2, 1)), size=(4, 1), **kwargs)
+            expected = torch.tensor([0., 0.25, 0.75, 1.], device=device).reshape(1, 1, 4, 1)
+            self.assertEqual(out_t, expected.expand(1, num_channels, 4, 1))
+
     @onlyAccelerator
     def test_upsamplingBicubic2d_many_channels(self, device):
         # Exercises the parallelized batch/channel kernel for small spatial
