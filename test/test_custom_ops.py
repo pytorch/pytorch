@@ -13,6 +13,7 @@ import typing
 import unittest
 from functools import partial
 from pathlib import Path
+from types import ModuleType
 from typing import *  # noqa: F403
 from unittest.mock import patch
 
@@ -6266,7 +6267,131 @@ Please use `add.register_fake` to add an fake impl.""",
                 torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
 
 
+@instantiate_parametrized_tests
 class TestLibrarySourceLocation(TestCase):
+    @parametrize(
+        "caller",
+        [
+            "interactive",
+            "exec",
+            "unregistered",
+            "matching",
+            "mismatched",
+            "mismatched_virtual",
+            "mismatched_pyc",
+            "torchvision",
+        ],
+    )
+    def test_register_fake_caller_module(self, caller):
+        # quantized::add is defined in C++ with m.set_python_module.
+        op = torch.ops.quantized.add.default
+        expected_module, _ = torch._C._dispatch_pystub("quantized::add", "")
+        name = {
+            "interactive": "__main__",
+            "matching": expected_module,
+            "torchvision": "torchvision._test_fake",
+        }.get(caller, "_test_fake_module")
+        module = ModuleType(name)
+        filename = f"/{name}.py"
+        if caller != "interactive":
+            module.__file__ = filename
+        if caller in ("interactive", "exec"):
+            filename = "<string>"
+        if caller == "mismatched_virtual":
+            module.__file__ = filename = "<test_fake_caller>"
+        elif caller == "mismatched_pyc":
+            module.__file__ = filename + "c"
+        registered = {} if caller == "unregistered" else {name: module}
+        calls = []
+
+        def fake(a, b, scale, zero_point):
+            calls.append(True)
+            return a.new_empty((a.shape[0], b.shape[1]))
+
+        with torch.library._scoped_library("quantized", "FRAGMENT") as lib:
+            module.__dict__.update(torch=torch, lib=lib, fake=fake)
+            with patch.dict(sys.modules, registered):
+                exec(
+                    compile(
+                        'torch.library.register_fake("quantized::add", fake, lib=lib)',
+                        filename,
+                        "exec",
+                    ),
+                    module.__dict__,
+                )
+            with torch._subclasses.fake_tensor.FakeTensorMode():
+                a, b = torch.empty(2, 3), torch.empty(3, 5)
+                if caller.startswith("mismatched"):
+                    with self.assertRaisesRegex(RuntimeError, "actually found in"):
+                        op(a, b, 1.0, 0)
+                    self.assertEqual(calls, [])
+                else:
+                    self.assertEqual(op(a, b, 1.0, 0).shape, (2, 5))
+                    self.assertEqual(calls, [True])
+
+    def test_get_source_stacklevel(self):
+        def caller():
+            return torch._library.utils.get_source(2)
+
+        line = sys._getframe().f_lineno + 1
+        source = torch._library.utils.get_source(1)
+        self.assertEqual(source, f"{__file__}:{line}")
+
+        line = sys._getframe().f_lineno + 1
+        source = caller()
+        self.assertEqual(source, f"{__file__}:{line}")
+
+    def test_register_fake_with_unrelated_lazy_module(self):
+        # Use a fresh interpreter so inspect's module cache cannot hide a scan
+        # of sys.modules. The unrelated module must remain uninitialized.
+        script = """\
+import importlib.util
+import sys
+import tempfile
+from pathlib import Path
+
+import torch
+from torch.testing._internal.common_utils import TestCase
+
+check = TestCase()
+lib = torch.library.Library("_test_lazy_source", "FRAGMENT")
+lib.define("foo(Tensor x) -> Tensor")
+
+def fake(x):
+    return torch.empty_like(x)
+
+with tempfile.TemporaryDirectory() as directory:
+    path = Path(directory) / "unrelated_lazy_module.py"
+    path.write_text("raise ImportError('unrelated lazy module was loaded')\\n")
+    spec = importlib.util.spec_from_file_location("_test_unrelated_lazy_module", path)
+    spec.loader = importlib.util.LazyLoader(spec.loader)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    try:
+        line = sys._getframe().f_lineno + 1
+        torch.library.register_fake("_test_lazy_source::foo", fake, lib=lib)
+        check.assertIs(type(module), importlib.util._LazyModule)
+    finally:
+        sys.modules.pop(spec.name, None)
+
+entry = torch._library.simple_registry.singleton.find("_test_lazy_source::foo")
+check.assertEqual(entry.fake_impl.kernel.source, f"<string>:{line}")
+with torch._subclasses.fake_tensor.FakeTensorMode():
+    x = torch.empty(2, 3)
+    result = torch.ops._test_lazy_source.foo(x)
+    check.assertEqual(result.shape, x.shape)
+    check.assertEqual(result.dtype, x.dtype)
+    check.assertEqual(result.device, x.device)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_library_source_location(self):
         # Library.__init__ uses sys._getframe(1) to capture the caller's
         # filename and line number. Verify this works correctly by creating

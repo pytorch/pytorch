@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-import inspect
+import os
 import re
 import sys
 import weakref
 from collections.abc import Callable, Sequence
+from types import FrameType, ModuleType
 from typing import Any, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
@@ -333,10 +334,7 @@ class Library:
 
         source = torch._library.utils.get_source(_stacklevel + 1)
         frame = sys._getframe(_stacklevel)
-        caller_module = inspect.getmodule(frame)
-        # Can be none if you call register_fake from somewhere there isn't a module
-        # (e.g. __main__)
-        caller_module_name = None if caller_module is None else caller_module.__name__
+        caller_module_name = _get_pystub_module(frame)
 
         # TODO(rzou): We're gonna need to stage this change with torchvision,
         # since torchvision is github first.
@@ -1657,6 +1655,26 @@ def register_vmap(
         return register
     else:
         return register(func)
+
+
+def _get_pystub_module(frame: FrameType) -> str | None:
+    name = frame.f_globals.get("__name__")
+    module = sys.modules.get(name) if isinstance(name, str) else None
+    if not isinstance(module, ModuleType):
+        return None
+    # Read only this module's namespace, without invoking a lazy module loader.
+    filename = object.__getattribute__(module, "__dict__").get("__file__")
+    source = frame.f_code.co_filename
+    if not isinstance(filename, str) or not filename:
+        return None
+    if filename.endswith(".pyc"):
+        filename = filename[:-1]
+    # exec can use a module's globals while running code from another filename.
+    if source == filename or os.path.normcase(
+        os.path.realpath(source)
+    ) == os.path.normcase(os.path.realpath(filename)):
+        return name
+    return None
 
 
 # If the op was defined in C++, then we want to make sure there was an
