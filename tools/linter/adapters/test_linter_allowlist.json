@@ -376,7 +376,6 @@
   "test/inductor/test_custom_lowering.py",
   "test/inductor/test_custom_op_autotune.py",
   "test/inductor/test_custom_op_out_lowering.py",
-  "test/inductor/test_custom_partitioner_fn.py",
   "test/inductor/test_custom_post_grad_passes.py",
   "test/inductor/test_cutedsl_grouped_mm.py",
   "test/inductor/test_cutedsl_template.py",
