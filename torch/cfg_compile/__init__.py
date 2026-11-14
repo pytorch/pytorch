@@ -60,15 +60,16 @@ import os
 import sys
 import types
 import warnings
+import weakref
 from collections.abc import Callable, Iterable
 from typing import Any
 
 import torch
 
-from . import _shortcuts
+from . import _regions, _shortcuts
 
 
-__all__ = ["Pipeline", "Unsupported", "cfg_compile", "is_available"]
+__all__ = ["Pipeline", "Unsupported", "cfg_compile", "is_available", "regions"]
 
 Pass = str | Callable[[Any], bool]
 
@@ -189,6 +190,9 @@ def cfg_compile(
     callees: bool = True,
     shortcuts: bool = True,
     demote: bool | None = None,
+    backend: str | Callable[..., Any] | None = None,
+    region_min_ops: int = 4,
+    region_max_variants: int = 32,
     max_versions: int = 4,
     max_respecializations: int = 6,
 ) -> Any:
@@ -234,6 +238,29 @@ def cfg_compile(
             ``TORCH_CFG_COMPILE_DEMOTE=0`` turns the default off, for looking
             at the VM itself.
             A callee the compiler does not support runs in the interpreter.
+        backend: hand the tensor work of each basic block to a graph compiler.
+            ``"inductor"`` traces every run of instructions of a block that a
+            trace can capture, together with what those instructions call,
+            into one ATen graph, and compiles it with AOTAutograd and
+            Inductor: with gradients enabled, the tensors such a region
+            returns have one compiled autograd function as their ``grad_fn``.
+            The outermost region that traces is the one that is compiled;
+            where an instruction does not trace, the VM runs it and the blocks
+            of what it calls are tried in turn. ``"aot_eager"`` builds the
+            same graphs and runs them with the eager kernels. A callable
+            ``backend(graph_module, example_inputs)`` returning a callable is
+            used as given. ``regions()`` on the result reports what was
+            compiled and what was left to the VM, with the reason. See
+            ``torch/cfg_compile/_regions.py`` for what a compiled region
+            checks on every call and what it does not.
+        region_min_ops: a region with fewer tensor operations than this is
+            left to the VM, whose direct kernel calls are cheaper than
+            entering a compiled graph.
+        region_max_variants: how many combinations of inputs (shapes, dtypes,
+            modules, modes) a region is compiled for before further ones run
+            its instructions as they are. Combinations that trace to the same
+            graph, as the layers of a model do when a region is called with
+            one after the other, share what the backend made of it.
         max_versions: how many specialized versions a block can have at once.
         max_respecializations: how many times a block may be profiled and
             specialized again before it settles on code without guards.
@@ -255,6 +282,9 @@ def cfg_compile(
         "callees": callees,
         "shortcuts": shortcuts,
         "demote": demote,
+        "backend": backend,
+        "region_min_ops": region_min_ops,
+        "region_max_variants": region_max_variants,
         "max_versions": max_versions,
         "max_respecializations": max_respecializations,
     }
@@ -271,8 +301,17 @@ def cfg_compile(
     if pipeline is None:
         pipeline = Pipeline.default()
     runtime = _load_runtime()
+    regions = None
+    if backend is not None:
+        if not specialize:
+            raise ValueError("backend= needs specialize=True: regions are a pass")
+        regions = _regions.make_pass(
+            runtime, backend, region_min_ops, region_max_variants, warmup=0
+        )
+        # First, while the instructions are still the ones of the block.
+        pipeline = Pipeline([regions, *pipeline.passes])
     try:
-        return runtime.compile(
+        compiled = runtime.compile(
             fn,
             list(pipeline.passes),
             specialize=specialize,
@@ -286,6 +325,9 @@ def cfg_compile(
             max_versions=max_versions,
             max_respecializations=max_respecializations,
         )
+        if regions is not None:
+            _region_passes[compiled] = regions
+        return compiled
     except NotImplementedError as e:
         if not fallback:
             raise Unsupported(f"{fn.__qualname__}: {e}") from None
@@ -293,6 +335,28 @@ def cfg_compile(
             f"torch.cfg_compile left {fn.__qualname__} uncompiled: {e}", stacklevel=2
         )
         return fn
+
+
+# The region pass of each compiled function that has a backend.
+_region_passes: "weakref.WeakKeyDictionary[Any, _regions.Regions]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def regions(fn: Any) -> list[dict[str, Any]]:
+    """What ``backend=`` made of a compiled function and of what it calls.
+
+    One dict per region, with ``where`` (function, block and instructions),
+    ``state`` (``"compiled"``, or ``"waiting"`` for a region that has not been
+    tried yet), ``variants``, ``compiles`` (how many of the variants went to
+    the backend: the others had the graph of an earlier one), ``ops`` and
+    ``seconds`` spent tracing and compiling; and one per instruction or run of
+    instructions that was left to the VM, with ``state`` ``"vm"`` and the
+    ``reason``.
+    """
+    fn = getattr(fn, "__func__", fn)
+    found = _region_passes.get(fn)
+    return found.report() if found is not None else []
 
 
 class _CallableModule(types.ModuleType):

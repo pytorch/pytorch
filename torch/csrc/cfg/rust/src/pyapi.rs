@@ -178,7 +178,7 @@ pub fn compile(
 
 /// A function compiled to an SSA control-flow graph. Calling it runs the
 /// graph in the VM.
-#[pyclass(module = "torch._cfg_rs", name = "CfgFunction", frozen)]
+#[pyclass(module = "torch._cfg_rs", name = "CfgFunction", frozen, weakref)]
 pub struct CfgFunction {
     inner: Arc<Compiled>,
     wrapped: PyObject,
@@ -349,6 +349,7 @@ impl CfgFunction {
         out.set_item("interpreted_callees", interpreted)?;
         out.set_item("demoted_callees", cf.callees.demoted())?;
         out.set_item("demoted", cf.is_demoted())?;
+        out.set_item("measuring", cf.is_measuring())?;
         out.set_item("log", state.log.clone())?;
         Ok(out.into_any().unbind())
     }
@@ -409,6 +410,12 @@ impl Region {
         Ok(self.parts()?.0.block)
     }
 
+    /// The file the function of the block is defined in.
+    #[getter]
+    fn filename(&self) -> PyResult<String> {
+        Ok(self.parts()?.1.func().filename.clone())
+    }
+
     /// Whether the pass may add guards based on what was observed.
     #[getter]
     fn speculate(&self) -> PyResult<bool> {
@@ -435,6 +442,7 @@ impl Region {
             u.inst.op.for_each_use(|v| uses.push(v));
             d.set_item("uses", uses)?;
             d.set_item("text", text)?;
+            d.set_item("replayable", u.origin as usize == i && u.inst.op.is_replayable())?;
             out.append(d)?;
         }
         Ok(out.into_any().unbind())
@@ -487,6 +495,100 @@ impl Region {
         Ok(unit.add_guard(cx, cond, before))
     }
 
+    /// What a pass left on this block with `Replay.settle`, or None.
+    #[getter]
+    fn note(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let (unit, cx) = self.parts()?;
+        let state = cx.cf.state.borrow();
+        Ok(match &state.blocks[unit.block].note {
+            Some(note) => unsafe { PyObject::from_borrowed_ptr(py, note.as_ptr()) },
+            None => py.None(),
+        })
+    }
+
+    /// Leaves an object on the block for the next time a pass sees it.
+    #[setter]
+    fn set_note(&self, note: &Bound<'_, PyAny>) -> PyResult<()> {
+        let (unit, cx) = self.parts()?;
+        cx.cf.state.borrow_mut().blocks[unit.block].note =
+            if note.is_none() { None } else { Some(unsafe { PyObj::from_borrowed(note.as_ptr()) }) };
+        Ok(())
+    }
+
+    /// A handle on the generic instructions start..end of the block, which
+    /// outlives the pass: it can run them again on other values, and says
+    /// which values they take and give.
+    fn replayer(&self, start: usize, end: usize) -> PyResult<Replay> {
+        let (unit, cx) = self.parts()?;
+        let count = cx.func().blocks[unit.block].insts.len();
+        if start >= end || end > count {
+            return Err(PyIndexError::new_err("no such range of instructions"));
+        }
+        // Every Compiled lives in an Arc.
+        let compiled = unsafe {
+            let pointer = cx.cf as *const Compiled;
+            std::sync::Arc::increment_strong_count(pointer);
+            let owned = std::sync::Arc::from_raw(pointer);
+            std::sync::Arc::downgrade(&owned)
+        };
+        Ok(Replay { compiled, block: unit.block, start, end })
+    }
+
+    /// Replaces the instructions start..end, which must still be the generic
+    /// ones, by a call of `callable` with the values the range takes from
+    /// before it (see `Replay.io`), which returns a tuple of the values it
+    /// gives. Returns False if that cannot be done.
+    fn fuse(&self, start: usize, end: usize, callable: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let (unit, cx) = self.parts()?;
+        if start >= end || end > unit.insts.len() {
+            return Err(PyIndexError::new_err("no such range of instructions"));
+        }
+        if unit.insts[start..end].iter().enumerate().any(|(i, u)| u.origin as usize != start + i) {
+            return Ok(false);
+        }
+        let (inputs, outputs) = cx.cf.range_io(unit.block, start, end);
+        let tuple = cx.cf.scratch();
+        let bc = unit.insts[start].inst.bc;
+        // What the range held alive up to some point, it now holds to its
+        // end: the values from before the range, and the ones it gives.
+        let mut defined: Vec<V> = Vec::new();
+        let mut held: Vec<V> = Vec::new();
+        for u in &unit.insts[start..end] {
+            if let Op::Hold(values) = &u.inst.op {
+                for v in values {
+                    if (!defined.contains(v) || outputs.contains(v)) && !held.contains(v) {
+                        held.push(*v);
+                    }
+                }
+            }
+            if u.inst.dst != NONE {
+                defined.push(u.inst.dst);
+            }
+        }
+        let callee = unsafe { PyObj::from_borrowed(callable.as_ptr()) };
+        let mut fused = vec![crate::spec::UInst {
+            inst: Inst { dst: tuple, op: Op::CallObject(callee, inputs), bc, kills: Vec::new() },
+            origin: start as u32,
+            removable: false,
+        }];
+        for (i, output) in outputs.iter().enumerate() {
+            fused.push(crate::spec::UInst {
+                inst: Inst { dst: *output, op: Op::TupleGet(tuple, i as u32), bc, kills: Vec::new() },
+                origin: NONE,
+                removable: false,
+            });
+        }
+        if !held.is_empty() {
+            fused.push(crate::spec::UInst {
+                inst: Inst { dst: NONE, op: Op::Hold(held), bc, kills: Vec::new() },
+                origin: NONE,
+                removable: false,
+            });
+        }
+        unit.insts.splice(start..end, fused);
+        Ok(true)
+    }
+
     /// Replaces the instruction at `index` with the constant True, False or
     /// None.
     fn replace_with_const(&self, index: usize, value: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -512,6 +614,113 @@ impl Region {
         u.inst.op = Op::Const(c);
         Ok(())
     }
+}
+
+/// A range of the generic instructions of a block, to be run again on other
+/// values. Made by `Region.replayer`.
+#[pyclass(module = "torch._cfg_rs", name = "Replay", frozen)]
+pub struct Replay {
+    compiled: std::sync::Weak<Compiled>,
+    block: usize,
+    start: usize,
+    end: usize,
+}
+
+impl Replay {
+    fn compiled(&self) -> PyResult<std::sync::Arc<Compiled>> {
+        self.compiled
+            .upgrade()
+            .ok_or_else(|| PyRuntimeError::new_err("the compiled function no longer exists"))
+    }
+
+    fn check(&self, lo: usize, hi: usize) -> PyResult<()> {
+        if lo < self.start || hi > self.end || lo > hi {
+            return Err(PyIndexError::new_err("outside the range of the replay"));
+        }
+        Ok(())
+    }
+}
+
+#[pymethods]
+impl Replay {
+    #[getter]
+    fn block(&self) -> usize {
+        self.block
+    }
+
+    #[getter]
+    fn start(&self) -> usize {
+        self.start
+    }
+
+    #[getter]
+    fn end(&self) -> usize {
+        self.end
+    }
+
+    /// Name and line of the function, for messages.
+    #[getter]
+    fn name(&self) -> PyResult<String> {
+        let compiled = self.compiled()?;
+        Ok(format!("{} (block {})", compiled.func.qualname, self.block))
+    }
+
+    /// The values the instructions lo..hi take from before them, and the
+    /// ones they define that are needed afterwards, as two lists.
+    fn io(&self, lo: usize, hi: usize) -> PyResult<(Vec<V>, Vec<V>)> {
+        self.check(lo, hi)?;
+        Ok(self.compiled()?.range_io(self.block, lo, hi))
+    }
+
+    /// The instructions lo..hi as text.
+    fn text(&self, lo: usize, hi: usize) -> PyResult<Vec<String>> {
+        self.check(lo, hi)?;
+        let compiled = self.compiled()?;
+        let func = &compiled.func;
+        Ok(func.blocks[self.block].insts[lo..hi].iter().map(|inst| func.op_repr(&inst.op)).collect())
+    }
+
+    /// Runs the instructions lo..hi on the values in `env`, a dict from value
+    /// numbers to objects; afterwards `env` holds the values still needed.
+    /// With `traced`, what the instructions call runs in the interpreter
+    /// instead of compiled. An exception gets the index of the instruction
+    /// that raised it as its attribute `cfg_index`.
+    #[pyo3(signature = (lo, hi, env, traced=false))]
+    fn run(&self, py: Python<'_>, lo: usize, hi: usize, env: &Bound<'_, PyDict>, traced: bool) -> PyResult<()> {
+        self.check(lo, hi)?;
+        let compiled = self.compiled()?;
+        match unsafe { compiled.replay(self.block, lo, hi, env.as_ptr(), traced) } {
+            Ok(()) => Ok(()),
+            Err(index) => {
+                let err = PyErr::fetch(py);
+                let _ = err.value_bound(py).setattr("cfg_index", index);
+                Err(err)
+            }
+        }
+    }
+
+    /// Leaves `note` on the block for the pass and has the block specialized
+    /// again, with that note, before this returns.
+    fn settle(&self, note: &Bound<'_, PyAny>) -> PyResult<()> {
+        let compiled = self.compiled()?;
+        compiled.state.borrow_mut().blocks[self.block].note =
+            Some(unsafe { PyObj::from_borrowed(note.as_ptr()) });
+        compiled.respecialize(self.block);
+        Ok(())
+    }
+}
+
+/// Tells the VM that compiled code changed behind its back: measurements of
+/// compiled code against the interpreter that are under way start over.
+#[pyfunction]
+pub fn plan_changed() {
+    vm::plan_changed();
+}
+
+/// How many blocks on the calling thread are in their profiling run.
+#[pyfunction]
+pub fn profiling_depth() -> usize {
+    vm::profiling_depth()
 }
 
 pub fn run_python_pass(callable: &PyObj, unit: &mut Unit, cx: &PassCx) -> PyResult<bool> {
