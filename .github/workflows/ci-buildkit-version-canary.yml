@@ -10,8 +10,16 @@ concurrency:
   cancel-in-progress: false
 jobs:
   probe:
-    # Inert until exact draft allocation and independent final-tree review.
-    if: ${{ false && github.repository == 'pytorch/pytorch' }}
+    # Exact owned route; normal selected-head approval remains mandatory.
+    if: >-
+      github.repository == 'pytorch/pytorch' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.number == 204886 &&
+      github.event.pull_request.user.login == 'ptdbot' &&
+      github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' &&
+      github.event.pull_request.head.ref == 'ci-buildkit-version-20261113' &&
+      github.event.pull_request.base.repo.full_name == 'pytorch/pytorch' &&
+      github.event.pull_request.base.ref == 'main'
     runs-on: mt-l-x86iavx512-8-64
     timeout-minutes: 5
     container:
@@ -22,6 +30,7 @@ jobs:
         run: |
           python3 -I - <<'PY'
           # AI-assisted temporary diagnostic. Never merge.
+          import contextlib
           import hashlib
           import io
           import json
@@ -35,11 +44,12 @@ jobs:
           import tarfile
           import tempfile
           import time
+          import urllib.error
           import urllib.parse
           import urllib.request
 
-          PR_NUMBER = 0  # Inert until exact allocation and independent receipt review.
-          PLAN = "215518285e7585081dd606b675f12a2bde249ccf5ca8c73df2eeb4e76645f826"
+          PR_NUMBER = 204886
+          PLAN = "78cecf855d481580e55b188b84471fbf1b6d9bbc2ede267e72134b6d9af81f1c"
           BRANCH = "ci-buildkit-version-20261113"
           URL = "https://github.com/moby/buildkit/releases/download/v0.29.0/buildkit-v0.29.0.linux-amd64.tar.gz"
           ARCHIVE_SHA = "ab8d93c72253b450f34a43e1c480abc52380f4aec3a8a395aebf09489efef7a0"
@@ -160,31 +170,170 @@ jobs:
               )
 
 
-          class Redirects(urllib.request.HTTPRedirectHandler):
+          class Cancellation:
               def __init__(self):
-                  self.count = 0
+                  self.pending = False
+                  self.deferred = 0
 
+              def handler(self, _signum, _frame):
+                  self.pending = True
+                  signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                  signal.signal(signal.SIGINT, signal.SIG_IGN)
+                  if not self.deferred:
+                      raise InterruptedError()
+
+              def check(self):
+                  if self.pending:
+                      raise InterruptedError()
+
+
+          CANCELLATION = Cancellation()
+
+
+          @contextlib.contextmanager
+          def acquisition_deadline(seconds=30):
+              deadline = time.monotonic() + seconds
+              prior_mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+              prior_handler = signal.getsignal(signal.SIGALRM)
+              handler_owned = False
+              timer_owned = False
+              requeue = False
+              alarm_raises = True
+
+              def remaining():
+                  CANCELLATION.check()
+                  value = deadline - time.monotonic()
+                  if value <= 0:
+                      raise TimeoutError()
+                  return value
+
+              def expired(_signum, _frame):
+                  if alarm_raises:
+                      raise TimeoutError()
+
+              # Defer cancellation only while installing/restoring process-global signal
+              # state. Flags precede mutations, including syscalls that may raise after
+              # changing state. No network operation or child launch occurs in this span.
+              CANCELLATION.deferred += 1
+              setup_deferred = True
+              try:
+                  signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+                  if signal.SIGALRM in prior_mask:
+                      raise ValueError("inherited blocked alarm")
+                  if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
+                      raise ValueError("existing timer")
+                  if signal.SIGALRM in signal.sigpending():
+                      raise ValueError("existing alarm")
+                  interval = remaining()
+                  handler_owned = True
+                  signal.signal(signal.SIGALRM, expired)
+                  timer_owned = True
+                  signal.setitimer(signal.ITIMER_REAL, interval)
+                  CANCELLATION.deferred -= 1
+                  setup_deferred = False
+                  signal.pthread_sigmask(signal.SIG_SETMASK, prior_mask)
+                  CANCELLATION.check()
+                  yield remaining
+                  remaining()
+              except BaseException:
+                  # A monotonic check can win the race with the one-shot kernel alarm.
+                  # Do not let its later delivery interrupt restoration.
+                  alarm_raises = False
+                  raise
+              else:
+                  alarm_raises = False
+              finally:
+                  if not setup_deferred:
+                      CANCELLATION.deferred += 1
+                  try:
+                      signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+                      try:
+                          if timer_owned:
+                              signal.setitimer(signal.ITIMER_REAL, 0)
+                              info = signal.sigtimedwait({signal.SIGALRM}, 0)
+                              if info is not None and (
+                                  info.si_signo != signal.SIGALRM or info.si_code != 128
+                              ):
+                                  requeue = True
+                              if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
+                                  raise ValueError("timer still active")
+                      finally:
+                          if handler_owned:
+                              signal.signal(signal.SIGALRM, prior_handler)
+                  finally:
+                      try:
+                          if requeue:
+                              os.kill(os.getpid(), signal.SIGALRM)
+                      finally:
+                          try:
+                              signal.pthread_sigmask(signal.SIG_SETMASK, prior_mask)
+                          finally:
+                              CANCELLATION.deferred -= 1
+                  if requeue:
+                      raise ValueError("unrelated alarm")
+                  CANCELLATION.check()
+
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, req, fp, code, msg, headers, newurl):
-                  self.count += 1
-                  if self.count > 3 or not allowed_url(newurl):
-                      raise ValueError("redirect")
-                  return super().redirect_request(req, fp, code, msg, headers, newurl)
+                  return None
+
+
+          def acquisition_response(opener, remaining):
+              url = URL
+              for redirects in range(4):
+                  if not allowed_url(url):
+                      raise ValueError("url")
+                  request = urllib.request.Request(
+                      url, headers={"Accept": "application/octet-stream"}
+                  )
+                  try:
+                      response = opener.open(request, timeout=remaining())
+                  except urllib.error.HTTPError as error:
+                      try:
+                          locations = error.headers.get_all("Location", [])
+                          if (
+                              error.code not in {301, 302, 303, 307, 308}
+                              or redirects == 3
+                              or len(locations) != 1
+                          ):
+                              raise ValueError("redirect") from None
+                          target = urllib.parse.urljoin(url, locations[0])
+                          if not allowed_url(target):
+                              raise ValueError("redirect")
+                      finally:
+                          error.close()  # Never consume an unbounded redirect body.
+                      remaining()
+                      url = target
+                      continue
+                  try:
+                      if response.status != 200 or response.url != url:
+                          raise ValueError("response")
+                      result = bytearray()
+                      while True:
+                          remaining()
+                          chunk = response.read1(min(65536, 100 * 1024 * 1024 + 1 - len(result)))
+                          if not chunk:
+                              break
+                          result.extend(chunk)
+                          if len(result) > 100 * 1024 * 1024:
+                              raise ValueError("archive size")
+                      remaining()
+                      if hashlib.sha256(result).hexdigest() != ARCHIVE_SHA:
+                          raise ValueError("archive")
+                      remaining()
+                      return bytes(result)
+                  finally:
+                      response.close()
+              raise ValueError("redirect")
 
 
           def download_archive():
-              if not allowed_url(URL):
-                  raise ValueError("url")
-              opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), Redirects())
-              request = urllib.request.Request(
-                  URL, headers={"Accept": "application/octet-stream"}
-              )
-              with opener.open(request, timeout=30) as response:
-                  if response.status != 200 or not allowed_url(response.url):
-                      raise ValueError("response")
-                  data = response.read(100 * 1024 * 1024 + 1)
-              if len(data) > 100 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != ARCHIVE_SHA:
-                  raise ValueError("archive")
-              return data
+              with acquisition_deadline() as remaining:
+                  opener = urllib.request.build_opener(
+                      urllib.request.ProxyHandler({}), NoRedirect()
+                  )
+                  return acquisition_response(opener, remaining)
 
 
           def archive_binary(data):
@@ -220,15 +369,21 @@ jobs:
               process = None
               data = bytearray()
               try:
-                  process = subprocess.Popen(
-                      argv,
-                      stdin=subprocess.DEVNULL,
-                      stdout=subprocess.PIPE,
-                      stderr=subprocess.DEVNULL,
-                      env=environment,
-                      start_new_session=True,
-                  )
-                  result["info_attempted"] = True
+                  CANCELLATION.check()
+                  CANCELLATION.deferred += 1
+                  try:
+                      process = subprocess.Popen(
+                          argv,
+                          stdin=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL,
+                          env=environment,
+                          start_new_session=True,
+                      )
+                      result["info_attempted"] = True
+                  finally:
+                      CANCELLATION.deferred -= 1
+                  CANCELLATION.check()
                   deadline = time.monotonic() + timeout
                   with selectors.DefaultSelector() as selector:
                       selector.register(process.stdout, selectors.EVENT_READ)
@@ -290,10 +445,16 @@ jobs:
               binary_fd = None
               binary_identity = None
               try:
-                  directory = tempfile.mkdtemp(prefix="ci-buildkit-version-", dir=parent)
-                  root_identity = identity(os.stat(directory, follow_symlinks=False))
-                  root_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-                  root_identity = identity(os.fstat(root_fd))
+                  CANCELLATION.check()
+                  CANCELLATION.deferred += 1
+                  try:
+                      directory = tempfile.mkdtemp(prefix="ci-buildkit-version-", dir=parent)
+                      root_identity = identity(os.stat(directory, follow_symlinks=False))
+                      root_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                      root_identity = identity(os.fstat(root_fd))
+                  finally:
+                      CANCELLATION.deferred -= 1
+                  CANCELLATION.check()
                   if (
                       identity(os.stat(directory, follow_symlinks=False)) != root_identity
                       or stat.S_IMODE(os.fstat(root_fd).st_mode) != 0o700
@@ -306,13 +467,18 @@ jobs:
                   if hashlib.sha256(binary).hexdigest() != BINARY_SHA:
                       raise ValueError("binary")
                   result["client_binary_verified"] = True
-                  binary_fd = os.open(
-                      "buildctl",
-                      os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                      0o700,
-                      dir_fd=root_fd,
-                  )
-                  binary_identity = identity(os.fstat(binary_fd))
+                  CANCELLATION.deferred += 1
+                  try:
+                      binary_fd = os.open(
+                          "buildctl",
+                          os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                          0o700,
+                          dir_fd=root_fd,
+                      )
+                      binary_identity = identity(os.fstat(binary_fd))
+                  finally:
+                      CANCELLATION.deferred -= 1
+                  CANCELLATION.check()
                   with os.fdopen(os.dup(binary_fd), "wb") as output:
                       output.write(binary)
                   os.close(binary_fd)
@@ -378,13 +544,8 @@ jobs:
               result = dict.fromkeys(FIELDS, False)
               resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
-              def cancelled(_signum, _frame):
-                  signal.signal(signal.SIGTERM, signal.SIG_IGN)
-                  signal.signal(signal.SIGINT, signal.SIG_IGN)
-                  raise InterruptedError()
-
-              signal.signal(signal.SIGTERM, cancelled)
-              signal.signal(signal.SIGINT, cancelled)
+              signal.signal(signal.SIGTERM, CANCELLATION.handler)
+              signal.signal(signal.SIGINT, CANCELLATION.handler)
               try:
                   run_probe(result)
               except BaseException:
