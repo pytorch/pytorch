@@ -587,7 +587,13 @@ def foreach_lerp_inplace(
         w = torch.where(mask, neg_omw, weight)
         bases = [torch.where(mask, e, s) for s, e in zip(self, end)]
         w_list = [w] * len(diff)
-        torch._foreach_addcmul_(bases, w_list, diff)
+        # With CUDA tensors, addcmul accepts a CPU scalar only as tensor2. A CPU
+        # weight goes there. With a CUDA weight, diff does: torch.where moved
+        # any 0-dim CPU bases to CUDA, and their diff is still on CPU.
+        if w.device.type == "cpu":
+            torch._foreach_addcmul_(bases, diff, w_list)
+        else:
+            torch._foreach_addcmul_(bases, w_list, diff)
         for s, b in zip(self, bases):
             s.copy_(b)
     else:
