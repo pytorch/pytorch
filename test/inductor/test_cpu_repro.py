@@ -163,7 +163,7 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     hw_classification = HardwareClassification.CPU
     common = check_model
-
+    
     @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
     def test_prefer_deferred_runtime_asserts_backed_symint_compile(self):
         def fn(x):
@@ -177,7 +177,22 @@ class CPUReproTests(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "to be True"):
             compiled(torch.rand(101, 101))
+            
+    @requires_vectorization
+    def test_bool_mask_min_max_reduction(self):
+        # Repro for https://github.com/pytorch/pytorch/issues/204545.
+        def fn(x):
+            mask = (x > 0) & (x < 1)
+            return (
+                mask.min(),
+                mask.max(),
+                mask.min(dim=1).values,
+                mask.max(dim=1).values,
+            )
 
+        x = torch.randn(17, 9)
+        self.common(fn, (x,))
+        
     @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
     def test_prefer_deferred_runtime_asserts_compound_backed_symint_compile(self):
         def fn(x):
@@ -8148,7 +8163,6 @@ class CPUReproTests(TestCase):
             for fn in [fn_cmp_slice, fn_cmp_pad, fn_to_bool]:
                 self.common(fn, (a,))
             self.common(fn_bitwise_bool, (a, b))
-
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
