@@ -3401,6 +3401,8 @@ class <lambda>(torch.nn.Module):
             return z0, z
 
         inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        # The inputs are filled on the current stream and first read on s,
+        # which does not wait for it.
         torch.accelerator.synchronize()
         with patch.dict(globals(), {"_stream_del_global_preexisting": inp[0]}):
             expected = fn(*inp)
@@ -3433,6 +3435,8 @@ class <lambda>(torch.nn.Module):
             return z
 
         inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        # The inputs are filled on the current stream and first read on s,
+        # which does not wait for it.
         torch.accelerator.synchronize()
         expected = fn(*inp)
         with patch.dict(globals(), {"_stream_del_global": inp[0]}):
@@ -3457,6 +3461,8 @@ class <lambda>(torch.nn.Module):
             return mod.store_then_delete_multi_stream_tensor_fn(x, y, device)
 
         inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        # The inputs are filled on the current stream and first read on s,
+        # which does not wait for it.
         torch.accelerator.synchronize()
         expected = fn(*inp)
         with patch.dict(

@@ -1776,10 +1776,6 @@ class PythonModuleVariable(VariableTracker):
             if name == "__dict__":
                 tx.output.check_deleted_global_dict_handout(self.value.__dict__)
             else:
-                # Covers reads that bypass _load_attr, e.g.
-                # me.__getattribute__(name); the _load_attr hook stays because
-                # an Unsupported raised here is constant-folded there for
-                # python-constant objects.
                 tx.output.check_deleted_global_read(self.value.__dict__, name)
 
         attr_value = None

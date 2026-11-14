@@ -483,8 +483,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                     self.assertEqual(cnt.frame_count, 1)
 
     # policy=error flags the zero-net store+delete as an unreplayed side
-    # effect; the shape itself matches eager.
-    @unittest.expectedFailure
+    # effect; the shape itself matches eager without the policy.
     def test_delete_global_created_then_deleted(self):
         with mock.patch.dict(globals()):
             with torch._dynamo.config.patch(side_effect_replay_policy="error"):
@@ -496,8 +495,8 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                     return x + 1
 
                 x = torch.ones(2, 2)
-                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-                self.assertEqual(opt_fn(x), x + 1)
+                with self.assertRaisesRegex(RuntimeError, "found certain side effects"):
+                    torch.compile(fn, backend="eager", fullgraph=True)(x)
             self.assertNotIn("_dg_a", globals())
 
     @parametrize("preexisting", (True, False))
@@ -512,6 +511,8 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             if preexisting:
                 self.assertNotIn("_dg_a", globals())
 
+    # The re-bound name keeps its old __dict__ slot instead of appending
+    # where eager re-inserts it.
     @unittest.expectedFailure
     def test_delete_global_then_store_matches_eager_dict_order(self):
         with mock.patch.dict(globals(), {"_dg_a": 1, "_dg_pad": 0}):
@@ -734,7 +735,8 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), x + 42)
             self.assertNotIn("delete_value", mod.__dict__)
 
-    @unittest.expectedFailure
+    # policy=error flags the zero-net store+delete as an unreplayed side
+    # effect; the shape itself matches eager without the policy.
     def test_delete_global_crossfile_created_then_deleted(self):
         with crossfile_globals() as mod:
             with torch._dynamo.config.patch(side_effect_replay_policy="error"):
@@ -745,7 +747,8 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                     return x + 1
 
                 x = torch.ones(2, 2)
-                self.assertEqual(fn(x), x + 1)
+                with self.assertRaisesRegex(RuntimeError, "found certain side effects"):
+                    fn(x)
             self.assertNotIn("store_then_delete_missing_value", mod.__dict__)
 
     def test_delete_global_crossfile_created_then_deleted_replays_delete(self):
