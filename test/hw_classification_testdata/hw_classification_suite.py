@@ -31,6 +31,13 @@ class CudaTest(TestCase):
         pass
 
 
+class CudaXpuTest(TestCase):
+    hw_classification = (HardwareClassification.CUDA, HardwareClassification.XPU)
+
+    def test_cuda_xpu(self):
+        pass
+
+
 class UnclassifiedTest(TestCase):
     def test_unclassified(self):
         pass

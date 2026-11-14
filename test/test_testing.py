@@ -3396,6 +3396,50 @@ class TestHardwareClassifications(TestCase):
     def _suite_test_names(self, suite) -> set[str]:
         return {test_case.id().split(".")[-1] for test_case in self._cu.HardwareClassificationTestLoader.iter_test_cases_recursively(suite)}
 
+    @parametrize("selected,excluded,expected", [
+        (None, (), True),
+        (("CUDA",), (), True),
+        (("XPU",), (), True),
+        (("CUDA", "XPU"), (), True),
+        (("MPS",), (), False),
+        (("ACCELERATOR",), (), False),
+        (None, ("XPU",), False),
+        (("CUDA",), ("XPU",), False),
+        (("XPU",), ("CUDA",), False),
+        (("CUDA", "XPU"), ("MPS",), True),
+    ])
+    def test_filter_suite_multiple_classifications(self, selected, excluded, expected):
+        requirement = self._cu.HardwareClassification
+
+        class CudaXpuBase(TestCase):
+            hw_classification = (requirement.CUDA, requirement.XPU)
+
+        class CudaXpuTest(CudaXpuBase):
+            def test_shared(self):
+                pass
+
+        selected = None if selected is None else {requirement[name] for name in selected}
+        exclude = frozenset(requirement[name] for name in excluded)
+        loader = self._cu.HardwareClassificationTestLoader(selected, exclude=exclude)
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(CudaXpuTest)
+        filtered = loader.get_filtered_suite(suite)
+        self.assertEqual(self._suite_test_names(filtered), {"test_shared"} if expected else set())
+
+    @parametrize("classification", [
+        (),
+        (HardwareClassification.CUDA, "xpu"),
+        [HardwareClassification.CUDA, HardwareClassification.XPU],
+        (HardwareClassification.GENERIC, HardwareClassification.CUDA),
+        (HardwareClassification.ACCELERATOR, HardwareClassification.XPU),
+        "cuda",
+    ])
+    def test_invalid_multiple_classifications(self, classification):
+        class InvalidTest(TestCase):
+            hw_classification = classification
+
+        with self.assertRaisesRegex(TypeError, "hw_classification must be"):
+            self._cu.get_hw_classification(InvalidTest)
+
     def test_filter_suite(self):
         requirement = self._cu.HardwareClassification
 
@@ -3584,18 +3628,25 @@ class TestHardwareClassifications(TestCase):
     @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
     @unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
     @unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "the filter doesn't depend on the device")
-    def test_hw_classification_exclude_env_var(self):
+    @parametrize("selected,excluded,ran_names", [
+        ([], "GENERIC,CPU", {"test_cuda", "test_cuda_xpu", "test_unclassified"}),
+        (["--hw-classification", "XPU"], "", {"test_cuda_xpu"}),
+        (["--hw-classification", "CUDA", "XPU"], "XPU", {"test_cuda"}),
+    ])
+    def test_hw_classification_exclude_env_var(self, selected, excluded, ran_names):
         # Runs the fixture directly (unittest) and with --use-pytest, as run_test.py
         # runs test files, in place under test/ so test/conftest.py and pytest.ini apply.
-        env = _FIXTURE_CHILD_ENV | {"PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION": "GENERIC,CPU"}
+        env = _FIXTURE_CHILD_ENV | {"PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION": excluded}
         fixture = _HW_CLASSIFICATION_TESTDATA / "hw_classification_suite.py"
-        runners = [("unittest", [], [r"\bRan 2 tests\b"])]
+        count = len(ran_names)
+        runners = [("unittest", [], [rf"\bRan {count} tests?\b"])]
         if _fixture_child_versions()["pytest"] is not None:
-            runners.append(("pytest", ["--use-pytest", "-p", "no:cacheprovider"], [r"\b2 passed\b", r"\b2 deselected\b"]))
+            summaries = [rf"\b{count} passed\b", rf"\b{5 - count} deselected\b"]
+            runners.append(("pytest", ["--use-pytest", "-p", "no:cacheprovider"], summaries))
         for runner, extra_args, summaries in runners:
             with self.subTest(runner=runner):
                 result = subprocess.run(
-                    [sys.executable, str(fixture.relative_to(fixture.parents[1])), "-v", *extra_args],
+                    [sys.executable, str(fixture.relative_to(fixture.parents[1])), "-v", *extra_args, *selected],
                     cwd=fixture.parents[1],
                     env=env,
                     capture_output=True,
@@ -3607,12 +3658,13 @@ class TestHardwareClassifications(TestCase):
                 for summary in summaries:
                     self.assertRegex(output, summary)
                 # -v lists each test that ran; the excluded labels must not be among them.
-                ran = set(re.findall(r"\b(test_generic|test_cpu|test_cuda|test_unclassified)\b", output))
-                self.assertEqual(ran, {"test_cuda", "test_unclassified"}, output)
+                ran = set(re.findall(r"\b(test_generic|test_cpu|test_cuda|test_cuda_xpu|test_unclassified)\b", output))
+                self.assertEqual(ran, ran_names, output)
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
 instantiate_parametrized_tests(TestImports)
+instantiate_parametrized_tests(TestHardwareClassifications)
 
 
 @unittest.skipIf(IS_WINDOWS, "dynamo test failures are not looked up on Windows")
