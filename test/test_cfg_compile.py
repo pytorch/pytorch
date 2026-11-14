@@ -2287,6 +2287,19 @@ class TestCfgMoreBytecodes(TestCase):
         compiled = torch.cfg_compile(BytecodeChild.name.fget, fallback=False)
         self.assertEqual(compiled(obj), "child of base")
 
+    def test_super_that_is_not_the_builtin(self):
+        class Shadow:
+            name = "something else"
+
+        # A module that rebinds `super` gets what it asked for: its object is
+        # called without arguments, as the source has it.
+        method = BytecodeChild.name.fget
+        compiled = torch.cfg_compile(method, fallback=False)
+        with unittest.mock.patch(f"{__name__}.super", Shadow, create=True):
+            self.assertEqual(compiled(BytecodeChild()), method(BytecodeChild()))
+            self.assertEqual(compiled(BytecodeChild()), "child of something else")
+        self.assertEqual(compiled(BytecodeChild()), "child of base")
+
     def test_star_unpacking(self):
         def f(seq):
             a, *b, c = seq

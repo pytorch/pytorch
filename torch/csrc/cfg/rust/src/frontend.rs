@@ -446,11 +446,11 @@ impl<'a> Builder<'a> {
                     stack.push(v);
                 }
                 Bc::LoadSuperAttr => {
-                    // super(class, self).name, spelled out.
                     let this = pop_value!();
                     let class = pop_value!();
-                    let super_ = pop_value!();
-                    let bound = emit!(off, Op::Call { callee: super_, args: vec![class, this], kwnames: NONE });
+                    let global_super = pop_value!();
+                    let explicit = arg & 2 != 0;
+                    let bound = emit!(off, Op::SuperObject { global_super, class, this, explicit });
                     if arg & 1 != 0 {
                         stack.push(NULLMARK);
                     }
@@ -1502,6 +1502,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::WithExceptStart { exit: a, exc: b }
         | Op::CellSet(a, b) => r!(a, b),
         Op::MatchClass { subject, class, names, .. } => r!(subject, class, names),
+        Op::SuperObject { global_super, class, this, .. } => r!(global_super, class, this),
         Op::StoreAttr { obj, val, .. } => r!(obj, val),
         Op::SetItem { obj, key, val } => r!(obj, key, val),
         Op::MapAdd(a, b, c) | Op::BuildSlice(a, b, c) => r!(a, b, c),
