@@ -512,6 +512,125 @@ if HAS_GPU_AND_TRITON:
                 self._check_tma_store_view_epilogue_fuses()
             self.assertTrue(tma_store_choices)
 
+        @unittest.skipIf(
+            GPU_TYPE != "cuda" or torch.version.hip is not None,
+            "the benchmark floor is only subtracted on CUDA",
+        )
+        @fresh_cache()
+        @config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "ATEN,TRITON",
+                "max_template_fusion_benchmarked_choices": 1,
+            }
+        )
+        def test_template_fusion_does_not_double_count_benchmark_floor(self):
+            # Mocked timings: every standalone benchmark pays a fixed FLOOR on top
+            # of the kernel's real time. Real: aten 8.8 + epilogue 1.7 = 10.5 us,
+            # fused template 12.7 us, so fusing is a loss. Summing the two
+            # standalone timings counts FLOOR twice (13.3 + 6.2 = 19.5 > 17.2) and
+            # would pick the fused template.
+            FLOOR = 4.5e-3
+            aten_ms = 8.8e-3 + FLOOR
+            epilogue_ms = 1.7e-3 + FLOOR
+            fused_ms = 12.7e-3 + FLOOR
+            triton_ms = 9.5e-3 + FLOOR
+            orig_choice_timings = MultiTemplateBuffer.choice_timings
+
+            def choice_timings(self, hint_override=None):
+                timings = orig_choice_timings(self, hint_override)
+                return {
+                    c: aten_ms
+                    if isinstance(c, ExternKernelCaller)
+                    else triton_ms + 1e-6 * i
+                    for i, c in enumerate(timings)
+                }
+
+            def f(a, b):
+                return (a @ b).float()
+
+            a = torch.randn(384, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+            b = torch.randn(1024, 512, device=GPU_TYPE, dtype=torch.bfloat16)
+
+            def compile_with_floor_subtracted(subtract):
+                torch._dynamo.reset()
+                with (
+                    config.patch(template_fusion_subtract_benchmark_floor=subtract),
+                    unittest.mock.patch.object(
+                        MultiTemplateBuffer, "choice_timings", choice_timings
+                    ),
+                    unittest.mock.patch.object(
+                        Scheduler,
+                        "benchmark_fused_nodes",
+                        return_value=(epilogue_ms, ""),
+                    ),
+                    unittest.mock.patch.object(
+                        Scheduler,
+                        "benchmark_codegened_module",
+                        return_value=(fused_ms, ""),
+                    ),
+                    unittest.mock.patch.object(
+                        Scheduler, "_benchmark_floor_ms", return_value=FLOOR
+                    ),
+                ):
+                    out, code = run_and_get_code(torch.compile(f), a, b)
+                self.assertEqual(out, f(a, b), atol=1e-5, rtol=1e-5)
+                return code[0]
+
+            # Flag off: the double-counted floor makes the fused template win.
+            FileCheck().check("triton_tem_fused").run(
+                compile_with_floor_subtracted(False)
+            )
+            # Flag on: one floor is subtracted and the unfused extern mm wins.
+            FileCheck().check("extern_kernels.mm").check_not("triton_tem_fused").run(
+                compile_with_floor_subtracted(True)
+            )
+
+        @unittest.skipIf(GPU_TYPE != "cuda", "the benchmark floor is measured on CUDA")
+        def test_benchmark_floor_ms_measured_and_cached(self):
+            from torch._inductor import scheduler as scheduler_mod
+            from torch._inductor.runtime.benchmarking import benchmarker
+
+            scheduler_mod._BENCHMARK_FLOOR_MS.clear()
+            device = torch.device(GPU_TYPE)
+            with unittest.mock.patch.object(
+                benchmarker, "benchmark", wraps=benchmarker.benchmark
+            ) as bench:
+                floor = Scheduler._benchmark_floor_ms(device)
+                again = Scheduler._benchmark_floor_ms(device)
+            self.assertEqual(bench.call_count, 1)
+            self.assertEqual(floor, again)
+            # A near-empty kernel: positive, and far below 50 us.
+            self.assertGreater(floor, 0.0)
+            self.assertLess(floor, 0.05)
+
+        @config.patch(template_fusion_subtract_benchmark_floor=True)
+        def test_template_fusion_floor_applies_only_to_event_timed_choices(self):
+            cuda = torch.device("cuda", 0)
+
+            def extern(cudagraphs=False, config_cudagraphs=False):
+                c = ExternKernelCaller.__new__(ExternKernelCaller)
+                c._benchmark_with_cudagraphs = cudagraphs
+                c.bmreq = SimpleNamespace(
+                    benchmark_with_cudagraphs=False,
+                    config_cudagraph_benchmarking=config_cudagraphs,
+                )
+                return c
+
+            applies = Scheduler._template_fusion_floor_applies
+            self.assertEqual(applies(cuda, extern()), torch.version.hip is None)
+            self.assertFalse(applies(torch.device("cpu"), extern()))
+            self.assertFalse(applies(cuda, extern(cudagraphs=True)))
+            self.assertFalse(applies(cuda, extern(config_cudagraphs=True)))
+            self.assertFalse(applies(cuda, object()))
+            self.assertFalse(applies(cuda, None))
+            with config.patch(autotune_cudagraph_benchmarking=True):
+                self.assertFalse(applies(cuda, extern()))
+            with config.patch(profile_bandwidth_with_do_bench_using_profiling=True):
+                self.assertFalse(applies(cuda, extern()))
+            with config.patch(template_fusion_subtract_benchmark_floor=False):
+                self.assertFalse(applies(cuda, extern()))
+
     class MultiTemplateFusionDecisionGpuTest(InductorTestCase):
         """V.choices.multi_template_fusion_decision in real compilations: the
         hook alone decides whether a MultiTemplateBuffer fuses and the
