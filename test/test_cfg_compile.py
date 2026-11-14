@@ -1769,6 +1769,43 @@ class TestCfgCallees(TestCase):
         message = "sig() missing 3 required positional arguments: 'a', 'b', and 'c'"
         self.assertTrue(call_outcome(compiled)[1].endswith(message))
 
+    def test_bad_star_arguments_raise_what_the_interpreter_raises(self):
+        def target(*args, **kwargs):
+            return args, kwargs
+
+        def star(x):
+            return target(*x)
+
+        def double_star(x):
+            return target(**x)
+
+        def both(a, k):
+            return target(1, *a, k=2, **k)
+
+        def in_a_list(x):
+            return [1, *x]
+
+        def in_a_dict(x):
+            return {"a": 1, **x}
+
+        cases = (
+            (star, ([1, 2],), (5,), (None,)),
+            (double_star, ({"a": 1},), ([1],), (None,)),
+            (both, ([1], {"z": 3}), ([1], {"k": 5}), (3, {}), ([1], 4)),
+            (in_a_list, ([2],), (5,)),
+            (in_a_dict, ({"b": 2},), ([1],), (5,)),
+        )
+        for fn, *argsets in cases:
+            compiled = torch.cfg_compile(fn, fallback=False)
+            for args in argsets:
+                self.assertEqual(call_outcome(compiled, *args), call_outcome(fn, *args))
+        message = call_outcome(torch.cfg_compile(both, fallback=False), [1], {"k": 5})[
+            1
+        ]
+        self.assertTrue(
+            message.endswith("target() got multiple values for keyword argument 'k'")
+        )
+
     def test_callees_off(self):
         def f(obj, x):
             return obj.twice(x)

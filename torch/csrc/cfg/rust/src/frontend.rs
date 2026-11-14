@@ -658,7 +658,9 @@ impl<'a> Builder<'a> {
                         Bc::SetAdd => Op::SetAdd(container, item),
                         Bc::SetUpdate => Op::SetUpdate(container, item),
                         Bc::DictUpdate => Op::DictUpdate(container, item),
-                        _ => Op::DictMerge(container, item),
+                        // The function the arguments are for is under
+                        // them, for the error messages.
+                        _ => Op::DictMerge(container, item, peek!(arg as usize + 2)),
                     };
                     effect!(off, op);
                 }
@@ -1496,7 +1498,6 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::ListExtend(a, b)
         | Op::SetUpdate(a, b)
         | Op::DictUpdate(a, b)
-        | Op::DictMerge(a, b)
         | Op::ExcMatch(a, b)
         | Op::MatchKeys(a, b)
         | Op::WithExceptStart { exit: a, exc: b }
@@ -1505,7 +1506,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         Op::SuperObject { global_super, class, this, .. } => r!(global_super, class, this),
         Op::StoreAttr { obj, val, .. } => r!(obj, val),
         Op::SetItem { obj, key, val } => r!(obj, key, val),
-        Op::MapAdd(a, b, c) | Op::BuildSlice(a, b, c) => r!(a, b, c),
+        Op::MapAdd(a, b, c) | Op::BuildSlice(a, b, c) | Op::DictMerge(a, b, c) => r!(a, b, c),
         Op::Format { val, spec, .. } => r!(val, spec),
         Op::BuildTuple(vs)
         | Op::BuildList(vs)

@@ -109,6 +109,24 @@ pub unsafe fn str_to_string(s: Obj) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+extern "C" {
+    pub fn _PyDict_MergeEx(mp: Obj, other: Obj, override_: std::os::raw::c_int) -> std::os::raw::c_int;
+    pub fn _PyObject_FunctionStr(x: Obj) -> Obj;
+}
+
+/// How the interpreter names a callable in the errors of a call: `f()` or
+/// `module.f()`.
+pub unsafe fn function_str(func: Obj) -> String {
+    let s = _PyObject_FunctionStr(func);
+    if s.is_null() {
+        ffi::PyErr_Clear();
+        return "function".to_string();
+    }
+    let text = str_to_string(s);
+    ffi::Py_DECREF(s);
+    text
+}
+
 pub unsafe fn type_name(o: Obj) -> String {
     let tp = ffi::Py_TYPE(o);
     std::ffi::CStr::from_ptr((*tp).tp_name).to_string_lossy().into_owned()
