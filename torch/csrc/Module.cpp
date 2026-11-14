@@ -2819,15 +2819,6 @@ PyObject* initModule() {
               c10::OperatorName(name, overload));
         });
     py_module.def(
-        "_cpp_fake_not_implemented",
-        [](const std::string& name, const std::string& overload) {
-          const c10::OperatorName op_name(name, overload);
-          const auto op = c10::Dispatcher::singleton().findSchema(op_name);
-          TORCH_CHECK_VALUE(
-              op.has_value(), "operator ", op_name, " does not exist");
-          return at::impl::cppFakeNotImplemented(*op);
-        });
-    py_module.def(
         "_fake_dispatch_deregister_op_impl",
         [](const std::string& name, const std::string& overload) {
           at::impl::fakeDispatchTableRemove(

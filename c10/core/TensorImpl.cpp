@@ -1214,11 +1214,13 @@ FakeTensorMode::FakeTensorMode(
     std::shared_ptr<c10::SafePyObject> shape_env,
     std::shared_ptr<c10::SafePyObject> converter,
     bool allow_meta,
-    bool allow_unsafe_data_ptr_access)
+    bool allow_unsafe_data_ptr_access,
+    bool propagate_real_tensors)
     : shape_env_(std::move(shape_env)),
       fake_tensor_converter_(std::move(converter)),
       allow_meta_(allow_meta),
-      allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
+      allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access),
+      propagate_real_tensors_(propagate_real_tensors) {}
 
 FakeTensorMode::~FakeTensorMode() = default;
 

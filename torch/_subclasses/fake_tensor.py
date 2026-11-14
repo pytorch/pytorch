@@ -367,8 +367,8 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 # its interface yet. Its from_tensor raises UnsupportedFakeTensorException for
 # views, sparse and mkldnn tensors and tensors with nested ints, its
 # converter's from_real_tensor also for constants that are fakes or not plain
-# tensors, and its converter's from_meta_and_device, which makes Python
-# FakeTensors, raises AssertionError. So a caller that needs a Python
+# tensors, and its converter's from_meta_and_device raises NotImplementedError
+# for a pytype other than Tensor. So a caller that needs a Python
 # FakeTensorMode narrows the result with
 # torch._guards.require_python_fake_mode, which raises RuntimeError for a C++
 # mode.
@@ -1085,6 +1085,9 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
             trace=trace,
         )
 
+    def is_our_fake(self, t: object) -> TypeGuard[Tensor]:
+        return isinstance(t, Tensor) and torch._C._maybe_get_fake_mode(t) is self
+
     @property
     def avoid_device_init(self) -> bool:
         return _avoid_device_init()
@@ -1245,6 +1248,16 @@ class FakeTensorConverter:
             else:
                 self.invalidate_constant_aliases(constant)
 
+    def _check_mode_kind(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
+        # A converter makes one kind of fake, which the casts to FakeTensor in
+        # this class rely on
+        if isinstance(fake_mode, CppFakeTensorMode) != self.meta_converter.cpp_fakes:
+            kind = type(fake_mode).__name__
+            raise AssertionError(
+                f"this converter's cpp_fakes does not match the {kind}; use the "
+                "mode's own fake_tensor_converter"
+            )
+
     def _get_memo(self, t: Tensor) -> Tensor | None:
         tid = self.meta_converter.describer.lookup_tensor.get(t)
         if tid is None:
@@ -1256,8 +1269,7 @@ class FakeTensorConverter:
         self.meta_converter.tensor_memo[tid] = v
 
     # You can have a real tensor that you need to convert into a fake tensor.
-    # If you have a meta tensor already, call from_meta_and_device (or, for a
-    # C++ fake, torch._C._from_meta_and_device).
+    # If you have a meta tensor already, call from_meta_and_device.
     #
     # You're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
@@ -1299,15 +1311,8 @@ class FakeTensorConverter:
         symbolic_context: SymbolicContext | None = None,
         trace: bool = True,
     ) -> Tensor:
-        # A converter makes one kind of fake, which the casts to FakeTensor in
-        # this class rely on
+        self._check_mode_kind(fake_mode)
         cpp_fakes = self.meta_converter.cpp_fakes
-        if isinstance(fake_mode, CppFakeTensorMode) != cpp_fakes:
-            kind = type(fake_mode).__name__
-            raise AssertionError(
-                f"this converter's cpp_fakes does not match the {kind}; use the "
-                "mode's own fake_tensor_converter"
-            )
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
             if tracing_context := torch._guards.TracingContext.try_get():
@@ -1522,6 +1527,7 @@ class FakeTensorConverter:
         return out
 
     # If you specify the device, it MUST be a meta tensor that is not fake.
+    @overload
     def from_meta_and_device(
         self,
         fake_mode: FakeTensorMode,
@@ -1529,13 +1535,27 @@ class FakeTensorConverter:
         device: torch.device,
         pytype: type[torch.Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
-    ) -> FakeTensor:
-        # This builds FakeTensors, so the memo holds only those
-        if self.meta_converter.cpp_fakes:
-            raise AssertionError(
-                "from_meta_and_device makes FakeTensors, but this converter's "
-                "cpp_fakes is set"
-            )
+    ) -> FakeTensor: ...
+
+    @overload
+    def from_meta_and_device(
+        self,
+        fake_mode: CppFakeTensorMode,
+        t: Tensor,
+        device: torch.device,
+        pytype: type[torch.Tensor] | None = None,
+        dispatch_keys: torch.DispatchKeySet | None = None,
+    ) -> Tensor: ...
+
+    def from_meta_and_device(
+        self,
+        fake_mode: FakeTensorMode | CppFakeTensorMode,
+        t: Tensor,
+        device: torch.device,
+        pytype: type[torch.Tensor] | None = None,
+        dispatch_keys: torch.DispatchKeySet | None = None,
+    ) -> Tensor:
+        self._check_mode_kind(fake_mode)
         if t.device.type != "meta":
             raise AssertionError(
                 f"tensor's device must be `meta`, got {t.device.type} instead"
@@ -1551,10 +1571,19 @@ class FakeTensorConverter:
         # the meta tensor should be fresh so there's no way to get it wrong
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
-            return cast(FakeTensor, maybe_memo)
-        out = FakeTensor(
-            fake_mode, t, device, pytype=pytype, dispatch_keys=dispatch_keys
-        )
+            return maybe_memo
+        if isinstance(fake_mode, CppFakeTensorMode):
+            if pytype not in (None, torch.Tensor):
+                raise NotImplementedError(
+                    f"C++ fake tensors of type {pytype} are not supported yet"
+                )
+            out = torch._C._from_meta_and_device(t, torch.device(device), fake_mode)
+            if dispatch_keys is not None:
+                torch._C._set_fake_dispatch_keys(out, dispatch_keys)
+        else:
+            out = FakeTensor(
+                fake_mode, t, device, pytype=pytype, dispatch_keys=dispatch_keys
+            )
         self.set_tensor_memo(t, out)
         return out
 
