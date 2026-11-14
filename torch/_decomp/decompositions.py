@@ -4710,7 +4710,9 @@ def _trilinear(
         utils.can_safe_cast_to(cast_to=result_dtype, cast_from=promoted),
         lambda: f"result type {promoted} can't be cast to the desired output type {result_dtype}",
     )
-    compute_dtype = torch.float32 if promoted == torch.bool else promoted
+
+    opmath_dtype = utils.get_computation_dtype(promoted)
+    compute_dtype = torch.float32 if promoted == torch.bool else opmath_dtype
     i1, i2, i3 = (t.to(compute_dtype) for t in (i1, i2, i3))
 
     dims12 = [
