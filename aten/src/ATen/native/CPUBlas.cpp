@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Parallel.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/mkl/LinearAlgebra.h>
 #include <ATen/native/mkldnn/Matmul.h>
@@ -7,6 +8,8 @@
 #include <c10/util/irange.h>
 
 #include <climits>
+#include <cmath>
+#include <memory>
 #if !defined(__s390x__ ) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -121,6 +124,62 @@ bool use_blas_gemm(
       (ldc >= std::max(int64_t{1}, m)));
 }
 C10_DIAGNOSTIC_POP()
+
+#if defined(MKL_HAS_SBGEMM) || defined(MKL_HAS_SHGEMM)
+// Runs a bf16/f16 gemm on MKL, which only writes f32 C, through an f32 copy of C.
+// Returns false when the ATen kernel should handle the problem instead: tiny
+// problems (same bound as mkldnn_gemm, where MKL's call overhead dominates) and
+// skinny transa ones.
+template <typename scalar_t>
+bool mkl_xf16_gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const scalar_t *a, int64_t lda,
+    const scalar_t *b, int64_t ldb,
+    float beta,
+    scalar_t *c, int64_t ldc) {
+  // MKL's bf16/f16 gemm parallelizes poorly over few columns, while the transa
+  // dot-product kernel in cpu/BlasKernel.cpp splits the rows of A across threads,
+  // so for transa/no-transb problems (the nn.Linear layout) the ATen kernel wins
+  // below a column count that grows with the thread count and the size of A.
+  // The threshold is measured on AVX2 and AVX-512 without AMX
+  const int64_t threads = at::in_parallel_region() ? 1 : at::get_num_threads();
+  const double min_cols_transa = std::max(24.0, 5.0 * threads * std::sqrt(static_cast<double>(m) * k) / 4096);
+  const bool skinny_transa = transa != TransposeType::NoTranspose &&
+      transb == TransposeType::NoTranspose && n < min_cols_transa;
+  if (m * n * k <= 16 * 16 * 16 || skinny_transa ||
+      !use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+    return false;
+  }
+  at::DataPtr c_buf = c10::GetCPUAllocator()->allocate(m * n * sizeof(float));
+  float* c_f32 = static_cast<float*>(c_buf.get());
+  const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(1, m));
+  if (beta != 0.0f) {
+    at::parallel_for(0, n, grain, [&](int64_t begin, int64_t end) {
+      for (const auto j : c10::irange(begin, end)) {
+        for (const auto i : c10::irange(m)) {
+          c_f32[j * m + i] = c[j * ldc + i];
+        }
+      }
+    });
+  }
+  const int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb;
+  if constexpr (std::is_same_v<scalar_t, at::BFloat16>) {
+    mkl_gemm_bf16bf16f32(transa, transb, m_, n_, k_, alpha, a, lda_, b, ldb_, beta, c_f32.get(), m_);
+  } else {
+    mkl_gemm_f16f16f32(transa, transb, m_, n_, k_, alpha, a, lda_, b, ldb_, beta, c_f32.get(), m_);
+  }
+  at::parallel_for(0, n, grain, [&](int64_t begin, int64_t end) {
+    for (const auto j : c10::irange(begin, end)) {
+      for (const auto i : c10::irange(m)) {
+        c[j * ldc + i] = c_f32[j * m + i];
+      }
+    }
+  });
+  return true;
+}
+#endif  // MKL_HAS_SBGEMM || MKL_HAS_SHGEMM
 
 #ifdef USE_FBGEMM
 fbgemm::matrix_op_t to_fbgemm(TransposeType trans) {
@@ -393,6 +452,11 @@ void gemm(
       return;
    }
 #endif
+#ifdef MKL_HAS_SBGEMM
+   if (mkl_xf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif
    gemm_stub(
       at::kCPU, at::kBFloat16,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
@@ -452,6 +516,11 @@ void gemm(
         }
       }
       return;
+   }
+#endif
+#ifdef MKL_HAS_SHGEMM
+   if (mkl_xf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
    }
 #endif
    gemm_stub(
