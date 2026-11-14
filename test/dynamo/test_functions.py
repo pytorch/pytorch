@@ -9765,6 +9765,435 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, expected)
 
+    @parametrize("kind", ["dict_iadd", "dict_setitem", "list_append", "list_extend"])
+    def test_locally_defined_class_closure_mutation(self, kind):
+        # Regression test for gh-197896
+        state = {"n": 0} if kind.startswith("dict") else []
+
+        class Helper:
+            def touch(self):
+                if kind == "dict_iadd":
+                    state["n"] += 1
+                elif kind == "dict_setitem":
+                    state["k"] = 1
+                elif kind == "list_append":
+                    state.append(1)
+                else:
+                    state.extend([1])
+
+        def f(x):
+            Helper().touch()
+            return x + 1
+
+        expected_state = {
+            "dict_iadd": {"n": 2},
+            "dict_setitem": {"n": 0, "k": 1},
+            "list_append": [1, 1],
+            "list_extend": [1, 1],
+        }[kind]
+        g = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(g(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(g(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(state, expected_state)
+
+    def test_locally_defined_context_manager_closure_mutation(self):
+        # Locally defined context manager instantiated inside compiled function
+        log = []
+
+        class CM:
+            def __enter__(self):
+                log.append("enter")
+                return self
+
+            def __exit__(self, *a):
+                log.append("exit")
+                return False
+
+        def f_cm(x):
+            with CM():
+                y = x + 1
+            return y * 2
+
+        g_cm = torch.compile(f_cm, backend="eager", fullgraph=True)
+        res = g_cm(torch.ones(2))
+        self.assertEqual(res, torch.full((2,), 4.0))
+        self.assertEqual(log, ["enter", "exit"])
+
+    def test_locally_defined_class_property_closure_mutation(self):
+        # Locally defined class with @property mutating a closure variable
+        prop_log = []
+
+        class PropHelper:
+            @property
+            def val(self):
+                prop_log.append("read")
+                return 1
+
+        def f_prop(x):
+            return x + PropHelper().val
+
+        g_prop = torch.compile(f_prop, backend="eager", fullgraph=True)
+        self.assertEqual(g_prop(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(g_prop(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(prop_log, ["read", "read"])
+
+    def test_locally_defined_method_nonlocal_rebind(self):
+        n = 0
+
+        class Helper:
+            def touch(self):
+                nonlocal n
+                n += 1
+
+        def fn(x):
+            Helper().touch()
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(n, 2)
+
+    def test_locally_instantiated_method_rebind(self):
+        old_log = []
+        new_log = []
+
+        class Helper:
+            def value(self):
+                old_log.append("old")
+                return 1
+
+            @classmethod
+            def cm_value(cls):
+                old_log.append("old_cm")
+                return 10
+
+        def new_value(self):
+            new_log.append("new")
+            return 2
+
+        @classmethod
+        def new_cm_value(cls):
+            new_log.append("new_cm")
+            return 20
+
+        class CM:
+            def __enter__(self):
+                old_log.append("old_enter")
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def new_enter(self):
+            new_log.append("new_enter")
+            return self
+
+        def fn(x):
+            with CM():
+                return x + Helper().value() + Helper().cm_value()
+
+        backend = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        out1 = compiled(torch.ones(1))
+        Helper.value = new_value
+        out2 = compiled(torch.ones(1))
+        Helper.cm_value = new_cm_value
+        out3 = compiled(torch.ones(1))
+        CM.__enter__ = new_enter
+        out4 = compiled(torch.ones(1))
+
+        self.assertEqual(out1, torch.tensor([12.0]))
+        self.assertEqual(out2, torch.tensor([13.0]))
+        self.assertEqual(out3, torch.tensor([23.0]))
+        self.assertEqual(out4, torch.tensor([23.0]))
+        self.assertEqual(
+            old_log, ["old_enter", "old", "old_cm", "old_enter", "old_cm", "old_enter"]
+        )
+        self.assertEqual(
+            new_log, ["new", "new", "new_cm", "new_enter", "new", "new_cm"]
+        )
+        self.assertEqual(backend.frame_count, 4)
+
+    def test_lru_cache_method_closure_mutation(self):
+        log = []
+
+        class Helper:
+            @functools.lru_cache(0)  # noqa: B019
+            def touch(self):
+                log.append("touch")
+
+        def fn(x):
+            Helper().touch()
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(log, ["touch", "touch"])
+        # touch's closure is sourced through Helper, so Dynamo guards on the
+        # length of the captured log, as it does for any list it reads from a
+        # source: the second call sees one more entry and recompiles.
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_getattr_closure_mutation(self):
+        log = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                log.append("desc1")
+                return 2
+
+        class Helper:
+            desc = Desc()
+
+            def __getattr__(self, name):
+                log.append(f"getattr:{name}")
+                return 1
+
+        def new_get(self, obj, objtype=None):
+            log.append("desc2")
+            return 20
+
+        def new_getattr(self, name):
+            log.append(f"getattr2:{name}")
+            return 100
+
+        def fn(x):
+            return x + Helper().missing + Helper().desc
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([4.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([4.0]))
+
+        count_before = counter.frame_count
+        Desc.__get__ = new_get
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([22.0]))
+        self.assertEqual(counter.frame_count, count_before + 1)
+
+        Helper.__getattr__ = new_getattr
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([121.0]))
+        self.assertEqual(counter.frame_count, count_before + 2)
+        self.assertEqual(
+            log,
+            [
+                "getattr:missing",
+                "desc1",
+                "getattr:missing",
+                "desc1",
+                "getattr:missing",
+                "desc2",
+                "getattr2:missing",
+                "desc2",
+            ],
+        )
+
+    def test_sourceless_inherited_class_attr_metaclass_shadow_recompiles(self):
+        class Meta(type):
+            @property
+            def scale(cls):
+                return 100
+
+        class Base:
+            scale = 2
+
+        class Child(Base, metaclass=Meta):
+            pass
+
+        def fn(x):
+            return x + Child().scale
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+
+        self.assertEqual(Child.scale, 100)
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(counter.frame_count, 1)
+
+        Base.scale = 3
+        self.assertEqual(compiled(x), x + 3)
+        self.assertEqual(compiled(x), x + 3)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_locally_instantiated_init_staticmethod_compiled_closure_mutation(self):
+        # __init__ runs through UserDefinedObjectVariable.call_method; the
+        # staticmethod and the torch.compile-wrapped method go through
+        # resolve_type_attr.
+        log = []
+
+        class Helper:
+            def __init__(self):
+                log.append("init")
+
+            @staticmethod
+            def touch():
+                log.append("static")
+
+            @torch.compile(backend="eager")
+            def meth(self, x):
+                log.append("compiled")
+                return x + 1
+
+        def fn(x):
+            h = Helper()
+            h.touch()
+            return h.meth(x)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(log, ["init", "static", "compiled"] * 2)
+
+    def test_locally_instantiated_init_staticmethod_rebind(self):
+        class Helper:
+            def __init__(self):
+                self.v = 1
+
+            @staticmethod
+            def w():
+                return 10
+
+        def new_init(self):
+            self.v = 2
+
+        def new_w():
+            return 20
+
+        def fn(x):
+            return x + Helper().v + Helper().w()
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.zeros(1)
+        self.assertEqual(compiled(x), x + 11)
+        self.assertEqual(compiled(x), x + 11)
+        self.assertEqual(counter.frame_count, 1)
+
+        Helper.__init__ = new_init
+        self.assertEqual(compiled(x), x + 12)
+        self.assertEqual(counter.frame_count, 2)
+
+        Helper.w = staticmethod(new_w)
+        self.assertEqual(compiled(x), x + 22)
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_locally_instantiated_compiled_enter(self):
+        # __enter__ is a torch.compile wrapper: Dynamo traces its
+        # _torchdynamo_inline target, whose closure is not the wrapper's.
+        log = []
+
+        class CM:
+            @torch.compile(backend="eager")
+            def __enter__(self):
+                log.append("enter")
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def fn(x):
+            with CM():
+                return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(log, ["enter", "enter"])
+
+    def test_locally_instantiated_compiled_dunder_methods(self):
+        # The same for __exit__, __getattr__ and a descriptor's __get__.
+        log = []
+
+        class D:
+            @torch.compile(backend="eager")
+            def __get__(self, obj, objtype=None):
+                log.append("get")
+                return 2
+
+        class Helper:
+            d = D()
+
+            def __enter__(self):
+                return self
+
+            @torch.compile(backend="eager")
+            def __exit__(self, *args):
+                log.append("exit")
+                return False
+
+            @torch.compile(backend="eager")
+            def __getattr__(self, name):
+                log.append(name)
+                return 1
+
+        def fn(x):
+            with Helper():
+                return x + Helper().missing + Helper().d
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([4.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([4.0]))
+        self.assertEqual(log, ["missing", "get", "exit"] * 2)
+
+    def test_locally_instantiated_compiled_enter_rebind(self):
+        class CM:
+            @torch.compile(backend="eager")
+            def __enter__(self):
+                return 1
+
+            def __exit__(self, *args):
+                return False
+
+        @torch.compile(backend="eager")
+        def new_enter(self):
+            return 2
+
+        def fn(x):
+            with CM() as v:
+                return x + v
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.zeros(1)
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+        CM.__enter__ = new_enter
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("built_in_graph", [True, False])
+    def test_compiled_method_held_across_graph_break(self, built_in_graph):
+        # A bound torch.compile-wrapped method that is live at a graph break is
+        # reconstructed there. It must come back bound to its object, not as
+        # the unbound wrapper in Holder.__dict__["meth"], which the resumed call
+        # would invoke without self. built_in_graph=True builds the object
+        # inside the compiled function, the case this PR newly sources through
+        # its class; False passes it in.
+        class Holder:
+            def __init__(self):
+                self.k = 1
+
+            @torch.compile(backend="eager")
+            def meth(self, x):
+                return x + self.k
+
+        def fn(h, x):
+            if h is None:
+                h = Holder()
+            m = h.meth
+            torch._dynamo.graph_break()
+            return m(x)
+
+        h = None if built_in_graph else Holder()
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(h, x), fn(h, x))
+
 
 _FUNCTION_DEVICE_TEST_BASES = (FunctionTestsCudaOnly, FunctionTestsDevice)
 

@@ -209,31 +209,25 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return type(self.cm_obj).__name__
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .builder import VariableBuilder
-
         source = None if self.source is None else AttrSource(self.source, "__enter__")
-        return variables.UserMethodVariable(
-            VariableBuilder.create_internal_user_function(
-                self.cm_obj.__enter__.__func__,
-                source=source and AttrSource(source, "__func__"),
-            ),
-            self,
-            source=source,
+        return self.bind_class_function(
+            tx,
+            "__enter__",
+            self.cm_obj.__enter__.__func__,
+            method_source=source,
+            fn_source=source and AttrSource(source, "__func__"),
         ).call_function(tx, [], {})
 
     def exit(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
-        from .builder import VariableBuilder
-
         source = None if self.source is None else AttrSource(self.source, "__exit__")
-        x = variables.UserMethodVariable(
-            VariableBuilder.create_internal_user_function(
-                self.cm_obj.__exit__.__func__,
-                source=source and AttrSource(source, "__func__"),
-            ),
-            self,
-            source=source,
+        x = self.bind_class_function(
+            tx,
+            "__exit__",
+            self.cm_obj.__exit__.__func__,
+            method_source=source,
+            fn_source=source and AttrSource(source, "__func__"),
         ).call_function(tx, list(args), {})
         tx.active_generic_context_managers.pop()
         return x
