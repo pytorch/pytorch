@@ -62,6 +62,21 @@ TORCH_DYNAMO_RESUME_IN_PREFIX = "torch_dynamo_resume_in"
 IS_TRACING_RESUME_PROLOGUE_VARNAME = "__is_tracing_resume_prologue"
 
 
+def _deepcopy_instructions(instructions: list[Instruction]) -> list[Instruction]:
+    # copy.deepcopy(instructions) recurses along target and exn_tab_entry links.
+    # Seeding the memo with shallow copies resolves those links without recursing.
+    memo: dict[int, Any] = {}
+    copies = []
+    for inst in instructions:
+        new = copy.copy(inst)
+        memo[id(inst)] = new
+        copies.append(new)
+    for inst, new in zip(instructions, copies):
+        for field in dataclasses.fields(inst):
+            setattr(new, field.name, copy.deepcopy(getattr(inst, field.name), memo))
+    return copies
+
+
 # If is_resume - this codegen is for a resume function
 def _initial_push_null(insts: list[Instruction]) -> None:
     insts.append(create_instruction("PUSH_NULL"))
@@ -376,7 +391,7 @@ class ContinueExecutionCache:
         def update(
             instructions: list[Instruction], code_options: dict[str, Any]
         ) -> None:
-            meta.instructions = copy.deepcopy(instructions)
+            meta.instructions = _deepcopy_instructions(instructions)
 
             args = ["__nested_resume_fns", "__nested_frame_values"]
             args += [f"___stack{i}" for i in range(nstack)]
