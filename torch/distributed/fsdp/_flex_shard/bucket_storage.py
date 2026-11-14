@@ -1,0 +1,1082 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+from __future__ import annotations
+
+import fnmatch
+import functools
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
+from typing import Any, cast, TYPE_CHECKING
+
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+from torch._prims_common import make_contiguous_strides_for
+
+from .placement_contract import (
+    get_global_layout,
+    get_partial_grad_group,
+    GradientReduceOp,
+    GradientReduction,
+)
+from .utils import _get_single_placement
+
+
+if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.tensor import Shard as DTensorShard
+
+    from .api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
+    from .bucket_runtime import BucketRuntime
+    from .placement_contract import (
+        BucketStorageLayout,
+        GlobalLayout,
+        LocalStorageLayout,
+        Placement,
+    )
+
+
+BucketParamFQNsByIndex = list[list[str]]
+
+# DTensor's Shard(dim) stands for the engine's Shard(dim)
+PlacementFn = Callable[
+    [list[tuple[str, nn.Parameter]], "DeviceMesh"],
+    Mapping[str, tuple["Placement | DTensorShard", ...]],
+]
+
+# Called with a bucket's ``(fqn, unsharded param)`` pairs.
+BucketHook = Callable[[list[tuple[str, nn.Parameter]]], None]
+
+
+@dataclass(frozen=True)
+class BucketSpec:
+    """Specification for a parameter communication bucket.
+
+    Args:
+        patterns: fnmatch glob patterns matched against parameter FQNs, or
+            module FQNs, which match all of the module's parameters. A
+            parameter matches this bucket if its FQN matches any pattern. A
+            parameter registered under several names (e.g. tied embedding and
+            output weights) must match one bucket with every name, as FSDP2
+            requires one FSDP group per parameter; the bucket's hooks then sit
+            on a module that contains every use: the deepest module containing
+            its params. A bucket whose patterns all name modules hooks those
+            modules instead, as one group, as FSDP2's ``fully_shard`` does for a
+            list of modules: it unshards when the first of them starts its
+            forward, runs its post-forward once all of them have finished, and
+            reduce-scatters once the first one's input grads are computed. For
+            a bucket of sibling modules, e.g. consecutive transformer layers,
+            whose parent would gather it for its whole forward and
+            reduce-scatter it only after its whole backward. As with FSDP2, a
+            forward may skip some of them, and the root module's post-forward
+            then completes the group, e.g. a decoder that returns its norm's
+            output and leaves the output projection in its bucket to the
+            loss. One of them may also run on its own, e.g. that projection
+            on each chunk of the hidden states with a backward per chunk:
+            such a call does not complete the group, so its outputs get no
+            pre-backward hook, and its post-backward runs as soon as its input
+            grads are computed. Eager only.
+        placement_fn: Required callable that maps this bucket's
+            ``(named_params, mesh)`` to per-parameter placements.
+            The minimal eager path expects one ``Placement`` per parameter.
+        mesh: The CUDA ``DeviceMesh`` this bucket's collectives run on. A
+            bucket is one collective over one process group, so the mesh is a
+            per-bucket property; ``placement_fn`` receives it. Different buckets
+            may use different meshes (e.g. expert params on an expert-parallel
+            mesh vs dense params on the data-parallel mesh), but all bucket
+            meshes in one ``flex_shard()`` call must share a device type. A 2D
+            mesh with ``mesh_dim_names`` shards over its dim 1 and replicates
+            over its dim 0, as ``fully_shard``'s HSDP does: ``placement_fn``
+            receives the 1D shard mesh, and each reduce-scatter's output is
+            all-reduced over the replicas. HSDP requires placements that
+            declare ``matches_fsdp2_collectives``, such as ``Shard``.
+        mp_policy: ``fully_shard``'s mixed precision policy, for this bucket's
+            parameters: their unsharded dtypes (``param_dtype``,
+            ``param_dtype_override_fn``) and the dtype their grads accumulate
+            and reduce in (``reduce_dtype``). Eager casts each full-parameter
+            grad to ``reduce_dtype`` before it accumulates on the unsharded
+            parameter; torch.compile casts the accumulated grad in the
+            reduce-scatter copy-in. An unused parameter's zero grad has the
+            forward dtype, so set ``reduce_dtype`` if its grads can arrive in
+            another dtype. ``cast_forward_inputs`` and ``output_dtype`` cast
+            the inputs and outputs of the modules that this bucket hooks; the
+            buckets that hook one module must cast alike.
+        offload_policy: ``fully_shard``'s offload policy. With
+            ``CPUOffloadPolicy``, as in ``fully_shard``, the bucket keeps its
+            sharded parameters and their grads on the CPU (pinned unless
+            ``pin_memory=False``), so the optimizer steps there, and copies the
+            shards to the accelerator for each unshard. Requires placements
+            that declare ``supports_cpu_offload``, such as ``Shard``. Eager
+            only.
+        gradient_reduce_op: Gradient reduction semantics. ``dist.ReduceOp.AVG``
+            preserves FlexShard's historical average-gradient behavior.
+            ``dist.ReduceOp.SUM`` matches FSDP2's no-gradient-division mode,
+            where the training loop owns global gradient scaling.
+        gradient_divide_factor: With ``gradient_reduce_op=AVG``, the reduced
+            gradient is the sum over ``mesh`` divided by this factor, which
+            defaults to the mesh size; like FSDP2's
+            ``set_gradient_divide_factor``. For example, with expert parallelism
+            an expert's gradient already includes tokens routed from its
+            expert-parallel peers, so an expert bucket on the expert
+            data-parallel mesh divides by the dense data-parallel size. The
+            placement implements both settings: ``reduce_prepared_grad``
+            receives them as a ``GradientReduction``.
+        reshard_after_forward: Whether to free this bucket's unsharded
+            parameters after forward and re-gather them before backward. This
+            defaults to True. As in FSDP2, it also decides whether a forward
+            that no backward follows (e.g. under ``torch.no_grad()``) frees
+            them; with False, ``module.parameters()`` returns the unsharded
+            params until the bucket reshards (``FlexShardModule.reshard()``).
+            As in FSDP2, an int reshards to groups of that many consecutive
+            ranks of the shard mesh: each rank keeps its group's part of the
+            unsharded parameters after forward, and the group all-gathers them
+            before backward, e.g. within a host. It must divide the shard mesh
+            size (which reshards as True; 1 as False) and requires placements
+            that declare ``matches_fsdp2_collectives``, such as ``Shard``.
+            Under ``torch.compile`` the traced graph owns buffer lifetimes
+            instead.
+        pre_backward_hook: Optional callable run with this bucket's
+            ``(fqn, unsharded param)`` pairs once they are unsharded and before
+            its backward runs: in its pre-backward hook, and when activation
+            checkpointing unshards it for the recomputed forward; it may run
+            more than once per backward. For example, kernels that add weight grads
+            into a buffer in place and give autograd none (TransformerEngine's
+            ``fuse_wgrad_accumulation`` reads ``param.main_grad``) need the
+            grads allocated and exposed there first. Grads allocated as views
+            of one zeroed buffer per storage the unsharded params view, at
+            their offsets, in the reduce dtype, let a placement whose gradient
+            reduction layout is its parameter layout (``BucketedBlockShard``
+            with equal rank ranges, whole-parameter ``BucketedOwned``)
+            reduce-scatter that buffer without copying the grads in
+            (``alloc_grads_in_param_layout``). A whole-parameter
+            ``BucketedOwned`` bucket with no hook gets its grads allocated so
+            when its params are in the dtype their grads accumulate and reduce
+            in (``Placement.reduces_grads_in_param_layout``). Eager only.
+        post_reduce_hook: Optional callable run with the same pairs once a
+            syncing backward has taken their grads for the reduce-scatter, e.g.
+            to release references to those grads. Eager only.
+        defer_post_backward: Whether this bucket's post-backward (the
+            reduce-scatter with gradient sync on, then reshard) waits for
+            ``FlexShardModule.finish_deferred_backward`` instead of running once
+            its module's backward is done. For kernels that compute weight
+            grads after that backward, e.g. TransformerEngine's
+            ``delay_wgrad_compute``, whose ``backward_dw()`` runs later. A
+            syncing backward that runs the module's backward but ends with the
+            bucket unfinished raises. Eager only.
+        fsdp2_compatible: Whether this bucket's collectives match those of the
+            FSDP2 ``fully_shard`` group it replaces, byte for byte, so training
+            is bitwise identical to FSDP2. The parameters take FSDP2's order: a
+            post-order walk over the modules the patterns name, in pattern
+            order, or over the whole module for parameter patterns, keeping
+            each module's own parameters. The reduce-scatter groups them by
+            sharded grad dtype, as FSDP2 does, and includes only the parameters
+            that got a grad, as FSDP2 does by default: every rank must then get
+            grads for the same parameters. Requires placements that declare
+            ``matches_fsdp2_collectives``, such as ``Shard``. Eager
+            only.
+    """
+
+    patterns: list[str]
+    placement_fn: PlacementFn
+    mesh: DeviceMesh
+    mp_policy: MixedPrecisionPolicy | None = None
+    offload_policy: OffloadPolicy | None = None
+    gradient_reduce_op: GradientReduceOp = dist.ReduceOp.AVG
+    gradient_divide_factor: float | None = None
+    reshard_after_forward: bool | int = True
+    pre_backward_hook: BucketHook | None = None
+    post_reduce_hook: BucketHook | None = None
+    defer_post_backward: bool = False
+    fsdp2_compatible: bool = False
+
+
+@dataclass(frozen=True)
+class BucketParamLayout:
+    """Bucket-global layout metadata for one parameter."""
+
+    param_offset: int
+    local_global_offset: int
+
+
+@dataclass(frozen=True)
+class BucketLayout:
+    """Bucket-global storage layout shared by parameters in one bucket."""
+
+    global_numel: int
+    local_numel: int
+    rank_offsets: tuple[int, ...]
+    rank_numels: tuple[int, ...]
+    param_layouts: dict[str, BucketParamLayout]
+
+
+@dataclass(frozen=True)
+class ParamMeta:
+    """The autograd and grad-dtype settings of a parameter whose sharded data
+    is not the parameter itself, e.g. the local tensor of a DTensor parameter
+    that ``fully_shard`` shards. Its Python attributes, outer layout and
+    partial-grad group are not carried over."""
+
+    requires_grad: bool
+    has_explicit_grad_dtype: bool = False
+    grad_dtype_override: torch.dtype | None = None
+
+
+@dataclass
+class ParamInfo:
+    """Metadata for a parameter in chunked storage."""
+
+    fqn: str
+    global_shape: torch.Size
+    global_stride: tuple[int, ...]
+    dtype: torch.dtype
+    requires_grad: bool
+    placements: tuple[Placement, ...]
+    param_dtype: torch.dtype | None = None
+    reduce_dtype: torch.dtype | None = None
+    local_shape: torch.Size = field(default_factory=lambda: torch.Size([]))
+    local_numel: int = 0
+    byte_offset: int = 0  # byte offset into the sharded storage
+    storage_nbytes: int = 0  # bytes reserved for this param's local storage
+    global_numel: int = 0  # total elements in unsharded param
+    bucket_layout: BucketLayout | None = None
+    # Outer (TP/EP) layout declared by the input param; ``global_shape`` is then
+    # the outer local shape.
+    outer_layout: GlobalLayout | None = None
+    # Group over which each rank computes only part of the grad; FlexShard sums
+    # the unsharded grad over it before the reduce-scatter.
+    partial_grad_group: dist.ProcessGroup | None = None
+    # Python attributes of the original parameter (e.g. framework tags), copied
+    # onto its persistent unsharded parameter.
+    param_attrs: dict[str, Any] = field(default_factory=dict)
+    has_explicit_grad_dtype: bool = False
+    grad_dtype_override: torch.dtype | None = None
+    # Other names the parameter is registered under (e.g. tied weights), all in
+    # this bucket; each module slot holds the same sharded or unsharded param.
+    shared_fqns: tuple[str, ...] = ()
+    bucket_reduce_dtype: torch.dtype | None = None  # promoted over the bucket
+
+    @property
+    def placement(self) -> Placement:
+        """The single placement supported by the minimal eager path."""
+        return _get_single_placement(self.placements)
+
+    @property
+    def unsharded_dtype(self) -> torch.dtype:
+        """Dtype exposed to module forward for the full parameter."""
+        return self.param_dtype or self.dtype
+
+    @property
+    def unsharded_grad_dtype(self) -> torch.dtype | None:
+        """Dtype for autograd accumulation of the full-parameter gradient.
+
+        None accepts gradients in any dtype.
+        """
+        if self.reduce_dtype is not None:
+            return self.reduce_dtype
+        if self.has_explicit_grad_dtype:
+            return self.grad_dtype_override
+        return self.dtype
+
+    @property
+    def grad_reduce_dtype(self) -> torch.dtype:
+        """Dtype used to communicate this parameter's gradient."""
+        return (
+            self.bucket_reduce_dtype
+            or self.unsharded_grad_dtype
+            or self.unsharded_dtype
+        )
+
+
+class ShardedBucketStorage:
+    """
+    Manages a byte buffer that backs one bucket of sharded parameters.
+
+    All parameters in a bucket storage must share a dtype and placement-compatible
+    local layout. Each placement owns its parameter's local storage layout and
+    exposed tensor view; ShardedBucketStorage only places those layouts
+    sequentially in one byte buffer.
+
+    Communication is delegated to the bucket runtime's forward hooks; this
+    bucket storage object owns the byte buffer and metadata.
+    """
+
+    def __init__(
+        self,
+        byte_storage: torch.Tensor,
+        param_infos: dict[str, ParamInfo],
+        mesh: DeviceMesh,
+        total_bytes: int,
+        module: nn.Module,
+        reshard_after_forward: bool = True,
+        gradient_reduce_op: GradientReduceOp = dist.ReduceOp.AVG,
+        pre_backward_hook: BucketHook | None = None,
+        post_reduce_hook: BucketHook | None = None,
+        gradient_divide_factor: float | None = None,
+        defer_post_backward: bool = False,
+        hook_module_fqns: list[str] | None = None,
+        fsdp2_compatible: bool = False,
+        mp_policy: MixedPrecisionPolicy | None = None,
+    ) -> None:
+        if byte_storage.dtype != torch.uint8:
+            raise ValueError(f"Expected uint8 storage, got {byte_storage.dtype}")
+        self._byte_storage = byte_storage
+        self._param_infos = param_infos
+        self._mesh = mesh
+        self._total_bytes = total_bytes
+        self._module = module
+        self._reshard_after_forward = reshard_after_forward
+        self._pre_backward_hook = pre_backward_hook
+        self._post_reduce_hook = post_reduce_hook
+        self._defer_post_backward = defer_post_backward
+        self._fsdp2_compatible = fsdp2_compatible
+        # The modules a bucket of module patterns hooks (BucketSpec.patterns).
+        self._hook_module_fqns = hook_module_fqns
+        # Its forward casts at the hooked modules (BucketSpec.mp_policy)
+        self._mp_policy = mp_policy
+        # See set_requires_gradient_sync and set_reshard_after_backward.
+        self._requires_gradient_sync = True
+        self._reshard_after_backward = True
+        # See set_separate_reduce_scatter_group.
+        self._reduce_mesh: DeviceMesh | None = None
+        # The group over the replicas of the mesh that gradients are all-reduced
+        # over after the reduce-scatter (HSDP), whether they are, and a hook on
+        # the reduced shard, as FSDP2's set_requires_all_reduce and
+        # set_all_reduce_hook.
+        self._replicate_group: dist.ProcessGroup | None = None
+        self._requires_all_reduce = True
+        self._all_reduce_hook: Callable[[torch.Tensor], None] | None = None
+        self._all_reduce_hook_stream: torch.Stream | None = None
+        # The smaller group a reshard after forward keeps chunks for, as
+        # FSDP2's reshard_after_forward=int (see BucketRuntime.reshard).
+        self._post_forward_group: dist.ProcessGroup | None = None
+        # The all-gather replacing the placement's (FSDP2's custom AllGather).
+        self._all_gather_comm: Any = None
+        # See set_cpu_offload
+        self._cpu_offload: CPUOffloadPolicy | None = None
+        self._compute_device: torch.device | None = None
+        # The runtime that runs this bucket (flex_shard's buckets)
+        self.runtime: BucketRuntime | None = None
+        # FSDP2's custom ReduceScatter and set_reduce_scatter_input_fn.
+        self._reduce_scatter_comm: Any = None
+        # FSDP2's AllReduce for the replica all-reduce, or None for dist.all_reduce
+        self._all_reduce_comm: Any = None
+        self._reduce_scatter_input_fn: Any = None
+        # FSDP2's set_unshard_in_backward and set_reduce_scatter_unused_params.
+        self._unshard_in_backward = True
+        self._reduce_scatter_unused_params = False
+        # FSDP2's _set_unshard_async_op: unshards run as asynchronous
+        # collectives on the current stream instead of on the unshard stream
+        self._unshard_async_op = False
+        # See set_buckets_to_forward_prefetch and set_buckets_to_backward_prefetch.
+        self._forward_prefetch: list[ShardedBucketStorage] | None = None
+        self._backward_prefetch: list[ShardedBucketStorage] | None = None
+        self._gradient_reduction = GradientReduction(
+            gradient_reduce_op, gradient_divide_factor
+        )
+
+    def set_cpu_offload(
+        self, policy: CPUOffloadPolicy, compute_device: torch.device
+    ) -> None:
+        """Keep the sharded parameters and their grads on the CPU, as FSDP2's
+        ``CPUOffloadPolicy``: unshards gather onto ``compute_device``, and
+        reduced grads are copied back to the CPU (see
+        ``BucketRuntime._offload_sharded_grads``)."""
+        self._cpu_offload = policy
+        self._compute_device = compute_device
+
+    @classmethod
+    def create_param_infos(
+        cls,
+        named_params: list[tuple[str, nn.Parameter]],
+        mesh: DeviceMesh,
+        param_placements: dict[str, tuple[Placement, ...]],
+        mp_policy: MixedPrecisionPolicy | None = None,
+        metas: dict[str, ParamMeta] | None = None,
+    ) -> tuple[dict[str, ParamInfo], int]:
+        """
+        Create ParamInfo for each parameter, computing local layout and byte offsets.
+        ``metas`` gives the settings of parameters whose tensors in
+        ``named_params`` are only their data (see ``ParamMeta``).
+
+        The caller validates that each bucket uses compatible placements and a
+        uniform dtype. Each placement owns its per-parameter local storage layout;
+        bucket storage only places those layouts sequentially in the byte buffer.
+        """
+        if not named_params:
+            return {}, 0
+
+        param_dtypes: dict[str, torch.dtype | None] = dict.fromkeys(
+            fqn for fqn, _ in named_params
+        )
+        if mp_policy is not None:
+            # Resolved once per parameter, as fully_shard calls
+            # param_dtype_override_fn once per parameter
+            for fqn, param in named_params:
+                param_dtypes[fqn] = mp_policy._resolve_for_param(param).param_dtype
+        reduce_dtype = None if mp_policy is None else mp_policy.reduce_dtype
+        first_fqn = named_params[0][0]
+        placement = _get_single_placement(param_placements[first_fqn])
+        # ParamInfo order must match layout order: FP8 pack plans index infos
+        # by position.
+        if (
+            placement.requires_dtype_grouped_layout
+            and mp_policy is not None
+            and mp_policy.param_dtype_override_fn is not None
+        ):
+            groups: dict[torch.dtype, list[tuple[str, nn.Parameter]]] = {}
+            for fqn, param in named_params:
+                dtype = param_dtypes[fqn] or param.dtype
+                groups.setdefault(dtype, []).append((fqn, param))
+            named_params = [named for group in groups.values() for named in group]
+        bucket_layout = placement.bucket_storage_layout(
+            named_params,
+            param_placements,
+            mesh,
+        )
+        if bucket_layout is not None:
+            param_infos, total_bytes = cls._create_param_infos_from_bucket_layout(
+                named_params,
+                param_placements,
+                bucket_layout,
+                param_dtypes,
+                reduce_dtype,
+                metas or {},
+            )
+        else:
+            param_infos, total_bytes = cls._create_param_infos_from_local_layouts(
+                named_params,
+                mesh,
+                param_placements,
+                param_dtypes,
+                reduce_dtype,
+                metas or {},
+            )
+
+        # One collective per bucket needs one dtype. Like FSDP2, promote over
+        # trainable grads only. Grads with no fixed dtype normally arrive in
+        # the unsharded dtype; backward only widens this over the grads that
+        # actually arrive.
+        trainable_grad_dtypes = [
+            info.unsharded_grad_dtype or info.unsharded_dtype
+            for info in param_infos.values()
+            if info.requires_grad
+        ]
+        if trainable_grad_dtypes:
+            bucket_reduce_dtype = functools.reduce(
+                torch.promote_types,
+                trainable_grad_dtypes,
+            )
+            for info in param_infos.values():
+                info.bucket_reduce_dtype = bucket_reduce_dtype
+        return param_infos, total_bytes
+
+    @classmethod
+    def _create_param_infos_from_local_layouts(
+        cls,
+        named_params: list[tuple[str, nn.Parameter]],
+        mesh: DeviceMesh,
+        param_placements: dict[str, tuple[Placement, ...]],
+        param_dtypes: dict[str, torch.dtype | None],
+        reduce_dtype: torch.dtype | None,
+        metas: dict[str, ParamMeta],
+    ) -> tuple[dict[str, ParamInfo], int]:
+        rank = mesh.get_local_rank()
+        world_size = mesh.size()
+        param_infos: dict[str, ParamInfo] = {}
+        current_byte_offset = 0
+        for fqn, param in named_params:
+            placements = param_placements[fqn]
+            placement = _get_single_placement(placements)
+            local_storage_layout = cls._compute_local_storage_layout(
+                fqn,
+                param,
+                placement,
+                rank,
+                world_size,
+            )
+            if local_storage_layout.storage_nbytes > 0:
+                byte_offset = current_byte_offset
+                current_byte_offset += local_storage_layout.storage_nbytes
+            else:
+                byte_offset = 0
+
+            param_infos[fqn] = cls._create_param_info(
+                fqn=fqn,
+                param=param,
+                placements=placements,
+                local_shape=local_storage_layout.local_shape,
+                local_numel=local_storage_layout.local_numel,
+                byte_offset=byte_offset,
+                storage_nbytes=local_storage_layout.storage_nbytes,
+                param_dtype=param_dtypes[fqn],
+                reduce_dtype=reduce_dtype,
+                meta=metas.get(fqn),
+            )
+
+        return param_infos, current_byte_offset
+
+    @staticmethod
+    def _compute_local_storage_layout(
+        fqn: str,
+        param: nn.Parameter,
+        placement: Placement,
+        rank: int,
+        world_size: int,
+    ) -> LocalStorageLayout:
+        local_storage_layout = placement.local_storage_layout(
+            param.shape,
+            param.dtype,
+            rank,
+            world_size,
+        )
+
+        if local_storage_layout.local_numel < 0:
+            raise ValueError(
+                f"Placement {placement!r} returned negative local_numel "
+                f"for parameter {fqn!r}."
+            )
+        if local_storage_layout.storage_nbytes < 0:
+            raise ValueError(
+                f"Placement {placement!r} returned negative storage_nbytes "
+                f"for parameter {fqn!r}."
+            )
+        return local_storage_layout
+
+    @classmethod
+    def _create_param_infos_from_bucket_layout(
+        cls,
+        named_params: list[tuple[str, nn.Parameter]],
+        param_placements: dict[str, tuple[Placement, ...]],
+        bucket_layout: BucketStorageLayout,
+        param_dtypes: dict[str, torch.dtype | None],
+        reduce_dtype: torch.dtype | None,
+        metas: dict[str, ParamMeta],
+    ) -> tuple[dict[str, ParamInfo], int]:
+        expected_fqns = {fqn for fqn, _ in named_params}
+        actual_fqns = set(bucket_layout.param_layouts)
+        if actual_fqns != expected_fqns:
+            msg_parts = []
+            missing_fqns = expected_fqns - actual_fqns
+            extra_fqns = actual_fqns - expected_fqns
+            if missing_fqns:
+                msg_parts.append(f"missing layouts for {sorted(missing_fqns)}")
+            if extra_fqns:
+                msg_parts.append(f"unexpected layouts for {sorted(extra_fqns)}")
+            raise ValueError(
+                "Placement bucket_storage_layout() must return layouts for "
+                f"exactly the provided parameters; {', '.join(msg_parts)}."
+            )
+        if bucket_layout.total_bytes < 0:
+            raise ValueError(
+                "Placement bucket_storage_layout() returned negative total_bytes."
+            )
+
+        param_infos: dict[str, ParamInfo] = {}
+        for fqn, param in named_params:
+            placements = param_placements[fqn]
+            layout = bucket_layout.param_layouts[fqn]
+            if layout.local_numel < 0:
+                raise ValueError(
+                    "Placement bucket_storage_layout() returned negative "
+                    f"local_numel for parameter {fqn!r}."
+                )
+            if layout.byte_offset < 0:
+                raise ValueError(
+                    "Placement bucket_storage_layout() returned negative "
+                    f"byte_offset for parameter {fqn!r}."
+                )
+            if layout.storage_nbytes < 0:
+                raise ValueError(
+                    "Placement bucket_storage_layout() returned negative "
+                    f"storage_nbytes for parameter {fqn!r}."
+                )
+            if (
+                layout.storage_nbytes > 0
+                and layout.byte_offset + layout.storage_nbytes
+                > bucket_layout.total_bytes
+            ):
+                raise ValueError(
+                    "Placement bucket_storage_layout() returned storage for "
+                    f"parameter {fqn!r} outside the bucket byte range."
+                )
+
+            param_infos[fqn] = cls._create_param_info(
+                fqn=fqn,
+                param=param,
+                placements=placements,
+                local_shape=layout.local_shape,
+                local_numel=layout.local_numel,
+                byte_offset=layout.byte_offset,
+                storage_nbytes=layout.storage_nbytes,
+                bucket_layout=layout.bucket_layout,
+                param_dtype=param_dtypes[fqn],
+                reduce_dtype=reduce_dtype,
+                meta=metas.get(fqn),
+            )
+
+        return param_infos, bucket_layout.total_bytes
+
+    @staticmethod
+    def _create_param_info(
+        *,
+        fqn: str,
+        param: nn.Parameter,
+        placements: tuple[Placement, ...],
+        local_shape: torch.Size,
+        local_numel: int,
+        byte_offset: int,
+        storage_nbytes: int,
+        bucket_layout: BucketLayout | None = None,
+        param_dtype: torch.dtype | None = None,
+        reduce_dtype: torch.dtype | None = None,
+        meta: ParamMeta | None = None,
+    ) -> ParamInfo:
+        if meta is not None:
+            return ParamInfo(
+                fqn=fqn,
+                global_shape=param.shape,
+                global_stride=tuple(make_contiguous_strides_for(param.shape)),
+                dtype=param.dtype,
+                param_dtype=param_dtype,
+                reduce_dtype=reduce_dtype,
+                requires_grad=meta.requires_grad,
+                placements=placements,
+                local_shape=local_shape,
+                local_numel=local_numel,
+                byte_offset=byte_offset,
+                storage_nbytes=storage_nbytes,
+                global_numel=param.numel(),
+                bucket_layout=bucket_layout,
+                has_explicit_grad_dtype=meta.has_explicit_grad_dtype,
+                grad_dtype_override=meta.grad_dtype_override,
+            )
+        has_explicit_grad_dtype = param._has_grad_dtype_override
+        return ParamInfo(
+            fqn=fqn,
+            global_shape=param.shape,
+            global_stride=tuple(make_contiguous_strides_for(param.shape)),
+            dtype=param.dtype,
+            param_dtype=param_dtype,
+            reduce_dtype=reduce_dtype,
+            requires_grad=param.requires_grad,
+            placements=placements,
+            local_shape=local_shape,
+            local_numel=local_numel,
+            byte_offset=byte_offset,
+            storage_nbytes=storage_nbytes,
+            global_numel=param.numel(),
+            bucket_layout=bucket_layout,
+            outer_layout=get_global_layout(param),
+            partial_grad_group=get_partial_grad_group(param),
+            param_attrs=dict(vars(param)),
+            has_explicit_grad_dtype=has_explicit_grad_dtype,
+            grad_dtype_override=param.grad_dtype if has_explicit_grad_dtype else None,
+        )
+
+    @property
+    def byte_storage(self) -> torch.Tensor:
+        """The underlying unified byte storage tensor (sharded)."""
+        return self._byte_storage
+
+    @property
+    def flat_storage(self) -> torch.Tensor:
+        """Alias for byte_storage for backwards compatibility."""
+        return self._byte_storage
+
+    @property
+    def total_bytes(self) -> int:
+        """Total bytes in the sharded storage."""
+        return self._total_bytes
+
+    @property
+    def numel(self) -> int:
+        """Total number of bytes (for compatibility, returns byte count)."""
+        return self._byte_storage.numel()
+
+    @property
+    def param_infos(self) -> dict[str, ParamInfo]:
+        """Metadata for each parameter."""
+        return self._param_infos
+
+    @property
+    def gradient_reduction(self) -> GradientReduction:
+        """What this bucket's gradient reduction must produce, which its
+        placement implements."""
+        return self._gradient_reduction
+
+    @property
+    def gradient_reduce_op(self) -> GradientReduceOp:
+        """Gradient reduction semantics for this bucket."""
+        return self._gradient_reduction.op
+
+    def set_gradient_reduce_op(self, op: GradientReduceOp) -> None:
+        """Set gradient reduction semantics for this bucket."""
+        self._gradient_reduction = replace(self._gradient_reduction, op=op)
+
+    @property
+    def gradient_divide_factor(self) -> float | None:
+        """What ``AVG`` divides this bucket's summed gradients by; None means the
+        mesh size."""
+        return self._gradient_reduction.divide_factor
+
+    def set_gradient_divide_factor(self, factor: float | None) -> None:
+        """Set what ``AVG`` divides this bucket's summed gradients by."""
+        self._gradient_reduction = replace(
+            self._gradient_reduction, divide_factor=factor
+        )
+
+    def set_replicate_group(self, group: dist.ProcessGroup | None) -> None:
+        """All-reduce this bucket's reduced gradients over ``group``, the
+        replicas of its mesh (HSDP); the default divide factor then counts
+        them too."""
+        self._replicate_group = group
+        self._gradient_reduction = replace(
+            self._gradient_reduction,
+            replicate_size=1 if group is None else group.size(),
+        )
+
+    def set_force_sum_reduction_for_comms(self, enable: bool) -> None:
+        """Make the gradient collectives sum and divide separately, as FSDP2's
+        ``set_force_sum_reduction_for_comms``."""
+        self._gradient_reduction = replace(self._gradient_reduction, force_sum=enable)
+
+    @property
+    def reduce_mesh(self) -> DeviceMesh:
+        """The mesh this bucket reduce-scatters its gradients over: its mesh,
+        unless ``set_separate_reduce_scatter_group`` gave the reduce-scatters a
+        process group of their own over the same ranks."""
+        return self._mesh if self._reduce_mesh is None else self._reduce_mesh
+
+    def set_separate_reduce_scatter_group(
+        self,
+        enable: bool,
+        reduce_meshes: dict[tuple[str, tuple[int, ...]], DeviceMesh] | None = None,
+    ) -> None:
+        """Run this bucket's reduce-scatters on a process group of their own,
+        over its mesh's ranks, or with ``enable=False`` on its mesh's group.
+
+        ``FlexShardModule.set_separate_reduce_scatter_group`` documents the
+        behavior and sets every bucket. ``reduce_meshes`` holds the reduce
+        meshes made so far, by device type and ranks, so buckets over the same
+        ranks share one process group.
+        """
+        if not enable or self._mesh.size() == 1:
+            # A 1-rank mesh has no reduce-scatter to separate.
+            self._reduce_mesh = None
+            return
+        if self._mesh.ndim != 1:
+            raise NotImplementedError(
+                "A separate reduce-scatter group needs a 1-D bucket mesh, got "
+                f"{self._mesh.ndim} dims."
+            )
+        from torch.distributed.device_mesh import DeviceMesh
+
+        ranks = tuple(self._mesh.mesh.flatten().tolist())
+        key = (self._mesh.device_type, ranks)
+        if reduce_meshes is None:
+            reduce_meshes = {}
+        if key not in reduce_meshes:
+            if self._reduce_mesh is not None:
+                # Already enabled: keep its group.
+                reduce_meshes[key] = self._reduce_mesh
+            else:
+                # Local synchronization: ranks outside this mesh don't wait in
+                # new_group's barrier, as for FSDP2's group.
+                group = dist.new_group(
+                    list(ranks),
+                    use_local_synchronization=True,
+                    group_desc="flex_shard_reduce_scatter",
+                )
+                if group == dist.GroupMember.NON_GROUP_MEMBER:
+                    raise AssertionError(
+                        f"This rank is not in its bucket mesh's ranks {ranks}."
+                    )
+                reduce_meshes[key] = DeviceMesh.from_group(
+                    group,
+                    self._mesh.device_type,
+                    mesh=self._mesh.mesh,
+                    mesh_dim_names=self._mesh.mesh_dim_names,
+                )
+        self._reduce_mesh = reduce_meshes[key]
+
+    def set_requires_gradient_sync(self, requires_gradient_sync: bool) -> None:
+        """Set whether backward reduce-scatters this bucket's gradients.
+
+        ``FlexShardModule.set_requires_gradient_sync`` documents the behavior
+        and sets every bucket.
+        """
+        self._requires_gradient_sync = requires_gradient_sync
+
+    def set_reshard_after_backward(self, reshard_after_backward: bool) -> None:
+        """Set whether backward reshards this bucket.
+
+        ``FlexShardModule.set_reshard_after_backward`` documents the behavior
+        and sets every bucket.
+        """
+        self._reshard_after_backward = reshard_after_backward
+
+    @property
+    def reshard_after_backward(self) -> bool:
+        """Whether backward reshards this bucket; see
+        ``set_reshard_after_backward``."""
+        return self._reshard_after_backward
+
+    def set_reduce_scatter_unused_params(
+        self, reduce_scatter_unused_params: bool
+    ) -> None:
+        """Set whether this bucket reduce-scatters zeros for params without
+        grads.
+
+        ``FlexShardModule.set_reduce_scatter_unused_params`` documents the
+        behavior and sets every bucket.
+        """
+        self._reduce_scatter_unused_params = reduce_scatter_unused_params
+
+    @property
+    def reshard_after_forward(self) -> bool:
+        """Whether this bucket frees its unsharded parameters after forward;
+        see ``set_reshard_after_forward``."""
+        return self._reshard_after_forward
+
+    def set_reshard_after_forward(self, reshard_after_forward: bool) -> None:
+        """Set whether this bucket reshards after forward, like FSDP2's
+        ``set_reshard_after_forward`` on its group.
+
+        ``BucketSpec.reshard_after_forward`` sets the initial value; this one
+        applies from the next forward on, e.g. to keep the bucket gathered
+        across several calls of its module.
+        """
+        self._reshard_after_forward = reshard_after_forward
+
+    def unshard(self) -> None:
+        """Unshard this bucket now and keep it unsharded, like FSDP2's
+        ``FSDPModule.unshard()`` on its group, synchronously.
+
+        ``FlexShardModule.unshard`` documents the behavior and unshards every
+        bucket. Eager only.
+        """
+        from . import module_ops
+
+        module_ops.unshard([self._runtime()], async_op=False)
+
+    def reshard(self) -> None:
+        """Reshard this bucket now, like FSDP2's ``FSDPModule.reshard()`` on
+        its group, and release its prefetched unshard, if any.
+
+        Grads accumulated without sync stay. Unlike
+        ``FlexShardModule.reshard``, this keeps the bucket's backward state, so
+        a backward still to run re-gathers the bucket in its pre-backward hook.
+        Eager only.
+        """
+        from . import module_ops
+
+        module_ops.reshard([self._runtime()])
+
+    def _runtime(self) -> BucketRuntime:
+        """This bucket's runtime, once its storage is materialized."""
+        if self._byte_storage.is_meta:
+            raise RuntimeError(
+                "FlexShard: the bucket's storage is on meta until to_empty()."
+            )
+        return cast("BucketRuntime", self.runtime)
+
+    def set_buckets_to_forward_prefetch(
+        self, buckets: list[ShardedBucketStorage]
+    ) -> None:
+        """Set the buckets this bucket prefetches in forward, like FSDP2's
+        ``set_modules_to_forward_prefetch``.
+
+        Right after this bucket unshards in its pre-forward hook, the listed
+        buckets start their all-gathers, in order, unless they are unsharded
+        already. Each stays in flight until its own hook takes it, or the
+        backward or ``FlexShardModule.reshard()`` releases it, so listing more
+        buckets overlaps more communication and holds more unsharded buckets
+        at once. Without a list, a bucket prefetches the next bucket in the
+        learned forward order, one prefetch at a time; a list, even an empty
+        one, replaces that. The buckets must come from the same ``flex_shard``
+        call. Eager only.
+        """
+        self._forward_prefetch = _check_prefetch_buckets(buckets)
+
+    def set_buckets_to_backward_prefetch(
+        self, buckets: list[ShardedBucketStorage]
+    ) -> None:
+        """Set the buckets this bucket prefetches in backward, like FSDP2's
+        ``set_modules_to_backward_prefetch``.
+
+        Right after this bucket re-gathers in its pre-backward hook, the listed
+        buckets start their all-gathers, as ``set_buckets_to_forward_prefetch``
+        describes. Without a list, a bucket prefetches the next bucket in the
+        reverse post-forward order; a list, even an empty one, replaces that.
+        """
+        self._backward_prefetch = _check_prefetch_buckets(buckets)
+
+    @property
+    def world_size(self) -> int:
+        """World size of the mesh."""
+        return self._mesh.size()
+
+    def get_local_view(self, fqn: str) -> torch.Tensor:
+        """Get the local tensor view for a parameter by FQN (from sharded storage)."""
+        info = self._param_infos[fqn]
+        return info.placement.make_local_storage_view(self._byte_storage, info)
+
+
+def _check_prefetch_buckets(
+    buckets: list[ShardedBucketStorage],
+) -> list[ShardedBucketStorage]:
+    buckets = list(buckets)
+    for bucket in buckets:
+        if not isinstance(bucket, ShardedBucketStorage):
+            raise TypeError(
+                "Prefetch targets must be entries of "
+                f"FlexShardModule.sharded_bucket_storages, got {type(bucket).__name__}."
+            )
+    return buckets
+
+
+def _assign_params_to_buckets(
+    param_fqns: list[str],
+    buckets: list[BucketSpec],
+    shared_names: dict[str, list[str]] | None = None,
+) -> BucketParamFQNsByIndex:
+    """Assign each param FQN to exactly one bucket via fnmatch.
+
+    Returns:
+        A list aligned with ``buckets``: result[bucket_idx] is the ordered list
+        of parameter FQNs assigned to ``buckets[bucket_idx]``.
+
+    Raises:
+        ValueError: if any param matches zero or multiple buckets, or if the
+            names of a shared parameter (``shared_names``: first name -> other
+            names) match different buckets.
+    """
+    param_to_buckets: dict[str, list[int]] = {
+        fqn: _matching_buckets(fqn, buckets) for fqn in param_fqns
+    }
+
+    # Check for orphans
+    orphans = [fqn for fqn, idxs in param_to_buckets.items() if len(idxs) == 0]
+    if orphans:
+        orphan_list = "\n  ".join(orphans)
+        raise ValueError(
+            f"flex_shard: {len(orphans)} parameters not covered by any bucket:\n"
+            f"  {orphan_list}\n"
+            'Add these to an existing bucket or add a catch-all bucket: ["*"]'
+        )
+
+    # Check for overlaps
+    overlaps = {fqn: idxs for fqn, idxs in param_to_buckets.items() if len(idxs) > 1}
+    if overlaps:
+        lines = []
+        for fqn, idxs in overlaps.items():
+            bucket_descs = ", ".join(f"bucket {i} {buckets[i].patterns}" for i in idxs)
+            lines.append(f"  {fqn} -> {bucket_descs}")
+        overlap_list = "\n".join(lines)
+        raise ValueError(
+            f"flex_shard: {len(overlaps)} parameters matched multiple buckets:\n"
+            f"{overlap_list}\n"
+            "Ensure each parameter matches exactly one bucket."
+        )
+
+    # Like FSDP2, which requires one FSDP group per parameter, every name of a
+    # shared parameter must match its bucket: the bucket's hooks then sit on a
+    # module that contains every use of the parameter.
+    for fqn, other_fqns in (shared_names or {}).items():
+        names = {name: _matching_buckets(name, buckets) for name in (fqn, *other_fqns)}
+        if any(idxs != param_to_buckets[fqn] for idxs in names.values()):
+            lines = []
+            for name, idxs in names.items():
+                descs = ", ".join(f"bucket {i} {buckets[i].patterns}" for i in idxs)
+                lines.append(f"  {name} -> {descs or 'no bucket'}")
+            matches = "\n".join(lines)
+            raise ValueError(
+                f"flex_shard: parameter {fqn!r} is shared with "
+                f"{', '.join(map(repr, other_fqns))}, but its names match "
+                f"different buckets:\n{matches}\n"
+                "For shared/tied parameters, put every name that refers to the "
+                "parameter in the same BucketSpec."
+            )
+
+    # Build assignments
+    assignments: BucketParamFQNsByIndex = [[] for _ in buckets]
+    for fqn, idxs in param_to_buckets.items():
+        assignments[idxs[0]].append(fqn)
+
+    return assignments
+
+
+def _matching_buckets(fqn: str, buckets: list[BucketSpec]) -> list[int]:
+    # A pattern naming a module matches the params under it.
+    return [
+        bucket_idx
+        for bucket_idx, bucket in enumerate(buckets)
+        if any(
+            fnmatch.fnmatch(fqn, pattern) or fnmatch.fnmatch(fqn, f"{pattern}.*")
+            for pattern in bucket.patterns
+        )
+    ]
+
+
+def _hook_module_fqns(module: nn.Module, patterns: list[str]) -> list[str] | None:
+    """The modules a bucket hooks when all its patterns name modules, else None
+    (see ``BucketSpec.patterns``)."""
+    named = []
+    for pattern in patterns:
+        try:
+            named.append(module.get_submodule(pattern))
+        except AttributeError:
+            pass
+    if not named:
+        return None
+    if len(named) != len(patterns):
+        raise ValueError(
+            f"BucketSpec patterns {patterns} mix module FQNs with parameter "
+            "patterns; a bucket's patterns must all name modules, whose forwards "
+            "then carry its hooks, or all match parameters."
+        )
+    for pattern, submodule in zip(patterns, named, strict=True):
+        if type(submodule).forward is nn.Module.forward:
+            raise ValueError(
+                f"BucketSpec pattern {pattern!r} names a "
+                f"{type(submodule).__name__}, which has no forward to hook; name "
+                "the modules it contains instead."
+            )
+    return list(patterns)
+
+
+def _fsdp2_param_order(
+    module: nn.Module,
+    patterns: list[str],
+    named_params: list[tuple[str, nn.Parameter]],
+) -> list[tuple[str, nn.Parameter]]:
+    """Order a bucket's params as ``fully_shard`` orders its group's params.
+
+    FSDP2 walks the modules it is given in post-order and takes each module's
+    own params when it first meets them. A bucket of module patterns walks
+    those modules, in pattern order. For parameter patterns, any module that
+    contains the bucket gives the same relative order, so walk the root.
+    """
+    hook_fqns = _hook_module_fqns(module, patterns)
+    roots = [module.get_submodule(fqn) for fqn in hook_fqns] if hook_fqns else [module]
+    bucket_param_ids = {id(param) for _, param in named_params}
+    positions: dict[int, int] = {}
+    visited: set[nn.Module] = set()
+
+    def visit(submodule: nn.Module) -> None:
+        visited.add(submodule)
+        for child in submodule.children():
+            if child not in visited:
+                visit(child)
+        for param in submodule.parameters(recurse=False):
+            if id(param) in bucket_param_ids:
+                positions.setdefault(id(param), len(positions))
+
+    for root in roots:
+        if root not in visited:
+            visit(root)
+    return sorted(named_params, key=lambda named_param: positions[id(named_param[1])])
