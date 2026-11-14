@@ -842,7 +842,7 @@ Keyword args:
     {device}
     {requires_grad}
 
-References::
+References:
 
     - A. Nuttall, "Some windows with very good sidelobe behavior,"
       IEEE Transactions on Acoustics, Speech, and Signal Processing, vol. 29, no. 1, pp. 84-91,
