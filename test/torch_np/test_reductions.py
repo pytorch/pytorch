@@ -1,12 +1,13 @@
 # Owner(s): ["module: dynamo"]
 
-from unittest import skipIf, SkipTest
+from unittest import skip, skipIf, SkipTest
 
 import numpy
 import pytest
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -372,6 +373,10 @@ class TestGenericReductions(TestCase):
             func(a, axis=np.array([1, 2]))
 
     @parametrize_func
+    @decorateIf(
+        skip("func(..., axis=()) is not valid"),
+        lambda p: p["func"] in fails_empty_tuple,
+    )
     def test_axis_empty_generic(self, func):
         if func in fails_empty_tuple:
             raise SkipTest("func(..., axis=()) is not valid")
@@ -392,6 +397,10 @@ class TestGenericReductions(TestCase):
 
     @parametrize_axis
     @parametrize_func
+    @decorateIf(
+        skip("reduction does not allow tuple axis"),
+        lambda p: p["func"] in fails_axes_tuples,
+    )
     def test_keepdims_generic(self, axis, func):
         if func in fails_axes_tuples:
             raise SkipTest(f"{func.__name__} does not allow tuple axis.")
@@ -411,6 +420,9 @@ class TestGenericReductions(TestCase):
         assert_array_equal(with_keepdims, expanded)
 
     @parametrize_func
+    @decorateIf(
+        skip("reduction does not have out= arg"), lambda p: p["func"] in fails_out_arg
+    )
     def test_out_scalar(self, func):
         # out no axis: scalar
         if func in fails_out_arg:
@@ -453,6 +465,17 @@ class TestGenericReductions(TestCase):
     @parametrize("dtype", [bool, "int32", "float64"])
     @parametrize_func
     @parametrize_axis
+    @decorateIf(
+        skip("reduction does not have out= arg"), lambda p: p["func"] in fails_out_arg
+    )
+    @decorateIf(
+        skip("reduction does not allow tuple axis"),
+        lambda p: p["func"] in fails_axes_tuples,
+    )
+    @decorateIf(
+        skip("test implies float->int casts"),
+        lambda p: p["func"] in restricts_dtype_casts,
+    )
     def test_out_axis(self, func, axis, dtype, keepdims):
         # out with axis
         if func in fails_out_arg:
@@ -485,6 +508,13 @@ class TestGenericReductions(TestCase):
 
     @parametrize_func
     @parametrize_axis
+    @decorateIf(
+        skip("reduction does not have out= arg"), lambda p: p["func"] in fails_out_arg
+    )
+    @decorateIf(
+        skip("reduction does not allow tuple axis"),
+        lambda p: p["func"] in fails_axes_tuples,
+    )
     def test_keepdims_out(self, func, axis):
         if func in fails_out_arg:
             raise SkipTest(f"{func.__name__} does not have out= arg.")

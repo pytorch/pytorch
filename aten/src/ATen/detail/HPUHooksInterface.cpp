@@ -15,6 +15,10 @@ TORCH_API const at::HPUHooksInterface& getHPUHooks() {
   return *hooks;
 }
 
+bool isHPUHooksBuilt() {
+  return HPUHooksRegistry()->Has("HPUHooks");
+}
+
 } // namespace detail
 
 C10_DEFINE_REGISTRY(HPUHooksRegistry, HPUHooksInterface, HPUHooksArgs)

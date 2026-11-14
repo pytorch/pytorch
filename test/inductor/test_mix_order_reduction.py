@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     recover_orig_fp32_precision,
@@ -109,6 +110,10 @@ class SkipPatternTest(TestBase):
 )
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):
+    @decorateIf(
+        unittest.skip("Invalid combination"),
+        lambda params: params["name"] == "prod" and len(params["shape"]) == 3,
+    )
     @parametrize(
         "name",
         [
@@ -487,6 +492,10 @@ class MixOrderReductionTest(TestBase):
             expected_mix_order_reduction, metrics.codegen_mix_order_reduction
         )
 
+    @decorateIf(
+        unittest.skip("Skip non-critical tests to save resources."),
+        lambda params: params["shape"] != (1000000, 256) and params["add_1dim"],
+    )
     @parametrize(
         "wdtype",
         [

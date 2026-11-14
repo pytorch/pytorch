@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    preserves_device_selection,
 )
 from torch.testing._internal.common_utils import IS_MACOS, parametrize, subtest
 from torch.testing._internal.inductor_utils import requires_gpu
@@ -28,6 +29,9 @@ aten = torch.ops.aten
 
 
 class TestSliceScatterChunking(TestCase):
+    setUp = preserves_device_selection(TestCase.setUp)
+    setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
+
     def _run_pass(self, fn, *args, tracing_mode="fake", custom=None):
         gm = make_fx(fn, tracing_mode=tracing_mode)(*args)
         if custom is not None:
