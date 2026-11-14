@@ -15,9 +15,14 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import _get_mesh_info
 from torch.distributed.tensor import DTensor, init_device_mesh, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
@@ -83,6 +88,9 @@ class DenseSparseParams(nn.Module):
 
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
 class TestFullyShardSpmdTypes(TestCase):
+    # These tests use CPU meshes and a fake process group.
+    hw_classification = HardwareClassification.CPU
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -117,7 +125,7 @@ class TestFullyShardSpmdTypes(TestCase):
             dist.destroy_process_group()
         super().tearDownClass()
 
-    def test_restores_param_spmd_type_for_compute(self):
+    def test_restores_param_spmd_type_for_compute(self, device):
         """FSDP restores user SPMD metadata on params for compute.
 
         FSDP should preserve the compute-mesh annotations when applied with
@@ -231,7 +239,7 @@ class TestFullyShardSpmdTypes(TestCase):
                     2,
                 )
 
-    def test_full_param_annotations_do_not_require_init_compute_mesh(self):
+    def test_full_param_annotations_do_not_require_init_compute_mesh(self, device):
         """Full per-axis annotations are enough without an init compute mesh."""
         model = SpmdLinear(self.dense_type_mesh, seq_parallel=False)
 
@@ -272,7 +280,7 @@ class TestFullyShardSpmdTypes(TestCase):
                 {self.dp_axis: spmd.P, self.cp_axis: spmd.P, self.tp_axis: spmd.I},
             )
 
-    def test_local_v_param_requires_partition_spec(self):
+    def test_local_v_param_requires_partition_spec(self, device):
         """Local-only V@TP params are ambiguous for FSDP.
 
         Without PartitionSpec shard info, FSDP cannot choose the matching
@@ -306,7 +314,7 @@ class TestFullyShardSpmdTypes(TestCase):
             """Cannot convert plain Varying to a DTensor placement. Use S(dim) to specify which tensor dimension is sharded.""",
         )
 
-    def test_partial_param_annotations_infer_fsdp_axes_at_init(self):
+    def test_partial_param_annotations_infer_fsdp_axes_at_init(self, device):
         """Use init-time current_mesh to infer omitted FSDP axes as R.
 
         Params annotate only TP; FSDP fills DP/CP axes during fully_shard().
@@ -347,7 +355,7 @@ class TestFullyShardSpmdTypes(TestCase):
                 {self.dp_axis: spmd.P, self.cp_axis: spmd.P, self.tp_axis: spmd.I},
             )
 
-    def test_mixed_dense_sparse_params_use_per_param_restore_meshes(self):
+    def test_mixed_dense_sparse_params_use_per_param_restore_meshes(self, device):
         """
         Test restoring per-param dense and sparse type meshes.
 
@@ -420,7 +428,7 @@ class TestFullyShardSpmdTypes(TestCase):
             ),
         )
 
-    def test_spmd_params_require_dp_mesh_dims(self):
+    def test_spmd_params_require_dp_mesh_dims(self, device):
         """Require explicit DP mesh axes before FSDP handles spmd_types params."""
         model = SpmdLinear(self.dense_type_mesh, seq_parallel=False)
 
@@ -444,7 +452,7 @@ class TestFullyShardSpmdTypes(TestCase):
             "replicates across.",
         )
 
-    def test_fully_annotated_sparse_param_requires_sparse_storage_mesh(self):
+    def test_fully_annotated_sparse_param_requires_sparse_storage_mesh(self, device):
         """Fully-annotated sparse param + dense FSDP mesh errors out."""
         model = nn.Linear(16, 16, bias=False)
         spmd.assert_type(
@@ -472,7 +480,7 @@ class TestFullyShardSpmdTypes(TestCase):
             "the FSDP DP mesh.",
         )
 
-    def test_spmd_restore_mesh_must_contain_annotated_axes(self):
+    def test_spmd_restore_mesh_must_contain_annotated_axes(self, device):
         """Partial TP annotations w/ sparse current_mesh context fail."""
         model = SpmdLinear(self.dense_type_mesh, seq_parallel=False)
         spmd.assert_type(model.unsharded_weight, {self.tp_axis: spmd.I})
@@ -495,7 +503,7 @@ class TestFullyShardSpmdTypes(TestCase):
         )
         self.assertIn("Annotate only axes in the compute mesh", str(cm.exception))
 
-    def test_partial_non_storage_annotations_require_current_mesh(self):
+    def test_partial_non_storage_annotations_require_current_mesh(self, device):
         """Partial non-storage annotations need a shared current mesh."""
         model = nn.Linear(16, 16, bias=False)
         spmd.assert_type(model.weight, {self.ep_axis: spmd.S(0)})
@@ -521,7 +529,7 @@ class TestFullyShardSpmdTypes(TestCase):
             "mesh_dp_shard, mesh_cp, mesh_tp).",
         )
 
-    def test_partial_param_annotations_missing_non_fsdp_axis_errors(self):
+    def test_partial_param_annotations_missing_non_fsdp_axis_errors(self, device):
         """Require annotations for storage axes that FSDP does not manage."""
         model = SpmdLinear(self.dense_type_mesh, seq_parallel=False)
 
@@ -555,7 +563,7 @@ class TestFullyShardSpmdTypes(TestCase):
             "(mesh_tp,).",
         )
 
-    def test_fsdp_dp_axes_must_be_r(self):
+    def test_fsdp_dp_axes_must_be_r(self, device):
         """FSDP-managed DP axes must be Replicate in spmd_types annotations."""
         model = SpmdLinear(self.dense_type_mesh, seq_parallel=False)
 
@@ -587,13 +595,15 @@ class TestFullyShardSpmdTypes(TestCase):
 
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
 class TestFullyShardSpmdGradDtype(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
 
     @skip_if_lt_x_gpu(4)
-    def test_native_spmd_accumulation(self):
-        device = get_devtype().type
+    def test_native_spmd_accumulation(self, device):
+        device = torch.device(device).type
         mesh = init_device_mesh(device, (2, 2), mesh_dim_names=("dp", "tp"))
         dp_axis = spmd.MeshAxis.of(mesh.get_group("dp"))
         tp_axis = spmd.MeshAxis.of(mesh.get_group("tp"))
@@ -664,5 +674,9 @@ class TestFullyShardSpmdGradDtype(FSDPTest):
             self.assertEqual(param.grad.full_tensor(), ref_weight.grad)
 
 
+instantiate_device_type_tests(TestFullyShardSpmdTypes, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    TestFullyShardSpmdGradDtype, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()

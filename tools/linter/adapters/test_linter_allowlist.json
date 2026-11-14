@@ -27,7 +27,6 @@
   "test/distributed/_composable/fsdp/test_fully_shard_memory.py",
   "test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py",
   "test/distributed/_composable/fsdp/test_fully_shard_overlap.py",
-  "test/distributed/_composable/fsdp/test_fully_shard_spmd_types.py",
   "test/distributed/_composable/fsdp/test_fully_shard_state_dict.py",
   "test/distributed/_composable/fsdp/test_fully_shard_training.py",
   "test/distributed/_composable/test_checkpoint.py",
