@@ -453,6 +453,12 @@ test_tsan() {
 }
 
 test_editable() {
+  # The nightly rerun-disabled-tests run never fails on a test result, so an editable
+  # rebuild there would only repeat what this job already checks on every PR.
+  if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
+    echo "Skipping the editable install test in rerun-disabled-tests mode"
+    return
+  fi
   # Every other job tests a wheel install. This one replaces it with a redirect-mode
   # editable install (Python from the checkout, CMake artifacts from the install tree)
   # and runs the suites that resolve installed files, so a path derived from
@@ -463,14 +469,13 @@ test_editable() {
   python -m pip uninstall -y torch
   git submodule sync && git submodule update --init --recursive
   time WERROR=1 python -m pip install --no-build-isolation --no-deps -v -e .
-  sccache --show-stats || true
+  print_sccache_stats
   # From test/, where the checkout is not on sys.path: the Python sources must still come
   # from the checkout and the extension module from the install tree.
   (cd test && python -c 'import os, sys, torch; real = os.path.realpath; print(torch.__file__, torch._C.__file__); sys.exit(0 if real(torch.__file__) == real("../torch/__init__.py") and "/build/install/" in real(torch._C.__file__) else "torch is not installed editable")')
   # Suites that resolve installed files (helpers, cpp_extension, package data) plus the
-  # public-API import sweep. test_fx and test_license are here for #195891: the torchbind
-  # library is still found only through the build/lib fallback and the dist-info license
-  # test skips itself, so both start testing the layout once that issue is fixed.
+  # public-API import sweep. test_fx (torchbind test library) and test_license (dist-info
+  # licenses) cover the lookups fixed for #195891.
   # The list is the point of the job, so TD must not trim it.
   export NO_TD=1
   time python test/run_test.py --include \

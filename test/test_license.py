@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+import importlib.metadata
 import os
 import subprocess
 import sys
@@ -11,7 +12,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -31,8 +31,20 @@ sys.path.remove(str(REPO_ROOT))
 # explicit included + excluded license paths, unknown discovery fails,
 # SPDX expressions from a per-file map
 
-site_packages = os.path.dirname(os.path.dirname(torch.__file__))
-distinfo = glob.glob(os.path.join(site_packages, "torch-*dist-info"))
+# The dist-info sits where the distribution is installed, which under an editable
+# install is not next to torch.__file__. A stale torch.egg-info on sys.path is also a
+# "torch" distribution, so look beside each one and keep only dist-info directories.
+site_packages = sorted(
+    {
+        str(dist.locate_file(""))
+        for dist in importlib.metadata.distributions(name="torch")
+    }
+)
+distinfo = [
+    path
+    for directory in site_packages
+    for path in glob.glob(os.path.join(directory, "torch-*dist-info"))
+]
 
 
 def _audit_fixture(
