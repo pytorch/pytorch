@@ -14,6 +14,7 @@ import typing
 import unittest
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 from typing import *  # noqa: F403
 from unittest.mock import patch
 
@@ -4879,8 +4880,10 @@ with warnings.catch_warnings(record=True) as w:
     @fake_tensor_modes
     def test_library_register_fake(self, mode_cls):
         for mode in ["function", "qualname", "opoverload"]:
+            opname = f"register_fake_{mode}_{mode_cls.__name__}"
+            qualname = f"_torch_testing::{opname}"
 
-            @torch.library.custom_op("_torch_testing::add", mutates_args=())
+            @torch.library.custom_op(qualname, mutates_args=())
             def add(x: Tensor, y: float) -> Tensor:
                 x_np = x.cpu().numpy()
                 out_np = x_np + y
@@ -4892,10 +4895,12 @@ with warnings.catch_warnings(record=True) as w:
                 dec = torch.library.register_fake(add)
                 self.assertIsNotNone(dec)
             elif mode == "qualname":
-                dec = torch.library.register_fake("_torch_testing::add")
+                dec = torch.library.register_fake(qualname)
                 self.assertIsNotNone(dec)
             elif mode == "opoverload":
-                dec = torch.library.register_fake(torch.ops._torch_testing.add.default)
+                dec = torch.library.register_fake(
+                    getattr(torch.ops._torch_testing, opname).default
+                )
                 self.assertIsNotNone(dec)
             else:
                 raise AssertionError("should not get here")
@@ -4906,12 +4911,32 @@ with warnings.catch_warnings(record=True) as w:
                 called = True
                 return torch.empty_like(x)
 
-            with mode_cls():
+            with mode_cls() as fake_mode:
                 x = torch.randn(3)
                 y = 3.14
                 z = add(x, y)
                 self.assertEqual(z.shape, x.shape)
                 self.assertTrue(called)
+
+                def profiled_kernel(func, mode, x, y):
+                    self.assertIs(func, add._opoverload)
+                    self.assertIs(mode, fake_mode)
+                    with mode:
+                        return x.new_empty(x.numel() + 1)
+
+                profiles = SimpleNamespace(
+                    data={add._opoverload}, generic_fake_kernel=profiled_kernel
+                )
+                with torch._dynamo.config.patch(_custom_ops_profile=profiles):
+                    called = False
+                    self.assertEqual(add(x, y).shape, (4,))
+                    self.assertFalse(called)
+                    profiles.data.clear()
+                    self.assertEqual(add(x, y).shape, (3,))
+                    self.assertTrue(called)
+                    profiles.data.add(add._opoverload)
+                    self.assertEqual(add(x, y).shape, (4,))
+                self.assertEqual(add(x, y).shape, (3,))
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_torch_dispatch(self):

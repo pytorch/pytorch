@@ -750,8 +750,8 @@ fake_tensor_cache_crosscheck_enabled = (
 # the inference_mode is still respected.
 fake_tensor_disable_inference_mode = True
 
-# Use C++ FakeTensor mode (DispatchKey::Fake) instead of Python FakeTensorMode
-# for fake tensor propagation during dynamo tracing.
+# Experimental: FakeTensorMode() constructs a CppFakeTensorMode.
+# Compiler integration is incomplete; keep this opt-in.
 use_cpp_fake_tensor = os.environ.get("CPP_FAKETENSOR", "0") == "1"
 
 # Experimental feature for running automatic caching precompile.
@@ -929,6 +929,8 @@ record_runtime_overhead = True
 enable_aot_compile = True
 
 # HACK: this is for testing custom ops profiling only
+# Native FakeTensor supports profiles for custom namespaces; built-in ATen/prim
+# profiles currently require Python FakeTensorMode.
 _custom_ops_profile: Any | None = None
 
 # Experimental flag to enable regional compile on invoke_subgraph HOP.

@@ -3,6 +3,7 @@
 
 import copy
 import unittest
+from types import SimpleNamespace
 
 import torch
 import torch.utils._pytree as pytree
@@ -15,6 +16,7 @@ from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    fake_tensor_modes,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_MACOS,
@@ -209,9 +211,14 @@ def forward(self, token, obj_attr, x, n):
     return (getitem, add)""",
         )
 
-    def test_method_schema(self):
+    @fake_tensor_modes
+    @parametrize("propagate_real_tensors", [False, True])
+    def test_method_schema(self, mode_cls, propagate_real_tensors):
         tq = _empty_tensor_queue()
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        with torch._functorch.config.patch(
+            fake_tensor_propagate_real_tensors=propagate_real_tensors
+        ):
+            fake_mode = mode_cls()
         fake_obj = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, tq)
         self.assertExpectedInline(
             str(fake_obj.push.schema),
@@ -221,6 +228,39 @@ def forward(self, token, obj_attr, x, n):
             str(fake_obj.pop.schema),
             """pop(__torch__.torch.classes._TorchScriptTesting._TensorQueue _0) -> Tensor _0""",
         )
+        with fake_mode:
+            x = torch.ones(2, 3)
+            torch.ops._TorchScriptTesting.queue_push(fake_obj, x)
+            self.assertEqual(torch.ops._TorchScriptTesting.queue_size(fake_obj), 1)
+            self.assertIs(torch.ops._TorchScriptTesting.queue_pop(fake_obj), x)
+
+        foo = torch.classes._TorchScriptTesting._Foo(2, 3)
+        fake_foo = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, foo)
+        with fake_mode:
+            out = torch.ops._TorchScriptTesting.takes_foo(fake_foo, x)
+        self.assertIs(torch._subclasses.fake_tensor.maybe_get_fake_mode(out), fake_mode)
+        self.assertEqual(
+            (out.shape, out.stride(), out.device), (x.shape, x.stride(), x.device)
+        )
+        if propagate_real_tensors:
+            self.assertEqual(
+                torch._subclasses.fake_tensor.maybe_get_real_tensor(out),
+                torch.full((2, 3), 5.0),
+            )
+
+        def profile_kernel(func, mode, foo, x):
+            self.assertIsNone(torch._guards.active_fake_mode())
+            with mode:
+                return x.new_empty(7)
+
+        profile = SimpleNamespace(
+            data={torch.ops._TorchScriptTesting.takes_foo.default},
+            generic_fake_kernel=profile_kernel,
+        )
+        with fake_mode, torch._dynamo.config.patch(_custom_ops_profile=profile):
+            self.assertEqual(
+                torch.ops._TorchScriptTesting.takes_foo(fake_foo, x).shape, (7,)
+            )
 
     @parametrize("pre_dispatch", [True, False])
     def test_attribute(self, pre_dispatch):
