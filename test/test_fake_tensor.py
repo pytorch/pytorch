@@ -3706,18 +3706,60 @@ class TestFakeTensorConverter(TestCase):
 
     @fake_tensor_modes
     @parametrize("active", [False, True])
-    def test_memoized_conversion_to_meta(self, mode_cls, active):
-        x = torch.rand(2, 2, 2)
+    @parametrize(
+        "layout",
+        [
+            torch.strided,
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ],
+    )
+    @parametrize("requires_grad", [False, True])
+    @parametrize("leaf", [False, True])
+    def test_memoized_conversion_to_meta(
+        self, mode_cls, active, layout, requires_grad, leaf
+    ):
+        x = torch.rand(2, 4, 4)
+        if layout != torch.strided:
+            kwargs = (
+                {"blocksize": (2, 2)}
+                if layout in (torch.sparse_bsr, torch.sparse_bsc)
+                else {}
+            )
+            x = x.to_sparse(layout=layout, **kwargs)
+        x.requires_grad_(requires_grad)
+        if not leaf:
+            x = x.clone()
         mode = mode_cls()
+        if active and layout not in (torch.strided, torch.sparse_coo):
+            # Describing real compressed-sparse components dispatches their
+            # accessors. Both modes reject those real inputs while active.
+            with mode, self.assertRaisesRegex(AssertionError, "Please convert"):
+                mode.from_tensor(x)
+            return
         with mode if active else contextlib.nullcontext():
             fake = mode.from_tensor(x)
         self.assertIs(mode.from_tensor(x), fake)
         self.assertIs(mode.from_tensor(fake), fake)
         self.assertIs(maybe_get_fake_mode(fake), mode)
         self.assertEqual(fake.shape, x.shape)
-        self.assertEqual(fake.stride(), x.stride())
+        self.assertEqual(fake.layout, x.layout)
+        if layout == torch.strided:
+            self.assertEqual(fake.stride(), x.stride())
+        else:
+            self.assertEqual(fake.sparse_dim(), x.sparse_dim())
+            self.assertEqual(fake.dense_dim(), x.dense_dim())
+            with in_kernel_invocation_manager(mode):
+                self.assertEqual(fake._nnz(), 0)
+            if layout == torch.sparse_coo:
+                self.assertEqual(fake.is_coalesced(), x.is_coalesced())
         self.assertEqual(fake.dtype, x.dtype)
         self.assertEqual(fake.device, x.device)
+        self.assertEqual(fake.requires_grad, x.requires_grad)
+        self.assertEqual(fake.is_leaf, x.is_leaf)
 
     @fake_tensor_modes
     @parametrize("pytype", [None, torch.Tensor, torch.nn.Parameter])
