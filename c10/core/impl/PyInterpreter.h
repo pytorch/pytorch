@@ -360,11 +360,12 @@ struct C10_API PyInterpreterVTable {
   virtual bool prim_meta_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
-  // Needs an active mode. Returns false if op has a fake kernel. real
+  // Takes the uninstalled mode. Returns false if op has a fake kernel. real
   // (borrowed) is the fake_run_real_op result.
   virtual bool fake_infer_from_real_out(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
       PyObject* real) const = 0;
   // Validates real input subclasses, then optionally tries initial constant
   // computation or a plain lift while holding the GIL. Replaces the
@@ -390,18 +391,20 @@ struct C10_API PyInterpreterVTable {
   // else mode's allow_non_fake_inputs_.
   virtual bool allow_non_fake_inputs(
       const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
-  // Needs an active mode. Runs op on the reals behind fake_args and returns the
-  // RealOpResult as a new reference, or nullptr if an arg has no real tensor
-  // or the real op raises ZeroDivisionError.
+  // Takes the uninstalled mode. Runs op on the reals behind fake_args and
+  // returns the RealOpResult as a new reference, or nullptr if an arg has no
+  // real tensor or the real op raises ZeroDivisionError.
   virtual PyObject* fake_run_real_op(
       const c10::OperatorHandle& op,
-      const torch::jit::Stack& fake_args) const = 0;
-  // Needs an active mode. Applies real (borrowed) to the fake outputs on top of
-  // stack, replacing them if the Python side returns new ones.
+      const torch::jit::Stack& fake_args,
+      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
+  // Takes the uninstalled mode. Applies real (borrowed) to the fake outputs on
+  // top of stack, replacing them if the Python side returns new ones.
   virtual void propagate_real_tensors(
       const c10::OperatorHandle& op,
       PyObject* real,
-      torch::jit::Stack* stack) const = 0;
+      torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
 };
 
 struct C10_API PyInterpreter {

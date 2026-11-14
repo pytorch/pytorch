@@ -1055,6 +1055,9 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         if static_shapes is not None:
             self.static_shapes = static_shapes
 
+    _maybe_infer_fake = _maybe_infer_fake
+    _maybe_infer_fake_kernel_from_pytree_out = _maybe_infer_fake_kernel_from_pytree_out
+
     # Symbolized on demand, without retaining the creation frame's locals.
     @property
     def stack(self) -> str:

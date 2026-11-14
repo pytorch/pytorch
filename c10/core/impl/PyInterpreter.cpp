@@ -210,6 +210,7 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   bool fake_infer_from_real_out(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/,
       PyObject* /*real*/) const override {
     PANIC(fake_infer_from_real_out);
   }
@@ -233,13 +234,15 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   }
   PyObject* fake_run_real_op(
       const c10::OperatorHandle& /*op*/,
-      const torch::jit::Stack& /*fake_args*/) const override {
+      const torch::jit::Stack& /*fake_args*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
     PANIC(fake_run_real_op);
   }
   void propagate_real_tensors(
       const c10::OperatorHandle& /*op*/,
       PyObject* /*real*/,
-      torch::jit::Stack* /*stack*/) const override {
+      torch::jit::Stack* /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
     PANIC(propagate_real_tensors);
   }
 };
