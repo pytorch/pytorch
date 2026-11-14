@@ -1010,7 +1010,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                         self.assertEqual(opt_fn(x), expected(x))
                         self.assertNotIn("_dg_a", globals())
 
-    @parametrize("shape", ("attr", "setitem"))
+    @parametrize("shape", ("attr", "setitem", "update", "setdefault"))
     def test_delete_global_module_write_after(self, shape):
         me = sys.modules[__name__]
 
@@ -1026,9 +1026,23 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             me.__dict__["_dg_a"] = 5
             return x + 1
 
+        def fn_update(x):
+            global _dg_a
+            del _dg_a
+            me.__dict__.update(_dg_a=5)
+            return x + 1
+
+        def fn_setdefault(x):
+            global _dg_a
+            del _dg_a
+            me.__dict__.setdefault("_dg_a", 5)
+            return x + 1
+
         fn, expected, g_after, msg = {
             "attr": (fn_attr, lambda x: x + 1, 5, "module-object write"),
             "setitem": (fn_setitem, lambda x: x + 1, 5, "module-__dict__ access"),
+            "update": (fn_update, lambda x: x + 1, 5, "module-__dict__ access"),
+            "setdefault": (fn_setdefault, lambda x: x + 1, 5, "module-__dict__ access"),
         }[shape]
         with mock.patch.dict(globals(), {"_dg_a": 1}):
             x = torch.ones(2, 2)

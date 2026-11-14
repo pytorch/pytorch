@@ -2668,8 +2668,7 @@ class InstructionTranslatorBase(
                 context=name,
                 explanation=(
                     "Dynamo cannot order a global delete against a pending "
-                    "write to the module globals, whether through the "
-                    "module object or its __dict__."
+                    "write to the module globals through the module object."
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
@@ -6647,19 +6646,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             super().DELETE_GLOBAL(inst)
             return
         name = inst.argval
-        _fglobals_value, fglobals_vt, global_source = self.get_globals_source_and_value(
-            name
-        )
-        if isinstance(global_source, DictGetItemSource):
-            unimplemented(
-                gb_type="DELETE_GLOBAL in non-module globals",
-                context=f"module_name: {self.f_globals.get('__name__')!r}",
-                explanation=(
-                    "Dynamo cannot safely replay global deletes for a frame "
-                    "whose globals dict is not the registered module __dict__."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+        _, fglobals_vt, _ = self.get_globals_source_and_value(name)
         if getattr(
             getattr(fglobals_vt, "value", None), "__getattr__", None
         ) is not None or self.output.side_effects.has_pending_mutation_of_attr(
