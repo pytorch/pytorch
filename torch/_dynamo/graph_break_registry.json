@@ -2480,6 +2480,16 @@
       ]
     }
   ],
+  "GB7682": [
+    {
+      "Gb_type": "Unsupported generator frame f_locals operation",
+      "Context": "f_locals {op}",
+      "Explanation": "Dynamo does not model {op} on a generator frame's f_locals.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0142": [
     {
       "Gb_type": "Unsupported context manager",
@@ -4716,6 +4726,26 @@
       ]
     }
   ],
+  "GB5184": [
+    {
+      "Gb_type": "Unsupported generator frame f_locals",
+      "Context": "Python {sys.version_info[:2]}",
+      "Explanation": "f_locals is only modeled on Python 3.13+.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4329": [
+    {
+      "Gb_type": "Unsupported generator frame f_locals write",
+      "Context": "f_locals[{key.debug_repr()}]: {op}",
+      "Explanation": "Dynamo only models assigning a plain local variable through a generator frame's f_locals.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB5460": [
     {
       "Gb_type": "bytearray constructor with non-constant args",
@@ -5962,6 +5992,16 @@
       "Explanation": "Attempted to call `torch.library.wrap_triton` or `torch._library.capture_triton` with > 1 args. Dynamo does not support this.",
       "Hints": [
         "Remove the wrap_triton/capture_triton call or its additional args.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7149": [
+    {
+      "Gb_type": "Generator frame f_locals write in a subgraph",
+      "Context": "f_locals[{key.debug_repr()}]",
+      "Explanation": "Writing a generator's locals inside a higher-order op or while reconstructing a generator is not supported.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
