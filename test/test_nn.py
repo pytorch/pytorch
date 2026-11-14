@@ -16009,6 +16009,52 @@ class TestNNDeviceType(NNTestCase):
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    @parametrize_test("case", [
+        subtest(((40, 5, 4), [5, 8, 16, 12, 12], [40] * 5, False, False, False), name="small_path"),
+        subtest(((300, 5, 257), [127] * 5, [300, 300, 300, 300, 297], False, False, True), name="long_targets_large_alphabet"),
+        subtest(((300, 5, 4), [127] * 5, [300, 300, 300, 300, 297], False, False, True), name="long_targets_small_alphabet"),
+        subtest(((240, 5, 1000), [5, 8, 16, 12, 12], [240, 240, 240, 240, 237], True, False, False), name="large_alphabet"),
+        subtest(((240, 3, 4), [0, 0, 0], [240, 120, 0], False, False, False), name="empty_targets"),
+        subtest(((240, 5, 36), [0, 0, 64, 0, 1], [240, 120, 200, 0, 0], True, False, False), name="boundaries"),
+        subtest(((240, 6, 36), [0, 0, 64, 0, 260, 1], [240, 120, 200, 0, 240, 0], True, True, False), name="boundaries_zero_infinity"),
+    ])
+    def test_CTCLoss_deterministic(self, device, dtype, case):
+        shape, target_lengths, input_lengths, concatenated, zero_infinity, repeated_labels = case
+        time, batch, classes = shape
+        log_probs = torch.randn(batch, time, classes, device=device, dtype=dtype)
+        log_probs = log_probs.log_softmax(2).transpose(0, 1).detach().requires_grad_()
+        target_size = 2 * max(target_lengths)
+        targets = torch.randint(0, classes - 1, (batch, target_size), device=device, dtype=torch.long)[:, ::2]
+        targets.add_(targets >= 3)
+        if repeated_labels:
+            split = max(target_lengths) // 2
+            targets[:, :split] = 0
+            targets[:, split:] = 1
+        if concatenated:
+            targets = torch.cat([target[:length] for target, length in zip(targets, target_lengths)]).int()
+        grad_out = torch.randn(batch * 2, device=device, dtype=dtype)[::2]
+        with cudnn.flags(enabled=False), DeterministicGuard(False):
+            reference_loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                                        blank=3, reduction='none', zero_infinity=zero_infinity)
+            reference_grad, = torch.autograd.grad(reference_loss, log_probs, grad_out)
+        with cudnn.flags(enabled=False), DeterministicGuard(True):
+            loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                              blank=3, reduction='none', zero_infinity=zero_infinity)
+            grad, = torch.autograd.grad(loss, log_probs, grad_out)
+            self.assertEqual(loss, reference_loss, atol=0, rtol=0)
+            # Collect and large-path kernels sum in different orders; observed max diff ~6e-4 (float), ~2e-12 (double).
+            reference_atol = 1e-3 if dtype == torch.float else 1e-11
+            self.assertEqual(grad, reference_grad, atol=reference_atol, rtol=0)
+
+            for _ in range(3):
+                repeated_loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                                           blank=3, reduction='none', zero_infinity=zero_infinity)
+                repeated_grad, = torch.autograd.grad(repeated_loss, log_probs, grad_out)
+                self.assertEqual(loss, repeated_loss, atol=0, rtol=0)
+                self.assertEqual(grad, repeated_grad, atol=0, rtol=0)
+
     def test_CTCLoss_zero_lengths(self, device):
         N = 3
         S = 2
