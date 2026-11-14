@@ -1338,7 +1338,20 @@ class TensorVariable(VariableTracker):
             return None
 
         source = TensorPropertySource(self.source, TensorProperty.STORAGE_OFFSET)
-        install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
+        install_guard(
+            source.make_guard(
+                functools.partial(
+                    GuardBuilder.EQUALS_MATCH,
+                    recompile_hint=(
+                        "Dynamo guards this tensor's storage offset because it "
+                        "traced a storage_offset() call whose result may affect "
+                        "calculations or control flow. Even empty views can have "
+                        "different offsets if their slices start at different "
+                        "positions, so a later empty view can fail this guard."
+                    ),
+                )
+            )
+        )
         return ConstantVariable.create(storage_offset, source=source)
 
     def _method_size_stride(

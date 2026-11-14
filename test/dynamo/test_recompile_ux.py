@@ -359,6 +359,32 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         expected_hint = f"(HINT: Iterator t must be a tuple iterator with {expected_items}; Dynamo specialized the compiled code on the tuple iterator type and remaining count.)"
         self.assertIn(expected_hint, reasons[0])
 
+    @parametrize("use_offset, empty", [(True, False), (False, False), (True, True)])
+    @torch._dynamo.config.patch(recompile_limit=2)
+    def test_tensor_storage_offset_recompile_hint(self, use_offset, empty):
+        reasons = []
+
+        def fn(x):
+            offset = x.storage_offset()
+            return x + (offset if use_offset else 1)
+
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: reasons.append(failure.reason)
+        )(fn)
+        base = torch.arange(5)
+        first = base[:0] if empty else base[:3]
+        second = base[1:1] if empty else base[1:4]
+        compiled(first)
+        self.assertEqual(compiled(second), fn(second))
+
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("x.storage_offset() == 0", reasons[0])
+        self.assertIn(
+            "(HINT: Dynamo guards this tensor's storage offset because it traced",
+            reasons[0],
+        )
+        self.assertIn("Even empty views can have different offsets", reasons[0])
+
     @torch._dynamo.config.patch(recompile_limit=1)
     def test_recompile_child_run_only(self):
         def f(x, n):
