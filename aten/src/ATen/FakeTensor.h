@@ -8,6 +8,7 @@
 namespace c10 {
 struct FakeTensorMode;
 struct TensorImpl;
+struct VariableVersion;
 } // namespace c10
 
 namespace at {
@@ -45,6 +46,13 @@ TORCH_API bool may_turn_const(const Tensor& tensor);
 // dispatch, but must not enter InKernelInvocationGuard: the copies stay fake.
 TORCH_API Tensor fake_detach(const Tensor& self);
 TORCH_API Tensor& fake_shallow_copy_data_(Tensor& self, const Tensor& source);
+
+// Unlike the kernels above, data access keeps Python's shallow-copy hook
+// active.
+TORCH_API Tensor fake_tensor_data(
+    const Tensor& self,
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change);
 
 } // namespace impl
 
