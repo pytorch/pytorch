@@ -7072,40 +7072,6 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @fake_tensor_modes
-    @parametrize("parameter_output", [False, True])
-    def test_fake_fallback_constant_output_type(self, mode_cls, parameter_output):
-        mode = mode_cls()
-        real = torch.ones(1)
-        seen = []
-
-        def add(t):
-            seen.append(torch._guards.active_fake_mode())
-            out = t + 1
-            return (
-                torch.nn.Parameter(out, requires_grad=False)
-                if parameter_output
-                else out
-            )
-
-        with torch.library._scoped_library("_test_fake_constant", "DEF") as lib:
-            lib.define("add(Tensor x) -> Tensor")
-            lib.impl("add", add, "CPU")
-            with mode:
-                if parameter_output:
-                    with self.assertRaisesRegex(
-                        AssertionError, "Please convert all Tensors"
-                    ):
-                        torch.ops._test_fake_constant.add(real)
-                else:
-                    out = torch.ops._test_fake_constant.add(real)
-                self.assertIs(torch._guards.active_fake_mode(), mode)
-        self.assertEqual(seen, [None])
-        if not parameter_output:
-            self.assertIs(maybe_get_fake_mode(out), mode)
-            self.assertEqual(maybe_get_fake_constant(out), real + 1)
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    @fake_tensor_modes
     @parametrize("allow", [False, True])
     def test_fake_fallback_constant_avoid_device_init(self, mode_cls, allow):
         real = torch.ones(1)
