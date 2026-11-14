@@ -36,6 +36,19 @@ def empty_cache() -> None:
         torch._C._xpu_emptyCache()
 
 
+def ipc_collect() -> None:
+    r"""Force collects XPU memory after it has been released by XPU IPC.
+
+    .. note::
+        Checks if any sent XPU tensors could be cleaned from the memory. Force
+        closes shared memory file used for reference counting if there is no
+        active counters. Useful when the producer process stopped actively sending
+        tensors and want to release unused memory.
+    """
+    _lazy_init()
+    torch._C._xpu_ipc_collect()
+
+
 def reset_peak_memory_stats(device: Device = None) -> None:
     r"""Reset the "peak" stats tracked by the XPU memory allocator.
 
@@ -681,6 +694,7 @@ __all__ = [
     "change_current_allocator",
     "empty_cache",
     "get_per_process_memory_fraction",
+    "ipc_collect",
     "list_gpu_processes",
     "max_memory_allocated",
     "max_memory_reserved",
