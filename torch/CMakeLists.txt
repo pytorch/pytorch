@@ -455,6 +455,10 @@ endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
+if(MSVC AND BUILD_SHARED_LIBS)
+  install(FILES $<TARGET_PDB_FILE:torch_python> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+endif()
+
 # Build the torch._C Python extension module from the thin stub that
 # forwards to torch_python.  This was historically built by setuptools;
 # building it here lets both setuptools and scikit-build-core use the
@@ -462,6 +466,10 @@ install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   Python_add_library(_C MODULE WITH_SOABI "${TORCH_SRC_DIR}/csrc/stub.c")
   target_link_libraries(_C PRIVATE torch_python)
+  if(MSVC AND CMAKE_BUILD_TYPE MATCHES Debug)
+    # Keep LIBCMTD out of the /MDd link.
+    target_link_options(_C PRIVATE "/NODEFAULTLIB:LIBCMTD.LIB")
+  endif()
   set_target_properties(_C PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
     # libtorch_python.so is installed to lib/ relative to _C, so use
@@ -479,6 +487,9 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
       LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
     )
+    if(MSVC AND BUILD_SHARED_LIBS)
+      install(FILES $<TARGET_PDB_FILE:_C> DESTINATION "${SKBUILD_PLATLIB_DIR}/torch" OPTIONAL)
+    endif()
   endif()
 
   # ---[ NCCL EP extension (torch._nccl_ep)
@@ -523,6 +534,9 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       install(TARGETS _nccl_ep
         RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
         LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
+      if(MSVC AND BUILD_SHARED_LIBS)
+        install(FILES $<TARGET_PDB_FILE:_nccl_ep> DESTINATION "${SKBUILD_PLATLIB_DIR}/torch" OPTIONAL)
+      endif()
     endif()
   endif()
 endif()
