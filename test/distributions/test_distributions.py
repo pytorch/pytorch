@@ -6035,14 +6035,15 @@ class TestKLDevice(DistributionsTestCase):
         self.assertEqual(expected_kl, actual_kl)
 
     @skipIfTorchDynamo("This test explicitly invokes torch.compile")
-    # Not expectedFailureXPU: subTest failures aren't raised, so the xfail wrapper sees a pass.
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5216")
     def test_compile_kl_multivariate_normal(self):
         def fn(p_mu, p_log_var, q_mu, q_log_var):
             q_var = torch.diag_embed(torch.exp(q_log_var))
             p_var = torch.diag_embed(torch.exp(p_log_var))
-            p = MultivariateNormal(p_mu, p_var)
-            q = MultivariateNormal(q_mu, q_var)
+            # Dynamo cannot trace Distribution arg validation; TorchPatcher.patch()
+            # turns it off once per process and setUp re-enables it. Revisit once
+            # https://github.com/pytorch/pytorch/issues/157926 is resolved.
+            p = MultivariateNormal(p_mu, p_var, validate_args=False)
+            q = MultivariateNormal(q_mu, q_var, validate_args=False)
             return kl_divergence(p, q).mean()
 
         set_rng_seed(0)
