@@ -1422,7 +1422,10 @@ class TestBasicGEMM(TestCase):
     @parametrize("q_group", [32, 64, 128])
     @parametrize("act_dtype", [torch.bfloat16, torch.float16])
     @parametrize("scale_dtype_fp32", [True, False])
-    def test__int4_mm(self, device, m, k, n, q_group, act_dtype, scale_dtype_fp32):
+    @parametrize("a_col_major", [False, True])
+    def test__int4_mm(
+        self, device, m, k, n, q_group, act_dtype, scale_dtype_fp32, a_col_major
+    ):
         inner_k_tiles = 2
         torch.manual_seed(1)
         a_fp32 = torch.rand((m, k), dtype=torch.float32, device=device)
@@ -1443,6 +1446,12 @@ class TestBasicGEMM(TestCase):
         b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_fp32)
 
         a = a_fp32.to(dtype=act_dtype)
+        if a_col_major:
+            # Column-major (non-contiguous) A with stride (1, m), like the
+            # transposed emb_norm that transformers gemma-3n feeds to
+            # embedding_projection.
+            a = a.t().contiguous().t()
+            self.assertFalse(a.is_contiguous())
         b = b_fp32.to(dtype=act_dtype)
         scale_dtype = torch.float32 if scale_dtype_fp32 else act_dtype
         scales = b_scales.to(dtype=scale_dtype)
