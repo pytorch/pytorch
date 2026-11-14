@@ -69,6 +69,16 @@
 // Callers that need to tell these apart from other NotImplementedErrors match
 // the message unsupported() raises.
 //
+// TODO: native common-device resolution snapshots fake_tensor_prefer_device_type
+// at mode construction to avoid GIL/Python lookups on device conflicts. Python
+// op_impls, including foreach and sparse compressed constructors, still read
+// live config. Changing None to "cuda" after construction can make CPU/CUDA add
+// raise while _foreach_add chooses CUDA; changing "cuda" to None reverses that
+// behavior. We assume the preference stays fixed for a mode's lifetime and have
+// not found real use cases requiring changes during that lifetime. We accept
+// this divergence rather than pay for live lookups or propagate the snapshot
+// through Python handlers.
+//
 // TODO: an op in torch._dynamo.config._custom_ops_profile runs its Meta kernel
 // here, where Python runs the profile's generic fake kernel.
 //
