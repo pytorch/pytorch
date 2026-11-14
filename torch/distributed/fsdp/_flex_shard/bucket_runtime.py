@@ -68,6 +68,13 @@ class ParamOwnerRef:
             leaf_module = leaf_module._checkpoint_wrapped_module
         return cls(leaf_module, parts[-1])
 
+    @property
+    def param(self) -> nn.Parameter:
+        param = self.module._parameters[self.param_name]
+        if param is None:
+            raise AssertionError(f"Expected a parameter named {self.param_name!r}")
+        return param
+
 
 @dataclass(frozen=True)
 class BucketParam:

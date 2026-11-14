@@ -9,7 +9,11 @@ import torch.distributed._symmetric_memory as symm_mem
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
-from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
+from torch.distributed.fsdp._fully_shard._fsdp_api import (
+    AllGather,
+    AllReduce,
+    ReduceScatter,
+)
 from torch.distributed.tensor import DTensor
 
 from ._all_gather_layout import (
@@ -186,6 +190,17 @@ class SymmMemAllGather(SymmMemAllocMixin, AllGather):
             group=group,
             async_op=async_op,
         )
+
+
+class DefaultAllReduce(DefaultAllocMixin, AllReduce):
+    def __call__(
+        self,
+        tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        op: _ReduceOp,
+        async_op: bool = False,
+    ) -> dist.Work | None:
+        return dist.all_reduce(tensor, group=group, op=op, async_op=async_op)
 
 
 class DefaultReduceScatter(DefaultAllocMixin, ReduceScatter):
@@ -404,6 +419,10 @@ def foreach_all_gather(
         )
         if output_metadata is not None:  # the layout finalizes the output
             _check_custom_layout_outputs(fsdp_params, world_size)
+        comm_kwargs = {}
+        if layout.comm is not None:  # it selects the output with the metadata
+            all_gather_comm = layout.comm
+            comm_kwargs["output_metadata"] = output_metadata
         all_gather_output = all_gather_comm.allocate(
             (all_gather_input_numel * world_size,), dtype=dtype, device=device
         )
@@ -416,9 +435,6 @@ def foreach_all_gather(
         )
         del param_all_gather_inputs, all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
-    comm_kwargs = {}
-    if layout.comm_type is not None:  # its comm selects the output with the metadata
-        comm_kwargs["output_metadata"] = output_metadata
     with device_handle.stream(all_gather_stream):
         all_gather_work = all_gather_comm(
             output_tensor=all_gather_output,
@@ -788,6 +804,7 @@ def foreach_reduce(
     force_sum_reduction_for_comms: bool = False,
     *,
     prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
+    all_reduce_comm: AllReduce = DefaultAllReduce(),
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -827,11 +844,19 @@ def foreach_reduce(
         unsharded_grads, shard_dims=shard_dims, world_size=world_size
     )
     reduce_scatter_output_numel = sum(padded_sharded_numels)
-    reduce_scatter_input = reduce_scatter_comm.allocate(
-        (reduce_scatter_output_numel * world_size,),
-        dtype=reduce_dtype,
-        device=device,
-    )
+    # A singleton group runs no reduce-scatter, so FSDP owns the packed buffer
+    # instead of the comm, whose allocator may return a persistent buffer.
+    skip_reduce_scatter = world_size == 1
+    if skip_reduce_scatter:
+        reduce_scatter_input = torch.empty(
+            reduce_scatter_output_numel, dtype=reduce_dtype, device=device
+        )
+    else:
+        reduce_scatter_input = reduce_scatter_comm.allocate(
+            (reduce_scatter_output_numel * world_size,),
+            dtype=reduce_dtype,
+            device=device,
+        )
 
     copy_in(reduce_scatter_input)
     # Only after the copy-in finishes can we free the gradients, including any
@@ -843,26 +868,37 @@ def foreach_reduce(
     all_reduce_event = None
 
     with device_handle.stream(reduce_scatter_stream):
-        reduce_output = reduce_scatter_comm.allocate(
-            (reduce_scatter_output_numel,),
-            dtype=reduce_dtype,
-            device=device,
-        )
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        if world_size > 1:
+        if skip_reduce_scatter:
+            if all_reduce_group is None:
+                # The packed input already is the reduction output
+                reduce_output = reduce_scatter_input
+            else:
+                # HSDP/replicate keeps a separate output, allocated in the RS
+                # stream, since its all-reduce and partial accumulation outlive
+                # the input
+                reduce_output = torch.empty_like(reduce_scatter_input)
+                reduce_output.copy_(reduce_scatter_input)
+            # No collective runs to fold the division into, so apply only the
+            # factor that pre/post division does not already cover
+            divide_in_op = (
+                gradient_divide_factor
+                if predivide_factor is None and postdivide_factor is None
+                else None
+            )
+            _div_if_needed(reduce_output, divide_in_op)
+        else:
+            reduce_output = reduce_scatter_comm.allocate(
+                (reduce_scatter_output_numel,),
+                dtype=reduce_dtype,
+                device=device,
+            )
             reduce_scatter_comm(
                 output_tensor=reduce_output,
                 input_tensor=reduce_scatter_input,
                 group=reduce_scatter_group,
                 op=reduce_scatter_op,
             )
-        else:
-            # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
-            # account for a possible gradient_divide_factor.
-            if gradient_divide_factor is not None and gradient_divide_factor != 1.0:
-                reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
-            else:
-                reduce_output.copy_(reduce_scatter_input)
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
         if all_reduce_group is not None:  # HSDP or DDP/replicate
@@ -889,10 +925,8 @@ def foreach_reduce(
             else:
                 all_reduce_stream.wait_stream(current_stream)
             with device_handle.stream(all_reduce_stream):
-                dist.all_reduce(
-                    reduce_output,
-                    group=all_reduce_group,
-                    op=all_reduce_op,
+                all_reduce_comm(
+                    tensor=reduce_output, group=all_reduce_group, op=all_reduce_op
                 )
                 # Keep refs to the reduce-dtype AR buffer + completion
                 # event so FSDPParamGroup._all_reduce_state can hold them
@@ -967,9 +1001,10 @@ def foreach_reduce(
                     and not to_accumulate_grad
                     and not has_post_acc_grad_hook
                 )
-                # Since the GPU sharded gradient is allocated in the RS stream,
-                # we can free it here by not keeping a ref without waiting for
-                # the D2H copy since future RS-stream ops run after the copy
+                # Since the GPU sharded gradient is allocated in the RS stream
+                # (or a reused input is kept alive past the copy), we can free
+                # it here by not keeping a ref without waiting for the D2H copy
+                # since future RS-stream ops run after the copy
                 new_sharded_grad = new_sharded_grad.to(
                     torch.device("cpu"), non_blocking=non_blocking
                 )
@@ -995,9 +1030,13 @@ def foreach_reduce(
                 hook(fsdp_param.sharded_param)
         post_reduce_event = post_reduce_stream.record_event()
     # The RS output is allocated in the RS stream and used in the default
-    # stream (for optimizer). To ensure its memory is not reused for later
-    # RSs, we do not need extra synchronization since the sharded parameters
-    # hold refs through the end of backward.
+    # stream (for optimizer); the sharded parameters hold refs through the end
+    # of backward, so its memory is not reused for later RSs. A reused input is
+    # instead allocated in the current stream and read by the post-reduce ops
+    # above, so keep it alive until they finish. With all_reduce_input set, its
+    # AllReduceState is only released after waiting on the post-reduce event.
+    if reduce_output is reduce_scatter_input and all_reduce_input is None:
+        reduce_scatter_event = post_reduce_event
     return (
         reduce_scatter_input,
         reduce_scatter_event,

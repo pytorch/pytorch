@@ -239,8 +239,17 @@ std::vector<typename GetScalarType<T>::type>
       return temp;
     }();
 
+// Welford reductions call the helpers below for every vector step and every
+// output. cpp.force_inline_welford defines TORCH_INDUCTOR_FORCE_INLINE_WELFORD,
+// which always inlines them instead of leaving the choice to the compiler.
+#ifdef TORCH_INDUCTOR_FORCE_INLINE_WELFORD
+#define INDUCTOR_WELFORD_INLINE C10_ALWAYS_INLINE
+#else
+#define INDUCTOR_WELFORD_INLINE
+#endif
+
 template <typename T>
-Welford<T> welford_combine(
+INDUCTOR_WELFORD_INLINE Welford<T> welford_combine(
     const Welford<T>& a,
     const Welford<T>& b,
     bool use_index = false) {
@@ -278,7 +287,7 @@ Welford<T> welford_combine(
 }
 
 template <typename T, uint64_t kChunkSize = 0>
-Welford<T> welford_combine(
+INDUCTOR_WELFORD_INLINE Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,
     WelfordHelper<T, kChunkSize>* w = nullptr) {
@@ -318,7 +327,9 @@ Welford<T> welford_combine(
 }
 
 template <typename T, uint64_t kChunkSize>
-Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T, kChunkSize>* w) {
+INDUCTOR_WELFORD_INLINE Welford<T> welford_combine(
+    Welford<T>& acc,
+    WelfordHelper<T, kChunkSize>* w) {
   for (const auto i : c10::irange(w->depth)) {
     acc = welford_combine(acc, w->welford_stk[i]);
   }
@@ -335,7 +346,7 @@ struct IndexValue {
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T, uint64_t kChunkSize = 0>
-Welford<T> welford_combine(
+INDUCTOR_WELFORD_INLINE Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,
     int64_t tail_size,
@@ -817,7 +828,7 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
 #endif
 
 template <typename scalar_t>
-Welford<scalar_t> welford_vec_reduce_all(
+INDUCTOR_WELFORD_INLINE Welford<scalar_t> welford_vec_reduce_all(
     Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;
   Welford<scalar_t> result;
@@ -852,7 +863,7 @@ Welford<scalar_t> welford_vec_reduce_all(
 }
 
 template <typename scalar_t>
-Welford<scalar_t> welford_vec_reduce_all(
+INDUCTOR_WELFORD_INLINE Welford<scalar_t> welford_vec_reduce_all(
     Welford<at::vec::VectorizedN<scalar_t, 2>> acc) {
   auto Welford0 = Welford<at::vec::Vectorized<scalar_t>>{
       acc.mean[0], acc.m2[0], acc.weight[0], acc.index};

@@ -8,12 +8,18 @@ from collections import defaultdict
 from pathlib import Path
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import (
+    preserves_unittest_skip_marks,
+    run_tests,
+    TEST_XPU,
+    TestCase,
+)
 
 
 Verbose = False
 
 
+@preserves_unittest_skip_marks()
 class XpuScopeProfilerTest(TestCase):
     def __init__(self, arg):
         super().__init__(arg)

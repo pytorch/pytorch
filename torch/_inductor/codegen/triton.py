@@ -32,6 +32,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
+    Max,
     Min,
     Mod,
     ModularIndexing,
@@ -46,7 +47,7 @@ from torch.utils._triton import (
 )
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
-from ...utils._sympy.value_ranges import ValueRanges
+from ...utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import config, dependencies, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
@@ -276,7 +277,9 @@ class TritonSymbols:
     """
 
     reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX, SymT.R2_INDEX])
-    block_types = OrderedSet([SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK, *reduction_types])
+    block_types = OrderedSet(
+        [SymT.XBLOCK, SymT.YBLOCK, SymT.Z0_BLOCK, *reduction_types]
+    )
 
     block_offsets = {
         symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
@@ -1685,7 +1688,7 @@ class TritonOverrides(OpOverrides):
            Current codegen eagerly broadcasts tl.arange to create unique axes. We
            reshape, transpose, or broadcast to align with the (Y, R) x (R, X) shape.
            We avoid using 3D dot ((Z, Y, R) x (Z, R, X)) because 3D tl.dot has
-           poor performance. During batched matmul (bmm), we keep ZBLOCK=1 and call
+           poor performance. During batched matmul (bmm), we keep Z0_BLOCK=1 and call
            the 2D dot kernel instead.
         """
         if not V.kernel.is_native_matmul:
@@ -1771,9 +1774,11 @@ class TritonOverrides(OpOverrides):
             """
 
             # Triton 3d dot is slower than 2d dot, so we want to keep block shape in 2d
-            # by fixing ZBLOCK=1 in the autotune config
-            if ZBLOCK in initial_shape:
-                initial_shape = ["1" if dim == ZBLOCK else dim for dim in initial_shape]
+            # by fixing Z0_BLOCK=1 in the autotune config
+            if Z0_BLOCK in initial_shape:
+                initial_shape = [
+                    "1" if dim == Z0_BLOCK else dim for dim in initial_shape
+                ]
 
             if final_shape == [YBLOCK, RBLOCK]:
                 if XBLOCK in initial_shape:
@@ -1823,7 +1828,7 @@ class TritonOverrides(OpOverrides):
 
         XBLOCK = str(TritonSymbols.block_sizes[SymT.XBLOCK])
         YBLOCK = str(TritonSymbols.block_sizes[SymT.YBLOCK])
-        ZBLOCK = str(TritonSymbols.block_sizes[SymT.ZBLOCK])
+        Z0_BLOCK = str(TritonSymbols.block_sizes[SymT.Z0_BLOCK])
         RBLOCK = str(TritonSymbols.block_sizes[SymT.R0_INDEX])
 
         a = V.kernel.cse.generate(
@@ -2832,7 +2837,7 @@ class BlockParameters:
             If the strides are not all known constants or if the strides are already
             sorted in descending order, return identity sort.
 
-            For example if block_shape @ strides is [ZBLOCK, XBLOCK, YBLOCK] @ [8, 1, 16]
+            For example if block_shape @ strides is [Z0_BLOCK, XBLOCK, YBLOCK] @ [8, 1, 16]
             The indices to sort the strides in descending order will be [2, 0, 1].
             The indices to revert back to the original order will be [1, 2, 0].
             """
@@ -3696,6 +3701,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.has_load_with_contiguous_rdim = False
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
+        # Set on HIP when this kernel may access a graph input that as_strided
+        # rebased to a negative offset below its data pointer, which AMD buffer
+        # ops cannot address.
+        self.negative_offset_found = False
 
     @property
     def uses_tma(self) -> bool:
@@ -3826,7 +3835,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for symt in (
             SymT.XBLOCK,
             SymT.YBLOCK,
-            SymT.ZBLOCK,
+            SymT.Z0_BLOCK,
             SymT.R0_INDEX,
             SymT.R1_INDEX,
             SymT.R2_INDEX,
@@ -4689,7 +4698,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     mask_shape.discard(tmp)
                     mask_shape.update(tmp.mask_vars)
 
-                # e.g., expand_list becomes ['ZBLOCK', 1, 1, 'R0_BLOCK']
+                # e.g., expand_list becomes ['Z0_BLOCK', 1, 1, 'R0_BLOCK']
                 expand_list = ["1"] * len(self.dense_size_list())
                 for mask in mask_shape:
                     if not isinstance(mask, str):
@@ -4894,7 +4903,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
         # Stores require an explicit broadcast. We do this in two phases:
-        #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
+        #  1. Broadcast the operand to the final shape of the range trees, e.g. [Z0_BLOCK,
         #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
         #  2. In case the block pointer / tma descriptor has different dimensionality, broadcast/reshape the
         #     result to the shape of the pointer.
@@ -5386,6 +5395,49 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             PartialAccumulate(name, reduction_type, val)
         )
 
+    def _record_negative_offset(self, name: str, index: sympy.Expr | None) -> None:
+        """Set ``negative_offset_found`` if this access may go below ``name``'s pointer.
+
+        Only graph inputs that as_strided rebased to a negative offset on HIP are
+        checked; ``name`` may also be a mutation buffer of such an input. ``index``
+        is the offset from the data pointer, or ``None`` when it is only known at
+        runtime. A ``None`` index, or one whose lower bound cannot be determined,
+        counts as negative. The flag is never cleared.
+        """
+        if torch.version.hip is None or self.negative_offset_found:
+            return
+        # A store into a mutated input names the mutation buffer, not the input.
+        if V.graph.scheduler:
+            name = V.graph.scheduler.mutation_real_name.get(name, name)
+        if name not in V.graph.inputs_with_negative_as_strided_offset:
+            return
+        if index is None:
+            self.negative_offset_found = True
+            return
+
+        index = sympy.expand(
+            V.graph.sizevars.remove_precomputed_replacements(index), identity=True
+        )
+        if not index.free_symbols:
+            self.negative_offset_found = bool(index < 0)
+            return
+
+        if not any(
+            term.could_extract_minus_sign() for term in sympy.Add.make_args(index)
+        ):
+            return
+
+        shape_ranges = V.graph.sizevars.shape_env.var_to_range
+        var_ranges = dict(shape_ranges)
+        try:
+            for var, size in self.var_ranges().items():
+                size_upper = bound_sympy(Max(size - 1, 0), shape_ranges).upper
+                var_ranges[var] = ValueRanges(0, size_upper)
+            self.negative_offset_found = bool(bound_sympy(index, var_ranges).lower < 0)
+        except Exception:
+            # A negative term with unknown bounds cannot safely use unsigned offsets.
+            self.negative_offset_found = True
+
     def load(self, name: str, index: sympy.Expr):
         """
         Load from the memory location 'name', offset by some indexing expression 'index'.
@@ -5430,6 +5482,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
         if isinstance(indexing, IndexingOptions):
+            self._record_negative_offset(name, indexing.index)
             if self._has_stride1_on_rdim(indexing.index):
                 self.has_load_with_contiguous_rdim = True
 
@@ -5680,10 +5733,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             mask_constant_index=mode == "atomic_add",
         )
 
-        if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
-            indexing.index
-        ):
-            self.stores_with_contiguous_rdim.append(name)
+        if isinstance(indexing, IndexingOptions):
+            self._record_negative_offset(name, indexing.index)
+            if self._has_stride1_on_rdim(indexing.index):
+                self.stores_with_contiguous_rdim.append(name)
 
         # Guard against write-after-read corruption in triton.
         # See # https://github.com/triton-lang/triton/issues/1615
@@ -5800,6 +5853,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # If we're trying to use a bucketize kernel, we should make sure that an
         # autotuning config with num_elements_per_warp=(warp_size) exists.
         self.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
+
+        # The search reads both lookup tensors at offsets known only at runtime.
+        self._record_negative_offset(boundaries[0], None)
+        if sorter:
+            self._record_negative_offset(sorter[0], None)
 
         boundaries_ptr = self.args.input(boundaries[0])
         boundary_size = self.index_to_str(boundaries[1])
@@ -6017,7 +6075,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # reduction block from accumulator and only keep (Y,X).
         # In bmm (Z,Y,R)x(Z,R,X) case, we also remove z dimension from accumulator
         # because 3d (Z,Y,X) tl.dot is somehow slower than 2d tl.dot.
-        # Instead, we force ZBLOCK to be always 1 during autotune.
+        # Instead, we force Z0_BLOCK to be always 1 during autotune.
         dense_size_str: str
         if self.is_native_matmul:
             dense_sizes = self.dense_size_list()
@@ -8049,6 +8107,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
+        if (
+            config.triton.sm100_outer_reduction_r0_block_8
+            and self._get_heuristic() == "reduction"
+        ):
+            device = V.graph.get_current_device_or_throw()
+            if triton_meta_device_props(device).cc == 100:
+                out["sm100_outer_reduction_r0_block_8"] = True
         if config.deterministic or config.test_configs.force_filter_reduction_configs:
             out["has_loadstore_with_contiguous_rdim"] = (
                 self.has_load_with_contiguous_rdim
@@ -8209,14 +8274,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return False
 
     def pointer_range_override(self) -> tuple[int, ...] | None:
-        """Suppress ``tt.pointer_range=32`` when this kernel uses atomics.
+        """Suppress ``tt.pointer_range=32`` for incompatible HIP accesses.
 
-        On HIP the annotation lets the backend use buffer ops, and buffer atomics are
-        far slower than global ones under contention. ``()`` suppresses; ``None`` lets
-        ``config_of`` decide, which is also where the config flag is applied. Only
-        valid once the kernel body exists, since it reads ``atomic_add_found``.
+        On HIP the annotation lets the backend use buffer ops. Buffer atomics are far
+        slower than global ones under contention, and buffer ops cannot address memory
+        below the kernel pointer, which a negative as_strided rebase can require.
+        ``()`` suppresses; ``None`` lets ``config_of`` decide, which is also where the
+        config flag is applied. Only valid once the kernel body exists.
         """
-        if torch.version.hip is not None and self.atomic_add_found:
+        if torch.version.hip is not None and (
+            self.atomic_add_found or self.negative_offset_found
+        ):
             return ()
         return None
 
@@ -8402,7 +8470,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self._filter_pdl(self.body)
 
-        # Computed after codegen_body() so self.atomic_add_found is accurate.
+        # Computed after codegen_body() so atomic_add_found and negative_offset_found
+        # are accurate.
         triton_meta["configs"] = [
             config_of(
                 signature,
@@ -8677,8 +8746,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if entry.tensor_dim is None:
             raise AssertionError("entry.tensor_dim must not be None")
         size = self.indexing_size_str(entry.tensor_dim)
-        # For batch matmul, we always set the ZBLOCK=1.
-        # In this case, we found not broadcasting tl.arange(0, ZBLOCK) is faster.
+        # For batch matmul, we always set the Z0_BLOCK=1.
+        # In this case, we found not broadcasting tl.arange(0, Z0_BLOCK) is faster.
         if (
             self.is_native_matmul
             and entry.tensor_dim == 0

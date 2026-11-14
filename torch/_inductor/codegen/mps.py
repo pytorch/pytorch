@@ -20,7 +20,9 @@ from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
+from ..codecache import code_hash, get_path
+from ..scheduler import WhyNoFuse
+from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata, Placeholder
 from ..virtualized import ops, OpsWrapper, V
 from .common import (
     CSEVariable,
@@ -35,8 +37,10 @@ from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..ops_handler import ReductionType, StoreMode
-    from ..scheduler import Scheduler, SchedulerNode
+    from ..scheduler import BaseSchedulerNode, Scheduler, SchedulerNode
     from .common import OpVarT
 
 log = logging.getLogger(__name__)
@@ -1339,17 +1343,82 @@ class MetalKernel(SIMDKernel):
 
 
 class MetalScheduling(SIMDScheduling):
+    """Scheduling for MPS: emits Metal kernels, plus external template kernels
+    (e.g. Helion) that render and emit their own Python source."""
+
     kernel_type = MetalKernel  # type: ignore[assignment]
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
 
+    def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        # MPS has no Metal templates, so every template here is an external one
+        # (e.g. Helion), whose fusion hooks generate Triton code; fusing other
+        # nodes into it gives wrong results or breaks MPS wrapper codegen. Helion
+        # turns template fusion off on Metal; this covers templates that leave it
+        # on. A multi-output template still absorbs its MultiOutput children: the
+        # scheduler fuses those before asking the backend.
+        if node1.is_template() or node2.is_template():
+            WhyNoFuse(node1, node2)("MPS does not fuse into external templates")
+            return False
+        return super().can_fuse(node1, node2)
+
+    can_fuse_vertical = can_fuse
+    can_fuse_horizontal = can_fuse
+
+    def codegen_template(
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
+        *,
+        only_gen_src_code: bool = False,
+        hint_override: int | None = None,
+    ) -> str | None:
+        # Checked before rendering, since rendering is where Helion autotunes.
+        if V.graph.cpp_wrapper:
+            raise NotImplementedError(
+                "External template kernels (e.g. Helion) are not supported on MPS "
+                "with cpp_wrapper or AOTInductor; use torch.compile with the default "
+                "Python wrapper"
+            )
+        return super().codegen_template(
+            template_node,
+            epilogue_nodes,
+            prologue_nodes,
+            only_gen_src_code=only_gen_src_code,
+            hint_override=hint_override,
+        )
+
     def define_kernel(
-        self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
+        self, src_code: str, node_schedule: list[SchedulerNode], kernel: SIMDKernel
     ) -> str:
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             return wrapper.src_to_kernel[src_code]
+
+        if not isinstance(kernel, MetalKernel):
+            # External template kernels (e.g. Helion) render their own Python source
+            # and emit it themselves, as with TritonScheduling.
+            fn_name = f"generated_kernel_{wrapper.next_kernel_suffix()}"
+            named_src = src_code.replace(
+                str(Placeholder.DESCRIPTIVE_NAME), fn_name
+            ).replace(str(Placeholder.KERNEL_NAME), fn_name)
+            _, _, kernel_path = get_path(code_hash(named_src.strip()), "py")
+            if not kernel.emit_kernel_override(
+                wrapper,
+                named_src,
+                fn_name,
+                node_schedule,
+                kernel_path,
+                get_kernel_metadata,
+            ):
+                raise NotImplementedError(
+                    f"MPS cannot emit {type(kernel).__name__}: only Metal kernels and "
+                    "kernels whose emit_kernel_override emits their source are supported"
+                )
+            wrapper.src_to_kernel[src_code] = fn_name
+            return fn_name
 
         if V.graph.cpp_wrapper:
             # C++ path: one library per kernel (each has a single "generated_kernel" function)
