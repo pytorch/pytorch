@@ -693,33 +693,19 @@ Tensor _weight_int8pack_mm_xpu(
 
   auto C = at::empty({M, N}, A.options());
 
-  // --- Launch kernel ---
-  Tensor bias = at::Tensor();
-  Tensor mat2_zero_points = at::Tensor();
-  Tensor non_const_scales = scales;
-  auto post_op_args = torch::List<std::optional<at::Scalar>>();
+  // oneDNN cannot run zero-size matmuls here: M == 0 fails with a missing
+  // dnnl_dummy_kernel, N == 0 or K == 0 hangs (the quantized_matmul path fails
+  // the same way). An empty output needs no work, and K == 0 is a sum over
+  // nothing, i.e. all zeros.
+  if (C.numel() == 0 || K == 0) {
+    return C.zero_();
+  }
 
-  at::native::onednn::quantized_matmul(
-      A.contiguous(),
-      1.0,
-      0,
-      B,
-      non_const_scales,
-      mat2_zero_points,
-      bias,
-      C,
-      1.0,
-      0,
-      C.scalar_type(),
-      /*other*/ std::nullopt,
-      /*other scale*/ 1.0,
-      /*other zp*/ 0,
-      /*binary post op*/ "none",
-      /*binary alpha*/ 1.0,
-      /*post_op_name*/ "none",
-      post_op_args,
-      /*post_op_algorithm*/ "none",
-      /*m2_trans*/ false);
+  // Weight-only (fp activation x s8 weight) matmul. It must not go through
+  // quantized_matmul: that builds an int8-activation primitive (src/dst scales,
+  // no int fpmath), which oneDNN can only serve with the ocl:ref:any reference
+  // kernel, 25-150x slower than a bf16 GEMM.
+  at::native::onednn::woq_matmul_int8(C, A.contiguous(), B, scales);
 
   return C;
 }
