@@ -308,10 +308,10 @@ DeviceIndex ExchangeDevice(DeviceIndex to_device) {
     int tmp_device = -1;
     C10_CUDA_CHECK(cudaGetDevice(&tmp_device));
     cur_device = static_cast<DeviceIndex>(tmp_device);
-    if (to_device == cur_device) {
-      return cur_device;
-    }
   }
+  // no `to_device == cur_device` shortcut, unlike MaybeExchangeDevice below:
+  // already being on `to_device` does not imply it has a primary context.
+  // cudaSetDevice must be called
   C10_CUDA_CHECK(cudaSetDevice(to_device));
   return cur_device;
 }
