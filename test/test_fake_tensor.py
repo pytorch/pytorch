@@ -2067,8 +2067,6 @@ def forward(self, x_1):
     def test_mixed_real_and_fake_inputs(self, mode_cls, allow, override, channels):
         from torch._subclasses.fake_tensor import fake_tensor_tls
 
-        if mode_cls is CppFakeTensorMode and channels == 1:
-            self.skipTest("C++ fake fallback does not support constant inputs")
         if (
             mode_cls is CppFakeTensorMode
             and torch._functorch.config.fake_tensor_propagate_real_tensors
@@ -2104,7 +2102,13 @@ def forward(self, x_1):
             mode,
         ):
             x = torch.randn(1, channels, 3, 3)
-            if allowed:
+            if mode_cls is CppFakeTensorMode:
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    "numbers-as-tensors operations without fake inputs",
+                ):
+                    mod(x)
+            elif allowed:
                 out = mod(x)
                 self.checkType(out, "cpu", (1, channels, 3, 3))
                 self.assertIs(maybe_get_fake_mode(out), mode)
