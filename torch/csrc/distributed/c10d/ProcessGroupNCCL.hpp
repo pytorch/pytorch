@@ -577,6 +577,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // first operation.
     bool lazy_init{false};
 
+    // nccl2 only: process-global pre-shared key for NCCL's TLS socket
+    // encryption (NCCL 2.32.3+ built with TLS support). See the pybind
+    // docstring for constraints.
+    std::optional<std::string> encryption_psk;
+
    private:
     // Keeps clone()'s strdup'ed config.netName alive; see clone().
     std::shared_ptr<const char> owned_net_name_;
