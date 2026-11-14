@@ -5,6 +5,7 @@ import builtins
 import collections
 import collections.abc
 import copy
+import copyreg
 import dataclasses
 import dis
 import enum
@@ -5548,6 +5549,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIs(type(d), NT)
         self.assertEqual(c._fields, nt._fields)
 
+        def construct(x):
+            value = NT(x, x + 1, x + 2)
+            return copy.copy(value), copy.deepcopy(value)
+
+        x = torch.randn(3)
+        self.assertEqual(
+            construct(x),
+            torch.compile(construct, backend="eager", fullgraph=True)(x),
+        )
+
         p = Plain()
         c, d = cfn(p)
         self.assertEqual(c.a, 1)
@@ -5586,6 +5597,253 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(d.a, 1)
         self.assertIsNot(d.b, obj.b)  # deep copy clones the list
         self.assertEqual(d.b, obj.b)
+
+    def test_copy_user_defined_object_slots(self):
+        class SlotsOnly:
+            __slots__ = "foo"
+
+        class Mixed:
+            __slots__ = ("foo", "__dict__")
+
+        class Base:
+            __slots__ = ("__base",)
+
+            def set_base(self, value):
+                self.__base = value
+
+            def get_base(self):
+                return self.__base
+
+        class Derived(Base):
+            __slots__ = ("child",)
+
+        class Custom:
+            __slots__ = ("foo", "state")
+
+            def __getstate__(self):
+                return {"foo": self.foo}
+
+            def __setstate__(self, state):
+                self.foo = state["foo"]
+                self.state = "custom"
+
+        def fn(obj):
+            return copy.copy(obj), copy.deepcopy(obj)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+
+        slots_only = SlotsOnly()
+        slots_only.foo = [0]
+        shallow, deep = compiled(slots_only)
+        self.assertIs(shallow.foo, slots_only.foo)
+        self.assertEqual(deep.foo, slots_only.foo)
+        self.assertIsNot(deep.foo, slots_only.foo)
+
+        unset = SlotsOnly()
+        shallow, deep = compiled(unset)
+        self.assertFalse(hasattr(shallow, "foo"))
+        self.assertFalse(hasattr(deep, "foo"))
+
+        derived = Derived()
+        derived.set_base([1])
+        derived.child = [2]
+        shallow, deep = compiled(derived)
+        self.assertIs(shallow.get_base(), derived.get_base())
+        self.assertIs(shallow.child, derived.child)
+        self.assertEqual(deep.get_base(), derived.get_base())
+        self.assertEqual(deep.child, derived.child)
+        self.assertIsNot(deep.get_base(), derived.get_base())
+        self.assertIsNot(deep.child, derived.child)
+
+        mixed = Mixed()
+        mixed.foo = [3]
+        mixed.attr = [4]
+        shallow, deep = compiled(mixed)
+        self.assertIs(shallow.foo, mixed.foo)
+        self.assertIs(shallow.attr, mixed.attr)
+        self.assertEqual(deep.foo, mixed.foo)
+        self.assertEqual(deep.attr, mixed.attr)
+        self.assertIsNot(deep.foo, mixed.foo)
+        self.assertIsNot(deep.attr, mixed.attr)
+
+        mixed_empty = Mixed()
+        mixed_empty.foo = [3]
+        shallow, deep = compiled(mixed_empty)
+        self.assertEqual(mixed_empty.__dict__, {})
+        self.assertEqual(shallow.__dict__, {})
+        self.assertEqual(deep.__dict__, {})
+
+        custom = Custom()
+        custom.foo = [5]
+        shallow, deep = compiled(custom)
+        self.assertEqual(shallow.state, "custom")
+        self.assertEqual(deep.state, "custom")
+        self.assertIs(shallow.foo, custom.foo)
+        self.assertIsNot(deep.foo, custom.foo)
+
+        def construct(x):
+            obj = SlotsOnly()
+            obj.foo = [x]
+            return copy.copy(obj).foo, copy.deepcopy(obj).foo
+
+        x = torch.randn(3)
+        self.assertEqual(
+            construct(x),
+            torch.compile(construct, backend="eager", fullgraph=True)(x),
+        )
+
+    def test_copy_user_defined_object_slotnames_guards(self):
+        class Plain:
+            def __init__(self):
+                self.value = [1]
+
+        class Slotted:
+            __slots__ = ("value",)
+
+        class Cached:
+            __slots__ = ("included", "omitted")
+
+        def mutate_then_copy(obj, values):
+            values["mutated"] = True
+            shallow = copy.copy(obj)
+            deep = copy.deepcopy(obj)
+            return shallow.value, deep.value, values
+
+        for obj in (Plain(), Slotted()):
+            obj.value = [2]
+            expected = mutate_then_copy(obj, {})
+            actual = torch.compile(mutate_then_copy, backend="eager", fullgraph=True)(
+                obj, {}
+            )
+            self.assertEqual(actual, expected)
+            self.assertIs(actual[0], obj.value)
+            self.assertIsNot(actual[1], obj.value)
+
+        Cached.__slotnames__ = ["included"]
+        cached = Cached()
+        cached.included = [3]
+        cached.omitted = [4]
+        shallow, deep = torch.compile(
+            lambda obj: (copy.copy(obj), copy.deepcopy(obj)),
+            backend="eager",
+            fullgraph=True,
+        )(cached)
+        self.assertIs(shallow.included, cached.included)
+        self.assertIsNot(deep.included, cached.included)
+        self.assertFalse(hasattr(shallow, "omitted"))
+        self.assertFalse(hasattr(deep, "omitted"))
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def guarded_copy(obj, x):
+            copied = copy.copy(obj)
+            return x + 1, hasattr(copied, "value")
+
+        compiled = torch.compile(guarded_copy, backend=counter, fullgraph=True)
+        slotted = Slotted()
+        slotted.value = [5]
+        x = torch.randn(3)
+        result, has_value = compiled(slotted, x)
+        self.assertEqual(result, x + 1)
+        self.assertTrue(has_value)
+        self.assertEqual(counter.frame_count, 1)
+
+        del Slotted.__slotnames__
+        copy.copy(slotted)
+        Slotted.unrelated = object()
+        result, has_value = compiled(slotted, x)
+        self.assertEqual(result, x + 1)
+        self.assertTrue(has_value)
+        self.assertEqual(counter.frame_count, 1)
+
+        Slotted.__slotnames__ = list(Slotted.__slotnames__)
+        result, has_value = compiled(slotted, x)
+        self.assertEqual(result, x + 1)
+        self.assertTrue(has_value)
+        self.assertEqual(counter.frame_count, 1)
+
+        Slotted.__slotnames__ = []
+        result, has_value = compiled(slotted, x)
+        self.assertEqual(result, x + 1)
+        self.assertFalse(has_value)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_copy_slotnames_first_call_semantics(self):
+        class EagerPlain:
+            pass
+
+        class CompiledPlain:
+            pass
+
+        class EagerSlotted:
+            __slots__ = ("value",)
+
+        class CompiledSlotted:
+            __slots__ = ("value",)
+
+        def shallow(obj, x):
+            cls = type(obj)
+            before = hasattr(cls, "__slotnames__")
+            copied = copy.copy(obj)
+            after = hasattr(cls, "__slotnames__")
+            return before, after, copied.value, x + 1
+
+        def deep(obj, x):
+            cls = type(obj)
+            before = hasattr(cls, "__slotnames__")
+            copied = copy.deepcopy(obj)
+            after = hasattr(cls, "__slotnames__")
+            return before, after, copied.value, x + 1
+
+        for eager_cls, compiled_cls, fn in (
+            (EagerPlain, CompiledPlain, shallow),
+            (EagerSlotted, CompiledSlotted, deep),
+        ):
+            eager_obj = eager_cls()
+            eager_obj.value = [1]
+            compiled_obj = compiled_cls()
+            compiled_obj.value = [1]
+            self.assertFalse(hasattr(compiled_cls, "__slotnames__"))
+
+            x = torch.randn(3)
+            expected_first = fn(eager_obj, x)
+            counter = torch._dynamo.testing.CompileCounter()
+            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            self.assertEqual(compiled(compiled_obj, x), expected_first)
+            self.assertEqual(compiled(compiled_obj, x), fn(eager_obj, x))
+            self.assertEqual(counter.frame_count, 2)
+
+    def test_copy_slotnames_failed_trace_has_no_side_effect(self):
+        class Slotted:
+            __slots__ = ("value",)
+
+        obj = Slotted()
+        obj.value = 1
+
+        def fn(value):
+            copied = copy.copy(value)
+            torch._dynamo.graph_break()
+            return copied.value
+
+        self.assertFalse(hasattr(Slotted, "__slotnames__"))
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(obj)
+        self.assertFalse(hasattr(Slotted, "__slotnames__"))
+
+    def test_copy_slotnames_immutable_class(self):
+        def fn(obj):
+            before = hasattr(object, "__slotnames__")
+            names = copyreg._slotnames(object)
+            copied = copy.copy(obj)
+            after = hasattr(object, "__slotnames__")
+            return before, after, names, type(copied) is object
+
+        obj = object()
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(obj),
+            fn(obj),
+        )
+        self.assertFalse(hasattr(object, "__slotnames__"))
 
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
