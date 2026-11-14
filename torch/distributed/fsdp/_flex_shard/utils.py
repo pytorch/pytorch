@@ -234,9 +234,10 @@ def _get_shared_param_names(module: nn.Module) -> dict[str, list[str]]:
 
 def _validate_flex_shard_mesh(mesh: DeviceMesh) -> None:
     """Validate mesh inputs for FlexShard eager mode."""
-    if mesh.ndim != 1:
+    if mesh.ndim not in (1, 2):
         raise ValueError(
-            f"flex_shard requires a 1D DeviceMesh, but got {mesh.ndim}D mesh"
+            "flex_shard requires a 1D DeviceMesh, or a 2D one for HSDP, but got "
+            f"{mesh.ndim}D mesh"
         )
     if mesh.device_type != "cuda":
         raise NotImplementedError(

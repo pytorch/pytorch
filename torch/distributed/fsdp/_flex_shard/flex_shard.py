@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import contract
 from torch.distributed._composable_state import _get_module_state
@@ -323,6 +324,16 @@ class FlexShardModule:
             self._bucket_storages(recurse), requires_gradient_sync
         )
 
+    def set_requires_all_reduce(
+        self, requires_all_reduce: bool, *, recurse: bool = True
+    ) -> None:
+        """Set whether backward all-reduces HSDP buckets' reduced gradients over
+        their replicas, like FSDP2's: with ``False``, gradient accumulation
+        reduce-scatters each microbatch without the all-reduce."""
+        module_ops.set_requires_all_reduce(
+            self._bucket_storages(recurse), requires_all_reduce
+        )
+
     def set_separate_reduce_scatter_group(
         self,
         enable: bool = True,
@@ -426,10 +437,10 @@ def flex_shard(
             CUDA device before sharding. Meta parameters keep uninitialized
             storage.
         buckets: Required list of bucket specifications. Each bucket owns its
-            1D CUDA mesh and its placement function. A bucket is one collective
-            over one process group, so the mesh lives on the bucket; different
-            buckets may use different meshes (all sharing one device type). A
-            single whole-module bucket can be expressed as
+            CUDA mesh (2D for HSDP) and its placement function. A bucket is one
+            collective over one process group, so the mesh lives on the bucket;
+            different buckets may use different meshes (all sharing one device
+            type). A single whole-module bucket can be expressed as
             ``[BucketSpec(["*"], placement_fn=per_param_placements, mesh=mesh)]``.
 
     Parameters must be plain tensors. Parameters that are local shards of an
@@ -478,17 +489,8 @@ def flex_shard(
           replaced (e.g. ``load_state_dict(assign=True)``) before the first
           forward
     """
-    inputs = _prepare_flex_shard_inputs(
-        module,
-        buckets,
-    )
-
-    bucket_storages = _materialize_bucket_storages(
-        module,
-        inputs,
-        buckets,
-    )
-
+    inputs = _prepare_flex_shard_inputs(module, buckets)
+    bucket_storages = _materialize_bucket_storages(module, inputs)
     return _install_state(module, flex_shard.state(module), bucket_storages)
 
 
@@ -586,6 +588,13 @@ def relayout_bucket(
 
     param_placements = _engine_placements(placement_fn(named_full_params, mesh))
     _validate_placements(param_placements, named_full_params)
+    if bucket_storage._replicate_group or bucket_storage._post_forward_group:
+        _validate_fsdp2_collective_placements(
+            "has an HSDP mesh or reshards to a smaller group after forward, "
+            "which require",
+            param_placements,
+            [info.fqn for info in infos],
+        )
     full_params = [param for _, param in named_full_params]
     build_bucket(
         _param_sources(
@@ -612,6 +621,8 @@ def relayout_bucket(
             "mp_policy": bucket_storage._mp_policy,
         },
         runtime=runtime,
+        replicate_group=bucket_storage._replicate_group,
+        post_forward_group=bucket_storage._post_forward_group,
     )
     new_storage = runtime.bucket_storage
     new_storage._requires_gradient_sync = bucket_storage._requires_gradient_sync
@@ -691,6 +702,16 @@ def _check_not_already_flex_sharded(module: nn.Module) -> None:
 
 
 @dataclass(frozen=True)
+class _BucketGroups:
+    """A bucket's process groups beyond its shard mesh's: the replicas that
+    all-reduce its reduced gradients (HSDP), and the smaller group that a
+    reshard after forward keeps chunks for (an int ``reshard_after_forward``)."""
+
+    replicate_group: dist.ProcessGroup | None = None
+    post_forward_group: dist.ProcessGroup | None = None
+
+
+@dataclass(frozen=True)
 class PreparedFlexShardInputs:
     """Validated inputs and derived setup state for flex_shard()."""
 
@@ -698,6 +719,10 @@ class PreparedFlexShardInputs:
     device: torch.device
     param_placements: dict[str, tuple[Placement, ...]]
     bucket_assignments: BucketParamFQNsByIndex
+    # The buckets with their 1D shard meshes and bool reshard_after_forward,
+    # and the groups that HSDP meshes and int reshard_after_forward add.
+    buckets: list[BucketSpec]
+    bucket_groups: list[_BucketGroups]
     # Shared parameters: first name -> other names, all in the same bucket.
     shared_param_names: dict[str, list[str]] = field(default_factory=dict)
 
@@ -705,10 +730,10 @@ class PreparedFlexShardInputs:
 def _materialize_bucket_storages(
     module: nn.Module,
     inputs: PreparedFlexShardInputs,
-    buckets: list[BucketSpec],
 ) -> list[ShardedBucketStorage]:
     """Create ShardedBucketStorage objects, with their runtimes in one
     context, and install sharded parameters."""
+    buckets = inputs.buckets
     named_params_dict = dict(inputs.named_params)
     context = BucketCommContext.for_device(_get_device_from_mesh(buckets[0].mesh))
     bucket_storages: list[ShardedBucketStorage] = []
@@ -731,6 +756,7 @@ def _materialize_bucket_storages(
                 bucket_spec,
                 inputs.shared_param_names,
                 context,
+                inputs.bucket_groups[bucket_idx],
             )
         )
 
@@ -744,10 +770,14 @@ def build_flex_bucket(
     bucket_spec: BucketSpec,
     shared_names: dict[str, list[str]] | None = None,
     context: BucketCommContext | None = None,
+    groups: _BucketGroups | None = None,
 ) -> ShardedBucketStorage:
     """One ``flex_shard`` bucket of ``named_params`` and its runtime in
     ``context`` (a new one by default), keeping the parameters' shards in its
-    storage and installing sharded parameters that view them."""
+    storage and installing sharded parameters that view them. ``bucket_spec``
+    has its 1D shard mesh; ``groups`` adds its replicate and post-forward
+    groups."""
+    groups = groups or _BucketGroups()
     mesh = bucket_spec.mesh
     device = _get_device_from_mesh(mesh)
     offload = bucket_spec.offload_policy
@@ -772,6 +802,8 @@ def build_flex_bucket(
             "mp_policy": bucket_spec.mp_policy,
         },
         offload_policy=offload if isinstance(offload, CPUOffloadPolicy) else None,
+        replicate_group=groups.replicate_group,
+        post_forward_group=groups.post_forward_group,
         debug_fqn=_bucket_debug_fqn(module, [fqn for fqn, _ in named_params]),
     )
     return runtime.bucket_storage
@@ -825,22 +857,93 @@ def _resolve_bucket_param_placements(
     return param_placements
 
 
-def _validate_fsdp2_compatible_buckets(
+def _validate_fsdp2_collective_buckets(
     bucket_assignments: BucketParamFQNsByIndex,
     param_placements: dict[str, tuple[Placement, ...]],
     buckets: list[BucketSpec],
+    bucket_groups: list[_BucketGroups],
 ) -> None:
-    for bucket, bucket_fqns in zip(buckets, bucket_assignments, strict=True):
-        if not bucket.fsdp2_compatible:
+    """Buckets that run FSDP2's collectives need placements that issue them."""
+    for bucket, groups, bucket_fqns in zip(
+        buckets, bucket_groups, bucket_assignments, strict=True
+    ):
+        if bucket.fsdp2_compatible:
+            feature = "sets fsdp2_compatible, which requires"
+        elif groups.replicate_group is not None:
+            feature = "has an HSDP mesh, whose gradient all-reduce requires"
+        elif groups.post_forward_group is not None:
+            feature = "reshards to a smaller group after forward, which requires"
+        else:
             continue
-        for fqn in bucket_fqns:
-            (placement,) = param_placements[fqn]
-            if not placement.matches_fsdp2_collectives:
+        _validate_fsdp2_collective_placements(
+            f"{bucket.patterns} {feature}", param_placements, bucket_fqns
+        )
+
+
+def _validate_fsdp2_collective_placements(
+    feature: str,
+    param_placements: dict[str, tuple[Placement, ...]],
+    fqns: list[str],
+) -> None:
+    for fqn in fqns:
+        (placement,) = param_placements[fqn]
+        if not placement.matches_fsdp2_collectives:
+            raise ValueError(
+                f"BucketSpec {feature} placements whose collectives match "
+                f"FSDP2's, such as Shard, but {fqn!r} uses {placement!r}."
+            )
+
+
+def _resolve_bucket_meshes(
+    buckets: list[BucketSpec],
+) -> tuple[list[BucketSpec], list[_BucketGroups]]:
+    """Give each bucket its 1D shard mesh and a bool ``reshard_after_forward``,
+    and return the groups that an HSDP mesh and an int ``reshard_after_forward``
+    add, as ``fully_shard`` derives them."""
+    resolved: list[BucketSpec] = []
+    bucket_groups: list[_BucketGroups] = []
+    post_forward_groups: dict[tuple[int, ...], dist.ProcessGroup] = {}
+    for bucket in buckets:
+        mesh, replicate_group = bucket.mesh, None
+        if mesh.ndim == 2:
+            if mesh.mesh_dim_names is None:
                 raise ValueError(
-                    f"BucketSpec {bucket.patterns} sets fsdp2_compatible, which "
-                    "requires placements whose collectives match FSDP2's, such as "
-                    f"Shard, but {fqn!r} uses {placement!r}."
+                    f"BucketSpec {bucket.patterns} needs mesh_dim_names on its 2D "
+                    "HSDP mesh, as fully_shard does."
                 )
+            replicate_group = mesh.get_group(0)
+            mesh = mesh[mesh.mesh_dim_names[1]]
+        reshard_after_forward = bucket.reshard_after_forward
+        post_forward_group = None
+        if not isinstance(reshard_after_forward, bool):
+            size = mesh.size()
+            if (
+                not isinstance(reshard_after_forward, int)
+                or reshard_after_forward < 1
+                or size % reshard_after_forward
+            ):
+                raise ValueError(
+                    f"BucketSpec {bucket.patterns} reshard_after_forward must be a "
+                    f"bool or an int that divides its shard mesh size {size}, not "
+                    f"{reshard_after_forward!r}."
+                )
+            if 1 < reshard_after_forward < size:
+                # This rank's consecutive ranks of the shard mesh; only they
+                # create their group, so meshes over some ranks work too
+                chunk = mesh.get_local_rank() // reshard_after_forward
+                ranks = tuple(mesh.mesh.view(-1, reshard_after_forward)[chunk].tolist())
+                if ranks not in post_forward_groups:
+                    post_forward_groups[ranks] = cast(
+                        dist.ProcessGroup,
+                        dist.new_group(list(ranks), use_local_synchronization=True),
+                    )
+                post_forward_group = post_forward_groups[ranks]
+            reshard_after_forward = reshard_after_forward > 1
+        resolved.append(
+            replace(bucket, mesh=mesh, reshard_after_forward=reshard_after_forward)
+        )
+        bucket_groups.append(_BucketGroups(replicate_group, post_forward_group))
+    return resolved, bucket_groups
 
 
 def _validate_offloaded_buckets(
@@ -876,6 +979,7 @@ def _prepare_flex_shard_inputs(
         if not callable(bucket.placement_fn):
             raise TypeError("BucketSpec.placement_fn must be callable.")
         _validate_flex_shard_mesh(bucket.mesh)
+    buckets, bucket_groups = _resolve_bucket_meshes(buckets)
     # A bucket is one collective over one process group, so the mesh is a
     # per-bucket property. Buckets may use different meshes, but this rank has a
     # single local device, so require all bucket meshes to share a device type.
@@ -926,7 +1030,9 @@ def _prepare_flex_shard_inputs(
         buckets,
         named_params,
     )
-    _validate_fsdp2_compatible_buckets(bucket_assignments, param_placements, buckets)
+    _validate_fsdp2_collective_buckets(
+        bucket_assignments, param_placements, buckets, bucket_groups
+    )
     _validate_offloaded_buckets(bucket_assignments, param_placements, buckets)
 
     return PreparedFlexShardInputs(
@@ -934,5 +1040,7 @@ def _prepare_flex_shard_inputs(
         device=device,
         param_placements=param_placements,
         bucket_assignments=bucket_assignments,
+        buckets=buckets,
+        bucket_groups=bucket_groups,
         shared_param_names=shared_param_names,
     )
