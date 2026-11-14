@@ -34,7 +34,7 @@ from typing import Any, TYPE_CHECKING
 import torch.nn
 from torch._guards import Source
 
-from .. import graph_break_hints, trace_rules, variables
+from .. import config, graph_break_hints, trace_rules, variables
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
@@ -142,6 +142,26 @@ def initialize_lazy_module(
                 tx,
                 args=["AttributeError during lazy module initialization"],
             )
+
+
+_CALL_METHOD_NAMES = ("forward", "__call__", "_call_impl", "_wrapped_call_impl")
+
+
+def _is_unsupported_rnn(value: object) -> bool:
+    return isinstance(value, torch.nn.RNNBase) and not config.allow_rnn
+
+
+def _graph_break_if_rnn(value: object) -> None:
+    if _is_unsupported_rnn(value):
+        unimplemented(
+            gb_type="Attempted to wrap RNN, GRU, or LSTM",
+            context=str(value),
+            explanation="Dynamo does not support RNN, GRU, or LSTM.",
+            hints=[
+                "Set torch._dynamo.config.allow_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
 
 @contextmanager
@@ -617,6 +637,7 @@ class NNModuleVariable(VariableTracker):
         from .builder import VariableBuilder
 
         mod = tx.output.get_submodule(self.module_key)
+        _graph_break_if_rnn(mod)
 
         with record_nn_module_stack(
             self.module_key, self.get_nn_module_stack_source(), tx, mod
@@ -1257,6 +1278,8 @@ class NNModuleVariable(VariableTracker):
         constant: bool = False,
     ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
+        if name in _CALL_METHOD_NAMES:
+            _graph_break_if_rnn(module)
 
         # `constant=` is a Dynamo-internal extra arg from UserMethodVariable,
         # not a Python method. Base call_method cannot take it.
@@ -1384,6 +1407,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         from .builder import VariableBuilder
 
         mod = self.value
+        _graph_break_if_rnn(mod)
         # see comment on lazy module handling in NNModuleVariable.call_function for context
         if is_lazy_module(mod):  # type: ignore[arg-type]
             if mod.cls_to_become is not None:  # type: ignore[attr-defined]
@@ -1483,6 +1507,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name in _CALL_METHOD_NAMES:
+            _graph_break_if_rnn(self.value)
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
             if self.source:
@@ -1603,6 +1629,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 explanation="Intentionally graph breaking on getattr() on a nn.Module "
                 "with a pending mutation",
                 hints=[],
+            )
+
+        # Calling the bound method must reach call_method, which graph breaks
+        # at the call site, instead of inlining the RNN's forward.
+        if name in _CALL_METHOD_NAMES and _is_unsupported_rnn(self.value):
+            return variables.GetAttrVariable(
+                self,
+                name,
+                py_type=types.MethodType,
+                source=AttrSource(self.source, name) if self.source else None,
             )
 
         # Allow skipping of empty hook dict guards on inbuilt nn modules

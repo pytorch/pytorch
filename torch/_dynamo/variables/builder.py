@@ -3062,19 +3062,6 @@ class VariableBuilder:
                 ],
             )
 
-        if (
-            isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
-            and not config.allow_rnn
-        ):
-            return DelayGraphBreakVariable(
-                source=self.source,
-                msg=(
-                    "Dynamo does not support RNN, GRU, or LSTM. "
-                    "Set torch._dynamo.config.allow_rnn=True to enable "
-                    "experimental support for RNN, GRU, and LSTM in Dynamo"
-                ),
-            )
-
         if inspect.getattr_static(value, "_is_fsdp_managed_module", False):
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information

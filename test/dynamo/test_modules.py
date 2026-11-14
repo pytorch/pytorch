@@ -1345,6 +1345,82 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(cnt.frame_count, 2)
                 self.assertEqual(cnt.op_count, 3)
 
+    def test_rnn_attributes_read_before_graph_break(self):
+        class RecurrentModel(torch.nn.Module):
+            def __init__(self, recurrent_cls) -> None:
+                super().__init__()
+                self.pre = torch.nn.Linear(8, 8)
+                self.rnn = recurrent_cls(8, 8, num_layers=2, batch_first=True)
+                self.post = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                x = self.pre(x)
+                layers = self.rnn.num_layers * (2 if self.rnn.bidirectional else 1)
+                h0 = torch.zeros(layers, x.size(0), self.rnn.hidden_size)
+                state = (h0, h0) if isinstance(self.rnn, torch.nn.LSTM) else h0
+                x, _ = self.rnn(x, state)
+                return self.post(x[:, -1, :])
+
+        inp = torch.randn(2, 3, 8)
+
+        for recurrent_cls in (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM):
+            with self.subTest(recurrent_cls=recurrent_cls):
+                m = RecurrentModel(recurrent_cls).eval()
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_m = torch.compile(m, backend=cnt)
+
+                r = opt_m(inp)
+
+                self.assertTrue(torch._dynamo.testing.same(r, m(inp)))
+                self.assertEqual(cnt.frame_count, 2)
+
+    def test_rnn_method_call_graph_breaks(self):
+        class RecurrentModel(torch.nn.Module):
+            def __init__(self, call_name) -> None:
+                super().__init__()
+                self.call_name = call_name
+                self.pre = torch.nn.Linear(8, 8)
+                self.rnn = torch.nn.GRU(8, 8, batch_first=True)
+                self.post = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                x = self.pre(x)
+                if self.call_name == "forward":
+                    x, _ = self.rnn.forward(x)
+                else:
+                    x, _ = self.rnn.__call__(x)
+                return self.post(x[:, -1, :])
+
+        inp = torch.randn(2, 3, 8)
+
+        for call_name in ("forward", "__call__"):
+            with self.subTest(call_name=call_name):
+                m = RecurrentModel(call_name).eval()
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_m = torch.compile(m, backend=cnt)
+
+                r = opt_m(inp)
+
+                self.assertTrue(torch._dynamo.testing.same(r, m(inp)))
+                self.assertEqual(cnt.frame_count, 2)
+
+    def test_rnn_attributes_respect_custom_getattribute(self):
+        class CustomGRU(torch.nn.GRU):
+            offset = 1
+
+            def __getattribute__(self, name):
+                if name == "offset":
+                    return 2
+                return super().__getattribute__(name)
+
+        def fn(x, rnn):
+            return x + rnn.offset
+
+        rnn = CustomGRU(8, 8)
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(inp, rnn), fn(inp, rnn))
+
     @patch.object(torch._dynamo.config, "allow_unspec_int_on_nn_module", True)
     def test_self_mutating1(self):
         m1 = torch.nn.Linear(10, 10)
