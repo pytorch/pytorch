@@ -2847,6 +2847,25 @@ def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
     return allow_tf32
 
 
+def blackwell_tma_mma_layout_supported(
+    dtype: torch.dtype,
+    allow_tf32: bool,
+    a_row_major: bool,
+    block_m: int,
+) -> bool:
+    """Whether the Blackwell TMA GEMM templates can lower this A operand layout.
+
+    tcgen05.mma does not support transposed FP32 operands in shared memory.
+    With the layouts emitted by the Blackwell persistent-TMA mm template and
+    the decompose-K partial-BMM template, the unsupported case is a transposed
+    (column-major) A operand with TF32 enabled and BLOCK_M > 32. BLOCK_M=32
+    and either orientation of B use supported MMA layouts.
+    """
+    return not (
+        dtype == torch.float32 and allow_tf32 and not a_row_major and block_m > 32
+    )
+
+
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     """
     Mixin class that converts config lists to template kwargs.
@@ -2881,16 +2900,19 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # kernels are unaffected.
     ascending_k: bool = False
 
+    def _allow_tf32(self, kernel_inputs: KernelInputs) -> bool:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
+        m, n, k = kernel_inputs.mnk_symbolic()
+        return mm_allow_tf32(m, n, k, kernel_inputs.device_type)
+
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> dict[str, Any]:
-        if not isinstance(kernel_inputs, MMKernelInputs):
-            raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
-        m, n, k = kernel_inputs.mnk_symbolic()
         extra_kwargs = {
-            "ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type),
+            "ALLOW_TF32": self._allow_tf32(kernel_inputs),
         }
         # Scoped to XPU (self.ascending_k) and to the templates that reference
         # the key. The mm/addmm/... ops via mm_template are excluded because
@@ -3485,6 +3507,19 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
     combinations the lowering cannot support before they reach codegen.
     """
 
+    @staticmethod
+    def _supports_mma_layout(
+        dtype: torch.dtype,
+        allow_tf32: bool,
+        template_kwargs: dict[str, Any],
+    ) -> bool:
+        return blackwell_tma_mma_layout_supported(
+            dtype,
+            allow_tf32,
+            template_kwargs["A_ROW_MAJOR"],
+            template_kwargs["BLOCK_M"],
+        )
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -3498,6 +3533,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             raise AssertionError("Blackwell GEMM requires MMKernelInputs")
         _, mat2 = kernel_inputs.mat1mat2()
         element_size = mat2.get_dtype().itemsize
+        allow_tf32 = self._allow_tf32(kernel_inputs)
 
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -3505,6 +3541,10 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             op_name,
             **kwargs,
         ):
+            if not self._supports_mma_layout(
+                kernel_inputs.dtype(), allow_tf32, template_kwargs
+            ):
+                continue
             use_meta_ws = template_kwargs.get("USE_META_WS", False)
             # autoWS configs come from a full sweep; drop combos the lowering
             # does not support so no invalid config reaches codegen.
