@@ -2136,6 +2136,176 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
         return True
 
 
+def check_bf16_mmla_extra(config, m, n, k, alpha, num_threads, **kwargs):
+    return k % 4 == 0 and alpha == 1
+
+
+@register_micro_gemm(
+    *generate_gemm_config(
+        VecSVE,
+        [(6, 16, 8)],
+        input_dtype=torch.bfloat16,
+        output_dtype=torch.float,
+        extra_check=check_bf16_mmla_extra,
+    ),
+)
+class CppMicroGemmBF16MMLA(CppMicroGemm):
+    """
+    This class generates the code for micro gemm using the Arm BFMMLA instruction,
+    which multiplies a 2x4 block of A by a 4x2 block of B into a 2x2 fp32 tile.
+    It supports input types of torch.bfloat16 with fp32 output.
+    """
+
+    TEMPLATE_ENTRY = r"""
+{{declare_kernel}} {
+{%- if pack_vnni_B_locally %}
+    {{kernel.assert_function}}(N % 16 == 0, "N dimension must be multiple of 16");
+    {{template.codegen_allocate_weight_buffer("packed_B_buf", "uint16_t", "K", 16)}}
+{%- else %}
+    {{kernel.assert_function}}(N == 16, "N dimension must be 16");
+{%- endif %}
+    {{kernel.assert_function}}(K % 4 == 0, "K dimension must be multiple of 4");
+    // Rows of A are packed in pairs [K/4][8] so that each BFMMLA operand of A is one load
+    {{template.codegen_allocate_weight_buffer("packed_A_buf", "uint16_t", "K", block_m)}}
+    for (int64_t n = 0; n < N; n += 16) {
+{%- if pack_vnni_B_locally %}
+        // Pack non-constant weights into VNNI4 format in packed_B_buf
+        for (int64_t k = 0; k < K; k += 4) {
+            const uint16_t* src = reinterpret_cast<const uint16_t*>(B + k * ldb + n);
+            for (int64_t h = 0; h < 16; h += 8) {
+                uint16x8x4_t rows;
+                rows.val[0] = vld1q_u16(src + h);
+                rows.val[1] = vld1q_u16(src + ldb + h);
+                rows.val[2] = vld1q_u16(src + 2 * ldb + h);
+                rows.val[3] = vld1q_u16(src + 3 * ldb + h);
+                vst4q_u16(packed_B_buf + k * 16 + 4 * h, rows);
+            }
+        }
+{%- endif %}
+        for (int64_t m = 0; m < M; m += {{block_m}}) {
+            int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
+            for (int64_t r = 0; r < block_m; r += 2) {
+                const uint16_t* r0 = reinterpret_cast<const uint16_t*>(A + (m + r) * lda);
+                const uint16_t* r1 = r0 + lda;
+                uint16_t* d = packed_A_buf + r * K;
+                int64_t k = 0;
+                for (; k + 8 <= K; k += 8, d += 16) {
+                    const uint64x2_t x = vreinterpretq_u64_u16(vld1q_u16(r0 + k));
+                    const uint64x2_t y = r + 1 < block_m ? vreinterpretq_u64_u16(vld1q_u16(r1 + k)) : vdupq_n_u64(0);
+                    vst1q_u16(d, vreinterpretq_u16_u64(vzip1q_u64(x, y)));
+                    vst1q_u16(d + 8, vreinterpretq_u16_u64(vzip2q_u64(x, y)));
+                }
+                for (; k < K; k += 4, d += 8) {
+                    vst1_u16(d, vld1_u16(r0 + k));
+                    vst1_u16(d + 4, r + 1 < block_m ? vld1_u16(r1 + k) : vdup_n_u16(0));
+                }
+            }
+{%- for num_rows in range(block_m, 0, -2) %}
+    {%- if num_rows != block_m %}
+            else
+    {%- endif %}
+            if (block_m > {{num_rows - 2}}) {
+                {{kernel_name}}_bfmmla_kernel_{{num_rows}}_16<accum>(
+                    packed_A_buf,
+{%- if pack_vnni_B_locally %}
+                    packed_B_buf,
+{%- else %}
+                    reinterpret_cast<const uint16_t*>(B),
+{%- endif %}
+                    C + m * ldc + n,
+                    K,
+                    2 * K,
+                    ldc,
+                    block_m
+                );
+            }
+{%- endfor %}
+        }
+    }
+}
+"""
+
+    TEMPLATE_KERNEL = r"""
+
+template <bool accum>
+inline void {{kernel_name}}_bfmmla_kernel_{{num_rows}}_16(
+    const uint16_t* {{restrict_keyword}} A,
+    const uint16_t* {{restrict_keyword}} B,
+    float* {{restrict_keyword}} C,
+    int64_t K,
+    int64_t lda,
+    int64_t ldc,
+    int64_t rows
+) {
+{%- for r in range(num_rows // 2) %}
+    {%- for c in range(8) %}
+    float32x4_t acc{{r}}_{{c}} = vdupq_n_f32(0.f);
+    {%- endfor %}
+{%- endfor %}
+    for (int64_t k = 0; k < K; k += 4) {
+{%- for r in range(num_rows // 2) %}
+        const bfloat16x8_t a{{r}} = vreinterpretq_bf16_u16(vld1q_u16(A + {{r}} * lda + 2 * k));
+{%- endfor %}
+{%- for c in range(8) %}
+        {
+            const bfloat16x8_t b = vreinterpretq_bf16_u16(vld1q_u16(B + 16 * k + {{8 * c}}));
+    {%- for r in range(num_rows // 2) %}
+            acc{{r}}_{{c}} = vbfmmlaq_f32(acc{{r}}_{{c}}, a{{r}}, b);
+    {%- endfor %}
+        }
+    {%- if c == 3 %}
+        // Prevent GCC 13 from hoisting B loads and spilling accumulators.
+        __asm__ __volatile__("" ::: "memory");
+    {%- endif %}
+{%- endfor %}
+    }
+    // acc{r}_{c} holds [C(2r, 2c), C(2r, 2c+1), C(2r+1, 2c), C(2r+1, 2c+1)].
+{%- for r in range(num_rows // 2) %}
+    {%- for c in range(0, 8, 2) %}
+    {
+        const uint64x2_t x = vreinterpretq_u64_f32(acc{{r}}_{{c}});
+        const uint64x2_t y = vreinterpretq_u64_f32(acc{{r}}_{{c + 1}});
+        float32x4_t row0 = vreinterpretq_f32_u64(vzip1q_u64(x, y));
+        float* c0 = C + {{2 * r}} * ldc + {{2 * c}};
+        if constexpr (accum) {
+            row0 = vaddq_f32(row0, vld1q_f32(c0));
+        }
+        vst1q_f32(c0, row0);
+        if ({{2 * r + 1}} < rows) {
+            float32x4_t row1 = vreinterpretq_f32_u64(vzip2q_u64(x, y));
+            if constexpr (accum) {
+                row1 = vaddq_f32(row1, vld1q_f32(c0 + ldc));
+            }
+            vst1q_f32(c0 + ldc, row1);
+        }
+    }
+    {%- endfor %}
+{%- endfor %}
+}
+"""
+
+    def codegen_define(self, kernel: CppTemplateKernel) -> str:
+        block_m = self.register_blocking.block_m
+        options = {
+            "declare_kernel": self.get_kernel_declaration(),
+            "kernel": kernel,
+            "block_m": block_m,
+            **self.get_common_options(),
+        }
+        result = ""
+        for num_rows in range(block_m, 0, -2):
+            result += KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
+                {**options, "num_rows": num_rows}
+            )
+        result += KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(
+            options
+        )
+        return result
+
+    def get_b_layout(self):
+        return LayoutType.VNNI4
+
+
 def create_micro_gemm(
     name,
     m,
