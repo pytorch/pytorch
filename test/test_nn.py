@@ -7837,6 +7837,65 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(Y_ref, Y)
 
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_rmsnorm_mixed_dtype_weight(self, device, dtype):
+        def rms_norm_reference_fn(i, weight, eps):
+            upcasted_i = i.float()
+            result = upcasted_i * torch.rsqrt(
+                upcasted_i.pow(2).mean(dim=-1, keepdim=True) + eps
+            )
+            return (result * weight).type_as(i)
+
+        eps = 1e-5
+        for M, N in ((4, 256), (127, 768), (200, 512), (2048, 1024)):
+            X = torch.randn(M, N, dtype=dtype, device=device, requires_grad=True)
+            w = torch.randn(N, dtype=torch.float32, device=device, requires_grad=True)
+
+            Y = torch.nn.functional.rms_norm(X, (N,), w, eps)
+            Y_ref = rms_norm_reference_fn(X.detach(), w.detach(), eps)
+            self.assertEqual(Y.dtype, dtype)
+            self.assertEqual(Y, Y_ref, rtol=1e-2, atol=1e-2)
+
+            gO = torch.randn_like(Y)
+            dX, dw = torch.autograd.grad(Y, [X, w], gO)
+
+            X_ref = X.detach().clone().requires_grad_(True)
+            w_ref = w.detach().clone().requires_grad_(True)
+            Y_ref = rms_norm_reference_fn(X_ref, w_ref, eps)
+            dX_ref, dw_ref = torch.autograd.grad(Y_ref, [X_ref, w_ref], gO)
+
+            self.assertEqual(dX.dtype, dtype)
+            self.assertEqual(dw.dtype, torch.float32)
+            self.assertEqual(dX, dX_ref)
+            # dgamma reduces over all M rows; the fused kernel and the reference
+            # accumulate in a different order.
+            self.assertEqual(dw, dw_ref, rtol=1e-3, atol=1e-3)
+
+    @onlyCUDA
+    def test_rmsnorm_mixed_dtype_weight_dispatches_to_fused(self, device):
+        X = torch.randn(64, 256, dtype=torch.bfloat16, device=device, requires_grad=True)
+        w = torch.randn(256, dtype=torch.float32, device=device)
+        Y = torch.nn.functional.rms_norm(X, (256,), w, 1e-5)
+        # The composite fallback gives ToCopyBackward0.
+        self.assertEqual(Y.grad_fn.name(), "FusedRmsNormBackward0")
+
+    @onlyCUDA
+    def test_rmsnorm_mixed_dtype_weight_unsupported(self, device):
+        # rms_norm sends these pairs to the composite, so call the fused ops directly.
+        cases = (
+            (torch.bfloat16, torch.float16, "expect parameter to have scalar type of Float"),
+            (torch.float64, torch.float32, "all inputs must share same datatype"),
+        )
+        for X_dtype, w_dtype, msg in cases:
+            X = torch.randn(4, 8, dtype=X_dtype, device=device)
+            w = torch.randn(8, dtype=w_dtype, device=device)
+            rstd = torch.ones(4, 1, device=device)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.ops.aten._fused_rms_norm(X, [8], w, 1e-5)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.ops.aten._fused_rms_norm_backward(X, X, [8], rstd, w, [True, True])
+
     # Shapes reach each MPS layer_norm backward path the OpInfo samples miss: rows split into chunks (2, 20001), rows
     # too long for registers (2, 4097), one threadgroup per row with wide weight and bias grad tiles split across rows
     # (100, 256), and tall 32x32 weight and bias grad tiles with a column tail (300, 33). Every dtype accumulates in
@@ -17994,6 +18053,33 @@ if __name__ == '__main__':
         self.assertEqual(dgamma.cpu().double(), dgamma_ref, atol=1, rtol=1e-2)
         if dbeta_ref is not None:
             self.assertEqual(dbeta.cpu().double(), dbeta_ref, atol=1, rtol=1e-2)
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_rmsnorm_mixed_dtype_weight_huge_M(self, device, dtype):
+        # M > 64*1024 with small N takes the huge-M gamma backward path, whose fp32
+        # partials are cast back to the fp32 weight's dtype rather than the input's.
+        # (65537, 130) leaves the grid unaligned in both M and N.
+        eps = 1e-5
+        for M, N in ((131072, 128), (65537, 130)):
+            x = torch.randn(M, N, dtype=dtype)
+            weight = torch.randn(N, dtype=torch.float32)
+            grad_out = torch.randn(M, N, dtype=dtype)
+
+            grads = []
+            for dev, x_dt, w_dt in ((device, dtype, torch.float32), ("cpu", torch.float64, torch.float64)):
+                x_ = x.to(dev, x_dt).requires_grad_(True)
+                w_ = weight.to(dev, w_dt).requires_grad_(True)
+                out = torch.nn.functional.rms_norm(x_, [N], w_, eps)
+                out.backward(grad_out.to(dev, x_dt))
+                grads.append((x_.grad, w_.grad))
+            (dx, dw), (dx_ref, dw_ref) = grads
+
+            msg = f"M={M} N={N}"
+            self.assertEqual(dx.dtype, dtype, msg)
+            self.assertEqual(dw.dtype, torch.float32, msg)
+            self.assertEqual(dx.cpu().double(), dx_ref, msg, atol=1e-2, rtol=1e-2)
+            self.assertEqual(dw.cpu().double(), dw_ref, msg, atol=1e-3, rtol=1e-3)
 
 
 class TestFunctionalPickle(TestCase):

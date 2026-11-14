@@ -2098,10 +2098,14 @@ def _fused_rms_norm_backward(
     M = prod(outer_dims)  # type: ignore[arg-type]
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
+    # The kernels return d_weight in the weight's dtype, which can differ from the
+    # input's. This decomp is also the op's meta kernel, so it must agree with them.
+    weight_dtype = weight.dtype if weight is not None else input.dtype
+
     if guard_or_false(M == 0) or guard_or_false(N == 0):
         return (
             input.new_zeros(input_shape) if output_mask[0] else None,
-            input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
+            input.new_zeros(inner_dims, dtype=weight_dtype) if output_mask[1] else None,
         )
 
     rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
@@ -2130,7 +2134,7 @@ def _fused_rms_norm_backward(
 
     return (
         _maybe_cast(d_input, input.dtype),
-        _maybe_cast(d_weight, input.dtype),
+        _maybe_cast(d_weight, weight_dtype),
     )
 
 
