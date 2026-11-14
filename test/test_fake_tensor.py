@@ -6454,6 +6454,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(torch._C._maybe_get_fake_mode(functional))
         self.assertIsNone(torch._C._maybe_get_fake_mode(TwoTensor(fake, fake)))
         self.assertIsNone(torch._C._maybe_get_fake_mode(_add_batch_dim(fake, 0, 1)))
+        # When use_cpp_fake_tensor is enabled, FakeTensorMode.__new__ constructs
+        # CppFakeTensorMode. Disable it here to construct a Python mode.
         with torch._dynamo.config.patch(use_cpp_fake_tensor=False):
             python_mode = FakeTensorMode()
         python_fake = python_mode.from_tensor(torch.empty(2))
@@ -6496,6 +6498,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch._C._set_dispatch_mode(object())
         # A C++ mode and a Python FakeTensorMode cannot both be installed
+        # When use_cpp_fake_tensor is enabled, FakeTensorMode.__new__ constructs
+        # CppFakeTensorMode. Disable it here to construct a Python mode.
         with torch._dynamo.config.patch(use_cpp_fake_tensor=False):
             python_mode = FakeTensorMode()
         try:
@@ -6878,6 +6882,8 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertTrue(selected.allow_non_fake_inputs)
             self.assertTrue(selected.static_shapes)
             self.assertTrue(selected.fake_tensor_converter.export)
+            # When use_cpp_fake_tensor is enabled, FakeTensorMode.__new__ constructs
+            # CppFakeTensorMode. Disable it here to construct a Python mode.
             with torch._dynamo.config.patch(use_cpp_fake_tensor=False):
                 python_mode = FakeTensorMode()
             for copied in (copy.copy(python_mode), copy.deepcopy(python_mode)):
@@ -7620,6 +7626,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         msg = "CppFakeTensorMode is not supported here yet"
         with self.assertRaisesRegex(RuntimeError, msg):
             require_python_fake_mode(CppFakeTensorMode())
+        # When use_cpp_fake_tensor is enabled, FakeTensorMode.__new__ constructs
+        # CppFakeTensorMode. Disable it here to construct a Python mode.
         with torch._dynamo.config.patch(use_cpp_fake_tensor=False):
             py_mode = FakeTensorMode()
         self.assertIs(require_python_fake_mode(py_mode), py_mode)
