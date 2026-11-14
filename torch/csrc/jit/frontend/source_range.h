@@ -450,8 +450,8 @@ struct TORCH_API Source {
 // A SourceRange is a reference to subset of a Source, specified by `start` and
 // `end` byte offsets into the source text.
 struct TORCH_API SourceRange {
-  SourceRange(std::shared_ptr<Source> source_view, size_t start_, size_t end_)
-      : source_view_(std::move(source_view)), start_(start_), end_(end_) {
+  SourceRange(std::shared_ptr<Source> source_view, size_t start, size_t end)
+      : source_view_(std::move(source_view)), start_(start), end_(end) {
     if (source_view_) {
       start_iter_ = source_view_->text_str().iter_for_pos(start_);
     }
@@ -460,12 +460,12 @@ struct TORCH_API SourceRange {
   SourceRange() : source_view_(nullptr), start_(0), end_(0) {}
 
   SourceRange(
-      std::shared_ptr<Source> source_view_,
+      std::shared_ptr<Source> source_view,
       StringCordView::Iterator start_iter,
-      size_t end_)
-      : source_view_(std::move(source_view_)),
+      size_t end)
+      : source_view_(std::move(source_view)),
         start_(start_iter.pos()),
-        end_(end_),
+        end_(end),
         start_iter_(start_iter) {}
 
   const std::string_view token_text() const {
