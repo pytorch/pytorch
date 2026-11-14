@@ -3112,8 +3112,12 @@ Call this whenever a new thread is created in order to propagate values from
         // _make_subclass: a new detached fake sharing meta's storage (or, for a
         // sparse meta, its indices and values). meta keeps its own device and
         // autograd state. As in Python, the shared storage is marked as a
-        // fake's; a sparse meta has no storage to mark, and the indices and
-        // values it shares stay non-fake.
+        // fake's; a sparse meta has no storage to mark. This call marks only
+        // the outer sparse TensorImpl fake. The C++ fake fallback later marks
+        // retained COO _indices/_values outputs fake in place. The
+        // caller's shared components then acquire that mode/device too; reusing
+        // the outer meta tensor with another mode/device can fail on access.
+        // See Note [In-place conversion of Meta outputs].
         c10::intrusive_ptr<c10::TensorImpl> out_impl;
         {
           // As in no_dispatch(). Otherwise an active dispatch mode would run

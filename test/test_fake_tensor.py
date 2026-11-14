@@ -2307,6 +2307,31 @@ def forward(self, x_1):
             self.assertIs(torch.ops.aten.add_.Tensor(fake, 1), fake)
             self.assertIs(torch.ops.aten.add.out(fake, fake, out=out), out)
 
+    @fake_tensor_modes
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    def test_sparse_meta_kernel_dispatch(self, mode_cls):
+        mode = mode_cls()
+
+        def check(out, shape):
+            self.checkType(out, "cpu", list(shape))
+            self.assertIs(maybe_get_fake_mode(out), mode)
+
+        meta = torch.eye(2).to_sparse().to("meta")
+        sparse = self.fake_from_meta(mode, meta, "cpu")
+        # Bypass ADInplaceOrView to check the sparse fallback's return.
+        with torch._C._AutoDispatchBelowADInplaceOrView():
+            self.assertIs(aten._coalesced_(sparse, False), sparse)
+        self.assertFalse(sparse.is_coalesced())
+        for out in (sparse.clone(), sparse + sparse, sparse.detach()):
+            check(out, (2, 2))
+            self.assertTrue(out.is_sparse)
+        check(sparse._values(), meta._values().shape)
+        check(sparse._indices(), meta._indices().shape)
+        csr_meta = torch.eye(2).to_sparse_csr().to("meta")
+        csr = self.fake_from_meta(mode, csr_meta, "cpu")
+        check(csr.crow_indices(), csr_meta.crow_indices().shape)
+        check(csr.detach(), csr.shape)
+
 
 instantiate_parametrized_tests(TestFakeTensor)
 
