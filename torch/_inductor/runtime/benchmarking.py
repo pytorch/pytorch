@@ -18,7 +18,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch.utils._debug_mode import DebugMode
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._triton import triton_compile_iq_collect_enabled
+from torch.utils._triton import has_triton, triton_compile_iq_collect_enabled
 
 
 log = logging.getLogger(__name__)
@@ -617,22 +617,97 @@ class TritonBenchmarker(Benchmarker):
             raise
 
 
-# AMD Infinity Cache (MALL) size by gfx target; torch's device properties do not
-# report it. Unknown archs are assumed to have a 256 MB MALL.
-_ROCM_MALL_SIZE = {
+# Infinity Cache (MALL) bytes by gfx target, used only when HSA cannot be queried.
+# RDNA sizes are for the largest SKU of each target. Unlisted targets get 0 (L2 only).
+_ROCM_MALL_SIZE_FALLBACK = {
+    "gfx906": 0,  # MI50/MI60
     "gfx908": 0,  # MI100
     "gfx90a": 0,  # MI200
     "gfx942": 256 * 1024 * 1024,  # MI300X
     "gfx950": 256 * 1024 * 1024,  # MI350X
+    "gfx1030": 128 * 1024 * 1024,  # RX 6800/6900
+    "gfx1031": 96 * 1024 * 1024,  # RX 6700
+    "gfx1032": 32 * 1024 * 1024,  # RX 6600
+    "gfx1100": 96 * 1024 * 1024,  # RX 7900
+    "gfx1101": 64 * 1024 * 1024,  # RX 7800/7700
+    "gfx1102": 32 * 1024 * 1024,  # RX 7600
+    "gfx1151": 32 * 1024 * 1024,  # Ryzen AI Max (Strix Halo)
+    "gfx1200": 32 * 1024 * 1024,  # RX 9060
+    "gfx1201": 64 * 1024 * 1024,  # RX 9070, Radeon AI PRO R9700
 }
 
 
+def _hsa_cache_beyond_l2(uuid: bytes) -> int | None:
+    """Bytes of the outermost cache beyond L2 that HSA reports for the GPU agent
+    whose UUID is `uuid`, or None if HSA cannot be queried or has no such agent.
+
+    torch's ROCm device properties do not include the Infinity Cache, but HSA's
+    HSA_AGENT_INFO_CACHE_SIZE lists every cache level (L1, L2, L3, L4).
+    TODO: read it from the device properties once torch exposes the last-level
+    cache size there.
+    """
+    import ctypes
+
+    hsa_agent_info_device, hsa_agent_info_cache_size = 17, 18
+    hsa_amd_agent_info_uuid, hsa_device_type_gpu = 0xA011, 1
+    if len(uuid) != 16 or uuid == b"0" * 16:
+        return None
+    try:
+        hsa = ctypes.CDLL("libhsa-runtime64.so.1")
+    except OSError:
+        return None
+    if hsa.hsa_init() != 0:
+        return None
+    found: list[int] = []
+
+    # hsa_agent_t is a struct holding one uint64, passed by value like a uint64.
+    @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p)
+    def visit(agent: int, _: Any) -> int:
+        handle = ctypes.c_uint64(agent)
+        dev_type = ctypes.c_uint32()
+        name = ctypes.create_string_buffer(21)
+        if (
+            hsa.hsa_agent_get_info(
+                handle, hsa_agent_info_device, ctypes.byref(dev_type)
+            )
+            or dev_type.value != hsa_device_type_gpu
+            or hsa.hsa_agent_get_info(handle, hsa_amd_agent_info_uuid, name)
+            or name.raw[:20] != b"GPU-" + uuid
+        ):
+            return 0
+        sizes = (ctypes.c_uint32 * 4)()
+        if hsa.hsa_agent_get_info(handle, hsa_agent_info_cache_size, sizes) == 0:
+            # No L2 means the cache topology was not reported; use the fallback.
+            found.append((sizes[3] or sizes[2]) if sizes[1] else -1)
+        return 0
+
+    try:
+        status = hsa.hsa_iterate_agents(visit, None)
+    finally:
+        hsa.hsa_shut_down()
+    if status != 0 or len(found) != 1 or found[0] < 0:
+        return None
+    return found[0]
+
+
+def _is_rocm_device(device_type: str | torch.device | None) -> bool:
+    return bool(torch.version.hip) and _normalize_gpu_device_type(device_type) == "cuda"
+
+
 @functools.cache
-def _rocm_mall_size() -> int:
-    """MALL bytes of the current ROCm device."""
-    props = torch.cuda.get_device_properties(torch.cuda.current_device())
-    arch = getattr(props, "gcnArchName", "").split(":", 1)[0]
-    return _ROCM_MALL_SIZE.get(arch, 256 * 1024 * 1024)
+def _rocm_mall_size(device: int) -> int:
+    """Infinity Cache (MALL) bytes of ROCm device `device`: queried from HSA, else
+    looked up by gfx target, else 0."""
+    props = torch.cuda.get_device_properties(device)
+    try:
+        size = _hsa_cache_beyond_l2(bytes(props.uuid.bytes))
+    except Exception:
+        log.debug("HSA cache-size query failed", exc_info=True)
+        size = None
+    if size is not None:
+        return size
+    arch = get_interface_for_device("cuda").get_compute_capability(device)
+    return _ROCM_MALL_SIZE_FALLBACK.get(arch, 0)
 
 
 @functools.cache
@@ -706,9 +781,9 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         autotune choices.
         """
         cache_size = self.get_device_cache_size(device_type)
-        if not torch.version.hip:
+        if not _is_rocm_device(device_type):
             return cache_size
-        return cache_size + _rocm_mall_size()
+        return cache_size + _rocm_mall_size(torch.cuda.current_device())
 
     def get_event_pairs(
         self: Self, iters: int, device_type: str | torch.device | None = None
@@ -833,15 +908,16 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         # write-back. Read it with a Triton kernel, since ATen's loads skip the
         # Infinity Cache on MI300 (see _rocm_read_flush). Read it twice: one pass
         # does not evict operands the callable has just reused from the Infinity
-        # Cache.
+        # Cache. Without Triton, fall back to zero_().
+        read_flush = _is_rocm_device(device_type) and has_triton()
         buffer = torch.empty(
             buffer_size_bytes // 4,
-            dtype=torch.float32 if torch.version.hip else torch.int,
+            dtype=torch.float32 if read_flush else torch.int,
             device=device_type,
         )
         buffer.zero_()
         flush: Callable[[], Any]
-        if torch.version.hip:
+        if read_flush:
             passes = 2
             flush = _rocm_read_flush(buffer, passes)
             # keep the warmup's total reads
