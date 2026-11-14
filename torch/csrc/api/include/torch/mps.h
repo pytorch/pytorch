@@ -30,9 +30,15 @@ void TORCH_API manual_seed(uint64_t seed);
 void TORCH_API synchronize();
 
 /// Submits the currently active command buffer to run on the MPS device.
+/// Must be called from a block running on `get_dispatch_queue()`, for example
+/// inside `dispatch_sync(get_dispatch_queue(), ^{ ... })`. Calling it from
+/// anywhere else throws an error.
 void TORCH_API commit();
 
 /// Get the current command buffer to encode the Metal commands.
+/// Must be called from a block running on `get_dispatch_queue()`, for example
+/// inside `dispatch_sync(get_dispatch_queue(), ^{ ... })`. Calling it from
+/// anywhere else throws an error.
 MTLCommandBuffer_t TORCH_API get_command_buffer();
 
 /// Get the dispatch_queue_t to synchronize encoding the custom kernels
