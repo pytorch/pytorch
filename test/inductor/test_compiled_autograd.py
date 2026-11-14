@@ -320,6 +320,49 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_undefined_grad_from_empty_input(self):
+        # _convolution_double_backward leaves its grads undefined when the input
+        # is empty, so the graph has to accumulate a None into a defined grad.
+        def fn():
+            model = torch.nn.Conv1d(3, 4, 3)
+            x = torch.randn([0, 3, 10], requires_grad=True)
+            out = model(x)
+            grad_out = torch.randn_like(out, requires_grad=True)
+            grads = torch.autograd.grad(
+                out, (x, *model.parameters()), grad_out, create_graph=True
+            )
+            yield from torch.autograd.grad(
+                out.sum() + sum(g.sum() for g in grads),
+                (x, grad_out, *model.parameters()),
+                retain_graph=True,
+            )
+
+        self.check_output_and_recompiles(
+            fn,
+            count=[2, 0],
+            compiler_fn=make_compiler_fn(
+                fullgraph=False, dynamic=None, backend="eager"
+            ),
+        )
+
+    def test_accumulate_into_existing_sparse_grad(self):
+        # The second backward passes the sparse .grad from the first one in as a
+        # graph input, so it goes through automatic dynamic and gets guarded on.
+        def fn():
+            model = torch.nn.Embedding(10, 4, sparse=True)
+            idx = torch.tensor([1, 2, 3])
+            for _ in range(2):
+                model(idx).sum().backward()
+            yield model.weight.grad.to_dense()
+
+        self.check_output_and_recompiles(
+            fn,
+            count=[2, 0],
+            compiler_fn=make_compiler_fn(
+                fullgraph=False, dynamic=None, backend="eager"
+            ),
+        )
+
     def test_cache_hit(self):
         def fn():
             for _ in range(3):
@@ -4168,12 +4211,12 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_27 = cos_backward0[0];  cos_backward0 = None
         validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_27], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_8, unwrap_maybe_dynamic_int_9], False, 6)]);  getitem_27 = unwrap_maybe_dynamic_int_8 = unwrap_maybe_dynamic_int_9 = None
         getitem_28 = validate_outputs_3[0];  validate_outputs_3 = None
-        add = torch.add(getitem_23, getitem_28);  getitem_23 = getitem_28 = None
+        accumulate_grads = torch__dynamo_external_utils_accumulate_grads(getitem_23, getitem_28);  getitem_23 = getitem_28 = None
 
         getitem_29 = hooks[3];  hooks = None
         getitem_30 = packed_data[3];  packed_data = None
         call_hook_3 = torch__dynamo_external_utils_call_hook(getitem_29, getitem_30, hook_type = 'unpack_hook');  getitem_29 = getitem_30 = None
-        sin_backward0 = torch__dynamo_compiled_autograd_ops_SinBackward0([add], [True], call_hook_3);  add = call_hook_3 = None
+        sin_backward0 = torch__dynamo_compiled_autograd_ops_SinBackward0([accumulate_grads], [True], call_hook_3);  accumulate_grads = call_hook_3 = None
         getitem_31 = sin_backward0[0];  sin_backward0 = None
         validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_10, unwrap_maybe_dynamic_int_11], False, 6)]);  getitem_31 = unwrap_maybe_dynamic_int_10 = unwrap_maybe_dynamic_int_11 = None
         getitem_32 = validate_outputs_4[0];  validate_outputs_4 = None

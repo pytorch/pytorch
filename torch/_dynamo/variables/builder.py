@@ -4956,16 +4956,19 @@ def record_automatic_dynamic(
             stride[i] = candidates.get(i_stride, i_stride)
             # pyrefly: ignore [no-matching-overload]
             candidates.setdefault(i_stride * ex_size[i], InferStride(i))
+        # type: ignore[arg-type]
+        entry = FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
     else:
-        # pyrefly: ignore [implicit-any]
-        stride = []
+        # Sparse tensors have no strides. Leave the stride entry unset rather
+        # than recording an empty tuple: is_stride_dynamic indexes the stride
+        # tuple per dim, so a tuple must always have one entry per dim.
+        entry = FrameStateSizeEntry.make_tensor(tuple(ex_size), auto_unset)
 
     return process_automatic_dynamic(
         # type: ignore[arg-type]ks
         tx,
         name,
-        # type: ignore[arg-type]
-        FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride)),
+        entry,
     )
 
 
@@ -5664,9 +5667,12 @@ def _wrap_to_fake_tensor_and_record_impl(
             values = fake_e._values() if fake_e.is_sparse else fake_e.values()
             tx.output.input_source_to_sizes_strides[source] = {
                 "size": fake_e.size(),
-                # TODO: revise this, but for now this stride instead of ()
-                #       avoids SegFault with PYTORCH_TEST_WITH_DYNAMO=1
-                "stride": (1,) * fake_e.ndim,
+                # COO reports all-zero strides, which is also what the
+                # TENSOR_MATCH guard reads back off the real tensor, so a
+                # placeholder here would never match. The compressed layouts
+                # have no strides at all; keep a placeholder for them (() is
+                # not usable, it segfaults with PYTORCH_TEST_WITH_DYNAMO=1).
+                "stride": fake_e.stride() if fake_e.is_sparse else (1,) * fake_e.ndim,
                 "values_size": values.size(),
                 "values_stride": values.stride(),
             }
