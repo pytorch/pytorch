@@ -5,6 +5,14 @@
 
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#ifdef USE_ROCM
+#include <ATen/ATen.h>
+#include <ATen/native/cuda/GridSampler.h>
+#include <c10/util/env.h>
+#include <limits>
+#include <optional>
+#include <string>
+#endif
 #define ASSERT_EQ_CUDA(X, Y) \
   {                          \
     bool _isEQ = X == Y;     \
@@ -143,4 +151,107 @@ TEST(ApplyTest, InvalidExclusion) {
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 3, sizes, strides};
   ASSERT_ANY_THROW(ti.collapseDims(5));
 }
+#ifdef USE_ROCM
+
+// The ROCm grid_sampler_2d backward channel-parallel kernel advances each
+// lane's channel counter by the lane count, so 32-bit indexing also needs
+// C - 1 + lanes to fit. Meta tensors keep this host-only: no GPU or large
+// allocation is needed.
+TEST(ApplyTest, GridSampler2dBackwardChannelLaneIndexWidth) {
+  using at::native::canUse32BitIndexMath;
+  using at::native::rocm_grid_sampler_2d_backward_channel_lane_use_32bit_index;
+  const auto meta = at::TensorOptions().device(at::kMeta).dtype(at::kBFloat16);
+  const auto grid = at::empty({1, 1, 1, 2}, meta);
+  const int64_t int32_max = std::numeric_limits<int32_t>::max();
+  // Lanes: the next power of two, at least 1 and at most 256.
+  const std::pair<int64_t, int64_t> lane_cases[] = {
+      {0, 1}, {1, 1}, {2, 2}, {3, 4}, {64, 64}, {65, 128}, {256, 256},
+      {257, 256}, {int32_max, 256}, {std::numeric_limits<int64_t>::max(), 256},
+  };
+  for (const auto& [C, lanes] : lane_cases) {
+    EXPECT_EQ(at::native::rocm_grid_sampler_2d_backward_lanes(C), lanes)
+        << "C=" << C;
+  }
+  // (C, expected selection); the large C use scalar-expanded tensors.
+  const std::pair<int64_t, bool> cases[] = {
+      {257, true},
+      {int32_max - 255, true},
+      {int32_max - 254, false},
+      {(int64_t{1} << 31) - 128, false},
+  };
+  for (const auto& [C, use_32bit] : cases) {
+    const auto input = at::empty({1, 1, 1, 1}, meta).expand({1, C, 1, 1});
+    const auto grad_output = at::empty({1, 1, 1, 1}, meta).expand({1, C, 1, 1});
+    // The tensor-offset checks alone accept every case.
+    ASSERT_TRUE(canUse32BitIndexMath(input));
+    ASSERT_TRUE(canUse32BitIndexMath(grid));
+    ASSERT_TRUE(canUse32BitIndexMath(grad_output));
+    EXPECT_EQ(
+        rocm_grid_sampler_2d_backward_channel_lane_use_32bit_index(
+            input, grid, grad_output),
+        use_32bit)
+        << "C=" << C;
+  }
+  // A tensor offset beyond the 32-bit range still selects 64-bit indexing.
+  const auto strided =
+      at::empty_strided({1, 4, 1, 1}, {4, int64_t{1} << 31, 1, 1}, meta);
+  ASSERT_FALSE(canUse32BitIndexMath(strided));
+  EXPECT_FALSE(rocm_grid_sampler_2d_backward_channel_lane_use_32bit_index(
+      strided, grid, at::empty({1, 4, 1, 1}, meta)));
+}
+
+namespace {
+// Sets an environment variable for the guard's lifetime, then restores it.
+class ScopedEnv {
+ public:
+  ScopedEnv(const char* name, const char* value)
+      : name_(name), saved_(c10::utils::get_env(name)) {
+    c10::utils::set_env(name_, value);
+  }
+  ~ScopedEnv() {
+    if (saved_.has_value()) {
+      c10::utils::set_env(name_, saved_->c_str());
+    } else {
+      c10::utils::unset_env(name_);
+    }
+  }
+  ScopedEnv(const ScopedEnv&) = delete;
+  ScopedEnv& operator=(const ScopedEnv&) = delete;
+
+ private:
+  const char* name_;
+  std::optional<std::string> saved_;
+};
+} // namespace
+
+// Both sides of the channel-parallel kernel's launch bound: HIP limits
+// gridDim.x * blockDim.x to UINT32_MAX, and C = 5 uses 8 lanes, so
+// (2**32 - 1) / 8 output locations is the last eligible launch and one more is
+// the first ineligible one. Forcing the override selects the kernel for every
+// eligible call on any architecture; channels-last input that requests
+// grad_input is eligible from C = 3. Meta tensors need no storage and the
+// dispatch launches nothing.
+TEST(ApplyTest, GridSampler2dBackwardChannelLaneLaunchBound) {
+  const ScopedEnv force("PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE", "1");
+  const auto meta = at::TensorOptions().device(at::kMeta).dtype(at::kFloat);
+  const auto input = at::empty({1, 5, 8, 8}, meta)
+                         .contiguous(at::MemoryFormat::ChannelsLast);
+  ASSERT_TRUE(input.is_contiguous(at::MemoryFormat::ChannelsLast));
+  ASSERT_EQ(at::native::rocm_grid_sampler_2d_backward_lanes(5), 8);
+  const int64_t last_eligible =
+      int64_t{std::numeric_limits<uint32_t>::max()} / 8;
+  ASSERT_EQ(last_eligible, 536870911);
+  const auto select = [&](int64_t width) {
+    return at::native::rocm_grid_sampler_2d_backward_dispatch(
+        input, at::empty({1, 1, width, 2}, meta),
+        /*interpolation_mode=*/0, /*input_requires_grad=*/true);
+  };
+  const auto last = select(last_eligible);
+  EXPECT_TRUE(last.channel_lane);
+  EXPECT_TRUE(last.scratch);
+  const auto first_ineligible = select(last_eligible + 1);
+  EXPECT_FALSE(first_ineligible.channel_lane);
+  EXPECT_FALSE(first_ineligible.scratch);
+}
+#endif
 #endif
