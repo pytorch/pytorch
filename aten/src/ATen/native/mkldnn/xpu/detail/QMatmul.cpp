@@ -520,7 +520,9 @@ sycl::event scaled_matmul(
     const std::optional<at::Tensor>& bias,
     const std::optional<at::Tensor>& scale_result,
     bool use_fast_accum,
-    const std::optional<at::Tensor>& alpha) {
+    const std::optional<at::Tensor>& alpha,
+    float gemm_alpha,
+    float beta) {
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
@@ -574,14 +576,16 @@ sycl::event scaled_matmul(
   }
 
   // alpha applies a per-tensor multiplier to the matmul product (used by
-  // two-level NVFP4 global scaling: alpha = global_scale_a * global_scale_b).
+  // two-level NVFP4 global scaling: alpha = global_scale_a * global_scale_b),
+  // and gemm_alpha is the scaled_addmm scalar alpha.
   // CUDA computes alpha*(A@B)+bias. oneDNN applies DNNL_ARG_BIAS *before*
-  // post-ops, so when alpha is present we apply bias as a binary_add post-op
-  // *after* the alpha multiply to preserve the same math. Without alpha, bias
-  // stays on the native DNNL_ARG_BIAS path.
+  // post-ops, so when either multiplier is present we apply bias as a
+  // binary_add post-op *after* the multiply to preserve the same math.
+  // Otherwise, bias stays on the native DNNL_ARG_BIAS path.
   bool with_alpha = alpha.has_value() && alpha->defined();
-  bool bias_as_arg = with_bias && !with_alpha;
-  bool bias_as_post_op = with_bias && with_alpha;
+  bool with_gemm_alpha = gemm_alpha != 1.0f;
+  bool bias_as_arg = with_bias && !with_alpha && !with_gemm_alpha;
+  bool bias_as_post_op = with_bias && (with_alpha || with_gemm_alpha);
 
   // 1.2 Create primitive descriptor and set scales mask
   const ScaleSpec src_spec =
@@ -608,9 +612,10 @@ sycl::event scaled_matmul(
     op_attr.set_scales(DNNL_ARG_DST, 0, {}, dnnl::memory::data_type::f32);
   }
 
-  // Assemble post-ops: optional alpha (binary_mul) followed by optional bias
-  // (binary_add). Order matters -- alpha must be applied to the product before
-  // bias is added.
+  // Assemble post-ops: optional alpha (binary_mul), optional gemm_alpha
+  // (eltwise_linear), optional bias (binary_add), optional beta (sum). Order
+  // matters -- both multipliers must be applied to the product before bias is
+  // added.
   dnnl::memory::desc alpha_md;
   dnnl::post_ops po;
   if (with_alpha) {
@@ -618,8 +623,14 @@ sycl::event scaled_matmul(
         {1, 1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::ab);
     po.append_binary(dnnl::algorithm::binary_mul, alpha_md);
   }
+  if (with_gemm_alpha) {
+    po.append_eltwise(dnnl::algorithm::eltwise_linear, gemm_alpha, 0.0f);
+  }
   if (bias_as_post_op) {
     po.append_binary(dnnl::algorithm::binary_add, bias_md);
+  }
+  if (beta != 0.0f) {
+    po.append_sum(beta);
   }
   if (po.len() > 0) {
     op_attr.set_post_ops(po);
@@ -700,6 +711,9 @@ sycl::event scaled_matmul(
     args.insert(
         {DNNL_ARG_ATTR_MULTIPLE_POST_OP(post_op_idx) | DNNL_ARG_SRC_1,
          alpha_mem});
+    post_op_idx++;
+  }
+  if (with_gemm_alpha) {
     post_op_idx++;
   }
   if (bias_as_post_op) {
