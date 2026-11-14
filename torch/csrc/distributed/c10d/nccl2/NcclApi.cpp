@@ -13,7 +13,7 @@
 
 namespace c10d::nccl2 {
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0)
 #define NCCL2_HAS_COLL_CONFIG
 #endif
 
@@ -540,7 +540,7 @@ ncclResult_t DefaultNcclApi::gather(
     cudaStream_t stream,
     const MaterializedCollectiveConfig& config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3)
 #ifdef NCCL2_HAS_COLL_CONFIG
   if (config.data != nullptr) {
     return ncclGatherConfig(
