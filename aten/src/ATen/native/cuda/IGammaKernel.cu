@@ -5,6 +5,7 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <c10/util/MathConstants.h>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
@@ -301,7 +302,7 @@ __host__ __device__ scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t
     absoldterm = absterm;
     afac /= a;
   }
-  res += sgn * ::exp(-0.5 * a * eta * eta) * sum / ::sqrt(2 * 3.1415926535 * a);
+  res += sgn * ::exp(-0.5 * a * eta * eta) * sum / ::sqrt(2 * c10::detail::pi<accscalar_t>() * a);
 
   return res;
 }

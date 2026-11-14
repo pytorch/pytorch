@@ -990,7 +990,7 @@ static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam
     absoldterm = absterm;
     afac /= a;
   }
-  res += sgn * std::exp(-0.5 * a * eta * eta) * sum / std::sqrt(2 * c10::pi<float> * a);
+  res += sgn * std::exp(-0.5 * a * eta * eta) * sum / std::sqrt(2 * c10::pi<scalar_t> * a);
 
   return res;
 }
