@@ -184,7 +184,6 @@
   "test/distributed/tensor/test_view_ops.py",
   "test/distributed/tensor/test_xla_integration.py",
   "test/distributed/test_aten_comm_compute_reordering.py",
-  "test/distributed/test_backends.py",
   "test/distributed/test_c10d_collectives.py",
   "test/distributed/test_c10d_common.py",
   "test/distributed/test_c10d_cuda_graphs.py",
