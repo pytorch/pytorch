@@ -3233,10 +3233,13 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*all_types_and(torch.half, torch.bfloat16, torch.complex64))
     def test_cumsum_cumprod_outer_dim(self, device, dtype):
         # On ROCm, scans along a non-last dim of length >= 32 (>= 16 on gfx1250) run a tiled kernel
-        # that also splits long columns into chunks. The inputs keep every result exact in `dtype`
-        # for any combine order: integers wrap around (odd factors for cumprod, so products never
-        # reach 0), and floating-point inputs are small integers for cumsum and +-1 (+-1j) for
-        # cumprod.
+        # that also splits long columns into chunks. Without the Tensor Data Mover, 1- and 2-byte
+        # rows that are not a whole number of 16-byte vectors stay on the stock kernel when the
+        # scan is shorter than 512 and there are at least 64 columns, so (40, 1024) and
+        # (4, 200, 15) keep those dtypes on the tiled kernel. The inputs keep every result exact in
+        # `dtype` for any combine order: integers wrap around (odd factors for cumprod, so products
+        # never reach 0), and floating-point inputs are small integers for cumsum and +-1 (+-1j)
+        # for cumprod.
         cases = [
             ((16, 5), 0),
             ((32, 5), 0),
@@ -3244,7 +3247,9 @@ class TestTorchDeviceType(TestCase):
             ((1024, 4), 0),
             ((257, 33), 0),
             ((20, 1000), 0),
+            ((40, 1024), 0),
             ((4, 300, 33), 1),
+            ((4, 200, 15), 1),
             ((65536, 4), 0),
             ((3, 20001, 3), 1),
         ]
