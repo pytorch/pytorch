@@ -7640,7 +7640,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         )
                     self.body.writeline(f"{name} = {updated}")
 
-            for idx in range(len(self.saved_partial_accumulate)):
+            for idx, partial_accum in enumerate(self.saved_partial_accumulate):
+                if self.mix_order_partials_in_buffers:
+                    # One [nsplit, r0_numel] graph buffer per accumulator.
+                    ptr = self.args.output(partial_accum.buffer_name)
+                    self.body.writeline(
+                        f"tl.store({ptr} + tl.program_id(0) * r0_numel + r0_index, accum{idx}, r0_mask)"
+                    )
+                    continue
                 self.body.writeline(
                     f"tl.store(ws_ptr + (tl.program_id(0) + {idx} * tl.num_programs(0)) * r0_numel + r0_index, accum{idx}, r0_mask)"
                 )

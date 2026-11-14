@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ..ir import IRNode
+    from ..runtime.hints import InductorMeta
 
 from ..ops_handler import registered_pointwise_ops, WrapperHandler
 from ..optimize_indexing import (
@@ -52,13 +53,7 @@ from ..optimize_indexing import (
     indexing_dtype_strength_reduction,
 )
 from ..runtime.coordinate_descent_tuner import CoordescTuner
-from ..runtime.hints import DeviceProperties, InductorMeta
-from ..runtime.runtime_utils import (
-    green_text,
-    last_power_of_2,
-    next_power_of_2,
-    yellow_text,
-)
+from ..runtime.runtime_utils import green_text, next_power_of_2, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..shape_propagation import ShapePropagationOpsHandler
 from ..utils import (
@@ -599,6 +594,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.min_xblock: int | None = None
         self.min_rblock: int | None = None
         self.saved_partial_accumulate: list[PartialAccumulate] = []
+        # Set when graph buffers, not a workspace, take the partial sums.
+        self.mix_order_partials_in_buffers = False
         self._index_dtype = self.features.select_index_dtype()
 
     def codegen_template_body(
@@ -3554,7 +3551,7 @@ class SIMDScheduling(BaseScheduling):
         ):
             raise AssertionError("node1 and node2 must not be ancestors of each other")
 
-        self._codegen_mix_order_reduction(node1, node2)
+        self._codegen_mix_order_reduction(node1, node2, node.mix_order_split_size)
 
     def _split_mix_order_reduction_epilogue(self, node):
         # TODO: do more validation here
@@ -3622,16 +3619,18 @@ class SIMDScheduling(BaseScheduling):
         node_schedule = kernel.features.node_schedule
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
-        # allocate workspace for this kernel
-        _, ws_name, ws_off = kernel.args.workspace(
-            len(kernel.saved_partial_accumulate)
-            * kernel.numels["r0_"]
-            * ((kernel.numels["x"] + kernel.rsplit_size - 1) // kernel.rsplit_size),
-            False,
-            dtype=torch.float,
-        )
-        if ws_off != 0:
-            raise AssertionError(f"{ws_off=}")
+        ws_name = None
+        if not kernel.mix_order_partials_in_buffers:
+            # allocate workspace for this kernel
+            _, ws_name, ws_off = kernel.args.workspace(
+                len(kernel.saved_partial_accumulate)
+                * kernel.numels["r0_"]
+                * ((kernel.numels["x"] + kernel.rsplit_size - 1) // kernel.rsplit_size),
+                False,
+                dtype=torch.float,
+            )
+            if ws_off != 0:
+                raise AssertionError(f"{ws_off=}")
         with kernel:
             kernel.codegen_body()
 
@@ -3659,28 +3658,16 @@ class SIMDScheduling(BaseScheduling):
     ) -> tuple[float, str]:
         raise NotImplementedError
 
-    def _codegen_mix_order_reduction(self, node1, node2):
+    def _codegen_mix_order_reduction(self, node1, node2, scheduled_split_size=None):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
-
-        def _pick_split_size():
-            # the overridden has highest priority
-            if config.triton.mix_order_reduction_split_size is not None:
-                return config.triton.mix_order_reduction_split_size
-
-            # heuristics based on number of SMs
-            device_prop = DeviceProperties.create(node1.get_device())
-            num_sm = device_prop.multi_processor_count
-            estimated_num_splits = num_sm * 8
-
-            # split_size is decided based on hint.
-            # optimization_hint is fine here: the result is clamped to [16, 128],
-            # so any fallback value still produces a valid split size.
-            numel_hint = V.graph.sizevars.optimization_hint(numel)
-            split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
-            split_size = min(split_size, 128)
-            return split_size
-
-        initial_split_size = _pick_split_size()
+        # A split size from the scheduler means that the second stages are regular
+        # scheduler nodes, which read the partial sums from graph buffers.
+        partials_in_buffers = scheduled_split_size is not None
+        initial_split_size = (
+            scheduled_split_size
+            if partials_in_buffers
+            else scheduler.MixOrderReduction.pick_split_size(node1)
+        )
 
         # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
@@ -3703,10 +3690,12 @@ class SIMDScheduling(BaseScheduling):
         kernel = self._create_kernel_for_mix_order_reduction(
             kernel_features, initial_split_size
         )
+        kernel.mix_order_partials_in_buffers = partials_in_buffers
 
         # The autotuning is skipped in deterministic mode
         if (
-            not torch._inductor.config.deterministic
+            not partials_in_buffers
+            and not torch._inductor.config.deterministic
             and config.triton.mix_order_reduction_split_size is None
             and not kernel.fixed_config
             and (
@@ -3743,7 +3732,7 @@ class SIMDScheduling(BaseScheduling):
         # output
         is_split_reduction = bool(node2_reductions[0].node._split_size)
         rename = {}
-        if is_split_reduction:
+        if is_split_reduction and not partials_in_buffers:
             for subnode in node2_reductions:
                 bufname = subnode.get_outputs()[0].node.get_name()
                 username = (
@@ -3783,6 +3772,12 @@ class SIMDScheduling(BaseScheduling):
         kernel.call_kernel(kernel.kernel_name, deallocate_ws=False)
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+
+        if partials_in_buffers:
+            if node2_epilogue:
+                self._codegen_nodes(node2_epilogue)
+            self.free_buffers_in_scheduler()
+            return
 
         # an extra round of reduction
         if len(converted_nodes) != len(kernel.saved_partial_accumulate):
@@ -5747,9 +5742,16 @@ class SIMDScheduling(BaseScheduling):
             per_subkernel_blocks=per_subkernel_blocks,
         )
 
-        for src_code, kernel, _ in kernel_code_list:
-            kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
-            self.codegen_comment(combo_kernel_node.snodes, kernel_name)
+        for src_code, kernel, node_group in kernel_code_list:
+            if combo_kernel_node.is_mix_order_finalize:
+                name_nodes = comment_nodes = [
+                    n for subkernel in node_group for n in subkernel.get_nodes()
+                ]
+            else:
+                name_nodes = [combo_kernel_node]
+                comment_nodes = combo_kernel_node.snodes
+            kernel_name = self.define_kernel(src_code, name_nodes, kernel)
+            self.codegen_comment(comment_nodes, kernel_name)
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
             with V.graph.wrapper_code.kernel_profile_scope(
                 kernel_name, combo_kernel_node.snodes

@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import functools
 import unittest
 from unittest import mock
 from unittest.mock import patch
@@ -8,7 +9,7 @@ import torch
 import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torch import nn
-from torch._dynamo.utils import same
+from torch._dynamo.utils import counters, same
 from torch._inductor import metrics, utils
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
@@ -25,6 +26,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
+    OMIT_SKIPPED_TESTS,
     parametrize,
     recover_orig_fp32_precision,
     skipIfXpu,
@@ -1061,7 +1063,10 @@ class MixOrderReductionTest(TestBase):
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
         # the slice grads alias the shared cat buffer: the final reduction
         # must be written through the view, never bound to a fresh tensor
-        FileCheck().check(".copy_(workspace_").run(wrapper)
+        if inductor_config.triton.mix_order_reduction_sched_finalize:
+            self.assertNotIn("workspace_", wrapper)
+        else:
+            FileCheck().check(".copy_(workspace_").run(wrapper)
         self.assertNotIn("= workspace_", wrapper)
         torch.testing.assert_close(ref_grad, act_grad, atol=1e-4, rtol=1e-4)
 
@@ -1946,6 +1951,187 @@ class MixOrderReductionHeuristicTest(TestBase):
 )
 class NoMixOrderReductionTest(MixOrderReductionTest):
     pass
+
+
+def _norm_fwd(kind):
+    def fwd(x, w, b, scale, shift):
+        if kind == "rms":
+            return F.rms_norm(x, x.shape[-1:], w)
+        y = F.layer_norm(x, x.shape[-1:], w, b)
+        return y * (1 + scale) + shift if kind == "modulated_ln" else y
+
+    return fwd
+
+
+# Column sums finalized per norm backward: dw; dw, db; dw, db, dscale, dshift.
+_NORM_ACCUMULATORS = {"rms": 1, "ln": 2, "modulated_ln": 4}
+
+
+@inductor_config.patch(
+    {
+        "triton.cooperative_reductions": False,
+        "triton.force_cooperative_reductions": False,
+        "triton.mix_order_reduction": True,
+        "triton.mix_order_reduction_sched_finalize": True,
+    }
+)
+@instantiate_parametrized_tests
+class MixOrderReductionSchedFinalizeTest(TestBase):
+    def _check_norm_bwd(self, kind, rows, cols, split_reductions, dynamic):
+        fwd = _norm_fwd(kind)
+        x = torch.randn(rows, cols, device=GPU_TYPE, dtype=torch.bfloat16)
+        params = [
+            torch.randn(cols, device=GPU_TYPE, dtype=torch.bfloat16) for _ in range(4)
+        ]
+        dy = torch.randn_like(x)
+
+        leaves = [t.float().requires_grad_() for t in [x, *params]]
+        ref = torch.autograd.grad(fwd(*leaves), leaves, dy.float(), allow_unused=True)
+
+        leaves = [t.detach().clone().requires_grad_() for t in [x, *params]]
+        if dynamic:
+            torch._dynamo.mark_dynamic(leaves[0], 0)
+        compiled = torch.compile(
+            fwd,
+            dynamic=None if dynamic else False,
+            options={"split_reductions": split_reductions},
+        )
+        counters.clear()
+        act, codes = utils.run_and_get_code(
+            lambda: torch.autograd.grad(
+                compiled(*leaves), leaves, dy, allow_unused=True
+            )
+        )
+        for a, r in zip(act, ref):
+            if r is None:
+                self.assertIsNone(a)
+                continue
+            err = (a.float() - r).abs().max() / r.abs().max().clamp_min(1e-6)
+            self.assertLess(err.item(), 2e-2)
+
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        self.assertEqual(
+            counters["inductor"]["mix_order_sched_finalize"], _NORM_ACCUMULATORS[kind]
+        )
+        # The partial sums are graph buffers; there is no workspace to finalize.
+        self.assertNotIn("workspace_", codes[-1])
+        return counters["inductor"]["mix_order_sched_finalize_new_stage"], codes[-1]
+
+    @parametrize("kind", ["rms", "ln", "modulated_ln"])
+    @parametrize("split_reductions", [True, False])
+    @parametrize("dynamic", [False, True])
+    def test_norm_bwd(self, kind, split_reductions, dynamic):
+        new_stages, _ = self._check_norm_bwd(
+            kind, 16384, 512, split_reductions, dynamic
+        )
+        # Without split reductions, the pass adds the second stages itself.
+        self.assertEqual(new_stages > 0, not split_reductions)
+
+    @parametrize("kind", ["rms", "modulated_ln"])
+    def test_wide_norm_bwd(self, kind):
+        # Inductor does not split reductions with at least num_SMs * 64 outputs, so
+        # these column sums reach mix-order unsplit even with split_reductions.
+        cols = 12288
+        if self._num_sm() * 64 > cols:
+            self.skipTest(f"Inductor splits {cols}-wide column sums on this device")
+        new_stages, _ = self._check_norm_bwd(kind, 16384, cols, True, False)
+        self.assertEqual(new_stages, _NORM_ACCUMULATORS[kind])
+
+    @parametrize("split_reductions", [True, False])
+    def test_finalize_kernel_metadata(self, split_reductions):
+        rows, cols = 16384, 512
+        _, code = self._check_norm_bwd("ln", rows, cols, split_reductions, False)
+        launches = [
+            line.split(".run(")[0].strip()
+            for line in code.split("def call(")[-1].splitlines()
+            if ".run(" in line
+        ]
+        # The mix-order kernel, then the dw and db finalizes as one combo kernel.
+        self.assertEqual(len(launches), 2, launches)
+        finalize = launches[-1]
+        self.assertTrue(
+            finalize.startswith("triton_red_fused_native_layer_norm"), finalize
+        )
+        header = code[: code.index(f"def {finalize}(")].rsplit("# kernel path:", 1)[1]
+        self.assertIn("# Topologically Sorted Source Nodes: [", header)
+        nsplit = rows // self._heuristic_split_size(rows)
+        self.assertIn(f'Tensor "f32[{nsplit}, {cols}][{cols}, 1]', header)
+
+    @inductor_config.patch("triton.mix_order_reduction_autotune_split_size", True)
+    def test_heuristic_split_size_under_autotune(self):
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x = torch.randn(32768, 512, device=GPU_TYPE)
+        counters.clear()
+        act, (code,) = utils.run_and_get_code(torch.compile(f), x)
+        torch.testing.assert_close(act, f(x), atol=1e-2, rtol=1e-3)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        self.assertEqual(counters["inductor"]["mix_order_sched_finalize"], 1)
+        self.assertIn(f"'RSPLIT_SIZE': {self._heuristic_split_size(x.shape[0])}", code)
+
+    @staticmethod
+    def _num_sm():
+        device = torch.device(
+            GPU_TYPE, torch.get_device_module(GPU_TYPE).current_device()
+        )
+        return DeviceProperties.create(device).multi_processor_count
+
+    @classmethod
+    def _heuristic_split_size(cls, rows):
+        split = 1 << max((rows // (cls._num_sm() * 8)).bit_length() - 1, 0)
+        return min(max(split, 16), 128)
+
+
+def _expect_sched_finalize(test):
+    @functools.wraps(test)
+    def wrapper(self):
+        counters.clear()
+        test(self)
+        # Every mix-order reduction finalizes its column sums with regular
+        # second-stage reductions.
+        self.assertGreater(metrics.codegen_mix_order_reduction, 0)
+        self.assertEqual(
+            counters["inductor"]["mix_order_sched_finalize_nodes"],
+            metrics.codegen_mix_order_reduction,
+        )
+
+    return wrapper
+
+
+# MixOrderReductionTest cases whose column sums reach the finalize.
+_SCHED_FINALIZE_CASES = (
+    "test_mix_order_reduction_name_sum",
+    "test_non_contiguous_input",
+    "test_multi_workspace_allocation",
+    "test_rms_norm_bwd_tma_small",
+    "test_layer_norm_bwd_with_bias",
+    "test_rms_norm_bwd_with_dynamic_shape",
+    "test_layer_norm_bwd_with_dynamic_shape",
+    "test_layer_norm_bwd_no_bias",
+    "test_rms_norm_sharing_weights",
+    "test_layer_norm_sharing_weights",
+    "test_chained_modulated_norm_shared_table",
+)
+_matched_cases = set()
+for _name in dir(MixOrderReductionTest):
+    for _case in _SCHED_FINALIZE_CASES:
+        if _name == _case or _name.startswith(f"{_case}_"):
+            _matched_cases.add(_case)
+            setattr(
+                MixOrderReductionSchedFinalizeTest,
+                _name,
+                _expect_sched_finalize(getattr(MixOrderReductionTest, _name)),
+            )
+# PYTORCH_TEST_OMIT_SKIPPED=1 deletes skipped tests. Of the cases above, only the
+# TMA case has a skip decorator.
+_expected_cases = set(_SCHED_FINALIZE_CASES)
+if OMIT_SKIPPED_TESTS and not HAS_GPU_TMA:
+    _expected_cases.discard("test_rms_norm_bwd_tma_small")
+if _missing_cases := _expected_cases - _matched_cases:
+    raise AssertionError(
+        f"no MixOrderReductionTest cases match {sorted(_missing_cases)}"
+    )
 
 
 if __name__ == "__main__":

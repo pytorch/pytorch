@@ -2651,6 +2651,15 @@ class triton:
     # this could be helpful to avoid recompilations in some cases
     mix_order_reduction_non_strict_mode = False
 
+    # Finalize the partial sums of a mix-order reduction with regular second-stage
+    # reductions, picked at scheduling and run as one combo kernel per mix-order
+    # reduction, instead of one ATen sum per accumulator. For these reductions the
+    # split size comes from MixOrderReduction.pick_split_size and is not
+    # autotuned; the reductions the pass skips keep the ATen finalize.
+    mix_order_reduction_sched_finalize = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_SCHED_FINALIZE", "0") == "1"
+    )
+
     # Maximum external read buffers (loads) in a mix-order reduction
     # kernel. Set to 0 to disable the check.
     mix_order_reduction_max_reads = 10
