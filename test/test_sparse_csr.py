@@ -2832,6 +2832,26 @@ class TestSparseCSRDevice(TestCase):
         for index_dtype in [torch.int32, torch.int64]:
             run_test(index_dtype)
 
+    @dtypes(torch.float32, torch.float64)
+    def test_sparse_add_out_layout_mismatch(self, device, dtype):
+        # Regression for #204442: mismatched out= layout must raise, not
+        # internal-assert (COO/strided) or silently transpose (CSC).
+        a = torch.tensor(
+            [[1.0, 0.0, 2.0], [0.0, 3.0, 0.0], [0.0, 0.0, 5.0]],
+            dtype=dtype,
+            device=device,
+        ).to_sparse_csr()
+        expected = "Expected all tensors to have the same layout|Expected out to be a sparse compressed tensor"
+        for out in (
+            torch.zeros(3, 3, dtype=dtype, device=device).to_sparse(),
+            torch.zeros(3, 3, dtype=dtype, device=device),
+            torch.zeros(3, 3, dtype=dtype, device=device).to_sparse_csc(),
+            torch.zeros(3, 3, dtype=dtype, device=device).to_sparse_bsr((1, 1)),
+            torch.zeros(3, 3, dtype=dtype, device=device).to_sparse_bsc((1, 1)),
+        ):
+            with self.assertRaisesRegex(ValueError, expected):
+                torch.add(a, a, out=out)
+
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
