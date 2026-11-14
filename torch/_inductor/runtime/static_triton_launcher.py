@@ -563,8 +563,10 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
     def __init__(self, kernel: CompiledKernel) -> None:
         self.tmem_size: int | None = None
         self.max_tmem_size = 0
+        is_hip = False
         # pyrefly: ignore [missing-attribute]
         if "hsaco" in kernel.asm:
+            is_hip = True
             # pyrefly: ignore [missing-attribute]
             self.cubin_raw = kernel.asm["hsaco"]
 
@@ -582,6 +584,11 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
                 "Expected either 'hsaco' (ROCm) or 'cubin' (CUDA) in kernel.asm"
             )
         super().__init__(kernel)
+        # TODO: Always launch HIP kernels with zero dynamic shared memory
+        # once every supported Triton version allocates AMD LDS statically.
+        # pyrefly: ignore [missing-attribute]
+        if is_hip and getattr(kernel.metadata, "shared_static", None) is not None:
+            self.shared = 0
 
     def load_kernel(self, device: int) -> None:
         # Match Triton's load-time check so _make_launchers can retry num_stages=1.
