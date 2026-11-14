@@ -3036,7 +3036,7 @@ def _max_pool_nd_with_indices(
         for d in range(n_dim)
     ]
 
-    # Pad with -inf so out-of-bounds positions never win the max. For integer
+    # Pad with -inf; ties with valid -inf values are resolved below. For integer
     # types, iinfo.min is a valid data value, so padding with it causes ties
     # in argmax that produce wrong indices. Promote to a wider type so the
     # sentinel is strictly below any representable value in the original dtype.
@@ -3113,7 +3113,19 @@ def _max_pool_nd_with_indices(
         out_pos = torch.arange(
             output_sizes[d], device=device, dtype=torch.int64
         ).reshape(shape)
+        if pa[d]:
+            # A padding tie selects kernel position zero. Advance it to the
+            # first valid position, accounting for the dilation alignment.
+            first_valid = ((pa[d] - out_pos * st[d] + di[d] - 1) // di[d]).clamp_min(0)
+            kernel_pos[d] = torch.maximum(kernel_pos[d], first_valid)
         orig_coords.append(out_pos * st[d] + kernel_pos[d] * di[d] - pa[d])
+
+    if any(pa):
+        valid_argmax = kernel_pos[0]
+        for d in range(1, n_dim):
+            valid_argmax = valid_argmax * ks[d] + kernel_pos[d]
+        # Gather from the valid winner so gradients do not flow into padding.
+        values = windows.gather(-1, valid_argmax.unsqueeze(-1)).squeeze(-1)
 
     flat_indices = orig_coords[0]
     for d in range(1, n_dim):
