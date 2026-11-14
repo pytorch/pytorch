@@ -857,6 +857,145 @@ with tempfile.TemporaryDirectory() as build_directory:
         loss = MyFn.apply(inp).sum()
         test_backward_deadlock.run_back_no_gil(loss)
 
+    @torch.compiler.disable
+    def test_storage_dealloc_releases_gil_for_native_deleter(self):
+        # This test checks final-reference destruction timing, which Dynamo
+        # may change by retaining references across graph breaks.
+        source = r"""
+        #include <torch/extension.h>
+
+        #include <chrono>
+        #include <condition_variable>
+        #include <cstdlib>
+        #include <mutex>
+
+        namespace {
+        std::condition_variable condition;
+        std::mutex mutex;
+        bool deleter_entered = false;
+        bool observer_waiting = false;
+        bool observer_progressed = false;
+        bool deleter_observed_progress = false;
+
+        void blocking_deleter(void* data) {
+          std::free(data);
+          std::unique_lock<std::mutex> lock(mutex);
+          deleter_entered = true;
+          condition.notify_all();
+          deleter_observed_progress = condition.wait_for(
+              lock,
+              std::chrono::seconds(2),
+              [] { return observer_progressed; });
+        }
+
+        torch::Tensor make_tensor() {
+          auto* data = static_cast<float*>(std::malloc(sizeof(float)));
+          TORCH_CHECK(data != nullptr, "malloc failed");
+          return torch::from_blob(data, {1}, blocking_deleter);
+        }
+
+        void reset() {
+          std::lock_guard<std::mutex> lock(mutex);
+          deleter_entered = false;
+          observer_waiting = false;
+          observer_progressed = false;
+          deleter_observed_progress = false;
+        }
+
+        bool wait_for_observer() {
+          pybind11::gil_scoped_release no_gil;
+          std::unique_lock<std::mutex> lock(mutex);
+          return condition.wait_for(
+              lock, std::chrono::seconds(5), [] { return observer_waiting; });
+        }
+
+        bool observer_wait_for_deleter() {
+          {
+            std::lock_guard<std::mutex> lock(mutex);
+            observer_waiting = true;
+          }
+          condition.notify_all();
+          pybind11::gil_scoped_release no_gil;
+          std::unique_lock<std::mutex> lock(mutex);
+          return condition.wait_for(
+              lock, std::chrono::seconds(5), [] { return deleter_entered; });
+        }
+
+        void observer_report_progress() {
+          std::lock_guard<std::mutex> lock(mutex);
+          observer_progressed = true;
+          condition.notify_all();
+        }
+
+        bool deleter_has_entered() {
+          std::lock_guard<std::mutex> lock(mutex);
+          return deleter_entered;
+        }
+
+        bool deleter_saw_observer_progress() {
+          std::lock_guard<std::mutex> lock(mutex);
+          return deleter_observed_progress;
+        }
+        } // namespace
+
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+          m.def("make_tensor", &make_tensor);
+          m.def("reset", &reset);
+          m.def("wait_for_observer", &wait_for_observer);
+          m.def("observer_wait_for_deleter", &observer_wait_for_deleter);
+          m.def("observer_report_progress", &observer_report_progress);
+          m.def("deleter_has_entered", &deleter_has_entered);
+          m.def("deleter_saw_observer_progress", &deleter_saw_observer_progress);
+        }
+        """
+        module = torch.utils.cpp_extension.load_inline(
+            name="storage_dealloc_gil",
+            cpp_sources=source,
+            verbose=True,
+        )
+        for retain_reference in (False, True):
+            with self.subTest(retain_reference=retain_reference):
+                module.reset()
+
+                # Keep only the Python storage wrapper alive. Its final decref
+                # takes THPStorage_dealloc rather than THPVariable_dealloc.
+                tensor = module.make_tensor()
+                storage_holder = [tensor.untyped_storage()]
+                del tensor
+
+                if retain_reference:
+                    # An additional owner legitimately delays teardown. The GIL
+                    # guarantee must still hold when the last owner releases it.
+                    retained_holder = storage_holder.copy()
+                    storage_holder.clear()
+                    self.assertFalse(module.deleter_has_entered())
+                    storage_holder = retained_holder
+
+                def observe_deleter():
+                    if module.observer_wait_for_deleter():
+                        module.observer_report_progress()
+
+                def destroy_storage():
+                    storage = storage_holder.pop()
+                    del storage
+
+                observer = threading.Thread(target=observe_deleter)
+                destroyer = threading.Thread(target=destroy_storage)
+                observer.start()
+                try:
+                    self.assertTrue(module.wait_for_observer())
+                    destroyer.start()
+                finally:
+                    # Native waits are also bounded, so failed assertions cannot
+                    # leave an observer blocking interpreter shutdown forever.
+                    if destroyer.ident is not None:
+                        destroyer.join(timeout=10)
+                    observer.join(timeout=10)
+
+                self.assertFalse(destroyer.is_alive())
+                self.assertFalse(observer.is_alive())
+                self.assertTrue(module.deleter_saw_observer_progress())
+
     def test_custom_compound_op_autograd(self):
         # Test that a custom compound op (i.e. a custom op that just calls other aten ops)
         # correctly returns gradients of those other ops
