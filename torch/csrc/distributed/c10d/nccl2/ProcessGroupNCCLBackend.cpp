@@ -11,6 +11,9 @@
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <optional>
+#include <string>
 #include <unordered_set>
 
 #include <c10/cuda/CUDAGuard.h>
@@ -161,6 +164,53 @@ class CompletedWork : public ::c10d::Work {
   std::shared_ptr<CoalescedBatchResult> batch_;
 };
 
+// NCCL's encryption key is process-global and reread for every new socket,
+// including those of live communicators and NCCL's RAS thread. Set it at most
+// once, before the first nccl2 group is constructed. Groups constructed with a
+// key, or while TORCH_NCCL_ENCRYPTION_PSK is set and no key is applied, must
+// not be constructed concurrently with other groups. Never log the key.
+void applyEncryptionPsk(std::optional<std::string> psk) {
+  static std::atomic<bool> group_constructed{false};
+  static std::optional<std::string> applied_psk;
+  bool first_group = !group_constructed.load();
+  if (!psk.has_value() && !applied_psk.has_value()) {
+    auto env_psk = getCvarString({"TORCH_NCCL_ENCRYPTION_PSK"}, "");
+    if (!env_psk.empty()) {
+      psk = std::move(env_psk);
+    }
+  }
+  if (!psk.has_value() || psk == applied_psk) {
+    group_constructed.store(true);
+    return;
+  }
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 32, 3) || defined(USE_ROCM)
+  TORCH_CHECK(
+      false,
+      "encryption_psk/TORCH_NCCL_ENCRYPTION_PSK requires NCCL >= 2.32.3 and "
+      "is not supported on ROCm");
+#endif
+  // NCCL reads the key as a C string.
+  TORCH_CHECK_VALUE(
+      psk->find('\0') == std::string::npos,
+      "encryption_psk/TORCH_NCCL_ENCRYPTION_PSK must not contain NUL bytes");
+  TORCH_CHECK(
+      !applied_psk.has_value(),
+      "encryption_psk/TORCH_NCCL_ENCRYPTION_PSK differs from the key set by an "
+      "earlier nccl2 group; "
+      "NCCL's key is process-global and can't be changed");
+  TORCH_CHECK(
+      first_group,
+      "encryption_psk/TORCH_NCCL_ENCRYPTION_PSK must be set on the first nccl2 "
+      "group created in the process");
+  DefaultNcclApi nccl_api;
+  NCCL_CHECK(
+      &nccl_api,
+      nullptr,
+      nccl_api.setEncryptionPsk(psk->c_str()),
+      "ncclSetEncryption failed");
+  applied_psk = std::move(psk);
+  group_constructed.store(true);
+}
 } // namespace
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -195,6 +245,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       !options_c10d_->enable_reconfigure || supportsReconfigure(),
       "nccl2 reconfigure requires NCCL 2.28 or later (RCCL 2.30.7 or later "
       "on ROCm)");
+  applyEncryptionPsk(options_c10d_->encryption_psk);
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(

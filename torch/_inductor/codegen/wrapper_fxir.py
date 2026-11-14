@@ -1215,15 +1215,16 @@ class FxConverter:
             call_args: Sequence[Any], cfg: Config
         ) -> tuple[Any, ...]:
             """
-            Add constant kwargs to the arg list.
+            Add constant kwargs to the launcher's arg list.
             """
-            # Add args from the proper Triton signature.
+            # Name the args after the launcher's signature, which leaves out
+            # constexprs on newer Triton versions.
             # Exclude constants and config kwargs, as those are tracked separately.
             new_call_args = []
             constants = triton_meta["constants"]
             call_kwargs = {
                 key: val
-                for key, val in zip(signature, call_args)
+                for key, val in zip(tuner._launcher_arg_names(cfg), call_args)
                 # pyrefly: ignore [missing-attribute]
                 if key not in constants and key not in cfg.kwargs
             }
@@ -1237,18 +1238,15 @@ class FxConverter:
                 if key not in cfg.kwargs
             ]
 
-            # Add Inductor's extra launcher args to the end.
-            if extra_launcher_args := tuner.inductor_meta.get("extra_launcher_args"):
-                new_call_args.extend(
-                    call_args[len(call_args) - len(extra_launcher_args) :]
-                )
-
             return tuple(new_call_args)
 
         kernel_config = tuner.compile_results[0].config
         extra_options = getattr(kernel_config, "extra_options", None)
-        call_args = add_constants_to_call_args(call_args, kernel_config)
+        # The grid is read from the args as the launcher receives them, with
+        # Inductor's extra launcher args at the end, so read it before the
+        # constants are added back.
         call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
+        call_args = add_constants_to_call_args(call_args, kernel_config)
         call_kwargs = dict(zip(signature, call_args))
         # pyrefly: ignore [missing-attribute]
         if any(kwarg in kernel_config.kwargs for kwarg in call_kwargs):

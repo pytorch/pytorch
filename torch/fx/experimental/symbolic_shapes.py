@@ -43,6 +43,7 @@ from typing import (
     Generic,
     NamedTuple,
     NoReturn,
+    overload,
     TYPE_CHECKING,
     TypeAlias,
     TypeGuard,
@@ -128,32 +129,48 @@ from torch.fx.experimental._size_hinting import (
 )
 
 
+@overload
+def guarding_hint_or_throw(a: torch.SymBool | bool) -> bool: ...
+
+
+@overload
+def guarding_hint_or_throw(a: torch.SymInt | int) -> int: ...
+
+
+@overload
+def guarding_hint_or_throw(a: torch.SymFloat | float) -> float: ...
+
+
+@overload
+def guarding_hint_or_throw(a: SymNode) -> int | bool | float: ...
+
+
 def guarding_hint_or_throw(
-    a: torch.SymInt | torch.SymBool | int | bool | SymNode,
-) -> int | bool:
+    a: torch.SymInt | torch.SymFloat | torch.SymBool | int | float | bool | SymNode,
+) -> int | bool | float:
     """
     Return a concrete hint for a symbolic value, for use in guarding decisions.
 
     Returns Python bool (True/False) for boolean inputs (SymBool, bool),
-    and Python int for integer inputs (SymInt, int).
+    Python int for integer inputs (SymInt, int), Python float for floating-point
+    inputs (SymFloat, float), and for a SymNode a value matching its pytype.
     """
     if isinstance(a, SymNode):
-        # maybe_set_item_memo relies on this never filling in a SymFloat's hint
-        if a.pytype not in (int, bool):
-            raise AssertionError(f"Expected an int or bool SymNode, got {a.pytype}")
         if a._hint is not None:
             return a._hint  # pyrefly: ignore[bad-return]
         if a.shape_env is None:
             raise AssertionError("shape_env is required for guarding_hint_or_throw")
         hint = a.shape_env.guarding_hint_or_throw(a.expr)
-        a._hint = hint
+        # maybe_set_item_memo relies on this never filling in a SymFloat's hint
+        if a.pytype is not float:
+            a._hint = hint
         return hint
-    if isinstance(a, (torch.SymInt, torch.SymBool)):
+    if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         return guarding_hint_or_throw(a.node)
     if isinstance(a, bool):
         return a
-    if type(a) is not int:
-        raise AssertionError(f"Expected int, got {type(a)}")
+    if type(a) not in (int, float):
+        raise AssertionError(f"Expected int or float, got {type(a)}")
     return a
 
 
@@ -2737,25 +2754,64 @@ SYMPY_INTERP = {
 
 
 def _lru_cache(
-    fn: Callable[..., _T], maxsize: int | None = None
+    fn: Callable[..., _T],
+    maxsize: int | None = None,
+    *,
+    replacements_and_ranges: bool = False,
 ) -> functools._lru_cache_wrapper[_T]:
     """
     Wrapper around lru_cache that clears when new info about shapes has been
     updated.
 
-    Use lru_cache if the output is always the same, regardless of the
-    constraints we know now (i.e. evaluate_expr)
+    Use plain lru_cache only if the result for the same arguments can never
+    change as the ShapeEnv gains constraints. For example, if evaluate_expr
+    returns True and installs a guard requiring the condition to hold, all
+    later reasoning must respect that guard, so the answer stays True.
 
-    Use _lru_cache otherwise.
+    Use _lru_cache if the result can change as we learn more. For example,
+    guard_or_false(s > 5) returns False when s has no hint and we cannot
+    decide; that does not establish s <= 5. If we later learn s >= 10, the
+    same call must return True, so the first False cannot be kept forever.
 
-    Also note that this depends on _update_version_counter being called on the
-    shape environment whenever the constraints are updated, otherwise the cache
-    will not be cleared.
+    replacements_and_ranges selects what invalidates the cache:
+
+    - False (default): clear whenever the ShapeEnv learns new information,
+      e.g. from guards or deferred runtime asserts, that changes _get_key()
+      (and hence _version_counter). _get_key() does not detect every
+      ShapeEnv mutation.
+    - True: clear only when replacements or value ranges change
+      (_replacements_version_counter or _var_to_range_version_counter);
+      any other new information leaves the cache intact. Every write to
+      replacements or var_to_range must bump the matching counter, and a
+      function using this mode must not read any other mutable ShapeEnv
+      state, including through helpers it calls, without revisiting this
+      choice.
+
+    WARNING: _update_version_counter() increments _version_counter only if
+    _get_key() changed; it is not an unconditional bump. Calling it after an
+    arbitrary mutation does not guarantee invalidation.
     """
     fn_cache = lru_cache(maxsize)(fn)
     prior_version = 0
+    prior_range_version = 0
 
-    if config.validate_shape_env_version_key:
+    # Separate wrappers keep the hot path a direct attribute read.
+    if replacements_and_ranges:
+
+        @functools.wraps(fn)
+        def wrapper(self: ShapeEnv, *args: Any, **kwargs: Any) -> _T:  # type: ignore[misc]
+            nonlocal prior_version, prior_range_version
+            if (
+                prior_version != self._replacements_version_counter
+                or prior_range_version != self._var_to_range_version_counter
+            ):
+                fn_cache.cache_clear()
+                prior_version = self._replacements_version_counter
+                prior_range_version = self._var_to_range_version_counter
+
+            return fn_cache(self, *args, **kwargs)
+
+    elif config.validate_shape_env_version_key:
         prior_key = None
 
         @functools.wraps(fn)
@@ -4219,8 +4275,10 @@ class ShapeEnv:
         self._var_to_range_version_counter = 0
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
-        # Separate counter tracking only replacement changes, used by
-        # SymNode.expr
+        # Separate counter tracking only replacement changes. Together with
+        # _var_to_range_version_counter it invalidates replace(), _find() and
+        # SymNode.expr. The symbolic op memo is also emptied when it changes,
+        # to drop entries keyed on old resolved forms.
         self._replacements_version_counter = 0
 
         # Note [symbolic op memo]
@@ -4228,9 +4286,12 @@ class ShapeEnv:
         # numel and contiguity for every fake tensor recomputes the same
         # products and comparisons over and over: on one model over 99% of a
         # few hundred thousand ops were repeats of about two thousand distinct
-        # computations. Memoize on
-        # (op, lhs expr, rhs expr, replacement version); the version keeps a hit
-        # valid only while replacements have not moved.
+        # computations. Memoize on (op, lhs.expr, rhs.expr), the operands
+        # resolved through replace(), so a hit never depends on outdated
+        # replacements or ranges. _get_symop_cache empties the memo whenever
+        # replacements change; that drops entries keyed on outdated resolved
+        # forms and is not needed for correctness. mod isn't memoized because
+        # it picks Mod or PythonMod from the operands' value ranges.
         #
         # What is cached is the result sympy expression. Every call site still
         # builds its own SymNode around it, and must: see the comment in
@@ -4238,6 +4299,7 @@ class ShapeEnv:
         # proxy tracing binary_magic_impl returns before it reaches this cache,
         # so nothing being traced is served from here.
         self._symop_cache: dict[Any, Any] = {}
+        self._symop_cache_version = 0
 
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
@@ -4396,6 +4458,7 @@ class ShapeEnv:
                 self.replacements[axiom.lhs] = axiom.rhs
                 added_replacements[axiom.lhs] = axiom.rhs
         self.axioms.update(new_axioms)
+        self._bump_replacements_version()
 
         # We need to freeze the ShapeEnv because any additional modification of
         # the ShapeEnv will cause unsoundness for subsequent specialization calls.
@@ -4407,6 +4470,7 @@ class ShapeEnv:
                 self.axioms.pop(k, None)
             for k in added_replacements:
                 self.replacements.pop(k, None)
+            self._bump_replacements_version()
             self.frozen = False
 
     def check_equal(self, other: ShapeEnv) -> None:
@@ -4440,6 +4504,7 @@ class ShapeEnv:
             "replacements_slocs",
             "_replacements_version_counter",
             "_symop_cache",
+            "_symop_cache_version",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
@@ -4836,6 +4901,17 @@ class ShapeEnv:
             len(self.real_tensor_prop_unbacked_vals),
             self._var_to_range_version_counter,
         )
+
+    def _bump_replacements_version(self) -> None:
+        self._replacements_version_counter += 1
+        self._update_version_counter()
+
+    def _get_symop_cache(self) -> dict[Any, Any]:
+        """Returns the symbolic op memo; see Note [symbolic op memo]."""
+        if self._replacements_version_counter != self._symop_cache_version:
+            self._symop_cache.clear()
+            self._symop_cache_version = self._replacements_version_counter
+        return self._symop_cache
 
     def _update_version_counter(self) -> None:
         # if the change to shape env effects self.divisible set
@@ -7520,15 +7596,15 @@ class ShapeEnv:
         )
         return r
 
-    @_lru_cache
+    @functools.partial(_lru_cache, replacements_and_ranges=True)
     def replace(self, expr: _SympyT) -> _SympyT:
         """
         Apply symbol replacements to any symbols in the given expression.
 
         IMPORTANT: The output of this method MUST depend only on
-        self.replacements and the input expr. Do not add dependencies on other
-        mutable state. SymNode.expr uses _replacements_version_counter (which
-        tracks only replacement changes) to cache calls to this method, so
+        self.replacements, self.var_to_range and the input expr (see _find).
+        This cache and SymNode.expr are invalidated only by
+        _replacements_version_counter and _var_to_range_version_counter, so
         depending on other state would cause stale cache results.
         """
         replacements: dict[sympy.Basic, sympy.Basic] = {}
@@ -7870,12 +7946,12 @@ class ShapeEnv:
         return result_expr
 
     @lru_cache(256)
-    def guarding_hint_or_throw(self, expr: sympy.Expr | int) -> int | bool:
+    def guarding_hint_or_throw(self, expr: sympy.Expr | int) -> int | bool | float:
         """
         Return a concrete hint for an expression.
 
         Returns Python bool (True/False) for boolean expressions (e.g. Eq, Ne),
-        and Python int for integer expressions.
+        Python float for float expressions, and Python int for integer expressions.
         """
         return _guarding_hint_or_throw_base(self, expr, {})
 
@@ -8221,8 +8297,7 @@ class ShapeEnv:
         # them)
         if a not in self.replacements_slocs:
             self.replacements_slocs[a] = self._get_sloc()
-        self._replacements_version_counter += 1
-        self._update_version_counter()
+        self._bump_replacements_version()
 
         # When specializing 'a == tgt', the equality should be also conveyed to
         # Z3, in case an expression uses 'a'.
@@ -8232,7 +8307,7 @@ class ShapeEnv:
         self.divisible.add(expr)
         self._update_version_counter()
 
-    @_lru_cache
+    @functools.partial(_lru_cache, replacements_and_ranges=True)
     @record_shapeenv_event()
     def _find(self, a: sympy.Symbol) -> sympy.Expr:
         """
@@ -8243,13 +8318,17 @@ class ShapeEnv:
         c: d
 
         IMPORTANT: The output of this method MUST depend only on
-        self.replacements and the input symbol. Do not add dependencies on other
-        mutable state. SymNode.expr uses _replacements_version_counter (which
-        tracks only replacement changes) to cache calls to replace() (and
-        transitively this method), so depending on other state would cause
-        stale cache results. (Note: _set_replacement,  may read other fields
-        like var_to_range, but those are side effects that do not affect the
-        returned value.)
+        self.replacements, self.var_to_range and the input symbol, because
+        this cache (and replace()'s) is cleared only when
+        _replacements_version_counter or _var_to_range_version_counter
+        changes.
+
+        It depends on ranges through the update at the end. Say a -> b + 1
+        and b -> c + d. _find(a) computes c + d + 1 and tries to store it as
+        a's replacement, but _set_replacement rejects it unless c + d + 1 is
+        known to lie within a's range. With a in [0, 100] and c, d unbounded
+        it is rejected, and _find(a) returns b + 1. Once c and d are narrowed
+        so that c + d + 1 fits, the same call returns c + d + 1.
         """
         if a not in self.replacements:
             return a
