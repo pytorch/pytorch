@@ -10322,6 +10322,78 @@ class TestLinalgCudaOnly(TestCase):
             self.assertEqual(C.shape, (128, 96))
 
     @skipIfRocm
+    @dtypes(torch.bfloat16)
+    @parametrize("allow_splitk", [True, False])
+    @parametrize("wildcard", [False, True])
+    def test_cublaslt_cached_solution_respects_reduction_flags_tunableop(self, device, dtype, allow_splitk, wildcard):
+        if not torch.cuda.is_bf16_supported():
+            raise unittest.SkipTest("bfloat16 not supported on this CUDA device")
+
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        # Tuning under the default flags offers split-K solutions for this
+        # shape, including ones that reduce in bf16.
+        m, n, k = 64, 64, 8192
+        with tempfile.TemporaryDirectory() as results_dir:
+            script = textwrap.dedent(
+                f"""
+                import torch
+                torch.cuda.tunable.set_filename({os.path.join(results_dir, "results.csv")!r}, False)
+                torch.cuda.tunable.set_cublaslt_requested_algo_count(32)
+                torch.cuda.tunable.set_max_tuning_iterations(1)
+                torch.cuda.tunable.set_rotating_buffer_size(0)
+                torch.cuda.tunable.enable(True)
+                A = torch.randn({m}, {k}, device={device!r}, dtype={dtype})
+                B = torch.randn({k}, {n}, device={device!r}, dtype={dtype})
+                torch.mm(A, B)
+                """
+            )
+            env = dict(os.environ, PYTORCH_TUNABLEOP_VERBOSE="3", PYTORCH_TUNABLEOP_VERBOSE_FILENAME="out")
+            log = subprocess.run(
+                [sys.executable, "-c", script], capture_output=True, text=True, env=env,
+                cwd=os.path.dirname(__file__), check=True
+            ).stdout
+        (op_sig, params_sig), = parse_tunable_log(log)
+
+        def forbidden(name):
+            splitk, red = map(int, re.search(r"_splitk_(\d+)_red_(\d+)_", name).groups())
+            # Without reduced precision only red_2 (COMPUTE_TYPE) split-K is allowed, and
+            # without split-K no reduction scheme is.
+            return splitk > 1 and red not in ((0, 2) if allow_splitk else (0,))
+
+        # Candidates that failed to run during tuning would fall back on any build.
+        unsupported = set(re.findall(r"unsupported .* (Gemm_Cublaslt_\S+)", log))
+        names = sorted(n for n in set(re.findall(r"Gemm_Cublaslt_\S+", log)) - unsupported if forbidden(n))
+        if not names:
+            raise unittest.SkipTest(f"cuBLASLt offered no candidate that the flags forbid:\n{log}")
+        params_key = re.sub(r"\d+", "*", params_sig) if wildcard else params_sig
+
+        prev_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        with self._tunableop_ctx(), blas_library_context("cublaslt"):
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.wildcard_fallback_enable(wildcard)
+            with open(torch.cuda.tunable.get_filename(), "w") as file:
+                file.writelines(f"Validator,{key},{value}\n" for key, value in torch.cuda.tunable.get_validators())
+                file.write(f"{op_sig},{params_key},{names[0]},0.1\n")
+            self.assertTrue(torch.cuda.tunable.read_file())
+
+            A = torch.randn(m, k, device=device, dtype=dtype)
+            B = torch.randn(k, n, device=device, dtype=dtype)
+            try:
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, allow_splitk)
+                out = torch.mm(A, B)
+                torch.cuda.tunable.enable(False)
+                ref = torch.mm(A, B)
+            finally:
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = prev_bf16
+                torch.cuda.tunable.wildcard_fallback_enable(False)
+        # The forbidden solution must be rejected in favor of the untuned path.
+        self.assertEqual(out, ref, atol=0, rtol=0, msg=names[0])
+
+    @skipIfRocm
     @dtypes(torch.half)
     def test_cuda_graph_capture_skips_first_tuning_tunableop(self, device, dtype):
         with self._tunableop_ctx():

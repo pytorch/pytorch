@@ -224,6 +224,10 @@ class CublasltGemmProblemBase {
     return workspace_.size;
   }
 
+  uint32_t reduction_mask() const {
+    return reduction_mask_;
+  }
+
  protected:
   at::cuda::blas::detail::CuBlasLtMatmulDescriptor compute_desc_;
   at::cuda::blas::detail::CuBlasLtMatmulPreference preference_;
@@ -239,6 +243,7 @@ class CublasltGemmProblemBase {
   cudaDataType_t d_type_;
   const void* alpha_ptr_ = nullptr;
   const void* beta_ptr_ = nullptr;
+  uint32_t reduction_mask_ = std::numeric_limits<uint32_t>::max();
 };
 
 template <typename T, typename C_Dtype = T>
@@ -465,7 +470,6 @@ class CublasltStandardGemmProblem : public CublasltGemmProblemBase {
   at::opmath_type<T> beta_;
   at::Half halpha_;
   at::Half hbeta_;
-  uint32_t reduction_mask_ = std::numeric_limits<uint32_t>::max();
   cublasOperation_t opa_;
   cublasOperation_t opb_;
   const void* bias_ = nullptr;
@@ -892,7 +896,11 @@ class CublasltMatmulOp : public Callable<ParamsT> {
  private:
   template <typename ProblemT>
   bool InitializeAlgo(const ProblemT& problem, cublasLtMatmulAlgo_t* algo) {
+    // Configs from a results file, a wildcard match or an earlier tuning run
+    // may come from a heuristic query made under other reduced-precision or
+    // split-K flags, and cublasLtMatmulAlgoCheck ignores the reduction mask.
     if (!config_.has_value() ||
+        (config_->reduction & ~problem.reduction_mask()) != 0 ||
         !CublasltInitializeAlgo(problem, config_.value(), algo) ||
         !CublasltValidateAlgo(problem, algo)) {
       return false;
