@@ -8722,6 +8722,25 @@ class TestTorch(TestCase):
     def test_sobolengine_draw_scrambled(self):
         self.test_sobolengine_draw(scramble=True)
 
+    def test_sobolengine_draw_zero(self, scramble: bool = False):
+        # draw(0) on a fresh engine used to forward -1 to the C++ op and
+        # raise; it must return an empty tensor, as it does after a draw.
+        engine = torch.quasirandom.SobolEngine(2, scramble=scramble, seed=123456)
+        sample = engine.draw(0)
+        self.assertEqual(sample.shape, (0, 2))
+        self.assertEqual(engine.num_generated, 0)
+        # The sequence still starts at the first point afterwards.
+        first = engine.draw(1)
+        self.assertEqual(engine.num_generated, 1)
+        ref_engine = torch.quasirandom.SobolEngine(2, scramble=scramble, seed=123456)
+        torch.testing.assert_close(first, ref_engine.draw(1))
+        # draw(0) after drawing stays a no-op.
+        self.assertEqual(engine.draw(0).shape, (0, 2))
+        self.assertEqual(engine.num_generated, 1)
+
+    def test_sobolengine_draw_zero_scrambled(self):
+        self.test_sobolengine_draw_zero(scramble=True)
+
     def test_sobolengine_first_point(self):
         for dtype in (torch.float, torch.double):
             engine = torch.quasirandom.SobolEngine(2, scramble=False)
