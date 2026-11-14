@@ -85,7 +85,7 @@ def _remove_set_grad_and_inline(node: torch.fx.Node) -> None:
         sub_graph.nodes,
         lambda n: sub_graph.erase_node(n) if _is_set_grad_enabled_node(n) else n,
     )
-    node_inline_(node)
+    node_inline_(node, recompile=False)
 
 
 def _sequential_split_and_maybe_inline_subgraphs(

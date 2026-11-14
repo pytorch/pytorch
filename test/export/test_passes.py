@@ -9,6 +9,7 @@ import math
 import operator
 import unittest
 from re import escape
+from unittest import mock
 
 import torch
 from functorch.experimental.control_flow import cond
@@ -1104,6 +1105,45 @@ def forward(self, sin, cos):
             lambda: torch.autocast("cpu", dtype=torch.bfloat16),
             "wrap_with_autocast",
         )
+
+    def test_region_passes_recompile_each_module_a_fixed_number_of_times(self):
+        # Recompiling the whole module after inlining each region made export
+        # time grow with the square of the number of regions.
+        class Regions(torch.nn.Module):
+            def __init__(self, n):
+                super().__init__()
+                self.n = n
+
+            def forward(self, x):
+                for _ in range(self.n):
+                    x = x + 1
+                    with torch.no_grad():
+                        x = x.sin()
+                    with torch.autocast("cpu", enabled=False):
+                        x = x.cos()
+                return x
+
+        recompile = torch.fx.GraphModule.recompile
+        most_recompiles = []
+        for n in (2, 8):
+            counts = {}
+
+            def counting_recompile(gm):
+                counts[gm] = counts.get(gm, 0) + 1
+                return recompile(gm)
+
+            m, x = Regions(n), torch.randn(4)
+            with mock.patch.object(
+                torch.fx.GraphModule, "recompile", counting_recompile
+            ):
+                ep = export(m, (x,))
+            for region in ("wrap_with_set_grad_enabled", "wrap_with_autocast"):
+                target = getattr(torch.ops.higher_order, region)
+                nodes = ep.graph.find_nodes(op="call_function", target=target)
+                self.assertEqual(len(nodes), n)
+            self.assertEqual(ep.module()(x), m(x))
+            most_recompiles.append(max(counts.values()))
+        self.assertEqual(most_recompiles[0], most_recompiles[1])
 
     def test_set_grad_pass_reads_nested_spec(self):
         # A pytree spec that lives on a submodule is read with a dotted
