@@ -149,6 +149,7 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
     HandleType mc_handle,
     void* mc_addr,
     size_t buffer_size,
+    size_t signal_pad_size,
     int local_device_idx,
     int rank,
     int world_size,
@@ -161,6 +162,7 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
       mc_handle_(mc_handle),
       mc_addr_(mc_addr),
       buffer_size_(buffer_size),
+      signal_pad_size_(signal_pad_size),
       local_device_idx_(local_device_idx),
       rank_(rank),
       world_size_(world_size),
@@ -227,6 +229,10 @@ void** CUDASymmetricMemory::get_signal_pad_ptrs_dev() {
 
 size_t CUDASymmetricMemory::get_buffer_size() {
   return pai_->buffer_size_;
+}
+
+size_t CUDASymmetricMemory::get_signal_pad_size() {
+  return pai_->signal_pad_size_;
 }
 
 bool CUDASymmetricMemory::has_multicast_support() {
@@ -391,12 +397,14 @@ Block::Block(
     size_t block_size,
     size_t buffer_size,
     size_t buffer_offset,
+    size_t signal_pad_size,
     const std::optional<std::string>& group_name)
     : alloc_ref(std::move(alloc_ref)),
       device_idx(device_idx),
       block_size(block_size),
       buffer_size(buffer_size),
       buffer_offset(buffer_offset),
+      signal_pad_size(signal_pad_size),
       default_group_name(std::move(group_name)) {}
 
 namespace {
@@ -434,7 +442,8 @@ void* CUDASymmetricMemoryAllocator::alloc(
     const std::optional<std::string>& group_name) {
   // Kernels outside PyTorch index the pad as world_size * channel + src, so
   // PyTorch's own barrier state stays out of it; see front_region_size().
-  const size_t buffer_offset = front_region_size(get_signal_pad_size());
+  const size_t signal_pad_size = get_signal_pad_size();
+  const size_t buffer_offset = front_region_size(signal_pad_size);
   size_t block_size = buffer_offset + at::round_up(size, 16UL);
   c10::cuda::CUDAGuard guard(device_idx);
   device_idx = static_cast<int>(guard.current_device().index());
@@ -554,6 +563,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
       block_size,
       size,
       buffer_offset,
+      signal_pad_size,
       group_name);
   {
     std::unique_lock lock(mutex_);
@@ -1238,6 +1248,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       mc_handle,
       mc_buffer_addr,
       block->buffer_size,
+      block->signal_pad_size,
       block->device_idx,
       rank,
       world_size,

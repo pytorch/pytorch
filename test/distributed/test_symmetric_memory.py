@@ -307,6 +307,27 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    def test_signal_pad_size_fixed_at_allocation(self) -> None:
+        self._init_process()
+        original_size = symm_mem.get_signal_pad_size()
+        t = symm_mem.empty(1 << 16, device=self.device).zero_()
+        symm_mem.set_signal_pad_size(original_size * 4)
+        self.addCleanup(symm_mem.set_signal_pad_size, original_size)
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        pad = hdl.get_signal_pad(self.rank)
+        self.assertEqual(pad.numel() * pad.element_size(), original_size)
+        with self.assertRaises(RuntimeError) as cm:
+            hdl.get_signal_pad(self.rank, [original_size // 4 + 1], torch.int32)
+        self.assertIn("exceeds the allocated size", str(cm.exception))
+        pad.fill_(1)
+        self.assertEqual(t.count_nonzero().item(), 0)
+        pad.zero_()
+        device_module.synchronize()
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
     def test_handle_group_name(self) -> None:
         """A handle reports the group it was rendezvoused on."""
         self._init_process()

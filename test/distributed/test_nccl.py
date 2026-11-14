@@ -502,6 +502,25 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             handle.barrier(channel=max_channel)
         handle.barrier(channel=max_channel - 1)
 
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_symmetric_memory_device_API
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_barrier_channel_out_of_bounds_after_pad_size_grows(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        pad_size = symm_mem.get_signal_pad_size()
+        symm_mem.set_signal_pad_size(pad_size * 4)
+        self.addCleanup(symm_mem.set_signal_pad_size, pad_size)
+        handle = symm_mem.rendezvous(t, group=c10d.group.WORLD.group_name)
+        self.assertEqual(handle.get_signal_pad(self.rank).numel() * 4, pad_size)
+
+        channel = pad_size // (4 * self.world_size)
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            handle.barrier(channel=channel)
+
     @skip_if_rccl_lt_2_31_2
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")

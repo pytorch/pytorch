@@ -17,6 +17,7 @@ void launch_barrier_kernel(
     int channel,
     int rank,
     int world_size,
+    size_t signal_pad_size,
     size_t timeout_ms);
 
 void launch_put_signal_kernel(
@@ -25,6 +26,7 @@ void launch_put_signal_kernel(
     int channel,
     int rank,
     int world_size,
+    size_t signal_pad_size,
     size_t timeout_ms);
 
 void launch_wait_signal_kernel(
@@ -33,6 +35,7 @@ void launch_wait_signal_kernel(
     int channel,
     int rank,
     int world_size,
+    size_t signal_pad_size,
     size_t timeout_ms);
 
 } // namespace c10d::symmetric_memory

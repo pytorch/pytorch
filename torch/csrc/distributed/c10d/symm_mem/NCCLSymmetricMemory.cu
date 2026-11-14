@@ -46,6 +46,8 @@ struct NCCLAllocation {
   // Byte offset from alloc_base to the start of the user buffer; the signal pad
   // occupies [0, buffer_offset).
   size_t buffer_offset;
+  // The signal pad size this allocation was made with.
+  size_t signal_pad_size;
   int device_idx;
   std::mutex mutex;
   // Map of group name to peer alloc info
@@ -56,10 +58,12 @@ struct NCCLAllocation {
       void* alloc_base,
       size_t buffer_size,
       size_t buffer_offset,
+      size_t signal_pad_size,
       int device_idx)
       : alloc_base(alloc_base),
         buffer_size(buffer_size),
         buffer_offset(buffer_offset),
+        signal_pad_size(signal_pad_size),
         device_idx(device_idx) {}
 
   ~NCCLAllocation() {
@@ -163,6 +167,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       std::string group_name)
       : buffer_size_(allocation->buffer_size),
         buffer_offset_(allocation->buffer_offset),
+        signal_pad_size_(allocation->signal_pad_size),
         device_idx_(allocation->device_idx),
         group_name_(std::move(group_name))
   {
@@ -441,6 +446,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   // Byte offset from the allocation base to the start of the user buffer; the
   // signal pad occupies [0, buffer_offset_).
   size_t buffer_offset_;
+  size_t signal_pad_size_;
   int device_idx_;
   int rank_;
   int world_size_;
@@ -520,6 +526,10 @@ void** NCCLSymmetricMemory::get_signal_pad_ptrs_dev() {
 
 size_t NCCLSymmetricMemory::get_buffer_size() {
   return pai_->buffer_size_;
+}
+
+size_t NCCLSymmetricMemory::get_signal_pad_size() {
+  return pai_->signal_pad_size_;
 }
 
 bool NCCLSymmetricMemory::has_multicast_support() {
@@ -752,8 +762,9 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // single window is registered over the whole region at rendezvous time, so
     // only the base pointer (already granularity-aligned by ncclMemAlloc) needs
     // to satisfy NCCL's window-alignment requirement.
+    const size_t signal_pad_size = get_signal_pad_size();
     const size_t buffer_offset =
-        at::round_up(get_signal_pad_size(), signal_pad_alignment);
+        at::round_up(signal_pad_size, signal_pad_alignment);
     const size_t aligned_buffer_size = at::round_up(size, 16UL);
 #if defined(USE_ROCM) && defined(NCCL_WIN_REQUIRED_ALIGNMENT)
     // Round the backing allocation to RCCL's advertised 4096-byte window
@@ -835,7 +846,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       allocations_.emplace(
           buffer_ptr,
           std::make_unique<NCCLAllocation>(
-              alloc_base, size, buffer_offset, device_idx));
+              alloc_base, size, buffer_offset, signal_pad_size, device_idx));
     }
     return buffer_ptr;
   }
