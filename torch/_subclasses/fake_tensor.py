@@ -920,6 +920,8 @@ class FakeTensorConverter:
             and out.is_leaf
         ):
             out.grad_dtype = inner_t.grad_dtype
+        if inner_t.requires_grad and inner_t.retains_grad:
+            out._retains_grad = True
 
         # Propagate backend-specific metadata (e.g. PrivateUse1 BackendMeta) from
         # the (unwrapped) real tensor onto the fake tensor. for_fake lets the

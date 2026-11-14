@@ -507,7 +507,10 @@ def aot_dispatch_autograd_graph(
         aot_config,
     )
     joint_fn_to_trace = create_joint(
-        fn_prepared_for_autograd, flat_args_descs, aot_config=aot_config
+        fn_prepared_for_autograd,
+        flat_args_descs,
+        aot_config=aot_config,
+        mutated_inp_retain_grad_indices=fw_metadata.mutated_inp_retain_grad_indices,
     )
     # pyrefly: ignore[missing-attribute]
     joint_fn_handle = joint_fn_to_trace.handle

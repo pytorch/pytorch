@@ -3530,6 +3530,15 @@ class VariableBuilder:
         example_value = wrap_to_fake_tensor_and_record(
             value, tx=self.tx, is_tensor=True, source=source, tensor_spec=_tensor_spec
         )
+        if (
+            source is not None
+            and not self.tx.export
+            and value.requires_grad
+            and not value.is_leaf
+        ):
+            install_guard(
+                AttrSource(source, "retains_grad").make_guard(GuardBuilder.EQUALS_MATCH)
+            )
 
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),

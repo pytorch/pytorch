@@ -2221,12 +2221,7 @@ def _compute_indices_of_inps_to_detach(
     bw_outs = bw_output.args[0]
 
     num_primal_outs = len(fw_metadata.input_info)
-    mut_grad_indices = [
-        idx
-        for idx in fw_metadata.mutated_inp_runtime_indices
-        if fw_metadata.input_info[idx].mutates_data
-        and fw_metadata.input_info[idx].requires_grad
-    ]
+    mut_grad_indices = fw_metadata.mutated_inp_retain_grad_indices
     num_backward_tokens = inner_meta.num_backward_tokens
     expected_bw_outs = (
         num_primal_outs
