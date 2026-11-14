@@ -35,4 +35,71 @@ static scalar_t* conditional_data_ptr(const Tensor& t) {
   }
 }
 
+inline void check_batch_norm_input_dim(const Tensor& input) {
+  TORCH_CHECK(
+      input.dim() >= 2,
+      "Expected input to have at least 2 dimensions, but got ",
+      input.dim());
+}
+
+inline void check_batch_norm_param_1d(
+    const std::optional<Tensor>& t_opt,
+    const c10::SymInt& num_features,
+    const char* name) {
+  if (t_opt.has_value() && t_opt->defined()) {
+    const auto& t = *t_opt;
+    TORCH_CHECK(
+        t.dim() == 1,
+        name,
+        " should be a 1D tensor, but got ",
+        t.dim(),
+        "D");
+    TORCH_CHECK(
+        t.sym_numel() == num_features,
+        name,
+        " should contain ",
+        num_features,
+        " elements not ",
+        t.sym_numel());
+  }
+}
+
+inline void check_batch_norm_inputs(
+    const Tensor& input,
+    const std::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    bool train) {
+  check_batch_norm_input_dim(input);
+  const auto num_features = input.sym_sizes()[1];
+
+  check_batch_norm_param_1d(weight_opt, num_features, "weight");
+  check_batch_norm_param_1d(bias_opt, num_features, "bias");
+  check_batch_norm_param_1d(running_mean_opt, num_features, "running_mean");
+  check_batch_norm_param_1d(running_var_opt, num_features, "running_var");
+
+  const bool has_running_mean = running_mean_opt.has_value() && running_mean_opt->defined();
+  const bool has_running_var = running_var_opt.has_value() && running_var_opt->defined();
+  TORCH_CHECK_VALUE(
+      has_running_mean == has_running_var,
+      "running_mean and running_var must either both be None or neither be None");
+  if (!train) {
+    TORCH_CHECK_VALUE(
+        has_running_mean,
+        "running_mean must be defined in evaluation mode");
+  }
+}
+
+inline void check_batch_norm_update_stats_inputs(
+    const Tensor& input,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt) {
+  check_batch_norm_input_dim(input);
+  const auto num_features = input.sym_sizes()[1];
+
+  check_batch_norm_param_1d(running_mean_opt, num_features, "running_mean");
+  check_batch_norm_param_1d(running_var_opt, num_features, "running_var");
+}
+
 } // namespace at::native
