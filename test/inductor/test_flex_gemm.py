@@ -2447,6 +2447,48 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @inductor_config.patch({"triton.enable_pdl": True})
+    def test_quack_waits_for_pdl_producer(self):
+        # The Triton producer calls gdc_launch_dependents after its loads and
+        # before its stores, so the PDL-launched QuACK GEMM has to wait for it
+        # before reading y. A fresh x each call means y's reused block holds
+        # an earlier call's values until those stores complete.
+        _skip_unless_quack_deps(self, block_copy=True)
+
+        def fn(x, w):
+            y = x
+            for _ in range(64):
+                y = torch.sin(y) * 1.5 + 0.25
+            y = y.to(torch.bfloat16)
+            out = flex_gemm(
+                torch.mm, (y, w), lambda acc: acc, kernel_options={"backend": "QUACK"}
+            )
+            return y, out
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        w = torch.randn(2048, 2048, device="cuda", dtype=torch.bfloat16)
+        (y, out), (code,) = run_and_get_code(
+            compiled, torch.randn(2048, 2048, device="cuda"), w
+        )
+        FileCheck().check("gdc_launch_dependents").run(code)
+        # A kernel launched between the producer and the GEMM would order y's
+        # stores before the GEMM, so check that the GEMM is the next launch.
+        call_body = code[code.index("def call(") :]
+        launches = re.findall(r"^\s*(\w+)\.run\(", call_body, flags=re.MULTILINE)
+        self.assertEqual(len(launches), 2, launches)
+        self.assertTrue(launches[0].startswith("triton_"), launches)
+        self.assertTrue(launches[1].startswith("cutedsl_"), launches)
+        self.assertNotIn("extern_kernels.", call_body)
+        for _ in range(5):
+            y, out = compiled(torch.randn(2048, 2048, device="cuda"), w)
+            # bf16 rounding of out reaches 1.0 at |out| >= 256, which rtol
+            # covers; reading y before the producer stored it changed some
+            # outputs by more than 200 before the fix.
+            self.assertEqual(out.float(), y.float() @ w.float(), atol=1.0, rtol=1e-2)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_generated_captured_scalar_scales_reduction_finalizer(self):
         m, n, group = 64, 64, 16
 
