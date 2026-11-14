@@ -641,9 +641,6 @@ void fakeFallback(
       return;
     }
   }
-  if (input_devices.empty()) {
-    unsupported(op, "ops without fake tensor inputs");
-  }
   if (has_sparse_inputs &&
       !op.hasComputedKernelForDispatchKey(
           meta_keyset.highestPriorityTypeId())) {
@@ -673,14 +670,14 @@ void fakeFallback(
   // Run the (sparse) Meta kernel with the inputs reporting the meta device (see
   // Note [C++ in_kernel_invocation]), as Python's in_kernel_invocation_manager
   // does. Match _DisableTorchDispatch so nested ops bypass dispatch modes.
-  c10::impl::ExcludeDispatchKeyGuard exclude_dispatch(c10::DispatchKeySet(
-      {c10::DispatchKey::Fake,
-       c10::DispatchKey::Python,
-       c10::DispatchKey::PreDispatch,
-       c10::DispatchKey::PythonTLSSnapshot}));
-  c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
-  c10::impl::InKernelInvocationGuard in_kernel;
   {
+    c10::impl::ExcludeDispatchKeyGuard exclude_dispatch(c10::DispatchKeySet(
+        {c10::DispatchKey::Fake,
+         c10::DispatchKey::Python,
+         c10::DispatchKey::PreDispatch,
+         c10::DispatchKey::PythonTLSSnapshot}));
+    c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
+    c10::impl::InKernelInvocationGuard in_kernel;
     // Uses global state; see Note [C++ fake fallback] for the concurrency limits.
     const bool suppress_invariants = has_sparse_inputs &&
         at::globalContext().checkSparseTensorInvariants().value_or(false);
@@ -747,9 +744,25 @@ void fakeFallback(
   // It does not provide Python's wrapping/memoization semantics.
   std::optional<c10::Device> output_common_device;
   std::unordered_set<const c10::TensorImpl*> converted_outputs;
-  auto wrap = [&](const at::Tensor& t, bool is_alias) {
+  auto wrap = [&](const at::Tensor& t, bool is_alias) -> std::optional<at::Tensor> {
     if (!t.defined()) {
-      return;
+      return std::nullopt;
+    }
+    if (input_devices.empty()) {
+      const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
+      if (!should_allow_numbers_as_tensors()) {
+        auto name = schema.name();
+        name.replace(name.find("::"), 2, ".");
+        interpreter->raise_python_error(
+            c10::impl::FakePythonError::AssertionError,
+            c10::str(
+                "Could not find common device for ",
+                name,
+                ".",
+                schema.overload_name().empty() ? "default"
+                                               : schema.overload_name()));
+      }
+      return at::Tensor(interpreter->from_real_tensor(mode, t.getIntrusivePtr()));
     }
     if (!output_common_device.has_value()) {
       output_common_device = find_common_device(/*resolve=*/true);
@@ -757,10 +770,9 @@ void fakeFallback(
     auto* impl = t.unsafeGetTensorImpl();
     // The same Meta tensor can occur several times in the return values.
     if (converted_outputs.contains(impl)) {
-      return;
+      return std::nullopt;
     }
     if (t.is_fake() && impl->fake_tensor_mode() == mode) {
-      // device() reports meta inside the kernel invocation scope.
       const auto fake_device = impl->fake_device();
       TORCH_CHECK(
           fake_device == output_common_device,
@@ -771,7 +783,7 @@ void fakeFallback(
       if (output_dispatch_keys.has_value()) {
         impl->set_fake_dispatch_keys(output_dispatch_keys);
       }
-      return;
+      return std::nullopt;
     }
     TORCH_CHECK(
         !t.is_fake(),
@@ -793,14 +805,16 @@ void fakeFallback(
         device_argument != output_common_device) {
       converted_outputs.insert(impl);
     }
+    return std::nullopt;
   };
   const auto num_returns = schema.returns().size();
   const auto returns_begin = stack->size() - num_returns;
   for (const auto i : c10::irange(num_returns)) {
     const bool is_alias = schema.returns()[i].alias_info() != nullptr;
-    for_each_tensor(stack, returns_begin + i, 1, [&](const at::Tensor& t) {
-      wrap(t, is_alias);
-    });
+    replace_each_tensor(
+        stack, returns_begin + i, 1, [&](const at::Tensor& t) {
+          return wrap(t, is_alias);
+        });
   }
 }
 

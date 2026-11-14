@@ -1960,6 +1960,7 @@ def forward(self, x_1):
             torch.div,
             subtest(partial(torch.div, rounding_mode="trunc"), name="trunc_div"),
             subtest(aten.add.Tensor, name="wrapped_add"),
+            subtest("multiple_outputs", name="multiple_outputs"),
         ],
         name_fn=lambda op: op.__name__,
     )
@@ -1969,16 +1970,52 @@ def forward(self, x_1):
             and torch._functorch.config.fake_tensor_propagate_real_tensors
         ):
             self.skipTest("C++ fake fallback does not support propagate_real_tensors")
-        expected = op(3, 2)
-        with mode_cls() as mode:
-            out = op(3, 2)
-            self.checkType(out, "cpu", [])
-            ten = torch.zeros(2, dtype=torch.int32) * 2.0
-            self.assertEqual(ten.dtype, torch.float)
-            self.checkType(ten, "cpu", [2])
-            self.assertIs(torch._guards.active_fake_mode(), mode)
-        self.assertEqual(maybe_get_fake_constant(out), expected)
-        self.assertIs(maybe_get_fake_mode(out), mode)
+        multiple_outputs = op == "multiple_outputs"
+        calls = []
+        with contextlib.ExitStack() as stack:
+            if multiple_outputs:
+                real_outputs = (
+                    torch.tensor(3, dtype=torch.int32),
+                    torch.tensor(2, dtype=torch.int64),
+                )
+
+                def impl(a, b, *, dispatch):
+                    calls.append(dispatch)
+                    return real_outputs
+
+                lib = stack.enter_context(
+                    torch.library._scoped_library("_test_fake_scalar_inputs", "DEF")
+                )
+                # Multiple outputs bypass the whitelist's initial constant path.
+                lib.define("add(int a, int b) -> (Tensor, Tensor)")
+                for dispatch in ("CompositeExplicitAutograd", "Meta"):
+                    lib.impl("add", partial(impl, dispatch=dispatch), dispatch)
+                op = torch.ops._test_fake_scalar_inputs.add
+            expected = op(3, 2)
+            calls.clear()
+            with mode_cls() as mode:
+                out = op(3, 2)
+                ten = torch.zeros(2, dtype=torch.int32) * 2.0
+                self.assertEqual(ten.dtype, torch.float)
+                self.checkType(ten, "cpu", [2])
+                self.assertIs(torch._guards.active_fake_mode(), mode)
+        for fake, real in zip(pytree.tree_leaves(out), pytree.tree_leaves(expected)):
+            self.checkType(fake, "cpu", [])
+            self.assertIs(maybe_get_fake_mode(fake), mode)
+            prims.utils.compare_tensor_meta(fake, real, check_strides=True)
+            if multiple_outputs:
+                self.assertIsNone(maybe_get_fake_constant(fake))
+                self.assertEqual(maybe_get_item_memo(fake), real.item())
+                self.assertIs(mode.from_tensor(real), fake)
+                self.assertFalse(is_fake_tensor(real))
+            else:
+                self.assertEqual(maybe_get_fake_constant(fake), real)
+        if multiple_outputs:
+            real_calls = 2 if mode.propagate_real_tensors else 1
+            self.assertEqual(
+                calls, ["CompositeExplicitAutograd"] * real_calls + ["Meta"]
+            )
+            self.assertEqual([real.item() for real in real_outputs], [3, 2])
 
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
