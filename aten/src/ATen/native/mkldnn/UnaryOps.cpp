@@ -36,38 +36,39 @@ Tensor& mkldnn_tanh_(Tensor& self) {
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/detail/Eltwise.h>
 
 namespace at::native {
 
 Tensor mkldnn_sigmoid(const Tensor& self) {
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y;
-  ideep::eltwise_forward::compute(
-      x, y, ideep::algorithm::eltwise_logistic, ideep::prop_kind::forward);
+  mkldnn::eltwise_forward(
+      x, y, dnnl::algorithm::eltwise_logistic, dnnl::prop_kind::forward);
   return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
 
 Tensor& mkldnn_sigmoid_(Tensor& self) {
   ideep::tensor& x = itensor_from_mkldnn(self);
-  ideep::eltwise_forward::compute(
-      x, x, ideep::algorithm::eltwise_logistic, ideep::prop_kind::forward);
+  mkldnn::eltwise_forward(
+      x, x, dnnl::algorithm::eltwise_logistic, dnnl::prop_kind::forward);
   return self;
 }
 
 Tensor mkldnn_tanh(const Tensor& self) {
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y;
-  ideep::eltwise_forward::compute(
-      x, y, ideep::algorithm::eltwise_tanh, ideep::prop_kind::forward);
+  mkldnn::eltwise_forward(
+      x, y, dnnl::algorithm::eltwise_tanh, dnnl::prop_kind::forward);
   return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
 
 Tensor& mkldnn_tanh_(Tensor& self) {
   ideep::tensor& x = itensor_from_mkldnn(self);
-  ideep::eltwise_forward::compute(
-      x, x, ideep::algorithm::eltwise_tanh, ideep::prop_kind::forward);
+  mkldnn::eltwise_forward(
+      x, x, dnnl::algorithm::eltwise_tanh, dnnl::prop_kind::forward);
   return self;
 }
 
