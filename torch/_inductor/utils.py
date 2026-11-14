@@ -2169,6 +2169,9 @@ def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
     else:
         device = torch.device(get_gpu_type(), index_or_device)
 
+    if device.type == torch._C._get_privateuse1_backend_name():
+        return True
+
     # Resolve the threshold outside of the cache so that changing
     # config.max_autotune_gemm_min_sms after the first call takes effect.
     return _is_big_gpu(device, config.max_autotune_gemm_min_sms)
