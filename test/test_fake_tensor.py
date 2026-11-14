@@ -7106,6 +7106,41 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @fake_tensor_modes
+    @parametrize("dtype", [torch.int32, torch.int64])
+    def test_fake_fallback_scalar_only_outputs(self, mode_cls, dtype):
+        mode = mode_cls()
+        real_outputs = tuple(torch.tensor(v, dtype=dtype) for v in (17, 23))
+        calls = []
+
+        def real_impl():
+            calls.append("real")
+            return real_outputs
+
+        def meta_impl():
+            calls.append("meta")
+            return real_outputs
+
+        with torch.library._scoped_library("_test_fake_scalar_outputs", "DEF") as lib:
+            # A whitelisted name takes the constant attempt, but multiple
+            # outputs require ordinary output conversion after Meta execution.
+            lib.define("add() -> (Tensor, Tensor)")
+            lib.impl("add", real_impl, "CompositeExplicitAutograd")
+            lib.impl("add", meta_impl, "Meta")
+            with mode:
+                outputs = torch.ops._test_fake_scalar_outputs.add()
+                self.assertIs(torch._guards.active_fake_mode(), mode)
+        self.assertEqual(calls, ["real", "meta"])
+        for out, real, value in zip(outputs, real_outputs, (17, 23)):
+            self.assertIs(maybe_get_fake_mode(out), mode)
+            prims.utils.compare_tensor_meta(out, real, check_strides=True)
+            self.assertIsNone(maybe_get_fake_constant(out))
+            self.assertEqual(maybe_get_item_memo(out), value)
+            self.assertIs(mode.from_tensor(real), out)
+            self.assertFalse(is_fake_tensor(real))
+            self.assertEqual(real, torch.tensor(value, dtype=dtype))
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @fake_tensor_modes
     @parametrize("allow", [False, True])
     def test_fake_fallback_constant_avoid_device_init(self, mode_cls, allow):
         real = torch.ones(1)
