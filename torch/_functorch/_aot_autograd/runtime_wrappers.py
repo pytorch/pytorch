@@ -14,6 +14,7 @@ import itertools
 import pprint
 import typing
 import warnings
+import weakref
 from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -3200,6 +3201,51 @@ def _codegen_backward_prologue(
     return buf.build()
 
 
+def _accumulate_mutated_inp_grad(target: Tensor | None, saved_ctx: Any, g: Tensor) -> None:
+    if (
+        target is None
+        or saved_ctx is None
+        or not target.retains_grad
+        or target.shape != g.shape
+    ):
+        return
+    cur_gf = target.grad_fn
+    if cur_gf is None or not any(
+        nf is saved_ctx for nf, _ in cur_gf.next_functions
+    ):
+        return
+    if target.grad is None:
+        target.grad = (
+            g.clone()
+            if g.layout != torch.strided
+            else g.clone(memory_format=torch.contiguous_format)
+        )
+    else:
+        target.grad = target.grad + g
+
+
+def _register_mutated_inp_retain_grad_hook(
+    inp: Tensor, ctx: Any
+) -> tuple[weakref.ref[Tensor], list[Tensor | None]]:
+    """Defer retained-grad accumulation to inp's original grad_fn prehook so
+    backward(inputs=...) / autograd.grad(...) excluding inp's ancestry skips it."""
+    inp_ref = weakref.ref(inp)
+    slot: list[Tensor | None] = [None]
+    gf = inp.grad_fn
+    if gf is not None and inp.retains_grad:
+        ctx_ref = weakref.ref(ctx)
+
+        def _prehook(_grad_outputs: Any) -> None:
+            g = slot[0]
+            if g is None:
+                return
+            slot[0] = None
+            _accumulate_mutated_inp_grad(inp_ref(), ctx_ref(), g)
+
+        gf.register_prehook(_prehook)
+    return inp_ref, slot
+
+
 def _codegen_backward_epilogue(
     fw_metadata: ViewAndMutationMeta,
     maybe_subclass_meta: SubclassMeta | None,
@@ -3210,11 +3256,19 @@ def _codegen_backward_epilogue(
     num_bw_tokens = fw_metadata.num_backward_tokens
     is_rng = fw_metadata.is_rng_op_functionalized
     has_subclass = maybe_subclass_meta is not None
+    # Note: backward output layout is [input grads | mutated-input grads | rng | tokens].
+    # Tokens/RNG are stripped first, subclasses are wrapped, then trailing
+    # mutated-input grads are stripped and recorded on ctx's prehook slots.
+    num_mut_grads = fw_metadata.num_mutated_inp_retain_grad_indices
 
     if has_subclass:
-        args = "out, make_subclass_override=None"
+        args = (
+            "out, make_subclass_override=None, ctx=None"
+            if num_mut_grads > 0
+            else "out, make_subclass_override=None"
+        )
     else:
-        args = "out"
+        args = "out, ctx=None" if num_mut_grads > 0 else "out"
     buf = PySourceBuilder(
         "_backward_epilogue", args=args, artifact_name="backward_epilogue"
     )
@@ -3248,15 +3302,44 @@ def _codegen_backward_epilogue(
                 buf.bind(_wrap_=codegen_wrap_fn)
                 buf.writeline("if make_subclass_override is None:")
                 with buf.indent():
-                    buf.writeline("return _wrap_(out)")
-            buf.writeline(
-                "return _wrap_subclasses_(out, "
-                "subclass_metas=_grad_input_metas_, "
-                "included_subclass_symints=True, is_runtime=True, "
-                "make_subclass_override=make_subclass_override)"
-            )
-        else:
-            buf.writeline("return out")
+                    buf.writeline("out = _wrap_(out)")
+                buf.writeline("else:")
+                with buf.indent():
+                    buf.writeline(
+                        "out = _wrap_subclasses_(out, "
+                        "subclass_metas=_grad_input_metas_, "
+                        "included_subclass_symints=True, is_runtime=True, "
+                        "make_subclass_override=make_subclass_override)"
+                    )
+            else:
+                buf.writeline(
+                    "out = _wrap_subclasses_(out, "
+                    "subclass_metas=_grad_input_metas_, "
+                    "included_subclass_symints=True, is_runtime=True, "
+                    "make_subclass_override=make_subclass_override)"
+                )
+
+        if num_mut_grads > 0:
+            mut_indices = fw_metadata.mutated_inp_retain_grad_indices
+            buf.bind(_acc_mut_grad_=_accumulate_mutated_inp_grad)
+            buf.writeline(f"_mut_grads = out[-{num_mut_grads}:]")
+            buf.writeline(f"out = out[:-{num_mut_grads}]")
+            buf.writeline("if ctx is not None:")
+            with buf.indent():
+                buf.writeline(
+                    f"for _idx, (_ref, _slot), _g in zip({tuple(mut_indices)!r}, ctx._mutated_inp_grad_slots, _mut_grads):"
+                )
+                with buf.indent():
+                    buf.writeline("if _g is not None:")
+                    with buf.indent():
+                        buf.writeline("if out[_idx] is not None:")
+                        with buf.indent():
+                            buf.writeline("_slot[0] = _g")
+                        buf.writeline("else:")
+                        with buf.indent():
+                            buf.writeline("_acc_mut_grad_(_ref(), ctx, _g)")
+
+        buf.writeline("return out")
 
     return buf.build()
 
@@ -3268,6 +3351,8 @@ def _codegen_compiled_forward(
     num_rng: int,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
+
+    mut_grad_indices = fw_metadata.mutated_inp_retain_grad_indices
 
     buf = PySourceBuilder(
         "_compiled_forward",
@@ -3287,6 +3372,13 @@ def _codegen_compiled_forward(
                     "f'expected BackwardState, got {type(_bw_state)}')"
                 )
             buf.writeline("ctx._compiled_autograd_backward_state = _bw_state")
+
+        if mut_grad_indices:
+            buf.bind(_reg_mut_grad_=_register_mutated_inp_retain_grad_hook)
+            slots = ", ".join(
+                f"_reg_mut_grad_(args[{idx}], ctx)" for idx in mut_grad_indices
+            )
+            buf.writeline(f"ctx._mutated_inp_grad_slots = ({slots},)")
 
         if num_rng > 0:
             buf.writeline("args = _rng_add_(ctx, args)")
@@ -3387,6 +3479,7 @@ def _codegen_compiled_backward(
     num_rng: int,
     num_tensors_no_vc_check: int | None,
     inputs_require_grad: bool,
+    has_mutated_inp_retain_grad: bool = False,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
@@ -3432,7 +3525,10 @@ def _codegen_compiled_backward(
         buf.writeline("def impl_fn(double_ctx=None):")
         with buf.indent():
             buf.writeline("out = _impl_(_ctx_, all_args)")
-            buf.writeline("return _epilogue_(out)")
+            if has_mutated_inp_retain_grad:
+                buf.writeline("return _epilogue_(out, ctx=_ctx_)")
+            else:
+                buf.writeline("return _epilogue_(out)")
 
         buf.writeline(
             "if (torch._C._is_key_in_tls('context')"
@@ -3525,6 +3621,7 @@ class _AOTDispatchAutogradFunctionFactory:
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
             any(inp.requires_grad for inp in fw_metadata.input_info),
+            bool(fw_metadata.num_mutated_inp_retain_grad_indices),
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias

@@ -12,7 +12,7 @@ It does so by:
 
 import typing
 import warnings
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -51,6 +51,7 @@ from .descriptors import (
     ForwardTokenAOTOutput,
     GradAOTOutput,
     InputMutationAOTOutput,
+    InputMutationGradAOTOutput,
     IntermediateBaseAOTOutput,
     PhiloxBackwardBaseOffsetAOTInput,
     PhiloxBackwardSeedAOTInput,
@@ -58,6 +59,7 @@ from .descriptors import (
     PhiloxForwardSeedAOTInput,
     PhiloxUpdatedBackwardOffsetAOTOutput,
     PhiloxUpdatedForwardOffsetAOTOutput,
+    PlainAOTInput,
 )
 from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
@@ -297,6 +299,7 @@ def create_joint(
     primals_descs: list[AOTInput] | None = None,
     *,
     aot_config: AOTConfig,
+    mutated_inp_retain_grad_indices: Sequence[int] = (),
 ) -> Callable[..., Any]:
     joint_fn_handle = JointFnHandle()
 
@@ -360,10 +363,43 @@ def create_joint(
             else:
                 inputs_needs_grads.append(False)
 
+        mut_retain_grad_set = set(mutated_inp_retain_grad_indices)
+        capture_mut_grads = (
+            bool(mut_retain_grad_set)
+            and outs_descs is not None
+            and not aot_config.is_export
+            and not aot_config.no_tangents
+        )
+        outs_to_grad_descs = (
+            [d for needs_tangent, d in zip(tangent_mask, outs_descs) if needs_tangent]
+            if capture_mut_grads and outs_descs is not None
+            else [None] * len(outs_to_grad)
+        )
         # Get the outputs that need gradients
         needed_outs: list[Tensor] = []
         needed_tangents: list[Tensor] = []
-        for out, tangent in zip(outs_to_grad, tangents):
+        mut_grad_targets: list[tuple[int, Tensor] | None] = []
+        mut_grad_descs: list[AOTOutput] = []
+        for out, tangent, desc in zip(outs_to_grad, tangents, outs_to_grad_descs):
+            is_mut_out = False
+            if capture_mut_grads and isinstance(desc, InputMutationAOTOutput):
+                base_desc: AOTInput = desc.mutated_input
+                while hasattr(base_desc, "base"):
+                    base_desc = base_desc.base
+                is_mut_out = (
+                    isinstance(base_desc, PlainAOTInput)
+                    and base_desc.idx in mut_retain_grad_set
+                )
+            if is_mut_out:
+                mut_grad_descs.append(
+                    InputMutationGradAOTOutput(grad_of=desc.mutated_input)  # type: ignore[union-attr]
+                )
+                capture_target = (
+                    isinstance(out, Tensor) and out.requires_grad and not out.is_leaf
+                )
+                mut_grad_targets.append(
+                    (len(needed_outs), out) if capture_target else None
+                )
             if isinstance(out, Tensor) and out.requires_grad:
                 # A bit sketchy, but fixes e.g. test_aot_autograd_exhaustive_matmul_cpu_float32
                 # The issue is that we are sensitive to decomps that don't accurately maintain
@@ -381,10 +417,13 @@ def create_joint(
                     )
                 needed_outs.append(
                     out
-                    if guard_or_true(sym_eq(out.shape, tangent.shape))
+                    if (is_mut_out and not out.is_leaf)
+                    or guard_or_true(sym_eq(out.shape, tangent.shape))
                     else out.view(tangent.shape)
                 )
                 needed_tangents.append(tangent)
+        mut_target_tensors = [t[1] for t in mut_grad_targets if t is not None]
+        mut_grads_out: list[Tensor | None] = [None] * len(mut_grad_targets)
 
         setup_stacktrace_preservation_hooks(
             [out.grad_fn for out in needed_outs if out.grad_fn is not None]
@@ -394,7 +433,7 @@ def create_joint(
             PhiloxStateTracker.mark_beginning_of_backward()
         backward_out: tuple[Tensor, ...] = ()
         # Call the backwards pass
-        if grad_primals:
+        if grad_primals or mut_target_tensors:
             functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
                 torch._C._TorchDispatchModeKey.FUNCTIONAL
             )
@@ -451,16 +490,49 @@ def create_joint(
                         allow_unused=True,
                     )
                 else:
-                    backward_out = torch.autograd.grad(
+                    grad_tangents = list(needed_tangents)
+
+                    def _make_mut_grad_hook(
+                        slot_idx: int,
+                        ext_tangent: Tensor,
+                        zero_tangent: Tensor,
+                    ) -> Callable[[Tensor], Tensor]:
+                        def _hook(g: Tensor) -> Tensor:
+                            if g is zero_tangent:
+                                return ext_tangent
+                            mut_grads_out[slot_idx] = g
+                            return g + ext_tangent
+
+                        return _hook
+
+                    for idx, target in enumerate(mut_grad_targets):
+                        if target is not None:
+                            g_idx, out_t = target
+                            raw_t = grad_tangents[g_idx]
+                            ext_t = (
+                                raw_t
+                                if guard_or_true(sym_eq(out_t.shape, raw_t.shape))
+                                else raw_t.view(out_t.shape)
+                            )
+                            zero_t = torch.zeros_like(ext_t)
+                            grad_tangents[g_idx] = zero_t
+                            stack.callback(
+                                out_t.register_hook(
+                                    _make_mut_grad_hook(idx, ext_t, zero_t)
+                                ).remove
+                            )
+                    raw_bw_out = torch.autograd.grad(
                         needed_outs,
-                        grad_primals,
-                        grad_outputs=needed_tangents,
+                        grad_primals + mut_target_tensors,
+                        grad_outputs=grad_tangents,
                         allow_unused=True,
                     )
+                    backward_out = raw_bw_out[: len(grad_primals)]
         backward_out_iter = iter(backward_out)
         final_outs = (
             outs,
-            [next(backward_out_iter) if i else None for i in inputs_needs_grads],
+            [next(backward_out_iter) if i else None for i in inputs_needs_grads]
+            + mut_grads_out,
         )
         if primals_descs is None:
             return final_outs  # type: ignore[return-value]
@@ -474,7 +546,8 @@ def create_joint(
                 # but this is quite an involved refactor
                 GradAOTOutput(desc) if i else None  # type: ignore[arg-type]
                 for i, desc in zip(inputs_needs_grads, primals_descs)
-            ],
+            ]
+            + mut_grad_descs,
         )
 
     @simple_wraps(inner_fn)

@@ -289,6 +289,8 @@ def run_functionalized_fw_and_collect_metadata(
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
                     keep_input_mutations=keep_input_mutations,
+                    retains_grad=isinstance(arg, Tensor)
+                    and (arg.retains_grad or getattr(arg, "_retains_grad", False)),
                 )
             )
 

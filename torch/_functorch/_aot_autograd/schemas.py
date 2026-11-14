@@ -145,6 +145,7 @@ class InputAliasInfo:
     mutation_is_shallow_copy_data: bool
     requires_grad: bool
     keep_input_mutations: bool
+    retains_grad: bool = False
 
     def __post_init__(self) -> None:
         if self.mutates_storage_metadata:
@@ -651,6 +652,22 @@ class ViewAndMutationMeta:
         # of input_info that corresponds to a mutation (data or metadata or both)
         self.mutated_inp_runtime_indices = mutated_inp_runtime_indices
         self.num_mutated_inp_runtime_indices = len(self.mutated_inp_runtime_indices)
+
+        # Non-leaf inputs whose data is mutated out-of-graph (autograd-visible)
+        # and that have retain_grad() set. We capture their pure in-graph
+        # gradient as trailing backward outputs so the epilogue can populate .grad.
+        self.mutated_inp_retain_grad_indices = [
+            i
+            for i in mutated_inp_runtime_indices
+            if (
+                self.input_info[i].mutates_data
+                and self.input_info[i].requires_grad
+                and self.input_info[i].retains_grad
+            )
+        ]
+        self.num_mutated_inp_retain_grad_indices = len(
+            self.mutated_inp_retain_grad_indices
+        )
 
         # This is pre-computed for perf.
         # It contains the index of every element
