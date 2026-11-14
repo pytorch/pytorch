@@ -480,16 +480,16 @@ template <typename encoder_t,
           typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
                                       std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
 static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigned idx) {
-  if (C10_UNLIKELY(t.device().type() == kCPU)) {
+  if (t.device().type() == kCPU) [[unlikely]] {
     if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
       TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
       // MPS does not support doubles, silently downcast CPU scalar to float
-      if (C10_UNLIKELY(t.scalar_type() == kDouble)) {
+      if (t.scalar_type() == kDouble) [[unlikely]] {
         auto val = static_cast<float>(*reinterpret_cast<const double*>(t.const_data_ptr()));
         [encoder setBytes:&val length:sizeof(val) atIndex:idx];
         return;
       }
-      if (C10_UNLIKELY(t.scalar_type() == kComplexDouble)) {
+      if (t.scalar_type() == kComplexDouble) [[unlikely]] {
         auto val = static_cast<c10::complex<float>>(*reinterpret_cast<const c10::complex<double>*>(t.const_data_ptr()));
         [encoder setBytes:&val length:sizeof(val) atIndex:idx];
         return;
@@ -539,7 +539,7 @@ static inline void bind_iter_tensors(id<MTLComputeCommandEncoder> encoder,
   for (auto idx : c10::irange(ntensors.value_or(iter.ntensors()))) {
     auto& t = iter.tensor_base(idx);
     // Handle CPU scalars
-    if (C10_UNLIKELY(t.device().type() == kCPU)) {
+    if (t.device().type() == kCPU) [[unlikely]] {
       mtl_setBuffer(encoder, t, idx);
       continue;
     }

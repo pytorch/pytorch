@@ -258,7 +258,8 @@ def _get_hw_classification(
 
         if isinstance(value, ast.Tuple):
             if not classifications or any(
-                member in (HardwareClassification.GENERIC, HardwareClassification.ACCELERATOR)
+                member
+                in (HardwareClassification.GENERIC, HardwareClassification.ACCELERATOR)
                 for member in classifications
             ):
                 return None
@@ -553,7 +554,10 @@ class HwClassificationRule(Rule):
     @classmethod
     def parse(
         cls, filename: str, node: ast.ClassDef
-    ) -> tuple[HardwareClassification | tuple[HardwareClassification, ...] | None, list[LintMessage]]:
+    ) -> tuple[
+        HardwareClassification | tuple[HardwareClassification, ...] | None,
+        list[LintMessage],
+    ]:
         """Parse and validate the class's hw_classification declaration.
 
         Returns the classification and any errors (non-empty iff the

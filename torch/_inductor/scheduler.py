@@ -5712,7 +5712,9 @@ def _occupancy_before_and_after_fusion(
     regs_per_block_unfused = unfused_n_regs * threads_per_block
     regs_per_block_fused = fused_n_regs * threads_per_block
 
-    blocks_unfused = regs_per_sm // regs_per_block_unfused
+    # Clamping blocks_fused as well would turn (fused=0, unfused=1) from 0/1
+    # (reject) into 1/1 (accept).
+    blocks_unfused = max(regs_per_sm // regs_per_block_unfused, 1)
     blocks_fused = regs_per_sm // regs_per_block_fused
 
     return blocks_unfused, blocks_fused
@@ -5942,6 +5944,40 @@ def _producer_fusion_enabled_inputs(
     if not _is_epilogue_fusion_enabled(template_node):
         enabled -= store_inputs
     return enabled
+
+
+def _required_producer_inputs(
+    multi_node: ir.MultiTemplateBuffer, fused_nodes: Sequence[BaseSchedulerNode]
+) -> OrderedSet[str]:
+    """The template inputs that ``fused_nodes`` produce. Computed for consumer
+    fusion too: a producer may already have been fused into the template in an
+    earlier fusion round."""
+    template_input_names = OrderedSet(
+        typing.cast(ir.IRNode, input_node).get_name()
+        for input_node in multi_node.inputs
+    )
+    return OrderedSet(
+        name
+        for fused_node in fused_nodes
+        for name in fused_node.get_buffer_names()
+        if name in template_input_names
+    )
+
+
+def _choice_supports_fusion(
+    template_node: BaseSchedulerNode,
+    choice: Any,
+    required_producer_inputs: OrderedSet[str],
+) -> bool:
+    """Whether ``choice`` is a Triton template choice that supports a producer
+    fused into each of ``required_producer_inputs``."""
+    if not isinstance(choice, torch._inductor.select_algorithm.TritonTemplateCaller):
+        return False
+    # Choices can support different inputs, e.g. persistent+TMA templates
+    # cannot fuse producers into TMA-loaded inputs.
+    return required_producer_inputs <= _producer_fusion_enabled_inputs(
+        template_node, choice
+    )
 
 
 def is_epilogue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
@@ -7554,6 +7590,134 @@ class Scheduler:
 
         return (fut, mod)
 
+    def _compile_fused_template(
+        self,
+        multi_node: ir.MultiTemplateBuffer,
+        choice: torch._inductor.select_algorithm.TritonTemplateCaller,
+        node_list_fused: Sequence[BaseSchedulerNode],
+        consumer_fusion: bool,
+    ) -> bool:
+        """Whether the kernel fusing ``node_list_fused`` compiles with ``choice``
+        as ``multi_node``'s template."""
+        from torch._inductor.codegen.simd import CantSplit
+
+        with multi_node.swap_as_triton_caller(choice):
+            try:
+                future, mod_fused = self.compile_kernel(
+                    node_list_fused, hint_override=choice.hint_override
+                )
+                if future is not None:
+                    future.result()
+                else:
+                    mod_fused.triton_.precompile()
+            except CantSplit:
+                return False
+            # Ideally we would more narrowly catch Exceptions here but
+            # Triton will unpredictably error with valid producer fusions.
+            except Exception as e:
+                if fusion_log.isEnabledFor(logging.DEBUG):
+                    fusion_log.debug(
+                        "Exception in compiling %s: %s",
+                        "producer" if not consumer_fusion else "consumer",
+                        e,
+                    )
+                return False
+        return True
+
+    def _asserts_need_real_inputs(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
+        """Whether the kernel of ``nodes`` alone has a device assert that the
+        generated inputs of benchmarking could trip."""
+        standalone = PyCodeCache.load(
+            self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
+        )
+        return bool(standalone.triton_.inductor_meta.get("asserts_need_real_inputs"))
+
+    def _multi_template_fusion_decision(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> FusionResult | None:
+        """
+        Ask V.choices.multi_template_fusion_decision about a MultiTemplateBuffer
+        pair; None keeps the benchmark-based decision.
+
+        The decision is immediate: _try_fusion_pairs commits an accepted
+        immediate fusion right away, so the buffer is finalized only for a fusion
+        that is committed. Pending (competing) template fusions are not used.
+
+        An accepted decision still has to pass the checks the benchmark path
+        applies (layout conflicts, atomic-add producers, the chosen template's
+        support for every fused producer, and a fused kernel that compiles), and
+        needs a template: an explicit Triton template choice of this buffer, or,
+        without one, the template the buffer is already finalized to. Otherwise
+        the fusion is declined. An accepted fusion whose other side has a device
+        assert marks the buffer in templates_with_unsafe_asserts, as the
+        benchmark path does, so later fusions into it are not benchmarked.
+        """
+        if config.multi_kernel_hints:
+            return None
+        epilogue = isinstance(node1.get_template_node(), ir.MultiTemplateBuffer)
+        multi_node = (node1 if epilogue else node2).get_template_node()
+        if not isinstance(multi_node, ir.MultiTemplateBuffer):
+            return None
+        other = node2 if epilogue else node1
+        decision = V.choices.multi_template_fusion_decision(
+            self, multi_node, other.get_nodes(), epilogue
+        )
+        if decision is None:
+            return None
+        if not decision.fuse:
+            return FusionResult.fuse(False)
+
+        why = WhyNoFuse(node1, node2)
+        committed = multi_node._render_caller
+        choice = decision.choice
+        if choice is None:
+            if multi_node._render_kind != "triton" or committed is None:
+                why("fusion decision has no template choice for an unfinalized buffer")
+                return FusionResult.fuse(False)
+            choice = committed
+        if not isinstance(
+            choice, torch._inductor.select_algorithm.TritonTemplateCaller
+        ) or not any(choice is c for c in multi_node.choices):
+            why("fusion decision choice is not a Triton template choice of this buffer")
+            return FusionResult.fuse(False)
+        if (
+            choice.layout.size != multi_node.get_size()
+            or choice.layout.stride != multi_node.get_stride()
+        ):
+            why("fusion decision choice has a different output layout")
+            return FusionResult.fuse(False)
+        if committed is not None and committed is not choice:
+            why("buffer is already finalized to a different choice")
+            return FusionResult.fuse(False)
+        node_list_fused = [*node1.get_nodes(), *node2.get_nodes()]
+        if not epilogue and self._any_atomic_add(node_list_fused):
+            why("template choice does not support this producer fusion")
+            return FusionResult.fuse(False)
+        if not _choice_supports_fusion(
+            node1 if epilogue else node2,
+            choice,
+            _required_producer_inputs(multi_node, node_list_fused),
+        ):
+            why("template choice does not support a fused producer")
+            return FusionResult.fuse(False)
+        if self._has_layout_conflict_for_template(multi_node):
+            why("template would conflict with a buffer layout constraint")
+            return FusionResult.fuse(False)
+        if not self._compile_fused_template(
+            multi_node, choice, node_list_fused, consumer_fusion=epilogue
+        ):
+            why("fused kernel does not compile with the template choice")
+            return FusionResult.fuse(False)
+        template_name = multi_node.get_name()
+        if (
+            config.benchmark_template_fusion
+            and template_name not in self.templates_with_unsafe_asserts
+            and self._asserts_need_real_inputs(other.get_nodes())
+        ):
+            self.templates_with_unsafe_asserts.add(template_name)
+        multi_node.finalize_as_triton_caller(choice)
+        return FusionResult.fuse(True)
+
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> FusionResult:
@@ -7572,6 +7736,11 @@ class Scheduler:
         ) and _is_atomic_add_mutation_epilogue(node2, check_config=False)
         if atomic_add_template_epilogue and not config.epilogue_fusion_with_atomic_add:
             return FusionResult.fuse(False)
+
+        if is_multi_template:
+            decision = self._multi_template_fusion_decision(node1, node2)
+            if decision is not None:
+                return decision
 
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
@@ -7669,28 +7838,13 @@ class Scheduler:
                     "expected multi_node to be an ir.MultiTemplateBuffer"
                 )
             template_scheduler_node = node1 if consumer_fusion else node2
-            # Computed for consumer fusion too: a producer may already have been
-            # fused into the template in an earlier fusion round.
-            template_input_names = OrderedSet(
-                typing.cast(ir.IRNode, input_node).get_name()
-                for input_node in multi_node.inputs
-            )
-            required_producer_inputs = OrderedSet(
-                name
-                for fused_node in node_list_fused
-                for name in fused_node.get_buffer_names()
-                if name in template_input_names
+            required_producer_inputs = _required_producer_inputs(
+                multi_node, node_list_fused
             )
 
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
-                if not isinstance(
-                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                ):
-                    return False
-                # Choices can support different inputs, e.g. persistent+TMA
-                # templates cannot fuse producers into TMA-loaded inputs.
-                return required_producer_inputs <= _producer_fusion_enabled_inputs(
-                    template_scheduler_node, choice
+                return _choice_supports_fusion(
+                    template_scheduler_node, choice, required_producer_inputs
                 )
 
             # Check for layout conflicts before committing to Triton template
@@ -7709,14 +7863,8 @@ class Scheduler:
             if not (needs_real_inputs or has_atomic_add) and (
                 config.benchmark_template_fusion or config.multi_kernel_hints
             ):
-                standalone = PyCodeCache.load(
-                    self.generate_kernel_code_from_nodes(
-                        node_list_2 if consumer_fusion else node_list_1,
-                        benchmark_kernel=True,
-                    )
-                )
-                needs_real_inputs = bool(
-                    standalone.triton_.inductor_meta.get("asserts_need_real_inputs")
+                needs_real_inputs = self._asserts_need_real_inputs(
+                    node_list_2 if consumer_fusion else node_list_1
                 )
             if needs_real_inputs and config.multi_kernel_hints and not has_atomic_add:
                 return FusionResult.fuse(False)
@@ -7814,30 +7962,6 @@ class Scheduler:
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
 
-            def compile_without_benchmarking(
-                choice: torch._inductor.select_algorithm.TritonTemplateCaller,
-            ) -> bool:
-                with multi_node.swap_as_triton_caller(choice):
-                    try:
-                        future, mod_fused = self.compile_kernel(
-                            node_list_fused, hint_override=choice.hint_override
-                        )
-                        if future is not None:
-                            future.result()
-                        else:
-                            mod_fused.triton_.precompile()
-                    except CantSplit:
-                        return False
-                    except Exception as e:
-                        if fusion_log.isEnabledFor(logging.DEBUG):
-                            fusion_log.debug(
-                                "Exception in compiling %s: %s",
-                                "producer" if not consumer_fusion else "consumer",
-                                e,
-                            )
-                        return False
-                return True
-
             if has_atomic_add:
                 if not consumer_fusion:
                     return FusionResult.fuse(False)
@@ -7854,7 +7978,9 @@ class Scheduler:
                             torch._inductor.select_algorithm.TritonTemplateCaller,
                             choice,
                         )
-                        if compile_without_benchmarking(triton_choice):
+                        if self._compile_fused_template(
+                            multi_node, triton_choice, node_list_fused, consumer_fusion
+                        ):
                             ms_fused_choice = triton_choice
                             break
                     if ms_fused_choice is None:

@@ -1,4 +1,5 @@
 # Owner(s): ["module: mps"]
+import contextlib
 import importlib
 import os
 import subprocess
@@ -9,9 +10,13 @@ from unittest.mock import patch
 import numpy as np
 
 import torch
+import torch._inductor.ir as ir
 from torch._inductor import config as inductor_config
 from torch._inductor.codegen.mps import MetalKernel
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.exc import InductorError
+from torch._inductor.select_algorithm import PartialRender
+from torch._inductor.utils import Placeholder, run_and_get_code
+from torch._inductor.virtualized import V
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_mps_types_and
 from torch.testing._internal.common_utils import (
@@ -19,6 +24,11 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import (
+    MockExternalTemplateBuffer,
+    patch_lowering,
+)
+from torch.utils._ordered_set import OrderedSet
 
 
 importlib.import_module("filelock")
@@ -56,6 +66,136 @@ class MPSBasicTests(TestCase):
             ),
             check_lowp=False,
         )
+
+    @contextlib.contextmanager
+    def _lower_to_external_template(
+        self, op, source, *, multi_output=False, allow_fusion=False
+    ):
+        # Lowers op to a mock Helion kernel. As in real Helion kernels, a
+        # multi-output kernel returns its outputs as MultiOutput children.
+        # allow_fusion sets both template fusion flags (Helion sets them to False
+        # on Metal); None leaves them unset, so the global fusion configs apply.
+        def render(buf, kernel):
+            kernel._setup_fusion_hooks()
+            kernel._call_args = [inp.get_name() for inp in buf.inputs]
+            if not multi_output:
+                kernel._call_args.append(buf.name)
+            return PartialRender(source, kernel.render_hooks)
+
+        class MultiOutputTemplateBuffer(MockExternalTemplateBuffer):
+            def should_allocate(self):
+                return False
+
+            def get_size(self):
+                return next(iter(self._multi_output_children.values())).get_size()
+
+        def lowering(a, b, alpha=None):
+            a = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(a))
+            b = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(b))
+            if multi_output:
+                layout = ir.MultiOutputLayout(device=a.get_device())
+                buf = MultiOutputTemplateBuffer(layout, [a, b], render)
+                example = V.graph.current_node.meta["val"]
+                outputs = ir.TemplateBuffer.build_multi_outputs(buf, example)
+                out_names = list(buf._multi_output_children)
+            else:
+                layout = ir.FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
+                buf = MockExternalTemplateBuffer(layout, [a, b], render)
+                outputs = ir.TensorBox.create(buf)
+                out_names = [buf.name]
+            if allow_fusion is not None:
+                buf.allow_epilogue_fusion = buf.allow_prologue_fusion = allow_fusion
+            if allow_fusion:
+                fusable = {name: f"out{i}" for i, name in enumerate(out_names)}
+                buf.epilogue_fusable_outputs = fusable
+                buf.load_input_fusion_allowed_inputs = OrderedSet([a.get_name()])
+            return outputs
+
+        # The patched lowering is not part of the FX graph cache key.
+        with (
+            inductor_config.patch(force_disable_caches=True),
+            patch_lowering({op: (lowering, False, None, False)}),
+        ):
+            yield
+
+    def _lower_add_to_external_template(self, allow_fusion=False):
+        source = (
+            f"def {Placeholder.KERNEL_NAME}(A, B, result):\n"
+            "    torch.add(A, B, out=result)\n"
+            "    return result\n"
+        )
+        return self._lower_to_external_template(
+            torch.ops.aten.add.Tensor, source, allow_fusion=allow_fusion
+        )
+
+    def test_external_template_kernel(self):
+        def f(a, b):
+            return (a.sin() + b) * 2
+
+        a = torch.randn(64, device=self.device)
+        b = torch.randn(64, device=self.device)
+        with self._lower_add_to_external_template(allow_fusion=True):
+            result, (code,) = run_and_get_code(torch.compile(f), a, b)
+        self.assertEqual(result, f(a, b))
+        self.assertIn("torch.add(A, B, out=result)", code)
+        self.assertEqual(code.count("def generated_kernel_"), 1)
+        # The template advertises fusion, but MPS keeps sin and * 2 as separate
+        # Metal kernels.
+        self.assertEqual(code.count("async_compile.metal("), 2)
+
+    @parametrize(
+        "allow_fusion", [False, None, True], name_fn=lambda f: f"fusion_{f}".lower()
+    )
+    def test_external_template_kernel_multi_output(self, allow_fusion):
+        source = (
+            f"def {Placeholder.KERNEL_NAME}(A, B):\n"
+            "    return torch.add(A, B), torch.sub(A, B)\n"
+        )
+        with torch.library._scoped_library("mps_test", "FRAGMENT") as lib:
+            lib.define("add_sub(Tensor a, Tensor b) -> (Tensor, Tensor)")
+            lib.impl(
+                "add_sub", lambda a, b: (a + b, a - b), "CompositeExplicitAutograd"
+            )
+            add_sub = torch.ops.mps_test.add_sub.default
+
+            def f(a, b):
+                x, y = add_sub(a.sin(), b)
+                return x * 2, y * 3
+
+            a = torch.randn(64, device=self.device)
+            b = torch.randn(64, device=self.device)
+            with self._lower_to_external_template(
+                add_sub, source, multi_output=True, allow_fusion=allow_fusion
+            ):
+                result, (code,) = run_and_get_code(torch.compile(f), a, b)
+            self.assertEqual(result, f(a, b))
+        self.assertEqual(code.count("def generated_kernel_"), 1)
+        # The MultiOutput children are fused into the template and unpacked
+        # from its return value by call_kernel.
+        FileCheck().check("= generated_kernel_").check("[0]").check("[1]").run(code)
+        # sin, * 2 and * 3 stay separate Metal kernels whether the fusion flags
+        # are off, unset or advertise fusion.
+        self.assertEqual(code.count("async_compile.metal("), 3)
+
+    def test_external_template_kernel_reuse(self):
+        def f(a, b, c, d):
+            return (a + b) * (c + d)
+
+        args = [torch.randn(64, device=self.device) for _ in range(4)]
+        with self._lower_add_to_external_template():
+            result, (code,) = run_and_get_code(torch.compile(f), *args)
+        self.assertEqual(result, f(*args))
+        self.assertEqual(code.count("def generated_kernel_"), 1)
+        self.assertEqual(code.count("= generated_kernel_"), 2)
+
+    @inductor_config.patch(cpp_wrapper=True)
+    def test_external_template_kernel_cpp_wrapper(self):
+        a = torch.randn(64, device=self.device)
+        with self._lower_add_to_external_template():
+            with self.assertRaisesRegex(
+                InductorError, "not supported on MPS with cpp_wrapper"
+            ):
+                torch.compile(lambda a, b: a + b)(a, a)
 
     def test_log(self):
         self.common(lambda x: x.log(), (torch.rand(1024),))
