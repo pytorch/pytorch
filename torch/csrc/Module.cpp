@@ -2794,6 +2794,9 @@ PyObject* initModule() {
         "_fake_dispatch_register_static_shape_decomp",
         add_for(FakeDispatchCategory::StaticShapeDecomp));
     py_module.def(
+        "_fake_dispatch_register_cpp_meta_supports_symint",
+        add_for(FakeDispatchCategory::CppMetaSupportsSymint));
+    py_module.def(
         "_fake_dispatch_deregister_decomp",
         [](const std::string& name, const std::string& overload) {
           const c10::OperatorName op_name(name, overload);
