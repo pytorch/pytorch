@@ -10,6 +10,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     ops,
 )
@@ -896,6 +897,93 @@ MASKEDTENSOR_FLOAT_TYPES = {
 
 class TestOperatorsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("op_name", ["var", "std"])
+    @parametrize("api", ["torch", "tensor"])
+    @parametrize("dim", [None, 1, (0, 1)])
+    @parametrize("keepdim", [False, True])
+    @parametrize("mask_kind", ["all", "partial", "empty_row"])
+    @parametrize("style, correction", [
+        ("positional", 0), ("positional", 1), ("keyword", 0), ("keyword", 1),
+        ("correction", 0), ("correction", 1), ("correction", 0.5),
+    ])
+    def test_var_std_arguments(self, device, dtype, op_name, api, dim, keepdim, mask_kind, style, correction):
+        data = torch.arange(1, 9, dtype=dtype, device=device).reshape(2, 4)
+        mask = torch.ones_like(data, dtype=torch.bool)
+        if mask_kind != "all":
+            mask[:, 1] = False
+        if mask_kind == "empty_row":
+            mask[1] = False
+        mt = masked_tensor(data, mask)
+        def op(*args, **kwargs):
+            if api == "torch":
+                return getattr(torch, op_name)(mt, *args, **kwargs)
+            return getattr(mt, op_name)(*args, **kwargs)
+
+        if style == "positional":
+            if dim is None and not keepdim:
+                result = op(bool(correction))
+            elif not keepdim:
+                result = op(dim, bool(correction))
+            else:
+                result = op(dim, bool(correction), keepdim)
+        elif style == "keyword":
+            result = op(dim=dim, unbiased=bool(correction), keepdim=keepdim)
+        else:
+            result = op(dim=dim, correction=correction, keepdim=keepdim)
+
+        dense_op = getattr(torch, op_name)
+        if dim == 1:
+            expected = torch.stack([dense_op(row[valid], correction=correction) for row, valid in zip(data, mask)])
+            if keepdim:
+                expected = expected.unsqueeze(1)
+        else:
+            expected = dense_op(data[mask], correction=correction)
+            if keepdim:
+                expected = expected.reshape(1, 1)
+        output_mask = mask.any(dim=dim, keepdim=keepdim)
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result.get_mask(), output_mask)
+        self.assertEqual(result.get_data()[output_mask], expected[output_mask])
+
+    @parametrize("op_name", ["var", "std"])
+    @parametrize("api", ["torch", "tensor"])
+    @parametrize("correction", [0, 1])
+    def test_var_std_correction_grad(self, device, op_name, api, correction):
+        data = torch.arange(1, 9, dtype=torch.float64, device=device).reshape(2, 4)
+        mask = torch.tensor([[True, False, True, True], [True, True, False, True]], device=device)
+        mt = masked_tensor(data.clone(), mask, requires_grad=True)
+        result = getattr(torch, op_name)(mt, dim=1, correction=correction) if api == "torch" else getattr(mt, op_name)(
+            dim=1, correction=correction,
+        )
+        result.sum().backward()
+        reference = data.clone().requires_grad_()
+        expected = torch.stack([getattr(torch, op_name)(row[valid], correction=correction)
+                                for row, valid in zip(reference, mask)])
+        expected.sum().backward()
+        self.assertEqual(mt.grad.get_data()[mask], reference.grad[mask])
+
+    @parametrize("op_name", ["var", "std"])
+    def test_var_std_conflicting_arguments(self, device, op_name):
+        data = torch.arange(4., device=device)
+        mt = masked_tensor(data, torch.ones_like(data, dtype=torch.bool))
+        with self.assertRaises(TypeError):
+            getattr(torch, op_name)(mt, dim=0, unbiased=False, correction=0)
+        with self.assertRaises(TypeError):
+            getattr(mt, op_name)(False, unbiased=False)
+
+    @parametrize("op_name", ["var", "std"])
+    @parametrize("dim", [(), [], (-1, 0)])
+    def test_var_std_correction_dims(self, device, op_name, dim):
+        data = torch.arange(1., 9., device=device).reshape(2, 4)
+        mask = torch.ones_like(data, dtype=torch.bool)
+        mask[0, 1] = False
+        mt = masked_tensor(data, mask)
+        result = getattr(torch, op_name)(mt, dim=dim, correction=0.5, keepdim=True)
+        expected = getattr(torch, op_name)(data[mask], correction=0.5).reshape(1, 1)
+        self.assertEqual(result.get_data(), expected)
+        self.assertEqual(result.get_mask(), torch.ones_like(expected, dtype=torch.bool))
 
     def _convert_mt_args(self, args, mask, layout):
         return [
