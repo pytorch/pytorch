@@ -99,7 +99,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIf,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.custom_op_db import custom_op_db
@@ -1094,13 +1093,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
     @skipIfPropagateRealTensors("Propagate real tensor not supported")
-    # mkldnn nyi in C++ fake tensors
-    @xfailIf(CPP_FAKETENSOR)
-    def test_alias_fake_mkldnn(self):
+    @fake_tensor_modes
+    def test_alias_fake_mkldnn(self, mode_cls):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
-        with FakeTensorMode() as fake_mode:
-            x = fake_mode.from_tensor(torch.randn(2, 3).to_mkldnn())
+        real = torch.randn(2, 3).to_mkldnn()
+        with mode_cls() as fake_mode:
+            x = fake_mode.from_tensor(real)
             y = torch.ops.aten.alias.default(x)
         self.assertTrue(y.is_mkldnn)
         self.assertEqual(torch._C._dispatch_key_set(y), torch._C._dispatch_key_set(x))
@@ -1123,9 +1122,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(t.device, torch.device("cpu"))
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
-    # mkldnn nyi in C++ fake tensors
-    @xfailIf(CPP_FAKETENSOR)
-    def test_mkldnn_to_dense(self):
+    @fake_tensor_modes
+    @parametrize("symbolic", [False, True])
+    def test_mkldnn_to_dense(self, mode_cls, symbolic):
+        if mode_cls is CppFakeTensorMode and TEST_WITH_TORCHDYNAMO:
+            self.skipTest(
+                "Dynamo guards on MKLDNN keys differ from the C++ fake's dispatch keys"
+            )
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
             FunctionalTensorMode,
@@ -1134,7 +1137,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
         real = torch.randn(2, 3).to_mkldnn()
-        with FakeTensorMode() as fake_mode:
+        with mode_cls(shape_env=ShapeEnv() if symbolic else None) as fake_mode:
             x = fake_mode.from_tensor(real)
             self.assertTrue(x.is_mkldnn)
             self.assertEqual(x.layout, torch._mkldnn)  # type: ignore[attr-defined]
@@ -1157,6 +1160,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
             detached = x.detach()
             self.assertTrue(detached.is_mkldnn)
+            self.assertTrue(x.data.is_mkldnn)
             y = detached.to_dense()
             self.assertFalse(y.is_mkldnn)
             self.assertEqual(y.layout, torch.strided)
@@ -1194,16 +1198,17 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
     @skipIfPropagateRealTensors("Propagate real tensor not supported")
-    # mkldnn nyi in C++ fake tensors
-    @xfailIf(CPP_FAKETENSOR)
-    def test_mkldnn_unsafe_fallback(self):
+    @fake_tensor_modes
+    def test_mkldnn_unsafe_fallback(self, mode_cls):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
-        with FakeTensorMode() as fake_mode:
-            x = fake_mode.from_tensor(torch.randn(1, 2, 8, 8).to_mkldnn())
+        real = torch.randn(1, 2, 8, 8).to_mkldnn()
+        with mode_cls() as fake_mode:
+            x = fake_mode.from_tensor(real)
             y = torch.nn.functional.max_pool2d(x, 3, 2, 1)
             self.assertTrue(is_fake_tensor(y))
             self.assertEqual(y.shape, (1, 2, 4, 4))
+            self.assertEqual(y.is_mkldnn, mode_cls is CppFakeTensorMode)
 
     @fake_tensor_modes
     def test_compare_tensor_meta_unbacked_numel(self, mode_cls):
