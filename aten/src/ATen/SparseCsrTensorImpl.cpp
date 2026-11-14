@@ -95,7 +95,17 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
 
   auto new_crow_indices_size = DimVector(size.slice(0, size.size() - 2));
   new_crow_indices_size.push_back(rows + 1);
+  Tensor old_crow_indices;
+  if (rows + 1 > old_crow_indices_size && crow_indices_.dim() > 1 &&
+      size.slice(0, size.size() - 2) ==
+          crow_indices_.sizes().slice(0, crow_indices_.dim() - 1)) {
+    // Resizing the last dimension does not preserve per-batch row pointers.
+    old_crow_indices = crow_indices_.clone();
+  }
   crow_indices_.resize_(new_crow_indices_size);
+  if (old_crow_indices.defined()) {
+    crow_indices_.narrow(-1, 0, old_crow_indices_size).copy_(old_crow_indices);
+  }
   if (rows + 1 >= old_crow_indices_size) {
     crow_indices_.narrow(-1, old_crow_indices_size, rows + 1 - old_crow_indices_size).fill_(nnz);
   } else {

@@ -1417,6 +1417,39 @@ class TestSparseCSRDevice(TestCase):
 
     @skipMeta
     @dtypes(torch.float, torch.bool)
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("batch_shape", [(), (2,), (2, 3), (0,), (0, 2)])
+    @parametrize("rows, nnz", [(0, 0), (2, 0), (2, 2)])
+    def test_resize_grow_rows(self, device, dtype, index_dtype, batch_shape, rows, nnz):
+        crow = torch.zeros((*batch_shape, rows + 1), dtype=index_dtype, device=device)
+        batch_count = crow[..., 0].numel()
+        if nnz:
+            crow[..., 1] = torch.arange(batch_count, device=device).reshape(batch_shape) % (nnz + 1)
+            crow[..., -1] = nnz
+        col = torch.tensor([0, 2] if nnz else [], dtype=index_dtype, device=device)
+        col = col.expand(*batch_shape, nnz).clone()
+        values = torch.arange(batch_count * nnz, device=device).add(1).to(dtype).reshape(*batch_shape, nnz)
+        a = torch.sparse_csr_tensor(crow, col, values, size=(*batch_shape, rows, 3), check_invariants=True)
+
+        for new_rows, new_cols in [(rows + 1, 3), (rows + 3, 5)]:
+            old_crow = a.crow_indices().clone()
+            old_col = a.col_indices().clone()
+            old_values = a.values().clone()
+            added_rows = new_rows - a.size(-2)
+            new_shape = (*batch_shape, new_rows, new_cols)
+            a.resize_(new_shape)
+            expected_crow = torch.cat((old_crow, old_crow.new_full((*batch_shape, added_rows), nnz)), dim=-1)
+            self.assertEqual(a.shape, new_shape)
+            self.assertEqual(a.crow_indices(), expected_crow)
+            torch._validate_sparse_compressed_tensor_args(
+                a.crow_indices(), a.col_indices(), a.values(), a.shape, a.layout,
+            )
+            self.assertEqual(a.col_indices(), old_col)
+            self.assertEqual(a.values(), old_values)
+            self.assertEqual(a._nnz(), nnz)
+
+    @skipMeta
+    @dtypes(torch.float, torch.bool)
     @all_sparse_compressed_layouts()
     def test_resize_as_sparse_compressed(self, device, dtype, layout):
         device_type = torch.device(device).type
