@@ -4469,6 +4469,26 @@
       ]
     }
   ],
+  "GB3826": [
+    {
+      "Gb_type": "kwargs expansion after iteration slot mutation",
+      "Context": "DICT_MERGE",
+      "Explanation": "Dynamo cannot expand a mapping after changing its type's __iter__.",
+      "Hints": [
+        "Expand the mapping outside the compiled function."
+      ]
+    }
+  ],
+  "GB9653": [
+    {
+      "Gb_type": "Duplicate keyword mapping key",
+      "Context": "DICT_MERGE",
+      "Explanation": "Dynamo cannot trace duplicate keys while expanding a custom mapping.",
+      "Hints": [
+        "Use unique keyword names or expand the mapping outside the compiled function."
+      ]
+    }
+  ],
   "GB0245": [
     {
       "Gb_type": "Attempted to use `nested_tensor` with non-list input",
