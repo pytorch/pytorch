@@ -679,12 +679,22 @@ struct ReduceJitOp {
       } else {
         uint32_t input_offset = threadIdx.y;
         uint32_t step = blockDim.y;
-        for (; input_offset < config.ctas_per_output; input_offset += step) {
-          uint32_t idx = config.staging_memory_offset(input_offset);
-          arg_vec_t next = reduce_buffer[idx];
+        // See Note [global_reduce prefetch] in Reduce.cuh.
+        constexpr int prefetch = ${global_reduce_prefetch};
+        static_assert(prefetch >= 1);
+        for (; input_offset < config.ctas_per_output; input_offset += step * prefetch) {
+          arg_vec_t next[prefetch];
           #pragma unroll
-          for (int i = 0; i < output_vec_size; i++) {
-            value[i] = reducer::combine(value[i], next[i]);
+          for (int u = 0; (u < prefetch) && (input_offset + u * step < config.ctas_per_output); u++) {
+            uint32_t idx = config.staging_memory_offset(input_offset + u * step);
+            next[u] = reduce_buffer[idx];
+          }
+          #pragma unroll
+          for (int u = 0; (u < prefetch) && (input_offset + u * step < config.ctas_per_output); u++) {
+            #pragma unroll
+            for (int i = 0; i < output_vec_size; i++) {
+              value[i] = reducer::combine(value[i], next[u][i]);
+            }
           }
         }
       }

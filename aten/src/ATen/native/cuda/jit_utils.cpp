@@ -1318,7 +1318,8 @@ std::string generate_reduction_code(
     bool contiguous,
     bool vectorized,
     int vec_size,
-    int max_threads_codegen) {
+    int max_threads_codegen,
+    int global_reduce_prefetch) {
   TORCH_INTERNAL_ASSERT(desc.nInputs == 1);
   TORCH_INTERNAL_ASSERT(desc.extra_args_types.empty());
 
@@ -1333,7 +1334,8 @@ std::string generate_reduction_code(
       contiguous,
       vectorized,
       vec_size,
-      max_threads_codegen
+      max_threads_codegen,
+      global_reduce_prefetch
     );
 }
 
@@ -1348,7 +1350,8 @@ std::string generate_reduction_code(
     bool contiguous,
     bool vectorized,
     int vec_size,
-    int max_threads_codegen) {
+    int max_threads_codegen,
+    int global_reduce_prefetch) {
       std::string func = func_;
       at::jit::TemplateEnv env;
       constexpr int thread_work_size = JIT_THREAD_WORK_SIZE;
@@ -1357,6 +1360,7 @@ std::string generate_reduction_code(
       env.s("result_type", result_type);
       env.s("reduction_accum_type", reduction_accum_type);
       env.s("vt0", std::to_string(vt0));
+      env.s("global_reduce_prefetch", std::to_string(global_reduce_prefetch));
       env.s("name", name);
       env.s("max_threads_lb", std::to_string(max_threads_codegen));
       env.s("thread_work_size", std::to_string(thread_work_size));
