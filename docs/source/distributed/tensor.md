@@ -211,6 +211,30 @@ When using DTensor together with Pipeline Parallelism, ranks for each pipeline s
 
 DTensor's RNG infra is based on the philox based RNG algorithm, and supports any philox based backend (cuda, and other cuda-like devices), but unfortunately does not yet support the CPU backend.
 
+
+When distributed RNG tracking is active, the random operation's output device
+must match the RNG tracker's device type. An existing tracker may have been
+initialized from a different mesh; a lazily initialized tracker uses the current
+mesh's device type. An explicit `device=` argument to
+`torch.rand_like` or `torch.randn_like` determines the output device; otherwise,
+the local input device is used. Meta outputs do not consume RNG state. Operations
+that do not use a distributed RNG tracker continue to use the local generator.
+
+:::{warning}
+Random initialization of CPU-local DTensors with an accelerator RNG tracker now raises a
+`RuntimeError` when distributed RNG tracking is active. Previously, restoring
+CPU RNG state could repeat samples or prevent rejection-sampling initializers
+such as `torch.nn.init.trunc_normal_` from terminating.
+
+This includes FSDP2 parameters materialized on CPU after `fully_shard`, such as
+with `CPUOffloadPolicy`. Initialize on the tracker device before offloading, or
+under `torch.no_grad()`, initialize each local shard returned by
+`DTensor.to_local()` using an explicitly seeded CPU `torch.Generator`.
+Local initialization bypasses distributed RNG
+semantics: the caller must coordinate seeds and streams so replicated shards
+match and distinct shards receive the intended samples.
+:::
+
 ## Debugging
 
 ```{eval-rst}

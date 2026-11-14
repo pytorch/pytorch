@@ -377,7 +377,40 @@ class OpDispatcher:
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
-                if not random._rng_tracker and is_rng_supported_mesh(mesh):
+                first_local_arg = cast(torch.Tensor, local_tensor_args[0])
+                random_device = (
+                    cast(torch.device | None, op_info.local_kwargs.get("device"))
+                    or first_local_arg.device
+                )
+                init_rng_tracker = not random._rng_tracker and is_rng_supported_mesh(
+                    mesh
+                )
+                use_rng_tracker = (
+                    random._rng_tracker.distribute_region_enabled
+                    if random._rng_tracker
+                    else init_rng_tracker
+                )
+                rng_device_type = (
+                    random._rng_tracker._device.type
+                    if random._rng_tracker
+                    else mesh.device_type
+                )
+                if (
+                    use_rng_tracker
+                    and random_device.type != "meta"
+                    and random_device.type != rng_device_type
+                ):
+                    # The existing tracker may have been initialized by another mesh.
+                    raise RuntimeError(
+                        f"DTensor random op {op_call} requires the output device "
+                        f"({random_device}) to match the RNG tracker device "
+                        f"({rng_device_type}) while distributed RNG is enabled. "
+                        "Initialize on the tracker device before offloading, or initialize "
+                        "the tensor returned by DTensor.to_local() under torch.no_grad() "
+                        "with an explicitly seeded generator."
+                    )
+
+                if init_rng_tracker:
                     # Default to `OffsetBasedRNGTracker` if the parallelism API did not already construct one
                     # Skip RNG state sync during tracing to avoid lazily initializing real RNG state under fake mode.
                     run_state_sync = not _are_we_tracing()
@@ -402,7 +435,6 @@ class OpDispatcher:
                     first_spec = output_sharding.redistribute_schema.args_spec[0]
                 else:
                     first_spec = cast(dtensor.DTensor, args[0])._spec
-                first_local_arg = cast(torch.Tensor, local_tensor_args[0])
 
                 # If the user provided a generator, we hook it up to our RNG manager, but we also pop it from kwargs
                 # so the op_call does not directly use it (we want op_call to fall back to the 'default' which is
@@ -416,7 +448,7 @@ class OpDispatcher:
 
                 if (
                     random._rng_tracker
-                    and not first_local_arg.is_meta
+                    and random_device.type != "meta"
                     and random._rng_tracker.distribute_region_enabled
                 ):
                     accelerator = torch.accelerator.current_accelerator()
