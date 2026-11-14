@@ -413,12 +413,19 @@ void validate_scaled_mm_v2_inputs(
 
   // NVFP4 (BlockWise1x16) blockwise scale element count for a given outer
   // dim, shared by the single- and two-level NVFP4 recipes. XPU uses the
-  // unpadded shape; NVIDIA the L4-padded SWIZZLE_32_4_4 shape. ROCm doesn't
-  // support NVFP4, so only these two cases arise.
+  // unpadded shape. ROCm's count, rows * round_up(K/16, 8), is used only for
+  // SWIZZLE_128; any other swizzle is rejected before the size checks. The
+  // remaining case is the padded SWIZZLE_32_4_4 shape. The arch gate stays
+  // in the kernel, which can query the device.
+  const bool rocm_nvfp4 = !is_xpu && at::globalContext().hasROCM();
   auto nvfp4_scale_elems = [&](const c10::SymInt& dim) {
-    return is_xpu ? dim * sym_ceil_div(K_unpacked, 16)
-                  : sym_round_up(dim, 128) *
-            sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
+    if (is_xpu) {
+      return dim * sym_ceil_div(K_unpacked, 16);
+    }
+    if (rocm_nvfp4) {
+      return dim * sym_round_up(sym_ceil_div(K_unpacked, 16), 8);
+    }
+    return sym_round_up(dim, 128) * sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
   };
 
   // Per-recipe scale checks. Shapes and dtypes mirror the per-recipe
@@ -453,15 +460,38 @@ void validate_scaled_mm_v2_inputs(
         "For ROCM MX gemm, swizzle_a and swizzle_b must each have 1 value, got ",
         swizzle_a.size(), " and ", swizzle_b.size());
     TORCH_CHECK_VALUE(
-        (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_32_8) &&
+        (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_32_8 ||
+            swizzle_a[0] == SwizzleType::SWIZZLE_128) &&
             swizzle_a[0] == swizzle_b[0],
-        "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_32_8, got swizzle_a=",
+        "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE, SWIZZLE_32_8, or SWIZZLE_128, got swizzle_a=",
         static_cast<int>(swizzle_a[0]), " and swizzle_b=", static_cast<int>(swizzle_b[0]));
   }
   const bool is_mx_32_8 = is_rocm_mx && swizzle_a[0] == SwizzleType::SWIZZLE_32_8;
+  const bool is_mx_128 = is_rocm_mx && swizzle_a[0] == SwizzleType::SWIZZLE_128;
   const bool is_nv_1x16 = is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x16, ScalingType::BlockWise1x16);
   const bool is_nv_2lvl = is_two_level_nvfp4(recipe_a, recipe_b);
+  // ROCm has one NVFP4 layout. Reject anything else before the size checks, so
+  // a CUDA-style call is NotImplementedError rather than a shape-dependent
+  // ValueError. This does not query the device, so it is safe for CPU and Meta.
+  if (rocm_nvfp4 && (is_nv_1x16 || is_nv_2lvl)) {
+    const auto num_args_a = recipe_a.size();
+    const auto num_args_b = recipe_b.size();
+    TORCH_CHECK_VALUE(
+        swizzle_a.size() == num_args_a && swizzle_b.size() == num_args_b,
+        "swizzle_a/swizzle_b must match the number of scale recipes, got ",
+        swizzle_a.size(), " and ", swizzle_b.size());
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        swizzle_a[0] == SwizzleType::SWIZZLE_128 &&
+            swizzle_b[0] == SwizzleType::SWIZZLE_128,
+        "NVFP4 block scaling on ROCm requires gfx1250 with ROCm 10.0 and SWIZZLE_128 scales. "
+        "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250 order.");
+    if (num_args_a == 2) {
+      TORCH_CHECK_VALUE(
+          swizzle_a[1] == SwizzleType::NO_SWIZZLE && swizzle_b[1] == SwizzleType::NO_SWIZZLE,
+          "For ROCM NVFP4 gemm, the tensorwise scale swizzle must be NO_SWIZZLE");
+    }
+  }
   // BlockWise1x128/128x128 combinations (DeepSeek-style) are deliberately
   // not validated here: they require SM90 and fail with NotImplementedError
   // from the kernel on other archs, which tests rely on.
@@ -528,19 +558,24 @@ void validate_scaled_mm_v2_inputs(
     // Layout the count belongs to. ROCm accepts two layouts that differ only
     // in padding, so the count alone is ambiguous without naming one.
     [[maybe_unused]] const char* scale_layout = "";
-    // The arch/version gate for SWIZZLE_32_8 lives in the kernel, which can
-    // query the device, so a request for it on an unsupported arch reaches this
-    // size check first whenever the two layouts' counts differ. Name the
-    // requirement, in `check_mx_swizzle`'s words, so that case is not
-    // misdiagnosed as a plain size mismatch.
-    [[maybe_unused]] const char* scale_layout_hint = is_mx_32_8
+    // A size mismatch is reported before the kernel's arch gate. Name the
+    // requirement, in check_mx_swizzle's words, so it is not a plain size error.
+    [[maybe_unused]] const char* scale_layout_hint =
+        is_mx_32_8
         ? "; SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)"
+        : is_mx_128
+        ? "; SWIZZLE_128 block scales require gfx1250 with ROCm 7.14"
         : "";
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
     // to keep aten-cpu free of GPU-conditional compilation. Formulas mirror
     // _scaled_mxfp8_mxfp8 and _scaled_mxfp4_mxfp4 in cuda/ScaledBlas.cpp.
-    if (is_mx_32_8) {
-      // 32x8-tiled scale layout (hipBLASLt BLK32_UE8M0_32_8).
+    if (is_mx_128) {
+      // gfx1250: rows * round_up(K/32, 4).
+      expected_a_elems = M * sym_round_up(sym_ceil_div(K_unpacked, 32), 4);
+      expected_b_elems = N * sym_round_up(sym_ceil_div(K_unpacked, 32), 4);
+      scale_layout = "SWIZZLE_128";
+    } else if (is_mx_32_8) {
+      // gfx950 32x8-tiled scale layout.
       expected_a_elems = sym_round_up(M, 32) *
           sym_round_up(sym_ceil_div(K_unpacked, 32), 8);
       expected_b_elems = sym_round_up(N, 32) *
@@ -685,8 +720,8 @@ void validate_scaled_mm_v2_inputs(
           swizzle_b[0] == SwizzleType::SWIZZLE_32_4_4,
           "scale_b must be swizzled to SWIZZLE_32_4_4 format");
     }
-    // ROCm's MX swizzle pair was already validated above, ahead of the
-    // per-recipe size checks.
+    // ROCm's MX and NVFP4 swizzle pairs were already validated above, ahead of
+    // the per-recipe size checks.
   }
 }
 

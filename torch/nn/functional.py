@@ -7559,6 +7559,16 @@ def scaled_mm(
         use_fast_accum: Request tensor-core fast accumulation for supported recipes.
             Hopper ``BlockWise1x128``/``BlockWise128x128`` require ``False``;
             MNxK4 forwards the flag to cuBLASLt.
+
+    .. note::
+        ``SwizzleType.SWIZZLE_128`` is the gfx1250 layout for MX (block 32)
+        and NVFP4 (block 16). Each block scale has
+        ``rows * round_up(K / block, 128 / block)`` elements: K-groups of
+        ``128 / block`` scales, stored group-major. When ``K`` is a multiple
+        of 128 and ``K > 128``, linear scales have that same count, so passing
+        them with ``SWIZZLE_128`` is accepted and the result is wrong. Reorder
+        the scales. ``torch._scaled_mm`` cannot name a swizzle; on gfx1250 use
+        this function and pass ``SWIZZLE_128``.
     """
 
     scale_a = _expand_single_value(scale_a)

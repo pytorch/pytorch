@@ -2834,12 +2834,27 @@ class TestScaleSwizzleInference(TestCase):
     `to_blocked` hands back the 32x8 buffer flattened.
     """
 
-    def _infer(self, mat_size, scale_size, mat_dtype, prefers_32_8):
+    def _infer(
+        self,
+        mat_size,
+        scale_size,
+        mat_dtype,
+        prefers_32_8,
+        gfx1250=(False, False),
+        scale_dtype=None,
+    ):
+        if scale_dtype is None:
+            scale_dtype = torch.float8_e8m0fnu
         with (
             mock.patch.object(torch.version, "hip", "7.14.0"),
+            mock.patch("torch.xpu._is_compiled", return_value=False),
             mock.patch(
                 "torch._inductor.utils._prefers_swizzle_32_8",
                 return_value=prefers_32_8,
+            ),
+            mock.patch(
+                "torch._inductor.utils._gfx1250_scale_swizzle",
+                return_value=gfx1250,
             ),
         ):
             return _infer_scale_swizzle_impl(
@@ -2847,7 +2862,7 @@ class TestScaleSwizzleInference(TestCase):
                 scale_size=scale_size,
                 scale_numel=math.prod(scale_size),
                 mat_dtype=mat_dtype,
-                scale_dtype=torch.float8_e8m0fnu,
+                scale_dtype=scale_dtype,
                 eq_fn=lambda a, b: a == b,
             )
 
@@ -2878,6 +2893,32 @@ class TestScaleSwizzleInference(TestCase):
         self.assertEqual(
             self._infer(mat_size, (1024,), mat_dtype, prefers_32_8=True),
             (ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_8),
+        )
+
+    @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
+    def test_gfx1250_mx_wins_the_unswizzled_tie(self, mat_dtype):
+        packed = mat_dtype == torch.float4_e2m1fn_x2
+        # M=128, K=128: gfx1250 holds 512 scales, the same as NO_SWIZZLE.
+        mat_size = (128, 64 if packed else 128)
+        self.assertEqual(
+            self._infer(
+                mat_size, (512,), mat_dtype, prefers_32_8=False, gfx1250=(True, False)
+            ),
+            (ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_128),
+        )
+
+    def test_gfx1250_nvfp4_is_swizzle_128(self):
+        # M=128, unpacked K=128: rows * round_up(K/16, 8) = 1024 scales.
+        self.assertEqual(
+            self._infer(
+                (128, 64),
+                (1024,),
+                torch.float4_e2m1fn_x2,
+                prefers_32_8=False,
+                gfx1250=(True, True),
+                scale_dtype=torch.float8_e4m3fn,
+            ),
+            (ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_128),
         )
 
     @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
