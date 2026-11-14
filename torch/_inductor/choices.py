@@ -13,7 +13,7 @@ from torch._inductor.runtime.runtime_utils import next_power_of_2
 from torch._inductor.scheduler import MixOrderReduction
 from torch.utils._sympy.value_ranges import bound_sympy
 
-from . import config
+from . import config, tuning_list
 from .codecache import write_text
 from .heuristics.template import get_template_heuristic
 from .heuristics.template.triton import (
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from .codegen.triton import TritonKernel
     from .ir import ChoiceCaller
     from .kernel_template_choice import KernelTemplateChoice
+    from .runtime.hints import TritonMeta
 
     from torch.utils._ordered_set import OrderedSet  # isort: skip
 
@@ -491,6 +492,20 @@ class InductorChoices:
     ) -> dict[str, Any]:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         return kernel_kwargs
+
+    def triton_kernel_configs(
+        self,
+        heuristic: str,
+        size_hints: dict[str, int],
+        triton_meta: TritonMeta,
+        inductor_meta: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Hook to supply Triton configs for a pointwise or reduction kernel, as
+        {"mode": "append" | "replace", "configs": [{"XBLOCK": 64, ...}, ...]}; see
+        tuning_list/README.md. The default reads config.tuning_list.table."""
+        return tuning_list.table_entry(
+            heuristic, size_hints, triton_meta, inductor_meta
+        )
 
     def override_best_choice(
         self,

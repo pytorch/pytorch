@@ -7,9 +7,11 @@ differ from the base.
 
 from __future__ import annotations
 
+import functools
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._inductor import tuning_list
 from torch._inductor.heuristics.registry import (
     CodegenConfigHeuristics,
     register_codegen_heuristic,
@@ -40,13 +42,18 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
         inductor_meta: dict[str, Any] | None = None,
     ) -> list[Any]:
         inductor_meta = inductor_meta or {}
+        supplied, replace = tuning_list.supplied_configs(
+            inductor_meta, functools.partial(triton_config_fn, size_hints)
+        )
+        if supplied and replace:
+            return supplied
         n = len(size_hints)
         if n == 1:
-            return self._configs_1d(
+            configs = self._configs_1d(
                 size_hints, bs, hinted_configs, triton_config_fn, inductor_meta
             )
-        if n == 2:
-            return self._configs_2d(
+        elif n == 2:
+            configs = self._configs_2d(
                 size_hints,
                 bs,
                 hinted_configs,
@@ -54,11 +61,13 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
                 tile_hint,
                 inductor_meta,
             )
-        if n == 3:
-            return self._configs_3d(
+        elif n == 3:
+            configs = self._configs_3d(
                 size_hints, bs, hinted_configs, triton_config_fn, inductor_meta
             )
-        raise NotImplementedError(f"size_hints: {size_hints}")
+        else:
+            raise NotImplementedError(f"size_hints: {size_hints}")
+        return configs + supplied
 
     def _configs_1d(
         self, size_hints, bs, hinted_configs, triton_config_fn, inductor_meta

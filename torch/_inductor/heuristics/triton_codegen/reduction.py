@@ -7,9 +7,11 @@ from the base.
 
 from __future__ import annotations
 
+import functools
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._inductor import tuning_list
 from torch._inductor.heuristics.registry import (
     CodegenConfigHeuristics,
     register_codegen_heuristic,
@@ -204,6 +206,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             get_total_reduction_numel,
             make_matmul_triton_config,
             triton_config_reduction,
+            triton_config_tiled_reduction,
             triton_native_bmm_configs,
             triton_native_mm_configs,
         )
@@ -257,7 +260,20 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             register_intensive=False,
             dynamic_scale_rblock=True,
             waves_per_eu=None,
+            y=None,
         ):
+            if y is not None:
+                # A tile named in full is built as named, not spread by tiling scores.
+                return triton_config_tiled_reduction(
+                    size_hints,
+                    x,
+                    y,
+                    r,
+                    num_stages=num_stages,
+                    register_intensive=register_intensive,
+                    waves_per_eu=waves_per_eu,
+                    warp_size=warp_size,
+                )
             if "y" in size_hints:
                 tiling_scores = _get_tiling_scores(inductor_meta, size_hints)
                 return _adapt_config_for_tiling(
@@ -284,6 +300,13 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     reduction_hint=reduction_hint,
                     warp_size=warp_size,
                 )
+
+        supplied, replace = tuning_list.supplied_configs(
+            inductor_meta,
+            functools.partial(make_config, register_intensive=register_intensive),
+        )
+        if supplied and replace:
+            return supplied
 
         contiguous_rblock = (
             4096 if scalar_accumulators and "y" in size_hints else MAX_R0_BLOCK
@@ -369,11 +392,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             if sm103_config is not None:
                 # Adding B300/GB300 config as autotuning option
                 inner_configs.append(sm103_config)
-            return configs + inner_configs
+            return configs + inner_configs + supplied
         elif reduction_hint == ReductionHint.OUTER:
-            return configs + [outer_config]
+            return configs + [outer_config] + supplied
         elif reduction_hint == ReductionHint.OUTER_TINY:
-            return configs + [tiny_config]
+            return configs + [tiny_config] + supplied
 
         result_configs = (
             configs
@@ -386,6 +409,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 make_config(64, 4, num_warps=8),
             ]
             + scalar_acc_configs
+            + supplied
         )
 
         return self._finalize_configs(
@@ -462,18 +486,26 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             "max_autotune_pointwise"
         )
 
-        xblock_vals = self._persistent_xblock_vals()
-
-        if "y" not in size_hints:
-            configs = [
-                triton_config_reduction(
+        def make_config(x, y=None, **knobs):
+            if y is None:
+                return triton_config_reduction(
                     size_hints,
-                    xblock,
+                    x,
                     rnumel,
                     register_intensive=True,
                     reduction_hint=reduction_hint,
                     warp_size=warp_size,
+                    **knobs,
                 )
+            return triton_config_tiled_reduction(
+                size_hints, x, y, rnumel, warp_size=warp_size, **knobs
+            )
+
+        xblock_vals = self._persistent_xblock_vals()
+
+        if "y" not in size_hints:
+            configs = [
+                make_config(xblock)
                 for xblock in xblock_vals
                 if xblock == 1
                 or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
@@ -489,15 +521,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 block_sizes = _match_target_block_product(
                     size_hints, x_y_scores, target_block_size
                 )
-                configs.append(
-                    triton_config_tiled_reduction(
-                        size_hints,
-                        block_sizes["x"],
-                        block_sizes["y"],
-                        rnumel,
-                        warp_size=warp_size,
-                    )
-                )
+                configs.append(make_config(block_sizes["x"], block_sizes["y"]))
 
         tiny_configs = [
             triton_config_reduction(
@@ -537,6 +561,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     max_autotune_configs, tiny_configs
                 )
             )
+
+        supplied, replace = tuning_list.supplied_configs(inductor_meta, make_config)
+        configs = supplied if supplied and replace else configs + supplied
 
         for c in configs:
             for p in size_hints:
