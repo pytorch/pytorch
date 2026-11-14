@@ -440,7 +440,6 @@
   "test/inductor/test_memory_planning_pools.py",
   "test/inductor/test_metrics.py",
   "test/inductor/test_minifier.py",
-  "test/inductor/test_minifier_isolate.py",
   "test/inductor/test_mix_order_reduction.py",
   "test/inductor/test_mkldnn_pattern_matcher.py",
   "test/inductor/test_mmdecomp.py",
