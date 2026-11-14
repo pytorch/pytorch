@@ -76,6 +76,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import (
+    decorateIf,
     disable_gc,
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -160,6 +161,11 @@ class SingleCondModel(torch.nn.Module):
 class MooType:
     def __init__(self, x):
         self.x = x
+
+
+class MethodHolder:
+    def scale(self, x):
+        return x * 2
 
 
 class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
@@ -1723,6 +1729,24 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             compiled_fn.save_compiled_function(self.path())
         self.assertIn("Cfg", str(cm.exception))
 
+    def test_load_guards_state_inside_fake_mode(self):
+        def fn(x):
+            return x + 1
+
+        opts = {"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe}
+        compiled = torch.compile(fn, fullgraph=True, backend="eager", options=opts)
+        compiled = compiled.aot_compile(((torch.randn(3),), {}))
+        # The TENSOR_MATCH guard on x is rebuilt with from_meta_and_device, which
+        # rejects fakes; unpickling the meta template under the active mode
+        # would make one
+        with FakeTensorMode() as mode:
+            guards_state = load_guards_state(compiled._artifacts.guards_state)
+            fake_key = torch._C._TorchDispatchModeKey.FAKE
+            self.assertIs(torch._C._get_dispatch_mode(fake_key), mode)
+        x = guards_state.output_graph.local_scope["x"]
+        self.assertTrue(torch._subclasses.fake_tensor.is_fake_tensor(x))
+        self.assertEqual(x.device, torch.device("cpu"))
+
     def test_aot_compile_reloads_a_helpers_annotations(self):
         # The shipping path: an annotated helper reached through
         # runtime_env.closure keeps the annotations that pickle and drops the
@@ -1960,8 +1984,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertEqual(len([l for l in logs.output if "dropping" in l]), 2)
         self.assertTrue(any("helper.lock (lock)" in l for l in logs.output))
         self.assertTrue(any("base.lock (lock)" in l for l in logs.output))
-        if sys.version_info >= (3, 11):
-            self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
+        self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
         with open(self.path(), "rb") as f:
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(*inputs), expected)
@@ -2433,6 +2456,37 @@ from user code:
                     ]
                 },
             ).aot_compile(((torch.ones(3),), {}))
+
+    def test_aot_compile_user_method_code_guard(self):
+        # obj.scale(x) guards scale's __code__ on the class __dict__ source.
+        # skip_guard_on_globals_unsafe keeps that local-rooted guard, so it is
+        # saved as a code check, and the loaded artifact still enforces it.
+        def fn(obj, x):
+            return obj.scale(x) + 1
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        obj, x = MethodHolder(), torch.ones(3)
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend=backend,
+            options={"guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe},
+        ).aot_compile(((obj, x), {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(obj, x), fn(obj, x))
+
+        original = MethodHolder.scale.__code__
+        MethodHolder.scale.__code__ = (lambda self, x: x * 3).__code__
+        try:
+            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                loaded(obj, x)
+        finally:
+            MethodHolder.scale.__code__ = original
 
     def test_aot_compile_basic_fn_inductor(self):
         def fn(x, y):
@@ -9325,6 +9379,11 @@ from user code:
         )
         _run_in_subprocess(functools.partial(_subprocess_load_then_compile, path))
 
+    @decorateIf(
+        unittest.skip("inlined comprehensions are 3.12+"),
+        lambda params: params["mint_site"] == "comprehension"
+        and sys.version_info < (3, 12),
+    )
     @parametrize("mint_site", ("install_global", "resume_function", "comprehension"))
     def test_mint_skips_a_name_baked_in_by_another_process(self, mint_site):
         # A load in a fresh process binds names its own counter is still behind:
@@ -10972,28 +11031,102 @@ from user code:
 
     def test_a_recorded_gpu_device_type_arms_the_load_check(self):
         # What the flip from "cpu" to an accelerator buys, and what it costs: a
-        # recorded "cuda" is what makes check_compatibility compare the GPU
-        # name, so an artifact saved on one GPU is now refused on another, and
-        # the AOT load path calls this unguarded. Both names are fabricated --
-        # SystemInfo.current().gpu_name is None on a host without a GPU, which
-        # is a mismatch on one side of the check only -- and is_available is
-        # patched so the refusal under test is the GPU-name one there too.
-        here = dataclasses.replace(SystemInfo.current(), gpu_name="This GPU")
-        saved = dataclasses.replace(here, gpu_name="Some Other GPU")
+        # recorded "cuda" is what makes check_compatibility compare the GPU, so
+        # an artifact saved on one arch is now refused on another, and the AOT
+        # load path calls this unguarded. Both archs are fabricated, and
+        # is_available is patched so the refusal under test is the GPU one on a
+        # host without a GPU too.
+        saved = dataclasses.replace(
+            SystemInfo.current(), gpu_name="Saved GPU", gpu_arch=100, gpu_sm_count=132
+        )
+        here = dataclasses.replace(saved, gpu_name="This GPU", gpu_arch=90)
         with patch.object(torch.cuda, "is_available", return_value=True):
-            here.check_compatibility(saved, "cpu")
-            with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
-                here.check_compatibility(saved, "cuda")
-            # The two load paths pass the saved info in opposite positions (AOT
-            # as other, caching precompile as self). With both names known they
-            # agree; only the side passed as other is required to be known, so
-            # an unknown name splits them.
+            saved.check_compatibility(here, "cpu")
+            with self.assertRaisesRegex(RuntimeError, "created for a different GPU"):
+                saved.check_compatibility(here, "cuda")
+
+    def test_gpus_of_one_arch_and_sm_count_share_an_artifact(self):
+        saved = dataclasses.replace(
+            SystemInfo.current(),
+            gpu_name="NVIDIA GB300",
+            gpu_arch=103,
+            gpu_sm_count=148,
+        )
+        here = dataclasses.replace(saved, gpu_name="NVIDIA GB300 Max-Q")
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            saved.check_compatibility(here, "cuda")
+
+    def test_a_gpu_with_another_sm_count_refuses_the_artifact(self):
+        # A cooperative reduction sizes its grid from the SM count it was
+        # compiled for, and every block must be resident at once, so an H100
+        # artifact cannot launch on an H20 although both are sm_90.
+        saved = dataclasses.replace(
+            SystemInfo.current(),
+            gpu_name="NVIDIA H100",
+            gpu_arch=90,
+            gpu_sm_count=132,
+        )
+        here = dataclasses.replace(saved, gpu_name="NVIDIA H20", gpu_sm_count=78)
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            with self.assertRaisesRegex(RuntimeError, "132 SMs.*78 SMs"):
+                saved.check_compatibility(here, "cuda")
+
+    def test_an_unrecorded_gpu_arch_falls_back_to_the_gpu_name(self):
+        # A package written before the arch was recorded, or on XPU, which
+        # records none; a GPU name the package did not record is not compared.
+        saved = dataclasses.replace(
+            SystemInfo.current(), gpu_name="Saved GPU", gpu_arch=None
+        )
+        here = dataclasses.replace(saved, gpu_name="This GPU", gpu_arch=90)
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            saved.check_compatibility(
+                dataclasses.replace(here, gpu_name="Saved GPU"), "cuda"
+            )
             with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
                 saved.check_compatibility(here, "cuda")
-            unknown = dataclasses.replace(here, gpu_name=None)
+            dataclasses.replace(saved, gpu_name=None).check_compatibility(here, "cuda")
+            # A host whose device info could not be read records no name.
+            unread = dataclasses.replace(here, gpu_name=None, gpu_arch=None)
             with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
-                unknown.check_compatibility(saved, "cuda")
-            saved.check_compatibility(unknown, "cuda")
+                saved.check_compatibility(unread, "cuda")
+
+    def test_the_aot_load_check_names_the_saved_gpu_as_cached(self):
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        artifacts = compiled_fn.aot_compile(((torch.randn(3),), {}))._artifacts
+        current = dataclasses.replace(
+            artifacts.system_info, gpu_name="This GPU", gpu_arch=90, gpu_sm_count=132
+        )
+        saved = dataclasses.replace(current, gpu_name="Saved GPU", gpu_arch=100)
+        artifacts = dataclasses.replace(
+            artifacts, device_type="cuda", system_info=saved
+        )
+        with (
+            patch.object(torch.cuda, "is_available", return_value=True),
+            patch.object(SystemInfo, "current", return_value=current),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "cached=Saved GPU .*current=This GPU "
+            ):
+                AOTCompiledFunction(artifacts)
+
+    def test_a_python_patch_release_shares_an_artifact(self):
+        saved = dataclasses.replace(SystemInfo.current(), python_version="3.12.4")
+        saved.check_compatibility(dataclasses.replace(saved, python_version="3.12.9"))
+        alpha = dataclasses.replace(saved, python_version="3.14.0a3")
+        alpha.check_compatibility(alpha)
+        for package, other in [
+            (saved, "3.13.4"),
+            (saved, "3.12.0rc1"),
+            (alpha, "3.14.0b1"),
+        ]:
+            with self.subTest(other=other):
+                with self.assertRaisesRegex(RuntimeError, "different Python version"):
+                    package.check_compatibility(
+                        dataclasses.replace(package, python_version=other)
+                    )
 
     def test_a_recorded_device_the_host_lacks_refuses_the_compile(self):
         # __post_init__ runs at the end of a compile as well as on load, so the
@@ -11059,6 +11192,35 @@ from user code:
 
         for eg, cg in zip(eager_grads, compiled_grads):
             self.assertEqual(eg, cg)
+
+    def test_cross_aot_compile_parameter(self):
+        # The loaded guards must expect a Parameter where a fake Parameter was
+        # compiled, though that fake records no pytype
+        def fn(x, w):
+            return x @ w
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            fake_x = torch.randn(2, 4)
+            made_under_mode = torch.nn.Parameter(torch.randn(4, 4))
+        converted = fake_mode.from_tensor(torch.nn.Parameter(torch.randn(4, 4)))
+        fake_ws = {"made_under_mode": made_under_mode, "converted": converted}
+        for name, fake_w in fake_ws.items():
+            with self.subTest(name):
+                compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+                aot_fn = compiled_fn.aot_compile(((fake_x, fake_w), {}))
+                aot_fn.save_compiled_function(self.path())
+                torch._dynamo.reset()
+
+                with open(self.path(), "rb") as f:
+                    loaded_fn = torch.compiler.load_compiled_function(f)
+
+                x, w = torch.randn(2, 4), torch.nn.Parameter(torch.randn(4, 4))
+                self.assertEqual(loaded_fn(x, w), fn(x, w))
+                # Differs from w only in type
+                plain_w = w.detach().requires_grad_()
+                with self.assertRaisesRegex(RuntimeError, "expected type of"):
+                    loaded_fn(x, plain_w)
 
     @unittest.skipIf(not c10d.is_available(), "requires c10d")
     @unittest.skipIf(not HAS_GPU, "requires gpu")

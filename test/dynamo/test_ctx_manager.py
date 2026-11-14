@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import inspect
+import operator
 import sys
 import unittest
 from collections import defaultdict
 from contextlib import contextmanager
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -14,6 +16,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
     same,
+    skipIfNotPy312,
 )
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
@@ -53,6 +56,10 @@ def set_default_dtype(dtype):
         torch.set_default_dtype(old_dtype)
 
 
+class Boom(Exception):
+    pass
+
+
 class CustomizedCtxManager:
     def __init__(self, mode):
         self.prev = torch.is_grad_enabled()
@@ -88,6 +95,11 @@ def customized_ctx_manager_with_graph_break(mode):
         yield torch._C._set_grad_enabled(mode)
     finally:
         torch._C._set_grad_enabled(prev)
+
+
+def _graph_break(x):
+    torch._dynamo.graph_break()
+    return x
 
 
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
@@ -140,6 +152,246 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.testing.standard_test(
                 self, fn=fn4, nargs=2, expected_ops=3
             )  # coalesced noop
+
+    def _check_filtered_comprehension(self, fn, args, requires_grad, result=None):
+        # Compile fn, run it twice (compile and cache hit), and check that the
+        # adds traced in its resume function ran under the restored context.
+        expected = fn(*args)
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        before = torch.is_grad_enabled()
+        num_graphs = []
+        for _ in range(2):
+            actual = compiled(*args)
+            num_graphs.append(len(backend.graphs))
+            self.assertEqual(actual, expected)
+            out = actual if result is None else result(actual)
+            self.assertEqual(out.requires_grad, requires_grad)
+            self.assertEqual(torch.is_grad_enabled(), before)
+        self.assertEqual(num_graphs[0], num_graphs[1])
+        adds = [
+            node
+            for graph in backend.graphs
+            for node in graph.graph.nodes
+            if node.op == "call_function"
+            and node.target is operator.add
+            and "resume_in_fn" in node.meta.get("stack_trace", "")
+        ]
+        self.assertTrue(adds)
+        for node in adds:
+            self.assertEqual(node.meta["example_value"].requires_grad, requires_grad)
+
+    # The profiling=True variants rely on record_function being traced as a
+    # no-op; with capture on, a graph break inside it is unsupported.
+    @parametrize("profiling", (False, True))
+    @parametrize("none_filter", (False, True))
+    @torch._dynamo.config.patch(capture_profiler_record_function=False)
+    def test_filtered_comprehension_context_graph_break(self, profiling, none_filter):
+        def fn(x, xs, flags):
+            ctx = (
+                torch.profiler.record_function("filtered_comprehension")
+                if profiling
+                else torch.no_grad()
+            )
+            with ctx:
+                if none_filter:
+                    idx = [i for i in range(len(xs)) if flags[i] is not None]
+                else:
+                    idx = [i for i in range(len(xs)) if i >= 1]
+                ys = [xs[i] for i in idx]
+                x = _graph_break(x) + sum(ys)
+            return x
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.randn(4, requires_grad=True) for _ in range(3)]
+        # Grad mode cannot show a lost scope for profiling=True. This variant
+        # checks that the resume function runs: with the scope dropped it
+        # raises TypeError from nullcontext.__init__.
+        self._check_filtered_comprehension(fn, (x, xs, [None, True, None]), profiling)
+
+    def test_filtered_comprehension_nested_context_graph_break(self):
+        def fn(x, xs):
+            with torch.no_grad():
+                with torch.enable_grad():
+                    idx = [i for i in range(len(xs)) if i >= 1]
+                    ys = [xs[i] for i in idx]
+                    return _graph_break(x) + sum(ys)
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.randn(4, requires_grad=True) for _ in range(3)]
+        self._check_filtered_comprehension(fn, (x, xs), True)
+
+    def test_filtered_comprehension_context_data_dependent_filter(self):
+        # The data-dependent filter graph-breaks inside the comprehension, at
+        # the restored jump. The elements must still be computed under no_grad.
+        def fn(x, ts):
+            with torch.no_grad():
+                ys = [t * 2 for t in ts if t.sum() > 0]
+                x = x + sum(ys)
+            return x, ys
+
+        x = torch.randn(4, requires_grad=True)
+        ts = [torch.ones(4, requires_grad=True) * s for s in (1, -1, 2)]
+        expected = fn(x, ts)
+        compiled = torch.compile(fn, backend="eager")
+        before = torch.is_grad_enabled()
+        for _ in range(2):
+            actual = compiled(x, ts)
+            self.assertEqual(actual, expected)
+            self.assertFalse(actual[0].requires_grad)
+            self.assertEqual([y.requires_grad for y in actual[1]], [False, False])
+            self.assertEqual(torch.is_grad_enabled(), before)
+
+    def test_filtered_comprehension_context_exception(self):
+        class Predicate:
+            def __bool__(self):
+                raise ValueError("filter failed")
+
+        def fn(x, flags):
+            # The comprehension's cleanup handler, whose entry the restored
+            # jump gets, must restore the outer i before the ValueError
+            # reaches the except.
+            i = 7
+            with torch.no_grad():
+                try:
+                    idx = [i for i in range(len(flags)) if flags[i]]
+                except ValueError:
+                    idx = [0]
+                ys = [x for i in idx]
+                torch._dynamo.graph_break()
+                x = x + sum(ys)
+            return x, i
+
+        x = torch.randn(4, requires_grad=True)
+        self._check_filtered_comprehension(
+            fn, (x, [Predicate()]), False, result=lambda out: out[0]
+        )
+
+    def test_loop_trailing_if_nested_context_graph_break(self):
+        def fn(x, xs):
+            with torch.no_grad():
+                with torch.enable_grad():
+                    n = 0
+                    for t in xs:
+                        if t is not None:
+                            n += 1
+                    torch._dynamo.graph_break()
+                    return x * n
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [None, x, None, x]
+        expected = fn(x, xs)
+        backend = EagerAndRecordGraphs()
+        actual = torch.compile(fn, backend=backend)(x, xs)
+        self.assertEqual(actual, expected)
+        self.assertTrue(actual.requires_grad)
+        self.assertTrue(torch.is_grad_enabled())
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_comprehension_graph_break_under_context_keeps_capture(self):
+        def gb(t):
+            torch._dynamo.graph_break()
+            return t
+
+        def fn(x, xs):
+            t = 42
+            with torch.no_grad():
+                keep = [gb(t) * x for t in xs]
+                y = torch.sin(x)
+            return keep, y, t
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.ones(4), 2 * torch.ones(4)]
+        expected = fn(x, xs)
+        backend = EagerAndRecordGraphs()
+        actual = torch.compile(fn, backend=backend)(x, xs)
+        self.assertEqual(actual, expected)
+        self.assertEqual([t.requires_grad for t in actual[0]], [False, False])
+        self.assertFalse(actual[1].requires_grad)
+        self.assertEqual(actual[2], 42)
+        self.assertTrue(
+            any(
+                node.target is torch.sin
+                for graph in backend.graphs
+                for node in graph.graph.nodes
+            )
+        )
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_filtered_comprehension_caller_context_nested_graph_break(self):
+        def inner(x, xs):
+            return [t * x for t in xs if t.sum() > 0]
+
+        def fn(x, xs):
+            with torch.no_grad():
+                keep = inner(x, xs)
+                w = x + 1
+            return [w] + keep
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.ones(4), -torch.ones(4)]
+        expected = fn(x, xs)
+        actual = torch.compile(fn, backend="eager")(x, xs)
+        self.assertEqual(actual, expected)
+        self.assertEqual([t.requires_grad for t in actual], [False, False])
+
+    def test_comprehension_graph_break_exception_restores_context(self):
+        def check(t):
+            torch._dynamo.graph_break()
+            if t.sum() < 0:
+                raise Boom("negative")
+            return t
+
+        def fn(x, xs):
+            with torch.no_grad():
+                return [check(t) * x for t in xs]
+
+        x = torch.randn(4, requires_grad=True)
+        compiled = torch.compile(fn, backend="eager")
+        out = compiled(x, [torch.ones(4)])
+        self.assertEqual([t.requires_grad for t in out], [False])
+        with self.assertRaisesRegex(Boom, "negative"):
+            compiled(x, [torch.ones(4), -torch.ones(4)])
+        self.assertTrue(torch.is_grad_enabled())
+
+    def test_filtered_comprehension_graph_break_in_try(self):
+        def check(t):
+            if t.numel() > 3:
+                raise Boom("too big")
+            return t
+
+        def fn(x, xs):
+            try:
+                keep = [check(t) * x for t in xs if t.sum() > 0]
+            except Boom:
+                keep = []
+            return keep
+
+        x = torch.randn(4)
+        xs = [torch.ones(4), -torch.ones(4)]
+        self.assertEqual(torch.compile(fn, backend="eager")(x, xs), [])
+
+    def test_filtered_comprehension_graph_break_try_in_context(self):
+        def check(t):
+            if t.numel() > 3:
+                raise Boom("too big")
+            return t
+
+        def fn(x, xs):
+            with torch.no_grad():
+                try:
+                    keep = [check(t) * x for t in xs if t.sum() > 0]
+                except Boom:
+                    keep = []
+                y = x * 2
+            return keep, y
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.ones(4), -torch.ones(4)]
+        actual = torch.compile(fn, backend="eager")(x, xs)
+        self.assertEqual(actual, fn(x, xs))
+        self.assertFalse(actual[1].requires_grad)
+        self.assertTrue(torch.is_grad_enabled())
 
     def test_grad_mode_guard(self):
         def fn(a, b):
@@ -3056,6 +3308,232 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(res[1].dtype == torch.float16)
 
 
+@skipIfNotPy312
+class ComprehensionGeneratorTests(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    @parametrize("caller", [False, True])
+    @parametrize("retained", [False, True])
+    @parametrize("effect", ["constant", "context"])
+    def test_finalizer_order(self, device, caller, retained, effect):
+        def delayed(state, events):
+            try:
+                events.append("yield")
+                yield 1
+            finally:
+                events.append("finalize")
+                state["flag"] = 7
+                if effect == "context":
+                    ctx = torch.no_grad()
+                    state["ctx"] = ctx
+                    state["alias"] = ctx
+
+        def inner(x, xs, state, events):
+            events.append("prefix")
+            prefix = x.sin()
+            ys = [t * x + state["flag"] for t in xs if t.sum() > 0]
+            tail = x.cos()
+            events.append("tail")
+            return prefix, ys, tail, state["flag"], torch.is_grad_enabled()
+
+        def fn(x, xs, state, events):
+            gen = delayed(state, events)
+            next(gen)
+            if retained:
+                state["gen"] = gen
+                state["gen_alias"] = gen
+            if caller:
+                result = inner(x, xs, state, events)
+            else:
+                events.append("prefix")
+                prefix = x.sin()
+                ys = [t * x + state["flag"] for t in xs if t.sum() > 0]
+                tail = x.cos()
+                events.append("tail")
+                result = prefix, ys, tail, state["flag"], torch.is_grad_enabled()
+            return result
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        previous_ctx = None
+        warm_graphs = None
+        xs = [torch.ones(4, device=device), -torch.ones(4, device=device)]
+        for value in (1.0, 2.0):
+            x = torch.full((4,), value, device=device, dtype=torch.float64)
+            x.requires_grad_()
+            eager_x = x.detach().clone().requires_grad_()
+            expected_state = {"flag": 0}
+            expected_events = []
+            expected = fn(eager_x, xs, expected_state, expected_events)
+            state = {"flag": 0}
+            events = []
+            actual = compiled(x, xs, state, events)
+            if retained:
+                expected_state["gen"].close()
+                state["gen"].close()
+                self.assertEqual(type(state["gen"]).__name__, "generator")
+                self.assertIs(state["gen"], state["gen_alias"])
+            self.assertEqual(actual, expected)
+            self.assertEqual(events, ["yield", "prefix", "tail", "finalize"])
+            self.assertEqual(events, expected_events)
+            self.assertEqual(state["flag"], expected_state["flag"])
+            self.assertEqual(actual[3], 0)
+            self.assertTrue(actual[4])
+            self.assertTrue(torch.is_grad_enabled())
+            sum(t.sum() for t in [expected[0], *expected[1], expected[2]]).backward()
+            sum(t.sum() for t in [actual[0], *actual[1], actual[2]]).backward()
+            self.assertEqual(x.grad, eager_x.grad)
+            if effect == "context":
+                self.assertIsInstance(state["ctx"], torch.no_grad)
+                self.assertIs(state["ctx"], state["alias"])
+                self.assertIsNot(state["ctx"], previous_ctx)
+                previous_ctx = state["ctx"]
+            if warm_graphs is None:
+                warm_graphs = len(backend.graphs)
+            else:
+                self.assertEqual(len(backend.graphs), warm_graphs)
+        if not caller:
+            self.assertEqual(len(backend.graphs), 0)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    @parametrize("lifecycle", ["created", "exhausted", "closed"])
+    def test_finished_generator_keeps_capture(self, device, lifecycle):
+        def delayed(state):
+            try:
+                yield 1
+            finally:
+                state["flag"] = 7
+
+        def fn(x, xs, state):
+            gen = delayed(state)
+            if lifecycle != "created":
+                next(gen)
+                if lifecycle == "closed":
+                    gen.close()
+                else:
+                    next(gen, None)
+            prefix = x.sin()
+            ys = [t * x + state["flag"] for t in xs if t.sum() > 0]
+            return prefix, ys, x.cos(), state["flag"]
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        xs = [torch.ones(4, device=device), -torch.ones(4, device=device)]
+        warm_graphs = None
+        for value in (1.0, 2.0):
+            x = torch.full((4,), value, device=device, dtype=torch.float64)
+            x.requires_grad_()
+            expected_state = {"flag": 0}
+            expected = fn(x, xs, expected_state)
+            state = {"flag": 0}
+            actual = compiled(x, xs, state)
+            self.assertEqual(actual, expected)
+            self.assertEqual(state, expected_state)
+            self.assertTrue(torch.is_grad_enabled())
+            if warm_graphs is None:
+                warm_graphs = len(backend.graphs)
+            else:
+                self.assertEqual(len(backend.graphs), warm_graphs)
+        targets = {n.target for gm in backend.graphs for n in gm.graph.nodes}
+        self.assertIn("sin", targets)
+        self.assertIn("cos", targets)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    @parametrize("retained", [False, True])
+    def test_raising_finalizer_dispatch(self, device, retained):
+        def delayed(state):
+            try:
+                yield 1
+            finally:
+                state["flag"] += 1
+                raise Boom("finalizer")
+
+        def fn(x, xs, state):
+            gen = delayed(state)
+            next(gen)
+            if retained:
+                state["gen"] = gen
+            prefix = x.sin()
+            ys = [t * x + state["flag"] for t in xs if t.sum() > 0]
+            return prefix, ys, state["flag"]
+
+        x = torch.ones(4, device=device)
+        xs = [x]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        unraisable = []
+
+        def collect(error):
+            unraisable.append((error.exc_type, str(error.exc_value)))
+
+        with mock.patch.object(sys, "unraisablehook", collect):
+            for call in (fn, compiled):
+                state = {"flag": 0}
+                result = call(x, xs, state)
+                self.assertEqual(result[1], [x])
+                self.assertEqual(result[2], 0)
+                if retained:
+                    with self.assertRaisesRegex(Boom, "finalizer"):
+                        state["gen"].close()
+                self.assertEqual(state["flag"], 1)
+        self.assertEqual(unraisable, [] if retained else [(Boom, "finalizer")] * 2)
+        self.assertEqual(len(backend.graphs), 0)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    @parametrize("fullgraph", [False, True])
+    def test_traceable_comprehension_generator_keeps_capture(self, device, fullgraph):
+        def delayed(state):
+            try:
+                yield 1
+            finally:
+                state["flag"] += 1
+
+        def fn(x, xs, state):
+            gen = delayed(state)
+            next(gen)
+            prefix = x.sin()
+            ys = [t * x for t in xs]
+            return prefix, ys, x.cos(), state["flag"]
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        expected_state = {"flag": 0}
+        expected = fn(x, [x], expected_state)
+        state = {"flag": 0}
+        backend = EagerAndRecordGraphs()
+        actual = torch.compile(fn, backend=backend, fullgraph=fullgraph)(x, [x], state)
+        self.assertEqual(actual, expected)
+        self.assertEqual(state, expected_state)
+        self.assertEqual(state["flag"], 1)
+        targets = {n.target for gm in backend.graphs for n in gm.graph.nodes}
+        self.assertIn("sin", targets)
+        self.assertIn("cos", targets)
+        self.assertTrue(torch.is_grad_enabled())
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_fullgraph_does_not_replay_finalizer(self, device):
+        def delayed(state):
+            try:
+                yield 1
+            finally:
+                state["flag"] = 7
+
+        def fn(x, xs, state):
+            gen = delayed(state)
+            next(gen)
+            prefix = x.sin()
+            ys = [t * x for t in xs if t.sum() > 0]
+            return prefix, ys
+
+        x = torch.ones(4, device=device)
+        state = {"flag": 0}
+        backend = EagerAndRecordGraphs()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Data-dependent branching"
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, [x], state)
+        self.assertEqual(state, {"flag": 0})
+        self.assertEqual(len(backend.graphs), 0)
+
+
 class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
     def test_stream_context_manager1(self, device):
         def fn(x):
@@ -4560,6 +5038,7 @@ class GraphModule(torch.nn.Module):
 
 instantiate_parametrized_tests(CtxManagerTests)
 instantiate_parametrized_tests(ContextlibContextManagerTests)
+instantiate_device_type_tests(ComprehensionGeneratorTests, globals(), allow_xpu=True)
 instantiate_device_type_tests(
     CtxManagerTestsDevice, globals(), except_for=("cpu",), allow_xpu=True
 )

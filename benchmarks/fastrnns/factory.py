@@ -3,7 +3,7 @@ from collections import namedtuple
 import torch
 from torch import Tensor
 
-from .cells import flat_lstm_cell, lstm_cell, premul_lstm_cell, premul_lstm_cell_no_bias
+from .cells import lstm_cell
 
 
 # list[list[T]] -> list[T]
@@ -66,131 +66,22 @@ def pytorch_lstm_creator(**kwargs):
     )
 
 
-def lstm_creator(script=True, **kwargs):
+def lstm_creator(**kwargs):
     input, hidden, params, _ = lstm_inputs(return_module=False, **kwargs)
     inputs = [input, hidden] + params[0]
     return ModelDef(
         inputs=inputs,
         params=flatten_list(params),
-        forward=lstm_factory(lstm_cell, script),
+        forward=lstm_factory(lstm_cell),
         backward_setup=lstm_backward_setup,
         backward=simple_backward,
     )
 
 
-def lnlstm_creator(script=True, decompose_layernorm=False, **kwargs):
-    if script is not True:
-        raise AssertionError("lnlstm_creator requires script=True")
-    from .custom_lstms import script_lnlstm
-
-    input_size = kwargs["inputSize"]
-    hidden_size = kwargs["hiddenSize"]
-    seq_len = kwargs["seqLength"]
-    batch_size = kwargs["miniBatch"]
-    ge = script_lnlstm(
-        input_size, hidden_size, 1, decompose_layernorm=decompose_layernorm
-    ).cuda()
-
-    input = torch.randn(seq_len, batch_size, input_size, device="cuda")
-    states = [
-        (
-            torch.randn(batch_size, hidden_size, device="cuda"),
-            torch.randn(batch_size, hidden_size, device="cuda"),
-        )
-    ]
-
-    return ModelDef(
-        inputs=[input, states],
-        params=ge.parameters(),
-        forward=ge,
-        backward_setup=lstm_backward_setup,
-        backward=simple_backward,
-    )
-
-
-def dropoutlstm_creator(script=True, **kwargs):
-    if script is not True:
-        raise AssertionError("dropoutlstm_creator requires script=True")
-    from .custom_lstms import LSTMState, script_lstm
-
-    input_size = kwargs["inputSize"]
-    hidden_size = kwargs["hiddenSize"]
-    seq_len = kwargs["seqLength"]
-    batch_size = kwargs["miniBatch"]
-    num_layers = kwargs["numLayers"]
-    ge = script_lstm(input_size, hidden_size, num_layers, dropout=True).cuda()
-
-    input = torch.randn(seq_len, batch_size, input_size, device="cuda")
-    states = [
-        LSTMState(
-            torch.randn(batch_size, hidden_size, device="cuda"),
-            torch.randn(batch_size, hidden_size, device="cuda"),
-        )
-        for _ in range(num_layers)
-    ]
-    return ModelDef(
-        inputs=[input, states],
-        params=ge.parameters(),
-        forward=ge,
-        backward_setup=lstm_backward_setup,
-        backward=simple_backward,
-    )
-
-
-def lstm_premul_creator(script=True, **kwargs):
-    input, hidden, params, _ = lstm_inputs(return_module=False, **kwargs)
-    inputs = [input, hidden] + params[0]
-    return ModelDef(
-        inputs=inputs,
-        params=flatten_list(params),
-        forward=lstm_factory_premul(premul_lstm_cell, script),
-        backward_setup=lstm_backward_setup,
-        backward=simple_backward,
-    )
-
-
-def lstm_premul_bias_creator(script=True, **kwargs):
-    input, hidden, params, _ = lstm_inputs(return_module=False, **kwargs)
-    inputs = [input, hidden] + params[0]
-    return ModelDef(
-        inputs=inputs,
-        params=flatten_list(params),
-        forward=lstm_factory_premul_bias(premul_lstm_cell_no_bias, script),
-        backward_setup=lstm_backward_setup,
-        backward=simple_backward,
-    )
-
-
-def lstm_simple_creator(script=True, **kwargs):
-    input, hidden, params, _ = lstm_inputs(return_module=False, **kwargs)
-    inputs = [input] + [h[0] for h in hidden] + params[0]
-    return ModelDef(
-        inputs=inputs,
-        params=flatten_list(params),
-        forward=lstm_factory_simple(flat_lstm_cell, script),
-        backward_setup=lstm_backward_setup,
-        backward=simple_backward,
-    )
-
-
-def lstm_multilayer_creator(script=True, **kwargs):
-    input, hidden, params, _ = lstm_inputs(return_module=False, **kwargs)
-    inputs = [input, hidden, flatten_list(params)]
-    return ModelDef(
-        inputs=inputs,
-        params=flatten_list(params),
-        forward=lstm_factory_multilayer(lstm_cell, script),
-        backward_setup=lstm_backward_setup,
-        backward=simple_backward,
-    )
-
-
-def imagenet_cnn_creator(arch, jit=True):
+def imagenet_cnn_creator(arch):
     def creator(device="cuda", **kwargs):
         model = arch().to(device)
         x = torch.randn(32, 3, 224, 224, device=device)
-        if jit:
-            model = torch.jit.trace(model, x)
         return ModelDef(
             inputs=(x,),
             params=list(model.parameters()),
@@ -265,7 +156,7 @@ def varlen_pytorch_lstm_creator(**kwargs):
     )
 
 
-def varlen_lstm_factory(cell, script):
+def varlen_lstm_factory(cell):
     def dynamic_rnn(
         sequences: list[Tensor],
         hiddens: tuple[Tensor, Tensor],
@@ -298,20 +189,18 @@ def varlen_lstm_factory(cell, script):
 
         return outputs, (hx_outs, cx_outs)
 
-    if script:
-        cell = torch.jit.script(cell)
-        dynamic_rnn = torch.jit.script(dynamic_rnn)
-
     return dynamic_rnn
 
 
-def varlen_lstm_creator(script=False, **kwargs):
+def varlen_lstm_creator(**kwargs):
+    if "script" in kwargs:
+        raise TypeError("varlen_lstm_creator() does not support 'script'")
     sequences, _, hidden, params, _ = varlen_lstm_inputs(return_module=False, **kwargs)
     inputs = [sequences, hidden] + params[0]
     return ModelDef(
         inputs=inputs,
         params=flatten_list(params),
-        forward=varlen_lstm_factory(lstm_cell, script),
+        forward=varlen_lstm_factory(lstm_cell),
         backward_setup=varlen_lstm_backward_setup,
         backward=simple_backward,
     )
@@ -409,7 +298,7 @@ def lstm_inputs(
         return x, (hx, cx), lstm.all_weights, None
 
 
-def lstm_factory(cell, script):
+def lstm_factory(cell):
     def dynamic_rnn(
         input: Tensor,
         hidden: tuple[Tensor, Tensor],
@@ -427,113 +316,14 @@ def lstm_factory(cell, script):
             outputs += [hy]
         return torch.stack(outputs), (hy.unsqueeze(0), cy.unsqueeze(0))
 
-    if script:
-        cell = torch.jit.script(cell)
-        dynamic_rnn = torch.jit.script(dynamic_rnn)
-
     return dynamic_rnn
 
 
 # premul: we're going to premultiply the inputs & weights
-def lstm_factory_premul(premul_cell, script):
-    def dynamic_rnn(
-        input: Tensor,
-        hidden: tuple[Tensor, Tensor],
-        w_ih: Tensor,
-        w_hh: Tensor,
-        b_ih: Tensor,
-        b_hh: Tensor,
-    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
-        hx, cx = hidden
-        outputs = []
-        inputs = torch.matmul(input, w_ih.t()).unbind(0)
-        hy, cy = hx[0], cx[0]
-        for seq_idx in range(len(inputs)):
-            hy, cy = premul_cell(inputs[seq_idx], (hy, cy), w_hh, b_ih, b_hh)
-            outputs += [hy]
-        return torch.stack(outputs), (hy.unsqueeze(0), cy.unsqueeze(0))
-
-    if script:
-        premul_cell = torch.jit.script(premul_cell)
-        dynamic_rnn = torch.jit.script(dynamic_rnn)
-
-    return dynamic_rnn
 
 
 # premul: we're going to premultiply the inputs & weights, and add bias
-def lstm_factory_premul_bias(premul_cell, script):
-    def dynamic_rnn(
-        input: Tensor,
-        hidden: tuple[Tensor, Tensor],
-        w_ih: Tensor,
-        w_hh: Tensor,
-        b_ih: Tensor,
-        b_hh: Tensor,
-    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
-        hx, cx = hidden
-        outputs = []
-        inpSize = input.size()
-        # add bias for all timesteps instead of going step-by-step, results in a single reduction kernel in the backward
-        # FIXME matmul(x,y) + bias currently goes through jit AD, and backward formula in AD is not optimized for this
-        # case. Workaround with mm and views.
-        inpSize = input.size()
-        inputs = torch.mm(input.view(-1, inpSize[2]), w_ih.t()) + b_ih
-        inputs = inputs.view(inpSize[0], inpSize[1], -1).unbind(0)
-        hy, cy = hx[0], cx[0]
-        for seq_idx in range(len(inputs)):
-            hy, cy = premul_cell(inputs[seq_idx], (hy, cy), w_hh, b_hh)
-            outputs += [hy]
-        return torch.stack(outputs), (hy.unsqueeze(0), cy.unsqueeze(0))
-
-    if script:
-        premul_cell = torch.jit.script(premul_cell)
-        dynamic_rnn = torch.jit.script(dynamic_rnn)
-
-    return dynamic_rnn
 
 
 # simple: flat inputs (no tuples), no list to accumulate outputs
 #         useful mostly for benchmarking older JIT versions
-def lstm_factory_simple(cell, script):
-    def dynamic_rnn(input, hx, cx, w_ih, w_hh, b_ih, b_hh):
-        hy = hx  # for scoping
-        cy = cx  # for scoping
-        inputs = input.unbind(0)
-        for seq_idx in range(len(inputs)):
-            hy, cy = cell(inputs[seq_idx], hy, cy, w_ih, w_hh, b_ih, b_hh)
-        return hy, cy
-
-    if script:
-        cell = torch.jit.script(cell)
-        dynamic_rnn = torch.jit.script(dynamic_rnn)
-
-    return dynamic_rnn
-
-
-def lstm_factory_multilayer(cell, script):
-    def dynamic_rnn(
-        input: Tensor, hidden: tuple[Tensor, Tensor], params: list[Tensor]
-    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
-        params_stride = 4  # NB: this assumes that biases are there
-        hx, cx = hidden
-        hy, cy = hidden  # for scoping...
-        inputs, outputs = input.unbind(0), []
-        for layer in range(hx.size(0)):
-            hy = hx[layer]
-            cy = cx[layer]
-            base_idx = layer * params_stride
-            w_ih = params[base_idx]
-            w_hh = params[base_idx + 1]
-            b_ih = params[base_idx + 2]
-            b_hh = params[base_idx + 3]
-            for seq_idx in range(len(inputs)):
-                hy, cy = cell(inputs[seq_idx], (hy, cy), w_ih, w_hh, b_ih, b_hh)
-                outputs += [hy]
-            inputs, outputs = outputs, []
-        return torch.stack(inputs), (hy.unsqueeze(0), cy.unsqueeze(0))
-
-    if script:
-        cell = torch.jit.script(cell)
-        dynamic_rnn = torch.jit.script(dynamic_rnn)
-
-    return dynamic_rnn

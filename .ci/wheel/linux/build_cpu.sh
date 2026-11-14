@@ -4,7 +4,6 @@
 
 set -ex
 
-export TH_BINARY_BUILD=1
 export USE_CUDA=0
 
 # Keep an array of cmake variables to add to

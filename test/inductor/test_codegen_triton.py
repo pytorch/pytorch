@@ -7,7 +7,7 @@ import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import sympy
 
@@ -61,7 +61,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
     TRITON_HAS_CPU,
 )
-from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
+from torch.utils._sympy.functions import FloorDiv, Identity, TruncToFloat, TruncToInt
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
@@ -424,6 +424,11 @@ class TestCodegenTriton(InductorTestCase):
         with patch("builtins.repr") as repr_mock:
             self.assertEqual(get_importable_constexpr_types([{"values": [1, 2]}]), [])
         repr_mock.assert_not_called()
+
+    def test_importable_constexpr_types_skip_namedtuple(self):
+        # NamedTuples go through namedtuple_helpers, not user-module imports.
+        Pair = namedtuple("Pair", ["x", "y"])
+        self.assertEqual(get_importable_constexpr_types([Pair(1, 2)]), [])
 
     def test_importable_constexpr_types_reserved_name_error(self):
         with self.assertRaisesRegex(ImportError, "import name tl.*reserved"):
@@ -1415,6 +1420,47 @@ def helper(x):
             sympy.Float(0.5) + TruncToFloat(s0),
         )
 
+    @parametrize("scheduled", [False, True])
+    @parametrize(
+        "shape, stride, expected",
+        [
+            ((32, 32), (32, 1), True),
+            ((2**30 - 1,), (1,), True),
+            ((2**30,), (1,), False),
+            ((2,), (2**30,), False),
+        ],
+    )
+    def test_constant_pointer_range_survives_scheduling(
+        self, scheduled, shape, stride, expected
+    ):
+        self._graph.constants["weight"] = torch.empty_strided(
+            shape, stride, dtype=torch.float16, device="meta"
+        )
+        scheduler = Mock()
+        scheduler.get_buffer_layout.side_effect = KeyError("weight")
+        arg = TensorArg(name="in_ptr0", buffer="weight", dtype=torch.float16)
+
+        with patch.object(self._graph, "scheduler", scheduler if scheduled else None):
+            self.assertEqual(triton_utils._is_tensor_within_2gb(arg), expected)
+
+    @parametrize("scheduled", [False, True])
+    @parametrize(
+        "storage_numel, expected",
+        [(2**30 - 1, True), (2**30, False), (2**30 + 1, False)],
+    )
+    def test_constant_pointer_range_checks_backing_storage(
+        self, scheduled, storage_numel, expected
+    ):
+        self._graph.constants["weight"] = torch.empty(
+            storage_numel, dtype=torch.float16, device="meta"
+        )[:32]
+        scheduler = Mock()
+        scheduler.get_buffer_layout.side_effect = KeyError("weight")
+        arg = TensorArg(name="in_ptr0", buffer="weight", dtype=torch.float16)
+
+        with patch.object(self._graph, "scheduler", scheduler if scheduled else None):
+            self.assertEqual(triton_utils._is_tensor_within_2gb(arg), expected)
+
     @inductor_config.patch("triton.emit_pointer_range_32", True)
     def test_config_of_emit_pointer_range_32_enabled(self):
         from torch._inductor.utils import (
@@ -1481,6 +1527,182 @@ def helper(x):
         code_str = " ".join(code)
         self.assertIn("tt.pointer_range", code_str)
 
+    def _pointwise_kernel(self, numel=12):
+        with self._graph.set_current_device(torch.device("cpu")):
+            return TritonKernel(
+                {"x": sympy.Integer(numel)},
+                features=SIMDKernelFeatures([], sympy.Integer(numel)),
+            )
+
+    def test_record_negative_offset_non_hip(self):
+        kernel = self._pointwise_kernel()
+        self._graph.inputs_with_negative_as_strided_offset.add("arg0")
+        with (
+            patch.object(torch.version, "hip", None),
+            patch.object(
+                sympy, "expand", side_effect=AssertionError("unexpected expand")
+            ),
+        ):
+            kernel._record_negative_offset("arg0", sympy.Integer(-6))
+        self.assertFalse(kernel.negative_offset_found)
+
+    @parametrize("rebased", [False, True])
+    @parametrize("index", [-6, None])
+    def test_record_negative_offset_rebase(self, rebased, index):
+        kernel = self._pointwise_kernel()
+        if rebased:
+            self._graph.inputs_with_negative_as_strided_offset.add("arg0")
+        # None stands for an index only known at runtime, as in bucketize.
+        index = None if index is None else sympy.Integer(index)
+        with patch.object(torch.version, "hip", "test"):
+            kernel._record_negative_offset("arg0", index)
+        self.assertEqual(kernel.negative_offset_found, rebased)
+
+    @parametrize("precomputed", [False, True])
+    def test_record_negative_offset_symbolic_rebase(self, precomputed):
+        kernel = self._pointwise_kernel()
+        size = make_symbol(SymT.SIZE, 0)
+        self._graph.sizevars.shape_env.var_to_range[size] = ValueRanges(6, 12)
+        self._graph.inputs_with_negative_as_strided_offset.add("arg0")
+        offset = size + 1
+        if precomputed:
+            offset = self._graph.sizevars.lookup_precomputed_size(offset)
+        with kernel, patch.object(torch.version, "hip", "test"):
+            x = kernel.range_trees[0].full_range().symbol()
+            # x + offset - 2 has a negative term but is at least 5, which only
+            # the bounds analysis on the replaced precomputed size can show.
+            for index in (x + offset, x + offset - 2):
+                kernel._record_negative_offset("arg0", index)
+                self.assertFalse(kernel.negative_offset_found)
+            kernel._record_negative_offset("arg0", x - offset)
+            self.assertTrue(kernel.negative_offset_found)
+
+    def test_record_negative_offset_constant_identity(self):
+        kernel = self._pointwise_kernel()
+        self._graph.inputs_with_negative_as_strided_offset.add("arg0")
+        with patch.object(torch.version, "hip", "test"):
+            kernel._record_negative_offset("arg0", Identity(sympy.Integer(-6)) + 1)
+        self.assertTrue(kernel.negative_offset_found)
+
+    def test_record_negative_offset_store_to_mutated_input(self):
+        kernel = self._pointwise_kernel()
+        self._graph.inputs_with_negative_as_strided_offset.add("arg0")
+        scheduler = MagicMock(mutation_real_name={"buf0": "arg0"})
+        with (
+            patch.object(self._graph, "scheduler", scheduler),
+            patch.object(torch.version, "hip", "test"),
+        ):
+            kernel._record_negative_offset("buf0", sympy.Integer(-6))
+        self.assertTrue(kernel.negative_offset_found)
+
+    @parametrize("hip", [None, "test"])
+    @parametrize("offset", [0, 6, 7])
+    def test_negative_as_strided_rebase_marker(self, hip, offset):
+        from torch._inductor.lowering import as_strided
+
+        x = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="arg0",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"), torch.float32, [sympy.Integer(6)]
+                ),
+            )
+        )
+        self._graph.graph_input_storage_offsets["arg0"] = sympy.Integer(6)
+        with patch.object(torch.version, "hip", hip):
+            as_strided(x, [sympy.Integer(6)], [sympy.Integer(1)], offset)
+        self.assertEqual(
+            "arg0" in self._graph.inputs_with_negative_as_strided_offset,
+            hip is not None and offset < 6,
+        )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch("triton.emit_pointer_range_32", True)
+    @parametrize(
+        "case", ["pad", "as_strided", "masked_as_strided", "elementwise", "cat"]
+    )
+    def test_pointer_range_negative_rebase(self, case):
+        self._skip_unless_annotation_is_literal()
+
+        def fn(x):
+            if case == "pad":
+                return torch.nn.functional.pad(x, (64, 64)) + 1
+            if case == "as_strided":
+                return x.as_strided((12,), (1,), 0) + 1
+            if case == "masked_as_strided":
+                return (
+                    torch.nn.functional.pad(x.as_strided((12,), (1,), 0), (64, 64)) + 1
+                )
+            if case == "cat":
+                return torch.cat((x, x)) + 1
+            return x + 1
+
+        # Padding a shifted input is safe; padding an explicitly rebased view
+        # still has active negative lanes relative to that same input pointer.
+        x = torch.arange(12, device=GPU_TYPE, dtype=torch.float32)[6:]
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(actual, fn(x))
+        self.assertEqual(
+            " ".join(code).count("tt.pointer_range"),
+            0 if case in ("as_strided", "masked_as_strided") else 2,
+        )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch("triton.emit_pointer_range_32", True)
+    @parametrize("op", ["fill", "copy"])
+    def test_pointer_range_negative_rebase_store(self, op):
+        self._skip_unless_annotation_is_literal()
+
+        def fn(x, y):
+            view = x.as_strided((12,), (1,), 0)
+            if op == "fill":
+                view.fill_(3.0)
+            else:
+                view.copy_(y)
+
+        # The kernel only stores through the rebased view; the whole storage,
+        # including the six elements before ``x``, must be written.
+        y = torch.arange(100, 112, device=GPU_TYPE, dtype=torch.float32)
+        expected = torch.arange(12, device=GPU_TYPE, dtype=torch.float32)
+        fn(expected[6:], y)
+        actual = torch.arange(12, device=GPU_TYPE, dtype=torch.float32)
+        _, code = run_and_get_code(torch.compile(fn, fullgraph=True), actual[6:], y)
+        self.assertEqual(actual, expected)
+        self.assertEqual(" ".join(code).count("tt.pointer_range"), 0)
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch("triton.emit_pointer_range_32", True)
+    @parametrize("op", ["bucketize", "searchsorted_2d", "searchsorted_sorter"])
+    def test_pointer_range_negative_rebase_lookup(self, op):
+        self._skip_unless_annotation_is_literal()
+
+        def fn(x, values, boundaries):
+            view = x.as_strided((12,), (1,), 0)
+            if op == "bucketize":
+                return torch.bucketize(values, view)
+            if op == "searchsorted_2d":
+                return torch.searchsorted(view.view(2, 6), values.view(2, -1))
+            return torch.searchsorted(boundaries, values, sorter=view)
+
+        # The binary search reads the six storage elements before ``x``. For
+        # the sorter case they hold the order of the descending boundaries.
+        storage = torch.arange(18, device=GPU_TYPE)
+        if op == "searchsorted_sorter":
+            storage[:12] = torch.arange(11, -1, -1, device=GPU_TYPE)
+        else:
+            storage = storage.float()
+        x = storage[6:]
+        values = torch.linspace(-1, 12, 512, device=GPU_TYPE)
+        boundaries = torch.arange(11, -1, -1, device=GPU_TYPE, dtype=torch.float32)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), x, values, boundaries
+        )
+        self.assertEqual(actual, fn(x, values, boundaries))
+        self.assertEqual(" ".join(code).count("tt.pointer_range"), 0)
+
     def _skip_unless_annotation_is_literal(self):
         """Only the V4 descriptor puts ``tt.pointer_range`` in the generated code.
 
@@ -1499,6 +1721,45 @@ def helper(x):
             self.skipTest(
                 "tt.pointer_range is only literal with the V4 attrs descriptor"
             )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch({"freezing": True, "triton.emit_pointer_range_32": True})
+    def test_constant_pointer_range_in_generated_code(self):
+        self._skip_unless_annotation_is_literal()
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "weight", torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float16)
+                )
+
+            def forward(self, x):
+                return x + self.weight
+
+        x = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
+        with torch.no_grad():
+            _, kernels = run_and_get_kernels(
+                torch.compile(Module().eval(), fullgraph=True), x, remove_quote=True
+            )
+        self.assertEqual(len(kernels), 1)
+        meta = next(
+            keyword.value
+            for node in ast.walk(ast.parse(kernels[0]))
+            if isinstance(node, ast.Call)
+            for keyword in node.keywords
+            if keyword.arg == "triton_meta"
+        )
+        meta = {key.value: value for key, value in zip(meta.keys, meta.values)}
+        signature = ast.literal_eval(meta["signature"])
+        configs = ast.literal_eval(meta["configs"])
+        # Only the frozen weight has an fp16 pointer; input and output are fp32.
+        weight_indices = [
+            idx for idx, dtype in enumerate(signature.values()) if dtype == "*fp16"
+        ]
+        self.assertEqual(len(weight_indices), 1)
+        self.assertIn(["tt.pointer_range", 32], configs[0][(weight_indices[0],)])
 
     @staticmethod
     def _flex_inputs(requires_grad=False):

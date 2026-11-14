@@ -226,6 +226,21 @@ class FxirTestCase(InductorTestCase):
         num_extern = self._count_ops(gm, torch.ops.aten.addmm.out)
         self.assertEqual(num_extern, 1)
 
+    @config.patch(
+        {
+            "trace.provenance_tracking_level": 2,
+            "trace.provenance_profiler_markers": True,
+        }
+    )
+    def test_provenance_profiler_markers(self):
+        def foo(x, y):
+            return x @ y + y.sum()
+
+        args = [
+            torch.randn(size, device=self.device) for size in [(129, 129), (129, 1)]
+        ]
+        self._compile_and_check(foo, args, expected_num_triton_kernels=1)
+
     def test_fallback(self):
         """
         Test a program that calls aten fallbacks.
@@ -848,6 +863,19 @@ class FxirTestCase(InductorTestCase):
         if use_dynamic_shapes:
             self.assertEqual(type(shape[0]), torch.fx.Node)
 
+    @config.patch("triton.autotune_at_compile_time", True)
+    def test_autotune_skips_kernels_with_device_asserts(self):
+        # Tuning runs kernels on zeros. There the gather reads row 64 of 64, and
+        # launching it would trip its device-side bounds assert.
+        w = torch.randn(64, 32, device=self.device)
+        idx = torch.full((128,), -64, device=self.device)
+        tuner = torch._inductor.runtime.triton_heuristics.CachingAutotuner
+        with unittest.mock.patch.object(
+            tuner, "run", autospec=True, side_effect=tuner.run
+        ) as tuned:
+            self._compile_and_check(lambda w, idx: w[idx + 64] * 2, [w, idx])
+        tuned.assert_not_called()
+
     def test_custom_triton(self):
         @triton.jit
         def add_kernel(
@@ -878,6 +906,51 @@ class FxirTestCase(InductorTestCase):
 
         args = [torch.randn(32, device=self.device) for _ in range(2)]
         self._compile_and_check(add, args)
+
+    @parametrize("constexpr_first", (False, True))
+    def test_custom_triton_constexpr_launch_grid(self, constexpr_first: bool):
+        """
+        Test a user kernel whose constexpr arg is smaller than its grid.
+        The launcher omits constexprs, so they must not displace the other
+        args or the grid read from the end of the args.
+        """
+
+        @triton.jit
+        def add_kernel_constexpr_last(
+            in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        @triton.jit
+        def add_kernel_constexpr_first(
+            BLOCK_SIZE: tl.constexpr, in_ptr0, in_ptr1, out_ptr, n_elements
+        ):
+            offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = (triton.cdiv(n_elements, 4),)
+            if constexpr_first:
+                add_kernel_constexpr_first[grid](4, x, y, output, n_elements)
+            else:
+                add_kernel_constexpr_last[grid](x, y, output, n_elements, BLOCK_SIZE=4)
+            return output
+
+        args = [torch.randn(32, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(add, args)
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+        self.assertEqual(triton_node.kwargs["grid"], [(8, 1, 1)])
 
     def test_output_slice_view(self):
         """
@@ -934,7 +1007,7 @@ class AOTFxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
     def check(
-        self, model, inp, dynamic_shapes=None, strict=False
+        self, model, inp, dynamic_shapes=None, strict=False, check_fn=same
     ) -> torch.fx.GraphModule:
         with torch.no_grad():
             ep = torch.export.export(
@@ -945,7 +1018,7 @@ class AOTFxirTestCase(InductorTestCase):
             )
             # Flatten args for fx_wrapper gm
             flat_args, _ = pytree.tree_flatten(inp)
-            self.assertTrue(same(model(*inp), gm(*flat_args)))
+            self.assertTrue(check_fn(model(*inp), gm(*flat_args)))
 
             for node in gm.graph.nodes:
                 if (
@@ -963,6 +1036,57 @@ class AOTFxirTestCase(InductorTestCase):
 
         inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
         self.check(M(), inp)
+
+    @requires_gpu()
+    @parametrize(
+        "input_dtype,dtype",
+        (
+            (torch.uint8, torch.float8_e4m3fn),
+            (torch.float16, torch.bfloat16),
+            (torch.uint8, torch.uint8),
+        ),
+    )
+    @parametrize("offset", (0, 16))
+    def test_reinterpret_dtype_view(self, input_dtype, dtype, offset):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.view(dtype)[offset : offset + 32].reshape(2, 16)
+
+        # Citrine C3: create inputs directly on the test device.
+        x = torch.arange(64, dtype=input_dtype, device=self.device)
+        model = M()
+        gm = self.check(
+            model, (x,), check_fn=lambda ref, res: same(ref.float(), res.float())
+        )
+        result = gm(x)
+        expected = model(x)
+
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result.device, x.device)
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result.stride(), expected.stride())
+        self.assertEqual(result.storage_offset(), expected.storage_offset())
+        self.assertEqual(result.view(torch.uint8), expected.view(torch.uint8))
+        self.assertEqual(
+            result.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+        )
+        (output,) = gm.graph.find_nodes(op="output")
+        self.assertEqual(output.args[0].meta["val"].dtype, dtype)
+
+    @requires_gpu()
+    @parametrize("offset", (0, 16))
+    def test_reinterpret_dtype_view_extern_kernel(self, offset):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                view = x.view(torch.bfloat16)[offset : offset + 32].reshape(2, 16)
+                return torch.mm(view, y)
+
+        x = torch.arange(64, dtype=torch.float16, device=self.device)
+        y = torch.ones(16, 16, dtype=torch.bfloat16, device=self.device)
+        gm = self.check(M(), (x, y))
+
+        (mm,) = gm.graph.find_nodes(op="call_function", target=torch.ops.aten.mm.out)
+        self.assertEqual(mm.args[0].meta["val"].dtype, torch.bfloat16)
 
     @requires_gpu()
     def test_aoti_fx_parallel_compile_reloads_triton_kernel(self):
