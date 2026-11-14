@@ -3165,6 +3165,49 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         x = torch.rand(3, 4)
         self.assertEqual(gm(x), (x + float("inf"), x + float("nan")))
 
+    def test_placeholder_shadows_custom_builtin(self):
+        # A parameter named like one of the globals the generated code relies
+        # on (nan, inf, device) must not shadow it. See #198072.
+        def mask_invalid(x, nan):
+            return torch.where(nan, float("nan"), x)
+
+        def clip_scores(scores, inf):
+            return torch.clamp(scores, max=float("inf")) + inf, scores + float("-inf")
+
+        def to_device(x, device):
+            return x.to(torch.device("cpu")) + device
+
+        x = torch.tensor([1.0, 50.0, 3.0])
+        for fn, args in (
+            (mask_invalid, (x, torch.tensor([False, True, False]))),
+            (clip_scores, (x, torch.tensor([10.0, 20.0, 30.0]))),
+            (to_device, (x, torch.tensor([1.0, 2.0, 3.0]))),
+        ):
+            with self.subTest(fn.__name__):
+                gm = symbolic_trace(fn)
+                self.assertEqual(gm(*args), fn(*args))
+                # The renamed global must also be importable from the saved code.
+                loaded = pickle.loads(pickle.dumps(gm))
+                self.assertEqual(loaded(*args), fn(*args))
+                # torch.export names placeholders exactly like the user's
+                # arguments, so node.name can be the shadowing name as well.
+                for node in gm.graph.nodes:
+                    if node.op == "placeholder":
+                        node.name = node.target
+                gm.recompile()
+                self.assertEqual(gm(*args), fn(*args))
+
+    def test_placeholder_named_torch(self):
+        # torch is emitted as literal text (here in the annotation), so a
+        # parameter named torch must not get the torch global renamed.
+        def f(x: torch.Tensor, torch: torch.Tensor):
+            return x + torch
+
+        x = torch.rand(3)
+        gm = symbolic_trace(f)
+        self.assertEqual(gm(x, x), x + x)
+        self.assertEqual(pickle.loads(pickle.dumps(gm))(x, x), x + x)
+
     def test_deepcopy_recursion_depth(self):
         depth = sys.getrecursionlimit() + 20
 
