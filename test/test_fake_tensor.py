@@ -3539,6 +3539,11 @@ class TestFakeTensorConstHandling(TestCase):
 
     @fake_tensor_modes
     def test_inplace_add(self, mode_cls):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         with mode_cls():
             x = torch.tensor(4.0)
             y = x.add_(1)
@@ -3548,6 +3553,11 @@ class TestFakeTensorConstHandling(TestCase):
 
     @fake_tensor_modes
     def test_shared_storages(self, mode_cls):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         with mode_cls():
             x = torch.tensor([4.0])
             y = x[:]
@@ -3558,6 +3568,11 @@ class TestFakeTensorConstHandling(TestCase):
 
     @fake_tensor_modes
     def test_constant_invalidation(self, mode_cls):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         with mode_cls():
             x = torch.tensor([1.0])
             self.assertConst(x)
@@ -3567,6 +3582,11 @@ class TestFakeTensorConstHandling(TestCase):
 
     @fake_tensor_modes
     def test_inplace_view_invalidation(self, mode_cls):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         with mode_cls():
             x = torch.tensor([1])
             self.assertConst(x)
@@ -3600,6 +3620,11 @@ class TestFakeTensorConstHandling(TestCase):
 
     @fake_tensor_modes
     def test_shared_storage_invalidation(self, mode_cls):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         with mode_cls():
             x = torch.tensor([1.0])
             y = x[:]
@@ -3609,6 +3634,11 @@ class TestFakeTensorConstHandling(TestCase):
 
     @fake_tensor_modes
     def test_aliased_const_write(self, mode_cls):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         with mode_cls():
             x = torch.tensor([1])
             y = x.expand([4])
@@ -3618,6 +3648,11 @@ class TestFakeTensorConstHandling(TestCase):
 
     @fake_tensor_modes
     def test_constant_propagate_through_functions(self, mode_cls):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         with mode_cls():
             y = torch.div(4, 4, rounding_mode="trunc")
             self.assertConst(y)
