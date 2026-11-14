@@ -383,6 +383,22 @@ class TORCH_API Dispatcher final {
       bool isRedispatch,
       Args... args);
 
+  // The boxed counterpart of CapturedKernel::call.
+  static void callBoxedKernel(
+      const OperatorHandle& op,
+      DispatchKeySet dispatchKeySet,
+      const KernelFunction& kernel,
+      bool isRedispatch,
+      Stack* stack);
+
+  static void callBoxedWithCaptureSink(
+      const OperatorHandle& op,
+      DispatchCaptureSink& sink,
+      DispatchKeySet dispatchKeySet,
+      const KernelFunction& kernel,
+      bool isRedispatch,
+      Stack* stack);
+
   static int64_t sequenceNumberForRunningRecordFunction(
       DispatchKey dispatchKey,
       DispatchKeySet dispatchKeySet);
@@ -985,7 +1001,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
         : runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet);
 
     // keeping the guard alive while executing the kernel
-    kernel.callBoxed(op, dispatchKeySet, stack);
+    callBoxedKernel(op, dispatchKeySet, kernel, /*isRedispatch=*/false, stack);
 
     if (C10_UNLIKELY(guard.needsOutputs())) {
       guard.setOutputs(*stack);
@@ -993,6 +1009,22 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
     return;
   }
 #endif // PYTORCH_DISABLE_PER_OP_PROFILING
+  callBoxedKernel(op, dispatchKeySet, kernel, /*isRedispatch=*/false, stack);
+}
+
+inline void Dispatcher::callBoxedKernel(
+    const OperatorHandle& op,
+    DispatchKeySet dispatchKeySet,
+    const KernelFunction& kernel,
+    bool isRedispatch,
+    Stack* stack) {
+  if (C10_UNLIKELY(impl::dispatch_capture_enabled())) {
+    if (auto* sink = impl::tls_dispatch_capture_sink()) {
+      callBoxedWithCaptureSink(
+          op, *sink, dispatchKeySet, kernel, isRedispatch, stack);
+      return;
+    }
+  }
   kernel.callBoxed(op, dispatchKeySet, stack);
 }
 
@@ -1035,7 +1067,7 @@ inline void Dispatcher::redispatchBoxed(
   }
 #endif
   const auto& kernel = entry.lookup(dispatchKeySet);
-  kernel.callBoxed(op, dispatchKeySet, stack);
+  callBoxedKernel(op, dispatchKeySet, kernel, /*isRedispatch=*/true, stack);
 }
 
 } // namespace c10

@@ -4,6 +4,7 @@
 #include <ATen/core/dispatch/DispatchCapture.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/record_function.h>
+#include <torch/library.h>
 
 #include <memory>
 #include <string>
@@ -90,6 +91,29 @@ at::CallbackHandle observe(bool needs_outputs) {
                                         .scopes({at::RecordScope::FUNCTION}));
 }
 
+// Takes three values and returns two.
+void variadicKernel(const c10::OperatorHandle& /*op*/, torch::jit::Stack* stack) {
+  torch::jit::drop(*stack, 3);
+  torch::jit::push(*stack, 1, 2);
+}
+
+// Takes one value and returns two.
+void variadicReturnsKernel(
+    const c10::OperatorHandle& /*op*/,
+    torch::jit::Stack* stack) {
+  torch::jit::drop(*stack, 1);
+  torch::jit::push(*stack, 1, 2);
+}
+
+TORCH_LIBRARY(_test_dispatch_capture, m) {
+  m.def(
+      "_test_dispatch_capture::variadic(...) -> (...)",
+      torch::CppFunction::makeFromBoxedFunction<&variadicKernel>());
+  m.def(
+      "_test_dispatch_capture::variadic_returns(int a) -> (...)",
+      torch::CppFunction::makeFromBoxedFunction<&variadicReturnsKernel>());
+}
+
 TEST(DispatchCaptureTest, CallReportsEveryStepOfTheChain) {
   const auto x = at::ones({3});
   const auto y = at::ones({3});
@@ -118,6 +142,76 @@ TEST(DispatchCaptureTest, CallReportsEveryStepOfTheChain) {
   EXPECT_EQ(sink.depth, 0);
 }
 
+TEST(DispatchCaptureTest, BoxedCallIsReported) {
+  const auto x = at::ones({3});
+  torch::jit::Stack stack{x, x, 1};
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    addTensor().callBoxed(&stack);
+  }
+  ASSERT_EQ(sink.enters.size(), 2u);
+  EXPECT_EQ(sink.enters[0].op, "aten::add.Tensor");
+  EXPECT_EQ(sink.enters[0].key, c10::DispatchKey::AutogradCPU);
+  EXPECT_FALSE(sink.enters[0].is_redispatch);
+  EXPECT_EQ(sink.enters[0].num_inputs, 3u);
+  EXPECT_EQ(sink.enters[1].key, c10::DispatchKey::CPU);
+  EXPECT_TRUE(sink.enters[1].is_redispatch);
+  ASSERT_EQ(sink.exits.size(), 2u);
+  EXPECT_EQ(sink.exits.back().num_outputs, 1u);
+  EXPECT_EQ(sink.depth, 0);
+  ASSERT_EQ(stack.size(), 1u);
+  EXPECT_TRUE(stack[0].toTensor().equal(at::full({3}, 2.0)));
+}
+
+TEST(DispatchCaptureTest, BoxedRedispatchIsReported) {
+  const auto x = at::ones({3});
+  torch::jit::Stack stack{x, x, 1};
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    addTensor().redispatchBoxed(
+        c10::DispatchKeySet(c10::DispatchKey::CPU), &stack);
+  }
+  ASSERT_EQ(sink.enters.size(), 1u);
+  EXPECT_TRUE(sink.enters[0].is_redispatch);
+  EXPECT_EQ(sink.enters[0].key, c10::DispatchKey::CPU);
+  ASSERT_EQ(sink.exits.size(), 1u);
+  EXPECT_EQ(sink.exits[0].num_outputs, 1u);
+}
+
+TEST(DispatchCaptureTest, BoxedCallOfAVariadicSchemaReportsTheWholeStack) {
+  const auto op = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test_dispatch_capture::variadic", "");
+  torch::jit::Stack stack{1, 2, 3};
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    op.callBoxed(&stack);
+  }
+  ASSERT_EQ(sink.enters.size(), 1u);
+  EXPECT_EQ(sink.enters[0].num_inputs, 3u);
+  ASSERT_EQ(sink.exits.size(), 1u);
+  EXPECT_EQ(sink.exits[0].num_outputs, 2u);
+}
+
+TEST(DispatchCaptureTest, VariadicReturnsStopAtTheArguments) {
+  const auto op = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test_dispatch_capture::variadic_returns", "");
+  // The first value is the caller's, as on a stack shared with an interpreter.
+  torch::jit::Stack stack{7, 5};
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    op.callBoxed(&stack);
+  }
+  ASSERT_EQ(sink.enters.size(), 1u);
+  EXPECT_EQ(sink.enters[0].num_inputs, 1u);
+  ASSERT_EQ(sink.exits.size(), 1u);
+  EXPECT_EQ(sink.exits[0].num_outputs, 2u);
+  EXPECT_EQ(stack.size(), 3u);
+}
+
 TEST(DispatchCaptureTest, ThrowingKernelReportsItsExit) {
   const auto x = at::ones({3});
   const auto y = at::ones({4});
@@ -133,6 +227,21 @@ TEST(DispatchCaptureTest, ThrowingKernelReportsItsExit) {
     EXPECT_TRUE(e.threw);
     EXPECT_EQ(e.num_outputs, 0u);
   }
+  EXPECT_EQ(sink.depth, 0);
+}
+
+TEST(DispatchCaptureTest, ThrowingBoxedCallReportsItsExit) {
+  torch::jit::Stack stack{at::ones({3}), at::ones({4}), 1};
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+    EXPECT_THROW(addTensor().callBoxed(&stack), c10::Error);
+  }
+  ASSERT_FALSE(sink.exits.empty());
+  ASSERT_EQ(sink.exits.size(), sink.enters.size());
+  EXPECT_TRUE(sink.exits.back().threw);
+  EXPECT_EQ(sink.exits.back().num_outputs, 0u);
   EXPECT_EQ(sink.depth, 0);
 }
 
@@ -154,6 +263,21 @@ TEST(DispatchCaptureTest, RecordFunctionObserversStillSeeTheCall) {
     EXPECT_FALSE(sink.enters.front().is_redispatch);
     EXPECT_EQ(sink.exits.size(), sink.enters.size());
   }
+}
+
+TEST(DispatchCaptureTest, RecordFunctionObserversStillSeeABoxedCall) {
+  const auto x = at::ones({3});
+  torch::jit::Stack stack{x, x, 1};
+  const auto handle = observe(/*needs_outputs=*/true);
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    addTensor().callBoxed(&stack);
+  }
+  at::removeCallback(handle);
+  EXPECT_EQ(observed_starts, 1);
+  EXPECT_EQ(observed_outputs, 1u);
+  EXPECT_EQ(sink.enters.size(), 2u);
 }
 
 TEST(DispatchCaptureTest, InstallReturnsThePreviousSink) {
