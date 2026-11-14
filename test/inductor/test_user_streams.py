@@ -2066,7 +2066,7 @@ class GraphModule(torch.nn.Module):
                     )
 
 
-@unittest.skipUnless(TEST_CUDA, "requires CUDA")
+@unittest.skipIf(not TEST_GPU, "requires GPU")
 @xfailIfNoAcceleratorTriton
 class TestStreamOrderingStress(InductorTestCase):
     """Stress tests verifying that interleaved event record/wait ops
@@ -2085,7 +2085,7 @@ class TestStreamOrderingStress(InductorTestCase):
             actual = compiled_fn(*args)
             # Full device sync as a safety net to ensure all stream work
             # is visible before comparing results.
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
             if not isinstance(expected, (tuple, list)):
                 expected, actual = [expected], [actual]
             for e, a in zip(expected, actual):
@@ -2110,22 +2110,22 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s = torch.cuda.Stream()
-            e = torch.cuda.Event()
+            s = torch.Stream()
+            e = torch.Event()
 
             # Heavy producer on default stream — takes real GPU time
             a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
             e.record()
 
-            with torch.cuda.stream(s):
+            with s:
                 e.wait()  # removing this would cause a race
                 b = a + 1
 
             s.synchronize()
             return b
 
-        x = torch.randn(N, N, device="cuda")
-        w = torch.eye(N, device="cuda") * 0.9  # use scaled identity for stability
+        x = torch.randn(N, N, device=GPU_TYPE)
+        w = torch.eye(N, device=GPU_TYPE) * 0.9  # use scaled identity for stability
         self._check_compiled_matches_eager(fn, x, w)
 
     # ------------------------------------------------------------------
@@ -2136,21 +2136,21 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s1 = torch.cuda.Stream()
-            s2 = torch.cuda.Stream()
-            e1 = torch.cuda.Event()
-            e2 = torch.cuda.Event()
+            s1 = torch.Stream()
+            s2 = torch.Stream()
+            e1 = torch.Event()
+            e2 = torch.Event()
 
-            with torch.cuda.stream(s1):
+            with s1:
                 a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
                 e1.record(s1)
 
-            with torch.cuda.stream(s2):
+            with s2:
                 e1.wait(s2)
                 b = TestStreamOrderingStress._heavy_matmul_chain(a, w)
                 e2.record(s2)
 
-            with torch.cuda.stream(s1):
+            with s1:
                 e2.wait(s1)
                 c = b + a
 
@@ -2158,8 +2158,8 @@ class TestStreamOrderingStress(InductorTestCase):
             s2.synchronize()
             return c
 
-        x = torch.randn(N, N, device="cuda")
-        w = torch.eye(N, device="cuda") * 0.9
+        x = torch.randn(N, N, device=GPU_TYPE)
+        w = torch.eye(N, device=GPU_TYPE) * 0.9
         self._check_compiled_matches_eager(fn, x, w)
 
     # ------------------------------------------------------------------
@@ -2170,29 +2170,29 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s1 = torch.cuda.Stream()
-            s2 = torch.cuda.Stream()
-            s3 = torch.cuda.Stream()
-            e = torch.cuda.Event()
-            e1 = torch.cuda.Event()
-            e2 = torch.cuda.Event()
-            e3 = torch.cuda.Event()
+            s1 = torch.Stream()
+            s2 = torch.Stream()
+            s3 = torch.Stream()
+            e = torch.Event()
+            e1 = torch.Event()
+            e2 = torch.Event()
+            e3 = torch.Event()
 
             # Slow producer
             a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
             e.record()
 
-            with torch.cuda.stream(s1):
+            with s1:
                 e.wait()
                 r1 = a * 2
                 e1.record(s1)
 
-            with torch.cuda.stream(s2):
+            with s2:
                 e.wait()
                 r2 = a * 3
                 e2.record(s2)
 
-            with torch.cuda.stream(s3):
+            with s3:
                 e.wait()
                 r3 = a * 4
                 e3.record(s3)
@@ -2207,8 +2207,8 @@ class TestStreamOrderingStress(InductorTestCase):
             s3.synchronize()
             return result
 
-        x = torch.randn(N, N, device="cuda")
-        w = torch.eye(N, device="cuda") * 0.9
+        x = torch.randn(N, N, device=GPU_TYPE)
+        w = torch.eye(N, device=GPU_TYPE) * 0.9
         self._check_compiled_matches_eager(fn, x, w)
 
     # ------------------------------------------------------------------
@@ -2219,23 +2219,23 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s1 = torch.cuda.Stream()
-            s2 = torch.cuda.Stream()
-            e_fork = torch.cuda.Event()
-            e1 = torch.cuda.Event()
-            e2 = torch.cuda.Event()
+            s1 = torch.Stream()
+            s2 = torch.Stream()
+            e_fork = torch.Event()
+            e1 = torch.Event()
+            e2 = torch.Event()
 
             base = x @ w
             e_fork.record()
 
-            with torch.cuda.stream(s1):
+            with s1:
                 e_fork.wait()
                 branch1 = TestStreamOrderingStress._heavy_matmul_chain(
                     torch.relu(base), w
                 )
                 e1.record(s1)
 
-            with torch.cuda.stream(s2):
+            with s2:
                 e_fork.wait()
                 branch2 = TestStreamOrderingStress._heavy_matmul_chain(
                     torch.sigmoid(base), w
@@ -2250,8 +2250,8 @@ class TestStreamOrderingStress(InductorTestCase):
             s2.synchronize()
             return result
 
-        x = torch.randn(N, N, device="cuda")
-        w = torch.eye(N, device="cuda") * 0.5
+        x = torch.randn(N, N, device=GPU_TYPE)
+        w = torch.eye(N, device=GPU_TYPE) * 0.5
         self._check_compiled_matches_eager(fn, x, w)
 
     # ------------------------------------------------------------------
@@ -2262,24 +2262,24 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            streams = [torch.cuda.Stream() for _ in range(4)]
-            events = [torch.cuda.Event() for _ in range(3)]
+            streams = [torch.Stream() for _ in range(4)]
+            events = [torch.Event() for _ in range(3)]
 
-            with torch.cuda.stream(streams[0]):
+            with streams[0]:
                 h = TestStreamOrderingStress._heavy_matmul_chain(x, w, depth=4)
                 events[0].record(streams[0])
 
-            with torch.cuda.stream(streams[1]):
+            with streams[1]:
                 events[0].wait(streams[1])
                 h = TestStreamOrderingStress._heavy_matmul_chain(h, w, depth=4)
                 events[1].record(streams[1])
 
-            with torch.cuda.stream(streams[2]):
+            with streams[2]:
                 events[1].wait(streams[2])
                 h = TestStreamOrderingStress._heavy_matmul_chain(h, w, depth=4)
                 events[2].record(streams[2])
 
-            with torch.cuda.stream(streams[3]):
+            with streams[3]:
                 events[2].wait(streams[3])
                 h = h + x  # quick consumer — races if wait is missing
 
@@ -2287,8 +2287,8 @@ class TestStreamOrderingStress(InductorTestCase):
                 s.synchronize()
             return h
 
-        x = torch.randn(N, N, device="cuda")
-        w = torch.eye(N, device="cuda") * 0.9
+        x = torch.randn(N, N, device=GPU_TYPE)
+        w = torch.eye(N, device=GPU_TYPE) * 0.9
         self._check_compiled_matches_eager(fn, x, w)
 
     # ------------------------------------------------------------------
@@ -2298,14 +2298,14 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s = torch.cuda.Stream()
-            e1 = torch.cuda.Event()
-            e2 = torch.cuda.Event()
+            s = torch.Stream()
+            e1 = torch.Event()
+            e2 = torch.Event()
 
             a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
             e1.record()
 
-            with torch.cuda.stream(s):
+            with s:
                 e1.wait()
                 b = TestStreamOrderingStress._heavy_matmul_chain(a, w)
                 e2.record(s)
@@ -2316,8 +2316,8 @@ class TestStreamOrderingStress(InductorTestCase):
             s.synchronize()
             return c
 
-        x = torch.randn(N, N, device="cuda")
-        w = torch.eye(N, device="cuda") * 0.9
+        x = torch.randn(N, N, device=GPU_TYPE)
+        w = torch.eye(N, device=GPU_TYPE) * 0.9
         self._check_compiled_matches_eager(fn, x, w)
 
     # ------------------------------------------------------------------
@@ -2329,10 +2329,10 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s = torch.cuda.Stream()
-            e = torch.cuda.Event()
+            s = torch.Stream()
+            e = torch.Event()
 
-            with torch.cuda.stream(s):
+            with s:
                 # Heavy matmul chain produces data on user stream
                 a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
                 # Triton pointwise on the same user stream — without fix
@@ -2344,12 +2344,12 @@ class TestStreamOrderingStress(InductorTestCase):
             s.synchronize()
             return b
 
-        x = torch.randn(N, N, device="cuda")
-        w = torch.eye(N, device="cuda") * 0.9
+        x = torch.randn(N, N, device=GPU_TYPE)
+        w = torch.eye(N, device=GPU_TYPE) * 0.9
         self._check_compiled_matches_eager(fn, x, w)
 
 
-@unittest.skipUnless(TEST_CUDA, "requires CUDA")
+@unittest.skipIf(not TEST_GPU, "requires GPU")
 @xfailIfNoAcceleratorTriton
 class TestGenericStreamCompile(InductorTestCase):
     """Tests for torch.compile with device-agnostic torch.Stream API."""
@@ -2359,10 +2359,10 @@ class TestGenericStreamCompile(InductorTestCase):
         from torch._inductor.utils import run_and_get_code
 
         # Create stream outside compiled function
-        stream = torch.Stream("cuda")
+        stream = torch.Stream(GPU_TYPE)
 
         def fn(x):
-            stream.wait_stream(torch.cuda.current_stream())
+            stream.wait_stream(torch.accelerator.current_stream())
             with stream:
                 a = x * 2
                 b = a + 1
@@ -2370,7 +2370,7 @@ class TestGenericStreamCompile(InductorTestCase):
             stream.synchronize()
             return b
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=GPU_TYPE)
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
@@ -2386,27 +2386,22 @@ class TestGenericStreamCompile(InductorTestCase):
         from torch._inductor.utils import run_and_get_code
 
         # Create stream and event outside compiled function
-        stream = torch.Stream("cuda")
-        event = torch.Event("cuda")
-        cuda_stream = torch.cuda.Stream(
-            stream_id=stream.stream_id,
-            device_index=stream.device_index,
-            device_type=stream.device_type,
-        )
+        stream = torch.Stream(GPU_TYPE)
+        event = torch.Event(GPU_TYPE)
 
         def fn(x):
             # Work on default stream
             a = x * 2
             event.record()
 
-            with torch.cuda.stream(cuda_stream):
+            with stream:
                 event.wait()
                 b = a + 1
 
-            cuda_stream.synchronize()
+            stream.synchronize()
             return b
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=GPU_TYPE)
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
@@ -2422,34 +2417,24 @@ class TestGenericStreamCompile(InductorTestCase):
         from torch._inductor.utils import run_and_get_code
 
         # Create streams and event outside compiled function
-        stream1 = torch.Stream("cuda")
-        stream2 = torch.Stream("cuda")
-        event = torch.Event("cuda")
-        cuda_stream1 = torch.cuda.Stream(
-            stream_id=stream1.stream_id,
-            device_index=stream1.device_index,
-            device_type=stream1.device_type,
-        )
-        cuda_stream2 = torch.cuda.Stream(
-            stream_id=stream2.stream_id,
-            device_index=stream2.device_index,
-            device_type=stream2.device_type,
-        )
+        stream1 = torch.Stream(GPU_TYPE)
+        stream2 = torch.Stream(GPU_TYPE)
+        event = torch.Event(GPU_TYPE)
 
         def fn(x):
-            with torch.cuda.stream(cuda_stream1):
+            with stream1:
                 a = x * 2
                 event.record()
 
-            with torch.cuda.stream(cuda_stream2):
+            with stream2:
                 event.wait()
                 b = a + 1
 
-            cuda_stream1.synchronize()
-            cuda_stream2.synchronize()
+            stream1.synchronize()
+            stream2.synchronize()
             return b
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=GPU_TYPE)
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
@@ -2467,28 +2452,23 @@ class TestGenericStreamCompile(InductorTestCase):
         from torch._inductor.utils import run_and_get_code
 
         # Create stream and event outside compiled function
-        stream = torch.Stream("cuda")
-        event = torch.Event("cuda")
-        cuda_stream = torch.cuda.Stream(
-            stream_id=stream.stream_id,
-            device_index=stream.device_index,
-            device_type=stream.device_type,
-        )
+        stream = torch.Stream(GPU_TYPE)
+        event = torch.Event(GPU_TYPE)
 
         def fn(x):
-            cuda_stream.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(cuda_stream):
+            stream.wait_stream(torch.accelerator.current_stream())
+            with stream:
                 a = x * 2
-                # Record event with explicit stream (using cuda_stream)
-                event.record(cuda_stream)
+                # Record event with an explicit stream argument
+                event.record(stream)
 
             event.wait()
             b = a + 1
 
-            cuda_stream.synchronize()
+            stream.synchronize()
             return b
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=GPU_TYPE)
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
@@ -2500,7 +2480,7 @@ class TestGenericStreamCompile(InductorTestCase):
         self.assertIn("record_event", code)
 
 
-@unittest.skipUnless(TEST_CUDA, "requires CUDA")
+@unittest.skipIf(not TEST_GPU, "requires GPU")
 @xfailIfNoAcceleratorTriton
 class TestStreamIdentity(InductorTestCase):
     """Verify that compiled code uses the user's original stream objects."""
@@ -2509,38 +2489,38 @@ class TestStreamIdentity(InductorTestCase):
         """Codegen should retrieve the user's stream via _get_stream_by_index."""
         from torch._inductor.utils import run_and_get_code
 
-        user_stream = torch.cuda.Stream()
+        user_stream = torch.Stream()
 
         def fn(x):
-            with torch.cuda.stream(user_stream):
+            with user_stream:
                 return x * 2
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=GPU_TYPE)
         result, (code,) = run_and_get_code(torch.compile(fn), x)
 
         self.assertEqual(result, fn(x))
         self.assertIn("_get_stream_by_index", code)
-        self.assertNotIn("torch.cuda.Stream(device=", code)
+        self.assertNotIn(f"torch.{GPU_TYPE}.Stream(device=", code)
 
     def test_multiple_stream_identity(self):
         """Each stream context should retrieve a different user stream object."""
         from torch._inductor.utils import run_and_get_code
 
-        stream_a = torch.cuda.Stream()
-        stream_b = torch.cuda.Stream()
+        stream_a = torch.Stream()
+        stream_b = torch.Stream()
 
         def fn(x):
-            event = torch.cuda.Event()
-            with torch.cuda.stream(stream_a):
+            event = torch.Event()
+            with stream_a:
                 a = x * 2
                 event.record()
-            with torch.cuda.stream(stream_b):
+            with stream_b:
                 event.wait()
                 b = a + 1
             stream_b.synchronize()
             return b
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=GPU_TYPE)
         result, (code,) = run_and_get_code(torch.compile(fn), x)
 
         self.assertEqual(result, fn(x))
@@ -2548,7 +2528,7 @@ class TestStreamIdentity(InductorTestCase):
         matches = re.findall(r"_get_stream_by_index\((\d+)\)", code)
         self.assertEqual(len(matches), 2)
         self.assertNotEqual(matches[0], matches[1])
-        self.assertNotIn("torch.cuda.Stream(device=", code)
+        self.assertNotIn(f"torch.{GPU_TYPE}.Stream(device=", code)
 
 
 @xfailIfNoAcceleratorTriton
