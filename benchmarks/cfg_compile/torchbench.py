@@ -196,7 +196,7 @@ def run_one(args):
             compiled = torch.cfg_compile(fn, backend="inductor", fallback=False)
 
         opt = optimizer(model) if training else None
-        warm, worst, quiet = [], 0.0, 0.0
+        warm, worst, quiet, calm = [], 0.0, 0.0, 0
         for i in range(args.max_warmup):
             sync()
             start = time.perf_counter()
@@ -212,12 +212,13 @@ def run_one(args):
                 worst = float("inf") if d is None else max(worst, d)
             # A JIT is warm when it has stopped changing its mind: cfg_compile
             # goes on measuring compiled code against the interpreter for a
-            # while after it has compiled.
+            # while after it has compiled, the function and what it calls.
             measuring = mode == "cfg" and compiled.stats()["measuring"]
+            calm = 0 if measuring else calm + 1
             enough = i + 1 >= args.warmup or (
                 i + 1 >= 6 and sum(warm) > args.warmup_seconds
             )
-            if enough and not (measuring and quiet < args.settle):
+            if enough and (calm >= 3 or quiet >= args.settle):
                 break
         del r
         if reference:
@@ -492,11 +493,11 @@ def main():
         default=120.0,
         help="or this long, and six calls",
     )
-    parser.add_argument("--max-warmup", type=int, default=80)
+    parser.add_argument("--max-warmup", type=int, default=400)
     parser.add_argument(
         "--settle",
         type=float,
-        default=300.0,
+        default=1500.0,
         help="seconds to wait for cfg_compile to stop measuring",
     )
     parser.add_argument("--calls", type=int, default=20, help="timed calls, at most")
