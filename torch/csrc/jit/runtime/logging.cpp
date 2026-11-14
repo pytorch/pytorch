@@ -29,10 +29,10 @@ int64_t LockingLogger::getCounterValue(const std::string& name) const {
   switch (type) {
     case AggregationType::SUM: {
       return raw_counter.sum;
-    } break;
+    }
     case AggregationType::AVG: {
       return raw_counter.sum / raw_counter.count;
-    } break;
+    }
   }
   TORCH_CHECK(false, "Unknown aggregation type!");
 }

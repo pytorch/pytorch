@@ -14,20 +14,11 @@ aten = torch.ops.aten
 
 
 @functools.cache
-def _misc_patterns_init(input_device: torch.device | None = None):
+def _misc_patterns_init(device: str):
     from .joint_graph import patterns as joint_graph_patterns
     from .post_grad import pass_patterns as post_grad_patterns_all
 
     post_grad_patterns = post_grad_patterns_all[1]  # medium priority
-
-    if input_device:
-        device = str(input_device)
-    else:
-        if torch.cuda.is_available():
-            # workaround https://github.com/pytorch/pytorch/issues/97894
-            device = "cuda"
-        else:
-            device = "cpu"
 
     # These patterns do 2 things
     # 1. Since we know that index is completely unique, we can codegen it using
@@ -52,7 +43,10 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         randperm_index_add_pattern,
         # pyrefly: ignore [bad-argument-type]
         randperm_index_add_replacement,
-        [torch.empty(4, 8, device=device), torch.empty(2, 8, device=device)],
+        [
+            torch.empty(4, 8, device=device),
+            torch.empty(2, 8, device=device),
+        ],
         # pyrefly: ignore [bad-argument-type]
         fwd_only,
         # pyrefly: ignore [bad-argument-type]
@@ -78,7 +72,10 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         randperm_index_add_full_pattern,
         # pyrefly: ignore [bad-argument-type]
         randperm_index_add_full_replacement,
-        [torch.empty(4, 8, device=device), torch.empty(4, 8, device=device)],
+        [
+            torch.empty(4, 8, device=device),
+            torch.empty(4, 8, device=device),
+        ],
         # pyrefly: ignore [bad-argument-type]
         fwd_only,
         # pyrefly: ignore [bad-argument-type]
