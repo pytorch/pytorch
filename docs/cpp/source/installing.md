@@ -37,7 +37,7 @@ supported into the future. A most basic `CMakeLists.txt` file could look like
 this:
 
 ```cmake
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.30 FATAL_ERROR)
 project(example-app)
 
 find_package(Torch REQUIRED)
@@ -58,6 +58,8 @@ if (MSVC)
                      $<TARGET_FILE_DIR:example-app>)
 endif (MSVC)
 ```
+
+Windows LibTorch packages require CMake 3.30 or newer.
 
 The implementation of our example will simply create a new `torch::Tensor` and
 print it:
