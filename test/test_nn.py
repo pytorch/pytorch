@@ -7899,6 +7899,22 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(Y_ref, Y)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_normalize_default_eps(self, device, dtype):
+        eps = torch.finfo(dtype).eps
+        rows = [[0, 0], [eps / 4, 0], [3, 4]]
+        x = torch.tensor(rows, dtype=dtype, device=device, requires_grad=True)
+        expected = torch.tensor([[0, 0], [0.25, 0], [0.6, 0.8]], dtype=dtype, device=device)
+
+        y = F.normalize(x)
+        self.assertEqual(y, expected)
+        out = torch.empty_like(expected)
+        F.normalize(x.detach(), out=out)
+        self.assertEqual(out, expected)
+        (grad,) = torch.autograd.grad(y.sum(), x)
+        self.assertEqual(grad[:2], torch.full_like(grad[:2], 1 / eps))
+
     @skipMPS  # backward mismatches CPU reference at this size on MPS
     @onlyAccelerator
     def test_layer_norm_gamma_beta_backward_dispatch_bands(self, device):
