@@ -319,6 +319,459 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             self.assertTrue(False, "Expected warning about lru_cache not found")
 
+    def test_nested_function_code_assignment_preserves_metadata(self):
+        def fn():
+            def target():
+                return 1
+
+            def replacement():
+                return 2
+
+            target.__name__ = "custom_name"
+            target.__qualname__ = "custom_qualname"
+            target.__doc__ = "custom_doc"
+            target.__code__ = replacement.__code__
+            return target(), target.__name__, target.__qualname__, target.__doc__
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(),
+            (2, "custom_name", "custom_qualname", "custom_doc"),
+        )
+
+    def test_nested_function_code_assignment_raises_catchable_error(self):
+        def fn():
+            value = 1
+
+            def closes_over_value():
+                return value
+
+            def no_closure():
+                return 2
+
+            try:
+                closes_over_value.__code__ = no_closure.__code__
+            except ValueError:
+                return "ValueError"
+            return "no error"
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), "ValueError"
+        )
+
+    def test_nested_function_code_deletion_matches_eager(self):
+        def fn():
+            def target():
+                return 1
+
+            try:
+                del target.__code__
+            except Exception as error:
+                return type(error).__name__
+            return "no error"
+
+        self.assertNotEqual(fn(), "no error")
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @parametrize("custom_metadata", (False, True))
+    @parametrize("graph_break", (False, True))
+    def test_nested_function_code_assignment_reconstruction(
+        self, custom_metadata, graph_break
+    ):
+        def fn(x):
+            def target():
+                "Original documentation."
+                return 1
+
+            def replacement():
+                "Replacement documentation."
+                return 2
+
+            if custom_metadata:
+                target.__name__ = "custom_name"
+                target.__qualname__ = "custom_qualname"
+                target.__doc__ = "custom_doc"
+            alias = target
+            target.__code__ = replacement.__code__
+            if graph_break:
+                torch._dynamo.graph_break()
+            return x + alias(), target
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=not graph_break)
+        for _ in range(2):
+            result, target = compiled(torch.ones(1))
+            expected, eager_target = fn(torch.ones(1))
+            self.assertEqual(result, expected)
+            self.assertEqual(target(), eager_target())
+            self.assertEqual(target.__name__, eager_target.__name__)
+            self.assertEqual(target.__qualname__, eager_target.__qualname__)
+            self.assertEqual(target.__doc__, eager_target.__doc__)
+        self.assertGreater(counter.frame_count, 0)
+
+    @parametrize("value", (None, 1, "invalid", ()))
+    def test_nested_function_code_assignment_invalid_type(self, value):
+        def fn():
+            def target():
+                return 1
+
+            try:
+                target.__code__ = value
+            except TypeError as error:
+                return str(error), target()
+            return "no error", target()
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_nested_function_code_assignment_hop_local(self):
+        def branch(x):
+            def target():
+                return 1
+
+            def replacement():
+                return 2
+
+            target.__code__ = replacement.__code__
+            return x + target()
+
+        def fn(pred, x):
+            return torch.cond(pred, branch, lambda x: x - 1, (x,))
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(torch.tensor(True), x), x + 2)
+        self.assertEqual(compiled(torch.tensor(False), x), x - 1)
+
+    def test_nested_function_code_assignment_hop_outer(self):
+        def fn(x):
+            def target():
+                return 1
+
+            def replacement():
+                return 2
+
+            def branch(x):
+                target.__code__ = replacement.__code__
+                return x + target()
+
+            return torch.cond(x.sum() > 0, branch, lambda x: x, (x,))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError, "HOP: Unsafe side effect"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
+    def test_catch_warnings_executes_on_each_call(self):
+        import warnings
+
+        def fn(x):
+            result = x + 1
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.filterwarnings("always", category=UserWarning)
+                warnings.simplefilter("always")
+                if x.item() > 0:
+                    warnings.warn("runtime warning", UserWarning)
+            return result, len(caught)
+
+        compiled = torch.compile(fn, backend="eager")
+        with warnings.catch_warnings():
+            filters = warnings.filters
+            result, caught_count = compiled(torch.ones(1))
+            self.assertEqual(result, torch.full((1,), 2, dtype=torch.float32))
+            self.assertEqual(caught_count, 1)
+            self.assertIs(warnings.filters, filters)
+
+            result, caught_count = compiled(-torch.ones(1))
+            self.assertEqual(result, torch.zeros(1))
+            self.assertEqual(caught_count, 0)
+            self.assertIs(warnings.filters, filters)
+
+    def test_warning_filter_functions_replay_on_cache_hit(self):
+        import warnings
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            warnings.filterwarnings("ignore", category=UserWarning)
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            return x + 1
+
+        compiled = torch.compile(fn, backend=counter)
+        with warnings.catch_warnings():
+            warnings.resetwarnings()
+            self.assertEqual(compiled(torch.ones(1)), torch.full((1,), 2.0))
+            frame_count = counter.frame_count
+            self.assertGreater(frame_count, 0)
+            self.assertTrue(
+                any(
+                    item[0] == "ignore" and item[2] is UserWarning
+                    for item in warnings.filters
+                )
+            )
+            self.assertTrue(
+                any(
+                    item[0] == "ignore" and item[2] is RuntimeWarning
+                    for item in warnings.filters
+                )
+            )
+
+            warnings.resetwarnings()
+            self.assertEqual(compiled(torch.ones(1)), torch.full((1,), 2.0))
+            self.assertEqual(counter.frame_count, frame_count)
+            self.assertTrue(
+                any(
+                    item[0] == "ignore" and item[2] is UserWarning
+                    for item in warnings.filters
+                )
+            )
+            self.assertTrue(
+                any(
+                    item[0] == "ignore" and item[2] is RuntimeWarning
+                    for item in warnings.filters
+                )
+            )
+
+    @parametrize("graph_break", (False, True))
+    def test_warning_record_list_fallback(self, graph_break):
+        import warnings
+
+        def fn(x):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                warnings.warn("runtime warning", UserWarning)
+                if graph_break:
+                    torch._dynamo.graph_break()
+            warning = caught[0]
+            checks = (
+                bool(caught),
+                caught.__len__(),
+                warning in caught,
+                caught.copy() == caught,
+                caught[0:1] == caught,
+                caught.index(warning),
+                caught[0] is caught[0],
+                len(list(caught)),
+                len(caught * 2),
+            )
+            caught.pop()
+            caught.append(warning)
+            caught.clear()
+            caught.append("kept")
+            return x + 1, checks, caught, str(warning.message), warning.category
+
+        compiled = torch.compile(fn, backend="eager")
+        for _ in range(2):
+            self.assertEqual(compiled(torch.ones(1)), fn(torch.ones(1)))
+
+    @unittest.skipIf(
+        sys.version_info < (3, 13), "Code assignment warnings require Python 3.13"
+    )
+    @parametrize("context_action", (False, True))
+    def test_code_assignment_warning_capture_reconstruction(self, context_action):
+        import warnings
+
+        def fn(x):
+            def target():
+                "Original documentation."
+                return 1
+
+            def replacement():
+                yield "replacement"
+
+            options = (
+                {"action": "always", "category": DeprecationWarning}
+                if context_action
+                else {}
+            )
+            with warnings.catch_warnings(record=True, **options) as caught:
+                warnings.simplefilter("always", DeprecationWarning)
+                target.__code__ = replacement.__code__
+            warning = caught[0]
+            checks = (
+                bool(caught),
+                caught.__len__(),
+                warning in caught,
+                caught.copy() == caught,
+                caught[0:1] == caught,
+                caught.index(warning),
+                caught[0] is caught[0],
+                len(list(caught)),
+                len(caught * 2),
+            )
+            caught.clear()
+            caught.append(warning)
+            return x + len(caught), checks, caught, target
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        previous = None
+        for _ in range(2):
+            expected, expected_checks, eager_caught, eager_target = fn(torch.ones(1))
+            with warnings.catch_warnings(record=True) as leaked:
+                warnings.simplefilter("always")
+                result, checks, caught, target = compiled(torch.ones(1))
+            self.assertEqual(result, expected)
+            self.assertEqual(checks, expected_checks)
+            self.assertEqual(len(leaked), 0)
+            self.assertEqual(len(caught), 1)
+            self.assertEqual(str(caught[0].message), str(eager_caught[0].message))
+            self.assertIs(caught[0].category, eager_caught[0].category)
+            self.assertEqual(caught[0].filename, eager_caught[0].filename)
+            self.assertEqual(caught[0].lineno, eager_caught[0].lineno)
+            self.assertEqual(target.__name__, eager_target.__name__)
+            self.assertEqual(target.__qualname__, eager_target.__qualname__)
+            self.assertEqual(target.__doc__, eager_target.__doc__)
+            self.assertEqual(list(target()), ["replacement"])
+            self.assertIsNot(caught, previous)
+            previous = caught
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("action", ("always", "error"))
+    def test_warning_capture_runtime_operator(self, action):
+        import warnings
+
+        def fn(x):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter(action)
+                try:
+                    x.std()
+                except UserWarning as error:
+                    return str(error), len(caught)
+            return "returned", len(caught)
+
+        compiled = torch.compile(fn, backend="eager")
+        for count in (1, 3, 1):
+            x = torch.ones(count)
+            self.assertEqual(compiled(x), fn(x))
+
+    def test_warning_filter_dynamic_argument_fallback(self):
+        import warnings
+
+        def fn(x):
+            warnings.filterwarnings(
+                "ignore", message=str(x.item()), category=UserWarning
+            )
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager")
+        with warnings.catch_warnings():
+            for value in (1, 2):
+                x = torch.tensor(value)
+                self.assertEqual(compiled(x), fn(x))
+
+    @unittest.skipIf(
+        sys.version_info >= (3, 14),
+        "NotImplemented truth testing raises on Python 3.14",
+    )
+    def test_warning_capture_unmodeled_python_warning(self):
+        import warnings
+
+        def fn(x):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = bool(NotImplemented)
+            return x + 1, result, len(caught), str(caught[0].message)
+
+        with warnings.catch_warnings(record=True) as leaked:
+            warnings.simplefilter("always")
+            with self.assertRaisesRegex(Unsupported, "warning context"):
+                torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+        self.assertEqual(len(leaked), 0)
+        compiled = torch.compile(fn, backend="eager")
+        for _ in range(2):
+            self.assertEqual(compiled(torch.ones(1)), fn(torch.ones(1)))
+
+    def test_warning_capture_explicit_enter_fallback(self):
+        import warnings
+
+        def fn(x):
+            manager = warnings.catch_warnings(record=True)
+            caught = manager.__enter__()
+            try:
+                warnings.simplefilter("always")
+                warnings.warn("explicit context", UserWarning)
+            finally:
+                manager.__exit__(None, None, None)
+            return x + 1, len(caught), str(caught[0].message)
+
+        compiled = torch.compile(fn, backend="eager")
+        with warnings.catch_warnings():
+            filters = warnings.filters
+            for _ in range(2):
+                self.assertEqual(compiled(torch.ones(1)), fn(torch.ones(1)))
+                self.assertIs(warnings.filters, filters)
+
+    def test_warning_capture_hop_rejected_without_global_mutation(self):
+        import warnings
+
+        def branch(x):
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter("error")
+                return x + 1
+
+        def fn(pred, x):
+            return torch.cond(pred, branch, lambda x: x - 1, (x,))
+
+        with warnings.catch_warnings():
+            filters = warnings.filters
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError, "Warning scope"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    torch.tensor(True), torch.ones(1)
+                )
+            self.assertIs(warnings.filters, filters)
+
+    @parametrize("argument", ("record", "module"))
+    def test_warning_context_rejects_arguments_without_repr(self, argument):
+        import warnings
+
+        events = []
+
+        class Meta(type):
+            def __repr__(cls):
+                events.append("repr")
+                return "InvalidWarningArgument"
+
+        class Invalid(metaclass=Meta):
+            pass
+
+        def fn(x):
+            with warnings.catch_warnings(**{argument: Invalid}):
+                return x + 1
+
+        with self.assertRaisesRegex(
+            Unsupported, "Unsupported warning context arguments"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+        self.assertEqual(events, [])
+
+    @unittest.skipIf(
+        sys.version_info >= (3, 14), "NotImplemented raises on Python 3.14"
+    )
+    @torch._dynamo.config.patch(enable_trace_unittest=True)
+    def test_warning_context_patched_unittest_enter(self):
+        import warnings
+
+        original = unittest.case._AssertWarnsContext.__enter__
+
+        def enter(context):
+            result = original(context)
+            if NotImplemented:
+                pass
+            return result
+
+        def fn(x):
+            with self.assertWarns(DeprecationWarning):
+                return x + 1
+
+        with patch.object(unittest.case._AssertWarnsContext, "__enter__", enter):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("ignore")
+                warnings.simplefilter("always", DeprecationWarning)
+                with self.assertRaisesRegex(Unsupported, "warning context"):
+                    torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+            self.assertEqual(caught, [])
+
     @make_test
     def test_add(a, b):
         return a + b

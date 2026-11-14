@@ -5681,6 +5681,162 @@
       ]
     }
   ],
+  "GB8951": [
+    {
+      "Gb_type": "Runtime operation in a warning context",
+      "Context": "str(target)",
+      "Explanation": "Dynamo cannot capture warnings produced by runtime graph operations.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0620": [
+    {
+      "Gb_type": "Unsupported operation in a warning context",
+      "Context": "{opname} {instruction.argval}",
+      "Explanation": "Dynamo only captures warnings from straight-line function code assignments.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5236": [
+    {
+      "Gb_type": "Unsupported call in a warning context",
+      "Context": "type(fn).__name__",
+      "Explanation": "Dynamo cannot determine the warnings produced by this call.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2743": [
+    {
+      "Gb_type": "Unsupported warning scope",
+      "Context": "warnings require a local, non-speculative capture scope",
+      "Explanation": "Dynamo cannot replay this warning with its original filters.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9763": [
+    {
+      "Gb_type": "Unsupported warning filter argument types",
+      "Context": "warning filters require plain constant arguments",
+      "Explanation": "Dynamo cannot evaluate user-defined warning filter behavior.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5866": [
+    {
+      "Gb_type": "Unsupported warning filter",
+      "Context": "warning filters require a category-wide action",
+      "Explanation": "Dynamo only models unconditional local warning filters.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1890": [
+    {
+      "Gb_type": "Unsupported warning emission",
+      "Context": "message",
+      "Explanation": "Dynamo cannot use ambient warning filters during tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9950": [
+    {
+      "Gb_type": "Warning scope in a higher-order operator",
+      "Context": "str(self)",
+      "Explanation": "Dynamo does not speculate on warning capture state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4461": [
+    {
+      "Gb_type": "Reentering a warning context",
+      "Context": "str(self)",
+      "Explanation": "Dynamo cannot reconstruct a previously entered warning context.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7149": [
+    {
+      "Gb_type": "Non-constant warning context arguments",
+      "Context": "warning context arguments are not constant",
+      "Explanation": "Dynamo requires constant warning context arguments.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Non-constant warning context arguments",
+      "Context": "str(self.catch_warnings_args)",
+      "Explanation": "Dynamo requires constant warning context arguments.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8012": [
+    {
+      "Gb_type": "Unsupported warning context arguments",
+      "Context": "warning capture requires a boolean record flag and the standard module",
+      "Explanation": "Dynamo only models the standard warnings module.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported warning context arguments",
+      "Context": "str(options)",
+      "Explanation": "Dynamo only models the standard warnings module.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8857": [
+    {
+      "Gb_type": "Unsupported warning context exit",
+      "Context": "str(self)",
+      "Explanation": "Dynamo only models properly nested warning contexts.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1291": [
+    {
+      "Gb_type": "Reconstructing an entered warning context",
+      "Context": "str(self)",
+      "Explanation": "Dynamo cannot reconstruct the state of an entered warning context.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5637": [
+    {
+      "Gb_type": "Non-constant warning filter arguments",
+      "Context": "str(self)",
+      "Explanation": "Dynamo requires constant local warning filters.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB1750": [
     {
       "Gb_type": "P2P compilation disabled for P2POp construction",

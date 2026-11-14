@@ -181,6 +181,7 @@ from .variables.builder import (
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
+    CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
     GenericContextWrappingVariable,
     WithEnterFunctionVariable,
@@ -1186,7 +1187,7 @@ def break_graph_if_unsupported(
                 _record_graph_break_op(
                     self, lambda p: _record_graph_break_ops(p, popped)
                 )
-                if self.active_generic_context_managers:
+                if self.active_generic_context_managers or self.output.warning_scopes:
                     # raise original graph break if fullgraph/error_on_graph_break=True
                     if self.one_graph or self.error_on_graph_break:
                         raise
@@ -1811,6 +1812,8 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected all( isinstance(x, VariableTracker) for x in itertools.chain(args, kwargs.values()) ) to be true"
             )
+        if self.output.warning_scopes:
+            CatchWarningsCtxManagerVariable.check_call(self, fn)
         inner_fn = None
         if hasattr(fn, "value"):
             inner_fn = fn.value
@@ -1929,6 +1932,8 @@ class InstructionTranslatorBase(
             self.update_block_stack(inst)
 
         try:
+            if self.output.warning_scopes:
+                CatchWarningsCtxManagerVariable.check_instruction(self, inst)
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
         except TensorifyScalarRestartAnalysis:
@@ -4078,6 +4083,7 @@ class InstructionTranslatorBase(
             and (self.is_child_tracer_active or not self.error_on_graph_break)
             and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
+            and not self.output.warning_scopes
             and not self.skip_one_hop_torch_function_depth
             # Do not allow nested graph breaks in HOPs
             and self.output.current_tracer.parent is None
