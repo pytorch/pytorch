@@ -14817,8 +14817,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
         # and https://github.com/pytorch/pytorch/issues/184893
         # max/min on boolean tensors returned incorrect indices on Triton and CPU.
-        if self.device != "cuda" and not is_cpp_backend(self.device):
-            raise unittest.SkipTest("only tested on CUDA and the C++ CPU backend")
+        if (
+            self.device != "cuda"
+            and not is_mps_backend(self.device)
+            and not is_cpp_backend(self.device)
+        ):
+            raise unittest.SkipTest("only tested on CUDA, MPS and the C++ CPU backend")
 
         def fn(x):
             return (
@@ -14835,12 +14839,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (7, 32),  # CPU repro from #184893
             (6, 6),  # Unrolled reduction
             (32, 32),  # Persistent reduction
-            (1028, 1028),  # Non-persistent reduction
         ]
         for i, shape in enumerate(shapes, start=2):
             torch.manual_seed(i)
             t1 = torch.randint(2, size=shape, dtype=torch.bool)
             self.common(fn, (t1,))
+
+    def test_max_min_bool_non_persistent(self):
+        # The non-persistent reduction case of test_max_min_bool. It is its
+        # own test because MPS with dynamic shapes returns wrong indices on
+        # ties here, see test_argmax_argmin_with_duplicates.
+        if (
+            self.device != "cuda"
+            and not is_mps_backend(self.device)
+            and not is_cpp_backend(self.device)
+        ):
+            raise unittest.SkipTest("only tested on CUDA, MPS and the C++ CPU backend")
+
+        def fn(x):
+            return (
+                x.max(0),
+                x.min(0),
+                x.max(1),
+                x.min(1),
+            )
+
+        torch.manual_seed(6)
+        t1 = torch.randint(2, size=(1028, 1028), dtype=torch.bool)
+        self.common(fn, (t1,))
 
     def test_max_min_bool_keepdim(self):
         # keepdim=True variant -- second reproducer from #184893
