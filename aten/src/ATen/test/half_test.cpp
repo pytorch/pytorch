@@ -182,3 +182,11 @@ TEST(TestHalf, ComplexHalf) {
   ASSERT_EQ(complex.real(), real);
   ASSERT_EQ(complex.imag(), imag);
 }
+
+#ifdef AT_HAS_ITEM_FLOAT16
+TEST(TestHalf, ItemFloat16) {
+  // 0x2E66 is the binary16 encoding of 0.1.
+  auto t = at::full({}, 0.1, kHalf);
+  ASSERT_EQ(c10::bit_cast<uint16_t>(t.item<_Float16>()), uint16_t{0x2E66});
+}
+#endif

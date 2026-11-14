@@ -626,6 +626,17 @@ class TORCH_API Tensor: public TensorBase {
   }
 };
 
+// _Float16 (std::float16_t in C++23) is bitwise identical to at::Half.
+// g++ before 13 defines __FLT16_MAX__ on targets where C++ cannot use _Float16.
+#if defined(__FLT16_MAX__) && !defined(__CUDACC__) && \
+    (defined(__clang__) || !defined(__GNUC__) || __GNUC__ >= 13)
+#define AT_HAS_ITEM_FLOAT16 1
+template <>
+inline _Float16 Tensor::item() const {
+  return c10::bit_cast<_Float16>(item().toHalf());
+}
+#endif
+
 namespace detail {
 // Helper creator for Tensor class which doesn't requires the users to pass
 // in an intrusive_ptr instead it just converts the argument passed to
