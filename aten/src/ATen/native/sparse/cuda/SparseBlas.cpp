@@ -43,6 +43,9 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cuda(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+  if (at::sparse_csr::has_noncontiguous_values(result)) {
+    return at::sparse_csr::run_on_contiguous_clone(result, [&](Tensor& r) { sparse_sampled_addmm_out_sparse_csr_cuda(self, mat1, mat2, beta, alpha, r); });
+  }
   at::native::sparse::sparse_sampled_addmm_check_inputs(
       self, mat1, mat2, beta, alpha, result);
 
@@ -84,6 +87,9 @@ Tensor& addmm_out_sparse_compressed_cuda(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+  if (at::sparse_csr::has_noncontiguous_values(result)) {
+    return at::sparse_csr::run_on_contiguous_clone(result, [&](Tensor& r) { addmm_out_sparse_compressed_cuda(self, mat1, mat2, beta, alpha, r); });
+  }
   sparse::impl::_check_is_cuda(self, "self");
   sparse::impl::_check_is_cuda(mat1, "mat1");
   sparse::impl::_check_is_cuda(mat2, "mat2");

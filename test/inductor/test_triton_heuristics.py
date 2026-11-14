@@ -277,7 +277,7 @@ class TestTritonHeuristics(TestCase):
 
         for size_hints in (
             {"x": 1, "y": 1, "r0_": 1},
-            {"x": 1, "y": 1, "z": 1, "r0_": 1},
+            {"x": 1, "y": 1, "z0_": 1, "r0_": 1},
         ):
             cfgs = _reduction_configs(
                 size_hints=size_hints,
@@ -311,10 +311,10 @@ class TestTritonHeuristics(TestCase):
                 {"x": 4096, "y": 4096, "r0_": 64},
                 {"native_matmul_persistent_rblock": 1024},
             ),
-            ({"x": 4096, "y": 4096, "z": 128, "r0_": 1}, {}),
-            ({"x": 16384, "y": 2048, "z": 128, "r0_": 2048}, {}),
+            ({"x": 4096, "y": 4096, "z0_": 128, "r0_": 1}, {}),
+            ({"x": 16384, "y": 2048, "z0_": 128, "r0_": 2048}, {}),
             (
-                {"x": 4096, "y": 4096, "z": 128, "r0_": 64},
+                {"x": 4096, "y": 4096, "z0_": 128, "r0_": 64},
                 {"native_matmul_persistent_rblock": 1024},
             ),
         ):
