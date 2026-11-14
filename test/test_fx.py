@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 # flake8: noqa: E221
 
+import ast
 import builtins
 import collections
 import contextlib
@@ -3051,6 +3052,30 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         graph = torch.fx.Graph()
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
         self.assertEqual(gm(), None)
+
+    def test_placeholder_only_graph_codegen(self):
+        graph = torch.fx.Graph()
+        graph.placeholder("x")
+        graph.placeholder("y")
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertIsNone(gm(1, 2))
+        self.assertIn("pass", gm.code)
+        ast.parse(gm.code)
+
+        readable = gm.print_readable(print_output=False)
+        self.assertIn("pass", readable)
+        ast.parse(readable)
+
+    def test_comment_only_graph_codegen(self):
+        graph = torch.fx.Graph()
+        graph.placeholder("x")
+        with graph.on_generate_code(lambda _: lambda body: ["# comment\n", *body]):
+            gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+            self.assertIsNone(gm(1))
+            self.assertIn("# comment", gm.code)
+            self.assertIn("pass", gm.code)
+            ast.parse(gm.code)
 
     def test_complex_constant_codegen_preserves_signed_zero(self):
         values = [
