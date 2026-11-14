@@ -4,6 +4,7 @@
 #include <torch/headeronly/util/BFloat16.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/TypeSafeSignMath.h>
 
 #include <cuda_runtime.h>
 
@@ -166,6 +167,39 @@ void testVectorizedBounds() {
   EXPECT_FALSE(wasWritten(out[buf_numel - 1])) << "wrote past the end";
 }
 
+template <typename scalar_t>
+__global__ void signbit_kernel(const scalar_t* in, bool* out, int n) {
+  const int i = threadIdx.x;
+  if (i < n) {
+    out[i] = torch::headeronly::_signbit(in[i]);
+  }
+}
+
+template <typename scalar_t>
+void testSignbit(scalar_t neg_nan) {
+  const std::vector<scalar_t> in = {
+      scalar_t(-1.0f), scalar_t(-0.0f), scalar_t(0.0f), scalar_t(1.0f), neg_nan};
+  const int n = static_cast<int>(in.size());
+  scalar_t* d_in = nullptr;
+  bool* d_out = nullptr;
+  CUDA_ASSERT_OK(cudaMalloc(&d_in, n * sizeof(scalar_t)));
+  CUDA_ASSERT_OK(cudaMalloc(&d_out, n * sizeof(bool)));
+  CUDA_ASSERT_OK(cudaMemcpy(
+      d_in, in.data(), n * sizeof(scalar_t), cudaMemcpyHostToDevice));
+  signbit_kernel<scalar_t><<<1, n>>>(d_in, d_out, n);
+  CUDA_ASSERT_OK(cudaGetLastError());
+  CUDA_ASSERT_OK(cudaDeviceSynchronize());
+  bool out[5];
+  CUDA_ASSERT_OK(cudaMemcpy(out, d_out, sizeof(out), cudaMemcpyDeviceToHost));
+  cudaFree(d_in);
+  cudaFree(d_out);
+  EXPECT_TRUE(out[0]);
+  EXPECT_TRUE(out[1]);
+  EXPECT_FALSE(out[2]);
+  EXPECT_FALSE(out[3]);
+  EXPECT_TRUE(out[4]);
+}
+
 // A paired neighbour must keep its value, including the sign of -0.0.
 template <typename scalar_t>
 void testPairedNeighbourUnchanged() {
@@ -184,6 +218,16 @@ void testPairedNeighbourUnchanged() {
 }
 
 } // namespace
+
+TEST(TestSignbit, Device) {
+  SKIP_IF_NO_CUDA();
+  using torch::headeronly::BFloat16;
+  using torch::headeronly::Half;
+  testSignbit<float>(-std::numeric_limits<float>::quiet_NaN());
+  testSignbit<double>(-std::numeric_limits<double>::quiet_NaN());
+  testSignbit<Half>(Half(0xFE00, Half::from_bits()));
+  testSignbit<BFloat16>(BFloat16(0xFFC0, BFloat16::from_bits()));
+}
 
 TEST(TestFastAtomicAdd, ScatterAdd) {
   SKIP_IF_NO_CUDA();
