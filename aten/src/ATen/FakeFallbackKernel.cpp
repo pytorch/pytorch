@@ -1,6 +1,7 @@
 #include <ATen/Context.h>
 #include <ATen/FakeTensor.h>
 #include <ATen/FakeTensorDispatchTables.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
@@ -33,7 +34,8 @@
 // wrap_meta_outputs_with_default_device_logic does.
 // Non-fake inputs are converted through the mode's converter when allowed;
 // metadata-mutating operations always require inputs owned by the mode.
-// Lifts first try Python's constant-creation path.
+// Lifts first try Python's constant-creation path. Numbers-as-tensors calls
+// without mode fakes are unsupported until their real execution is enabled.
 // Constant propagation remains unsupported once an input is a constant fake.
 // Python Meta registrations
 // that torch._meta_registrations installs as Meta kernels run here like C++
@@ -350,6 +352,14 @@ void fakeFallback(
         has_python_inputs = has_python_inputs ||
             (!t.is_fake() && impl->pyobj_slot()->load_pyobj() != nullptr);
       });
+  // Python's whitelist uses the base name without namespace or overload.
+  const auto should_allow_numbers_as_tensors = [&op] {
+    std::string_view name = op.operator_name().name;
+    if (const auto end = name.rfind("::"); end != std::string_view::npos) {
+      name.remove_prefix(end + 2);
+    }
+    return at::should_allow_numbers_as_tensors(name);
+  };
   const bool is_lift = schema.overload_name().empty() &&
       (schema.name() == "aten::lift_fresh" ||
        schema.name() == "aten::lift_fresh_copy");
@@ -362,6 +372,10 @@ void fakeFallback(
                 op, stack, mode, makes_constant, is_lift)) {
       return;
     }
+  }
+  if (!has_mode_fakes && !is_lift && should_allow_numbers_as_tensors()) {
+    // Input conversion would skip Python's real execution and constant creation.
+    unsupported(op, "numbers-as-tensors operations without fake inputs");
   }
   replace_each_tensor(
       stack,
@@ -381,7 +395,7 @@ void fakeFallback(
         }
         const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
         const auto raise = [&](std::string_view what) {
-          interpreter->fake_raise_python_error(
+          interpreter->raise_python_error(
               c10::impl::FakePythonError::AssertionError,
               c10::str(what, ". Found in ", op.operator_name()));
         };
