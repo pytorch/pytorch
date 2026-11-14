@@ -40,7 +40,7 @@ static uint32_t get_input_offset(
 
 #include <c10/metal/reduction_utils.h>
 
-// Load modes for SumOp: identity (sum), nan-to-zero (nansum),
+// Load modes for SumReductionOp: identity (sum), nan-to-zero (nansum),
 // nonzero-as-one (count_nonzero), abs (L1 norm), or square (L2 norm).
 enum LoadMode : uint {
   LOAD_IDENTITY = 0,
@@ -146,28 +146,29 @@ template <
     typename TO,
     LoadMode MODE = LOAD_IDENTITY,
     FinalizeOp FINAL = FINAL_NONE>
-struct SumOp {
+struct SumReductionOp {
   using acc_t =
       ::metal::conditional_t<MODE == LOAD_NONZERO, uint, opmath_t<TO>>;
+  using Reduce = c10::metal::SumOp<acc_t>;
   static inline acc_t identity() {
-    return acc_t(0);
+    return Reduce::identity();
   }
   template <typename TI>
   static inline acc_t load(TI v) {
     return static_cast<acc_t>(load_val<MODE>(v));
   }
   static inline acc_t combine(acc_t a, acc_t b) {
-    return a + b;
+    return Reduce::combine(a, b);
   }
   static inline acc_t simd_reduce(acc_t v) {
-    return c10::metal::simd_sum(v);
+    return Reduce::simd_reduce(v);
   }
   static inline acc_t threadgroup_reduce(
       threadgroup acc_t* shared,
       acc_t v,
       uint tid,
       uint tptg) {
-    return c10::metal::threadgroup_sum(shared, v, tid, tptg);
+    return Reduce::threadgroup_reduce(shared, v, tid, tptg);
   }
   static inline TO finalize(acc_t v, float param, device TO*, uint) {
     return static_cast<TO>(finalize_val<FINAL>(v, param));
@@ -175,27 +176,28 @@ struct SumOp {
 };
 
 template <typename TO>
-struct ProdOp {
+struct ProdReductionOp {
   using acc_t = opmath_t<TO>;
+  using Reduce = c10::metal::ProdOp<acc_t>;
   static inline acc_t identity() {
-    return cast_to<acc_t>(1);
+    return Reduce::identity();
   }
   template <typename TI>
   static inline acc_t load(TI v) {
     return static_cast<acc_t>(v);
   }
   static inline acc_t combine(acc_t a, acc_t b) {
-    return c10::metal::mul(a, b);
+    return Reduce::combine(a, b);
   }
   static inline acc_t simd_reduce(acc_t v) {
-    return c10::metal::simd_prod(v);
+    return Reduce::simd_reduce(v);
   }
   static inline acc_t threadgroup_reduce(
       threadgroup acc_t* shared,
       acc_t v,
       uint tid,
       uint tptg) {
-    return c10::metal::threadgroup_prod(shared, v, tid, tptg);
+    return Reduce::threadgroup_reduce(shared, v, tid, tptg);
   }
   static inline TO finalize(acc_t v, float, device TO*, uint) {
     return static_cast<TO>(v);
@@ -982,7 +984,7 @@ kernel void reduction_flat_strided(
       TO)
 
 #define REGISTER_SUM_IMPL(TI, TO, PREFIX, MODE) \
-  REGISTER_REDUCTION(PREFIX, TI, TO, SumOp<TO, MODE>)
+  REGISTER_REDUCTION(PREFIX, TI, TO, SumReductionOp<TO, MODE>)
 
 #define REGISTER_SUM(TI, TO) REGISTER_SUM_IMPL(TI, TO, "sum_", LOAD_IDENTITY)
 #define REGISTER_NANSUM(TI, TO) \
@@ -992,10 +994,14 @@ kernel void reduction_flat_strided(
 #define REGISTER_NORM(TI, TO)                          \
   REGISTER_SUM_IMPL(TI, TO, "norm_l0_", LOAD_NONZERO); \
   REGISTER_SUM_IMPL(TI, TO, "norm_l1_", LOAD_ABS);     \
-  REGISTER_REDUCTION("norm_l2_", TI, TO, SumOp<TO, LOAD_SQUARE, FINAL_SQRT>)
+  REGISTER_REDUCTION(                                  \
+      "norm_l2_", TI, TO, SumReductionOp<TO, LOAD_SQUARE, FINAL_SQRT>)
 #define REGISTER_NORM_L2_COMBINE(TO) \
   REGISTER_REDUCTION(                \
-      "norm_l2_combine_", float, TO, SumOp<TO, LOAD_IDENTITY, FINAL_SQRT>)
+      "norm_l2_combine_",            \
+      float,                         \
+      TO,                            \
+      SumReductionOp<TO, LOAD_IDENTITY, FINAL_SQRT>)
 
 REGISTER_SUM(float, float);
 REGISTER_SUM(float, half);
@@ -1050,7 +1056,8 @@ REGISTER_NORM_L2_COMBINE(float);
 REGISTER_NORM_L2_COMBINE(half);
 REGISTER_NORM_L2_COMBINE(bfloat);
 
-#define REGISTER_PROD(TI, TO) REGISTER_REDUCTION("prod_", TI, TO, ProdOp<TO>)
+#define REGISTER_PROD(TI, TO) \
+  REGISTER_REDUCTION("prod_", TI, TO, ProdReductionOp<TO>)
 
 REGISTER_PROD(float, float);
 REGISTER_PROD(float, half);

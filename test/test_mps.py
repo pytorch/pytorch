@@ -15563,6 +15563,39 @@ class TestComplex(TestCase):
 class TestCommon(TestCase):
     exact_dtype = True
 
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("inner", [1, 2])
+    @parametrize("initial", [1.000244140625, 65536.0])
+    def test_segment_reduce_initial_opmath(self, device, dtype, inner, initial):
+        # Cancellation exposes premature rounding or overflow of initial.
+        data = torch.full((64, inner), -int(initial) / 64, dtype=dtype, device=device)
+        offsets = torch.tensor([0, 0, 64], device=device)
+        result = torch.segment_reduce(data, "sum", offsets=offsets, initial=initial)
+        expected = torch.tensor(
+            [[initial] * inner, [initial - int(initial)] * inner], dtype=dtype, device=device
+        )
+        self.assertEqual(result, expected)
+
+    @dtypes(torch.bfloat16)
+    @parametrize("inner", [1, 2])
+    @parametrize("reduce", ["sum", "mean", "min", "max", "prod"])
+    def test_segment_reduce_forward(self, device, dtype, inner, reduce):
+        # inner=1 uses threadgroups; inner=2 uses the serial strided reduction.
+        # Long segments exercise multiple iterations per thread and BF16 accumulation.
+        segment_length = 1024
+        axis_size = 1 + 2 * segment_length
+        # A noncontiguous input with a skipped prefix, two long segments and an empty segment.
+        data = torch.ones((2, 2 * axis_size, inner), dtype=dtype, device=device)[:, ::2]
+        # Distinguish the extrema/product from the identity and exercise a zero product.
+        data[:, 2] = 2.
+        data[1, segment_length + 2] = 0.
+        boundaries = [1, 1 + segment_length, 1 + segment_length, axis_size]
+        offsets = torch.tensor([boundaries] * 2, dtype=torch.int32, device=device)
+        reference = data.cpu()
+        result = torch.segment_reduce(data, reduce, offsets=offsets, axis=1)
+        expected = torch.segment_reduce(reference, reduce, offsets=offsets.cpu(), axis=1)
+        self.assertEqual(result, expected)
+
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
     def tearDownClass(cls):
