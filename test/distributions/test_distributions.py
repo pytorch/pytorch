@@ -115,6 +115,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     expectedFailureXPU,
     instantiate_device_type_tests,
+    onlyCPU,
     largeTensorTest,
     preserves_device_selection,
     skipCUDAIf,
@@ -2207,6 +2208,38 @@ class TestDistributionsDevice(DistributionsTestCase):
                     )
         finally:
             torch.set_default_dtype(saved_dtype)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @parametrize("rate", [1e19, float(2**63), inf])
+    def test_poisson_sample_rate_too_large(self, device, dtype, rate):
+        rate = torch.tensor([rate], device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "invalid Poisson rate"):
+            torch.poisson(rate)
+        with self.assertRaisesRegex(RuntimeError, "invalid Poisson rate"):
+            Poisson(rate).sample()
+
+    @onlyCPU
+    @dtypes(torch.float64)
+    @parametrize("boundary", ["below", "at", "above"])
+    def test_poisson_sample_rate_limit(self, device, dtype, boundary):
+        int64_upper_bound = float(2**63)
+        max_rate = int64_upper_bound - 10 * math.sqrt(int64_upper_bound)
+        rate = {
+            "below": math.nextafter(max_rate, -inf),
+            "at": max_rate,
+            "above": math.nextafter(max_rate, inf),
+        }[boundary]
+        rates = torch.full((1000,), rate, device=device, dtype=dtype)
+        if boundary == "above":
+            with self.assertRaisesRegex(RuntimeError, "invalid Poisson rate"):
+                torch.poisson(rates)
+        else:
+            samples = torch.poisson(rates)
+            self.assertTrue(torch.isfinite(samples).all())
+            self.assertTrue((samples >= 0).all())
+            self.assertTrue((samples < int64_upper_bound).all())
+            self.assertEqual(samples, samples.floor())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_tensor_sample(self):
