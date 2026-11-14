@@ -16,6 +16,7 @@ import unittest.mock as mock
 import torch
 from torch._native import aot_manifest
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -399,6 +400,12 @@ class TestEmbedDetection(TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("LAZY_OK", proc.stdout)
+
+    add_skip_condition(
+        test_import_does_not_initialize_cuda,
+        lambda cls: not torch.cuda.is_available(),
+        "CUDA required",
+    )
 
 
 instantiate_parametrized_tests(TestEmbeddedCoverage)

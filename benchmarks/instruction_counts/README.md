@@ -16,8 +16,8 @@ upgraded in subsequent PRs.
 ### To define a new benchmark:
 * `TimerArgs`: Low level definition which maps directly to
 `torch.utils.benchmark.Timer`
-* `GroupedStmts`: Benchmark a snippet. (Python, C++, or both) Can automatically
-generate TorchScript and autograd variants.
+* `GroupedStmts`: Benchmark a snippet (Python, C++, or both). Can automatically
+generate autograd variants.
 * `GroupedModules`: Like `GroupedStmts`, but takes `nn.Module`s
 * `GroupedVariants`: Benchmark-per-line to define many related benchmarks in a
 single code block.
@@ -51,7 +51,6 @@ benchmark = GroupedStmts(
     ),
 
     signature="f(x, w) -> y",
-    torchscript=True,
     autograd=True,
 ),
 ```
@@ -72,63 +71,14 @@ Timer(
 )
 ```
 
-Moreover, because `signature` is provided we know that creation of `x` and `w`
-is part of setup, and the overall computation uses `x` and `w` to produce `y`.
-As a result, we can derive TorchScript'd and AutoGrad variants as well. We can
-deduce that a TorchScript model will take the form:
-
-```
-@torch.jit.script
-def f(x, w):
-    # Paste `benchmark.py_fwd_stmt` into the function body.
-    y = x * w
-    return y  # Set by `-> y` in signature.
-```
-
-And because we will want to use this model in both Python and C++, we save it to
-disk and load it as needed. At this point Timers for TorchScript become:
-
-```
-Timer(
-    stmt="""
-        y = jit_model(x, w)
-    """,
-    setup=""",
-        # benchmark.setup.py_setup
-        # jit_model = torch.jit.load(...)
-        # Warm up jit_model
-    """,
-)
-
-Timer(
-    stmt="""
-        std::vector<torch::jit::IValue> ivalue_inputs(
-            torch::jit::IValue({x}),
-            torch::jit::IValue({w})
-        );
-        auto y = jit_model.forward(ivalue_inputs);
-    """,
-    setup="""
-        # benchmark.setup.cpp_setup
-        # jit_model = torch::jit::load(...)
-        # Warm up jit_model
-    """,
-)
-```
-
-While nothing above is particularly complex, there is non-trivial bookkeeping
-(managing the model artifact, setting up IValues) which if done manually would
-be rather bug-prone and hard to read.
-
-The story is similar for autograd: because we know the output variable (`y`)
-and we make sure to assign it when calling TorchScript models, testing AutoGrad
-is as simple as appending `y.backward()` (or `y.backward();` in C++) to the
-stmt of the forward only variant. Of course this requires that `signature` be
-provided, as there is nothing special about the name `y`.
+Because we know the output variable (`y`), generating an autograd variant is
+as simple as appending `y.backward()` (or `y.backward();` in C++) to the stmt
+of the forward only variant. This requires that `signature` be provided, as
+there is nothing special about the name `y`.
 
 The logic for the manipulations above is split between `core/api.py` (for
-generating `stmt` based on language, Eager/TorchScript, with or without AutoGrad)
-and `core/expand.py` (for larger, more expansive generation). The benchmarks
+generating model invocations based on language) and `core/expand.py` (for
+expanding forward, autograd, language, and thread-count variants). The benchmarks
 themselves are defined in `definitions/standard.py`. The current set is chosen
 to demonstrate the various model definition APIs, and will be expanded when the
 benchmark runner infrastructure is better equipped to deal with a larger run.

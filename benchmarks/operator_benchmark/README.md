@@ -10,7 +10,7 @@ Key Features:
 
 2\. Supported Frameworks: PyTorch
 
-3\. Supported PyTorch mode: eager and JIT
+3\. Supported PyTorch mode: eager and torch.compile
 
 4\. Input shapes: user-defined shapes, randomly generated shapes
 
@@ -179,9 +179,9 @@ The [operator_microbenchmark.yml](../../.github/workflows/operator_microbenchmar
 - B200 GPUs (`linux.dgx.b200`) - CUDA 12.8, sm_100
 
 **ROCm Devices:**
-- MI350X GPUs (`linux.rocm.gpu.mi350.1`) - gfx950
+- MI350X GPUs (`linux.rocm.gpu.gfx950.1`) - gfx950
 
-**Operators Tracked in CI:** `matmul`, `mm`, `addmm`, `bmm`, `conv` (with tag `long`)
+**Operators Tracked in CI:** `matmul`, `mm`, `addmm`, `bmm`, `conv`, `grouped_mm` (with tag `long`)
 - Other operators in the `pt/` directory can be run ad-hoc using the workflow dispatch
 
 **Schedule:** Daily at 06:00 UTC

@@ -1126,6 +1126,7 @@ class _DeserializeGraphMixin:
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestDeserialize(_DeserializeGraphMixin, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -2346,6 +2347,7 @@ class TestSaveLoad(TestCase):
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestSerializeCustomClass(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -2955,6 +2957,7 @@ class TestSerializeAccelerator(TestCase):
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestDeserializeAccelerator(_DeserializeGraphMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 

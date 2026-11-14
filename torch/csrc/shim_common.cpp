@@ -14,6 +14,7 @@
 #include <ATen/ops/from_blob.h>
 #endif // AT_PER_OPERATOR_HEADERS
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 #include <torch/csrc/PyObjectConversion.h>
 #include <torch/csrc/shim_conversion_utils.h>
@@ -342,7 +343,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
 
     // read the output from the end of the stack and wrap that back into
     // IValue from StableIValue
-    for (size_t idx = 0; idx < num_returns; idx++) {
+    for (const auto idx : c10::irange(num_returns)) {
       const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
       torch::jit::push(
           stack, to_ivalue(ret_type, ministack[idx], extension_build_version_));
@@ -679,6 +680,33 @@ torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage) {
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_conj(AtenTensorHandle tensor, bool* ret_is_conj) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_conj = t->is_conj();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_neg = t->is_neg();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_inference = t->is_inference();
+  });
+}
+
 // Python interop conversions. These are the only stable
 // shims that need functionality from libtorch_python; they reach it through a
 // vtable that libtorch_python registers at load time
@@ -881,7 +909,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<at::Tag> tag_vec;
     tag_vec.reserve(num_tags);
-    for (int32_t i = 0; i < num_tags; i++) {
+    for (const auto i : c10::irange(num_tags)) {
       tag_vec.push_back(static_cast<at::Tag>(tags[i]));
     }
     reinterpret_cast<torch::Library*>(self)->def(
@@ -970,4 +998,8 @@ AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace() {
   return torch::csrc::shim::details ::
       get_torch_exception_what_without_backtrace()
           .c_str();
+}
+
+AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled() {
+  return c10::WarningUtils::get_warnAlways();
 }

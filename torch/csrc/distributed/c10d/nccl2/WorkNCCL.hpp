@@ -92,9 +92,11 @@ class WorkNCCL : public c10d::Work {
   std::vector<at::Tensor> result() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+  bool hasFutureResult() const override {
+    return true;
+  }
   float getDuration() const override;
   uint64_t getSequencenumber() const override;
-  uint64_t getCompletionKey() const override;
 
   std::chrono::milliseconds getTimeout() const override;
   WorkStatus status() const;
@@ -104,6 +106,14 @@ class WorkNCCL : public c10d::Work {
     outputs_ = std::move(outputs);
   }
   void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children);
+  // Makes getDuration() measure from where first's duration starts.
+  void setDurationStart(const WorkNCCL& first);
+  // Keeps the works' input tensors alive until this work is waited on, without
+  // taking them from the works.
+  void retainInputs(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
+  // Orders this work's stream after the end of each of works issued on
+  // another stream.
+  void waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
   // Per-process-group collective counter of the op this work tracks; set by
   // the backend's createWork().
   void setSequenceNumber(uint64_t seq);
@@ -123,6 +133,7 @@ class WorkNCCL : public c10d::Work {
   struct InputTensorShelf {
     explicit InputTensorShelf(std::vector<at::Tensor> tensors);
     void append(InputTensorShelf& other);
+    void appendCopy(InputTensorShelf& other);
     void clear();
 
     std::mutex mutex;
@@ -137,9 +148,14 @@ class WorkNCCL : public c10d::Work {
     WorkStatus status() const;
     std::exception_ptr exception() const;
     bool setTerminalStatus(WorkStatus status);
+    // Returns ownedEphemeralTimeout to the comm, at most once.
+    void releaseEphemeralTimeout();
     WorkStatus checkStatus(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
-    void notifyCompletion();
+    // Completes futureWorkResult once status() is terminal. checkStatus()
+    // only advances the status, so the queue can poll under its lock and
+    // publish after releasing it.
+    void publishResult();
     float getDuration();
 
     ProcessGroupNCCL* comm;
@@ -148,7 +164,6 @@ class WorkNCCL : public c10d::Work {
     at::cuda::CUDAStream stream;
     std::chrono::steady_clock::time_point workStartTime;
     std::chrono::milliseconds timeout;
-    uint64_t completionKey;
     std::chrono::milliseconds ownedEphemeralTimeout{0};
     std::atomic<bool> ephemeralTimeoutReleased{false};
     bool timingEnabled;
@@ -160,6 +175,7 @@ class WorkNCCL : public c10d::Work {
     std::atomic<WorkStatus> workStatus{WorkStatus::NOT_STARTED};
     std::exception_ptr workException;
     c10::intrusive_ptr<c10::ivalue::Future> futureWorkResult;
+    std::atomic<bool> resultPublished{false};
     bool hostBlocking{false};
   };
   struct TrackedWork {
@@ -167,7 +183,7 @@ class WorkNCCL : public c10d::Work {
     std::shared_ptr<InputTensorShelf> inputTensors;
   };
 
-  // Poll the CUDA events and advance status; used by the GC queue + watchdog.
+  // Poll the CUDA events, advance status and publish the result once terminal.
   WorkStatus checkStatus(
       std::optional<std::chrono::milliseconds> timeout = std::nullopt);
   void recordFunctionStart(std::string_view coll_name);
@@ -195,10 +211,10 @@ class WorkNCCLQueue {
       cudaStream_t stream);
 
  private:
-  // completed collects the states retired as COMPLETED, so the caller can push
-  // their completion out after dropping work_queues_mutex_.
+  // finished collects the states found terminal, so the caller can publish
+  // their results after dropping work_queues_mutex_.
   WorkNCCL::WorkStatus garbageCollectLocked(
-      std::vector<std::shared_ptr<WorkNCCL::State>>& completed);
+      std::vector<std::shared_ptr<WorkNCCL::State>>& finished);
   std::unordered_map<cudaStream_t, std::queue<WorkNCCL::TrackedWork>>
       stream_work_queues_;
   std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>>
