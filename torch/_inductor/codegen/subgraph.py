@@ -199,6 +199,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             is_inference=V.graph.is_inference,
             is_backward=V.graph.is_backward,
             name=f"benchmark_{safe_name}",
+            # Only benchmarked, never captured.
+            split_into_partitions=False,
+            cudagraphs_per_partition=False,
         )
         # Donation indices use the parent graph's placeholder ordering, not ours
         # (same as SubgraphLowering).
