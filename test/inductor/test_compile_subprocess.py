@@ -91,6 +91,20 @@ test_failures = {
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
 }
+# Parametrization changes the attribute keys but preserves each template name.
+# Expand to the generated keys that copy_tests uses to look up failures.
+_subprocess_skips = (
+    "test_conv2d_backward_parametrized",
+    "test_conv2d_backward_input_layout",
+    "test_conv_transpose2d_forward_triton",
+)
+test_failures.update(
+    {
+        name: TestFailure(("cpu", "cuda", "xpu", "mps"), is_skip=True)
+        for name, fn in vars(inductor.test_torchinductor.CommonTemplate).items()
+        if getattr(fn, "__name__", None) in _subprocess_skips
+    }
+)
 
 
 class TestSubprocess(TestCase):

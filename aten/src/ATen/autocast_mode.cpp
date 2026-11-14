@@ -252,6 +252,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(chain_matmul, lower_precision_fp)
   KERNEL_MPS(linalg_multi_dot, lower_precision_fp)
   KERNEL_MPS(lstm_cell, lower_precision_fp)
+  KERNEL_MPS(_lstm_mps, lower_precision_fp)
   KERNEL_MPS(scaled_dot_product_attention, lower_precision_fp)
 
   // fp32

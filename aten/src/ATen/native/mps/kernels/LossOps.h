@@ -19,6 +19,13 @@ struct NLLLossBackwardParams {
   bool is_mean;
 };
 
+struct BCELossReduceParams {
+  uint32_t numel;
+  uint32_t slice_len;
+  float scale;
+  bool has_weight;
+};
+
 template <typename index_t>
 struct CTCLossParams {
   index_t BLANK;

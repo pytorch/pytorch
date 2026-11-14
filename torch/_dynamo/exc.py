@@ -809,8 +809,9 @@ def unimplemented(
         if hasattr(from_exc, "real_stack"):
             past_real_stack = from_exc.real_stack
         options["real_stack"] = past_real_stack
-        if isinstance(from_exc, Unsupported):
+        if isinstance(from_exc, (Unsupported, StepUnsupported)):
             msg = f"{from_exc.msg}\n\n*** While handling this graph break, another graph break occurred: ***\n\n{msg}"
+        if isinstance(from_exc, Unsupported):
             # noqa: GB_REGISTRY
             raise Unsupported(msg, gb_type, skip_frame, **options)
         # noqa: GB_REGISTRY
@@ -981,10 +982,9 @@ def _extract_stack_with_positions() -> StackSummary:
     frame = sys._getframe(1)
     while frame is not None:
         code = frame.f_code
-        # colno/end_colno kwargs were added to FrameSummary in 3.11
         kwargs: dict[str, Any] = {}
         lineno = frame.f_lineno
-        if sys.version_info >= (3, 11) and frame.f_lasti >= 0:
+        if frame.f_lasti >= 0:
             positions = list(code.co_positions())
             idx = frame.f_lasti // 2
             if idx < len(positions):
