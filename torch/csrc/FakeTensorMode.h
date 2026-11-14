@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/TensorImpl.h>
+#include <c10/core/FakeTensorMode.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -8,10 +8,13 @@
 
 namespace torch::fake_tensor {
 
-// get the python CppFakeTensorMode object for mode, minting a fresh wrapper
-// around the same C++ mode if the previous one has been collected; see
-// Note [C++ FakeTensorMode Python wrapper lifetime] in FakeTensorMode.cpp.
-// Returns None only when mode is null.
+TORCH_PYTHON_API extern PyTypeObject PyCppFakeTensorModeType;
+
+// Accepts only the exact CppFakeTensorMode. Caller must hold the GIL.
+TORCH_PYTHON_API std::shared_ptr<c10::FakeTensorMode> getCppFakeTensorMode(
+    py::handle py_mode);
+
+// Reuses the live Python wrapper or rebuilds it around mode; null gives None.
 // Caller must hold the GIL.
 TORCH_PYTHON_API py::object getCppFakeTensorModePyObj(
     const std::shared_ptr<c10::FakeTensorMode>& mode);

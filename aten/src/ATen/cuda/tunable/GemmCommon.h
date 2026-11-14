@@ -290,13 +290,10 @@ inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivatio
   switch (value) {
     case at::cuda::blas::GEMMAndBiasActivationEpilogue::None:
       return std::string("None");
-      break;
     case at::cuda::blas::GEMMAndBiasActivationEpilogue::RELU:
       return std::string("RELU");
-      break;
     case cuda::blas::GEMMAndBiasActivationEpilogue::GELU:
       return std::string("GELU");
-      break;
     default:
       return std::string("unknown");
   }
@@ -747,7 +744,7 @@ struct ScaledGemmParams : OpParams {
     }
     return sig;
 #else
-    return fmt::sprintf(
+    auto sig = fmt::sprintf(
       "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_a_%s_b_%s_c_%s_as_%s_bs_%s_"
       "ast_%d_bst_%d_dscale_%d_fast_%d_bias_%s",
       transa, transb, m, n, k, lda, ldb, ldc,
@@ -761,6 +758,12 @@ struct ScaledGemmParams : OpParams {
       c_scale_ptr != nullptr,
       use_fast_accum,
       bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
+    // Preserve existing CUDA NO_SWIZZLE/SWIZZLE_32_4_4 tuning-file keys.
+    // Add any new CUDA swizzle here to distinguish its scale layout.
+    if (a_swizzle_type == SwizzleType::SWIZZLE_MN_K4 || b_swizzle_type == SwizzleType::SWIZZLE_MN_K4) {
+      sig += fmt::sprintf("_swz_%s_%s", at::blas::SwizzleTypeToString(a_swizzle_type), at::blas::SwizzleTypeToString(b_swizzle_type));
+    }
+    return sig;
 #endif
   }
 
