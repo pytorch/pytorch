@@ -820,6 +820,15 @@ class TensorVariable(VariableTracker):
             return VariableTracker.build(tx, self.is_nested)
         return None
 
+    def method_attr_imag(self, tx: "InstructionTranslatorBase") -> None:
+        # Tracing getattr(x, "imag") would raise this TypeError inside the fake
+        # tensor call, where user code cannot catch it.
+        if self.dtype is not None and not self.dtype.is_complex:
+            raise_type_error(
+                tx, "imag is not implemented for tensors with non-complex dtypes."
+            )
+        return None
+
     def method_attr_retain_grad(self, tx: "InstructionTranslatorBase") -> NoReturn:
         unimplemented(
             gb_type="Tensor.retain_grad() with AOTDispatcher",
@@ -882,9 +891,10 @@ class TensorVariable(VariableTracker):
             var = VariableTracker.build(tx, getattr).call_function(
                 tx, [self, VariableTracker.build(tx, name)], {}
             )
-            # in the event that TensorVariable returns NotImplemented
-            # GetAttrBuiltinVariable.call_function returns GetAttrVariable
-            ret_val = not isinstance(var, GetAttrVariable)
+            # A lookup that raised NotImplementedError comes back as an untyped
+            # GetAttrVariable. A typed one (e.g. a bound method found by
+            # dynamic_getattr) was resolved on the real value, so it exists.
+            ret_val = not isinstance(var, GetAttrVariable) or var.py_type is not None
         except (AttributeError, ObservedAttributeError):
             ret_val = False
 
@@ -2109,6 +2119,9 @@ class TensorVariable(VariableTracker):
 
     def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for tensors (size along first dimension)."""
+        # Mirror eager Tensor.__len__: a 0-d tensor has no first dimension.
+        if self.ndim == 0:
+            raise_observed_exception(TypeError, tx, args=["len() of a 0-d tensor"])
         return self.call_method(tx, "size", [VariableTracker.build(tx, 0)], {})
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:

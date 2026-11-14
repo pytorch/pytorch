@@ -14,6 +14,7 @@ from torch._functorch.aot_autograd import aot_module_simplified
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
 )
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils.hooks import RemovableHandle
@@ -1243,6 +1244,10 @@ def forward(self, L_x_ : torch.Tensor):
 
 class HooksTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(torch._dynamo.test_case.TestCase.setUp)
+    setUpClass = classmethod(
+        preserves_device_selection(torch._dynamo.test_case.TestCase.setUpClass.__func__)
+    )
 
     @onlyAccelerator
     def test_register_hook_on_intermediate_autograd_cache(self, device):

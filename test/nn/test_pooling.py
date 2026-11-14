@@ -39,6 +39,7 @@ from torch.testing._internal.common_nn import (
     NNTestCase,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     gcIfJetson,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -48,6 +49,7 @@ from torch.testing._internal.common_utils import (
     skipIfMPS,
     slowTest,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TEST_WITH_UBSAN,
     TestCase,
 )
@@ -437,7 +439,7 @@ class TestPoolingNN(NNTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             avgpool(inp)
 
@@ -962,19 +964,19 @@ class TestPoolingNNDevice(NNTestCase):
                 output_size=[1, 1, 1],
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_MaxPool3d_errors(self, device):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool3d(
                 kernel_size=9223372036854775803,
             )(samples)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool3d(
                 kernel_size=2,
@@ -987,38 +989,38 @@ class TestPoolingNNDevice(NNTestCase):
                 kernel_size=-1,
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_MaxPool2d_dilation_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool2d(
                 kernel_size=2,
                 dilation=(1, 9223372036854775803),
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_AvgPool3d_stride_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: stride",
+            "value cannot be converted to type int without overflow",
         ):
             nn.AvgPool3d(
                 kernel_size=2,
                 stride=(1, 1, 9223372036854775803),
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_pooling_backward_overflow(self, device):
         input2d = torch.randn(1, 1, 4, 4, device=device)
         grad2d = torch.randn(1, 1, 2, 2, device=device)
         indices2d = torch.zeros(1, 1, 2, 2, dtype=torch.long, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.avg_pool2d_backward(
                 grad2d,
@@ -1032,7 +1034,7 @@ class TestPoolingNNDevice(NNTestCase):
             )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.max_pool2d_with_indices_backward(
                 grad2d,
@@ -1050,7 +1052,7 @@ class TestPoolingNNDevice(NNTestCase):
         indices3d = torch.zeros(1, 1, 2, 2, 2, dtype=torch.long, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: stride",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.avg_pool3d_backward(
                 grad3d,
@@ -1064,7 +1066,7 @@ class TestPoolingNNDevice(NNTestCase):
             )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.max_pool3d_with_indices_backward(
                 grad3d,
@@ -1322,6 +1324,10 @@ torch.{device_type}.synchronize()
 
     @parametrize_test("kernel", ["max", "avg"])
     @parametrize_test("pooling_dims", [1, 2, 3])
+    @decorateIf(
+        unittest.skip("Skipping to avoid abort"),
+        lambda p: p["kernel"] == "max" and p["pooling_dims"] == 1,
+    )
     def test_pooling_shape(self, device, kernel, pooling_dims):
         """Test the output shape calculation for pooling functions"""
 
@@ -1398,6 +1404,15 @@ torch.{device_type}.synchronize()
 
         for mf in (torch.contiguous_format, torch.channels_last, "non_contiguous"):
             helper((2, 3, 6, 6), mf)
+
+    def test_adaptive_avg_pool2d_size_one_channel_stride(self, device):
+        # (B, 1, H, W) is contiguous whatever the stride of the size-1 dim.
+        x = torch.randn(1, 3, 5, 6, device=device).transpose(0, 1)
+        self.assertTrue(x.is_contiguous())
+        expected = F.adaptive_avg_pool2d(
+            x.clone(memory_format=torch.contiguous_format), (2, 3)
+        )
+        self.assertEqual(F.adaptive_avg_pool2d(x, (2, 3)), expected)
 
     def test_adaptive_avg_pool3d_output_size_one(self, device):
         x = torch.randn(
@@ -2267,6 +2282,12 @@ torch.{device_type}.synchronize()
 
     @expectedFailureMPS  # float64
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
+    # expectedFailureMeta already skips Dynamo; expose that skip before sharding.
+    @decorateIf(
+        unittest.skip("test doesn't currently work with dynamo"),
+        lambda p: TEST_WITH_TORCHDYNAMO
+        and torch.device(p["device"]).type in ("cpu", "cuda"),
+    )
     def test_fractional_max_pool2d(self, device):
         with set_default_dtype(torch.double):
             x = torch.randn(1, 2, 7, 7, requires_grad=True, device=device)
@@ -2338,6 +2359,12 @@ torch.{device_type}.synchronize()
 
     @expectedFailureMPS  # float64
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
+    # expectedFailureMeta already skips Dynamo; expose that skip before sharding.
+    @decorateIf(
+        unittest.skip("test doesn't currently work with dynamo"),
+        lambda p: TEST_WITH_TORCHDYNAMO
+        and torch.device(p["device"]).type in ("cpu", "cuda"),
+    )
     def test_fractional_max_pool3d(self, device):
         with set_default_dtype(torch.double):
             x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)

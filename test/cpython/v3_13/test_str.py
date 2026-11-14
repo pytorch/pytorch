@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
 
 __TestCase = CPythonTestCase
 
@@ -293,6 +293,7 @@ class StrTest(string_tests.StringLikeTest,
                         pickled = "".join(pickle.loads(pickle.dumps(it, proto)))
                         self.assertEqual(case, pickled)
 
+    @skipIfTorchDynamo("too slow: cross-product loop is unrolled at trace time")
     def test_count(self):
         string_tests.StringLikeTest.test_count(self)
         # check mixed argument types
@@ -323,6 +324,7 @@ class StrTest(string_tests.StringLikeTest,
             pass
         self.checkequal(3, MyStr('aaa'), 'count', 'a')
 
+    @skipIfTorchDynamo("too slow: cross-product loop is unrolled at trace time")
     def test_find(self):
         string_tests.StringLikeTest.test_find(self)
         # test implementation details of the memchr fast path
@@ -368,6 +370,7 @@ class StrTest(string_tests.StringLikeTest,
         self.checkequal(-1, 'a' * 100, 'find', 'a\U00100304')
         self.checkequal(-1, '\u0102' * 100, 'find', '\u0102\U00100304')
 
+    @skipIfTorchDynamo("too slow: cross-product loop is unrolled at trace time")
     def test_rfind(self):
         string_tests.StringLikeTest.test_rfind(self)
         # test implementation details of the memrchr fast path
