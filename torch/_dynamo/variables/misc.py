@@ -1772,6 +1772,12 @@ class PythonModuleVariable(VariableTracker):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
+        if tx.output.deleted_globals_by_dict:
+            if name == "__dict__":
+                tx.output.check_deleted_global_dict_handout(self.value.__dict__)
+            else:
+                tx.output.check_deleted_global_read(self.value.__dict__, name)
+
         attr_value = None
         if self.is_torch or name not in self.value.__dict__:
             try:

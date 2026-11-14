@@ -61,6 +61,7 @@ import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx, Tensor
 from torch._C._dynamo import guards
+from torch._dynamo import graph_break_hints
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
@@ -786,6 +787,11 @@ class OutputGraph(OutputGraphCommon):
         self.compile_id: int = next(_compile_id_counter)
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
+        # Names deleted in this trace, keyed by id() of the globals dict they
+        # were deleted from; the entry keeps the dict alive so the id cannot
+        # be reused. Later module-object or module-__dict__ accesses to those
+        # names graph-break (see check_deleted_global_read/write).
+        self.deleted_globals_by_dict: dict[int, tuple[Any, set[str]]] = {}
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -1065,6 +1071,53 @@ class OutputGraph(OutputGraphCommon):
 
         self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
         self._cached_replayed_side_effect_source_refs: tuple[str, ...] | None = None
+
+    # TODO(follow-up): replace these breaks with real support, ordering the
+    # module-object access against the replayed global delete.
+    def check_deleted_global_read(self, globals_dict: Any, name: str) -> None:
+        entry = self.deleted_globals_by_dict.get(id(globals_dict))
+        if entry is not None and name in entry[1]:
+            unimplemented(
+                gb_type="DELETE_GLOBAL followed by a module-object read",
+                context=f"name: {name}",
+                explanation=(
+                    "The replayed global delete unbinds the name, but this "
+                    "read would consult the real module, which still holds "
+                    "the pre-call value. Eager resume has to run the read "
+                    "instead."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+    def check_deleted_global_dict_handout(self, globals_dict: Any) -> None:
+        # Any view derived from the dict model (iteration, len, copy, items,
+        # unpacking) still contains the deleted name, so handing the dict out
+        # is broken regardless of which key is accessed next.
+        if self.deleted_globals_by_dict.get(id(globals_dict)) is not None:
+            unimplemented(
+                gb_type="DELETE_GLOBAL followed by a module-__dict__ access",
+                context="module __dict__",
+                explanation=(
+                    "The replayed global delete is not reflected in the "
+                    "dict model behind this module __dict__, so any view "
+                    "derived from it would still contain the deleted name. "
+                    "Eager resume has to run the access instead."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+    def check_deleted_global_write(self, globals_dict: Any, name: str) -> None:
+        entry = self.deleted_globals_by_dict.get(id(globals_dict))
+        if entry is not None and name in entry[1]:
+            unimplemented(
+                gb_type="DELETE_GLOBAL followed by a module-object write",
+                context=f"name: {name}",
+                explanation=(
+                    "The replayed global delete runs after this write and "
+                    "unbinds the name. Eager resume has to order them instead."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
     def track_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
         self.local_generators.append(gen)
