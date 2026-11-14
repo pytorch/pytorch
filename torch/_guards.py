@@ -1100,6 +1100,35 @@ class InlinedCodeCache:
     code_options: CodeOptions
 
 
+class _CurrentFrame:
+    """Context manager behind TracingContext.current_frame. Hand-written
+    rather than @contextmanager because it is entered on every inlined call
+    and generator resume."""
+
+    __slots__ = ("frame_summary", "old", "old_positions", "tc")
+
+    def __init__(self, frame_summary: traceback.FrameSummary | None) -> None:
+        self.frame_summary = frame_summary
+
+    def __enter__(self) -> None:
+        tc = self.tc = TracingContext.get()
+        if self.frame_summary is not None:
+            tc.frame_summary_stack.append(self.frame_summary)
+        self.old = tc.loc_in_frame
+        self.old_positions = tc.loc_in_frame_positions
+        tc.loc_in_frame = None
+        tc.loc_in_frame_positions = None
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        tc = self.tc
+        if isinstance(exc, Exception) and not hasattr(exc, "real_stack"):
+            exc.real_stack = tc.extract_stack()  # pyrefly: ignore [missing-attribute]
+        if self.frame_summary is not None:
+            tc.frame_summary_stack.pop()
+        tc.loc_in_frame = self.old
+        tc.loc_in_frame_positions = self.old_positions
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -1263,30 +1292,12 @@ class TracingContext:
                 raise
 
     @staticmethod
-    @contextlib.contextmanager
     def current_frame(
         frame_summary: traceback.FrameSummary | None,
-    ) -> Generator[None, None, None]:
+    ) -> _CurrentFrame:
         # frame_summary can be None to solely take advantage of real_stack
         # attachment to thrown exceptions
-        tc = TracingContext.get()
-        if frame_summary is not None:
-            tc.frame_summary_stack.append(frame_summary)
-        old = tc.loc_in_frame
-        old_positions = tc.loc_in_frame_positions
-        tc.loc_in_frame = None
-        tc.loc_in_frame_positions = None
-        try:
-            yield
-        except Exception as e:
-            if not hasattr(e, "real_stack"):
-                e.real_stack = tc.extract_stack()  # type: ignore[attr-defined]
-            raise
-        finally:
-            if frame_summary is not None:
-                tc.frame_summary_stack.pop()
-            tc.loc_in_frame = old
-            tc.loc_in_frame_positions = old_positions
+        return _CurrentFrame(frame_summary)
 
     @staticmethod
     @contextlib.contextmanager
