@@ -37,6 +37,7 @@ from .._flex_shard.bucket_runtime import (
     ParamOwnerRef,
     ParamRepresentation,
 )
+from .._flex_shard.all_gather_layout import DefaultAllGatherLayout
 from .._flex_shard.bucket_storage import ParamInfo, ShardedBucketStorage
 from .._flex_shard.placements.shard import Shard as EngineShard
 from .._flex_shard.placements.shard_all_gather import (
@@ -887,11 +888,18 @@ def _all_gather_comm_type(bucket: FullyShardBucket) -> type:
 
 
 def _check_layout_comm(bucket: FullyShardBucket, layout: Any, comm_type: type) -> None:
-    if layout.comm_type is not None and not issubclass(comm_type, layout.comm_type):
+    # Installed comms expect the default copy-in into the output they allocate,
+    # while a custom layout packs its own input and carries its own comm
+    from ._fsdp_collectives import DefaultAllGather
+
+    custom_layout = not isinstance(layout, DefaultAllGatherLayout)
+    if custom_layout and comm_type is not DefaultAllGather:
         raise ValueError(
-            f"all-gather layout {type(layout).__name__} requires a "
-            f"{layout.comm_type.__name__} comm, not {comm_type.__name__}; "
-            "install one with set_custom_all_gather() before the layout"
+            f"all-gather layout {type(layout).__name__} cannot use "
+            f"{comm_type.__name__}: comms from set_custom_all_gather(), "
+            "set_symm_mem_for_comm() and "
+            "set_allocate_memory_from_process_group_for_comm() only work "
+            "with DefaultAllGatherLayout; a custom layout carries its own comm"
         )
 
 
@@ -901,6 +909,20 @@ def set_custom_all_gather(state: Any, comm: Any) -> None:
         _check_layout_comm(bucket, bucket.all_gather_layout, type(comm))
     for bucket in buckets:
         bucket.storage._all_gather_comm = comm
+
+
+def set_custom_all_reduce(state: Any, comm: Any) -> None:
+    from ._fsdp_collectives import DefaultAllReduce
+
+    buckets = _buckets(state)
+    if len(buckets) > 1:
+        raise ValueError(
+            "set_custom_all_reduce is not supported with multiple param groups"
+        )
+    for bucket in buckets:
+        if bucket.mesh_info.replicate_info is None:
+            raise ValueError("set_custom_all_reduce requires a replication mesh")
+        bucket.storage._all_reduce_comm = DefaultAllReduce() if comm is None else comm
 
 
 def set_custom_reduce_scatter(state: Any, comm: Any) -> None:

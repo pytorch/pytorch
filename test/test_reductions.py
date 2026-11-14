@@ -558,6 +558,15 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
 
+    @parametrize("op", ["cumsum", "cumprod", "logcumsumexp", "cummax", "cummin"])
+    def test_cumulative_ops_size_one_dim_stride(self, device, op):
+        # Regression test for https://github.com/pytorch/pytorch/issues/202600
+        # mT leaves the size-1 dim with stride 1 instead of 5, yet the tensor is still contiguous
+        x = torch.randn(2, 3, 5, 1, device=device).mT
+        out = torch.zeros_like(x), torch.ones_like(x, dtype=torch.long)
+        res = getattr(torch, op)(x, 2, out=out if op.startswith("cumm") else out[0])
+        self.assertEqual(res, getattr(torch, op)(x.cpu(), 2))
+
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
     def test_logcumsumexp_complex(self, device, dtype):

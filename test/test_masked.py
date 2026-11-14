@@ -260,8 +260,18 @@ class mask_layouts(_TestParametrizer):
 
             test(self, layout, device, dtype, op, sample_inputs_generator())
 
+        def decorators(params):
+            layout, op = params['layout'], params['op']
+            if torch.device(params['device']).type in ('cpu', 'cuda') and (
+                layout == torch.sparse_coo and not op.supports_sparse
+                or layout == torch.sparse_csr and not op.supports_sparse_csr
+            ):
+                layout_name = str(layout).lstrip('torch.')
+                return [unittest.skip(f"{op.name} does not support inputs with {layout_name} layout")]
+            return []
+
         for layout in (torch.strided, torch.sparse_coo, torch.sparse_csr):
-            yield (wrap, str(layout).lstrip('torch.'), {'layout': layout}, lambda _: [])
+            yield (wrap, str(layout).lstrip('torch.'), {'layout': layout}, decorators)
 
 
 class TestMasked(TestCase):

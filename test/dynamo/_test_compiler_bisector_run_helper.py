@@ -1,9 +1,9 @@
 import os
+import sys
 from contextlib import contextmanager
 
 import torch
 import torch._prims_common as utils
-from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 aten = torch.ops.aten
@@ -46,14 +46,14 @@ def vq(x):
     return (x + 3).exponential_() * 10.5
 
 
-def test_fn():
+def test_fn(device):
     with patch_exp_decomp():
         vq_compiled = torch.compile(vq)  # noqa: UNSPECIFIED_BACKEND
-        x = torch.randn(4, 400, 256, device=GPU_TYPE)
+        x = torch.randn(4, 400, 256, device=device)
         out_compiled = vq_compiled(x)
 
     return 1 if out_compiled.isnan().any() else 0
 
 
 if __name__ == "__main__":
-    os._exit(test_fn())
+    os._exit(test_fn(sys.argv[1]))

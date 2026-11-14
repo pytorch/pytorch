@@ -1116,9 +1116,10 @@ class SizeVarAllocator:
         """Convert a sequence of sympy expressions to SymInts, or return ints as is."""
         return [self.to_symint_or_int(e) for e in exprs]
 
-    def guarding_hint_or_throw(self, expr: Expr | int) -> int:
+    def guarding_hint_or_throw(self, expr: Expr | int) -> int | float:
         """
-        Return a concrete integer hint for an expression that is safe to use for guarding.
+        Return a concrete hint for an expression that is safe to use for guarding.
+        Float expressions return a Python float.
 
         This method evaluates the expression using only backed-symbols hints. Unlike
         optimization_hint(), this method does NOT use heuristics or fallback values
@@ -1259,7 +1260,7 @@ class SizeVarAllocator:
     def guarding_hints_or_throw(
         self,
         exprs: Iterable[Expr | int],
-    ) -> tuple[int, ...]:
+    ) -> tuple[int | float, ...]:
         return tuple(self.guarding_hint_or_throw(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):

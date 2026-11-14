@@ -8,11 +8,14 @@
 
 #pragma once
 
+#include <fmt/format.h>
 #include <memory>
 #include <string>
+#include <system_error>
 
 #include "ActivityLoggerFactory.h"
 #include "ActivityTraceInterface.h"
+#include "ThrowUtil.h"
 #include "output_json.h"
 #include "output_membuf.h"
 
@@ -36,7 +39,15 @@ class ActivityTrace : public ActivityTraceInterface {
       prefix = "file://";
     }
     memLogger_->setChromeLogger(loggerFactory_.makeLogger(prefix + url));
-    memLogger_->log(*memLogger_->getChromeLogger());
+    const auto logger = memLogger_->getChromeLogger();
+    memLogger_->log(*logger);
+    // Logging only reads the buffered trace, so the caller can retry.
+    if (const auto error = logger->writeError()) {
+      KINETO_THROW(
+          std::system_error,
+          error,
+          fmt::format("Failed to save trace to '{}'", url));
+    }
   }
 
  private:
