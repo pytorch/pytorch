@@ -28,30 +28,41 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          BRANCH="${BASE_REF}"
-          echo "$BRANCH"
-          BRANCH="${BRANCH%/base}/orig"
-          echo "$BRANCH"
+          PREFIX="${BASE_REF%/base}"
+          ORIG="origin/${PREFIX}/orig"
+          echo "$PREFIX"
 
+          # ghstack pushes orig after head (for a new PR, only after creating it),
+          # so the checkout above can predate it. Wait until orig matches base and
+          # head, using the tree equalities ghstack itself asserts.
           WAIT_SECONDS=300
           END_WAIT=$((SECONDS+WAIT_SECONDS))
-          BRANCH_EXISTS=0
+          IN_SYNC=0
 
           while [ $SECONDS -lt $END_WAIT ]; do
-            git fetch --prune origin "${BRANCH}" || true
-            if git rev-parse --verify "origin/${BRANCH}"; then
-              BRANCH_EXISTS=1
+            git fetch --prune origin "+refs/heads/${PREFIX}/*:refs/remotes/origin/${PREFIX}/*" || true
+            if git rev-parse --verify --quiet "${ORIG}" > /dev/null &&
+              [ "$(git rev-parse "${ORIG}^{tree}")" = "$(git rev-parse "origin/${PREFIX}/head^{tree}")" ] &&
+              [ "$(git rev-parse "${ORIG}~1^{tree}")" = "$(git rev-parse "origin/${PREFIX}/base^{tree}")" ]; then
+              IN_SYNC=1
               break
             fi
-            echo "Waiting for branch ${BRANCH} to exist..."
-            sleep 30  # Wait for 30 seconds before retrying
+            echo "Waiting for ${ORIG} to match ${PREFIX}/base and ${PREFIX}/head..."
+            sleep 10
           done
 
-          if [ $BRANCH_EXISTS -eq 0 ]; then
-            echo "Branch ${BRANCH} not found after ${WAIT_SECONDS} seconds."
+          if ! git rev-parse --verify --quiet "${ORIG}" > /dev/null; then
+            echo "Branch ${PREFIX}/orig not found after ${WAIT_SECONDS} seconds."
             echo "Mergeability check failed for infrastructure reasons."
             exit 1
           fi
+          if [ $IN_SYNC -eq 0 ]; then
+            echo "${ORIG} still doesn't match after ${WAIT_SECONDS} seconds; letting trymerge report it."
+          fi
+
+          # ghstack pushes every orig branch of a stack in one push, after all head
+          # branches, so the rest of the stack's branches are now current too.
+          git fetch --prune origin
 
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
