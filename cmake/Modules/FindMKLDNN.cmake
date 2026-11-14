@@ -73,7 +73,7 @@ IF(NOT MKLDNN_FOUND)
       endif()
       ExternalProject_Add(xpu_mkldnn_proj
         GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
-        GIT_TAG v3.13.3
+        GIT_TAG v3.14
         PREFIX "${_xpu_mkldnn_prefix}"
         BUILD_IN_SOURCE 0
         CMAKE_ARGS  -DCMAKE_C_COMPILER=${DNNL_C_COMPILER}
@@ -84,6 +84,7 @@ IF(NOT MKLDNN_FOUND)
         -DDNNL_BUILD_EXAMPLES=OFF
         -DONEDNN_BUILD_GRAPH=ON
         -DDNNL_LIBRARY_TYPE=STATIC
+        -DONEDNN_EXPERIMENTAL_GROUPED_MEMORY=ON
         -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER}
         -G ${CMAKE_GENERATOR}
         BUILD_COMMAND ${DNNL_MAKE_COMMAND}
@@ -174,6 +175,22 @@ IF(NOT MKLDNN_FOUND)
   SET(DNNL_LIBRARY_TYPE STATIC CACHE STRING "" FORCE)
   SET(DNNL_ENABLE_PRIMITIVE_CACHE TRUE CACHE BOOL "" FORCE)
   SET(DNNL_GRAPH_CPU_RUNTIME ${MKLDNN_CPU_RUNTIME} CACHE STRING "" FORCE)
+  IF(APPLE AND CPU_AARCH64)
+    # Without ACL, oneDNN has no optimized kernels for Apple Silicon and falls back to gemm:ref
+    SET(ONEDNN_BLAS_VENDOR "ACCELERATE" CACHE STRING "" FORCE)
+    # PyTorch's FindBLAS shadows CMake's one and does not define the BLAS::BLAS target oneDNN links to
+    IF(NOT TARGET BLAS::BLAS)
+      ADD_LIBRARY(BLAS::BLAS INTERFACE IMPORTED)
+      SET_TARGET_PROPERTIES(BLAS::BLAS PROPERTIES INTERFACE_LINK_LIBRARIES "${BLAS_LIBRARIES}")
+    ENDIF()
+    # oneDNN includes the Accelerate.h umbrella header, whose global bfloat16_t from arm_bf16.h clashes
+    # with dnnl::impl::bfloat16_t, so shadow it with a header that only provides the CBLAS interface
+    # TODO: Replace the shim with -DACCELERATE_NEW_LAPACK once the oneDNN submodule includes
+    # https://github.com/uxlfoundation/oneDNN/pull/6436
+    SET(ONEDNN_ACCELERATE_SHIM_DIR "${CMAKE_BINARY_DIR}/onednn_accelerate_shim")
+    FILE(WRITE "${ONEDNN_ACCELERATE_SHIM_DIR}/Accelerate.h"
+      "#pragma once\n#define ACCELERATE_NEW_LAPACK\n#include <vecLib/cblas_new.h>\n")
+  ENDIF()
 
   IF(BUILD_ONEDNN_GRAPH)
     SET(DNNL_GRAPH_LIBRARY_TYPE STATIC CACHE STRING "" FORCE)
@@ -193,7 +210,14 @@ IF(NOT MKLDNN_FOUND)
     ENDIF()
   ENDIF()
 
+  IF(ONEDNN_ACCELERATE_SHIM_DIR)
+    GET_DIRECTORY_PROPERTY(_saved_include_dirs INCLUDE_DIRECTORIES)
+    INCLUDE_DIRECTORIES(BEFORE ${ONEDNN_ACCELERATE_SHIM_DIR})
+  ENDIF()
   ADD_SUBDIRECTORY(${MKLDNN_ROOT})
+  IF(ONEDNN_ACCELERATE_SHIM_DIR)
+    SET_DIRECTORY_PROPERTIES(PROPERTIES INCLUDE_DIRECTORIES "${_saved_include_dirs}")
+  ENDIF()
 
   IF(NOT TARGET dnnl)
     MESSAGE("Failed to include MKL-DNN target")
