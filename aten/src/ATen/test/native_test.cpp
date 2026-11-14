@@ -2,6 +2,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/FakeTensor.h>
+#include <ATen/SparseCsrTensorImpl.h>
+#include <ATen/SparseTensorImpl.h>
 #include <ATen/ThreadLocalState.h>
 #include <ATen/native/Pool.h>
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -336,6 +338,91 @@ static std::shared_ptr<c10::FakeTensorMode> make_cpp_fake_mode(
     bool allow_unsafe_data_ptr_access = true) {
   return std::make_shared<c10::FakeTensorMode>(
       nullptr, nullptr, allow_meta, allow_unsafe_data_ptr_access);
+}
+
+TEST(TestNative, FakeDetach) {
+  auto mode = make_cpp_fake_mode();
+  for (auto layout : {kStrided, kSparse, kSparseCsr, kSparseCsc, kSparseBsr, kSparseBsc}) {
+    auto real = at::eye(4);
+    if (layout == kSparseBsr || layout == kSparseBsc) {
+      real = real.to_sparse(layout, IntArrayRef{2, 2});
+    } else if (layout != kStrided) {
+      real = real.to_sparse(layout);
+    }
+    for (auto device : {
+             c10::Device(c10::kCPU),
+             c10::Device(c10::kCUDA, 1),
+             c10::Device(c10::kXPU, 1),
+             c10::Device(c10::kPrivateUse1, 1)}) {
+      SCOPED_TRACE(c10::str(layout, " ", device));
+      auto input = real.to(at::kMeta);
+      input.set_requires_grad(true);
+      at::init_cpp_fake(input.unsafeGetTensorImpl(), device, mode);
+      auto keys = real.key_set();
+      input.unsafeGetTensorImpl()->set_fake_dispatch_keys(keys);
+
+      c10::impl::ExcludeDispatchKeyGuard no_fake(c10::DispatchKey::Fake);
+      auto result = at::impl::fake_detach(input);
+      EXPECT_NE(result.unsafeGetTensorImpl(), input.unsafeGetTensorImpl());
+      if (layout == kSparse) {
+        auto* src = static_cast<SparseTensorImpl*>(input.unsafeGetTensorImpl());
+        auto* dst = static_cast<SparseTensorImpl*>(result.unsafeGetTensorImpl());
+        EXPECT_TRUE(dst->indices().is_same(src->indices()));
+        EXPECT_TRUE(dst->values().is_same(src->values()));
+        EXPECT_EQ(dst->sparse_dim(), src->sparse_dim());
+        EXPECT_EQ(dst->dense_dim(), src->dense_dim());
+        EXPECT_EQ(dst->coalesced(), src->coalesced());
+      } else if (layout != kStrided) {
+        auto* src = static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl());
+        auto* dst = static_cast<SparseCsrTensorImpl*>(result.unsafeGetTensorImpl());
+        EXPECT_TRUE(dst->compressed_indices().is_same(src->compressed_indices()));
+        EXPECT_TRUE(dst->plain_indices().is_same(src->plain_indices()));
+        EXPECT_TRUE(dst->values().is_same(src->values()));
+      } else {
+        EXPECT_TRUE(result.is_alias_of(input));
+      }
+      EXPECT_EQ(result.layout(), input.layout());
+      EXPECT_EQ(result.sizes(), input.sizes());
+      EXPECT_EQ(result.dtype(), input.dtype());
+      EXPECT_EQ(result.device(), input.device());
+      EXPECT_TRUE(result.is_fake());
+      EXPECT_EQ(result.unsafeGetTensorImpl()->fake_tensor_mode(), mode);
+      EXPECT_EQ(result.unsafeGetTensorImpl()->fake_dispatch_keys(), keys);
+      EXPECT_FALSE(result.requires_grad());
+      EXPECT_TRUE(input.requires_grad());
+      EXPECT_FALSE(c10::impl::FakeTensorModeTLS::in_kernel_invocation());
+    }
+  }
+}
+
+TEST(TestNative, FakeShallowCopyData) {
+  auto mode = make_cpp_fake_mode();
+  for (auto device : {c10::Device(c10::kCPU), c10::Device(c10::kCUDA, 0)}) {
+    auto source_device = device.is_cpu() ? c10::Device(c10::kCUDA, 0)
+                                         : c10::Device(c10::kCPU);
+    auto input = at::empty({2}, at::device(at::kMeta));
+    input.set_requires_grad(true);
+    auto source = at::empty({3, 4}, at::device(at::kMeta));
+    at::init_cpp_fake(input.unsafeGetTensorImpl(), device, mode);
+    at::init_cpp_fake(source.unsafeGetTensorImpl(), source_device, mode);
+    const auto version =
+        input.unsafeGetTensorImpl()->version_counter().current_version();
+
+    c10::impl::ExcludeDispatchKeyGuard no_fake(c10::DispatchKey::Fake);
+    auto& result = at::impl::fake_shallow_copy_data_(input, source);
+    EXPECT_TRUE(result.is_same(input));
+    EXPECT_EQ(
+        input.storage().unsafeGetStorageImpl(),
+        source.storage().unsafeGetStorageImpl());
+    EXPECT_EQ(input.sizes(), source.sizes());
+    EXPECT_EQ(input.strides(), source.strides());
+    EXPECT_EQ(input.device(), source_device);
+    EXPECT_TRUE(input.is_fake());
+    EXPECT_EQ(input.unsafeGetTensorImpl()->fake_tensor_mode(), mode);
+    EXPECT_EQ(input.unsafeGetTensorImpl()->version_counter().current_version(), version);
+    EXPECT_TRUE(input.requires_grad());
+    EXPECT_FALSE(source.requires_grad());
+  }
 }
 
 TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
