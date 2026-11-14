@@ -138,6 +138,10 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 
+def _restore_pickled_test_autotuner(*, old_values: Any) -> None:
+    return None
+
+
 _skip_if_gpu_unavailable = decorateIf(
     unittest.skip(f"requires {GPU_TYPE}"),
     lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
@@ -1682,7 +1686,10 @@ class TestFxGraphCache(TestCase):
                 StaticallyLaunchedAutotuner(
                     CompiledTritonKernels.key(kernel_src),
                     "concurrent_kernel",
-                    types.SimpleNamespace(compile_results=[]),
+                    types.SimpleNamespace(
+                        compile_results=[],
+                        restore_after_unpickle=_restore_pickled_test_autotuner,
+                    ),
                 )
             ],
         )

@@ -5011,6 +5011,9 @@ def _maybe_filter_configs_for_tma_restrictions(
                 pre_hook=example_config.pre_hook,
             )
         ]
+        # Unraised, the copy would repeat configs[0], which the loop below keeps anyway.
+        if config_block_sizes == example_config.kwargs:
+            new_configs = []
         # Remove configs that will not compile
         for c in configs:
             if all(
@@ -5088,6 +5091,7 @@ def pointwise(
         hinted_configs,
         tile_hint=tile_hint,
         inductor_meta=inductor_meta,
+        triton_meta=triton_meta,
     )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
