@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 
 @SymbolicGridFn
@@ -457,10 +458,23 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
 
 @L.register_lowering(aten.baddbmm)
-def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
+def tuned_baddbmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None):
     """
-    Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
+    Lowering for autotuning aten.baddbmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    if out_dtype is not None:
+        # No GEMM template accumulates into out_dtype, so mirror the aten
+        # kernel: a bmm that writes out_dtype, then the pointwise terms.
+        out = lowerings[aten.bmm](mat1, mat2, out_dtype, layout=layout)
+        if alpha != 1:
+            out = lowerings[aten.mul](alpha, out)
+        if beta == 0:
+            return out
+        inp = lowerings[prims.convert_element_type](inp, out_dtype)
+        if beta != 1:
+            inp = lowerings[aten.mul](beta, inp)
+        return lowerings[aten.add](out, inp)
+
     use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
     template_inp = inp
     if not use_bf16x9 and beta == 0:
