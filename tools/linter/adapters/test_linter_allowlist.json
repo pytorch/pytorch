@@ -68,7 +68,6 @@
   "test/distributed/checkpoint/test_dtensor_resharding.py",
   "test/distributed/checkpoint/test_file_system_checkpoint.py",
   "test/distributed/checkpoint/test_file_system_checkpoint_cpu.py",
-  "test/distributed/checkpoint/test_format_utils.py",
   "test/distributed/checkpoint/test_fsdp_model_state.py",
   "test/distributed/checkpoint/test_fsdp_optim_state.py",
   "test/distributed/checkpoint/test_fsdp_tp_checkpoint_conversion.py",
