@@ -5065,39 +5065,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_stale_base_at_entry_view_source_storage_fallback(self):
         # Read dest as well as mutating src so Dynamo keeps both aliases in the
         # graph. Their fake _base states differ, so the wrapper must use their
-        # common storage rather than rejecting the group. Detaching the stale
-        # destination also keeps the eager backward well-defined.
+        # common storage rather than rejecting the group. Training groups with
+        # mixed autograd histories remain unsupported.
         def fn(dest, src):
             src.add_(1)
             return src * 2 + dest[0].detach()
 
-        for requires_grad in [False, True]:
-            for backend in ["aot_eager", "inductor"]:
-                with self.subTest(backend=backend, requires_grad=requires_grad):
-                    torch._dynamo.reset()
-                    old_base = torch.arange(
-                        3, dtype=torch.float32, requires_grad=requires_grad
-                    )
-                    old = old_base.clone()
-                    y_base = torch.arange(
-                        5, dtype=torch.float32, requires_grad=requires_grad
-                    )
-                    y = y_base.clone()
-                    dest = old[:3]
-                    src = y[2:5]
-                    with torch.no_grad():
-                        dest.set_(src)
-                    out = torch.compile(fn, backend=backend)(dest, src)
-                    self.assertEqual(out, torch.tensor([9.0, 11.0, 13.0]))
-                    self.assertEqual(src, torch.tensor([3.0, 4.0, 5.0]))
-                    self.assertEqual(old, torch.arange(3, dtype=torch.float32))
-                    if requires_grad:
-                        out.sum().backward()
-                        self.assertIsNone(old_base.grad)
-                        self.assertEqual(
-                            y_base.grad,
-                            torch.tensor([0.0, 0.0, 2.0, 2.0, 2.0]),
-                        )
+        for backend in ["aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                old = torch.arange(3, dtype=torch.float32)
+                y = torch.arange(5, dtype=torch.float32)
+                dest = old[:3]
+                src = y[2:5]
+                dest.set_(src)
+                out = torch.compile(fn, backend=backend)(dest, src)
+                self.assertEqual(out, torch.tensor([9.0, 11.0, 13.0]))
+                self.assertEqual(src, torch.tensor([3.0, 4.0, 5.0]))
+                self.assertEqual(old, torch.arange(3, dtype=torch.float32))
 
     def test_synthetic_base_rebound_between_calls_recompiles_static(self):
         def fn(a, b):
@@ -5292,13 +5277,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for backend in ["aot_eager", "inductor"]:
             with self.subTest(backend=backend):
                 torch._dynamo.reset()
-                x = torch.zeros(2, 5)
+                x = torch.arange(10.0).reshape(2, 5).clone()
                 v1 = x[0]
                 v2 = torch.empty(5)
                 v2.set_(x.untyped_storage(), 0, (5,), (1,))
                 out = torch.compile(fn, backend=backend)(v1, v2)
-                self.assertEqual(out, torch.zeros(5))
-                self.assertEqual(v1, torch.zeros(5))
+                self.assertEqual(out, torch.arange(5.0) * 4)
+                self.assertEqual(v1, torch.arange(5.0) * 2)
+                self.assertEqual(x[1], torch.arange(5.0, 10.0))
 
     def test_storage_base_training_gradient_guard(self):
         # p.detach()[:3] next to p: storage mode would detach the base and
@@ -5312,9 +5298,35 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         p = torch.randn(5, requires_grad=True)
         v = p.detach()[:3]
         with self.assertRaisesRegex(
-            AssertionError, "non-differentiable view"
+            torch._dynamo.exc.BackendCompilerFailed, "non-differentiable view"
         ):
             torch.compile(fn, backend="aot_eager")(p, v)
+
+    def test_stale_base_training_mixed_history_is_rejected(self):
+        def fn(dest, src):
+            src.add_(1)
+            return src * 2 + dest
+
+        def fresh():
+            old_base = torch.arange(5.0, requires_grad=True)
+            new_base = torch.arange(5.0, requires_grad=True)
+            dest = old_base.clone()[2:5]
+            src = new_base.clone()[2:5]
+            with torch.no_grad():
+                dest.set_(src)
+            return old_base, new_base, dest, src
+
+        old_base, new_base, dest, src = fresh()
+        fn(dest, src).sum().backward()
+        self.assertEqual(old_base.grad, torch.tensor([0.0, 0.0, 1.0, 1.0, 1.0]))
+        self.assertEqual(new_base.grad, torch.tensor([0.0, 0.0, 2.0, 2.0, 2.0]))
+
+        torch._dynamo.reset()
+        _, _, dest, src = fresh()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed, "non-differentiable view"
+        ):
+            torch.compile(fn, backend="aot_eager")(dest, src)
 
     def test_set_new_base_stays_aliased(self):
         # Regression guard for aliasing the new source after set_(), not the old base.

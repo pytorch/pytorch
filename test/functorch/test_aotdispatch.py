@@ -10189,6 +10189,37 @@ def forward(self, primals_1, tangents_1):
         self.assertIn("as_strided_", source)
         self.assertIn("_meta_mut", source)
 
+    def test_synthetic_base_storage_mode_rebuilds_whole_storage(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
+        )
+
+        root = torch.arange(10.0).reshape(2, 5).clone()
+        view = root[0]
+        standalone = torch.empty(0).set_(root.untyped_storage(), 0, (5,), (1,))
+        wrapper = AOTSyntheticBaseWrapper(
+            trace_joint=False,
+            base_groups={0: [0, 1]},
+            base_group_names={0: ["view", "standalone"]},
+            storage_base_groups={0},
+        )
+        captured = []
+
+        def compiled(args):
+            captured.append((args[0].size(), args[0].stride()))
+            return args[0]
+
+        call = wrapper.post_compile(
+            compiled,
+            SimpleNamespace(),
+            runtime_metadata=SimpleNamespace(),
+        )
+        result = call([view, standalone])
+        self.assertEqual(captured, [(torch.Size([10]), (1,))])
+        self.assertEqual(result, root.reshape(-1))
+        with self.assertRaisesRegex(RuntimeError, "storage groups"):
+            call([view, standalone.clone()])
+
     def test_synthetic_base_single_member_skips_storage_group_check(self):
         from torch._functorch._aot_autograd.runtime_wrappers import (
             AOTSyntheticBaseWrapper,

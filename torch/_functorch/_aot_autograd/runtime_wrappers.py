@@ -2166,6 +2166,10 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 group = base_groups[base_idx]
                 group_names = self.base_group_names[base_idx]
                 first_orig = group[0]
+                for orig_idx in group:
+                    buf.writeline(
+                        f"_cdata_{orig_idx} = args[{orig_idx}].untyped_storage()._cdata"
+                    )
                 if base_idx in self.storage_base_groups:
                     # The traced graph saw a 1-D whole-storage base. Rebuild
                     # from storage at runtime so shape/stride match the trace.
@@ -2175,10 +2179,6 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                     buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
                 else:
                     buf.writeline("_b = None")
-                    for orig_idx in group:
-                        buf.writeline(
-                            f"_cdata_{orig_idx} = args[{orig_idx}].untyped_storage()._cdata"
-                        )
                     for orig_idx in group:
                         buf.writeline("if _b is None:")
                         with buf.indent():
@@ -2413,29 +2413,9 @@ def merge_view_inputs(
             all(alias is not base for _, base in non_none_bases)
             for alias in aliases_with_none_bases
         )
-        first_leafness = mutated_input_info[aliased_input_indices[0]].is_leaf
-        consistent_leafness = all(
-            mutated_input_info[i].is_leaf == first_leafness
-            for i in aliased_input_indices
-        )
-        # Synthetic-base metadata requires uniform leafness. Training groups
-        # that violate it must retain the existing differentiable-view error.
-        use_storage_base = has_standalone_alias and (
-            is_inference or consistent_leafness
-        )
-        # In training, storage mode detaches every member and regenerates views
-        # from a fresh leaf base. If a grad-requiring member's real autograd
-        # base differs from that leaf (e.g. p.detach()[:3] next to p), the
-        # gradient would be lost or misrouted. Keep the existing error for
-        # those groups instead of silently producing wrong gradients.
-        if use_storage_base and not is_inference:
-            if any(
-                fwd_inputs[i].requires_grad
-                and fwd_inputs[i]._base is not None
-                and not fwd_inputs[i]._base.requires_grad
-                for i in aliased_input_indices
-            ):
-                use_storage_base = False
+        # Storage identity cannot recover the members' autograd histories.
+        # Mixed groups retain the differentiable-view restriction in training.
+        use_storage_base = has_standalone_alias and is_inference
 
         # Here, we attempt to do a more complicated check to detect false aliasing
         # (e.g. if all the tensors have the same storage, but don't actually overlap)
@@ -2467,7 +2447,7 @@ def merge_view_inputs(
             view2 = fwd_inputs[idx2]
             # The "inputs that are aliased but have different differentiable bases" case
             # is more complicated and hopefully pretty rare. Not currently handled.
-            if not is_inference and not use_storage_base:
+            if not is_inference:
                 if not _are_differentiable_views(view1, view2):
                     raise AssertionError(
                         f"aot_autograd() does not yet handle non-differentiable view input mutations. "
@@ -2515,14 +2495,6 @@ def merge_view_inputs(
             # We don't actually have a convenient way of going from storage -> tensor,
             # So using set_() here (we suffer some minor overhead, but this case is rare).
             synthetic_base.set_(example_alias.untyped_storage())
-            if (
-                use_storage_base
-                and not is_inference
-                and any(fwd_inputs[i].requires_grad for i in aliased_input_indices)
-            ):
-                # Joint tracing clones grad-requiring mutated bases before
-                # regenerating views, keeping those views non-leaf.
-                synthetic_base.requires_grad_(True)
             synthetic_base_desc = SyntheticBaseAOTInput(fwd_inputs_descs[example_idx])
         else:
             # Case where all of the aliases require gradients, and have the same _base.
