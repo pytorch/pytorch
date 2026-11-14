@@ -1387,32 +1387,50 @@ class TestSparseCSRDevice(TestCase):
             return r
 
         batch_shapes = [(), (2,), (2, 3)]
-        for index_dtype, b in zip([torch.int32, torch.int64], batch_shapes):
+        for index_dtype, b, nnz in itertools.product([torch.int32, torch.int64], batch_shapes, [0, 6]):
             shape = (*b, 2, 3)
-            nnz = 6
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
             self.assertEqual(a.numel(), numel(a))
 
             new_shape = (*b, 4, 5)
             a.resize_(new_shape)
+            torch._validate_sparse_compressed_tensor_args(
+                a.crow_indices(), a.col_indices(), a.values(), a.shape, a.layout,
+            )
 
             self.assertEqual(a.shape, new_shape)
             # resize to larger shape doesn't add specified elements
             self.assertEqual(a._nnz(), nnz)
             self.assertEqual(a.numel(), numel(a))
 
-            new_shape = (*b, 1, 5)
+            # Resizing to the same shape preserves the number of specified elements.
             a.resize_(new_shape)
+            torch._validate_sparse_compressed_tensor_args(
+                a.crow_indices(), a.col_indices(), a.values(), a.shape, a.layout,
+            )
 
             self.assertEqual(a.shape, new_shape)
-            # resize to smaller shape trims specified elements
-            self.assertEqual(a._nnz(), 5)
+            self.assertEqual(a._nnz(), nnz)
             self.assertEqual(a.numel(), numel(a))
+
+            if nnz == 0:
+                for sparse_shape in [(1, 5), (1, 2), (1, 0), (0, 2), (0, 0)]:
+                    new_shape = (*b, *sparse_shape)
+                    a.resize_(new_shape)
+                    torch._validate_sparse_compressed_tensor_args(
+                        a.crow_indices(), a.col_indices(), a.values(), a.shape, a.layout,
+                    )
+                    self.assertEqual(a.shape, new_shape)
+                    self.assertEqual(a._nnz(), 0)
+                    self.assertEqual(a.numel(), numel(a))
 
             # trim batched dimensions
             a.resize_(new_shape[-2], new_shape[-1])
+            torch._validate_sparse_compressed_tensor_args(
+                a.crow_indices(), a.col_indices(), a.values(), a.shape, a.layout,
+            )
             self.assertEqual(a.shape, (new_shape[-2], new_shape[-1]))
-            self.assertEqual(a._nnz(), 5)
+            self.assertEqual(a._nnz(), nnz)
             self.assertEqual(a.numel(), numel(a))
 
     @skipMeta
@@ -1558,8 +1576,8 @@ class TestSparseCSRDevice(TestCase):
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_resize_errors(self, device, dtype):
-        for index_dtype in [torch.int32, torch.int64]:
-            shape = (2, 3)
+        for index_dtype, batch_shape in itertools.product([torch.int32, torch.int64], [(), (2,), (2, 3)]):
+            shape = (*batch_shape, 2, 3)
             nnz = 6
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
 
@@ -1567,13 +1585,23 @@ class TestSparseCSRDevice(TestCase):
                 new_shape = (4,)
                 a.resize_(new_shape)
 
-            # resizing of columns to smaller size is not implemented
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "torch.resize_: Resizing columns of sparse CSR tensors to a smaller value is not supported.",
-            ):
-                new_shape = (2, 2)
-                a.resize_(new_shape)
+            before = a.clone()
+            for dim, sparse_shape in [
+                ("columns", (2, 2)), ("rows", (1, 3)), ("rows", (0, 3)), ("rows", (1, 5)),
+            ]:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"torch.resize_: Resizing {dim} of non-empty sparse CSR tensors to a smaller value is not supported.",
+                ):
+                    a.resize_((*batch_shape, *sparse_shape))
+                self.assertEqual(a.shape, before.shape)
+                self.assertEqual(a._nnz(), before._nnz())
+                self.assertEqual(a.crow_indices(), before.crow_indices())
+                self.assertEqual(a.col_indices(), before.col_indices())
+                self.assertEqual(a.values(), before.values())
+                torch._validate_sparse_compressed_tensor_args(
+                    a.crow_indices(), a.col_indices(), a.values(), a.shape, a.layout,
+                )
 
     @skipIfTorchDynamo()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
