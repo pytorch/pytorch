@@ -2071,6 +2071,25 @@ class TestLinalg(TestCase):
         finally:
             torch.set_num_threads(num_threads)
 
+    # Adding the elements one by one in float stops at 2**24 for bfloat16 ones and
+    # at 2**14 for half 2**-10; the cascade sum gets the exact totals. One thread,
+    # because per-thread partial sums would keep a linear sum exact too.
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16)
+    def test_norm_reduced_precision_cascade(self, device, dtype):
+        n = 2**24 + 2**18
+        value = 2.0**-10 if dtype == torch.half else 1.0
+        x = torch.full((), value, dtype=dtype, device=device)
+        num_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(1)
+            fns = (torch.linalg._powsum, torch.linalg.vector_norm)
+            for fn, (t, dim) in product(fns, ((x.expand(n), None), (x.expand(n, 2), 0))):
+                expected = torch.full(t.shape[1:], n * value, dtype=dtype, device=device)
+                self.assertEqual(fn(t, 1, dim=dim), expected, atol=0, rtol=0, msg=f"{fn.__name__}, dim={dim}")
+        finally:
+            torch.set_num_threads(num_threads)
+
     # Reducing over a size-1 dim is no real reduction, so the cascade kernel adds
     # each mapped element in its elementwise loop. vector_norm handles size-1 dims
     # before the kernel, so only _powsum gets there; slicing keeps the other dims
