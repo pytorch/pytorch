@@ -75,7 +75,6 @@
   "test/distributed/checkpoint/test_fsspec.py",
   "test/distributed/checkpoint/test_hf_safetensor_e2e.py",
   "test/distributed/checkpoint/test_hsdp_checkpoint.py",
-  "test/distributed/checkpoint/test_pg_transport.py",
   "test/distributed/checkpoint/test_planner.py",
   "test/distributed/checkpoint/test_save_load_api.py",
   "test/distributed/checkpoint/test_state_dict.py",
