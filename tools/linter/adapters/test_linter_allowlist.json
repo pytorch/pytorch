@@ -51,7 +51,6 @@
   "test/distributed/_shard/test_sharder.py",
   "test/distributed/_tools/test_fake_collectives.py",
   "test/distributed/_tools/test_fsdp2_mem_tracker.py",
-  "test/distributed/_tools/test_mem_tracker.py",
   "test/distributed/_tools/test_memory_tracker.py",
   "test/distributed/_tools/test_runtime_estimator.py",
   "test/distributed/_tools/test_sac_estimator.py",
