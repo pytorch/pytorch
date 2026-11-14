@@ -286,7 +286,14 @@ def all_gather_copy_in_default(
     )
     foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
     with torch.no_grad():
-        torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
+        # A fused foreach copy takes inputs of one dtype, and the inputs may
+        # differ, e.g. sharded parameters that the copy casts to param_dtype
+        for dtype in dict.fromkeys(t.dtype for t in all_gather_inputs):
+            indices = [i for i, t in enumerate(all_gather_inputs) if t.dtype == dtype]
+            torch._foreach_copy_(
+                [foreach_copy_dsts[i] for i in indices],
+                [all_gather_inputs[i] for i in indices],
+            )
     return all_gather_input, all_gather_output
 
 
@@ -366,12 +373,14 @@ def foreach_all_gather(
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
     with device_handle.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-        (
-            param_all_gather_input_dtypes,
-            param_all_gather_input_numels,
-            dtype,
-        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
+        param_all_gather_inputs, param_all_gather_input_dtypes = (
+            _get_param_all_gather_inputs(fsdp_params)
+        )
+        param_all_gather_input_numels = [
+            [t.numel() for t in ts] for ts in param_all_gather_inputs
+        ]
+        dtypes = set(chain.from_iterable(param_all_gather_input_dtypes))
+        dtype = dtypes.pop() if len(dtypes) == 1 else torch.uint8
         if dtype == torch.uint8:
             all_gather_inputs = [
                 t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
@@ -413,7 +422,13 @@ def foreach_all_gather(
 @torch.no_grad()
 def _get_param_all_gather_inputs(
     fsdp_params: list[FSDPParam],
-) -> list[list[torch.Tensor]]:
+) -> tuple[list[list[torch.Tensor]], list[list[torch.dtype]]]:
+    """
+    Returns each parameter's all-gather inputs and the dtypes that they are
+    all-gathered in. An input may be a sharded parameter in its original dtype,
+    which the copy-in casts as it copies.
+    """
+
     # Intentionally try to run a fast-path that bypasses abstractions for the
     # common FSDP case of bf16/fp32 mixed precision in order to use foreach
     # copy for lower CPU overhead and more efficient copying in eager
@@ -444,20 +459,36 @@ def _get_param_all_gather_inputs(
             foreach_copy_input_numels.append(all_gather_input.numel())
         else:
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
+    param_all_gather_input_dtypes = [
+        [t.dtype for t in ts] for ts in param_all_gather_inputs
+    ]
 
-    # 2nd pass: use foreach copy to compute the remaining all-gather inputs
+    # 2nd pass: the foreach-copy parameters are all-gathered in param_dtype
     if foreach_copy_inputs:
         fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
-        param_dtype, device = fsdp_param_0.param_dtype, fsdp_param_0.device
-        flat_foreach_copy_input = torch.empty(
-            (sum(foreach_copy_input_numels),), device=device, dtype=param_dtype
-        )
-        splits = torch.split(flat_foreach_copy_input, foreach_copy_input_numels)
-        torch._foreach_copy_(splits, foreach_copy_inputs)
+        param_dtype = cast(torch.dtype, fsdp_param_0.param_dtype)
+        device = fsdp_param_0.device
+        splits: Sequence[torch.Tensor] = foreach_copy_inputs  # cast by the copy-in
+        if any(d != param_dtype for d in chain(*param_all_gather_input_dtypes)):
+            # A uint8 all-gather input takes bytes, so cast them first
+            flat_foreach_copy_input = torch.empty(
+                (sum(foreach_copy_input_numels),), device=device, dtype=param_dtype
+            )
+            splits = torch.split(flat_foreach_copy_input, foreach_copy_input_numels)
+            torch._foreach_copy_(splits, foreach_copy_inputs)
         for i, split in zip(foreach_copy_indices, splits):
             param_all_gather_inputs[i] = [split]
+            param_all_gather_input_dtypes[i] = [param_dtype]
 
-    return param_all_gather_inputs
+    return param_all_gather_inputs, param_all_gather_input_dtypes
+
+
+# The native copies, fsdp::_all_gather_copy_out_ and fsdp::chunk_cat_mixed_dtype
+# with num_leading_dims, copy each row of the dims before a tensor's shard dim
+# separately, so their CPU time and metadata grow with the rows (outer size), e.g.
+# of an embedding on Shard(1). Tensors with more rows go through rank-major
+# buffers instead.
+_MAX_NATIVE_COPY_OUTER_SIZE = 1024
 
 
 # Note [All-gather output fn]
@@ -484,7 +515,10 @@ def _default_all_gather_output_fn(
     world_size: int,
 ) -> None:
     """
-    Copies all_gather_output into outputs in two steps. For example, with 4 ranks,
+    Copies all_gather_output into outputs. If each output takes every rank's
+    whole chunk, and some have several rows but none more than
+    _MAX_NATIVE_COPY_OUTER_SIZE, one fsdp::_all_gather_copy_out_ copies each row
+    into place. Otherwise, it copies in two steps. For example, with 4 ranks,
     A (5, 3) on Shard(0), B (2, 8) on Shard(1) and C (2, 5) on Shard(1) give
     split_sizes = [6, 4, 4] and outer_sizes = [1, 2, 2]. Row r of
     all_gather_output.view(4, -1) holds rank r's padded shards, written here as
@@ -509,6 +543,16 @@ def _default_all_gather_output_fn(
             b10 b11 b12 b13 b14 b15 b16 b17         c10 c11 c12 c13 c14
     """
     byte_views = all_gather_output.dtype == torch.uint8
+    if 1 < max(outer_sizes) <= _MAX_NATIVE_COPY_OUTER_SIZE and all(
+        (output.nbytes if byte_views else output.numel()) == world_size * split_size
+        for output, split_size in zip(outputs, split_sizes)
+    ):
+        if byte_views:
+            outputs = [output.view(torch.uint8) for output in outputs]
+        torch.ops.fsdp._all_gather_copy_out_(
+            outputs, all_gather_output, split_sizes, outer_sizes, world_size
+        )
+        return
     split_outputs: list[torch.Tensor] = []
     # (rank-major buffer, output, outer size, whether the output drops padding)
     reassembled: list[tuple[torch.Tensor, torch.Tensor, int, bool]] = []
@@ -613,21 +657,27 @@ def _default_reduce_scatter_input_fn(
     shard_dims: list[int],
     world_size: int,
 ) -> Callable[[torch.Tensor], None]:
-    """Reorder gradients sharded on a nonzero dim by rank, zero-padding that dim
-    to the padded sharded size, and return their copy-in."""
+    """Reorder by rank the gradients that the copy-in cannot chunk along their
+    nonzero shard dims, uneven ones zero-padded to the padded sharded size and
+    ones with many rows, and return the copy-in."""
+    # The copy-in gives rank r the r-th of world_size chunks along dim 0, or
+    # along dim num_leading_dims[i] in each row of the dims before it
+    num_leading_dims = [0] * len(unsharded_grads)
     if world_size > 1:
-        # The copy-in gives rank r the r-th of world_size chunks along dim 0. For
-        # Shard(0) that is already its shard, so stack the other gradients' rank
-        # chunks along dim 0.
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim != 0:
                 grad = unsharded_grads[i]
-                if grad.shape[shard_dim] % world_size == 0:
+                if grad.shape[shard_dim] % world_size:
+                    grad = _pad_and_reorder_by_rank(grad, shard_dim, world_size)
+                elif math.prod(grad.shape[:shard_dim]) > _MAX_NATIVE_COPY_OUTER_SIZE:
                     grad = torch.cat(torch.chunk(grad, world_size, shard_dim), dim=0)
                 else:
-                    grad = _pad_and_reorder_by_rank(grad, shard_dim, world_size)
+                    grad = grad.contiguous()
+                    num_leading_dims[i] = shard_dim
                 unsharded_grads[i] = grad
-    return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
+    return lambda out: foreach_reduce_scatter_copy_in(
+        unsharded_grads, out, world_size, num_leading_dims
+    )
 
 
 def _pad_and_reorder_by_rank(
@@ -1001,6 +1051,7 @@ def foreach_reduce_scatter_copy_in(
     unsharded_grads: list[torch.Tensor],
     reduce_scatter_input: torch.Tensor,
     world_size: int,
+    num_leading_dims: list[int] | None = None,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
     # With reduce_dtype set, gradients share it. Otherwise each follows its
@@ -1010,30 +1061,11 @@ def foreach_reduce_scatter_copy_in(
     # bf16/fp32 and fp16/fp32 groups run that kernel once per input dtype, casting
     # during the copy-in; other mixes cast each gradient first.
     torch.ops.fsdp.chunk_cat_mixed_dtype(
-        unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
-    )
-
-
-def _get_all_gather_input_metadatas(
-    param_all_gather_inputs: list[list[torch.Tensor]],
-) -> tuple[list[list[torch.dtype]], list[list[int]], torch.dtype]:
-    param_all_gather_input_dtypes: list[list[torch.dtype]] = []
-    param_all_gather_input_numels: list[list[int]] = []
-    all_gather_dtype = param_all_gather_inputs[0][0].dtype
-    for all_gather_inputs in param_all_gather_inputs:
-        input_dtypes: list[torch.dtype] = []
-        input_numels: list[int] = []
-        for all_gather_input in all_gather_inputs:
-            if all_gather_input.dtype != all_gather_dtype:
-                all_gather_dtype = torch.uint8
-            input_dtypes.append(all_gather_input.dtype)
-            input_numels.append(all_gather_input.numel())
-        param_all_gather_input_dtypes.append(input_dtypes)
-        param_all_gather_input_numels.append(input_numels)
-    return (
-        param_all_gather_input_dtypes,
-        param_all_gather_input_numels,
-        all_gather_dtype,
+        unsharded_grads,
+        dim=0,
+        num_chunks=world_size,
+        out=reduce_scatter_input,
+        num_leading_dims=num_leading_dims,
     )
 
 

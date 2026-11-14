@@ -44,27 +44,29 @@ void chunk_cat_with_leading_dims(
     at::Tensor& out) {
   check_chunk_cat_leading_dims_inputs(
       tensors, num_leading_dims, num_chunks, out);
-  auto chunks = out.view({num_chunks, -1});
-  c10::SymInt offset = 0;
+  // Reorders each input with leading dims so that its chunks along dim 0 are
+  // the chunks of its rows, then copies the inputs as without leading dims,
+  // which costs no more than reordering them before calling this op. Empty
+  // inputs fill no columns.
+  std::vector<at::Tensor> inputs;
+  inputs.reserve(tensors.size());
   for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
     const auto dim = num_leading_dims[i];
-    const auto sizes = tensor.sym_sizes();
-    const auto outer_size = c10::multiply_integers(sizes.slice(0, dim));
-    const auto inner_size = (sizes[dim] + num_chunks - 1) / num_chunks *
-        c10::multiply_integers(sizes.slice(dim + 1));
-    auto chunk = chunks.narrow_symint(1, offset, outer_size * inner_size);
-    // copy_ casts to out's dtype
     if (dim == 0) {
-      chunk.copy_(at::_chunk_cat(tensor, 0, num_chunks));
-    } else {
-      // One strided copy per input keeps traced graphs linear in inputs.
-      chunk.view_symint({num_chunks, outer_size, inner_size})
-          .copy_(tensor.view_symint({outer_size, num_chunks, inner_size})
-                     .transpose(0, 1));
+      inputs.push_back(tensor);
+    } else if (tensor.sym_numel() != 0) {
+      const auto sizes = tensor.sym_sizes();
+      const auto outer_size = c10::multiply_integers(sizes.slice(0, dim));
+      const auto inner_size = sizes[dim] / num_chunks *
+          c10::multiply_integers(sizes.slice(dim + 1));
+      inputs.push_back(tensor.view_symint({outer_size, num_chunks, inner_size})
+                           .transpose(0, 1)
+                           .contiguous());
     }
-    offset += outer_size * inner_size;
   }
+  auto chunks = out.view({num_chunks, -1});
+  chunk_cat_mixed_dtype(inputs, 0, num_chunks, chunks, std::nullopt);
 }
 
 } // namespace

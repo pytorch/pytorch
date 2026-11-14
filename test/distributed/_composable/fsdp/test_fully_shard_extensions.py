@@ -1109,10 +1109,11 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.assertEqual(post_out_ids, [None] + [post_out_ids[1]] * 3)
         # FSDP keeps no references to the payloads of the 4 all-gathers
         self.assertEqual([ref() for ref in payload_refs], [None] * 8)
-        # The native op copies out unless a size-1 shard mesh skips the copy-out
+        # The native op copies out these few rows, also by default, unless a
+        # size-1 shard mesh skips the copy-out
         with _CountOp(torch.ops.fsdp._all_gather_copy_out_.default) as copies:
             model(inp)
-        self.assertEqual(copies.count > 0, native_copy and shard_world_size > 1)
+        self.assertEqual(copies.count > 0, shard_world_size > 1)
 
     @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_smaller_payload(self):

@@ -5,10 +5,10 @@
 
 namespace torch::distributed::fsdp {
 
-// Composite kernel of fsdp::chunk_cat_mixed_dtype. Without leading dims, it
-// calls _chunk_cat.out, first casting each input to out's dtype if the input
-// dtypes differ. With them, it copies each input into its slice of out, which
-// casts as it copies.
+// Composite kernel of fsdp::chunk_cat_mixed_dtype. It calls _chunk_cat.out,
+// first casting each input to out's dtype if the input dtypes differ, and
+// reordering each input with leading dims so that its chunks along dim 0 are
+// the chunks of its rows.
 TORCH_API void chunk_cat_mixed_dtype(
     at::TensorList tensors,
     int64_t dim,
