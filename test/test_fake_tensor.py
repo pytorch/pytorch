@@ -6861,6 +6861,12 @@ class TestCppFakeTensorModeBindings(TestCase):
                     )
                 with self.assertRaisesRegex(error, msg):
                     calls[op]()
+            elif mode_cls is CppFakeTensorMode and op in ("add", "add_"):
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    "numbers-as-tensors operations without fake inputs",
+                ):
+                    calls[op]()
             else:
                 result = calls[op]()
                 if op == "add_":
@@ -6870,7 +6876,9 @@ class TestCppFakeTensorModeBindings(TestCase):
                     self.assertIs(maybe_get_fake_mode(result), mode)
                 self.assertEqual(result.shape, (size * 2 if op == "cat" else size,))
                 self.assertEqual(result.device, torch.device("cpu"))
-        if kind == "tensor_subclass":
+        if kind == "tensor_subclass" or (
+            mode_cls is CppFakeTensorMode and op in ("add", "add_")
+        ):
             # In particular, rejection must precede the real add_ computation.
             self.assertEqual(base, torch.ones(size))
 
