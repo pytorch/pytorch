@@ -672,19 +672,6 @@ def optim_error_inputs_func_adam(device, dtype):
                 error_type=ValueError,
                 error_regex="betas must be either both floats or both Tensors",
             ),
-            ErrorOptimizerInput(
-                OptimizerInput(
-                    params=None,
-                    kwargs=dict(
-                        lr=1e-2,
-                        betas=(torch.tensor(0.9), torch.tensor(0.99)),
-                        foreach=True,
-                    ),
-                    desc=r"betas\[0\] as a Tensor is not supported for capturable=False and foreach=True",
-                ),
-                error_type=ValueError,
-                error_regex=r"betas\[0\] as a Tensor is not supported for capturable=False and foreach=True",
-            ),
         ]
     if _get_device_type(device) in CUDA_CONFIG_GPUS:
         sample_tensor = torch.empty((), device=device, dtype=dtype)

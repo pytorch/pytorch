@@ -464,6 +464,58 @@ class TestOptimRenewed(TestCase):
                 if optim_cls.__name__ != "Muon":
                     self.assertEqual(bias, bias_c)
 
+    @parametrize("num_dim", [0, 1, 2])
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ("Adam", "AdamW")],
+        dtypes=[torch.float32],
+    )
+    def test_tensor_betas(self, device, dtype, optim_info, num_dim):
+        # Tensor betas must work without capturable, both when foreach is requested
+        # and when it is only the default (#110205). optim_inputs_func leaves foreach
+        # and fused unset, so foreach=None exercises the default dispatch.
+        optim_cls = optim_info.optim_cls
+
+        betas_devices = [device]
+        if _get_device_type(device) != "cpu":
+            betas_devices.append("cpu")
+
+        inputs = optim_info.optim_inputs_func(device)
+        configs = product(inputs, betas_devices, (None, True))
+        for optim_input, betas_device, foreach in configs:
+            kwargs = {k: v for k, v in optim_input.kwargs.items() if k != "betas"}
+            # A Tensor lr still needs capturable for foreach.
+            tensor_lr = isinstance(kwargs.get("lr"), torch.Tensor)
+            if foreach and tensor_lr and not kwargs.get("capturable", False):
+                continue
+            kwargs["foreach"] = foreach
+
+            weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+            weight_c = weight.detach().clone().requires_grad_(True)
+            bias = Parameter(torch.randn(10, device=device, dtype=dtype))
+            bias_c = bias.detach().clone().requires_grad_(True)
+            inpt = torch.randn(5, device=device, dtype=dtype)
+
+            # Some configs already pass Tensor betas; compare against the floats.
+            betas = tuple(
+                float(b) for b in optim_input.kwargs.get("betas", (0.9, 0.999))
+            )
+            tensor_betas = tuple(
+                torch.tensor(b).reshape([1] * num_dim).to(betas_device) for b in betas
+            )
+
+            optimizer_r = optim_cls([weight, bias], betas=betas, **kwargs)
+            optimizer = optim_cls([weight_c, bias_c], betas=tensor_betas, **kwargs)
+            for _ in range(5):
+                for optim, w, b in (
+                    (optimizer_r, weight, bias),
+                    (optimizer, weight_c, bias_c),
+                ):
+                    optim.zero_grad()
+                    (w.mv(inpt) + b).pow(2).sum().backward()
+                    optim.step()
+                self.assertEqual(weight, weight_c)
+                self.assertEqual(bias, bias_c)
+
     @parametrize("with_lrsched", [True, False])
     @optims(
         [o for o in optim_db if o.supports_sparse or o.only_supports_sparse_grads],
