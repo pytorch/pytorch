@@ -148,9 +148,12 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   TORCH_CHECK(weight.defined() && bias.defined(),
              "mkldnn_batch_norm: currently mkldnn only support affine model");
 
+  // Keep contiguous dense storage alive while the ideep views are in use.
+  auto weight_contig = weight.is_mkldnn() ? weight : weight.contiguous();
+  auto bias_contig = bias.is_mkldnn() ? bias : bias.contiguous();
   ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::tensor w = itensor_from_const_tensor(weight);
-  ideep::tensor b = itensor_from_const_tensor(bias);
+  ideep::tensor w = itensor_from_const_tensor(weight_contig);
+  ideep::tensor b = itensor_from_const_tensor(bias_contig);
   bool use_running_stat = (running_mean.defined() && running_var.defined());
 
   ideep::tensor y;
@@ -254,9 +257,10 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   const Tensor& save_invstd = save_invstd_opt.value_or(Tensor());
 
   TORCH_CHECK(train, "mkldnn_batch_norm_backward: currently mkldnn only support train model");
+  auto weight_contig = weight.is_mkldnn() ? weight : weight.contiguous();
   ideep::tensor& grady = itensor_from_mkldnn(grad_output);
   ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::tensor w = itensor_from_const_tensor(weight);
+  ideep::tensor w = itensor_from_const_tensor(weight_contig);
   ideep::tensor& m = itensor_from_mkldnn(save_mean);
   ideep::tensor& v = itensor_from_mkldnn(save_invstd);
 
