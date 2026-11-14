@@ -837,8 +837,21 @@ class TestOptimRenewed(TestCase):
                     if torch.is_tensor(new_p_state.get("step", None)):
                         self.assertEqual(new_p_state["step"].dtype, assert_step_dtype)
                 for k in og_p_state:
+                    override_assert_eq_kwargs = None
+                    if og_p.dtype == torch.float16 and k in (
+                        "exp_avg_sq",
+                        "max_exp_avg_sq",
+                    ):
+                        # forloop/foreach Adam(W) keep these in fp32 for fp16
+                        # params, fused keeps them in fp16
+                        override_assert_eq_kwargs = {
+                            **assert_eq_kwargs,
+                            "exact_dtype": False,
+                        }
                     tracker.add(og_p_state[k])
-                    tracker.pop_check_set(new_p_state[k], self)
+                    tracker.pop_check_set(
+                        new_p_state[k], self, override_assert_eq_kwargs
+                    )
 
             self.assertTrue(tracker.all_popped())
 
@@ -1215,6 +1228,56 @@ class TestOptimRenewed(TestCase):
                 "MPS supports only torch.float16, torch.float32 and torch.bfloat16"
             )
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
+
+    # In fp16, (1 - beta2) * grad^2 underflows to 0 for small grads and eps=1e-8
+    # rounds to 0, so an fp16 second moment gives inf/nan on the first step, and
+    # later forgets small values and divides exp_avg by ~eps. forloop/foreach keep
+    # it in fp32 for fp16 params. See https://github.com/pytorch/pytorch/issues/147437
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=(torch.float16,),
+    )
+    @parametrize("impl", ["forloop", "foreach"])
+    def test_fp16_small_grads_match_fp32(self, device, dtype, optim_info, impl):
+        optim_cls = optim_info.optim_cls
+        for optim_input in optim_info.optim_inputs_func(device=device, dtype=dtype):
+            kwargs = deepcopy(optim_input.kwargs)
+            if kwargs.get("capturable", False) and _get_device_type(device) == "cpu":
+                # capturable is not supported on CPU
+                continue
+            # the default eps, which the optim inputs override for fp16
+            kwargs["eps"] = 1e-8
+            kwargs["foreach"] = impl == "foreach"
+            lr = float(kwargs.get("lr", 1e-3))
+            torch.manual_seed(0)
+            param = torch.nn.Parameter(
+                torch.randn(64, device=device, dtype=dtype) * 0.01
+            )
+            param_fp32 = torch.nn.Parameter(param.detach().float())
+            optimizer = optim_cls([param], **kwargs)
+            optimizer_fp32 = optim_cls([param_fp32], **kwargs)
+            for step in range(20):
+                if step == 10:
+                    state_dict = optimizer.state_dict()
+                    optimizer = optim_cls([param], **kwargs)
+                    with torch.optim.preserve_state_dtype_on_load():
+                        optimizer.load_state_dict(state_dict)
+                grad = torch.randn(64, device=device, dtype=dtype) * 1e-5
+                if step % 2:
+                    grad.zero_()
+                param.grad = grad
+                param_fp32.grad = grad.float()
+                optimizer.step()
+                optimizer_fp32.step()
+                self.assertTrue(param.isfinite().all())
+            state = optimizer.state[param]
+            self.assertEqual(state["exp_avg"].dtype, torch.float16)
+            for k in ("exp_avg_sq", "max_exp_avg_sq"):
+                if k in state:
+                    self.assertEqual(state[k].dtype, torch.float32)
+            # The remaining difference comes from exp_avg and the params being
+            # stored in fp16. With an fp16 second moment it is orders larger.
+            self.assertEqual(param.float(), param_fp32, atol=2 * lr, rtol=0)
 
     # Test vectorization path splits for fused kernels. Ensure the scalar path
     # and vectorized path compute the same thing.

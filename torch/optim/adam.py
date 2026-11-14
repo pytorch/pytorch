@@ -159,6 +159,15 @@ class Adam(Optimizer):
                 grads.append(p.grad)
 
                 state = self.state[p]
+                # In fp16, (1 - beta2) * grad^2 underflows to 0 for |grad| below
+                # ~7.7e-3, so the second moment loses small values and the step
+                # divides by ~eps. Keep it in fp32 for fp16 params, see
+                # https://github.com/pytorch/pytorch/issues/147437
+                v_dtype = (
+                    torch.float32
+                    if p.dtype == torch.float16 and not group["fused"]
+                    else None
+                )
                 # Lazy state initialization
                 if len(state) == 0:
                     if group["fused"]:
@@ -181,13 +190,19 @@ class Adam(Optimizer):
                     )
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
+                        p, dtype=v_dtype, memory_format=torch.preserve_format
                     )
                     if group["amsgrad"]:
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         state["max_exp_avg_sq"] = torch.zeros_like(
-                            p, memory_format=torch.preserve_format
+                            p, dtype=v_dtype, memory_format=torch.preserve_format
                         )
+                elif v_dtype is not None:
+                    # State loaded from a state_dict is cast to the param dtype by
+                    # default, see torch.optim.preserve_state_dtype_on_load.
+                    for key in ("exp_avg_sq", "max_exp_avg_sq"):
+                        if key in state and state[key].dtype == torch.float16:
+                            state[key] = state[key].float()
 
                 exp_avgs.append(state["exp_avg"])
                 exp_avg_sqs.append(state["exp_avg_sq"])
@@ -414,6 +429,14 @@ def _single_tensor_adam(
         # update step
         step_t += 1
 
+        # exp_avg_sq of fp16 params is fp32 (see _init_group). Compute the rest of
+        # the step in fp32 too, like the fused kernels, so eps and small moments
+        # don't round to 0, and store exp_avg back in fp16.
+        exp_avg_fp16 = None
+        if param.dtype == torch.float16:
+            grad = grad.float()
+            exp_avg_fp16, exp_avg = exp_avg, exp_avg.float()
+
         if weight_decay != 0:
             if decoupled_weight_decay:
                 # Perform step weight decay
@@ -439,7 +462,7 @@ def _single_tensor_adam(
         device = param.device
 
         if beta1_dict is not None:
-            dtype = param.dtype  # type: ignore[union-attr]
+            dtype = exp_avg.dtype
 
             # cast to workaround https://github.com/pytorch/pytorch/issues/140601
             key = (device, dtype)
@@ -455,6 +478,8 @@ def _single_tensor_adam(
         # Decay the first and second moment running average coefficient
 
         exp_avg.lerp_(grad, 1 - device_beta1)
+        if exp_avg_fp16 is not None:
+            exp_avg_fp16.copy_(exp_avg)
 
         # Nested if is necessary to bypass jitscript rules
         if differentiable and isinstance(beta2, Tensor):
@@ -655,6 +680,7 @@ def _multi_tensor_adam(
             beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr, attr-defined]
 
         device_beta1 = beta1_dict[device] if beta1_dict else beta1
+        is_fp16 = device_params[0].dtype == torch.float16
 
         # Handle complex parameters
         if has_complex:
@@ -685,6 +711,16 @@ def _multi_tensor_adam(
             )
         else:
             torch._foreach_add_(device_state_steps, 1)
+
+        # exp_avg_sq of fp16 params is fp32 (see _init_group). Compute the rest of
+        # the step on fp32 copies too, like the fused kernels, so eps and small
+        # moments don't round to 0, and copy exp_avg and the params back at the
+        # end. Using fp32 copies of the params keeps every foreach op single-dtype.
+        if is_fp16:
+            device_grads = [g.float() for g in device_grads]
+            fp16_params, fp16_exp_avgs = device_params, device_exp_avgs
+            device_params = [p.float() for p in device_params]
+            device_exp_avgs = [m.float() for m in device_exp_avgs]
 
         if weight_decay != 0:
             if decoupled_weight_decay:
@@ -798,6 +834,10 @@ def _multi_tensor_adam(
                 exp_avg_sq_sqrt,
                 step_size,
             )
+
+        if is_fp16:
+            torch._foreach_copy_(fp16_exp_avgs, device_exp_avgs)
+            torch._foreach_copy_(fp16_params, device_params)
 
 
 def _fused_adam(
