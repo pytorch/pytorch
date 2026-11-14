@@ -414,8 +414,6 @@
   "test/inductor/test_graph_transform_observer.py",
   "test/inductor/test_grid_sampler_codegen.py",
   "test/inductor/test_group_batch_fusion.py",
-  "test/inductor/test_halide.py",
-  "test/inductor/test_helion_kernels.py",
   "test/inductor/test_indexing.py",
   "test/inductor/test_inductor_annotations.py",
   "test/inductor/test_inductor_freezing.py",
