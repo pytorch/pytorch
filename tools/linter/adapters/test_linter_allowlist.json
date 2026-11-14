@@ -370,7 +370,6 @@
   "test/inductor/test_cpp_wrapper_custom_ops.py",
   "test/inductor/test_cuda_repro.py",
   "test/inductor/test_cudacodecache.py",
-  "test/inductor/test_cudagraph_trees.py",
   "test/inductor/test_custom_lowering.py",
   "test/inductor/test_custom_op_autotune.py",
   "test/inductor/test_custom_op_out_lowering.py",
