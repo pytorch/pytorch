@@ -10,6 +10,7 @@
 #include <torch/csrc/autograd/utils/error_messages.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FakeTensor.h>
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/MemoryOverlap.h>
@@ -482,16 +483,9 @@ c10::intrusive_ptr<at::TensorImpl> shallow_copy_for_data(
   if (self.is_fake() &&
       !c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::Fake) &&
       !c10::impl::FakeTensorModeTLS::in_kernel_invocation()) {
-    // Like Python's shallow-copy hook, dispatch detach so constants and their
-    // aliases are tracked. A raw TensorImpl copy drops the constant. Restore
-    // the caller's version/metadata policy: .data has its own version counter,
-    // whereas tensor_data() shares the source's.
-    auto result = at::Tensor(self).detach().getIntrusivePtr();
-    if (!result->is_inference()) {
-      result->set_version_counter(version_counter);
-    }
-    result->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    return result;
+    return at::impl::fake_tensor_data(
+               at::Tensor(self), version_counter, allow_tensor_metadata_change)
+        .getIntrusivePtr();
   }
   return self.unsafeGetTensorImpl()->shallow_copy_and_detach(
       version_counter, allow_tensor_metadata_change);
