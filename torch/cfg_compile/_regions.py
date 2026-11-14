@@ -645,6 +645,17 @@ def _identities(obj: Any, modules: dict[int, nn.Module], others: list[Any]) -> N
         others.append(obj)
 
 
+def _same_but_values(a: Any, b: Any) -> bool:
+    """Whether two keys of variants differ in numbers and strings only."""
+    if type(a) is not tuple or type(b) is not tuple:
+        return a == b
+    if len(a) != len(b):
+        return False
+    if len(a) == 2 and a[0] is b[0] and a[0] in (int, float, str, bool):
+        return True
+    return all(_same_but_values(x, y) for x, y in zip(a, b))
+
+
 def _modes() -> tuple[Any, ...]:
     return (
         torch.is_grad_enabled(),
@@ -928,7 +939,8 @@ class _Region:
         # Whether the instructions were checked on real values.
         self.surveyed = False
         self.calls = 0
-        # The time traces and the backend took.
+        # Graphs given to the backend, and the time traces and backend took.
+        self.compiles = 0
         self.seconds = 0.0
 
     def __call__(self, *args: Any) -> tuple[Any, ...]:
@@ -1076,6 +1088,14 @@ class _Region:
         self, key: Any, args: tuple[Any, ...], flat: list[torch.Tensor]
     ) -> _Variant | None:
         """Another variant of a region that has one, for inputs not seen yet."""
+        if len(self.variants) >= 3 and all(
+            _same_but_values(key, k) for k in self.variants
+        ):
+            # A loop counter, say: there is no end to these, and every one
+            # would be a graph of its own.
+            self.hot = False
+            self.plan.split(self, None, "its inputs take ever new values")
+            return None
         if len(self.variants) >= self.plan.options.max_variants:
             return None
         try:
@@ -1147,11 +1167,22 @@ class _Region:
         ops = sum(1 for node in graph.graph.nodes if node.op == "call_function")
         if ops < options.min_ops:
             raise _Failed(None, f"{ops} tensor operations, not worth a graph")
-        try:
-            compiled = options.backend(graph, list(flat))
-        except Exception as e:
-            reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
-            raise _Failed(None, f"the backend failed: {reason}") from None
+        # The parameters are inputs, so the layers of a model that are built
+        # alike give the same graph: it is compiled once. A graph that holds a
+        # tensor of its own is not looked up, the code does not say which.
+        same = None
+        if not any(node.op == "get_attr" for node in graph.graph.nodes):
+            same = (graph.code, key[1], key[2])
+        compiled = options.compiled.get(same)
+        if compiled is None:
+            try:
+                compiled = options.backend(graph, list(flat))
+            except Exception as e:
+                reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
+                raise _Failed(None, f"the backend failed: {reason}") from None
+            if same is not None:
+                options.compiled[same] = compiled
+            self.compiles += 1
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()
         return _Variant(compiled, found["recipes"], ops, keep)
@@ -1257,6 +1288,9 @@ class Regions:
         self.max_variants = max_variants
         self.warmup = warmup
         self.plans: list[_Plan] = []
+        # What the backend made of each graph, by the code of the graph and
+        # what its inputs are like.
+        self.compiled: dict[Any, Callable[..., Any]] = {}
 
     def __call__(self, region: Any) -> bool:
         insts = region.instructions()
@@ -1287,6 +1321,7 @@ class Regions:
                         "where": repr(part),
                         "state": "compiled" if part.hot else "waiting",
                         "variants": len(variants),
+                        "compiles": part.compiles,
                         "ops": max((v.ops for v in variants), default=0),
                         "seconds": part.seconds,
                     }
