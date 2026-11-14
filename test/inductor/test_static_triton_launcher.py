@@ -1815,39 +1815,12 @@ class _FastLauncherCompileMixin:
 
 @requires_gpu_and_triton
 class TestFastLauncherFallbackCompileResult(_FastLauncherCompileMixin, TestCase):
-    """Config-off path for any accelerator: the regular launcher must be
-    used and results stay correct without the fast launcher.
+    """E2E fast-launcher behavior shared by every accelerator: with the config
+    on a fast launcher is built and results stay correct; with it off the
+    regular launcher is used.
     """
 
     hw_classification = HardwareClassification.ACCELERATOR
-
-    def test_disable_fast_launcher(self, device):
-        """Verify disabling the config falls back to the regular launcher."""
-        patcher, results = self._patch_build_fast_launcher()
-        with patcher, torch._inductor.config.patch("use_fast_triton_launcher", False):
-
-            @torch.compile
-            def foo(x, y):
-                return x + y
-
-            x = torch.randn(10, device=device)
-            y = torch.randn(10, device=device)
-            result = foo(x, y)
-            self.assertEqual(result, x + y)
-            self.assertFalse(
-                any(results),
-                "no fast launcher should be built when config is disabled",
-            )
-
-
-@requires_gpu_and_triton
-class TestFastCudaLauncherCompileResult(_FastLauncherCompileMixin, TestCase):
-    """E2E tests verifying the fast launcher handling in torch.compile on
-    CUDA: assert both correctness (output matches eager) and that the fast
-    launcher C extension was constructed, not silently skipped.
-    """
-
-    hw_classification = HardwareClassification.CUDA
 
     def test_basic_compile(self, device):
         """Verify torch.compile uses the fast launcher and produces correct output."""
@@ -1871,6 +1844,33 @@ class TestFastCudaLauncherCompileResult(_FastLauncherCompileMixin, TestCase):
             x, y = torch.randn(10, device=device), torch.randn(10, device=device)
             self.assertEqual(foo(x, y), x + y)
 
+    def test_disable_fast_launcher(self, device):
+        """Verify disabling the config falls back to the regular launcher."""
+        patcher, results = self._patch_build_fast_launcher()
+        with patcher, torch._inductor.config.patch("use_fast_triton_launcher", False):
+
+            @torch.compile
+            def foo(x, y):
+                return x + y
+
+            x = torch.randn(10, device=device)
+            y = torch.randn(10, device=device)
+            result = foo(x, y)
+            self.assertEqual(result, x + y)
+            self.assertFalse(
+                any(results),
+                "no fast launcher should be built when config is disabled",
+            )
+
+
+@requires_gpu_and_triton
+class TestFastCudaLauncherCompileResult(_FastLauncherCompileMixin, TestCase):
+    """CUDA-specific fast-launcher handling: kernels that need the regular
+    static launcher must fall back from the fast launcher, not fail.
+    """
+
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(
         not has_triton_cuda_tma_device(),
         "requires Triton device-side TMA support on CUDA",
@@ -1879,7 +1879,6 @@ class TestFastCudaLauncherCompileResult(_FastLauncherCompileMixin, TestCase):
         {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
     )
     def test_device_tma_gemm_falls_back_from_fast_launcher(self, device):
-        """A global-scratch kernel repeatedly uses the regular static launcher."""
         """A global-scratch kernel repeatedly uses the regular static launcher."""
 
         @triton.jit
