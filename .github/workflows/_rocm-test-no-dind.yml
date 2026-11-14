@@ -216,6 +216,21 @@ jobs:
             exit 1
           fi
 
+      # Same facts setup-rocm prints for the DinD path (the amd-smi monitor table
+      # is already printed by "Job pod amd-smi"). free(1) reports the node's
+      # memory, not the pod's, so read the pod's cgroup values instead.
+      - name: Job pod GPU diagnostics
+        if: always()
+        shell: bash
+        timeout-minutes: 5
+        env:
+          MATRIX_RUNNER: ${{ matrix.runner }}
+        run: |
+          source /etc/rocm_env.sh || true
+          bash .github/scripts/rocm_gpu_partition.sh || true
+          ls -l /dev/kfd /dev/dri || true
+          grep -H . /sys/fs/cgroup/memory.{current,max} /sys/fs/cgroup/memory/memory.{usage,limit}_in_bytes 2>/dev/null || true
+
       - name: Get workflow job id
         id: get-job-id
         uses: pytorch/pytorch/.github/actions/get-workflow-job-id@main
@@ -381,6 +396,18 @@ jobs:
         shell: bash
         if: always() && steps.test.conclusion
         run: cat test/**/*_toprint.log || true
+
+      - name: GPU job diagnostics on failure
+        shell: bash
+        if: failure()
+        timeout-minutes: 5
+        env:
+          MATRIX_RUNNER: ${{ matrix.runner }}
+        run: |
+          source /etc/rocm_env.sh || true
+          bash .github/scripts/rocm_gpu_partition.sh --with-monitor || true
+          grep -H . /sys/fs/cgroup/memory.{current,max} /sys/fs/cgroup/memory/memory.{usage,limit}_in_bytes 2>/dev/null || true
+          ps -eo pid,etime,rss,comm --sort=-rss | head -30 || true
 
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}

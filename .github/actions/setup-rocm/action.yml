@@ -30,6 +30,8 @@ runs:
         cat /etc/apt/sources.list.d/rocm.list || true
         cat /opt/rocm/.info/version || true
         whoami
+        free -m || true
+        ls -l /dev/kfd /dev/dri || true
 
     - name: Runner health check amdgpu info
       if: always()
@@ -43,6 +45,9 @@ runs:
       run: |
         amd-smi monitor -ptumv
         amd-smi list
+        # Callers set MATRIX_RUNNER in the step env so the script can compare the visible
+        # render devices with the count in the runner label; without it that check is skipped.
+        bash .github/scripts/rocm_gpu_partition.sh || true
 
     - name: Runner health check rocminfo
       if: always()
