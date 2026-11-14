@@ -2127,6 +2127,17 @@ class TestMetaCore(TestCase):
             out = f()
             self.assertEqual(out.shape, [10, 16])
 
+    def test_bucketize_boundaries_must_be_1d(self):
+        # The meta kernels used to accept any boundaries shape, so FakeTensor
+        # tracing passed and Inductor failed later with an internal assertion.
+        x = torch.randn(4, device="meta")
+        for boundaries in (torch.randn(2, 2, device="meta"), torch.tensor(1.0, device="meta")):
+            msg = rf"boundaries tensor must be 1 dimension, but got dim\({boundaries.dim()}\)"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.bucketize(x, boundaries)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.bucketize(1.0, boundaries)
+
     def test_local_scalar_dense_call(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be called on meta tensors"):
             meta_tensor = torch.randn(1, device='meta')

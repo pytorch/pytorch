@@ -8465,9 +8465,18 @@ def mkldnn_rnn_layer_backward(
     return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 
+# Same check as bucketize_out_cpu in aten/src/ATen/native/Bucketization.cpp.
+def _check_bucketize_boundaries(boundaries: Tensor) -> None:
+    torch._check(
+        boundaries.dim() == 1,
+        lambda: f"boundaries tensor must be 1 dimension, but got dim({boundaries.dim()})",
+    )
+
+
 @register_meta([aten.bucketize.Tensor, aten.bucketize.Tensor_out])
 @out_wrapper()
 def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
+    _check_bucketize_boundaries(boundaries)
     return torch.empty_like(
         self,
         dtype=torch.int32 if out_int32 else torch.int64,
@@ -8483,6 +8492,7 @@ def meta_bucketize_scalar(
     out_int32: bool = False,
     right: bool = False,
 ):
+    _check_bucketize_boundaries(boundaries)
     return boundaries.new_empty(
         (),
         dtype=torch.int32 if out_int32 else torch.int64,
