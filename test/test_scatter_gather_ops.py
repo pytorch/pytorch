@@ -97,6 +97,23 @@ class TestScatterGather(TestCase):
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 
+    def test_scatter_expanded_int32_index(self):
+        destination = torch.zeros(6, 17)
+        index = torch.tensor([1, 4], dtype=torch.int32).view(2, 1).expand(2, 17)
+        source = torch.arange(2 * 17, dtype=torch.float32).reshape(2, 17)
+
+        actual = destination.scatter_add(0, index, source)
+        expected = destination.scatter_add(0, index.contiguous(), source)
+
+        self.assertEqual(actual, expected)
+
+        actual = destination.scatter_reduce(0, index, source, reduce="sum")
+        expected = destination.scatter_reduce(
+            0, index.contiguous(), source, reduce="sum"
+        )
+
+        self.assertEqual(actual, expected)
+
     @parametrize("dtype", [torch.float32, torch.float64, torch.bfloat16])
     def test_gather_expanded_index(self, dtype):
         device = "cpu"
@@ -209,6 +226,16 @@ class TestScatterGather(TestCase):
             scatter_add(x, index, src, eager_out)
             compiled(x, index, src, compiled_out)
             self.assertEqual(eager_out, compiled_out)
+
+    def test_gather_expanded_int32_index(self):
+        source = torch.arange(6 * 4, dtype=torch.float32).reshape(6, 4)
+        index = torch.tensor([1, 4], dtype=torch.int32).view(2, 1).expand(2, 4)
+
+        actual = torch.gather(source, 0, index)
+        expected = torch.gather(source, 0, index.contiguous())
+
+        self.assertEqual(actual, expected)
+
 
 class TestScatterGatherDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
