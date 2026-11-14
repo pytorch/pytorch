@@ -1,15 +1,15 @@
 r"""Experimental FSDP2 customization APIs.
 
-FSDP copies nonzero-dimension shards through intermediate buffers by default.
-The ``with_native_copy`` functions copy directly between parameter layouts and
-collective buffers instead. Register the reduce-scatter copy-in on a fully
-sharded model::
+FSDP copies nonzero-dimension shards directly between parameter layouts and
+collective buffers by default if their ``outer_size`` (the product of dimensions
+before the shard dimension) is at most 1024, such as ``Shard(1)`` over
+``[2, F, D]``, and through intermediate buffers otherwise. The
+``with_native_copy`` functions copy directly for any ``outer_size``. Register the
+reduce-scatter copy-in on a fully sharded model::
 
     model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
 
-The native CUDA copies write contiguous tensors without intermediate buffers and
-can improve performance for wide tensors with small ``outer_size`` (the product of
-dimensions before the shard dimension), such as ``Shard(1)`` over ``[2, F, D]``.
+The native CUDA copies write contiguous tensors without intermediate buffers.
 Their CPU time, GPU time, and metadata memory grow with the total outer size of a
 parameter group, and strided collective buffers take a slower path. Benchmark
 the callbacks on the target workload before enabling them. Groups with

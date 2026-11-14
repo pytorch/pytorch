@@ -58,9 +58,9 @@ device_type = torch.device(get_devtype())
 
 
 def record_copy_in_dtypes(grad_dtypes: list[tuple[torch.dtype, ...]]):
-    def copy_in(grads, buffer, world_size):
+    def copy_in(grads, buffer, world_size, *args):
         grad_dtypes.append(tuple(grad.dtype for grad in grads))
-        foreach_reduce_scatter_copy_in(grads, buffer, world_size)
+        foreach_reduce_scatter_copy_in(grads, buffer, world_size, *args)
 
     return patch(
         "torch.distributed.fsdp._fully_shard._fsdp_collectives."
@@ -1203,7 +1203,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     def test_native_copy_in_mixed_grad_dtypes(self):
         # Mixes the Linear's deferred bf16 Shard(1) gradient with the fp32
-        # norm's. The default copy-in reorders the former; the native one doesn't.
+        # norm's. Neither the default nor the native copy-in reorders the former.
         copy_ins: list[tuple[list[torch.dtype], list[int] | None]] = []
 
         class RecordCopyIns(TorchDispatchMode):
@@ -1238,7 +1238,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
                 loss.backward()
             models.append(model)
         dtypes = [torch.bfloat16, torch.float32]
-        self.assertEqual(copy_ins, [(dtypes, None), (dtypes, [1, 0])])
+        self.assertEqual(copy_ins, [(dtypes, [1, 0])] * 2)
         ref_model, model = models
         for ref_param, param in zip(ref_model.parameters(), model.parameters()):
             self.assertEqual(param.grad.full_tensor(), ref_param.grad.full_tensor())
