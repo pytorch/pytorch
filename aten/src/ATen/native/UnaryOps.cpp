@@ -456,7 +456,7 @@ static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, co
 // otherwise it won't dispatch to out-of-source devices like XLA.
 // For example it must be at::bitwise_not_out instead of bitwise_not_out(which is at::native!).
 template <typename OutImpl>
-static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
+[[maybe_unused]] static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
   Tensor result = at::empty({0}, self.options());
   return out_impl(result, self);
 }

@@ -301,7 +301,7 @@ inline auto pointer_to_optional_list(U** ptr, int64_t len) {
 }
 
 template <typename T>
-static c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
+static inline c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
   c10::List<T> scalars_list;
   scalars_list.reserve(len);
   for (const auto i : c10::irange(len)) {

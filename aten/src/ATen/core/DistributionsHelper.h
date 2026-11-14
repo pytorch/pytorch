@@ -120,7 +120,7 @@ struct uniform_real_distribution {
 template <typename RNG,
           typename = decltype(&RNG::next_double_normal_sample),
           typename = decltype(&RNG::set_next_double_normal_sample)>
-C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* generator, double* ret) {
+inline C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* generator, double* ret) {
   const auto sample = generator->next_double_normal_sample();
   if (!sample.has_value())
     return false;
@@ -132,7 +132,7 @@ C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* generator, double* ret) {
 template <typename RNG,
           typename = decltype(&RNG::next_float_normal_sample),
           typename = decltype(&RNG::set_next_float_normal_sample)>
-C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* generator, float* ret) {
+inline C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* generator, float* ret) {
   const auto sample = generator->next_float_normal_sample();
   if (!sample.has_value())
     return false;
@@ -142,24 +142,24 @@ C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* generator, float* ret) {
 }
 
 template <typename RNG>
-C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* /* generator */, void* /* ret */) {
+inline C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* /* generator */, void* /* ret */) {
   return false;
 }
 
 template <typename RNG,
           typename = decltype(&RNG::set_next_double_normal_sample)>
-C10_HOST_DEVICE void maybe_set_next_normal_sample(RNG* generator, const double* cache) {
+inline C10_HOST_DEVICE void maybe_set_next_normal_sample(RNG* generator, const double* cache) {
   generator->set_next_double_normal_sample(*cache);
 }
 
 template <typename RNG,
           typename = decltype(&RNG::set_next_float_normal_sample)>
-C10_HOST_DEVICE void maybe_set_next_normal_sample(RNG* generator, const float* cache) {
+inline C10_HOST_DEVICE void maybe_set_next_normal_sample(RNG* generator, const float* cache) {
   generator->set_next_float_normal_sample(*cache);
 }
 
 template <typename RNG>
-C10_HOST_DEVICE void maybe_set_next_normal_sample(RNG* /* generator */, const void* /* cache */) {
+inline C10_HOST_DEVICE void maybe_set_next_normal_sample(RNG* /* generator */, const void* /* cache */) {
 }
 
 /**

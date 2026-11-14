@@ -16,7 +16,7 @@
 namespace at::native {
 
 template <typename T>
-static void im2col(
+static inline void im2col(
     const T* data_im,
     const int64_t channels,
     const int64_t height,
@@ -88,7 +88,7 @@ static void im2col(
 }
 
 template <typename T>
-static void col2im_slice(
+static inline void col2im_slice(
     const T* data_col,
     const int64_t channels,
     const int64_t height,
@@ -192,7 +192,7 @@ static void col2im_slice(
 }
 
 template <typename T>
-static void col2im(
+static inline void col2im(
     const T* data_col,
     const int64_t channels,
     const int64_t height,

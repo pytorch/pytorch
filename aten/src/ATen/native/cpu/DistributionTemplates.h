@@ -385,7 +385,7 @@ void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG generato
 }
 
 template<typename RNG>
-void bernoulli_kernel(const TensorBase &self, double p, RNG generator) {
+inline void bernoulli_kernel(const TensorBase &self, double p, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
   self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     // See Note [Acquire lock when using random generators]
