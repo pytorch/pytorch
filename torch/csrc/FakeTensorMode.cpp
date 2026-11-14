@@ -129,6 +129,9 @@ static int cpp_fake_tensor_mode_init(
       config.attr("fake_tensor_allow_meta").cast<bool>(),
       config.attr("fake_tensor_allow_unsafe_data_ptr_access").cast<bool>(),
       config.attr("fake_tensor_propagate_real_tensors").cast<bool>());
+  mode->avoid_device_init_ = py::module::import("torch._subclasses.fake_tensor")
+                                 .attr("_avoid_device_init")()
+                                 .cast<bool>();
   mode->prefer_device_type_ = config.attr("fake_tensor_prefer_device_type")
                                   .cast<std::optional<std::string>>();
   if (creation_traceback != Py_None) {
@@ -190,6 +193,11 @@ static PyObject* get_mode_pyobject(PyObject* self, void*) {
 }
 
 static PyGetSetDef mode_properties[] = {
+    {"avoid_device_init",
+     get_mode_field<&c10::FakeTensorMode::avoid_device_init_>,
+     nullptr,
+     nullptr,
+     nullptr},
     {"_creation_traceback",
      get_mode_pyobject<&c10::FakeTensorMode::creation_traceback_>,
      nullptr,
