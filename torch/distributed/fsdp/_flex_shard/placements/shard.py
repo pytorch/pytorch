@@ -115,6 +115,9 @@ class Shard(Placement):
         # The layout that finalizes this unshard, and its metadata
         layout: AllGatherLayout
         output_metadata: object | None = None
+        # Whether ``comm`` is the installed layout's, which selects each call's
+        # output with its metadata
+        comm_takes_output_metadata: bool = False
         # An FSDP2 AllGather comm (e.g. symmetric memory) that allocated the
         # gather buffer and runs the collective, or None for all_gather_single
         comm: Any = None
@@ -317,6 +320,11 @@ class Shard(Placement):
         device = tensors[0].device if device is None else device
         all_gather = bucket_state or ShardAllGather(_PLAIN_REPRESENTATION, len(infos))
         layout = all_gather.layout
+        # A layout's own comm runs all of its all-gathers, also those that fall
+        # back to rank-major output
+        comm_takes_output_metadata = layout.comm is not None
+        if comm_takes_output_metadata:
+            comm = layout.comm
         with _record_copy_in_if_eager():
             # Each param's flattened inputs from its representation, or None
             # for its padded local shard
@@ -369,6 +377,7 @@ class Shard(Placement):
                     for param, inputs in zip(params, param_inputs, strict=True)
                 ),
                 layout=layout,
+                comm_takes_output_metadata=comm_takes_output_metadata,
                 comm=comm,
             )
             if single_rank:
@@ -471,7 +480,7 @@ class Shard(Placement):
                     gather_buf, send_buf, group=state.pg, async_op=async_op
                 )
             kwargs = {}
-            if state.layout.comm_type is not None:
+            if state.comm_takes_output_metadata:
                 kwargs["output_metadata"] = state.output_metadata
             return state.comm(
                 output_tensor=gather_buf,
@@ -588,9 +597,13 @@ class Shard(Placement):
         size = sum(s.numel() for s in padded_sizes)
         dtype = infos[0].grad_reduce_dtype
         device = tensors[0].device
+        # A singleton group runs no reduce-scatter and its packed buffer becomes
+        # the reduction output, so FSDP owns it instead of the comm, whose
+        # allocator may return a persistent buffer
+        skip_reduce_scatter = world_size == 1
         send_buf = (
             torch.empty(size, dtype=dtype, device=device)
-            if comm is None
+            if comm is None or skip_reduce_scatter
             else comm.allocate((size,), dtype=dtype, device=device)
         )
         if copy_in_fn is not None:

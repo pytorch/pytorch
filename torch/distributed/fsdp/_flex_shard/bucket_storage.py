@@ -342,6 +342,8 @@ class ShardedBucketStorage:
         self._compute_device: torch.device | None = None
         # FSDP2's custom ReduceScatter and set_reduce_scatter_input_fn.
         self._reduce_scatter_comm: Any = None
+        # FSDP2's AllReduce for the replica all-reduce, or None for dist.all_reduce
+        self._all_reduce_comm: Any = None
         self._reduce_scatter_input_fn: Any = None
         # FSDP2's set_unshard_in_backward and set_reduce_scatter_unused_params.
         self._unshard_in_backward = True

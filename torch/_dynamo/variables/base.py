@@ -38,13 +38,7 @@ from torch._C._dynamo import (
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
-from ..exc import (
-    ObservedAttributeError,
-    raise_attribute_error,
-    raise_type_error,
-    unimplemented,
-    Unsupported,
-)
+from ..exc import raise_attribute_error, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import format_source_range, istype
@@ -2402,35 +2396,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
-        """Dynamo's hasattr(): try tp_getattro_impl, catch AttributeError.
-
-        Mirrors CPython's PyObject_HasAttr (via PyObject_GetOptionalAttr):
-        call tp_getattro, suppress AttributeError via PyErr_Clear, return
-        True/False.
-        https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
-        """
-        result = self._hasattr_check_side_effects(tx, name)
-        if result is not None:
-            return result
-
-        try:
-            self.tp_getattro_impl(tx, name)
-            return variables.ConstantVariable.create(True)
-        except ObservedAttributeError:
-            tx.exn_vt_stack.clear_current_exception()
-            return variables.ConstantVariable.create(False)
-        except (NotImplementedError, Unsupported):
-            pass
-
-        unimplemented(
-            gb_type="Unsupported hasattr call",
-            context=f"call_obj_hasattr {self} {name}",
-            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
-            hints=[
-                f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
+        """VT-specific hasattr shortcut. generic_hasattr_str only calls an
+        override; the default raises so an override can defer via super()."""
+        # Do not overload this unless you really need it: e.g. non-trivial
+        # hasattr behavior which cannot be captured by the generic_hasattr function.
+        raise NotImplementedError
 
     def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """
@@ -3613,8 +3583,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> None:
         original_method = getattr(cls, method)
 
-        if original_method is getattr(VariableTracker, method) or hasattr(
-            original_method, "_call_once_guarded"
+        # A constant holds no other VTs, so it cannot be self-referential and
+        # skips the guard, which costs a contextvar lookup and a set update per
+        # call. ConstantVariable is not defined yet when its own class body is
+        # processed, hence the name check.
+        is_constant = (
+            cls.__name__ == "ConstantVariable"
+            and cls.__module__ == "torch._dynamo.variables.constant"
+        )
+        if (
+            is_constant
+            or original_method is getattr(VariableTracker, method)
+            or hasattr(original_method, "_call_once_guarded")
         ):
             return
 

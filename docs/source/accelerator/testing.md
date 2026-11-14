@@ -23,6 +23,8 @@ Test classification labels each test class (`GENERIC` / `ACCELERATOR` / device-s
 PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION=GENERIC python test/run_test.py -i test_autograd
 ```
 
+Upstream CI sets `PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION=GENERIC` on most CUDA and ROCm test jobs (see `.ci/pytorch/test.sh`), so a `GENERIC` class must not depend on an accelerator: no `device` parameter, no accelerator APIs or device-specific decorators, and no `instantiate_device_type_tests`. When running `.ci/pytorch/test.sh` yourself, a value set beforehand replaces that default, and an empty value turns the exclusion off.
+
 
 **For OOT backends, upstream test reuse should primarily focus on `ACCELERATOR` tests.** `GENERIC` tests are already covered by upstream CPU CI. Device-specific tests target built-in backends. OOT backends typically maintain their own device-specific tests downstream.
 

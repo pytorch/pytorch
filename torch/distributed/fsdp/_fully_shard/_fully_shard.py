@@ -13,10 +13,10 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 
-from .._flex_shard.all_gather_layout import AllGatherLayout
 from . import _fsdp_engine
 from ._fsdp_api import (
     AllGather,
+    AllReduce,
     DataParallelMeshDims,
     MixedPrecisionPolicy,
     OffloadPolicy,
@@ -41,6 +41,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
 
     from torch.distributed.tensor import DeviceMesh
+
+    from .._flex_shard.all_gather_layout import AllGatherLayout
 
 __all__ = [
     "fully_shard",
@@ -835,12 +837,12 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
-        This sets only the comm and keeps the installed all-gather layout. A
-        layout whose ``comm_type`` is set requires a comm of that type, which
-        FSDP passes each call's layout metadata: install the comm with this
-        method before the layout, and while the layout is installed, comms of
-        other types are rejected. Otherwise the comm can be replaced at any time,
-        since the layout, not the comm, owns the parameters' outputs.
+        This only works with the default all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`,
+        which packs the comm's input into the output that the comm allocated; a
+        custom layout carries its own comm instead (see
+        :meth:`set_all_gather_layout`). The comm can be replaced at any time,
+        since it owns no outputs.
 
         Args:
             comm (AllGather): Custom all-gather communication.
@@ -859,6 +861,27 @@ class FSDPModule:
         """
         engine_state = self._get_fsdp_state()
         _fsdp_engine.set_custom_reduce_scatter(engine_state, comm)
+
+    def set_custom_all_reduce(self, comm: AllReduce) -> None:
+        """Override HSDP or ``replicate_with_fsdp`` all-reduce communication.
+
+        See ``AllReduce`` for the in-place reduction and stream contract. The
+        primitive runs on FSDP's internal all-reduce stream, which is distinct
+        from the compute stream. FSDP handles gradient scaling, accumulation,
+        and buffer lifetime, and runs the optional all-reduce hook afterward.
+        ``set_requires_all_reduce(False)`` suppresses this collective.
+
+        This applies to this module's parameter group, not child FSDP modules.
+
+        .. warning::
+            This API is experimental and may change without backward
+            compatibility.
+
+        Args:
+            comm (Optional[AllReduce]): Custom all-reduce communication.
+                ``None`` restores ``DefaultAllReduce``.
+        """
+        _fsdp_engine.set_custom_all_reduce(self._get_fsdp_state(), comm)
 
     def set_all_reduce_hook(
         self,
@@ -950,22 +973,24 @@ class FSDPModule:
 
         The layout packs the group's all-gather inputs before the collective and
         turns the collective output into the parameters' all-gather outputs
-        after it completes.
+        after it completes. This is the only way to install a layout.
         :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`
-        packs rank-major input and copies the output with its ``output_fn``,
-        e.g. ``DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)``
-        for the native copy; it works with any comm that produces rank-major
-        output. This is the only way to install a layout. A layout whose
-        ``comm_type`` is set, e.g. one whose collective writes
-        parameter-contiguous output, requires a comm of that type, which FSDP
-        passes each call's layout metadata: install the comm first with
-        :meth:`set_custom_all_gather`. Replacing a layout keeps the installed
-        comm. A layout that keeps no per-call state can serve any number of
-        modules. Set custom layouts before the first unshard: layouts change only
-        between iterations, while no all-gather is pending and parameters are
-        resharded, and never after parameters adopt outputs from a custom
-        layout, since only the layout that created those outputs can refill
-        them. FSDP checks every group before changing any.
+        packs rank-major input into the collective output and copies the output
+        with its ``output_fn``, e.g.
+        ``DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)`` for the
+        native copy. It is the only layout that works with the comms that
+        :meth:`set_custom_all_gather`, :meth:`set_symm_mem_for_comm` and
+        :meth:`set_allocate_memory_from_process_group_for_comm` install, which
+        expect that copy-in. A custom layout, e.g. one whose collective writes
+        parameter-contiguous output, packs its own input and carries its own
+        all-gather as its ``comm``, which FSDP passes each call's layout
+        metadata; without a ``comm``, it runs FSDP's default all-gather. A
+        layout that keeps no per-call state can serve any number of modules. Set
+        custom layouts before the first unshard: layouts change only between
+        iterations, while no all-gather is pending and parameters are resharded,
+        and never after parameters adopt outputs from a custom layout, since
+        only the layout that created those outputs can refill them. FSDP checks
+        every group before changing any.
 
         Args:
             layout (AllGatherLayout): Layout to install; pass
@@ -973,11 +998,6 @@ class FSDPModule:
             recurse (bool): Whether to also set the layout for all nested FSDP
                 modules. Defaults to ``True``.
         """
-        if not isinstance(layout, AllGatherLayout):
-            raise TypeError(
-                f"expected an AllGatherLayout, e.g. DefaultAllGatherLayout(fn), but "
-                f"got {layout!r}"
-            )
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         _fsdp_engine.set_all_gather_layout(
@@ -1158,8 +1178,9 @@ class FSDPModule:
         This cannot be used together with :meth:`set_custom_all_gather` or
         :meth:`set_custom_reduce_scatter` as those APIs allow for
         finer-grained control over each communication, and this method cannot
-        determine their staging buffer allocation strategy. It is rejected under
-        a layout whose ``comm_type`` the resulting comm does not match.
+        determine their staging buffer allocation strategy. ProcessGroup
+        allocation only works with the default all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`.
 
         Args:
             enable (bool): Whether to turn on ProcessGroup allocation.
@@ -1191,8 +1212,9 @@ class FSDPModule:
         Collectives](https://docs.pytorch.org/docs/2.11/symmetric_memory.html#copy-engine-collectives).
 
         This cannot be used together with :meth:`set_custom_all_gather` or
-        :meth:`set_custom_reduce_scatter`, and is rejected like
-        :meth:`set_allocate_memory_from_process_group_for_comm` under a layout.
+        :meth:`set_custom_reduce_scatter`, and only works with the default
+        all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`.
 
         Args:
             backend (str): The symmetric memory backend to use. Defaults to

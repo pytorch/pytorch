@@ -5,7 +5,11 @@ from typing import Any, Literal
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
-from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
+from torch.distributed.fsdp._fully_shard._fsdp_api import (
+    AllGather,
+    AllReduce,
+    ReduceScatter,
+)
 
 from ._fsdp_api import _ReduceOp
 
@@ -138,6 +142,17 @@ class SymmMemAllGather(SymmMemAllocMixin, AllGather):
             group=group,
             async_op=async_op,
         )
+
+
+class DefaultAllReduce(DefaultAllocMixin, AllReduce):
+    def __call__(
+        self,
+        tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        op: _ReduceOp,
+        async_op: bool = False,
+    ) -> dist.Work | None:
+        return dist.all_reduce(tensor, group=group, op=op, async_op=async_op)
 
 
 class DefaultReduceScatter(DefaultAllocMixin, ReduceScatter):

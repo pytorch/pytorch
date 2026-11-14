@@ -2442,6 +2442,10 @@ class PythonWrapperCodegen(CodeGen):
             # See [Note: Removed Graph Partition Arguments]
             self.write_prefix()
 
+        # Queue before kernel codegen; partition prefixes are written afterwards.
+        if config.size_asserts and not V.graph.is_const_graph:
+            self.codegen_input_size_asserts()
+
         self.write_kernel_autotune_defs_header()
 
         if not V.graph.aot_mode:
@@ -2924,17 +2928,15 @@ class PythonWrapperCodegen(CodeGen):
 
             self.codegen_inputs()
 
-            # avoid duplicating asserts for both partition functions and
-            # the call function when using cudagraph partition
+            # Under cudagraph partitioning, leave NaN/alignment checks to partitions
+            # to avoid duplicates; call()-only inputs do not get these checks.
             if not (
                 is_using_cudagraph_partition()
-                and (not is_codegen_graph_partition_subgraph(self))
+                and not is_codegen_graph_partition_subgraph(self)
             ):
-                self.codegen_input_size_and_nan_asserts()
+                self.codegen_input_alignment_and_nan_asserts()
 
-    def codegen_input_size_and_nan_asserts(self) -> None:
-        if config.size_asserts:
-            self.codegen_input_size_asserts()
+    def codegen_input_alignment_and_nan_asserts(self) -> None:
         if config.alignment_asserts_inputs:
             self.codegen_input_alignment_asserts()
         if config.nan_asserts:
@@ -2957,10 +2959,10 @@ class PythonWrapperCodegen(CodeGen):
                 self.write_assert_alignment(name, GPU_ALIGN_BYTES, "input")
         self.lines.extend(body)
 
-    # Input size/stride assertions are deferred from the top of call() to just
-    # before the first kernel that uses each input. This avoids a block of N
-    # sequential assert calls (~1 us each) on the critical path before the first
-    # GPU kernel launch. Called from the scheduler codegen loop.
+    # Input size/stride assertions are deferred from the start of each wrapper
+    # function to just before the first kernel that uses each input. This avoids
+    # a block of N sequential assert calls (~1 us each) on the critical path
+    # before the first GPU kernel launch. Called from the scheduler codegen loop.
     def codegen_deferred_input_asserts(self, input_names: Iterable[str]) -> None:
         grouped_asserts: list[tuple[str, str, str]] = []
         for name in input_names:
