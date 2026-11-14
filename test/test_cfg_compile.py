@@ -2010,5 +2010,99 @@ class TestCfgWith(TestCase):
         self.assertIn("Linear.forward", stats["compiled_callees"])
 
 
+class BytecodeBase:
+    def scale(self, x):
+        return x * 2
+
+    @property
+    def name(self):
+        return "base"
+
+
+class BytecodeChild(BytecodeBase):
+    def scale(self, x):
+        return super().scale(x) + 1
+
+    def explicit(self, x):
+        return super(BytecodeChild, self).scale(x)  # noqa: UP008
+
+    @property
+    def name(self):
+        return "child of " + super().name
+
+
+@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
+class TestCfgMoreBytecodes(TestCase):
+    """Imports inside functions, super() and star unpacking."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_imports_inside_a_function(self):
+        def f(x):
+            import math
+            import os.path
+            from collections import deque, OrderedDict
+            from os import path as p
+
+            return (
+                math.floor(x),
+                p.basename("/a/b"),
+                os.path.sep,
+                OrderedDict.__name__,
+                deque([x]).pop(),
+            )
+
+        def missing():
+            from math import nothing_here  # noqa: F401
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        self.assertEqual(compiled(2.5), f(2.5))
+        with self.assertRaisesRegex(
+            ImportError, "cannot import name 'nothing_here' from 'math'"
+        ):
+            torch.cfg_compile(missing, fallback=False)()
+
+    def test_super(self):
+        obj = BytecodeChild()
+        for method in (BytecodeChild.scale, BytecodeChild.explicit):
+            compiled = torch.cfg_compile(method, fallback=False)
+            self.assertEqual(compiled(obj, 3), method(obj, 3))
+        compiled = torch.cfg_compile(BytecodeChild.name.fget, fallback=False)
+        self.assertEqual(compiled(obj), "child of base")
+
+    def test_star_unpacking(self):
+        def f(seq):
+            a, *b, c = seq
+            *d, e = seq
+            g, *h = seq
+            return a, b, c, d, e, g, h
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        for seq in ([1, 2, 3, 4], (1, 2), "abc", range(5)):
+            self.assertEqual(compiled(seq), f(seq))
+        for bad, error in (([1], ValueError), (5, TypeError)):
+            with self.assertRaises(error) as expected:
+                f(bad)
+            with self.assertRaises(error) as got:
+                compiled(bad)
+            self.assertEqual(str(got.exception), str(expected.exception))
+
+    def test_optimizer_step_is_compiled(self):
+        def step(opt):
+            opt.zero_grad()
+            opt.step()
+
+        weight = torch.nn.Parameter(torch.ones(2))
+        opt = torch.optim.SGD([weight], lr=0.5)
+        compiled = torch.cfg_compile(step, fallback=False)
+        for _ in range(2):
+            weight.grad = torch.ones(2)
+            opt.step()
+            compiled(opt)
+        self.assertEqual(weight, torch.zeros(2))
+        self.assertIn("SGD.step", compiled.stats()["compiled_callees"])
+        self.assertIn("Optimizer.zero_grad", compiled.stats()["compiled_callees"])
+
+
 if __name__ == "__main__":
     run_tests()
