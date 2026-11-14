@@ -12,6 +12,7 @@ from torch.export import export, FlatArgsAdapter, unflatten
 from torch.export.unflatten import _assign_attr, _AttrKind, _disable_interpreter
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_MACOS,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -695,6 +696,7 @@ class TestUnflatten(TestCase):
         )
 
     @skipIfTorchDynamo("custom objects not supported in dynamo yet")
+    @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
     def test_unflatten_constant_obj(self):
         init_torchbind_implementations()
 

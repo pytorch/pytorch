@@ -42,6 +42,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_mps import mps_ops_modifier
 from torch.testing._internal.common_utils import (
+    decorateIf,
     gradcheck,
     HardwareClassification,
     is_iterable_of_tensors,
@@ -295,6 +296,7 @@ class TestUnaryUfuncs(TestCase):
     @suppress_warnings
     @ops(reference_filtered_ops)
     @slowTestIf(IS_WINDOWS)
+    @decorateIf(unittest.skip("bool has no small values"), lambda p: p["dtype"] is torch.bool)
     def test_reference_numerics_small(self, device, dtype, op):
         if dtype == torch.bool:
             raise self.skipTest("bool has no small values")
@@ -307,6 +309,10 @@ class TestUnaryUfuncs(TestCase):
     @suppress_warnings
     @ops(reference_filtered_ops)
     @slowTestIf(IS_WINDOWS)
+    @decorateIf(
+        unittest.skip("bool, uint8, and int8 dtypes have no large values"),
+        lambda p: p["dtype"] in (torch.bool, torch.uint8, torch.int8),
+    )
     def test_reference_numerics_large(self, device, dtype, op):
         if dtype in (torch.bool, torch.uint8, torch.int8):
             raise self.skipTest("bool, uint8, and int8 dtypes have no large values")
@@ -720,6 +726,18 @@ class TestUnaryUfuncs(TestCase):
             RuntimeError, r"polygamma\(n, x\) does not support negative n\."
         ):
             torch.polygamma(-1, torch.tensor([1.0, 2.0], device=device))
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_angle_signed_zero(self, device, dtype):
+        x = torch.tensor([-0.0, 0.0, -1.0, 1.0, nan], device=device, dtype=dtype)
+        x_np = x.cpu().to(
+            torch.float64 if dtype == torch.float64 else torch.float32
+        ).numpy()
+
+        actual = torch.angle(x)
+        expected = torch.from_numpy(np.angle(x_np)).to(dtype)
+
+        self.assertEqual(actual, expected)
 
     @dtypes(torch.complex64, torch.complex128)
     def test_abs_angle_complex_to_float(self, device, dtype):

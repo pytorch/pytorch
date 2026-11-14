@@ -585,7 +585,8 @@ class AOTInductorTestsTemplate:
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU and Triton, or on macOS
+    # (see __main__).
 
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
@@ -607,6 +608,10 @@ class AOTInductorLoggingTest(LoggingTestCase):
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
 
+@unittest.skipIf(
+    IS_MACOS and not (IS_SANDCASTLE or IS_FBCODE),
+    "non-portable load_library call used in test",
+)
 class AOTICustomOpTestCase(TestCase):
     def setUp(self):
         if IS_SANDCASTLE or IS_FBCODE:

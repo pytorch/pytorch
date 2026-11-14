@@ -57,6 +57,7 @@ from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -1963,9 +1964,7 @@ def forward(self, primals, tangents):
                 register_custom_class(Bad1, typ="symbolic")
         finally:
             # Clean up pytree registration to avoid leaking state to other tests
-            pytree.SUPPORTED_NODES.pop(Bad1, None)
-            pytree.SUPPORTED_SERIALIZED_TYPES.pop(Bad1, None)
-            pytree.CONSTANT_NODES.discard(Bad1)
+            pytree._deregister_pytree_node(Bad1)
 
         @dataclass
         class Bad2(CustomClassBase):
@@ -4410,6 +4409,8 @@ class TestOpaqueGenerator(TestCase):
 
 class TestOpaqueGeneratorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(TestCase.setUp)
+    setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
 
     @onlyAccelerator
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5200")
