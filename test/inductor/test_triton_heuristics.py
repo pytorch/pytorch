@@ -58,12 +58,14 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_TENSOR_NUMEL,
 )
 from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
+from torch._inductor.runtime.tiling import block_to_prefix, get_max_block
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
     _enforce_native_matmul_config_min_xblock,
     _enforce_reduction_config_block_minimums,
     _find_names,
+    _get_nd_pointwise_numels,
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
@@ -79,6 +81,8 @@ from torch._inductor.runtime.triton_heuristics import (
     PrecomputedGrid,
     template,
     triton_config,
+    triton_config_reduction,
+    triton_config_tiled_reduction,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, get_code
@@ -257,11 +261,112 @@ class TestTritonHeuristics(TestCase):
         Make sure block size does not exceed the maximum defined in inductor config.
         """
         cfg = triton_config({"x": 2048, "y": 2}, 64, 64)
-        for label in "XYZ":
-            key = f"{label}BLOCK"
-            if key not in cfg.kwargs:
-                continue
-            self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+        for key, block in cfg.kwargs.items():
+            if key.endswith("BLOCK"):
+                self.assertLessEqual(
+                    block, get_max_block(block_to_prefix(key), TRITON_MAX_BLOCK)
+                )
+
+    def test_pointwise_budget_expansion(self):
+        hints = {"z1_": 8, "z0_": 8, "y": 8, "x": 64, "r0_": 512}
+        cases = [
+            ([8, 8, 32], {"x": 8, "y": 8, "z0_": 8, "z1_": 4}),
+            ([8, 32], {"x": 8, "y": 8, "z0_": 4, "z1_": 1}),
+            ([128], {"x": 64, "y": 2, "z0_": 1, "z1_": 1}),
+            ([8, 8, 128], {"x": 8, "y": 8, "z0_": 8, "z1_": 8}),
+            ([8, 8, 4, 2], {"x": 8, "y": 8, "z0_": 4, "z1_": 2}),
+        ]
+        for budgets, expected in cases:
+            with self.subTest(budgets=budgets):
+                self.assertEqual(_get_nd_pointwise_numels(hints, budgets), expected)
+        hints["z0_"] = 1
+        self.assertEqual(
+            _get_nd_pointwise_numels(hints, [8, 8, 4]),
+            {"x": 8, "y": 8, "z0_": 1, "z1_": 4},
+        )
+
+    def test_existing_pointwise_config_budgets(self):
+        for hints, budgets, expected in [
+            ({"x": 4096}, (1024,), {"XBLOCK": 1024}),
+            ({"y": 128, "x": 128}, (64, 64), {"XBLOCK": 64, "YBLOCK": 64}),
+            (
+                {"z0_": 32, "y": 32, "x": 32},
+                (16, 16, 16),
+                {"XBLOCK": 16, "YBLOCK": 16, "Z0_BLOCK": 16},
+            ),
+        ]:
+            with self.subTest(hints=hints):
+                cfg = triton_config(hints, *budgets)
+                self.assertEqual(cfg.kwargs, expected)
+                self.assertEqual(cfg.num_warps, 4 if len(hints) == 1 else 8)
+
+    @parametrize(
+        "hints, budgets",
+        [({"x": 128}, (64, 32)), ({"x": 128, "y": 64}, (64, 32, 16))],
+    )
+    def test_pointwise_config_rejects_extra_budgets(self, hints, budgets):
+        with self.assertRaisesRegex(
+            AssertionError, "More pointwise budgets than pointwise dimensions"
+        ):
+            triton_config(hints, *budgets)
+
+    def test_pointwise_budget_expansion_at_block_limit(self):
+        max_y = TRITON_MAX_BLOCK["Y"]
+        hints = {"x": 8, "y": 2 * max_y, "z0_": 8}
+        self.assertEqual(
+            _get_nd_pointwise_numels(hints, [8, 8 * max_y]),
+            {"x": 8, "y": max_y, "z0_": 8},
+        )
+
+    def test_tiled_reduction_pointwise_budget_expansion(self):
+        cfg = triton_config_tiled_reduction(
+            {"z0_": 8, "y": 8, "x": 64, "r0_": 8, "r1_": 32},
+            8,
+            32,
+            64,
+        )
+        self.assertEqual(
+            cfg.kwargs,
+            {"XBLOCK": 8, "YBLOCK": 8, "Z0_BLOCK": 4, "R0_BLOCK": 2, "R1_BLOCK": 32},
+        )
+
+    @parametrize(
+        "reduction_hints, budget, expected",
+        [
+            ({"r0_": 32}, 8, {"R0_BLOCK": 8}),
+            ({"r0_": 8, "r1_": 32}, 64, {"R0_BLOCK": 2, "R1_BLOCK": 32}),
+            ({"r0_": 8, "r1_": 32}, 1024, {"R0_BLOCK": 8, "R1_BLOCK": 32}),
+            ({"r0_": 8, "r1_": 1}, 4, {"R0_BLOCK": 4, "R1_BLOCK": 1}),
+            (
+                {"r0_": 8, "r1_": 4, "r2_": 16},
+                128,
+                {"R0_BLOCK": 2, "R1_BLOCK": 4, "R2_BLOCK": 16},
+            ),
+            (
+                {"r0_": 8, "r1_": 4, "r2_": 16, "r3_": 32},
+                1024,
+                {"R0_BLOCK": 1, "R1_BLOCK": 2, "R2_BLOCK": 16, "R3_BLOCK": 32},
+            ),
+            (
+                {"r0_": 8, "r1_": 4, "r2_": 16, "r3_": 8, "r4_": 32},
+                1024,
+                {
+                    "R0_BLOCK": 1,
+                    "R1_BLOCK": 1,
+                    "R2_BLOCK": 4,
+                    "R3_BLOCK": 8,
+                    "R4_BLOCK": 32,
+                },
+            ),
+        ],
+    )
+    def test_reduction_config_budget_expansion(self, reduction_hints, budget, expected):
+        cfg = triton_config_reduction({"x": 64, **reduction_hints}, 8, budget)
+        self.assertEqual(cfg.kwargs, {"XBLOCK": 8, **expected})
+        cfg = triton_config_tiled_reduction(
+            {"y": 8, "x": 64, **reduction_hints}, 8, 4, budget
+        )
+        self.assertEqual(cfg.kwargs, {"XBLOCK": 8, "YBLOCK": 4, **expected})
 
     def test_native_matmul_config_block_numel_limit(self):
         device = DeviceProperties(
