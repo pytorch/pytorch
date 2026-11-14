@@ -5942,7 +5942,12 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable, TupleVariable):
         # plain tuple in CPython, not the subclass. Also avoids
         # BaseListVariable._new_list's type(self)(items), which would misfire
         # on this class's (value, items) constructor.
-        return TupleVariable(list(items), mutation_type=ValueMutationNew())
+        items = list(items)
+        return TupleVariable(
+            items,
+            identity_token=object() if items else None,
+            mutation_type=ValueMutationNew(),
+        )
 
     def resolve_data_descriptor(
         self,
