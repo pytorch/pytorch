@@ -411,7 +411,6 @@
   "test/inductor/test_fx_fusion.py",
   "test/inductor/test_fxir_backend.py",
   "test/inductor/test_gpu_cpp_wrapper.py",
-  "test/inductor/test_graph_transform_observer.py",
   "test/inductor/test_grid_sampler_codegen.py",
   "test/inductor/test_group_batch_fusion.py",
   "test/inductor/test_halide.py",
