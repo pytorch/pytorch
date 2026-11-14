@@ -5377,6 +5377,44 @@ class TestLinalg(TestCase):
                 y = make_arg(size_y, noncontiguous=nctg_y)
                 self.check_single_matmul(x, y)
 
+    @dtypesIfCUDA(torch.float, torch.complex64)
+    @dtypes(torch.int64, torch.float, torch.complex64)
+    def test_matmul_broadcast_batch_fold(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        sizes = [
+            ((2, 3, 4, 5, 6), (2, 3, 1, 6, 7)),
+            ((6, 3, 1, 5), (3, 5, 4)),
+            ((2, 6, 3, 1, 5), (3, 5, 4)),
+            ((2, 6, 3, 1, 5), (6, 1, 5, 4)),
+            ((2, 3, 4, 5, 6), (1, 1, 6, 7)),
+            ((1, 3, 4, 5, 6), (1, 3, 1, 6, 7)),
+            ((4, 1, 5, 6), (1, 1, 6, 7)),
+            ((4, 3, 5, 6), (1, 3, 6, 7)),
+            ((4, 3, 0, 5), (3, 5, 2)),
+            ((0, 3, 1, 5), (3, 5, 2)),
+            ((4, 0, 1, 5), (0, 5, 2)),
+        ]
+        for (size_x, size_y), nctg_x, nctg_y in product(sizes, (True, False), (True, False)):
+            x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
+            self.check_single_matmul(x, y)
+
+    @onlyCPU
+    def test_matmul_broadcast_batch_fold_no_copy(self, device):
+        # https://github.com/pytorch/pytorch/issues/154128
+        def matmul_ops(x, y):
+            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU]) as prof:
+                result = torch.matmul(x, y)
+            self.assertEqual(result, torch.matmul(x.contiguous(), y.expand(*x.shape[:-2], *y.shape[-2:]).contiguous()))
+            return {event.key for event in prof.key_averages()}
+
+        # y is not expanded to the batch shape of x
+        for size_x, size_y in (((2, 3, 4, 5, 6), (2, 3, 1, 6, 7)), ((6, 3, 1, 5), (3, 5, 4))):
+            self.assertNotIn("aten::expand", matmul_ops(torch.randn(size_x, device=device), torch.randn(size_y, device=device)))
+        # Not folded, as that would copy the output or x while expanding y is a view
+        y = torch.randn(1, 5, 3, device=device)
+        self.assertNotIn("aten::clone", matmul_ops(torch.randn(6, 4, 1, 5, device=device), y.expand(4, 5, 3)))
+        self.assertNotIn("aten::clone", matmul_ops(torch.randn(1, 1, 5, device=device).expand(6, 1, 5), y))
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):

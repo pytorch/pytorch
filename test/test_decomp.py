@@ -1271,6 +1271,28 @@ class DecompOneOffTests(TestCase):
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
+    def test_matmul_broadcast_batch_fold(self, device):
+        # https://github.com/pytorch/pytorch/issues/154128
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        for size_x, size_y, num_clones in (
+            ((2, 3, 4, 5, 6), (2, 3, 1, 6, 7), 0),
+            ((1, 3, 4, 1, 6), (1, 3, 1, 6, 7), 0),
+            ((6, 3, 1, 5), (3, 5, 4), 1),
+        ):
+            x = torch.randn(size_x, device=device)
+            y = torch.randn(size_y, device=device)
+            for tracing_mode in ("real", "symbolic"):
+                with enable_python_dispatcher():
+                    gm = make_fx(torch.matmul, tracing_mode=tracing_mode)(x, y)
+                targets = [node.target for node in gm.graph.nodes]
+                self.assertNotIn(torch.ops.aten.expand.default, targets)
+                clones = targets.count(torch.ops.aten.clone.default)
+                self.assertEqual(clones, num_clones)
+                self.assertEqual(gm(x, y), torch.matmul(x, y))
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
     def test_softshrink_backward_lambd_range(self, device):
         # Like the kernel, reject finite lambd outside the computation dtype's
         # range, but accept inf and nan. (Long enough for the CPU kernel to take
