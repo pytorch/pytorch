@@ -3479,6 +3479,29 @@ class RegionCounting(torch.nn.Module):
         return self.inner(x)
 
 
+class RegionLayers(torch.nn.Module):
+    # A stack of layers behind a branch on data, so that each layer is a
+    # region of its own.
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            torch.nn.Sequential(
+                torch.nn.Linear(6, 6),
+                torch.nn.Tanh(),
+                torch.nn.Linear(6, 6),
+                torch.nn.ReLU(),
+            )
+            for _ in range(5)
+        )
+
+    def forward(self, x):
+        if x.sum() > 1e6:
+            return x
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
 def region_infer(model, x):
     return model(x)
 
@@ -3560,6 +3583,10 @@ class RegionStateful(torch.nn.Module):
 
 def region_cached(model, x, cache):
     return model(x, cache)
+
+
+def region_counter(x, i):
+    return ((x + i).sin() * i).cos().exp().tanh()
 
 
 def region_clock(model, x):
@@ -3718,6 +3745,27 @@ class TestCfgRegions(TestCase):
         self.assertEqual(compiled(x, x), region_chain(x, x), atol=0, rtol=0)
         (region,) = self.compiled_regions(compiled)
         self.assertEqual(region["variants"], 3)
+
+    def test_layers_built_alike_share_a_graph(self):
+        graphs = []
+
+        def backend(graph, inputs):
+            graphs.append(graph)
+            return graph
+
+        torch.manual_seed(0)
+        model = RegionLayers().eval()
+        compiled = torch.cfg_compile(region_infer, backend=backend, fallback=False)
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(3, 6)
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        # The call in the loop is a region with one variant per layer, whose
+        # parameters are inputs of its graph: the five traced to one graph.
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("RegionLayers.forward"))
+        self.assertEqual((region["variants"], region["compiles"]), (5, 1))
+        self.assertEqual(len(graphs), 1)
 
     def test_same_tensor_twice_is_its_own_variant(self):
         graphs = []
@@ -4053,6 +4101,22 @@ class TestCfgRegions(TestCase):
         (reason,) = self.left_to_vm(compiled, "region_global")
         self.assertIn("gives a tensor from outside the region", reason)
         self.assertEqual(len(self.compiled_regions(compiled)), 2)
+
+    def test_values_that_keep_changing_do_not_multiply_graphs(self):
+        graphs = []
+
+        def backend(graph, inputs):
+            graphs.append(1)
+            return graph
+
+        compiled = torch.cfg_compile(region_counter, backend=backend, fallback=False)
+        x = torch.randn(4)
+        for i in range(40):
+            self.assertEqual(compiled(x, i), region_counter(x, i), atol=0, rtol=0)
+        self.assertLessEqual(len(graphs), 3)
+        self.assertEqual(self.compiled_regions(compiled), [])
+        (reason,) = self.left_to_vm(compiled, "region_counter")
+        self.assertIn("ever new values", reason)
 
     def test_call_without_tensors_is_not_frozen(self):
         torch.manual_seed(0)
