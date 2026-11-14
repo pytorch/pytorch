@@ -126,7 +126,7 @@ class BlockDescriptorTestBase(InductorTestCase):
         return view
 
     def _assert_pointwise_ndims(self, code, num_dims: int) -> None:
-        pointwise_blocks = ["XBLOCK", "YBLOCK", "ZBLOCK"]
+        pointwise_blocks = ["XBLOCK", "YBLOCK", "Z0_BLOCK"]
         return self._assert_tiling_ndims(code, pointwise_blocks, num_dims)
 
     def _assert_reduction_ndims(self, code, num_dims: int) -> None:
@@ -796,7 +796,7 @@ class CommonTemplate:
         )
 
         # Check the code for the expected tiling.
-        all_tiles = ("XBLOCK", "YBLOCK", "ZBLOCK")
+        all_tiles = ("XBLOCK", "YBLOCK", "Z0_BLOCK")
         expected_tiles = set(all_tiles[:num_tiles])
         for tile_name in all_tiles:
             for program in code:
@@ -1415,20 +1415,20 @@ class CommonTemplate:
         self.assertExpectedInline(
             load_lines,
             """\
-    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])
-    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])""",
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[Z0_BLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[z0_offset, yoffset, xoffset]), boundary_check=[0, 1, 2])
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[Z0_BLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[z0_offset, yoffset, xoffset]), boundary_check=[0, 1, 2])""",
         )
 
         self.assertExpectedInline(
             store_lines,
-            """    tl.store(tl.make_block_ptr(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), tl.broadcast_to(tmp2, [ZBLOCK, YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1, 2])""",
+            """    tl.store(tl.make_block_ptr(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[Z0_BLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[z0_offset, yoffset, xoffset]), tl.broadcast_to(tmp2, [Z0_BLOCK, YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1, 2])""",
         )
 
         # Check the indices. These are used for non-block pointers.
         self.assertExpectedInline(
             index_lines,
             """\
-    zindex = zoffset + tl.arange(0, ZBLOCK)[:, None, None]
+    z0_index = z0_offset + tl.arange(0, Z0_BLOCK)[:, None, None]
     yindex = yoffset + tl.arange(0, YBLOCK)[None, :, None]
     xindex = xoffset + tl.arange(0, XBLOCK)[None, None, :]""",
         )
@@ -1607,12 +1607,12 @@ class CommonTemplate:
         class InputShape:
             x: int
             y: int
-            z: int | None = None
+            z0_: int | None = None
 
             def to_list(self):
                 out = [self.y, self.x]
-                if self.z is not None:
-                    out.insert(0, self.z)
+                if self.z0_ is not None:
+                    out.insert(0, self.z0_)
                 return out
 
         BLOCK_SIZE = 8

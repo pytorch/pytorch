@@ -450,9 +450,8 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         # Like SymNumberMemoDescriptor, a backed SymFloat survives an epoch
         # change. The descriptor checks the hint on every read, but a SymNode's
-        # hint is computed when it is created, and the only later write
-        # (guarding_hint_or_throw) rejects SymFloats, so a SymFloat's hint
-        # cannot change after this and checking it once here is equivalent.
+        # hint is computed when it is created, and guarding_hint_or_throw never
+        # caches SymFloat hints, so checking it once here is equivalent.
         backed = isinstance(memo, SymFloat) and memo.node.hint is not None
         torch._C._set_fake_item_memo(x, memo, keep_across_epochs=backed)
 
@@ -1126,6 +1125,11 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
             raise RuntimeError(
                 "Attempted to unset FakeTensorMode, but there wasn't one active."
             )
+
+
+# Why the dispatch cache bypasses each op outside the builtin namespaces it has
+# seen (see _cached_dispatch_impl).
+_non_builtin_bypass_reasons: dict[OpOverload, str] = {}
 
 
 @functools.cache
@@ -2667,6 +2671,25 @@ class FakeTensorMode(TorchDispatchMode):
         Lookup a cache entry for the given arguments. If none exists, dispatch
         and cache the result (if the result is eligible for caching).
         """
+        # Whether a non-builtin op can be cached doesn't depend on its arguments,
+        # so check that before building a key that would only be thrown away.
+        # The reason doesn't depend on them either, so it is worked out once per
+        # op; later calls bypass the cache without raising.
+        is_op_overload = isinstance(func, torch._ops.OpOverload)
+        if is_op_overload and not library_utils.is_builtin(func):
+            reason = _non_builtin_bypass_reasons.get(func)
+            if reason is None:
+                try:
+                    self._validate_cache_key(func, args, kwargs)
+                except _BypassDispatchCache as e:
+                    reason = _non_builtin_bypass_reasons[func] = e.reason
+                else:
+                    raise AssertionError(
+                        f"_validate_cache_key accepted non-builtin op {func}"
+                    )
+            FakeTensorMode.cache_bypasses[reason] += 1
+            return self._dispatch_impl(func, types, args, kwargs)
+
         state = None
         key = None
         try:
