@@ -142,6 +142,7 @@ from ..source import (
     DictSubclassGetItemSource,
     DynamicScalarSource,
     FloatTensorSource,
+    FunctoolsPartialDictStateSource,
     GetItemSource,
     GlobalSource,
     GradSource,
@@ -1699,8 +1700,32 @@ class VariableBuilder:
             )
             # Preserve cache_hash for SAC context_fn caching
             original_cache_hash = getattr(value, "cache_hash", None)
+            # CPython's partial_new unwraps value in partial(value, ...) only if
+            # value's instance dict was never created. Subclasses qualify too,
+            # before 3.13 only if they keep partial's __call__. Reading
+            # value.__dict__ would create the dict, so read the state from
+            # partial's own __reduce__, whose dict slot is None while it is
+            # unset. CPython merges the native fields, so subclasses that
+            # override func, args or keywords are not flattened.
+            flattenable = False
+            dict_state_source = None
+            value_type = type(value)
+            if all(
+                getattr(value_type, name) is getattr(functools.partial, name)
+                for name in ("func", "args", "keywords")
+            ) and (
+                sys.version_info >= (3, 13)
+                or value_type.__call__ is functools.partial.__call__
+            ):
+                flattenable = functools.partial.__reduce__(value)[2][3] is None
+                dict_state_source = FunctoolsPartialDictStateSource(self.get_source())
             return FunctoolsPartialVariable(
-                func_obj, args, keywords, original_cache_hash=original_cache_hash
+                func_obj,
+                args,
+                keywords,
+                original_cache_hash=original_cache_hash,
+                flattenable=flattenable,
+                dict_state_source=dict_state_source,
             )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.

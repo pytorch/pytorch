@@ -4013,6 +4013,8 @@ class FunctoolsPartialVariable(VariableTracker):
 
     _nonvar_fields = {
         "original_cache_hash",
+        "flattenable",
+        "dict_state_source",
         *VariableTracker._nonvar_fields,
     }
 
@@ -4022,6 +4024,8 @@ class FunctoolsPartialVariable(VariableTracker):
         args: list[VariableTracker],
         keywords: dict[str, VariableTracker],
         original_cache_hash: Any = None,
+        flattenable: bool = False,
+        dict_state_source: Source | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -4034,6 +4038,13 @@ class FunctoolsPartialVariable(VariableTracker):
         self.keywords = keywords
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
+        # Whether functools.partial(self, ...) unwraps self, as CPython's
+        # partial_new does for a partial whose instance dict was never created.
+        # Callers opt in only when they know the dict is unset.
+        self.flattenable = flattenable
+        # For a partial built from a real object, the source of its dict state
+        # (None while unset), which flattenable was computed from.
+        self.dict_state_source = dict_state_source
 
     def python_type(self) -> type:
         return functools.partial
@@ -4070,6 +4081,9 @@ class FunctoolsPartialVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
         # functools.partial uses slots, so attributes are constant
+        if name == "__dict__":
+            # Like reading it, hasattr creates the instance dict.
+            self.flattenable = False
         return VariableTracker.build(tx, hasattr(functools.partial(identity), name))
 
     # func / args / keywords are read-only members on partial objects.
@@ -4095,6 +4109,10 @@ class FunctoolsPartialVariable(VariableTracker):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        if name == "__dict__":
+            # Reading __dict__ creates the instance dict, after which CPython
+            # no longer flattens this partial.
+            self.flattenable = False
         try:
             return super().tp_getattro_impl(tx, name)
         except NotImplementedError:
