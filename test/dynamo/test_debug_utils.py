@@ -224,10 +224,12 @@ def forward(self, x_1):
             "TORCHINDUCTOR_ENV_DOUBLE_QUOTES": 'inductor_"env"',
             "TORCHDYNAMO_REPRO_AFTER": "aot",
             "TORCHDYNAMO_REPRO_LEVEL": "4",
+            "TORCH_NCCL_ENCRYPTION_PSK": "secret_psk",
         },
     )
     def test_generate_env_vars_string(self):
         env_strings = generate_env_vars_string()
+        self.assertNotIn("secret_psk", env_strings)
         self.assertIn(
             """os.environ['TORCHINDUCTOR_MAX_AUTOTUNE'] = '1'
 """,

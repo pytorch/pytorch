@@ -39,6 +39,7 @@ import torch
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 from torch._library.utils import RegistrationHandle
+from torch._logging._internal import trace_log
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import is_structseq_class
 
@@ -246,6 +247,7 @@ class SideEffects:
     keepalive: list[object]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
+    _capture_user_stacks: bool
 
     def __init__(
         self,
@@ -279,6 +281,12 @@ class SideEffects:
         self.store_attr_mutations = store_attr_mutations or {}
         self.attr_mutation_kinds = attr_mutation_kinds or {}
         self.mutation_user_stacks = mutation_user_stacks or {}
+        # Snapshot per compile (policy must not change mid-compilation): stacks
+        # are only read when formatting messages for the side_effects log or
+        # the dynamo_side_effects structured-trace artifact.
+        self._capture_user_stacks = config.side_effect_replay_policy != "silent" and (
+            side_effects_log.isEnabledFor(logging.DEBUG) or bool(trace_log.handlers)
+        )
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
@@ -389,7 +397,7 @@ class SideEffects:
 
     def _capture_user_stack(self, key: VariableTracker) -> None:
         """Capture the current user stack from the instruction translator."""
-        if config.side_effect_replay_policy == "silent":
+        if not self._capture_user_stacks:
             return
         if key not in self.mutation_user_stacks:
             self.mutation_user_stacks[key] = []
@@ -1519,7 +1527,7 @@ class SideEffects:
 
         # NOTE: should only be called once per VT - only if a side effect actually gets codegen'd!
         def _maybe_log_side_effect(var: VariableTracker) -> None:
-            if config.side_effect_replay_policy != "silent" and log_side_effects:
+            if log_side_effects and self._capture_user_stacks:
                 msg = self._format_side_effect_message(var)
                 side_effect_messages.append(msg)
 
@@ -1552,7 +1560,7 @@ class SideEffects:
             self._emit_side_effect_messages(side_effect_messages)
 
     def log_side_effects_summary(self) -> None:
-        if config.side_effect_replay_policy == "silent":
+        if not self._capture_user_stacks:
             return
         if not side_effects_log.isEnabledFor(logging.DEBUG):
             return

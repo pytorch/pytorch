@@ -65,6 +65,13 @@ TORCH_API void waitForNcclCompletion(
     std::chrono::milliseconds timeout,
     std::string_view operation);
 
+// Aborts comm and logs, rather than throws, on failure.
+TORCH_API void abortCommIgnoringErrors(
+    NcclApi& nccl_api,
+    ncclComm_t comm,
+    std::chrono::milliseconds timeout,
+    std::string_view operation);
+
 TORCH_API void waitForNcclChildComm(
     NcclApi& nccl_api,
     ncclComm_t parent_comm,

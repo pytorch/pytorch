@@ -1969,9 +1969,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         key: tuple[object, ...]
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
-            key = (self.fn, *(type(x) for x in args), True)
+            key = (self.fn, *map(type, args), True)
         else:
-            key = (self.fn, *(type(x) for x in args))
+            key = (self.fn, *map(type, args))
 
         handler = self.call_function_handler_cache.get(key)
         if not handler:

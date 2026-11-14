@@ -276,7 +276,9 @@ class TritonSymbols:
     """
 
     reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX, SymT.R2_INDEX])
-    block_types = OrderedSet([SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK, *reduction_types])
+    block_types = OrderedSet(
+        [SymT.XBLOCK, SymT.YBLOCK, SymT.Z0_BLOCK, *reduction_types]
+    )
 
     block_offsets = {
         symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
@@ -1685,7 +1687,7 @@ class TritonOverrides(OpOverrides):
            Current codegen eagerly broadcasts tl.arange to create unique axes. We
            reshape, transpose, or broadcast to align with the (Y, R) x (R, X) shape.
            We avoid using 3D dot ((Z, Y, R) x (Z, R, X)) because 3D tl.dot has
-           poor performance. During batched matmul (bmm), we keep ZBLOCK=1 and call
+           poor performance. During batched matmul (bmm), we keep Z0_BLOCK=1 and call
            the 2D dot kernel instead.
         """
         if not V.kernel.is_native_matmul:
@@ -1771,9 +1773,11 @@ class TritonOverrides(OpOverrides):
             """
 
             # Triton 3d dot is slower than 2d dot, so we want to keep block shape in 2d
-            # by fixing ZBLOCK=1 in the autotune config
-            if ZBLOCK in initial_shape:
-                initial_shape = ["1" if dim == ZBLOCK else dim for dim in initial_shape]
+            # by fixing Z0_BLOCK=1 in the autotune config
+            if Z0_BLOCK in initial_shape:
+                initial_shape = [
+                    "1" if dim == Z0_BLOCK else dim for dim in initial_shape
+                ]
 
             if final_shape == [YBLOCK, RBLOCK]:
                 if XBLOCK in initial_shape:
@@ -1823,7 +1827,7 @@ class TritonOverrides(OpOverrides):
 
         XBLOCK = str(TritonSymbols.block_sizes[SymT.XBLOCK])
         YBLOCK = str(TritonSymbols.block_sizes[SymT.YBLOCK])
-        ZBLOCK = str(TritonSymbols.block_sizes[SymT.ZBLOCK])
+        Z0_BLOCK = str(TritonSymbols.block_sizes[SymT.Z0_BLOCK])
         RBLOCK = str(TritonSymbols.block_sizes[SymT.R0_INDEX])
 
         a = V.kernel.cse.generate(
@@ -2832,7 +2836,7 @@ class BlockParameters:
             If the strides are not all known constants or if the strides are already
             sorted in descending order, return identity sort.
 
-            For example if block_shape @ strides is [ZBLOCK, XBLOCK, YBLOCK] @ [8, 1, 16]
+            For example if block_shape @ strides is [Z0_BLOCK, XBLOCK, YBLOCK] @ [8, 1, 16]
             The indices to sort the strides in descending order will be [2, 0, 1].
             The indices to revert back to the original order will be [1, 2, 0].
             """
@@ -3826,7 +3830,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for symt in (
             SymT.XBLOCK,
             SymT.YBLOCK,
-            SymT.ZBLOCK,
+            SymT.Z0_BLOCK,
             SymT.R0_INDEX,
             SymT.R1_INDEX,
             SymT.R2_INDEX,
@@ -4689,7 +4693,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     mask_shape.discard(tmp)
                     mask_shape.update(tmp.mask_vars)
 
-                # e.g., expand_list becomes ['ZBLOCK', 1, 1, 'R0_BLOCK']
+                # e.g., expand_list becomes ['Z0_BLOCK', 1, 1, 'R0_BLOCK']
                 expand_list = ["1"] * len(self.dense_size_list())
                 for mask in mask_shape:
                     if not isinstance(mask, str):
@@ -4894,7 +4898,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
         # Stores require an explicit broadcast. We do this in two phases:
-        #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
+        #  1. Broadcast the operand to the final shape of the range trees, e.g. [Z0_BLOCK,
         #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
         #  2. In case the block pointer / tma descriptor has different dimensionality, broadcast/reshape the
         #     result to the shape of the pointer.
@@ -6017,7 +6021,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # reduction block from accumulator and only keep (Y,X).
         # In bmm (Z,Y,R)x(Z,R,X) case, we also remove z dimension from accumulator
         # because 3d (Z,Y,X) tl.dot is somehow slower than 2d tl.dot.
-        # Instead, we force ZBLOCK to be always 1 during autotune.
+        # Instead, we force Z0_BLOCK to be always 1 during autotune.
         dense_size_str: str
         if self.is_native_matmul:
             dense_sizes = self.dense_size_list()
@@ -8049,6 +8053,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
+        if (
+            config.triton.sm100_outer_reduction_r0_block_8
+            and self._get_heuristic() == "reduction"
+        ):
+            device = V.graph.get_current_device_or_throw()
+            if triton_meta_device_props(device).cc == 100:
+                out["sm100_outer_reduction_r0_block_8"] = True
         if config.deterministic or config.test_configs.force_filter_reduction_configs:
             out["has_loadstore_with_contiguous_rdim"] = (
                 self.has_load_with_contiguous_rdim
@@ -8677,8 +8688,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if entry.tensor_dim is None:
             raise AssertionError("entry.tensor_dim must not be None")
         size = self.indexing_size_str(entry.tensor_dim)
-        # For batch matmul, we always set the ZBLOCK=1.
-        # In this case, we found not broadcasting tl.arange(0, ZBLOCK) is faster.
+        # For batch matmul, we always set the Z0_BLOCK=1.
+        # In this case, we found not broadcasting tl.arange(0, Z0_BLOCK) is faster.
         if (
             self.is_native_matmul
             and entry.tensor_dim == 0

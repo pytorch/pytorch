@@ -219,7 +219,7 @@ def run_triton_kernel_with_autotune(
             for i in range(num_kernels)
         ]
         zblocks = [
-            config.get(f"ZBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])
+            config.get(f"Z0_BLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["Z0_BLOCK"])
             for i in range(num_kernels)
         ]
         r0blocks = [
@@ -229,7 +229,7 @@ def run_triton_kernel_with_autotune(
     else:
         xblocks = [config.get("XBLOCK", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])]
         yblocks = [config.get("YBLOCK", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])]
-        zblocks = [config.get("ZBLOCK", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])]
+        zblocks = [config.get("Z0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["Z0_BLOCK"])]
         r0blocks = [config.get("R0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])]
     rsplit = config.get("RSPLIT", TRITON_DEFAULT_RSPLIT)
     rsplit_size = config.get("RSPLIT_SIZE", TRITON_DEFAULT_RSPLIT_SIZE)

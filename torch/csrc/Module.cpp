@@ -21,6 +21,7 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
@@ -2783,6 +2784,40 @@ PyObject* initModule() {
         "_fake_dispatch_register_custom_op_impl",
         add_for(FakeDispatchCategory::CustomOpImpl));
     py_module.def(
+        "_fake_dispatch_register_static_shape_decomp",
+        add_for(FakeDispatchCategory::StaticShapeDecomp));
+    py_module.def(
+        "_fake_dispatch_deregister_decomp",
+        [](const std::string& name, const std::string& overload) {
+          const c10::OperatorName op_name(name, overload);
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::Decomp, op_name);
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::StaticShapeDecomp, op_name);
+        });
+    py_module.def(
+        "_fake_dispatch_deregister_meta",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::Meta, c10::OperatorName(name, overload));
+        });
+    py_module.def(
+        "_fake_dispatch_contains_static_shape_decomp",
+        [](const std::string& name, const std::string& overload) {
+          return at::impl::fakeDispatchTableContains(
+              FakeDispatchCategory::StaticShapeDecomp,
+              c10::OperatorName(name, overload));
+        });
+    py_module.def(
+        "_cpp_fake_not_implemented",
+        [](const std::string& name, const std::string& overload) {
+          const c10::OperatorName op_name(name, overload);
+          const auto op = c10::Dispatcher::singleton().findSchema(op_name);
+          TORCH_CHECK_VALUE(
+              op.has_value(), "operator ", op_name, " does not exist");
+          return at::impl::cppFakeNotImplemented(*op);
+        });
+    py_module.def(
         "_fake_dispatch_deregister_op_impl",
         [](const std::string& name, const std::string& overload) {
           at::impl::fakeDispatchTableRemove(
@@ -2904,7 +2939,7 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("fake"));
 
   // The memo bindings read the epoch from the fake's mode, so callers need not
-  // reach its Python wrapper. They take a C++ fake: the setters raise for any
+  // reach its Python object. They take a C++ fake: the setters raise for any
   // other tensor and the getters return None. A fake without a mode has no
   // memos: the getters return None and the setters store nothing.
   py_module.def(
@@ -2914,7 +2949,7 @@ Call this whenever a new thread is created in order to propagate values from
         TORCH_CHECK(fake.is_fake(), "Expected a fake tensor");
         auto* impl = fake.unsafeGetTensorImpl();
         if (auto mode = impl->fake_tensor_mode()) {
-          impl->set_fake_sym_memo(name, std::move(memo), mode->mode->epoch_);
+          impl->set_fake_sym_memo(name, std::move(memo), mode->epoch_);
         }
       },
       py::arg("fake"),
@@ -2933,7 +2968,7 @@ Call this whenever a new thread is created in order to propagate values from
         if (!mode) {
           return std::nullopt;
         }
-        return impl->fake_sym_memo(name, mode->mode->epoch_);
+        return impl->fake_sym_memo(name, mode->epoch_);
       },
       py::arg("fake"),
       py::arg("name"));
@@ -2965,7 +3000,7 @@ Call this whenever a new thread is created in order to propagate values from
             std::make_shared<c10::SafePyObject>(
                 memo.inc_ref().ptr(), getPyInterpreter()),
             keep_across_epochs ? std::nullopt
-                               : std::optional<uint64_t>(mode->mode->epoch_));
+                               : std::optional<uint64_t>(mode->epoch_));
       },
       py::arg("fake"),
       py::arg("memo"),
@@ -2983,7 +3018,7 @@ Call this whenever a new thread is created in order to propagate values from
         if (!mode) {
           return py::none();
         }
-        auto memo = impl->fake_item_memo(mode->mode->epoch_);
+        auto memo = impl->fake_item_memo(mode->epoch_);
         if (!memo) {
           return py::none();
         }
@@ -2997,7 +3032,7 @@ Call this whenever a new thread is created in order to propagate values from
     TORCH_CHECK(t.is_fake(), "Expected a fake tensor");
     auto mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
     TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
-    const auto& constant = mode->mode->get_constant(t.unsafeGetTensorImpl());
+    const auto& constant = mode->get_constant(t.unsafeGetTensorImpl());
     if (!constant) {
       return py::none();
     }
@@ -3017,7 +3052,7 @@ Call this whenever a new thread is created in order to propagate values from
         }
         auto mode = fake.unsafeGetTensorImpl()->fake_tensor_mode();
         TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
-        mode->mode->set_constant(
+        mode->set_constant(
             fake.unsafeGetTensorImpl(),
             constant ? constant->getIntrusivePtr() : nullptr);
       },
@@ -3029,85 +3064,27 @@ Call this whenever a new thread is created in order to propagate values from
         torch::utils::fake_tensor_to_list(t));
   });
 
-  // A C++ FakeTensorMode, owned by its Python CppFakeTensorMode wrapper; see
-  // Note [C++ FakeTensorMode Python wrapper lifetime] in
-  // torch/csrc/FakeTensorMode.cpp.
-  py::class_<c10::FakeTensorMode, std::shared_ptr<c10::FakeTensorMode>>(
-      py_module, "_CppFakeTensorMode")
-      .def(
-          py::init([](const py::object& converter,
-                      const py::object& shape_env,
-                      const py::object& wrapper) {
-            TORCH_CHECK(!converter.is_none(), "Expected a FakeTensorConverter");
-            TORCH_CHECK(
-                !wrapper.is_none(),
-                "Expected the CppFakeTensorMode that owns this mode as wrapper");
-            std::shared_ptr<c10::SafePyObject> shape_env_obj;
-            if (!shape_env.is_none()) {
-              shape_env_obj = std::make_shared<c10::SafePyObject>(
-                  shape_env.inc_ref().ptr(), getPyInterpreter());
-            }
-            auto functorch_config =
-                py::module::import("torch._functorch.config");
-            auto mode = std::make_shared<c10::FakeTensorMode>(
-                std::move(shape_env_obj),
-                std::make_shared<c10::SafePyObject>(
-                    converter.inc_ref().ptr(), getPyInterpreter()),
-                functorch_config.attr("fake_tensor_allow_meta").cast<bool>(),
-                functorch_config
-                    .attr("fake_tensor_allow_unsafe_data_ptr_access")
-                    .cast<bool>());
-            PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
-            if (weakref == nullptr) {
-              throw py::error_already_set();
-            }
-            mode->fake_mode_pyobj_ = std::make_shared<c10::SafePyObject>(
-                weakref, getPyInterpreter());
-            return mode;
-          }),
-          py::arg("converter"),
-          py::arg("shape_env"),
-          py::arg("wrapper"))
-      .def_property(
-          "allow_meta",
-          [](const c10::FakeTensorMode& mode) { return mode.allow_meta_; },
-          [](c10::FakeTensorMode& mode, bool value) {
-            mode.allow_meta_ = value;
-          })
-      .def_property(
-          "_allow_unsafe_data_ptr_access",
-          [](const c10::FakeTensorMode& mode) {
-            return mode.allow_unsafe_data_ptr_access_;
-          },
-          [](c10::FakeTensorMode& mode, bool value) {
-            mode.allow_unsafe_data_ptr_access_ = value;
-          })
-      .def_property(
-          "epoch",
-          [](const c10::FakeTensorMode& mode) { return mode.epoch_; },
-          [](c10::FakeTensorMode& mode, uint64_t value) {
-            mode.epoch_ = value;
-          });
+  TORCH_CHECK_PYTHON(
+      PyModule_AddType(module, &torch::fake_tensor::PyCppFakeTensorModeType) >=
+      0);
 
   // The C++ counterpart of Python's FakeTensorConverter.from_meta_and_device.
-  // It takes no pytype or dispatch_keys: a C++ fake is always a plain Tensor
-  // (a Parameter carries the _is_param marker instead), and callers record
-  // anything else on the result. It does not memoize; callers such as the
-  // converter do. It rejects the inputs Python's does, raising TypeError,
-  // ValueError or, for a meta device the mode disallows, RuntimeError, where
-  // Python's raises AssertionError. Unlike Python's, it also rejects every
-  // tensor subclass with __torch_dispatch__ (Python's accepts one whose
-  // dispatched detach returns a plain tensor) and functional and functorch
-  // wrappers, and it takes device as a torch.device, not a string. It also
-  // does not initialize a CUDA or XPU context for such a device, as Python's
-  // FakeTensor.__new__ does (init_gpu_context).
+  // It takes no pytype or dispatch_keys: a C++ fake is always a plain Tensor,
+  // and callers record other metadata on the result. It does not memoize;
+  // callers such as the converter do. It rejects the inputs Python's does,
+  // raising TypeError, ValueError or, for a disallowed meta device,
+  // RuntimeError, where Python raises AssertionError. Unlike Python's, it also
+  // rejects every tensor subclass with __torch_dispatch__ (Python's accepts one
+  // whose dispatched detach returns a plain tensor) and functional and
+  // functorch wrappers, and it takes device as a torch.device, not a string. It
+  // also does not initialize a CUDA or XPU context for such a device, as
+  // Python's FakeTensor.__new__ does (init_gpu_context).
   py_module.def(
       "_from_meta_and_device",
       [](const at::Tensor& meta,
          c10::Device device,
-         const std::shared_ptr<c10::FakeTensorMode>& cpp_mode) {
-        auto mode = std::make_shared<c10::FakeTensorModeHandle>(
-            c10::FakeTensorModeHandle{cpp_mode});
+         const py::object& py_mode) {
+        auto mode = torch::fake_tensor::getCppFakeTensorMode(py_mode);
         // A functional or functorch wrapper would be copied as a wrapper whose
         // inner tensor is not fake. Checked first, as reading a subclass's
         // device can run its __torch_dispatch__.
@@ -3156,17 +3133,14 @@ Call this whenever a new thread is created in order to propagate values from
       },
       py::arg("meta"),
       py::arg("device"),
-      py::arg("mode").none(false));
+      py::arg("mode"));
 
-  // The Python wrapper of a C++ fake's mode, or None for any other tensor,
-  // including a Python FakeTensor (maybe_get_fake_mode handles those) and a
-  // tensor with the Fake key but no mode (see _set_fake_device). Unlike
-  // maybe_get_fake_mode, it does not look inside functional, functorch or
-  // traceable wrapper tensors. If the wrapper has been collected,
-  // getCppFakeTensorModePyObj rebuilds it (see Note [C++ FakeTensorMode Python
-  // wrapper lifetime] in torch/csrc/FakeTensorMode.cpp), propagating any error
-  // raised while doing so.
-  // TODO: the rebuild always fails until CppFakeTensorMode is added.
+  // The Python object (a CppFakeTensorMode) of a C++ fake's mode, or None for
+  // any other tensor, including a Python FakeTensor (maybe_get_fake_mode
+  // handles those) and a tensor with the Fake key but no mode (see
+  // _set_fake_device). Unlike maybe_get_fake_mode, it does not look inside
+  // functional, functorch or traceable wrapper tensors. A missing Python
+  // wrapper is created, including for modes made in C++.
   py_module.def("_maybe_get_fake_mode", [](const at::Tensor& t) -> py::object {
     if (!t.defined() || !t.is_fake()) {
       return py::none();

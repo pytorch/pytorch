@@ -507,6 +507,7 @@
 # /test/simulate_nccl_errors.py
 # /test/slow_tests.json
 # /test/test_accelerator.py
+# /test/test_stream.py
 # /test/test_ao_sparsity.py
 # /test/test_appending_byte_serializer.py
 # /test/test_as_strided.py
@@ -1084,6 +1085,13 @@
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
 /torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
+# label: oncall: distributed infra
+# owner: @d4l3k
+/test/distributed/checkpoint/test_pg_transport.py @d4l3k
+/test/distributed/test_transport_* @d4l3k
+/test/distributed/transport_test_utils.py @d4l3k
+/torch/distributed/_transport/ @d4l3k
+/torch/distributed/checkpoint/_pg_transport.py @d4l3k
 # label: module: fsdp
 # owner: @weifengpy
 /torch/csrc/distributed/fsdp/ @weifengpy

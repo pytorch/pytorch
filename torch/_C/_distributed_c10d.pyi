@@ -363,6 +363,12 @@ class TCPStore(Store):
         multi_tenant: bool = ...,
         master_listen_fd: int | None = ...,
         use_libuv: bool | None = ...,
+        *,
+        tls_cert: str | None = ...,
+        tls_key: str | None = ...,
+        tls_ca: str | None = ...,
+        tls_psk: str | None = ...,
+        tls_psk_file: str | None = ...,
     ) -> None: ...
     @property
     def host(self) -> str: ...
@@ -929,6 +935,7 @@ class ProcessGroupNCCL(Backend):
         split_from: ProcessGroupNCCL
         split_color: int
         lazy_init: bool
+        encryption_psk: str | None
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 

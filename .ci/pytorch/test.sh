@@ -669,8 +669,6 @@ test_python_smoke_b200() {
 
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
-  # Required by the device info tests in test_xpu, pinned to the XPU wheel's dep
-  pip_install "pyzes==0.1.2"
   time python test/run_test.py --include test_transformers test_xpu $PYTHON_TEST_EXTRA_OPTION
   # Temporary disable sycl-tla backend test for XPU since it's not stable yet. We will re-enable it once the stability is improved.
   # time test_xpu_sycl_tla_backend
@@ -845,6 +843,13 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_on_gpu_device1 --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_gpu_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_load_package_multiple_gpus --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_aot_cudagraphs_rejects_uncapturable_models --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_aot_cudagraphs_rejects_multi_device_model --verbose
+  # CUDA graph capture on a second GPU: the test_shim tests whose names end in
+  # MultiGpu, which skip or check only device 0 on single-GPU runners.
+  /usr/bin/env LD_LIBRARY_PATH="${TORCH_LIB_DIR}" "${BUILD_BIN_DIR}/test_shim" \
+    --gtest_filter='*MultiGpu' \
+    --gtest_output=xml:test/test-reports/cpp/test_shim_multi_gpu.xml
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose

@@ -208,7 +208,7 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
                 for i in range(num_kernels)
             ]
             zblocks = [
-                config_dict.get(f"ZBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])
+                config_dict.get(f"Z0_BLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["Z0_BLOCK"])
                 for i in range(num_kernels)
             ]
             r0blocks = [
@@ -218,7 +218,9 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         else:
             xblocks = [config_dict.get("XBLOCK", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])]
             yblocks = [config_dict.get("YBLOCK", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])]
-            zblocks = [config_dict.get("ZBLOCK", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])]
+            zblocks = [
+                config_dict.get("Z0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["Z0_BLOCK"])
+            ]
             r0blocks = [
                 config_dict.get("R0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])
             ]

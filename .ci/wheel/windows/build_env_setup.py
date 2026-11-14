@@ -39,7 +39,6 @@ WIN_CI_DIR = Path(__file__).resolve().parents[2] / "pytorch" / "windows"
 # build_pytorch.bat + internal/check_deps.bat.
 COMMON_BUILD_ENV: dict[str, str] = {
     "PYTORCH_BINARY_BUILD": "1",
-    "TH_BINARY_BUILD": "1",
     "BUILD_TEST": "0",
     "INSTALL_TEST": "0",
     "DISTUTILS_USE_SDK": "1",
