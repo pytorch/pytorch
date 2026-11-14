@@ -6,7 +6,6 @@
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreterHooks.h>
-#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
@@ -39,9 +38,11 @@
 // that cannot be evaluated invalidate constants sharing the written storage.
 // Symbolic inputs use Python's fast implementations before decomposition;
 // these implementations enter the mode only for their slow reference paths.
-// Python Meta registrations
-// that torch._meta_registrations installs as Meta kernels run here like C++
-// ones.
+// Python Meta registrations that torch._meta_registrations installs as Meta
+// kernels run here like C++ ones. When the Python dispatcher is enabled, preserve
+// its key on Meta redispatch so it also selects Python-only overrides, including
+// sparse overrides. Without that key, redispatch uses the native dispatch table
+// without consulting Python-only overrides.
 //
 // Sparse invariant checks read index data that Meta tensors do not have. Like
 // Python, this fallback disables the process-wide Context setting around sparse
@@ -62,8 +63,6 @@
 // So that ops do not give results Python's FakeTensorMode would not, it raises
 // NotImplementedError where Python runs something other than these,
 // apart from the known divergences in the TODOs below:
-//  - ops run under the Python dispatcher, whose Python-dispatcher-only Meta
-//    registrations do not run here;
 //  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors), or Any;
 //  - and the input checks below.
 // Callers that need to tell these apart from other NotImplementedErrors match
@@ -290,9 +289,8 @@ void fakeFallback(
   const bool metadata_copy = schema.overload_name().empty() &&
       (schema.name() == "aten::detach" ||
        schema.name() == "aten::shallow_copy_data_");
-  if (c10::impl::PythonDispatcherTLS::get_state() != nullptr) {
-    unsupported(op, "the Python dispatcher");
-  }
+  const auto python_dispatcher =
+      dispatchKeySet & c10::DispatchKeySet(c10::DispatchKey::PythonDispatcher);
 
   // The active mode, or, as Python's FakeTensor dispatch enters a fake's
   // mode, the mode of the first fake input
@@ -544,8 +542,9 @@ void fakeFallback(
 
   // Input devices in argument order, paired with whether each is a CPU scalar.
   c10::SmallVector<std::pair<c10::Device, bool>, 4> input_devices;
-  // The sparse inputs' Meta keys; Meta is added before redispatch.
-  c10::DispatchKeySet meta_keyset;
+  // Preserve the Python dispatcher when enabled; add the inputs' sparse Meta
+  // keys below and dense Meta before redispatch.
+  auto meta_keyset = python_dispatcher;
   for_each_tensor(
       stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
         if (!t.defined()) {
