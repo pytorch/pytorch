@@ -7812,6 +7812,23 @@ class TestNNDeviceType(NNTestCase):
             Y_cpu = layer_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.bfloat16, torch.float16)
+    @parametrize_test("width", [11, 12, 16, 24, 244, 384, 1536])
+    def test_LayerNorm_constant_input_is_exactly_zero(self, device, dtype, width):
+        # Regression test for the Welford combine in the GPU kernel: when both
+        # partial means agree, the combined mean must not move, so a constant
+        # row normalizes to exactly zero. Widths divisible by 4 take the
+        # vectorized path; 11 takes the scalar one.
+        X = torch.ones(4, width, dtype=dtype, device=device)
+        Y, mean, _ = torch.ops.aten.native_layer_norm(X, (width,), None, None, 1e-5)
+        self.assertEqual(mean, torch.ones_like(mean), rtol=0, atol=0)
+        self.assertEqual(Y, torch.zeros_like(Y), rtol=0, atol=0)
+        gamma = torch.ones(width, dtype=dtype, device=device)
+        beta = torch.zeros(width, dtype=dtype, device=device)
+        Y_affine = F.layer_norm(X, (width,), gamma, beta, 1e-5)
+        self.assertEqual(Y_affine, torch.zeros_like(Y_affine), rtol=0, atol=0)
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16)
     def test_rmsnorm_numeric(self, device, dtype):
