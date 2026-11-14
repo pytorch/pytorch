@@ -752,6 +752,106 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
                 torch.ones(2, 2, device="cpu")
             )
 
+    def test_current_stream_upcast_in_tree(self):
+        """The dict fast path keeps in-tree behavior; MTIA gets no upcast."""
+        from torch._dynamo.variables.streams import (
+            _get_stream_variable_cls,
+            CudaStreamVariable,
+            XpuStreamVariable,
+        )
+
+        self.assertIs(
+            _get_stream_variable_cls(torch.cuda.current_stream), CudaStreamVariable
+        )
+        self.assertIs(
+            _get_stream_variable_cls(torch.xpu.current_stream), XpuStreamVariable
+        )
+        # MTIA's Stream is an alias of torch.Stream: no proper subclass, no
+        # upcast, so the generic StreamVariable (which reports torch.Stream)
+        # is kept.
+        self.assertIsNone(_get_stream_variable_cls(torch.mtia.current_stream))
+
+    def test_current_stream_upcast_registry_fallback(self):
+        """The registry fallback upcasts to the first capable interface's Stream."""
+        from torch._dynamo.variables.streams import (
+            _get_stream_variable_cls,
+            _stream_variable_cls_for_interface,
+            StreamVariable,
+        )
+
+        class FakeStream(torch.Stream):
+            pass
+
+        def fake_current_stream(device=None):
+            raise NotImplementedError
+
+        class FullInterface(DeviceInterface):
+            Stream = FakeStream
+            current_stream = staticmethod(fake_current_stream)
+            stream_handle_attr = "fake_stream_handle"
+
+        class PartialInterface(DeviceInterface):
+            current_stream = staticmethod(fake_current_stream)
+
+        # Keyed on (Stream, handle attr, name): different handle attrs
+        # derive different classes, so re-registration cannot serve stale ones.
+        cls_a = _stream_variable_cls_for_interface(FakeStream, "h_a", "DiA")
+        self.assertIsNot(
+            cls_a, _stream_variable_cls_for_interface(FakeStream, "h_b", "DiB")
+        )
+        self.assertEqual(cls_a._device_handle_attr, "h_a")
+
+        with patch.dict(device_interfaces):
+            register_interface_for_device("fake_full", FullInterface)
+            cls = _get_stream_variable_cls(fake_current_stream)
+        self.assertTrue(issubclass(cls, StreamVariable))
+        self.assertIs(cls._cpython_type, FakeStream)
+        self.assertEqual(cls._device_handle_attr, "fake_stream_handle")
+        self.assertIn("fake_stream_handle", cls.tp_getset)
+        self.assertIs(cls(None, torch.Stream(device="cpu")).python_type(), FakeStream)
+        # Functions unrelated to any interface do not match.
+        self.assertIsNone(_get_stream_variable_cls(lambda: None))
+
+        # A partial fill (no proper Stream type declared) derives nothing.
+        with patch.dict(device_interfaces):
+            register_interface_for_device("fake_partial", PartialInterface)
+            self.assertIsNone(_get_stream_variable_cls(fake_current_stream))
+
+        # A partial fill registered first must not shadow a later capable one.
+        with patch.dict(device_interfaces):
+            register_interface_for_device("fake_mix:0", PartialInterface)
+            register_interface_for_device("fake_mix", FullInterface)
+            cls = _get_stream_variable_cls(fake_current_stream)
+        self.assertIs(cls._cpython_type, FakeStream)
+
+    def test_current_stream_handler_registration(self):
+        """The generalized @register includes a registered interface's stream."""
+        from torch._dynamo.variables.torch import (
+            _registry_current_stream_fns,
+            TorchInGraphFunctionVariable,
+        )
+
+        class FakeStream(torch.Stream):
+            pass
+
+        def fake_current_stream(device=None):
+            raise NotImplementedError
+
+        class FakeInterface(DeviceInterface):
+            Stream = FakeStream
+            current_stream = staticmethod(fake_current_stream)
+
+        self.addCleanup(TorchInGraphFunctionVariable._get_handlers.cache_clear)
+        with patch.dict(device_interfaces):
+            register_interface_for_device("fake_handler_reg", FakeInterface)
+            TorchInGraphFunctionVariable._get_handlers.cache_clear()
+            # Check the registry-derived list itself: the backstop loop in
+            # _get_handlers would register this fn too and mask a regression.
+            self.assertIn(fake_current_stream, _registry_current_stream_fns())
+            handlers = TorchInGraphFunctionVariable._get_handlers()
+            self.assertIsNotNone(handlers.get(fake_current_stream))
+            self.assertNotIn(DeviceInterface.current_stream, handlers)
+
 
 @requires_accelerator
 class TestStreams(torch._dynamo.test_case.TestCase):

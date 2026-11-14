@@ -1030,6 +1030,25 @@ _CONSTANT_FN_METADATA_ATTRS = frozenset(
 )
 
 
+def _registry_current_stream_fns() -> list[Callable[..., Any]]:
+    """current_stream functions routed through handle_current_stream.
+
+    Derived at the first _get_handlers() call; register_interface_for_device
+    invalidates that cache, so later registrations still take effect.
+    """
+    fns = [torch.accelerator.current_stream]
+    for _, di in get_registered_device_interfaces():
+        # Not type-checked at registration: probe, like the backstop loop.
+        fn = getattr(di, "current_stream", None)
+        exposes = getattr(di, "exposes_streams", None)
+        if fn is None or fn is DeviceInterface.current_stream:
+            continue
+        if exposes is None or not exposes():
+            continue
+        fns.append(fn)
+    return list(dict.fromkeys(fns))  # remove duplicates
+
+
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
@@ -3049,12 +3068,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return VariableTracker.build(tx, module, new_source)
 
-        @register(
-            torch.accelerator.current_stream,
-            torch.cuda.current_stream,
-            torch.mtia.current_stream,
-            torch.xpu.current_stream,
-        )
+        @register(*_registry_current_stream_fns())
         def handle_current_stream(
             self,
             tx: "InstructionTranslatorBase",
@@ -3975,13 +3989,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                             )
             return None
 
-        # Register current_stream for third-party PrivateUse1 backends (e.g.
-        # torch_npu) that register a DeviceInterface at import time. Runs last
-        # so the explicit @register entries above always win. _get_handlers is
-        # @functools.cache'd (register before the first torch.compile(); only
-        # _get_handlers.cache_clear() clears it), and backends must also route
-        # their current_stream to TorchInGraphFunctionVariable via trace rules
-        # or Dynamo inlines it and this handler is bypassed.
+        # Backstop for interfaces that override current_stream without a
+        # stream type (Stream left as the sentinel): the registry-derived
+        # @register list above keeps those out via exposes_streams(), so this
+        # loop only picks up the remainder. Backends must also route their
+        # current_stream to TorchInGraphFunctionVariable via trace rules or
+        # Dynamo inlines it and this handler is bypassed.
         for _, device_interface in get_registered_device_interfaces():
             # Skip undefined current_stream, the abstract base stub, and
             # backends already covered by an explicit @register above.
