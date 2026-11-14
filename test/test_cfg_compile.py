@@ -3705,6 +3705,40 @@ def region_pair(pair, kinds):
     return RegionPair(total, total.tanh().abs().sqrt().neg())
 
 
+class RegionStages(torch.nn.Module):
+    # Tensor work in several blocks: a comprehension, a loop, a branch on a
+    # flag. `self` is a variable that a nested function shares.
+    def __init__(self):
+        super().__init__()
+        self.stem = torch.nn.Linear(6, 6)
+        self.stages = torch.nn.ModuleList(
+            torch.nn.Sequential(torch.nn.Linear(6, 6), torch.nn.Tanh())
+            for _ in range(3)
+        )
+        self.head = torch.nn.Linear(6, 3)
+        self.doubled = False
+
+    def forward(self, x, log):
+        h = self.stem(x)
+        feats = [stage(h) for stage in self.stages]
+        h = feats[0]
+        for feat in feats[1:]:
+            h = h + feat
+        if self.doubled:
+            h = h * 2
+        out = self.head(h).tanh()
+        log.append(float(out.sum()))
+
+        def result():
+            return out, self.doubled
+
+        return result()
+
+
+def region_stages(model, x, log):
+    return model(x, log)
+
+
 class RegionRandom(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -3746,7 +3780,7 @@ class TestCfgRegions(TestCase):
         self.assertTrue(region["where"].startswith("region_infer"))
         self.assertEqual(region["variants"], 1)
         self.assertGreaterEqual(region["ops"], 6)
-        self.assertIn("call_object", compiled.dump())
+        self.assertIn("leap", compiled.dump())
 
     @parametrize("optimizer", ("sgd", "adam"))
     def test_training_step_returns_a_compiled_autograd_function(self, optimizer):
@@ -3798,12 +3832,14 @@ class TestCfgRegions(TestCase):
                 self.assertEqual(compiled(model, x), expected, atol=0, rtol=0)
         self.assertEqual(signs, {True, False})
         # The call of the model does not trace, so the VM runs its forward,
-        # and what is on either side of the branch became graphs.
+        # where the branch stays a branch. The stretch before it is a graph
+        # that ends at the branch; the one after it is a graph of its own,
+        # and once more as the end of the path through the arm that doubles.
         self.assertEqual(len(self.left_to_vm(compiled, "region_infer")), 1)
         where = sorted(
             r["where"].split(" (")[0] for r in self.compiled_regions(compiled)
         )
-        self.assertEqual(where, ["RegionBranch.forward", "RegionBranch.forward"])
+        self.assertEqual(where, ["RegionBranch.forward"] * 3)
 
     def test_inputs_select_a_variant(self):
         graphs = []
@@ -4119,6 +4155,68 @@ class TestCfgRegions(TestCase):
         self.assertIn("takes a RegionCache from before the region", reasons)
         # The module below the call that takes the cache is a graph.
         self.assertGreaterEqual(len(self.compiled_regions(compiled)), 1)
+
+    def test_region_goes_on_into_the_blocks_after_it(self):
+        graphs = []
+
+        def backend(graph, inputs):
+            output = next(n for n in graph.graph.nodes if n.op == "output")
+            graphs.append(len(output.args[0]))
+            return graph
+
+        torch.manual_seed(0)
+        model = RegionStages().eval()
+        compiled = torch.cfg_compile(region_stages, backend=backend, fallback=False)
+        log, expected_log = [], []
+        with torch.no_grad():
+            for i in range(14):
+                if i == 8:
+                    # Not an input of anything: read by the path, and checked.
+                    model.doubled = True
+                x = torch.randn(2, 6)
+                out, doubled = compiled(model, x, log)
+                expected, _ = model(x, expected_log)
+                self.assertEqual(out, expected, atol=0, rtol=0)
+                self.assertEqual(doubled, i >= 8)
+        self.assertEqual(log, expected_log)
+        # The call of the model reads a tensor's data, so the VM runs its
+        # forward. There, stem, comprehension, loop, branch and head are four
+        # blocks and more, and one graph: the path through them, up to the
+        # conversion to a float.
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("RegionStages.forward (block 0)"))
+        self.assertGreaterEqual(region["ops"], 12)
+        ((block, _),) = region["ends"]
+        self.assertGreater(block, 0)
+        # One graph per value of the flag. Each gives back what is read after
+        # it and nothing else: not the list of the stages' outputs, which the
+        # function only keeps until it returns.
+        self.assertEqual(graphs, [1, 1])
+
+    def test_variable_shared_with_a_nested_function_is_an_input(self):
+        # A local that a nested function uses as well lives in a cell.
+        # Reading it does not end a region: the cell is an input, and what
+        # it holds is part of what a graph is compiled for.
+        graphs = []
+
+        def backend(graph, inputs):
+            calls = [n for n in graph.graph.nodes if n.op == "call_function"]
+            graphs.append(len(calls))
+            return graph
+
+        def f(x, scale):
+            def shared():
+                return scale
+
+            return (x.sin().cos() * scale).exp().tanh(), shared
+
+        compiled = torch.cfg_compile(f, backend=backend, fallback=False)
+        x = torch.randn(4)
+        for scale in (2.0, 2.0, 2.0, 2.0, 2.0, 3.0, 3.0):
+            out, shared = compiled(x, scale)
+            self.assertEqual(out, f(x, scale)[0], atol=0, rtol=0)
+            self.assertEqual(shared(), scale)
+        self.assertEqual(graphs, [5, 5])
 
     def test_named_tuples_and_sets_of_values_are_inputs(self):
         compiled = torch.cfg_compile(region_pair, backend="aot_eager", fallback=False)
