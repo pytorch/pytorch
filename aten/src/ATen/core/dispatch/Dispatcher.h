@@ -4,6 +4,7 @@
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/dispatch/CppSignature.h>
+#include <ATen/core/dispatch/DispatchCapture.h>
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <ATen/record_function.h>
@@ -357,6 +358,30 @@ class TORCH_API Dispatcher final {
 
  private:
   Dispatcher();
+
+  // A kernel as call and redispatch invoke it: the invocation is reported to
+  // the DispatchCaptureSink of this thread when one is installed.
+  struct CapturedKernel {
+    template <class Return, class... Args>
+    Return call(
+        const TypedOperatorHandle<Return(Args...)>& op,
+        DispatchKeySet dispatchKeySet,
+        Args... args) const;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+    const KernelFunction& kernel;
+    bool isRedispatch;
+  };
+
+  // Slow path of CapturedKernel taken while a sink is installed: boxes the
+  // arguments and results for it.
+  template <class Return, class... Args>
+  static Return callWithCaptureSink(
+      const TypedOperatorHandle<Return(Args...)>& op,
+      DispatchCaptureSink& sink,
+      DispatchKeySet dispatchKeySet,
+      const KernelFunction& kernel,
+      bool isRedispatch,
+      Args... args);
 
   static int64_t sequenceNumberForRunningRecordFunction(
       DispatchKey dispatchKey,
@@ -769,15 +794,79 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(
     // Calls the kernel and capture the output temporarily to pass to
     // RecordFunction.
     detail::CaptureKernelCall<Return> captureKernelCall(
-        kernel, op, dispatchKeySet, std::forward<Args>(args)...);
+        CapturedKernel{kernel, /*isRedispatch=*/false},
+        op,
+        dispatchKeySet,
+        std::forward<Args>(args)...);
     guard.setOutputs(captureKernelCall.getOutputs());
     // Releases the captured output to return to caller.
     return std::move(captureKernelCall).release();
   }
 
   // keeping the guard alive while executing the kernel
+  return CapturedKernel{kernel, /*isRedispatch=*/false}
+      .template call<Return, Args...>(
+          op, dispatchKeySet, std::forward<Args>(args)...);
+}
+
+// See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
+template <class Return, class... Args>
+C10_ALWAYS_INLINE Return Dispatcher::CapturedKernel::call(
+    const TypedOperatorHandle<Return(Args...)>& op,
+    DispatchKeySet dispatchKeySet,
+    Args... args) const {
+  if (C10_UNLIKELY(impl::dispatch_capture_enabled())) {
+    if (auto* sink = impl::tls_dispatch_capture_sink()) {
+      return callWithCaptureSink<Return, Args...>(
+          op,
+          *sink,
+          dispatchKeySet,
+          kernel,
+          isRedispatch,
+          std::forward<Args>(args)...);
+    }
+  }
   return kernel.template call<Return, Args...>(
       op, dispatchKeySet, std::forward<Args>(args)...);
+}
+
+// See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
+template <class Return, class... Args>
+C10_NOINLINE Return Dispatcher::callWithCaptureSink(
+    const TypedOperatorHandle<Return(Args...)>& op,
+    DispatchCaptureSink& sink,
+    DispatchKeySet dispatchKeySet,
+    const KernelFunction& kernel,
+    bool isRedispatch,
+    Args... args) {
+  constexpr auto num_boxed_args = impl::boxed_size<Args...>();
+  if constexpr (num_boxed_args != 0) {
+    // NOLINTNEXTLINE(*array*)
+    alignas(IValue) std::byte boxedArgs[num_boxed_args * sizeof(IValue)];
+    IValue* boxedArgsPtr = reinterpret_cast<IValue*>(boxedArgs);
+    impl::boxArgsToStack(boxedArgsPtr, args...);
+    sink.onKernelEnter(
+        op,
+        dispatchKeySet,
+        isRedispatch,
+        c10::ArrayRef<const c10::IValue>(
+            reinterpret_cast<IValue*>(boxedArgs), num_boxed_args));
+    boxedArgsPtr = reinterpret_cast<IValue*>(boxedArgs);
+    for (size_t ii = 0; ii < num_boxed_args; ++ii) {
+      (boxedArgsPtr + ii)->~IValue();
+    }
+  } else {
+    sink.onKernelEnter(op, dispatchKeySet, isRedispatch, {});
+  }
+  impl::DispatchCaptureExitGuard exitGuard(sink, op);
+  detail::CaptureKernelCall<Return> captureKernelCall(
+      kernel, op, dispatchKeySet, std::forward<Args>(args)...);
+  {
+    Stack outputs = captureKernelCall.getOutputs();
+    exitGuard.finish(
+        c10::ArrayRef<const c10::IValue>(outputs.data(), outputs.size()));
+  }
+  return std::move(captureKernelCall).release();
 }
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
@@ -827,15 +916,18 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
       }
       at::RecordFunction::schema_ref_t schema_ref_;
     } event(op.schema(), argsAddresses, argsTypes);
-    return kernel.template call<Return, Args...>(
-        op, dispatchKeySet, std::forward<Args>(args)...);
+    return CapturedKernel{kernel, /*isRedispatch=*/false}
+        .template call<Return, Args...>(
+            op, dispatchKeySet, std::forward<Args>(args)...);
   } else {
-    return kernel.template call<Return, Args...>(
-        op, dispatchKeySet, std::forward<Args>(args)...);
+    return CapturedKernel{kernel, /*isRedispatch=*/false}
+        .template call<Return, Args...>(
+            op, dispatchKeySet, std::forward<Args>(args)...);
   }
 #else
-  return kernel.template call<Return, Args...>(
-      op, dispatchKeySet, std::forward<Args>(args)...);
+  return CapturedKernel{kernel, /*isRedispatch=*/false}
+      .template call<Return, Args...>(
+          op, dispatchKeySet, std::forward<Args>(args)...);
 #endif // FBCODE_CAFFE2
 }
 
@@ -855,8 +947,9 @@ inline Return Dispatcher::redispatch(
 #endif
   const KernelFunction& kernel =
       op.operatorDef_->op.lookup(currentDispatchKeySet);
-  return kernel.template call<Return, Args...>(
-      op, currentDispatchKeySet, std::forward<Args>(args)...);
+  return CapturedKernel{kernel, /*isRedispatch=*/true}
+      .template call<Return, Args...>(
+          op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
