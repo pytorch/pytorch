@@ -202,6 +202,9 @@ class FakeTensorDeviceMismatchError(RuntimeError):
 def _resolve_device_conflict(
     func: OpOverload, common_device: torch.device, device: torch.device, /
 ) -> torch.device:
+    # Keep in sync with ConcretePyInterpreterVTable::_resolve_device_conflict
+    # in torch/csrc/PyInterpreter.cpp.
+
     # if prefer_device_type is set, prefer that device type over others
     prefer_device_type = torch._functorch.config.fake_tensor_prefer_device_type
     if prefer_device_type is not None:
@@ -2103,6 +2106,9 @@ class FakeTensor(Tensor):
         has_scalar_only_inputs = False
         is_cpu_zero_dim = None
 
+        # find_common_device in aten/src/ATen/FakeFallbackKernel.cpp hardcodes
+        # the ops of these three sets for the C++ fake fallback; keep them in sync
+
         # list of ops which can have args(tensor/tensorList) in mixed device
         mixed_device_fns = ordered_set(
             aten._foreach_copy.default,
@@ -3826,6 +3832,8 @@ class FakeTensorMode(TorchDispatchMode):
             log.exception("failed while attempting to run meta for %s", func)
             raise
 
+        # The C++ fake fallback's device_argument (FakeFallbackKernel.cpp)
+        # follows this kwargs.get("device"); keep them in sync
         return maybe_propagate_real_tensors(
             self.wrap_meta_outputs_with_default_device_logic(
                 r, func, flat_args, device=kwargs.get("device")
