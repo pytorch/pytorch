@@ -1073,11 +1073,10 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                     torch._C._dispatch_key_set(y)
                 )
 
-    # Conversion of real views to C++ fakes is not implemented.
-    @xfailIf(CPP_FAKETENSOR)
-    def test_alias_fake_tensor(self):
+    @fake_tensor_modes
+    def test_alias_fake_tensor(self, mode_cls):
         shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(shape_env=shape_env)
+        fake_mode = mode_cls(shape_env=shape_env)
         x = fake_mode.from_tensor(
             torch.randn(4, 6).t(),
             symbolic_context=StatelessSymbolicContext(
@@ -1655,12 +1654,11 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             result = torch.div(symint, 4, rounding_mode="trunc")
         self.assertIsNone(maybe_get_fake_constant(result))
 
-    # Conversion of real views to C++ fakes is not implemented.
-    @xfailIf(CPP_FAKETENSOR)
-    def test_parameter_view(self):
+    @fake_tensor_modes
+    def test_parameter_view(self, mode_cls):
         x = torch.nn.Parameter(torch.randn(4))
         x_view = x.view(4)
-        mode = FakeTensorMode()
+        mode = mode_cls()
         fake_x_view = mode.from_tensor(x_view)
         fake_x = mode.from_tensor(x)
         self.assertFalse(isinstance(fake_x_view, torch.nn.Parameter))
@@ -3768,16 +3766,41 @@ class TestFakeTensorConverter(TestCase):
         with self.assertRaisesRegex(AssertionError, "not fake"):
             converter.from_meta_and_device(mode, cpp_fake, "cpu")
 
-    # Conversion of real views to C++ fakes is not implemented.
-    @xfailIf(CPP_FAKETENSOR)
-    def test_separate_tensor_storages_view(self):
-        x = torch.rand(2, 2, 2)
-        y = x[0]
-        mode = FakeTensorMode()
+    @fake_tensor_modes
+    @parametrize("requires_grad", [False, True])
+    @parametrize("leaf", [False, True])
+    @parametrize("view_kind", ["slice", "transpose", "real", "complex"])
+    def test_separate_tensor_storages_view(
+        self, mode_cls, requires_grad, leaf, view_kind
+    ):
+        dtype = torch.complex64 if view_kind == "real" else torch.float32
+        x = torch.rand(2, 2, 2, dtype=dtype, requires_grad=requires_grad)
+        if not leaf:
+            x = x.sin()
+        y = {
+            "slice": lambda: x[1],
+            "transpose": lambda: x.transpose(0, 1),
+            "real": lambda: torch.view_as_real(x),
+            "complex": lambda: torch.view_as_complex(x),
+        }[view_kind]()
+        mode = mode_cls()
         converter = mode.fake_tensor_converter
         x_conv = converter.from_real_tensor(mode, x)
         y_conv = converter.from_real_tensor(mode, y)
         self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
+        self.assertIs(y_conv._base, x_conv)
+        self.assertIs(mode.from_tensor(y), y_conv)
+        self.assertEqual(y_conv.shape, y.shape)
+        self.assertEqual(y_conv.stride(), y.stride())
+        self.assertEqual(y_conv.storage_offset(), y.storage_offset())
+        self.assertEqual(y_conv.dtype, y.dtype)
+        self.assertEqual(y_conv.requires_grad, y.requires_grad)
+        self.assertEqual(y_conv.is_leaf, y.is_leaf)
+        version = x_conv._version
+        with torch.no_grad():
+            y_conv.add_(1)
+        self.assertEqual(x_conv._version, version + 1)
+        self.assertEqual(y_conv._version, x_conv._version)
 
     @xfailIfTorchDynamo
     @fake_tensor_modes
@@ -3906,13 +3929,12 @@ class TestFakeTensorConverter(TestCase):
         self.assertTrue(free_unbacked_symbols(refake.shape[0]))
         self.assertEqual(refake.shape[1], 3)
 
-    # Conversion of real views to C++ fakes is not implemented.
-    @xfailIf(CPP_FAKETENSOR)
-    def test_dead_weak_ref(self):
+    @fake_tensor_modes
+    def test_dead_weak_ref(self, mode_cls):
         x = torch.rand(2, 2, 2)
         y = x[0]
-        mode = FakeTensorMode()
-        converter = FakeTensorConverter(cpp_fakes=CPP_FAKETENSOR)
+        mode = mode_cls()
+        converter = mode.fake_tensor_converter
         x_conv = converter.from_real_tensor(mode, x)
         x_conv_storage = x_conv.untyped_storage()
         del x_conv
