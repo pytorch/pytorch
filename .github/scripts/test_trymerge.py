@@ -5428,5 +5428,52 @@ class TestFetchUrlTimeout(TestCase):
         self.assertEqual(mock_urlopen.call_args.kwargs, {})
 
 
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+class TestReRequestedReviewApproval(TestCase):
+    """An approval stops counting once its reviewer is asked to review again.
+
+    GitHub keeps the earlier APPROVED review on a re-request, so Mergebot has to drop
+    it itself (https://github.com/pytorch/test-infra/issues/5543).
+    """
+
+    def _pr(self, reviews: list[tuple[str, str]]) -> GitHubPR:
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        pr._reviews = reviews
+        return pr
+
+    @mock.patch("trymerge.gh_fetch_json_dict", return_value={"users": []})
+    def test_approval_counts_without_a_pending_request(self, mock_fetch: Any, *args: Any) -> None:
+        pr = self._pr([("malfet", "APPROVED")])
+        self.assertEqual(pr.get_approved_by(), ["malfet"])
+
+    @mock.patch(
+        "trymerge.gh_fetch_json_dict", return_value={"users": [{"login": "Malfet"}]}
+    )
+    def test_approval_is_dropped_when_reviewer_is_re_requested(
+        self, mock_fetch: Any, *args: Any
+    ) -> None:
+        pr = self._pr([("malfet", "APPROVED"), ("seemethere", "APPROVED")])
+        self.assertEqual(pr.get_approved_by(), ["seemethere"])
+
+    @mock.patch("trymerge.gh_fetch_json_dict", return_value={"users": []})
+    def test_approval_counts_again_once_the_request_is_cleared(
+        self, mock_fetch: Any, *args: Any
+    ) -> None:
+        # Re-approving removes the pending request, so GitHub reports no requested users.
+        pr = self._pr([("malfet", "APPROVED")])
+        self.assertEqual(pr.get_approved_by(), ["malfet"])
+
+    @mock.patch("trymerge.gh_fetch_json_dict", side_effect=URLError("boom"))
+    def test_github_failure_keeps_the_previous_behavior(self, mock_fetch: Any, *args: Any) -> None:
+        pr = self._pr([("malfet", "APPROVED")])
+        self.assertEqual(pr.get_approved_by(), ["malfet"])
+
+    @mock.patch("trymerge.gh_fetch_json_dict")
+    def test_no_request_is_made_without_approvals(self, mock_fetch: Any, *args: Any) -> None:
+        pr = self._pr([("malfet", "CHANGES_REQUESTED")])
+        self.assertEqual(pr.get_approved_by(), [])
+        mock_fetch.assert_not_called()
+
+
 if __name__ == "__main__":
     main()
