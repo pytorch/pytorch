@@ -1153,8 +1153,9 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         )
 
         res, codes = run_fw_bw_and_get_code(lambda: compiled_module(x))
-        # flex in forward and flex_backward in backward
-        self.assertEqual(len(codes), 2)
+        # flex in forward; flex recomputed by checkpointing and flex_backward in
+        # backward, where the recomputed flex compiles as part of the backward.
+        self.assertEqual(len(codes), 3)
         true_res = flex_module(x)
         self.assertEqual(res, true_res)
 
