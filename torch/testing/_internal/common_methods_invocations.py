@@ -3207,11 +3207,9 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
                          error_type=ValueError, error_regex="must not overlap")
 
     # Error Inputs for functions to raise an error on specified zero'd dimension as reduction dim
-    err_msg3 = "reduction"
-    # FIXME: eager and ref impl throw different types of errors
-    error_type = IndexError if 'refs' not in op_info.name else RuntimeError
+    err_msg3 = "Expected reduction dim"
     yield ErrorInput(SampleInput(torch.rand(shape, device=device), kwargs={'dim': 1}),
-                     error_type=error_type, error_regex=err_msg3)
+                     error_type=IndexError, error_regex=err_msg3)
 
 def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
     test_cases: tuple[tuple, dict] = (  # type: ignore[assignment]
