@@ -190,6 +190,57 @@ Result from the second inference:
 [ CUDAFloatType{2,1} ]
 ```
 
+## Running as CUDA graphs
+
+A CUDA model compiled with `aot_inductor.cudagraphs=True` can run as CUDA graphs
+that the runtime captures lazily, while serving calls, and replays, which cuts
+the host overhead of launching kernels. The compile fails if the model can't be
+captured, e.g. because it runs ops on the CPU, syncs with the host, uses side
+streams or control flow (`torch.cond`, `while_loop`), mutates its inputs, or
+has data-dependent shapes. Models that use random numbers are
+rejected too, for now (attention without dropout is fine), and so is ROCm,
+where a capture can't yet run safely next to other GPU work in the process
+([ROCm/rocm-systems#12677](https://github.com/ROCm/rocm-systems/issues/12677)).
+
+```python
+package_path = torch._inductor.aoti_compile_and_package(
+    torch.export.export(model, example_inputs),
+    inductor_configs={"aot_inductor.cudagraphs": True},
+)
+compiled = torch._inductor.aoti_load_package(package_path)
+out = compiled.run_with_lazy_cuda_graphs(*example_inputs)
+```
+
+In C++, `AOTIModelPackageLoader::run_with_lazy_cuda_graphs` takes the same
+arguments as `run`. Calling the model as usual still runs it eagerly, and
+doesn't count as a warm-up.
+
+- On each model instance (see `num_runners`), a new input layout (shapes and
+  strides) runs eagerly on its first call, is captured on its next call and
+  replayed after that. Only a thread that has already finished an eager call of
+  that layout on that instance captures it, since some libraries set up per
+  thread; any thread replays.
+- Each model instance keeps up to `AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS` graphs
+  (an environment variable read when the model is loaded, default 8; a bad
+  value makes every `run_with_lazy_cuda_graphs` call fail) in its own memory
+  pool; past that, new layouts run eagerly.
+- Replayed outputs are copies: they don't alias the inputs, and views among
+  outputs come back as separate tensors. Eager calls return the model's own
+  outputs.
+- As with `torch.cuda.graph`, a failed capture raises the error; existing
+  graphs keep replaying, and the layout is captured again on its next call.
+  Compiling with `aot_inductor.cudagraphs=True` rejects models that can't be
+  captured.
+- Capturing needs PyTorch's native CUDA caching allocator: under
+  `PYTORCH_ALLOC_CONF=backend:cudaMallocAsync`, every capture fails, so
+  `run_with_lazy_cuda_graphs` raises after each layout's first call; call the
+  model as usual instead.
+- Once a graph is captured, the model's active constants can't change, so
+  `load_constants` fails; in C++, the inactive buffer can still be updated, but
+  not swapped in. Load the model again to use new weights.
+- Calls can't run inside an outer CUDA graph capture, or on a model loaded with
+  `run_single_threaded=True`.
+
 ## Troubleshooting
 
 Below are some useful tools for debugging AOT Inductor.
@@ -204,6 +255,8 @@ torch.compiler_aot_inductor_debugging_guide
 ```
 
 To enable runtime checks on inputs, set the environment variable `AOTI_RUNTIME_CHECK_INPUTS` to 1. This will raise a `RuntimeError` if the inputs to the compiled model differ in size, data type, or strides from those used during export.
+
+On ROCm, a compiled model copies its constants to the GPU through two pinned staging buffers (64 MiB each by default, set with `AOTI_COPY_STAGE_BUFFER_BYTES`) taken from PyTorch's pinned host memory cache. Without them, ROCm tries to pin the model library's read-only pages, which can make creating a model take tens of seconds on MI300X. Set the environment variable `AOTI_COPY_USE_PINNED_ASYNC` to 0 to turn this off, or to 1 to turn it on for CUDA. The default comes from the PyTorch version that compiled the package, because this code is built into the model's shared library.
 
 ## API Reference
 

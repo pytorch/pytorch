@@ -81,7 +81,6 @@ from torch._subclasses.fake_tensor import (
     maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
-from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
 from torch.fx.experimental.dynamic_spec import (
@@ -1558,6 +1557,9 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
+                # A lazy VT for a globals dict realized after a delete in the
+                # trace hands out a stale model.
+                self.tx.output.check_deleted_global_dict_handout(value)
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
                     source=self.source,
@@ -3976,7 +3978,6 @@ class VariableBuilder:
             # when specialize_float=False
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda
             or torch._inductor.config.triton.cudagraphs
-            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or (
                 config.assume_static_by_default
                 and frame_state_entry.scalar is not auto_dynamic

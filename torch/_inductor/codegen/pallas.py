@@ -3332,7 +3332,7 @@ class PallasKernel(SIMDKernel):
 
         # Determine if this is a partial reduction (has pointwise dimensions)
         # or a full reduction to scalar
-        pointwise_prefixes = OrderedSet(["x", "y", "z"])
+        pointwise_prefixes = OrderedSet(["x", "y", "z0_"])
         has_pointwise = any(p in self.numels for p in pointwise_prefixes)
         pointwise_numel: int | None = self._compute_prefix_numel(pointwise_prefixes)
         reduction_numel: int | None = self._compute_reduction_numel()

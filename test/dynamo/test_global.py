@@ -994,7 +994,20 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
 
     @parametrize(
         "shape",
-        ("hasattr", "attr", "contains", "getitem", "get", "getattr", "getattr_default"),
+        (
+            "hasattr",
+            "attr",
+            "contains",
+            "getitem",
+            "get",
+            "getattr",
+            "getattr_default",
+            "in_list",
+            "in_copy",
+            "in_dict",
+            "unpack",
+            "len",
+        ),
     )
     def test_delete_global_module_read_after(self, shape):
         me = sys.modules[__name__]
@@ -1044,14 +1057,48 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             del _dg_a
             return x + getattr(me, "_dg_a", 0)
 
-        fn, expected = {
-            "hasattr": (fn_hasattr, lambda x: x),
-            "attr": (fn_attr, lambda x: x - 1),
-            "contains": (fn_contains, lambda x: x),
-            "getitem": (fn_getitem, lambda x: x - 1),
-            "get": (fn_get, lambda x: x),
-            "getattr": (fn_getattr, lambda x: x - 1),
-            "getattr_default": (fn_getattr_default, lambda x: x),
+        def fn_in_list(x):
+            global _dg_a
+            del _dg_a
+            return x + (1 if "_dg_a" in list(me.__dict__) else 0)
+
+        def fn_in_copy(x):
+            global _dg_a
+            del _dg_a
+            return x + (1 if "_dg_a" in me.__dict__.copy() else 0)
+
+        def fn_in_dict(x):
+            global _dg_a
+            del _dg_a
+            return x + (1 if "_dg_a" in dict(me.__dict__) else 0)
+
+        def fn_unpack(x):
+            global _dg_a
+            del _dg_a
+            return x + (1 if "_dg_a" in {**me.__dict__} else 0)
+
+        def fn_len(x):
+            global _dg_a
+            del _dg_a
+            return x + (
+                1
+                if len(me.__dict__) != len([k for k in me.__dict__ if k != "_dg_a"])
+                else 0
+            )
+
+        fn, expected, msg = {
+            "hasattr": (fn_hasattr, lambda x: x, "module-object read"),
+            "attr": (fn_attr, lambda x: x - 1, "module-object read"),
+            "contains": (fn_contains, lambda x: x, "module-__dict__ access"),
+            "getitem": (fn_getitem, lambda x: x - 1, "module-__dict__ access"),
+            "get": (fn_get, lambda x: x, "module-__dict__ access"),
+            "getattr": (fn_getattr, lambda x: x - 1, "module-object read"),
+            "getattr_default": (fn_getattr_default, lambda x: x, "module-object read"),
+            "in_list": (fn_in_list, lambda x: x, "module-__dict__ access"),
+            "in_copy": (fn_in_copy, lambda x: x, "module-__dict__ access"),
+            "in_dict": (fn_in_dict, lambda x: x, "module-__dict__ access"),
+            "unpack": (fn_unpack, lambda x: x, "module-__dict__ access"),
+            "len": (fn_len, lambda x: x, "module-__dict__ access"),
         }[shape]
         with mock.patch.dict(globals(), {"_dg_a": 1}):
             x = torch.ones(2, 2)
@@ -1062,7 +1109,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 globals()["_dg_a"] = 1
                 if fullgraph:
                     with self.assertRaisesRegex(
-                        Unsupported, "DELETE_GLOBAL followed by a module-object read"
+                        Unsupported, f"DELETE_GLOBAL followed by a {msg}"
                     ):
                         torch.compile(fn, backend="eager", fullgraph=True)(x)
                 else:
@@ -1116,13 +1163,13 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 return x - 1
             return x + 1
 
-        fn, expected, g_after = {
-            "attr": (fn_attr, lambda x: x + 1, 5),
-            "setitem": (fn_setitem, lambda x: x + 1, 5),
-            "update": (fn_update, lambda x: x + 1, 5),
-            "setdefault": (fn_setdefault, lambda x: x + 1, 5),
-            "pop": (fn_pop, lambda x: x - 1, None),
-            "delitem": (fn_delitem, lambda x: x - 1, None),
+        fn, expected, g_after, msg = {
+            "attr": (fn_attr, lambda x: x + 1, 5, "module-object write"),
+            "setitem": (fn_setitem, lambda x: x + 1, 5, "module-__dict__ access"),
+            "update": (fn_update, lambda x: x + 1, 5, "module-__dict__ access"),
+            "setdefault": (fn_setdefault, lambda x: x + 1, 5, "module-__dict__ access"),
+            "pop": (fn_pop, lambda x: x - 1, None, "module-__dict__ access"),
+            "delitem": (fn_delitem, lambda x: x - 1, None, "module-__dict__ access"),
         }[shape]
         with mock.patch.dict(globals(), {"_dg_a": 1}):
             x = torch.ones(2, 2)
@@ -1132,13 +1179,58 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 globals()["_dg_a"] = 1
                 if fullgraph:
                     with self.assertRaisesRegex(
-                        Unsupported, "DELETE_GLOBAL followed by a module-object write"
+                        Unsupported, f"DELETE_GLOBAL followed by a {msg}"
                     ):
                         torch.compile(fn, backend="eager", fullgraph=True)(x)
                 else:
                     opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
                     self.assertEqual(opt_fn(x), expected(x))
                     self.assertEqual(globals().get("_dg_a"), g_after)
+
+    @parametrize("shape", ("list", "len", "copy"))
+    def test_delete_global_module_dict_alias_after(self, shape):
+        me = sys.modules[__name__]
+
+        def fn_list(x):
+            global _dg_a
+            d = me.__dict__
+            del _dg_a
+            return x + (1 if "_dg_a" in list(d) else 0)
+
+        def fn_len(x):
+            global _dg_a
+            d = me.__dict__
+            del _dg_a
+            return x + (1 if len(d) != len([k for k in d if k != "_dg_a"]) else 0)
+
+        def fn_copy(x):
+            global _dg_a
+            d = me.__dict__
+            del _dg_a
+            return x + (1 if "_dg_a" in d.copy() else 0)
+
+        fn, expected = {
+            "list": (fn_list, lambda x: x),
+            "len": (fn_len, lambda x: x),
+            "copy": (fn_copy, lambda x: x),
+        }[shape]
+        with mock.patch.dict(globals(), {"_dg_a": 1}):
+            x = torch.ones(2, 2)
+            self.assertEqual(fn(x), expected(x))
+            self.assertNotIn("_dg_a", globals())
+            for fullgraph in (True, False):
+                torch._dynamo.reset()
+                globals()["_dg_a"] = 1
+                if fullgraph:
+                    with self.assertRaisesRegex(
+                        Unsupported,
+                        "DELETE_GLOBAL followed by a module-__dict__ access",
+                    ):
+                        torch.compile(fn, backend="eager", fullgraph=True)(x)
+                else:
+                    opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+                    self.assertEqual(opt_fn(x), expected(x))
+                    self.assertNotIn("_dg_a", globals())
 
     def test_delete_global_in_unregistered_importlib_module(self):
         module_name = "test_dynamo_unregistered_delete_global_181243"

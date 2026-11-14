@@ -79,6 +79,7 @@ from .hashable import HashableTracker, is_hashable
 from .object_protocol import (
     _is_method_type,
     generic_getitem,
+    generic_hasattr_str,
     generic_is_true,
     generic_richcompare_bool,
     generic_setitem,
@@ -567,29 +568,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 f"cannot use '{key.python_qualified_name()}' as a dict key ({message})",
             )
 
-    def _check_deleted_global_dict_access(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: Any,
-        write: bool,
-    ) -> None:
-        # Registered globals dicts are tracked in id_to_variable under their
-        # real dict; this VT may wrap it without exposing the value itself.
-        output_graph = tx.output
-        if not output_graph.deleted_globals_by_dict:
-            return
-        id_to_variable = output_graph.side_effects.id_to_variable
-        for dict_id, (
-            globals_dict,
-            _,
-        ) in output_graph.deleted_globals_by_dict.items():
-            if id_to_variable.get(dict_id) is self:
-                if write:
-                    output_graph.check_deleted_global_write(globals_dict, name)
-                else:
-                    output_graph.check_deleted_global_read(globals_dict, name)
-                return
-
     def mp_subscript_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -597,10 +575,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
         # Unhashable key check happens inside HashableTracker (tp_hash_impl → TypeError).
-        if tx.output.deleted_globals_by_dict and key.is_python_constant():
-            self._check_deleted_global_dict_access(
-                tx, key.as_python_constant(), write=False
-            )
         return self.getitem_const_raise_exception_if_absent(tx, key)
 
     def sq_contains_impl(
@@ -609,10 +583,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
-        if tx.output.deleted_globals_by_dict and item.is_python_constant():
-            self._check_deleted_global_dict_access(
-                tx, item.as_python_constant(), write=False
-            )
         key = self._lookup_key(tx, item)
         value = self.items.get(key)
         contains = value is not None and type(value) is not variables.DeletedVariable
@@ -704,10 +674,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         check_positional(tx, "get", len(args), 1, 2)
-        if tx.output.deleted_globals_by_dict and args[0].is_python_constant():
-            self._check_deleted_global_dict_access(
-                tx, args[0].as_python_constant(), write=False
-            )
         key = self._lookup_key(tx, args[0])
         value = self.items.get(key)
         if value is None or type(value) is variables.DeletedVariable:
@@ -728,10 +694,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if not self.is_mutable():
             return None
         check_positional(tx, "pop", len(args), 1, 2)
-        if tx.output.deleted_globals_by_dict and args[0].is_python_constant():
-            self._check_deleted_global_dict_access(
-                tx, args[0].as_python_constant(), write=True
-            )
         if not self.items and not isinstance(self, OrderedDictVariable):
             self.install_dict_keys_match_guard()
             if len(args) == 1:
@@ -818,16 +780,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        if tx.output.deleted_globals_by_dict and (args or kwargs):
-            for k in kwargs:
-                self._check_deleted_global_dict_access(tx, k, write=True)
-            if args:
-                other = args[0]
-                if isinstance(other, ConstDictVariable) and other.is_python_constant():
-                    for k in other.as_python_constant():
-                        self._check_deleted_global_dict_access(tx, k, write=True)
-                else:
-                    self._check_deleted_global_dict_access(tx, None, write=True)
         # Mirrors CPython PyDict_Merge: if arg has keys(), iterate keys and
         # __getitem__; else treat arg as iterable of (key, value) pairs.
         # kwargs are always merged on top.
@@ -843,13 +795,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 # correctness.
                 other.install_dict_keys_match_guard()
                 self.items.update(other.items)
-            elif (
-                isinstance(
-                    other,
-                    (variables.UserDefinedObjectVariable, MappingProxyVariable),
-                )
-                and other.call_obj_hasattr(tx, "keys").as_python_constant()
-            ):
+            elif isinstance(
+                other,
+                (variables.UserDefinedObjectVariable, MappingProxyVariable),
+            ) and generic_hasattr_str(tx, other, "keys"):
                 keys = other.call_method(tx, "keys", [], {})
                 for key in unpack_iterable(tx, keys):
                     self.items[HashableTracker(key)] = generic_getitem(tx, other, key)
@@ -879,10 +828,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if not self.is_mutable():
             return None
         check_positional(tx, "setdefault", len(args), 1, 2)
-        if tx.output.deleted_globals_by_dict and args[0].is_python_constant():
-            self._check_deleted_global_dict_access(
-                tx, args[0].as_python_constant(), write=True
-            )
         if (
             isinstance(self, OrderedDictVariable)
             and self.python_type() is not collections.OrderedDict
@@ -992,8 +937,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
         # value=None signals delete (CPython NULL sentinel).
         self.install_dict_keys_match_guard()
-        if tx.output.deleted_globals_by_dict and key.is_python_constant():
-            self._check_deleted_global_dict_access(tx, key.as_python_constant(), True)
         if isinstance(self, OrderedDictVariable):
             _guard_nan_key(key)
             hkey = HashableTracker(key)
@@ -1016,31 +959,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         """Mapping length for dict objects."""
         self.install_dict_keys_match_guard()
         return VariableTracker.build(tx, len(self.items))
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        # dict not allow setting arbitrary attributes.  OrderedDict and
-        # defaultdict allow arbitrary setattr, but not deletion of default attrs
-        cls = self.python_type()
-        if any(
-            cls is t for t in (dict, collections.OrderedDict, collections.defaultdict)
-        ):
-            if hasattr(cls, name):
-                return ConstantVariable.create(True)
-            if cls is dict:
-                return ConstantVariable.create(False)
-
-        msg = f"hasattr on {cls} is not supported"
-        unimplemented(
-            gb_type="unsupported hasattr operation",
-            context=f"Class {cls}",
-            explanation=msg,
-            hints=[
-                "Consider using a regular dictionary instead",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         self.install_dict_keys_match_guard()
@@ -1365,13 +1283,6 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 
         return generic_richcompare(tx, self.dv_dict, other, op)
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is types.MappingProxyType:
-            return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
-        return super().call_obj_hasattr(tx, name)
-
 
 class NNModuleHooksDictVariable(OrderedDictVariable):
     # Special class to avoid adding any guards on the nn module hook ids.
@@ -1441,15 +1352,6 @@ class DictViewVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.kv is None:
-            raise AssertionError("kv must not be None for call_obj_hasattr")
-        if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
 
     # dictview_mapping getset returns a read-only mappingproxy of the underlying
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040

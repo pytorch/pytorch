@@ -1215,6 +1215,14 @@
     {
       "Gb_type": "DELETE_GLOBAL with a pending module-object write",
       "Context": "name",
+      "Explanation": "Dynamo cannot order a global delete against a pending write to the module globals, whether through the module object or its __dict__, and the dict behind them is already materialized in the trace.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "DELETE_GLOBAL with a pending module-object write",
+      "Context": "name",
       "Explanation": "Dynamo cannot order a global delete against a pending write to the module globals, whether through the module object or its __dict__.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
@@ -1919,6 +1927,16 @@
       "Gb_type": "Dynamic class creation with type",
       "Context": "type(name, bases, namespace)",
       "Explanation": "Dynamo does not support tracing class creation with type().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9322": [
+    {
+      "Gb_type": "bytearray.join() with unsupported item type",
+      "Context": "bytearray.join() item: {item}",
+      "Explanation": "Dynamo only supports joining bytes and bytearray items, got {item.python_type_name()}.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -2644,6 +2662,15 @@
     }
   ],
   "GB0150": [
+    {
+      "Gb_type": "Unsupported hasattr call",
+      "Context": "generic_hasattr {obj} {name}",
+      "Explanation": "Dynamo does not know how to trace the function `{obj.debug_repr()}`",
+      "Hints": [
+        "Avoid calling `hasattr({obj.__class__.__name__}, {name})` in your code.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Unsupported hasattr call",
       "Context": "call_obj_hasattr {self} {name}",
@@ -4923,6 +4950,26 @@
       ]
     }
   ],
+  "GB1208": [
+    {
+      "Gb_type": "Unsupported generator frame f_back",
+      "Context": "{state}",
+      "Explanation": "f_back is only modeled for created or suspended generators.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0949": [
+    {
+      "Gb_type": "Unsupported generator frame attribute",
+      "Context": "frame.{name}",
+      "Explanation": "Dynamo does not model the frame attribute {name}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB1392": [
     {
       "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",
@@ -6500,6 +6547,16 @@
       "Explanation": "A fake id produced by id() on a compile-time container cannot be reconstructed across a graph break.",
       "Hints": [
         "Avoid using id() on containers in code that may graph-break."
+      ]
+    }
+  ],
+  "GB2210": [
+    {
+      "Gb_type": "DELETE_GLOBAL followed by a module-__dict__ access",
+      "Context": "module __dict__",
+      "Explanation": "The replayed global delete is not reflected in the dict model behind this module __dict__, so any view derived from it would still contain the deleted name. Eager resume has to run the access instead.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

@@ -1089,6 +1089,23 @@ class OutputGraph(OutputGraphCommon):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
 
+    def check_deleted_global_dict_handout(self, globals_dict: Any) -> None:
+        # Any view derived from the dict model (iteration, len, copy, items,
+        # unpacking) still contains the deleted name, so handing the dict out
+        # is broken regardless of which key is accessed next.
+        if self.deleted_globals_by_dict.get(id(globals_dict)) is not None:
+            unimplemented(
+                gb_type="DELETE_GLOBAL followed by a module-__dict__ access",
+                context="module __dict__",
+                explanation=(
+                    "The replayed global delete is not reflected in the "
+                    "dict model behind this module __dict__, so any view "
+                    "derived from it would still contain the deleted name. "
+                    "Eager resume has to run the access instead."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
     def check_deleted_global_write(self, globals_dict: Any, name: str | None) -> None:
         entry = self.deleted_globals_by_dict.get(id(globals_dict))
         if entry is not None and (name is None or name in entry[1]):

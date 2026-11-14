@@ -1969,9 +1969,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         key: tuple[object, ...]
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
-            key = (self.fn, *(type(x) for x in args), True)
+            key = (self.fn, *map(type, args), True)
         else:
-            key = (self.fn, *(type(x) for x in args))
+            key = (self.fn, *map(type, args))
 
         handler = self.call_function_handler_cache.get(key)
         if not handler:
@@ -3739,12 +3739,15 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             and isinstance(args[0], variables.PythonModuleVariable)
             and args[1].is_python_constant()
         ):
-            # Above tp_getattro: the read below would return the stale
-            # pre-call value, or an Unsupported raised there gets folded to
-            # it here.
-            tx.output.check_deleted_global_read(
-                args[0].value.__dict__, args[1].as_python_constant()
-            )
+            if args[1].as_python_constant() == "__dict__":
+                tx.output.check_deleted_global_dict_handout(args[0].value.__dict__)
+            else:
+                # Above tp_getattro: the read below would return the stale
+                # pre-call value, or an Unsupported raised there gets folded
+                # to it here.
+                tx.output.check_deleted_global_read(
+                    args[0].value.__dict__, args[1].as_python_constant()
+                )
         try:
             fold_constant = False
             if args[1].is_python_constant():
@@ -3840,23 +3843,10 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
             ]
         if len(args) != 2 or kwargs:
             raise_observed_exception(TypeError, tx)
+        from .object_protocol import generic_hasattr
+
         obj, attr = args
-        if not attr.is_python_constant():
-            raise_observed_exception(TypeError, tx)
-        attr_name = attr.as_python_constant()
-        if not isinstance(attr_name, str):
-            raise_type_error(
-                tx, f"attribute name must be string, not '{attr.python_type_name()}'"
-            )
-        result = obj.call_obj_hasattr(tx, attr_name)
-        if result is None:
-            unimplemented(
-                gb_type="hasattr() on unsupported type",
-                context=f"hasattr({obj}, {attr})",
-                explanation=f"hasattr() is not supported on type {obj.python_type_name()}",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return result
+        return generic_hasattr(tx, obj, attr)
 
 
 class SetAttrBuiltinVariable(BaseBuiltinVariable):

@@ -20,6 +20,8 @@ These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Ea
   - **All NCCL backends.** Control whether or not wait() is blocking or non-blocking. Default: ``0``.
 * - ``TORCH_NCCL_USE_COMM_NONBLOCKING``
   - **All NCCL backends.** If set to ``1``, create NCCL communicators in nonblocking mode. An explicit ``blocking`` value in the NCCL config takes precedence. Default: ``0``.
+* - ``TORCH_NCCL_ENCRYPTION_PSK``
+  - **`nccl` and `nccl-lazy` only.** Pre-shared key for NCCL socket encryption, used when ``ProcessGroupNCCL.Options.encryption_psk`` is unset and no key has been applied yet; see that option for requirements. Has no effect when ``nccl`` resolves to ``nccl-legacy`` or torchcomms. Group or communicator creation fails if the key can't be applied, including when set after a keyless nccl2 group was created. Never logged. Default: unset.
 * - ``TORCH_NCCL_NONBLOCKING_TIMEOUT``
   - **nccl-legacy only.** Timeout in seconds for nonblocking NCCL communicator operations (init, abort, finalize). Default: ``1800``.
 * - ``TORCH_NCCL_RANKS_PER_ROOT``

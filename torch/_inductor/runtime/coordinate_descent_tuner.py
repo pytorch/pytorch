@@ -71,7 +71,7 @@ class CoordescTuner:
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
 
-        # Native matmul codegen assumes ZBLOCK=1 always.
+        # Native matmul codegen assumes Z0_BLOCK=1 always.
         # This is because 3d tl.dot is slow and so we want to tile y and x only.
         # tl.dot also does not support size smaller than 16; we put this restriction.
         self.is_native_matmul = is_native_matmul
@@ -122,7 +122,7 @@ class CoordescTuner:
         out: list[str] = [
             "XBLOCK",
             "YBLOCK",
-            "ZBLOCK",
+            "Z0_BLOCK",
             # NOTE: we should not tune R0_BLOCK for persistent reduction.
             # We rely on the fact that persistent reduction's triton.Config
             # does not have the R0_BLOCK field to guarantee that.
@@ -141,7 +141,7 @@ class CoordescTuner:
             out.append("waves_per_eu")
         if self.is_native_matmul:
             out.append("num_stages")
-            out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
+            out.remove("Z0_BLOCK")  # Z0_BLOCK=1 always in native matmul
 
         if self.is_mix_order_reduction:
             # unlike TritonConfig.num_stages, this one is
@@ -440,7 +440,7 @@ class CoordescTuner:
             # improvement immediately so subsequent fields see the
             # updated working point.
             for field in self.tunable_fields:
-                # Some kernels don't have R0_BLOCK / YBLOCK / ZBLOCK,
+                # Some kernels don't have R0_BLOCK / YBLOCK / Z0_BLOCK,
                 # so the field may be absent from ``best_config``.
                 # Filter here so ``get_neighbour_configs`` can assume
                 # the field is present.

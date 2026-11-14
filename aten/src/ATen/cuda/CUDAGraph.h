@@ -127,6 +127,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void begin_capture_to_conditional_node(
       const Tensor& scalar_cuda_pred_tensor,
       cudaGraphConditionalNodeType conditional_type);
+  void route_pool_to_innermost_capture();
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 
  protected:
