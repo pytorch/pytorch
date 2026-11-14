@@ -151,7 +151,7 @@ Example::
 add_docstr_all(
     "new_empty_strided",
     """
-new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+new_empty_strided(size, stride, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
 pin_memory=False) -> Tensor
 """
     + r"""
@@ -1131,13 +1131,13 @@ Returns :attr:`self` if :attr:`self` is a coalesced tensor.
 add_docstr_all(
     "contiguous",
     r"""
-contiguous(memory_format=torch.contiguous_format) -> Tensor
+contiguous(*, memory_format=torch.contiguous_format) -> Tensor
 
 Returns a contiguous in memory tensor containing the same data as :attr:`self` tensor. If
 :attr:`self` tensor is already in the specified memory format, this function returns the
 :attr:`self` tensor.
 
-Args:
+Keyword args:
     memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.contiguous_format``.
 """,
@@ -4249,12 +4249,12 @@ Example::
 add_docstr_all(
     "resize_as_",
     r"""
-resize_as_(tensor, memory_format=torch.contiguous_format) -> Tensor
+resize_as_(tensor, *, memory_format=torch.contiguous_format) -> Tensor
 
 Resizes the :attr:`self` tensor to be the same size as the specified
 :attr:`tensor`. This is equivalent to ``self.resize_(tensor.size())``.
 
-Args:
+Keyword args:
     memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         Tensor. Default: ``torch.contiguous_format``. Note that memory format of
         :attr:`self` is going to be unaffected if ``self.size()`` matches ``tensor.size()``.
