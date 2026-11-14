@@ -1340,6 +1340,13 @@ class FakeTensorConverter:
         if maybe_memo is not None:
             if t.is_mkldnn and not maybe_memo.is_mkldnn:
                 maybe_set_fake_dispatch_keys(maybe_memo, torch._C._dispatch_keys(t))
+            if (
+                t.requires_grad
+                and not maybe_memo.is_leaf
+                and t.retains_grad
+                and not maybe_memo.retains_grad
+            ):
+                maybe_memo.retain_grad()
             return maybe_memo
         # not yet supported in metatensors
         if t.is_quantized:
@@ -1417,6 +1424,13 @@ class FakeTensorConverter:
             and out.is_leaf
         ):
             out.grad_dtype = inner_t.grad_dtype
+        if (
+            inner_t.requires_grad
+            and not out.is_leaf
+            and inner_t.retains_grad
+            and not out.retains_grad
+        ):
+            out.retain_grad()
 
         # Propagate backend-specific metadata (e.g. PrivateUse1 BackendMeta) from
         # the (unwrapped) real tensor onto the fake tensor. for_fake lets the

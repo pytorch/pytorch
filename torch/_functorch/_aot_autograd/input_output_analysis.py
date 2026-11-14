@@ -134,6 +134,7 @@ def remove_dupe_metadata(
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=subclass_tangent_meta,
+        outer_mutated_non_leaf_arg_positions=m.outer_mutated_non_leaf_arg_positions,
     )
 
 
@@ -174,7 +175,8 @@ def create_synthetic_base_metadata(
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
     # pyrefly: ignore [implicit-any]
     input_infos = []
-    for outer_indices in synthetic_base_to_indices.values():
+    for inner_idx, outer_indices in synthetic_base_to_indices.items():
+        inner_arg = inner_args[inner_idx]
         # leaf-ness should be all-or-nothing for aliased tensor.
         # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
         any_leaf = any(m.input_info[x].is_leaf for x in outer_indices)
@@ -229,6 +231,11 @@ def create_synthetic_base_metadata(
             is_leaf=any_leaf,
             requires_grad=requires_grad,
             keep_input_mutations=m.keep_input_mutations,
+            retains_grad=(
+                m.input_info[outer_indices[0]].retains_grad
+                if len(outer_indices) == 1
+                else (isinstance(inner_arg, Tensor) and inner_arg.retains_grad)
+            ),
         )
         input_infos.append(inpt_info)
 
@@ -342,6 +349,7 @@ def create_synthetic_base_metadata(
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],
             subclass_tangent_meta=subclass_tangent_meta,
+            outer_mutated_non_leaf_arg_positions=m.outer_mutated_non_leaf_arg_positions,
         ),
         outer_aliased_arg_idx_with_metadata_mutations,
     )

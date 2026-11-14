@@ -14,6 +14,7 @@ import itertools
 import pprint
 import typing
 import warnings
+import weakref
 from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -3200,6 +3201,152 @@ def _codegen_backward_prologue(
     return buf.build()
 
 
+def _has_saved_ctx_edge(target: Tensor, saved_ctx: Any) -> bool:
+    cur: Tensor | None = target
+    cur_gf = cur.grad_fn
+    if cur_gf is None:
+        return False
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if any(nf is saved_ctx for nf, _ in cur_gf.next_functions):
+            return True
+        if not cur._is_view() or (base := cur._base) is None:
+            break
+        base_gf = base.grad_fn
+        if base_gf is None or not any(nf is base_gf for nf, _ in cur_gf.next_functions):
+            break
+        cur = base
+        cur_gf = base_gf
+    return False
+
+
+def _accumulate_mutated_inp_grad(
+    target: Tensor | None, saved_ctx: Any, g: Tensor
+) -> None:
+    if (
+        target is None
+        or saved_ctx is None
+        or not target.retains_grad
+        or target.shape != g.shape
+        or not _has_saved_ctx_edge(target, saved_ctx)
+    ):
+        return
+    with torch.no_grad():
+        if target.grad is None:
+            target.grad = (
+                g.clone()
+                if g.layout != torch.strided
+                else g.clone(memory_format=torch.contiguous_format)
+            )
+        else:
+            target.grad = target.grad + g
+
+
+def _defer_mutated_inp_retain_grad(
+    triggers: Sequence[tuple[int, weakref.ref[Tensor] | None]],
+    bw_out: Sequence[Any],
+    target_ref: weakref.ref[Tensor],
+    ctx: Any,
+    g: Tensor,
+) -> None:
+    """Defer retained-grad accumulation to the active backward edges of all
+    inputs contributing to the mutated value, cleaning up via queue_callback."""
+    ctx_ref = weakref.ref(ctx)
+    next_fns = ctx.next_functions
+    handles: list[Any] = []
+    fired = False
+
+    def _cleanup() -> None:
+        while handles:
+            handles.pop().remove()
+
+    def _fire(*_args: Any) -> None:
+        nonlocal fired
+        if fired:
+            return
+        fired = True
+        _cleanup()
+        _accumulate_mutated_inp_grad(target_ref(), ctx_ref(), g)
+
+    for dep_idx, dep_ref in triggers:
+        if bw_out[dep_idx] is None:
+            continue
+        if dep_ref is not None and (dep_t := dep_ref()) is not None:
+            if dep_t.requires_grad:
+                handles.append(dep_t.register_hook(_fire))
+        elif dep_idx < len(next_fns) and (nf := next_fns[dep_idx][0]) is not None:
+            handles.append(nf.register_prehook(_fire))
+
+    if handles:
+        torch.autograd.Variable._execution_engine.queue_callback(_cleanup)
+    else:
+        _accumulate_mutated_inp_grad(target_ref(), ctx_ref(), g)
+
+
+_MutatedInpCaptureSpec = tuple[tuple[int, tuple[tuple[int, bool], ...]], ...]
+
+
+def _capture_mutated_inp_retain_grad_refs(
+    args: Sequence[Any],
+    spec: _MutatedInpCaptureSpec,
+) -> tuple[
+    tuple[weakref.ref[Tensor], tuple[tuple[int, weakref.ref[Tensor] | None], ...]],
+    ...,
+]:
+    return tuple(
+        (
+            weakref.ref(args[idx]),
+            tuple(
+                (dep_idx, weakref.ref(args[dep_idx]) if keep_ref else None)
+                for dep_idx, keep_ref in dep_specs
+            ),
+        )
+        for idx, dep_specs in spec
+    )
+
+
+def _strip_and_schedule_mutated_inp_grads(
+    out: tuple[Any, ...],
+    ctx: Any,
+    num_mut_grads: int,
+) -> tuple[Any, ...]:
+    mut_grads = out[-num_mut_grads:]
+    primal_grads = out[:-num_mut_grads]
+    if ctx is not None:
+        for (target_ref, triggers), g in zip(ctx._mutated_inp_refs, mut_grads):
+            if g is not None:
+                _defer_mutated_inp_retain_grad(
+                    triggers, primal_grads, target_ref, ctx, g
+                )
+    return primal_grads
+
+
+def _install_mutated_inp_retain_grad_guards(
+    aot_config: AOTConfig,
+    outer_arg_positions: Sequence[int],
+) -> None:
+    if (
+        not outer_arg_positions
+        or aot_config.is_export
+        or aot_config.no_tangents
+        or not aot_config.aot_autograd_arg_pos_to_source
+        or TracingContext.try_get() is None
+    ):
+        return
+    from torch._dynamo.guards import GuardBuilder, install_guard
+    from torch._dynamo.source import AttrSource
+
+    sources = aot_config.aot_autograd_arg_pos_to_source
+    guards = [
+        AttrSource(src, "retains_grad").make_guard(GuardBuilder.EQUALS_MATCH)
+        for pos in outer_arg_positions
+        if pos < len(sources) and (src := sources[pos]) is not None
+    ]
+    if guards:
+        install_guard(*guards)
+
+
 def _codegen_backward_epilogue(
     fw_metadata: ViewAndMutationMeta,
     maybe_subclass_meta: SubclassMeta | None,
@@ -3210,11 +3357,21 @@ def _codegen_backward_epilogue(
     num_bw_tokens = fw_metadata.num_backward_tokens
     is_rng = fw_metadata.is_rng_op_functionalized
     has_subclass = maybe_subclass_meta is not None
+    # Note: backward output layout is [input grads | mutated-input grads | rng | tokens].
+    # Tokens/RNG are stripped first, subclasses are wrapped, then trailing
+    # mutated-input grads are stripped and scheduled for deferred accumulation.
+    num_mut_grads = len(
+        getattr(fw_metadata, "captured_mutated_inp_retain_grads", ())
+    )
 
     if has_subclass:
-        args = "out, make_subclass_override=None"
+        args = (
+            "out, make_subclass_override=None, *, ctx=None"
+            if num_mut_grads > 0
+            else "out, make_subclass_override=None"
+        )
     else:
-        args = "out"
+        args = "out, *, ctx=None" if num_mut_grads > 0 else "out"
     buf = PySourceBuilder(
         "_backward_epilogue", args=args, artifact_name="backward_epilogue"
     )
@@ -3244,19 +3401,44 @@ def _codegen_backward_epilogue(
             buf.bind(
                 _grad_input_metas_=maybe_subclass_meta.grad_input_metas
             )  # pyrefly: ignore [missing-attribute]
-            if codegen_wrap_fn is not None:
+            if num_mut_grads == 0:
+                if codegen_wrap_fn is not None:
+                    buf.bind(_wrap_=codegen_wrap_fn)
+                    buf.writeline("if make_subclass_override is None:")
+                    with buf.indent():
+                        buf.writeline("return _wrap_(out)")
+                buf.writeline(
+                    "return _wrap_subclasses_(out, "
+                    "subclass_metas=_grad_input_metas_, "
+                    "included_subclass_symints=True, is_runtime=True, "
+                    "make_subclass_override=make_subclass_override)"
+                )
+            elif codegen_wrap_fn is not None:
                 buf.bind(_wrap_=codegen_wrap_fn)
                 buf.writeline("if make_subclass_override is None:")
                 with buf.indent():
-                    buf.writeline("return _wrap_(out)")
-            buf.writeline(
-                "return _wrap_subclasses_(out, "
-                "subclass_metas=_grad_input_metas_, "
-                "included_subclass_symints=True, is_runtime=True, "
-                "make_subclass_override=make_subclass_override)"
-            )
-        else:
+                    buf.writeline("out = _wrap_(out)")
+                buf.writeline("else:")
+                with buf.indent():
+                    buf.writeline(
+                        "out = _wrap_subclasses_(out, "
+                        "subclass_metas=_grad_input_metas_, "
+                        "included_subclass_symints=True, is_runtime=True, "
+                        "make_subclass_override=make_subclass_override)"
+                    )
+            else:
+                buf.writeline(
+                    "out = _wrap_subclasses_(out, "
+                    "subclass_metas=_grad_input_metas_, "
+                    "included_subclass_symints=True, is_runtime=True, "
+                    "make_subclass_override=make_subclass_override)"
+                )
+        elif num_mut_grads == 0:
             buf.writeline("return out")
+
+        if num_mut_grads > 0:
+            buf.bind(_strip_mut_grads_=_strip_and_schedule_mutated_inp_grads)
+            buf.writeline(f"return _strip_mut_grads_(out, ctx, {num_mut_grads})")
 
     return buf.build()
 
@@ -3268,6 +3450,10 @@ def _codegen_compiled_forward(
     num_rng: int,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
+
+    captured_mut_grads = getattr(
+        fw_metadata, "captured_mutated_inp_retain_grads", ()
+    )
 
     buf = PySourceBuilder(
         "_compiled_forward",
@@ -3287,6 +3473,20 @@ def _codegen_compiled_forward(
                     "f'expected BackwardState, got {type(_bw_state)}')"
                 )
             buf.writeline("ctx._compiled_autograd_backward_state = _bw_state")
+
+        if captured_mut_grads:
+            mutated_set = set(getattr(fw_metadata, "mutated_inp_runtime_indices", ()))
+            capture_spec = tuple(
+                (idx, tuple((d, d not in mutated_set) for d in dep_idxs))
+                for idx, dep_idxs in captured_mut_grads
+            )
+            buf.bind(
+                _capture_mut_refs_=_capture_mutated_inp_retain_grad_refs,
+                _mut_capture_spec_=capture_spec,
+            )
+            buf.writeline(
+                "ctx._mutated_inp_refs = _capture_mut_refs_(args, _mut_capture_spec_)"
+            )
 
         if num_rng > 0:
             buf.writeline("args = _rng_add_(ctx, args)")
@@ -3387,6 +3587,8 @@ def _codegen_compiled_backward(
     num_rng: int,
     num_tensors_no_vc_check: int | None,
     inputs_require_grad: bool,
+    *,
+    has_mutated_inp_retain_grad: bool = False,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
@@ -3432,7 +3634,10 @@ def _codegen_compiled_backward(
         buf.writeline("def impl_fn(double_ctx=None):")
         with buf.indent():
             buf.writeline("out = _impl_(_ctx_, all_args)")
-            buf.writeline("return _epilogue_(out)")
+            if has_mutated_inp_retain_grad:
+                buf.writeline("return _epilogue_(out, ctx=_ctx_)")
+            else:
+                buf.writeline("return _epilogue_(out)")
 
         buf.writeline(
             "if (torch._C._is_key_in_tls('context')"
@@ -3525,6 +3730,9 @@ class _AOTDispatchAutogradFunctionFactory:
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
             any(inp.requires_grad for inp in fw_metadata.input_info),
+            has_mutated_inp_retain_grad=bool(
+                fw_metadata.captured_mutated_inp_retain_grads
+            ),
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
@@ -3933,6 +4141,11 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
 
     @staticmethod
     def post_compile(spec: AOTDispatchAutogradCompileSpec) -> Callable[..., Any]:
+        _install_mutated_inp_retain_grad_guards(
+            spec.aot_config,
+            getattr(spec.fw_metadata, "outer_mutated_non_leaf_arg_positions", None)
+            or (),
+        )
         compiled_function_cls = _AOTDispatchAutogradFunctionFactory(spec).build()
         return RuntimeWrapper(
             indices_of_inps_to_detach=spec.indices_of_inps_to_detach,

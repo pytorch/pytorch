@@ -507,7 +507,14 @@ def aot_dispatch_autograd_graph(
         aot_config,
     )
     joint_fn_to_trace = create_joint(
-        fn_prepared_for_autograd, flat_args_descs, aot_config=aot_config
+        fn_prepared_for_autograd,
+        flat_args_descs,
+        aot_config=aot_config,
+        mutated_inp_retain_grad_indices=(
+            fw_metadata.mutated_inp_retain_grad_indices
+            if not aot_config.is_export and not aot_config.no_tangents
+            else ()
+        ),
     )
     # pyrefly: ignore[missing-attribute]
     joint_fn_handle = joint_fn_to_trace.handle
@@ -542,6 +549,9 @@ def aot_dispatch_autograd_graph(
         updated_joint_inputs,
         updated_joint_inputs_descs,
         aot_config=aot_config,
+    )
+    fw_metadata.captured_mutated_inp_retain_grads = (
+        joint_fn_handle.captured_mutated_inp_retain_grads
     )
 
     # Redundant with the check above, but worth having in case tracing introduced

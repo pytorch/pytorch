@@ -2029,6 +2029,339 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     return (transpose, add, add_1, diagonal, add_2)""",
         )
 
+    def _check_retain_grad_parity(self, fn, run_fn):
+        exp = run_fn(fn)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        self.assertEqual(run_fn(compiled_fn), exp)
+
+    def test_input_mutation_retain_grad_non_leaf(self):
+        def mul_sq(x):
+            x.mul_(3)
+            return x.square()
+
+        def unused_after_mut(x):
+            y = x + 2
+            x.mul_(3)
+            return y
+
+        def make_inp():
+            leaf = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+            x = leaf * 2
+            x.retain_grad()
+            return [leaf], [x]
+
+        # Exercises TestAOTAutograd, Dynamo, and AOTAutogradCache round-trip
+        self.verify_aot_autograd(mul_sq, make_inp, test_mutation=True)
+
+        for target_fn in (mul_sq, unused_after_mut):
+            for scale in (0.0, 7.0, float("inf"), -float("inf")):
+                with self.subTest(fn=target_fn.__name__, scale=scale):
+
+                    def run(fn, s=scale):
+                        leaf = torch.arange(
+                            1, 5, dtype=torch.float32, requires_grad=True
+                        )
+                        x = leaf * 2
+                        x.retain_grad()
+                        y = fn(x)
+                        loss = y.sum() if s == 0.0 else y.sum() + s * x.sum()
+                        loss.backward()
+                        return x.grad, leaf.grad
+
+                    self._check_retain_grad_parity(target_fn, run)
+
+        def run_retain_graph_and_autograd_grad(fn):
+            leaf = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+            x = leaf * 2
+            x.retain_grad()
+            y = fn(x)
+            y.sum().backward(retain_graph=True)
+            y.sum().backward()
+            leaf2 = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+            x2 = leaf2 * 2
+            x2.retain_grad()
+            (g_leaf2,) = torch.autograd.grad(fn(x2).sum(), (leaf2,))
+            return x.grad, leaf.grad, g_leaf2, x2.grad
+
+        self._check_retain_grad_parity(mul_sq, run_retain_graph_and_autograd_grad)
+
+    def test_input_mutation_retain_grad_guard_specialization(self):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        # Unmutated non-leaf inputs must NOT install retains_grad guards or recompile
+        def add_only(x, y):
+            return (x + y).square()
+
+        cnt_unmut = CompileCounterWithBackend("aot_eager")
+        compiled_add = torch.compile(add_only, backend=cnt_unmut, fullgraph=True)
+        lu0 = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+        lu1 = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+        compiled_add(lu0 * 2, lu1 * 3).sum().backward()
+        self.assertEqual(cnt_unmut.frame_count, 1)
+
+        xu = lu0.detach().clone().requires_grad_(True) * 2
+        xu.retain_grad()
+        compiled_add(xu, lu1.detach().clone().requires_grad_(True) * 3).sum().backward()
+        self.assertEqual(xu.grad, torch.tensor([10.0, 20.0, 30.0, 40.0]))
+        self.assertEqual(cnt_unmut.frame_count, 1)
+
+        # Mutated non-leaf inputs lazily install retains_grad guard and specialize
+        def mul_sq(x):
+            x.mul_(3)
+            return x.square()
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        compiled_mul_sq = torch.compile(mul_sq, backend=cnt, fullgraph=True)
+        leaf0 = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+        compiled_mul_sq(leaf0 * 2).sum().backward()
+        self.assertEqual(cnt.frame_count, 1)
+
+        leaf1 = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+        x1 = leaf1 * 2
+        x1.retain_grad()
+        compiled_mul_sq(x1).sum().backward()
+        self.assertEqual(x1.grad, torch.tensor([12.0, 24.0, 36.0, 48.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_input_mutation_retain_grad_views_multi_and_partial(self):
+        # Direct non-leaf reshape, slice, and multi-level chained views (CopySlices)
+        for make_view in (
+            lambda t: t.reshape(2, 6),
+            lambda t: t[:6],
+            lambda t: t.view(3, 4).transpose(0, 1)[1:3],
+        ):
+
+            def view_mut(v):
+                v.mul_(3)
+                return v.square()
+
+            def view_mut_linear(v):
+                v.mul_(3)
+                return v + 5
+
+            def run_view(fn, mv=make_view):
+                leaf = torch.arange(1, 13, dtype=torch.float32, requires_grad=True)
+                base = leaf * 2
+                v = mv(base)
+                v.retain_grad()
+                fn(v).sum().backward()
+                return v.grad, leaf.grad
+
+            def run_view_post_fw_mut(fn, mv=make_view):
+                leaf2 = torch.arange(1, 13, dtype=torch.float32, requires_grad=True)
+                v2 = mv(leaf2 * 2)
+                v2.retain_grad()
+                y2 = fn(v2)
+                v2.add_(100.0)
+                y2.sum().backward()
+                return v2.grad, leaf2.grad
+
+            self._check_retain_grad_parity(view_mut, run_view)
+            self._check_retain_grad_parity(view_mut_linear, run_view_post_fw_mut)
+
+        # Multi-input non-zero slot & post-forward mutation
+        def multi_mut(a, x, y):
+            x.mul_(3)
+            y.add_(1)
+            return (a + x + y).sum()
+
+        def run_multi_and_post_mut(fn):
+            la = torch.ones(4, dtype=torch.float32, requires_grad=True)
+            lx = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+            ly = torch.arange(2, 6, dtype=torch.float32, requires_grad=True)
+            x, y = lx * 2, ly * 3
+            x.retain_grad()
+            fn(la, x, y).backward()
+            return x.grad, lx.grad, ly.grad
+
+        self._check_retain_grad_parity(multi_mut, run_multi_and_post_mut)
+
+        # Unrelated retain_grad input alongside synthetic-base aliased inputs (under debug_assert)
+        def aliased_plus_retain_grad(a, b, z):
+            a.add_(1.0)
+            z.mul_(3.0)
+            return (a + b).sum() + z.square().sum()
+
+        with patch("functorch.compile.config.debug_assert", True):
+
+            def run_synth_plus_retain(fn):
+                l_ab = torch.ones(4, dtype=torch.float32, requires_grad=True)
+                l_z = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+                base_ab = l_ab * 2
+                z = l_z * 2
+                z.retain_grad()
+                fn(base_ab[:2], base_ab[:2], z).backward()
+                return z.grad, l_ab.grad, l_z.grad
+
+            self._check_retain_grad_parity(
+                aliased_plus_retain_grad, run_synth_plus_retain
+            )
+
+        def mul_add(x):
+            x.mul_(3)
+            return x + 5
+
+        def run_post_fw_mut(fn):
+            leaf = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+            x = leaf * 2
+            x.retain_grad()
+            y = fn(x)
+            x.add_(100.0)
+            y.sum().backward()
+            return x.grad, leaf.grad
+
+        self._check_retain_grad_parity(mul_add, run_post_fw_mut)
+
+        # Overwrite mutations (grad donor copy_ & non-grad zero_ overwrite, full & partial grad)
+        def overwrite_ops(x, w):
+            x.copy_(w)
+            return x.square()
+
+        def zero_overwrite(x, p):
+            x.zero_()
+            x.add_(3.0)
+            return x.square() + p * 2
+
+        for target_fn in (overwrite_ops, zero_overwrite):
+
+            def run_ovw(fn):
+                leaf = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+                w = torch.tensor([3.0, 4.0, 5.0, 6.0], requires_grad=True)
+                x = leaf * 2
+                x.retain_grad()
+                fn(x, w).sum().backward()
+                return x.grad, leaf.grad, w.grad
+
+            self._check_retain_grad_parity(target_fn, run_ovw)
+
+        def copy_plus_other(x, w, other):
+            x.copy_(w)
+            return x.square() + other * 5
+
+        def run_copy_partial(fn):
+            # 1. autograd.grad w.r.t. leaf donor w, non-leaf donor w, and excluded other
+            for w_non_leaf in (False, True):
+                l1 = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+                x1 = l1 * 2
+                x1.retain_grad()
+                lw1 = torch.tensor([3.0, 4.0, 5.0, 6.0], requires_grad=True)
+                w1 = lw1 * 1.0 if w_non_leaf else lw1
+                oth1 = torch.ones(4, dtype=torch.float32, requires_grad=True)
+                loss1 = fn(x1, w1, oth1).sum()
+                (g_oth,) = torch.autograd.grad(loss1, (oth1,), retain_graph=True)
+                xg_after_oth = None if x1.grad is None else x1.grad.clone()
+                (g_w,) = torch.autograd.grad(loss1, (w1,), retain_graph=True)
+                xg_after_ag_w = None if x1.grad is None else x1.grad.clone()
+                x1.grad = None
+                loss1.backward(inputs=[w1])
+                if w_non_leaf:
+                    res_non_leaf = (g_oth, xg_after_oth, g_w, xg_after_ag_w, x1.grad, w1.grad)
+                else:
+                    res_leaf = (g_oth, xg_after_oth, g_w, xg_after_ag_w, x1.grad, w1.grad)
+            return res_leaf, res_non_leaf
+
+        self._check_retain_grad_parity(copy_plus_other, run_copy_partial)
+
+        # Partial differentiation exclusion (backward(inputs=[w]), autograd.grad, retain_graph)
+        def mul_w(x, w):
+            x.mul_(3)
+            return x.square(), w * 2
+
+        def run_partial(fn):
+            leaf = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+            x = leaf * 2
+            x.retain_grad()
+            w = torch.ones(4, dtype=torch.float32, requires_grad=True)
+            o0, o1 = fn(x, w)
+            loss = o0.sum() + o1.sum()
+            (g_w,) = torch.autograd.grad(loss, (w,), retain_graph=True)
+            g_after_ag = None if x.grad is None else x.grad.clone()
+            loss.backward(inputs=[w], retain_graph=True)
+            g_after_bw_w = None if x.grad is None else x.grad.clone()
+            loss.backward(inputs=[leaf])
+            return g_w, g_after_ag, g_after_bw_w, x.grad, leaf.grad
+
+        self._check_retain_grad_parity(mul_w, run_partial)
+
+    def test_input_mutation_retain_grad_subclass_and_export(self):
+        from torch._dynamo import compiled_autograd
+        from torch._functorch._aot_autograd.descriptors import (
+            DummyAOTOutput,
+            InputMutationGradAOTOutput,
+        )
+        from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
+
+        def mul_sq(x):
+            x.mul_(3)
+            return x.square()
+
+        def run_subclass(fn):
+            la = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+            lb = torch.arange(5, 9, dtype=torch.float32, requires_grad=True)
+            tt = TwoTensor(la, lb) * 2
+            tt.retain_grad()
+            fn(tt).sum().backward()
+            return tt.grad.a, tt.grad.b
+
+        self._check_retain_grad_parity(mul_sq, run_subclass)
+
+        class Mod(torch.nn.Module):
+            def forward(self, t):
+                t.mul_(3)
+                return t.sum()
+
+        x = torch.arange(1, 5, dtype=torch.float32, requires_grad=True) * 2
+        with ExitStack() as stack:
+            j0 = aot_export_joint_with_descriptors(stack, Mod(), (x,))
+            d0 = next(
+                n for n in j0.graph_module.graph.nodes if n.op == "output"
+            ).meta.get("desc", [])
+            self.assertFalse(any(isinstance(d, InputMutationGradAOTOutput) for d in d0))
+
+        x.retain_grad()
+        with ExitStack() as stack:
+            j1 = aot_export_joint_with_descriptors(stack, Mod(), (x,))
+            d1 = next(
+                n for n in j1.graph_module.graph.nodes if n.op == "output"
+            ).meta.get("desc", [])
+            self.assertTrue(any(isinstance(d, InputMutationGradAOTOutput) for d in d1))
+            self.assertFalse(any(isinstance(d, DummyAOTOutput) for d in d1))
+
+        def run_compiled_autograd(fn):
+            leaf = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+            x_ca = leaf * 2
+            y = fn(x_ca)
+            with (
+                compiled_autograd._enable(lambda gm: gm.forward),
+                torch.autograd.set_multithreading_enabled(False),
+            ):
+                y.sum().backward()
+            return leaf.grad
+
+        self._check_retain_grad_parity(mul_sq, run_compiled_autograd)
+
+    @unittest.expectedFailure
+    def test_input_mutation_retain_grad_compiled_autograd(self):
+        from torch._dynamo import compiled_autograd
+
+        def mul_sq(x):
+            x.mul_(3)
+            return x.square()
+
+        def run_ca(fn):
+            leaf = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+            x = leaf * 2
+            x.retain_grad()
+            y = fn(x)
+            with (
+                compiled_autograd._enable(lambda gm: gm.forward),
+                torch.autograd.set_multithreading_enabled(False),
+            ):
+                y.sum().backward()
+            return x.grad, leaf.grad
+
+        self._check_retain_grad_parity(mul_sq, run_ca)
+
     def test_output_aliases_intermediate_single(self):
         def f(a):
             out = torch.mul(a, 3)

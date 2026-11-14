@@ -145,6 +145,7 @@ class InputAliasInfo:
     mutation_is_shallow_copy_data: bool
     requires_grad: bool
     keep_input_mutations: bool
+    retains_grad: bool = False
 
     def __post_init__(self) -> None:
         if self.mutates_storage_metadata:
@@ -589,6 +590,17 @@ class ViewAndMutationMeta:
     # compile ID string (e.g., "1/0") for error messages
     compile_id_str: str | None = None
 
+    # Positions in the outer (pre-wrapper) flat argument list — matching
+    # AOTConfig.aot_autograd_arg_pos_to_source — of non-leaf differentiable
+    # inputs with autograd-visible data mutations. Preserved across wrapper
+    # metadata rewrites (dedupe, synthetic bases, subclasses) that re-index
+    # input_info into inner graph positions.
+    outer_mutated_non_leaf_arg_positions: tuple[int, ...] | None = None
+
+    # Populated when joint graph capture emits InputMutationGradAOTOutput slots:
+    # each entry is (inner_mutated_input_idx, contributing_inner_primal_indices).
+    captured_mutated_inp_retain_grads: tuple[tuple[int, tuple[int, ...]], ...] = ()
+
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: list[str | None] | None = None
 
@@ -651,6 +663,26 @@ class ViewAndMutationMeta:
         # of input_info that corresponds to a mutation (data or metadata or both)
         self.mutated_inp_runtime_indices = mutated_inp_runtime_indices
         self.num_mutated_inp_runtime_indices = len(self.mutated_inp_runtime_indices)
+
+        # Inner-graph positions of non-leaf differentiable inputs experiencing
+        # autograd-visible data mutations; outer_mutated_non_leaf_arg_positions
+        # defaults to these on initial collection and stays fixed across wrapper rewrites.
+        inner_mutated_non_leaf_indices: tuple[int, ...] = tuple(
+            i
+            for i in mutated_inp_runtime_indices
+            if (
+                self.input_info[i].mutates_data
+                and self.input_info[i].requires_grad
+                and not self.input_info[i].is_leaf
+            )
+        )
+        if self.outer_mutated_non_leaf_arg_positions is None:
+            self.outer_mutated_non_leaf_arg_positions = inner_mutated_non_leaf_indices
+        self.mutated_inp_retain_grad_indices = [
+            i
+            for i in inner_mutated_non_leaf_indices
+            if self.input_info[i].retains_grad
+        ]
 
         # This is pre-computed for perf.
         # It contains the index of every element
@@ -890,6 +922,8 @@ class ViewAndMutationMeta:
                 for x, y in zip(self.traced_tangents, other.traced_tangents)
             )
             and self.num_backward_tokens == other.num_backward_tokens
+            and self.captured_mutated_inp_retain_grads
+            == other.captured_mutated_inp_retain_grads
         )
 
 
