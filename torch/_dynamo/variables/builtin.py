@@ -2608,11 +2608,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_dir(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
-        if tx.output.deleted_globals_by_dict and isinstance(
-            arg, variables.PythonModuleVariable
-        ):
-            # dir() lists the deleted name; the folded list below is stale.
-            tx.output.check_deleted_global_dict_handout(arg.value.__dict__)
         if isinstance(arg, variables.UserDefinedClassVariable):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
@@ -3739,23 +3734,6 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             ]
         no_keywords(tx, "getattr", kwargs)
         check_positional(tx, "getattr", len(args), 2, 3)
-        if (
-            tx.output.deleted_globals_by_dict
-            and isinstance(args[0], variables.PythonModuleVariable)
-            and args[1].is_python_constant()
-        ):
-            if args[1].as_python_constant() == "__dict__":
-                tx.output.check_deleted_global_dict_handout(args[0].value.__dict__)
-            elif not tx.output.side_effects.has_pending_mutation_of_attr(
-                args[0], args[1].as_python_constant()
-            ):
-                # Above tp_getattro: the read below would return the stale
-                # pre-call value, or an Unsupported raised there gets folded
-                # to it here. With a pending on the module VT (e.g. an
-                # inlined delete), the read resolves through it.
-                tx.output.check_deleted_global_read(
-                    args[0].value.__dict__, args[1].as_python_constant()
-                )
         try:
             fold_constant = False
             if args[1].is_python_constant():

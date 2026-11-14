@@ -2715,7 +2715,7 @@ class InstructionTranslatorBase(
         )
         if registered_module is None:
             unimplemented(
-                gb_type="DELETE_GLOBAL in unregistered module globals",
+                gb_type="DELETE_GLOBAL in non-module globals",
                 context=f"module_name: {self.f_globals.get('__name__')!r}",
                 explanation=(
                     "Dynamo cannot safely replay global deletes for a frame "
@@ -6653,11 +6653,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if isinstance(global_source, DictGetItemSource):
             unimplemented(
                 gb_type="DELETE_GLOBAL in non-module globals",
-                context=name,
+                context=f"module_name: {self.f_globals.get('__name__')!r}",
                 explanation=(
-                    "Dynamo cannot safely replay global deletes for an inlined "
-                    "function whose globals dict is not the registered module "
-                    "__dict__."
+                    "Dynamo cannot safely replay global deletes for a frame "
+                    "whose globals dict is not the registered module __dict__."
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )

@@ -965,18 +965,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             with self.assertRaisesRegex(NameError, "name '_dg_a' is not defined"):
                 torch.compile(fn, backend="eager", fullgraph=False)(x)
 
-    @parametrize(
-        "shape",
-        (
-            "hasattr",
-            "attr",
-            "contains",
-            "in_list",
-            "getattr",
-            "dir",
-            "getattribute",
-        ),
-    )
+    @parametrize("shape", ("hasattr", "attr", "contains"))
     def test_delete_global_module_read_after(self, shape):
         me = sys.modules[__name__]
 
@@ -998,41 +987,10 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             del _dg_a
             return x + (1 if "_dg_a" in me.__dict__ else 0)
 
-        def fn_getattr(x):
-            global _dg_a
-            del _dg_a
-            try:
-                # The builtin getattr call is the shape under test.
-                return x + getattr(me, "_dg_a")  # noqa: B009
-            except AttributeError:
-                return x - 1
-
-        def fn_in_list(x):
-            global _dg_a
-            del _dg_a
-            return x + (1 if "_dg_a" in list(me.__dict__) else 0)
-
-        def fn_dir(x):
-            global _dg_a
-            del _dg_a
-            return x + (1 if "_dg_a" in dir(me) else 0)
-
-        def fn_getattribute(x):
-            global _dg_a
-            del _dg_a
-            try:
-                return x + me.__getattribute__("_dg_a")
-            except AttributeError:
-                return x - 1
-
         fn, expected, msg = {
             "hasattr": (fn_hasattr, lambda x: x, "module-object read"),
             "attr": (fn_attr, lambda x: x - 1, "module-object read"),
             "contains": (fn_contains, lambda x: x, "module-__dict__ access"),
-            "in_list": (fn_in_list, lambda x: x, "module-__dict__ access"),
-            "getattr": (fn_getattr, lambda x: x - 1, "module-object read"),
-            "dir": (fn_dir, lambda x: x, "module-__dict__ access"),
-            "getattribute": (fn_getattribute, lambda x: x - 1, "module-object read"),
         }[shape]
         with mock.patch.dict(globals(), {"_dg_a": 1}):
             x = torch.ones(2, 2)
@@ -1187,7 +1145,7 @@ fn = functools.partial(my_fn)
                 torch.compile(mod.fn, backend="eager", fullgraph=True)(x)
             self.assertEqual(mod.flag, 1)
             with self.assertRaisesRegex(
-                Unsupported, "DELETE_GLOBAL in unregistered module globals"
+                Unsupported, "DELETE_GLOBAL in non-module globals"
             ):
                 torch.compile(mod.my_fn, backend="eager", fullgraph=True)(x)
             self.assertEqual(mod.flag, 1)

@@ -2591,27 +2591,17 @@ def generic_getattr(
 
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
-        if isinstance(obj, variables.PythonModuleVariable):
-            value = tx.output.side_effects.load_attr(obj, name, deleted_ok=True)
-            if not isinstance(value, variables.DeletedVariable):
-                # A pending descriptor store lands in module __dict__, so
-                # reading it back runs tp_descr_get the way type_getattro
-                # does; modules do not bind descriptors themselves.
-                if isinstance(
-                    value,
-                    (variables.StaticMethodVariable, variables.ClassMethodVariable),
-                ):
-                    return value.tp_descr_get_impl(tx, obj, obj)
-                return value
-            if default is _NO_DEFAULT:
-                raise_observed_exception(AttributeError, tx)
-            return default  # type: ignore[return-value]
-        if not isinstance(obj, variables.UserDefinedObjectVariable):
-            value = tx.output.side_effects.load_attr(obj, name)
-            # A pending store of a descriptor onto a class lands in cls.__dict__,
-            # so reading it back has to run tp_descr_get the way type_getattro
-            # does -- otherwise `C.h = staticmethod(f); type(C.h)` reports
-            # staticmethod instead of function.
+        is_module = isinstance(obj, variables.PythonModuleVariable)
+        if is_module or not isinstance(obj, variables.UserDefinedObjectVariable):
+            value = tx.output.side_effects.load_attr(obj, name, deleted_ok=is_module)
+            if isinstance(value, variables.DeletedVariable):
+                if default is _NO_DEFAULT:
+                    raise_observed_exception(AttributeError, tx)
+                return default  # type: ignore[return-value]
+            # A pending store of a descriptor lands in a dict (module or
+            # class __dict__), so reading it back has to run tp_descr_get the
+            # way type_getattro does -- otherwise `C.h = staticmethod(f)`;
+            # `type(C.h)` reports staticmethod instead of function.
             if isinstance(
                 value, (variables.StaticMethodVariable, variables.ClassMethodVariable)
             ):

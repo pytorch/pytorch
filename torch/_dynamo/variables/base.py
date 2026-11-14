@@ -2391,12 +2391,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return variables.ConstantVariable.create(
                 not isinstance(value, variables.DeletedVariable)
             )
-        if tx.output.deleted_globals_by_dict and isinstance(
-            self, variables.PythonModuleVariable
-        ):
-            # Above tp_getattro: call_obj_hasattr would swallow an Unsupported
-            # raised there and report a generic break instead.
-            tx.output.check_deleted_global_read(self.value.__dict__, name)
         return None
 
     def call_obj_hasattr(
