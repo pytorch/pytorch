@@ -313,9 +313,6 @@ non_decreasing_unary_ops = [
     aten.hardshrink.default,
     # I1(x) is monotonically non-decreasing for all real x.
     aten.special_modified_bessel_i1.default,
-    # threshold(x, t, v): x if x > t else v. Non-decreasing for v <= t (the
-    # common case, including the default v=0, t=0).
-    aten.threshold.default,
     # foreach variants
     aten._foreach_exp.default,
     aten._foreach_exp_.default,
@@ -330,6 +327,64 @@ _NON_DECREASING_RULES: list[list[Placement]] = [
 
 for op in non_decreasing_unary_ops:
     _register_single_dim_pointwise(op, _NON_DECREASING_RULES)
+
+
+def _register_threshold() -> None:
+    # threshold(x, t, v): x if x > t else v. Non-decreasing only when v <= t.
+    # When v > t, the operation is not monotone, so Partial(max) and Partial(min)
+    # must not be propagated.
+    _specially_registered_ops.add(aten.threshold.default)
+    inner_default = _common_pointwise_single_dim_strategy(partial_extra_rules=None)
+    inner_non_dec = _common_pointwise_single_dim_strategy(
+        partial_extra_rules=_NON_DECREASING_RULES
+    )
+
+    def threshold_strategy_fn(
+        op: OpOverload,
+        args: ArgsType,
+        kwargs: KwargsType,
+    ) -> list[list[Placement | _ShardingPlaceholder]]:
+        threshold = args[1] if len(args) > 1 else kwargs.get("threshold")
+        value = args[2] if len(args) > 2 else kwargs.get("value")
+        is_non_decreasing = False
+        if (
+            threshold is not None
+            and value is not None
+            and not isinstance(threshold, TensorMeta)
+            and not isinstance(value, TensorMeta)
+        ):
+            try:
+                # Cast threshold and value according to input tensor dtype to match C++ kernel semantics
+                if isinstance(args[0], TensorMeta) and args[0].dtype is not None:
+                    t_casted = torch.tensor(threshold, dtype=args[0].dtype).item()
+                    v_casted = torch.tensor(value, dtype=args[0].dtype).item()
+                    is_non_decreasing = bool(v_casted <= t_casted)
+                else:
+                    is_non_decreasing = bool(value <= threshold)
+            except Exception:
+                is_non_decreasing = False
+
+        fn = inner_non_dec if is_non_decreasing else inner_default
+        strategies = fn(op, args, kwargs)
+        kw_names = [k for k, v in kwargs.items() if isinstance(v, TensorMeta)]
+        if not kw_names:
+            return strategies
+        return [
+            s + [s[0] if name == "out" else Replicate() for name in kw_names]
+            for s in strategies
+        ]
+
+    register_single_dim_strategy(
+        aten.threshold.default,
+        schema_info=RuntimeSchemaInfo(
+            static_argnum=1, static_kwargkey=["threshold", "value"]
+        ),
+        allow_uneven_sharding=True,
+        allow_unbacked_sharding=True,
+    )(threshold_strategy_fn)
+
+
+_register_threshold()
 
 # Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
 # Note: acos excluded due to domain constraints [-1,1] causing validation failures
