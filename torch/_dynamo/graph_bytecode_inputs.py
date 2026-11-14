@@ -95,21 +95,35 @@ def install_active_registry() -> None:
         registry.install()
 
 
-def register_current_stream(stream: object, source: Source) -> None:
-    registry = _require_active_registry()
-    if registry.bytecode_constructors:
-        raise AssertionError(
-            f"Current stream must be registered at index {CURRENT_STREAM_INDEX}"
-        )
-
+def _construct_current_stream(
+    registry: UserObjectRegistry, source: Source
+) -> Callable[[PyCodegen], None]:
     def construct(cg: PyCodegen) -> None:
         if registry.current_stream_unused:
             cg.load_import_from(__name__, "unused_current_stream")
         else:
             cg(source)
 
-    registry.register(weakref.ref(stream), construct)
+    return construct
+
+
+def register_current_stream(stream: object, source: Source) -> None:
+    registry = _require_active_registry()
+    if registry.bytecode_constructors:
+        raise AssertionError(
+            f"Current stream must be registered at index {CURRENT_STREAM_INDEX}"
+        )
+    registry.register(weakref.ref(stream), _construct_current_stream(registry, source))
     registry.current_stream_unused = True
+
+
+def bind_current_stream(stream: object, source: Source) -> None:
+    """Replace a current stream registered before it could be queried."""
+    registry = _require_active_registry()
+    construct = _construct_current_stream(registry, source)
+    registry.bytecode_constructors[CURRENT_STREAM_INDEX] = construct
+    registry.weakrefs[CURRENT_STREAM_INDEX] = weakref.ref(stream)
+    registry.install()
 
 
 def mark_current_stream_used() -> None:
