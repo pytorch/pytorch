@@ -159,18 +159,6 @@ struct C10_API PyInterpreterVTable {
   virtual void reportErrorCallback(PyObject* callback, DispatchKey key)
       const = 0;
 
-  // This is only invoked in the multipy/torchdeploy // codespell:ignore multipy
-  // situation from pythonOpRegistrationTrampoline; this lets us get to the
-  // Python interpreter to actually find the appropriate Python op registration
-  // entry to call.
-  virtual void python_op_registration_trampoline(
-      const c10::OperatorHandle& op,
-      c10::DispatchKey,
-      c10::DispatchKeySet keyset,
-      torch::jit::Stack* stack,
-      bool with_keyset,
-      bool with_op) const = 0;
-
   virtual void throw_abstract_impl_not_imported_error(
       std::string opname,
       const char* pymodule,

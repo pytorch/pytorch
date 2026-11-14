@@ -69,17 +69,6 @@ struct ConcretePyInterpreterVTable final
       const c10::OperatorHandle& op,
       c10::DispatchKeySet /*ks*/,
       torch::jit::Stack* stack) const override;
-  // NB: this is defined in python_dispatch.cpp
-  void python_op_registration_trampoline(
-      const c10::OperatorHandle& op,
-      c10::DispatchKey key,
-      c10::DispatchKeySet keyset,
-      torch::jit::Stack* stack,
-      bool with_keyset,
-      bool with_op) const override {
-    torch::impl::dispatch::python_op_registration_trampoline_impl(
-        op, key, keyset, stack, with_keyset, with_op);
-  }
   void throw_abstract_impl_not_imported_error(
       std::string opname,
       const char* pymodule,

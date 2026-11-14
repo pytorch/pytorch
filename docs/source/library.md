@@ -163,6 +163,18 @@ with which inputs. `custom_op` therefore supports the conventional in-place and
 relationships.
 ```
 
+### Caching fake kernels
+
+FakeTensor caches the outputs of operators in the `aten`, `prim`, and `prims`
+namespaces. To let it cache a custom op as well, add `torch.Tag.cacheable_fake`
+to the op's `tags`. Only do this if the fake kernel's results depend only on
+the inputs' tensor metadata, the values of non-Tensor arguments, and global
+state such as the default dtype and device: it must not read tensor data,
+depend on other state (including the state of objects passed as arguments), or
+have side effects. Replacing the op's kernels through `torch.library`
+invalidates its cached results; kernels registered any other way, such as from
+C++, are not tracked.
+
 ```{eval-rst}
 .. autofunction:: custom_op
 .. autofunction:: triton_op

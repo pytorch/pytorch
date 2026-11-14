@@ -281,6 +281,30 @@ class TestPythonRegistration(TestCase):
             self.assertEqual(c, a + b)
             self.assertTrue(is_called)
 
+    def test_fallback_under_mode(self) -> None:
+        test_keyset = torch._C.DispatchKeySet("TESTING_ONLY_GenericMode")
+        is_called = False
+
+        with _scoped_library("_", "IMPL") as my_lib, LoggingTensorMode():
+            include_to_set = torch._C._dispatch_tls_local_include_set() | test_keyset
+            exclude_to_set = torch._C._dispatch_tls_local_exclude_set()
+
+            def my_fallback(op, *args, **kwargs):
+                nonlocal is_called
+                is_called = True
+                with torch._C._ForceDispatchKeyGuard(
+                    include_to_set, exclude_to_set | test_keyset
+                ):
+                    return op(*args, **kwargs)
+
+            my_lib.fallback(my_fallback, "TESTING_ONLY_GenericMode")
+            a, b = torch.rand(2), torch.rand(2)
+            with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
+                c = a + b
+
+        self.assertEqual(c, a + b)
+        self.assertTrue(is_called)
+
     def test_fallthrough_for_dense_key_with_meta_in_tls(self) -> None:
         # This tests that if meta is included in TlS dispatch key set,
         # then a meta kernel should be called regardless if a dense
@@ -391,6 +415,28 @@ class TestPythonRegistration(TestCase):
         # Validate that the old behavior is restored for neg and mul
         self.assertFalse(torch.neg(x).is_neg())
         self.assertTrue(torch.mul(x, y)._is_zerotensor())
+
+    @parametrize("dispatch_key", ["Meta", "CompositeExplicitAutograd", "Autograd"])
+    def test_override_restored(self, dispatch_key) -> None:
+        def rows(n):
+            return lambda x: x.new_empty((n * x.shape[0], x.shape[1]))
+
+        # Meta and CompositeExplicitAutograd kernels see FakeTensors, which have the
+        # Python key; Autograd kernels run while the dispatch mode is on the stack.
+        mode = LoggingTensorMode() if dispatch_key == "Autograd" else FakeTensorMode()
+        with _scoped_library(self.test_ns, "DEF") as lib, mode:
+            lib.define("rows(Tensor x) -> Tensor")
+            op = torch.ops._test_python_registration.rows.default
+            lib.impl(op, rows(1), dispatch_key)
+            x = torch.empty(3, 4)
+            with _scoped_library(self.test_ns, "IMPL") as first:
+                first.impl(op, rows(2), dispatch_key)
+                with _scoped_library(self.test_ns, "IMPL") as second:
+                    second.impl(op, rows(4), dispatch_key)
+                    self.assertEqual(op(x).shape, (12, 4))
+                    first._destroy()
+                    self.assertEqual(op(x).shape, (12, 4))
+            self.assertEqual(op(x).shape, (3, 4))
 
     def test_error_if_fn_not_callable(self):
         with self.assertRaisesRegex(

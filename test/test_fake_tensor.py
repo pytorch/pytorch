@@ -28,11 +28,18 @@ import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 from torch import distributed as dist
 from torch._C._functorch import _add_batch_dim, get_unwrapped, is_batchedtensor
+from torch._custom_class_base import CustomClassBase
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.source import LocalSource
 from torch._dynamo.testing import make_test_cls_with_patches, rand_strided
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
+from torch._library.fake_class_registry import maybe_to_fake_obj
+from torch._library.opaque_object import (
+    get_opaque_type_name,
+    register_custom_class,
+    unregister_custom_class,
+)
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
     _check_for_subclass_arg,
@@ -4678,6 +4685,11 @@ class TestFakeTensorSerialization(TestCase):
             self.assertEqual(x.device, y.device)
 
 
+class _OpaqueCounter(CustomClassBase):
+    def __init__(self, n):
+        self.n = n
+
+
 class _TestFakeTensorDispatchCacheHelpers:
     """Cache assertions shared with TestFakeTensorDispatchCacheDevice."""
 
@@ -5165,6 +5177,349 @@ class TestFakeTensorDispatchCache(_TestFakeTensorDispatchCacheHelpers, TestCase)
 
             x.unsqueeze_(0)
             self.assertBypasses("inplace view", 1)
+
+    @parametrize("transposed", [False, True])
+    def test_cache_custom_op_tag(self, transposed):
+        FakeTensorMode.cache_clear()
+        with torch.library._scoped_library("fake_tensor_cache_tag_test", "DEF") as lib:
+            lib.define(
+                "tagged(Tensor x, ScalarType dtype) -> Tensor",
+                tags=(torch.Tag.cacheable_fake,),
+            )
+            lib.define("untagged(Tensor x, ScalarType dtype) -> Tensor")
+            calls = 0
+
+            def fake(x, dtype):
+                nonlocal calls
+                calls += 1
+                return torch.empty_strided(
+                    x.shape, x.stride(), dtype=dtype, device=x.device
+                )
+
+            torch.library.register_fake(f"{lib.ns}::tagged", fake, lib=lib)
+            torch.library.register_fake(f"{lib.ns}::untagged", fake, lib=lib)
+            tagged = torch.ops.fake_tensor_cache_tag_test.tagged.default
+            untagged = torch.ops.fake_tensor_cache_tag_test.untagged.default
+            mode = FakeTensorMode()
+            mode.cache_crosscheck_enabled = False
+            x, y = (
+                mode.from_tensor(t.t() if transposed else t)
+                for t in (torch.randn(3, 4), torch.randn(3, 4))
+            )
+
+            with mode:
+                uncached = untagged(x, dtype=torch.float32)
+                untagged(x, dtype=torch.float32)
+                self.assertBypasses("non-builtin", 2)
+                for dtype in (torch.float32, torch.float64):
+                    first = tagged(x, dtype=dtype)
+                    before_hit, before_calls = FakeTensorMode.cache_info(), calls
+                    second = tagged(y, dtype=dtype)
+                    self._assert_symbolic_cache_hit(before_hit, second, first)
+                    self.assertEqual(calls, before_calls)
+                    self.assertIsNot(second, first)
+                    self.assertEqual(first.dtype, dtype)
+                    self.assertEqual(first.stride(), uncached.stride())
+
+                mode.cache_crosscheck_enabled = True
+                before_hit = FakeTensorMode.cache_info()
+                second = tagged(y, dtype=torch.float64)
+                self._assert_symbolic_cache_hit(before_hit, second, first)
+
+    @parametrize(
+        "bypass",
+        [
+            (torch.Tag.data_dependent_output, "data dependent output"),
+            (torch.Tag.dynamic_output_shape, "dynamic output shape"),
+            (torch.Tag.inplace_view, "inplace view"),
+        ],
+    )
+    def test_cache_custom_op_tag_preserves_bypasses(self, bypass):
+        tag, reason = bypass
+        FakeTensorMode.cache_clear()
+        with torch.library._scoped_library(
+            "fake_tensor_cache_bypass_test", "DEF"
+        ) as lib:
+            lib.define(
+                "identity(Tensor x) -> Tensor", tags=(torch.Tag.cacheable_fake, tag)
+            )
+            torch.library.register_fake(
+                f"{lib.ns}::identity", lambda x: torch.empty_like(x), lib=lib
+            )
+            op = torch.ops.fake_tensor_cache_bypass_test.identity.default
+            with FakeTensorMode():
+                x = torch.empty(4)
+                op(x)
+                op(x)
+            self.assertBypasses(reason, 2)
+
+    @parametrize(
+        "schema,alias_idx",
+        [
+            ("f(Tensor(a) x, Tensor y) -> Tensor(a)", 0),
+            ("f(Tensor(a!) x, Tensor(b) y) -> Tensor(b)", 1),
+        ],
+    )
+    def test_cache_custom_op_tag_bypasses_aliasing(self, schema, alias_idx):
+        FakeTensorMode.cache_clear()
+        with torch.library._scoped_library("fake_tensor_cache_alias_test", "DEF") as lib:
+            lib.define(schema, tags=(torch.Tag.cacheable_fake,))
+            torch.library.register_fake(
+                f"{lib.ns}::f", lambda *args: args[alias_idx].view(-1), lib=lib
+            )
+            op = torch.ops.fake_tensor_cache_alias_test.f.default
+            with FakeTensorMode():
+                args = (torch.empty(3, 4), torch.empty(3, 4))
+                for _ in range(2):
+                    self.assertEqual(
+                        op(*args).untyped_storage()._cdata,
+                        args[alias_idx].untyped_storage()._cdata,
+                    )
+            self.assertBypasses("non-builtin alias annotation", 2)
+
+    def test_cache_custom_op_tag_mutation(self):
+        with torch.library._scoped_library(
+            "fake_tensor_cache_mutation_test", "DEF"
+        ) as lib:
+            lib.define(
+                "add_(Tensor(a!) x) -> Tensor(a!)", tags=(torch.Tag.cacheable_fake,)
+            )
+            torch.library.register_fake(f"{lib.ns}::add_", lambda x: x, lib=lib)
+            op = torch.ops.fake_tensor_cache_mutation_test.add_.default
+            with FakeTensorMode():
+                x = torch.empty(3, 4)
+                FakeTensorMode.cache_clear()
+                self.assertIs(op(x), x)
+                self.assertIs(op(x), x)
+            self.assertHitsMisses(1, 1)
+
+    @parametrize("unbacked", [False, True])
+    def test_cache_custom_op_tag_bypasses_symint_output(self, unbacked):
+        FakeTensorMode.cache_clear()
+        with torch.library._scoped_library(
+            "fake_tensor_cache_symint_test", "DEF"
+        ) as lib:
+            lib.define("size(Tensor x) -> SymInt", tags=(torch.Tag.cacheable_fake,))
+
+            def size_fake(x):
+                if unbacked:
+                    return torch.library.get_ctx().new_dynamic_size()
+                return x.shape[0] * 2
+
+            torch.library.register_fake(f"{lib.ns}::size", size_fake, lib=lib)
+            op = torch.ops.fake_tensor_cache_symint_test.size.default
+            mode, x = self._symbolic_cache_input()
+            with mode:
+                op(x)
+                op(x)
+            self.assertBypasses("non-builtin SymInt output", 2)
+
+    def test_cache_custom_op_tag_bypasses_symbolic_opaque_args(self):
+        register_custom_class(_OpaqueCounter, typ="symbolic")
+        self.addCleanup(unregister_custom_class, _OpaqueCounter)
+        FakeTensorMode.cache_clear()
+        with torch.library._scoped_library(
+            "fake_tensor_cache_opaque_test", "DEF"
+        ) as lib:
+            lib.define(
+                f"f(Tensor x, {get_opaque_type_name(_OpaqueCounter)} c) -> Tensor",
+                tags=(torch.Tag.cacheable_fake,),
+            )
+            torch.library.register_fake(
+                f"{lib.ns}::f", lambda x, c: torch.empty_like(x), lib=lib
+            )
+            op = torch.ops.fake_tensor_cache_opaque_test.f.default
+            mode = FakeTensorMode()
+            counter = _OpaqueCounter(3)
+            with mode:
+                x = torch.empty(3)
+                for c in (counter, maybe_to_fake_obj(mode, counter)):
+                    op(x, c)
+            self.assertBypasses("non-builtin opaque argument", 2)
+
+    def test_cache_quantized_decomposed_ops(self):
+        import torch.ao.quantization.fx._decomposed  # noqa: F401
+
+        mode = FakeTensorMode()
+        x, q, scale, zp, qmin, qmax, scales, zps = map(
+            mode.from_tensor,
+            (
+                torch.randn(2, 3),
+                torch.zeros(2, 3, dtype=torch.int8),
+                torch.tensor(0.1),
+                torch.tensor(0),
+                torch.tensor(-128),
+                torch.tensor(127),
+                torch.full((3,), 0.1),
+                torch.zeros(3, dtype=torch.int64),
+            ),
+        )
+        qd = torch.ops.quantized_decomposed
+        int8 = (-128, 127, torch.int8)
+        calls = (
+            (qd.quantize_per_tensor.default, (x, 0.1, 0, *int8)),
+            (qd.quantize_per_tensor.tensor, (x, scale, zp, *int8)),
+            (qd.quantize_per_tensor.tensor2, (x, scale, zp, qmin, qmax, torch.int8)),
+            (qd.dequantize_per_tensor.default, (q, 0.1, 0, *int8)),
+            (qd.dequantize_per_tensor.tensor, (q, scale, zp, *int8)),
+            (qd.dequantize_per_tensor.tensor2, (q, scale, zp, qmin, qmax, torch.int8)),
+            (qd.quantize_per_channel.default, (x, scales, zps, 1, *int8)),
+            (qd.dequantize_per_channel.default, (q, scales, zps, 1, *int8)),
+        )
+        with mode:
+            for op, args in calls:
+                with self.subTest(op=op):
+                    FakeTensorMode.cache_clear()
+                    expected = op(*args)
+                    before_hit = FakeTensorMode.cache_info()
+                    self._assert_symbolic_cache_hit(before_hit, op(*args), expected)
+                    self.assertFalse(FakeTensorMode.cache_info().bypasses)
+
+    def test_cache_custom_op_tag_symbolic_make_fx(self):
+        calls = 0
+
+        @torch.library.custom_op(
+            "fake_tensor_cache_make_fx::double_rows",
+            mutates_args=(),
+            tags=(torch.Tag.cacheable_fake,),
+        )
+        def double_rows(x: torch.Tensor) -> torch.Tensor:
+            return torch.cat([x, x])
+
+        @double_rows.register_fake
+        def _(x):
+            nonlocal calls
+            calls += 1
+            return x.new_empty((2 * x.shape[0], x.shape[1]))
+
+        def f(x):
+            return double_rows(x) + double_rows(x)
+
+        with torch._dynamo.config.patch(fake_tensor_cache_crosscheck_enabled=False):
+            gm = make_fx(f, tracing_mode="symbolic")(torch.randn(3, 4))
+        self.assertEqual(calls, 1)
+        nodes = gm.graph.find_nodes(
+            op="call_function", target=double_rows._opoverload
+        )
+        self.assertEqual(len(nodes), 2)
+        (x_node,) = gm.graph.find_nodes(op="placeholder")
+        rows = x_node.meta["val"].shape[0].node.expr
+        for node in nodes:
+            self.assertEqual(node.meta["val"].shape[0].node.expr, 2 * rows)
+        x = torch.randn(5, 4)
+        self.assertEqual(gm(x), f(x))
+
+    def _tagged_op_input(self, symbolic):
+        mode = FakeTensorMode(shape_env=ShapeEnv() if symbolic else None)
+        mode.cache_crosscheck_enabled = False
+        x = mode.from_tensor(torch.randn(3, 4), static_shapes=not symbolic)
+        self.assertEqual(isinstance(x.shape[0], torch.SymInt), symbolic)
+        return mode, x
+
+    @staticmethod
+    def _rows_fakes():
+        calls = [0]
+
+        def rows(n):
+            def fake(x):
+                calls[0] += 1
+                return x.new_empty((n * x.shape[0], x.shape[1]))
+
+            return fake
+
+        return calls, rows
+
+    def _assert_cached_rows(self, op, x, n, calls):
+        # Count kernel calls: ops the kernel runs itself also move the cache
+        # counters, so hit/miss deltas cannot show that `op` was served from
+        # the cache.
+        before = calls[0]
+        first, second = op(x), op(x)
+        self.assertEqual(calls[0], before + 1)
+        self.assertEqual(first.shape, (n * x.shape[0], x.shape[1]))
+        self.assertEqual(
+            extract_tensor_metadata(first), extract_tensor_metadata(second)
+        )
+
+    @parametrize("symbolic", [False, True])
+    def test_cache_custom_op_tag_tracks_register_fake(self, symbolic):
+        calls, rows = self._rows_fakes()
+        ns = f"fake_tensor_cache_register_fake_{symbolic}"
+
+        @torch.library.custom_op(f"{ns}::inner", mutates_args=())
+        def inner(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @torch.library.custom_op(
+            f"{ns}::outer", mutates_args=(), tags=(torch.Tag.cacheable_fake,)
+        )
+        def outer(x: torch.Tensor) -> torch.Tensor:
+            return inner(x)
+
+        outer.register_fake(lambda x: inner(x))
+        mode, x = self._tagged_op_input(symbolic)
+        FakeTensorMode.cache_clear()
+        with mode:
+            for n in (1, 2, 1):
+                inner.register_fake(rows(n))
+                self._assert_cached_rows(outer._opoverload, x, n, calls)
+
+    @parametrize("symbolic", [False, True])
+    @parametrize(
+        "registration",
+        [
+            "fake",
+            "Meta",
+            "CompositeExplicitAutograd",
+            "CompositeExplicitAutogradNonFunctional",
+            "BackendSelect",
+        ],
+    )
+    def test_cache_custom_op_tag_tracks_library_lifecycle(self, symbolic, registration):
+        calls, rows = self._rows_fakes()
+        mode, x = self._tagged_op_input(symbolic)
+        FakeTensorMode.cache_clear()
+        with torch.library._scoped_library(
+            "fake_tensor_cache_library_lifecycle", "DEF"
+        ) as lib:
+            lib.define("rows(Tensor x) -> Tensor", tags=(torch.Tag.cacheable_fake,))
+            op = torch.ops.fake_tensor_cache_library_lifecycle.rows.default
+
+            def register(library, n):
+                if registration == "fake":
+                    torch.library.register_fake(op, rows(n), lib=library)
+                else:
+                    library.impl(op, rows(n), registration)
+
+            register(lib, 1)
+            with mode:
+                self._assert_cached_rows(op, x, 1, calls)
+                with torch.library._scoped_library(lib.ns, "IMPL") as override:
+                    register(override, 2)
+                    self._assert_cached_rows(op, x, 2, calls)
+                self._assert_cached_rows(op, x, 1, calls)
+
+    @parametrize("symbolic", [False, True])
+    def test_cache_custom_op_tag_tracks_meta_finalizer(self, symbolic):
+        calls, rows = self._rows_fakes()
+        mode, x = self._tagged_op_input(symbolic)
+        FakeTensorMode.cache_clear()
+        with torch.library._scoped_library(
+            "fake_tensor_cache_meta_finalizer", "DEF"
+        ) as lib:
+            lib.define("rows(Tensor x) -> Tensor", tags=(torch.Tag.cacheable_fake,))
+            op = torch.ops.fake_tensor_cache_meta_finalizer.rows.default
+            lib.impl(op, rows(1), "Meta")
+            with mode:
+                self._assert_cached_rows(op, x, 1, calls)
+                override = torch.library.Library(lib.ns, "IMPL", "Meta")
+                override.impl(op, rows(2))
+                self._assert_cached_rows(op, x, 2, calls)
+                reference = weakref.ref(override)
+                del override
+                gc.collect()
+                self.assertIsNone(reference())
+                self._assert_cached_rows(op, x, 1, calls)
 
     def test_cache_default_dtype(self):
         """

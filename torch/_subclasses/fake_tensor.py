@@ -2814,6 +2814,11 @@ class FakeTensorMode(TorchDispatchMode):
             # whether we're tracing or not.
             is_tracing,
         ]
+        if (
+            isinstance(func, torch._ops.OpOverload)
+            and torch.Tag.cacheable_fake in func.tags
+        ):
+            key_values.append(library_utils._fake_impl_epoch)
         if state.known_symbols:
             # If there are symbols then include the epoch - this is really more
             # of a Shape env var which lives on the FakeTensorMode.
@@ -2848,6 +2853,7 @@ class FakeTensorMode(TorchDispatchMode):
         reasonable.
         """
         from torch._higher_order_ops.utils import registered_hop_fake_fns
+        from torch._library.opaque_object import is_opaque_symbolic_type
 
         # For hops, we perform the validity check in _make_cache_entry  because we
         # need to have the output tensor.
@@ -2901,7 +2907,20 @@ class FakeTensorMode(TorchDispatchMode):
             raise _BypassDispatchCache("inductor::resize_storage_bytes_")
 
         if not torch._library.utils.is_builtin(func):
-            raise _BypassDispatchCache("non-builtin")
+            if torch.Tag.cacheable_fake not in func.tags:
+                raise _BypassDispatchCache("non-builtin")
+            schema = func._schema
+            if any(
+                a.alias_info is not None and not a.alias_info.is_write
+                for a in (*schema.arguments, *schema.returns)
+            ):
+                raise _BypassDispatchCache("non-builtin alias annotation")
+            if any(
+                isinstance(a, (FakeScriptObject, torch.ScriptObject))
+                or is_opaque_symbolic_type(type(a))
+                for a in pytree.tree_leaves((args, kwargs))
+            ):
+                raise _BypassDispatchCache("non-builtin opaque argument")
 
         # In order to handle storage aliasing, we need to establish the alias
         # for any view op on a cache hit. But CompositeImplicitAutograd ops may
@@ -3190,6 +3209,12 @@ class FakeTensorMode(TorchDispatchMode):
                 )
 
         if isinstance(output, (int, torch.SymInt, type(None))):
+            if (
+                isinstance(output, torch.SymInt)
+                and isinstance(func, torch._ops.OpOverload)
+                and not library_utils.is_builtin(func)
+            ):
+                raise _BypassDispatchCache("non-builtin SymInt output")
             output_info = _DispatchCacheEntryOutputInfo(
                 inplace_idx=None, metadata=None, view_idx=None, constant_value=output
             )

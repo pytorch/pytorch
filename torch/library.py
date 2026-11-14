@@ -265,6 +265,7 @@ class Library:
             self._registration_handles,
             self.m,
             _SCHEMA_TO_SIGNATURE_CACHE,
+            self.ns,
         )
 
     def __repr__(self):
@@ -515,6 +516,7 @@ class Library:
 
         _impls.add(key)
         self._op_impls.add(key)
+        torch._library.utils._bump_fake_impl_epoch(self.ns)
 
     def register_symm_mem_args(self, op_name, arg_names):
         r"""Registers which arguments require symmetric memory allocation for an operator.
@@ -605,6 +607,7 @@ class Library:
     def _destroy(self):
         if self.m is not None:
             self.m.reset()
+            torch._library.utils._bump_fake_impl_epoch(self.ns)
         self.m = None
         for handle in self._registration_handles:
             handle.destroy()
@@ -654,6 +657,7 @@ def _del_library(
     registration_handles,
     m,
     schema_to_signature_cache,
+    ns,
 ):
     for op_def in op_defs:
         name = op_def
@@ -673,6 +677,7 @@ def _del_library(
 
     if m is not None:
         m.reset()
+        torch._library.utils._bump_fake_impl_epoch(ns)
 
     _clear_torch_ops_cache(op_defs)
 

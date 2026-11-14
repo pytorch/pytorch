@@ -23,7 +23,6 @@
 #include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/Synchronized.h>
-#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 #include <torch/csrc/utils/python_raii.h>
 
@@ -43,14 +42,6 @@ namespace torch::impl::dispatch {
 // when the vector reallocates.
 static c10::Synchronized<std::vector<std::unique_ptr<std::string>>>
     leaked_python_filenames_;
-
-// NB: I'd like to index this on OperatorHandle, but I can't, as I can't
-// guarantee that the main interpreter has finish doing all registrations before
-// the other interpreters start banging on it
-static c10::Synchronized<ska::flat_hash_map<
-    c10::OperatorName,
-    ska::flat_hash_map<c10::DispatchKey, std::shared_ptr<c10::SafePyObject>>>>
-    python_registrations_;
 
 static torch::Library::Kind parseKind(const std::string& k) {
   static std::unordered_map<std::string, torch::Library::Kind> kind_map = {
@@ -87,7 +78,6 @@ inline static torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
 
 class PythonKernelHolder : public c10::OperatorKernel {
   c10::SafePyObject func_;
-  c10::DispatchKey dispatch_key_;
   // If "with_keyset", then we expect a keyset as the first arg.
   bool with_keyset_;
   // If "with_op", then we expect the op as first arg (or second if keyset)
@@ -96,11 +86,9 @@ class PythonKernelHolder : public c10::OperatorKernel {
  public:
   PythonKernelHolder(
       py::object func,
-      c10::DispatchKey dispatch_key,
       bool with_keyset = false,
       bool with_op = false)
       : func_(func.release().ptr(), getPyInterpreter()),
-        dispatch_key_(dispatch_key),
         with_keyset_(with_keyset),
         with_op_(with_op) {}
 
@@ -120,57 +108,6 @@ class PythonKernelHolder : public c10::OperatorKernel {
       const c10::OperatorHandle& op,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack) {
-    // Figure out if we can handle it hermetically, or if we have
-    // to double dispatch
-
-    // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
-    const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
-    if (mode_stack_len > 0) {
-      const auto& cur_torch_dispatch_mode_state =
-          c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
-      cur_torch_dispatch_mode_state->pyinterpreter()
-          ->python_op_registration_trampoline(
-              op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
-      return;
-    }
-
-    const auto& schema = op.schema();
-    const auto num_arguments = schema.arguments().size();
-
-    // Otherwise, find a PyInterpreter on a Tensor if it has Python key (which
-    // means it's a nontrivial tensor subclass)
-    for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
-      if (ivalue.isTensor()) {
-        auto* impl = ivalue.unsafeToTensorImpl();
-        if (impl->pyobj_slot()->load_pyobj() &&
-            impl->key_set().has(at::DispatchKey::Python)) {
-          (*c10::impl::getGlobalPyInterpreter())
-              ->python_op_registration_trampoline(
-                  op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
-          return;
-        }
-      } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
-        // NB: use toListRef as it doesn't induce refcount bumps
-        // (toTensorListRef is not a thing)
-        for (const auto& nv : ivalue.toListRef()) {
-          if (nv.isNone()) {
-            continue;
-          }
-          auto* impl = nv.unsafeToTensorImpl();
-          if (impl->pyobj_slot()->load_pyobj() &&
-              impl->key_set().has(at::DispatchKey::Python)) {
-            (*c10::impl::getGlobalPyInterpreter())
-                ->python_op_registration_trampoline(
-                    op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
-            return;
-          }
-        }
-      }
-    }
-
-    // Nothing requires the operator to be homed to a specific interpreter, so
-    // run it on the current interpreter
-
     auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
     py::gil_scoped_acquire g;
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
@@ -873,14 +810,8 @@ void initDispatchBindings(PyObject* module) {
                       dispatch,
                       CppFunction::makeFromBoxedFunctor(
                           std::make_unique<PythonKernelHolder>(
-                              func, dispatch, with_keyset))),
+                              func, with_keyset))),
                   register_or_verify());
-              python_registrations_.withLock([&](auto& regs) {
-                regs[lib._resolve(name)].insert_or_assign(
-                    dispatch,
-                    std::make_shared<c10::SafePyObject>(
-                        func.release().ptr(), getPyInterpreter()));
-              });
             }
             END_HANDLE_TH_ERRORS_PYBIND
           },
@@ -933,7 +864,7 @@ void initDispatchBindings(PyObject* module) {
                   dispatch,
                   CppFunction::makeFromBoxedFunctor(
                       std::make_unique<PythonKernelHolder>(
-                          func, dispatch, with_keyset, /*with_op*/ true))));
+                          func, with_keyset, /*with_op*/ true))));
             }
             END_HANDLE_TH_ERRORS_PYBIND
           },
@@ -1539,39 +1470,6 @@ void initDispatchBindings(PyObject* module) {
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
       .value("PROXY", TorchDispatchModeKey::PROXY)
       .value("FAKE", TorchDispatchModeKey::FAKE);
-}
-
-// TODO: dedupe with the kernel
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-void python_op_registration_trampoline_impl(
-    const c10::OperatorHandle& op,
-    c10::DispatchKey key,
-    c10::DispatchKeySet keyset,
-    torch::jit::Stack* stack,
-    bool with_keyset,
-    bool with_op) {
-  auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
-  py::gil_scoped_acquire g;
-  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-  auto func = python_registrations_.withLock(
-      [&](auto& regs) { return regs[op.operator_name()][key]; });
-  TORCH_INTERNAL_ASSERT(func != nullptr);
-  auto* pyobj = func->ptr(getPyInterpreter());
-  TORCH_INTERNAL_ASSERT(pyobj != nullptr);
-  auto callable = py::reinterpret_borrow<py::object>(pyobj);
-  auto obj = with_op ? with_keyset ? callable(
-                                         keyset,
-                                         torch::detail::getTorchApiFunction(op),
-                                         *args_kwargs.first,
-                                         **args_kwargs.second)
-                                   : callable(
-                                         torch::detail::getTorchApiFunction(op),
-                                         *args_kwargs.first,
-                                         **args_kwargs.second)
-      : with_keyset ? callable(keyset, *args_kwargs.first, **args_kwargs.second)
-                    : callable(*args_kwargs.first, **args_kwargs.second);
-  TORCH_CHECK_PYTHON(obj);
-  pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 
 } // namespace torch::impl::dispatch
