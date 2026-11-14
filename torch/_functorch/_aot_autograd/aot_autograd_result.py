@@ -484,6 +484,9 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             }
             bw_fx_config: _CompileFxKwargs = {
                 **fx_config,
+                "cudagraphs": fx_config.get(
+                    "backward_cudagraphs", fx_config.get("cudagraphs")
+                ),
                 "is_backward": True,
             }
             compiled_fw_func = self.compiled_fw.post_compile(
@@ -711,9 +714,10 @@ def deserialize_bundled_cache_entry(
     # which is set by compile_fx. But in precompile, we never actually call compile_fx
     # so we don't have a place to track cudagraphs here.
     # A nested compile region's cudagraph opt-in belongs to the artifact, not to
-    # this process's config: a forward compiled for capture with the top level off
+    # this process's config: a graph compiled for capture with the top level off
     # got it from a region. One whose request was dropped asks too, so that
-    # post_compile reports the skip again.
+    # post_compile reports the skip again. The backward's box is shared with the
+    # forward's only when both request capture, as in a fresh compile.
     fw_result = entry.compiled_fw.result
     region_requested_cudagraphs = (
         isinstance(fw_result, CompiledFxGraph)
@@ -725,6 +729,21 @@ def deserialize_bundled_cache_entry(
     )
     cudagraphs = BoxedBool(
         torch._inductor.config.triton.cudagraphs or region_requested_cudagraphs
+    )
+    bw_result = entry.compiled_bw.result if entry.compiled_bw is not None else None
+    bw_requested = (
+        isinstance(bw_result, CompiledFxGraph)
+        and (
+            bw_result.compiled_with_cudagraphs
+            or "cudagraphs_dropped_reason" in bw_result.fx_kwargs
+        )
+        and (
+            torch._inductor.config.triton.cudagraphs
+            or not bw_result.fx_kwargs.get("cudagraphs_top_level", True)
+        )
+    )
+    backward_cudagraphs = (
+        cudagraphs if cudagraphs and bw_requested else BoxedBool(bw_requested)
     )
     boxed_forward_device_index = BoxedDeviceIndex(None)
     # We need to make a clean copy of the cache entry
@@ -745,6 +764,7 @@ def deserialize_bundled_cache_entry(
             entry.sanitized_aot_config,
             {
                 "cudagraphs": cudagraphs,
+                "backward_cudagraphs": backward_cudagraphs,
                 "boxed_forward_device_index": boxed_forward_device_index,
             },
         )
