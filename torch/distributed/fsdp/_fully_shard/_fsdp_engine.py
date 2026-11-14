@@ -97,6 +97,8 @@ class FSDPParamRepresentation(ParamRepresentation):
 
     def unsharded_param(self, index: int, full_param: torch.Tensor) -> torch.Tensor:
         fsdp_param = self.fsdp_params[index]
+        if fsdp_param._merged_size is not None:
+            full_param = full_param.view(fsdp_param._orig_size)
         spec = fsdp_param._unsharded_dtensor_spec
         if fsdp_param.is_spmd_types or spec is None or isinstance(full_param, DTensor):
             return full_param
@@ -107,12 +109,20 @@ class FSDPParamRepresentation(ParamRepresentation):
     def unsharded_local(
         self, index: int, unsharded_param: nn.Parameter
     ) -> torch.Tensor:
-        if isinstance(unsharded_param, DTensor):
-            return unsharded_param._local_tensor
-        return unsharded_param
+        local = (
+            unsharded_param._local_tensor
+            if isinstance(unsharded_param, DTensor)
+            else unsharded_param
+        )
+        merged_size = self.fsdp_params[index]._merged_size
+        return local if merged_size is None else local.view(merged_size)
 
     def unsharded_grad(self, index: int, grad: torch.Tensor) -> torch.Tensor:
-        return self.fsdp_params[index]._get_grad_inner_tensor(grad)
+        fsdp_param = self.fsdp_params[index]
+        grad = fsdp_param._get_grad_inner_tensor(grad)
+        # The reduce-scatter pads BlockShard's merged rows, not whole experts
+        merged_size = fsdp_param._merged_size
+        return grad if merged_size is None else grad.reshape(merged_size)
 
     def check_post_forward_reshard(self) -> None:
         for fsdp_param in self.fsdp_params:
