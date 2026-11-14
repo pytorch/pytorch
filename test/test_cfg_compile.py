@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import dis
 import importlib
 import math
@@ -2332,9 +2333,48 @@ class FrameChild(BytecodeBase):
         return parent.scale(x) + 1
 
 
+def frame_caller():
+    """Where the function that called the caller of this one is, as the stack has it."""
+    frame = sys._getframe(1)
+    names = []
+    while frame is not None and len(names) < 3:
+        names.append(frame.f_code.co_name)
+        frame = frame.f_back
+    caller = sys._getframe(1)
+    return caller.f_lineno, names, caller.f_globals is globals()
+
+
+def frame_inner():
+    return frame_caller(), sys._getframe().f_code is frame_inner.__code__
+
+
+def frame_outer():
+    return frame_inner()
+
+
+def frame_new_classes():
+    pair = collections.namedtuple("pair", "a b")
+    plain = type("plain", (), {})
+    return pair.__module__, plain.__module__
+
+
+def frame_warns():
+    warnings.warn("from a compiled function", UserWarning, stacklevel=1)
+    return 1
+
+
+def frame_divides(x):
+    y = x + 1
+    return (y, 1 / (x - x))
+
+
+def frame_calls_divides(x):
+    return frame_divides(x)
+
+
 @unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
 class TestCfgFrames(TestCase):
-    """A compiled function has no Python frame, so what reads its own frame is not compiled."""
+    """A compiled function runs under a frame of the interpreter, with its locals in registers."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -2345,22 +2385,61 @@ class TestCfgFrames(TestCase):
         def uses_eval(a):
             return eval("a + 1")
 
-        def uses_frame(a):
-            return sys._getframe().f_locals["a"]
-
         for f, args, name in (
             (uses_locals, (1, 2), "locals"),
             (uses_eval, (1,), "eval"),
-            (uses_frame, (1,), "_getframe"),
         ):
             with self.assertRaisesRegex(
                 torch.cfg_compile.Unsupported,
-                name + r"\(\) needs a Python frame of its own",
+                name + r"\(\) reads the local variables of the frame",
             ):
                 torch.cfg_compile(f, fallback=False)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 self.assertEqual(torch.cfg_compile(f)(*args), f(*args))
+
+    def test_the_stack_shows_compiled_functions(self):
+        compiled = torch.cfg_compile(frame_outer, fallback=False, inline=False)
+        self.assertEqual(compiled(), frame_outer())
+        self.assertEqual(
+            compiled()[0][1],
+            ["frame_inner", "frame_outer", "test_the_stack_shows_compiled_functions"],
+        )
+        self.assertIn("frame_inner", compiled.stats()["compiled_callees"])
+
+    def test_new_classes_belong_to_the_module_of_the_compiled_function(self):
+        compiled = torch.cfg_compile(frame_new_classes, fallback=False)
+        self.assertEqual(compiled(), (__name__, __name__))
+
+    def test_warning_names_the_line_of_the_compiled_function(self):
+        def caught(fn):
+            with warnings.catch_warnings(record=True) as log:
+                warnings.simplefilter("always")
+                fn()
+            return [(w.filename, w.lineno, str(w.message)) for w in log]
+
+        compiled = torch.cfg_compile(frame_warns, fallback=False)
+        self.assertEqual(caught(compiled), caught(frame_warns))
+        self.assertEqual(caught(compiled)[0][0], __file__)
+
+    def test_traceback_has_frames_lines_and_columns(self):
+        def entries(fn):
+            try:
+                fn(3)
+            except ZeroDivisionError as e:
+                frames = traceback.extract_tb(e.__traceback__)[1:]
+                last = e.__traceback__
+                while last.tb_next is not None:
+                    last = last.tb_next
+                back = last.tb_frame.f_back.f_code.co_name
+                return [(f.name, f.lineno, f.colno, f.end_colno) for f in frames], back
+
+        compiled = torch.cfg_compile(frame_calls_divides, fallback=False, inline=False)
+        self.assertEqual(entries(compiled), entries(frame_calls_divides))
+        self.assertEqual(
+            [entry[0] for entry in entries(compiled)[0]],
+            ["frame_calls_divides", "frame_divides"],
+        )
 
     def test_callee_that_reads_its_frame_runs_in_the_interpreter(self):
         def fmt(name, value):
