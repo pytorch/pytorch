@@ -1392,6 +1392,70 @@ def index_reduce(
             f"and (source) {src.device}"
         ),
     )
+    torch._check_index(
+        index.dim() <= 1,
+        lambda: (
+            f"index_reduce_(): Index is supposed to be a vector, but got dim: "
+            f"{index.dim()} with type: {index.dtype} and size: {list(index.shape)}"
+        ),
+    )
+    torch._check(
+        index.dtype in (torch.int32, torch.int64),
+        lambda: (
+            f"index_reduce_(): Expected dtype int32/int64 for index but got: "
+            f"{index.dtype}"
+        ),
+    )
+    torch._check(
+        self.dtype == src.dtype,
+        lambda: (
+            f"index_reduce_(): self ({self.dtype}) and source ({src.dtype}) "
+            f"must have the same scalar type"
+        ),
+    )
+    torch._check(
+        reduction_type in ("prod", "mean", "amax", "amin"),
+        lambda: (
+            "index_reduce(): Expected reduce to be one of prod, mean, amax or "
+            f"amin but got {reduction_type}."
+        ),
+    )
+    dim = utils.canonicalize_dim(self.dim(), dim)
+    torch._check(
+        dim == 0 or dim < src.dim(),
+        lambda: (
+            f"index_reduce_(): Indexing dim {dim} is out of bounds of the "
+            f"source tensor with dim {src.dim()}"
+        ),
+    )
+    numel = index.numel()
+    torch._check(
+        numel == (1 if src.dim() == 0 else src.shape[dim]),
+        lambda: (
+            f"index_reduce_(): Number of indices ({numel}) should be equal to "
+            f"source.size(dim): ({src.shape[dim]}), for dim: {dim}"
+        ),
+    )
+    torch._check(
+        self.dim() == src.dim(),
+        lambda: (
+            "source tensor shape must match self tensor shape, excluding the "
+            f"specified dimension. Got self.shape = {list(self.shape)} "
+            f"source.shape = {list(src.shape)}"
+        ),
+    )
+    self_sliced_shape = (
+        self.shape[:dim] + self.shape[dim + 1 :] if self.dim() > 0 else ()
+    )
+    src_sliced_shape = src.shape[:dim] + src.shape[dim + 1 :] if src.dim() > 0 else ()
+    torch._check(
+        sym_eq(self_sliced_shape, src_sliced_shape),
+        lambda: (
+            "source tensor shape must match self tensor shape, excluding the "
+            f"specified dimension. Got self.shape = {list(self.shape)} "
+            f"source.shape = {list(src.shape)}"
+        ),
+    )
     if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(
         self.dtype
     ):
@@ -1407,33 +1471,10 @@ def index_reduce(
         out = out.index_add(dim, index, src)
         return out / counts if true_division else out // counts
 
-    if use_scatter_fallback(
-        aten.scatter_reduce_.two,
-        reduction_type,
-        self.dtype,
-        src.dtype,
-        src.device.type,
-        True,
-    ):
-        return NotImplemented
-
-    # pyrefly: ignore [missing-attribute]
-    repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
-    index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
-    perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))
-    scatter_index = (
-        index.to(torch.int64)
-        .repeat_interleave(repeats)
-        .reshape(index_shape)
-        .permute(perm)
-    )
-    return self.scatter_reduce(
-        dim,
-        scatter_index,
-        src,
-        reduction_type,
-        include_self=include_self,
-    )
+    # Only "mean" with types that support atomic adds returns above; every
+    # remaining input falls back to eager (the scatter_reduce lowering only
+    # supports "sum").
+    return NotImplemented
 
 
 def _max_pool_with_indices(

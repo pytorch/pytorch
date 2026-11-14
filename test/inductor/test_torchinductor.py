@@ -21328,6 +21328,95 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         result = torch.compile(fn)(x_base.clone()[:, 2:, :], index, source)
         self.assertEqual(result, expected)
 
+    def test_index_reduce_shape_validation(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/202938.
+        # Eager rejects a source whose shape does not match self excluding the
+        # reduce dim; the inductor decomposition must reject it too instead of
+        # silently broadcasting.
+        def fn(self_, index, source):
+            return self_.index_reduce(0, index, source, "mean", include_self=True)
+
+        index = torch.tensor([0], dtype=torch.int64, device=self.device)
+        source = torch.randn(1, device=self.device)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "source tensor shape must match self tensor shape"
+        ):
+            torch.compile(fn, backend="inductor")(
+                torch.tensor(2.0, device=self.device), index, source
+            )
+
+        # rank mismatches must also be rejected, as in eager, instead of
+        # passing the check and crashing later in lowering; the index numel
+        # matches source.size(dim) so the shape check is what fires, and the
+        # index values stay in range of self so a validation regression fails
+        # on its regex instead of on lowering's out-of-bounds handling
+        index4 = torch.tensor([0, 1, 2, 0], dtype=torch.int64, device=self.device)
+        with self.assertRaisesRegex(
+            RuntimeError, "source tensor shape must match self tensor shape"
+        ):
+            torch.compile(fn, backend="inductor")(
+                torch.randn(4, device=self.device),
+                index4,
+                torch.randn(4, 4, device=self.device),
+            )
+        with self.assertRaisesRegex(
+            RuntimeError, "source tensor shape must match self tensor shape"
+        ):
+            torch.compile(fn, backend="inductor")(
+                torch.randn(3, 4, device=self.device),
+                index4,
+                torch.randn(4, device=self.device),
+            )
+        # same rank with mismatched sizes exercises the sym_eq check itself
+        with self.assertRaisesRegex(
+            RuntimeError, "source tensor shape must match self tensor shape"
+        ):
+            torch.compile(fn, backend="inductor")(
+                torch.randn(3, 4, device=self.device),
+                torch.tensor([0, 1], dtype=torch.int64, device=self.device),
+                torch.randn(2, 5, device=self.device),
+            )
+
+        # a dim that is valid for self but out of bounds of the source is
+        # rejected with eager's message instead of a raw IndexError
+        def fn_dim1(self_, index, source):
+            return self_.index_reduce(1, index, source, "mean", include_self=True)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Indexing dim 1 is out of bounds of the source tensor"
+        ):
+            torch.compile(fn_dim1, backend="inductor")(
+                torch.randn(3, 4, device=self.device),
+                torch.tensor([0, 1, 2, 0], dtype=torch.int64, device=self.device),
+                torch.randn(4, device=self.device),
+            )
+
+        # an invalid reduction type is rejected, as in eager
+        def fn_sum(self_, index, source):
+            return self_.index_reduce(0, index, source, "sum", include_self=True)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected reduce to be one of"):
+            torch.compile(fn_sum, backend="inductor")(
+                torch.tensor([2.0], device=self.device), index, source
+            )
+
+        # a scalar self with a scalar source is still valid, as in eager
+        scalar_source = torch.tensor(5.0, device=self.device)
+        self.assertEqual(
+            torch.compile(fn, backend="inductor")(
+                torch.tensor(2.0, device=self.device), index, scalar_source
+            ),
+            fn(torch.tensor(2.0, device=self.device), index, scalar_source),
+        )
+
+        # a 1-dim self with a matching source still works and matches eager
+        x = torch.tensor([2.0], device=self.device)
+        self.assertEqual(
+            torch.compile(fn, backend="inductor")(x, index, source),
+            fn(x, index, source),
+        )
+
     def test_pad_after_gelu(self):
         # Regression test for Voxtral compilation on MPS
         for dtype in [torch.float32, torch.float16, torch.bfloat16]:
