@@ -3,8 +3,9 @@
 import functools
 import logging
 import warnings
-from collections.abc import Callable, Sequence
-from dataclasses import replace
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 import torch
@@ -32,6 +33,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
 _StateType = TypeVar("_StateType", bound="FSDPState")
+
+
+@dataclass
+class _PartialBackward:
+    """An ``FSDPModule.partial_backward`` scope: the state of its module and
+    whether a backward through that module ran in it."""
+
+    state: "FSDPState"
+    ran_backward: bool = False
 
 
 class FSDPStateContext(Generic[_StateType]):
@@ -62,6 +72,8 @@ class FSDPStateContext(Generic[_StateType]):
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
         self.post_optim_event: torch.Event | None = None
+        # The open FSDPModule.partial_backward scope, if any
+        self.partial_backward: _PartialBackward | None = None
 
 
 class FSDPState(_State):
@@ -138,6 +150,7 @@ class FSDPState(_State):
                 self._post_forward,
                 self._modules_to_run_forward,
                 self._cast_output_dtype,
+                lambda: self._in_partial_backward,
             )
             self._pre_forward_hook_handle = hook_handle
             self._post_forward_hook_handle = hook_handle
@@ -403,6 +416,11 @@ class FSDPState(_State):
             state._modules_to_run_forward.clear()
         return output
 
+    @property
+    def _in_partial_backward(self) -> bool:
+        scope = self._state_ctx.partial_backward
+        return scope is not None and scope.state is self
+
     @_dynamo_disable
     def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:
         with _spmd_no_typecheck():
@@ -411,6 +429,8 @@ class FSDPState(_State):
             default_prefetch = len(self._states_to_backward_prefetch) == 0
             for fsdp_param_group in self._fsdp_param_groups:
                 fsdp_param_group.pre_backward(default_prefetch)
+            if self._in_partial_backward:
+                return grad
             for fsdp_state in self._states_to_backward_prefetch:
                 # Reverse so higher-indexed groups are prefetched first,
                 # matching backward execution order (reverse of forward).
@@ -427,6 +447,18 @@ class FSDPState(_State):
                 raise AssertionError(
                     "Expected manual backward finalization mode to be set"
                 )
+            if (scope := self._state_ctx.partial_backward) is not None:
+                # A backward through the module of a partial_backward scope
+                # alone: finish its groups, whose gradients accumulate, and
+                # leave the others to the outer backward or the scope's exit
+                for group in reversed(scope.state._fsdp_param_groups):
+                    if group._training_state != TrainingState.POST_BACKWARD:
+                        group.post_backward()
+                    group._training_state = TrainingState.IDLE
+                scope.state._training_state = TrainingState.IDLE
+                scope.ran_backward = True
+                self._state_ctx.post_backward_final_callback_queued = False
+                return
             # Reset per-iteration state. With chunked loss, each standalone
             # per-chunk call repopulates an inner state's
             # ``_modules_to_run_forward`` (and claims ``iter_forward_root``)
@@ -458,6 +490,75 @@ class FSDPState(_State):
                 # gradient accumulation does not retain the buffer.
                 self._comm_ctx.release_all_gather_state_on_current_stream()
             self._state_ctx.post_backward_final_callback_queued = False
+
+    @contextmanager
+    def _partial_backward(self, outer_backward_follows: bool) -> Iterator[None]:
+        """See ``FSDPModule.partial_backward``."""
+        state_ctx = self._state_ctx
+        if self._is_root is None:
+            raise RuntimeError(
+                f"{self._state_name} partial_backward needs the root forward to run first"
+            )
+        if state_ctx.partial_backward is not None:
+            raise RuntimeError(f"{self._state_name} partial_backward cannot nest")
+        groups = self._fsdp_param_groups
+        manual_finalization = state_ctx.manual_backward_finalization
+        with _spmd_no_typecheck():
+            for group in groups:
+                group.lazy_init()
+                group.unshard()
+            for group in groups:
+                group.wait_for_unshard()
+                group._in_partial_backward = True
+        scope = state_ctx.partial_backward = _PartialBackward(self)
+        try:
+            yield
+        except BaseException:
+            # Reshard without collectives, which only some ranks might reach;
+            # reset_iter_state discards the gradients
+            self._end_partial_backward(scope)
+            with _spmd_no_typecheck():
+                for group in groups:
+                    if not scope.ran_backward:
+                        group.reshard()
+                    elif group.reshard_after_backward and not manual_finalization:
+                        group.reshard()
+            raise
+        self._end_partial_backward(scope)
+        with _spmd_no_typecheck():
+            if not scope.ran_backward:
+                for group in groups:
+                    group.reshard()
+                return
+            # The outer backward reduces a group shared with modules outside
+            # this one, which get their gradients there
+            shared = any(len(group.modules) > 1 for group in groups)
+            if not manual_finalization and not (outer_backward_follows and shared):
+                for group in groups:
+                    group.post_backward()
+            if not outer_backward_follows:
+                state_ctx.post_backward_final_callback_queued = True
+                self._root_post_backward_final_callback()
+
+    def _end_partial_backward(self, scope: _PartialBackward) -> None:
+        if self._state_ctx.partial_backward is not scope:
+            raise AssertionError("Expected the open partial_backward scope")
+        self._state_ctx.partial_backward = None
+        for group in self._fsdp_param_groups:
+            group._in_partial_backward = False
+            # A post-backward hook can run without the final callback, e.g. for
+            # a backward that reached this module's inputs only
+            if group._training_state == TrainingState.POST_BACKWARD:
+                scope.ran_backward = True
+                group._training_state = TrainingState.IDLE
+
+    def _complete_grouped_forward(self, module: nn.Module, output: Any) -> Any:
+        """See ``FSDPModule.complete_grouped_forward``."""
+        if not self._modules_to_run_forward:
+            return output
+        output = self._post_forward(module, None, output)
+        self._modules_to_run_forward.clear()
+        return output
 
     def finalize_backward(self, *, wait_for_gradient_reduction: bool = True) -> None:
         if self._is_root is None:
@@ -708,6 +809,7 @@ def _register_group_forward_hooks(
     post_hook: Callable,
     modules_to_run: set[nn.Module],
     cast_output_dtype: Callable[[Any], Any],
+    completes_each_call: Callable[[], bool],
 ) -> _MultiHandle:
     """
     Registers group forward pre and post-hooks. The pre-hook runs on every
@@ -721,7 +823,8 @@ def _register_group_forward_hooks(
     registers the pre-backward hook, and itself casts output_dtype). If
     a module never runs forward, the post-hook does not fire for it and
     ``_force_complete_incomplete_states`` finishes the group from the
-    root's post-forward.
+    root's post-forward. In an ``FSDPModule.partial_backward`` scope
+    (``completes_each_call``), each module's call completes the group.
     """
     modules_set = set(modules)
 
@@ -741,6 +844,9 @@ def _register_group_forward_hooks(
             # module in the group (including repeat invocations such as
             # per-chunk standalone head calls) produces output in the
             # mp_policy's output_dtype.
+            if completes_each_call():
+                modules_to_run.clear()
+                return post_hook(hook_module, input, output)
             if module in modules_to_run:
                 modules_to_run.remove(module)
                 if len(modules_to_run) == 0:

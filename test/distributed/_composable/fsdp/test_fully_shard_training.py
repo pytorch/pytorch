@@ -1609,6 +1609,402 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         )
 
 
+class _ChunkedLossModel(nn.Module):
+    """A decoder whose output projection a chunked loss runs on its own. A
+    frozen decoder detaches after the embedding, so no outer backward follows
+    the chunked loss, while a tied head still trains the embedding."""
+
+    def __init__(self, *, tie: bool, frozen: bool) -> None:
+        super().__init__()
+        self.frozen = frozen
+        self.embed = nn.Embedding(32, 16)
+        self.body = nn.Linear(16, 16)
+        self.norm = nn.LayerNorm(16)
+        self.head = nn.Linear(16, 32, bias=False)
+        if tie:
+            self.head.weight = self.embed.weight
+        if frozen:
+            self.body.requires_grad_(False)
+            self.norm.requires_grad_(False)
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        hidden = self.embed(tokens)
+        if self.frozen:
+            hidden = hidden.detach()
+        return self.norm(self.body(hidden))
+
+
+def _chunked_head_loss(
+    model: _ChunkedLossModel,
+    hidden: torch.Tensor,
+    labels: torch.Tensor,
+    fail_at_chunk: int | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Runs the head and its backward chunk by chunk in ``partial_backward``.
+    Returns the loss and the gradient for ``hidden``, if it requires one."""
+    outer_backward_follows = hidden.requires_grad
+    total_loss, hidden_grads = hidden.new_zeros(()), []
+    with model.head.partial_backward(outer_backward_follows=outer_backward_follows):
+        for index, (chunk, label) in enumerate(
+            zip(hidden.detach().chunk(4), labels.chunk(4))
+        ):
+            if index == fail_at_chunk:
+                raise RuntimeError("chunk failure")
+            chunk = chunk.detach().requires_grad_(outer_backward_follows)
+            loss = nn.functional.cross_entropy(
+                model.head(chunk), label, reduction="sum"
+            )
+            total_loss += loss.detach()
+            if torch.is_grad_enabled():
+                loss.backward()
+                if outer_backward_follows:
+                    hidden_grads.append(chunk.grad)
+    return total_loss, torch.cat(hidden_grads) if hidden_grads else None
+
+
+def _fsdp_policies(model: nn.Module) -> tuple:
+    return model.get_is_last_backward(), [
+        (
+            module.get_reshard_after_forward(),
+            module.get_reshard_after_backward(),
+            module.get_requires_gradient_sync(),
+            module.get_requires_all_reduce(),
+        )
+        for module in model.modules()
+        if isinstance(module, FSDPModule)
+    ]
+
+
+def _backward_prefetch_order(model: _ChunkedLossModel) -> list:
+    """The forward order that backward prefetching follows, for the groups of
+    the modules other than the head."""
+    head_groups = model.head._get_fsdp_state()._fsdp_param_groups
+    return [
+        tuple(group._post_forward_indices)
+        for module in model.modules()
+        if isinstance(module, FSDPModule)
+        for group in module._get_fsdp_state()._fsdp_param_groups
+        if group not in head_groups
+    ]
+
+
+class TestFullyShardPartialBackward(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        if device_type.type == "cpu":
+            return 4
+        return min(4, torch.get_device_module(device_type).device_count())
+
+    def _init_models(self, mesh: DeviceMesh, layout: str, frozen: bool):
+        torch.manual_seed(42)
+        model = _ChunkedLossModel(tie=layout == "tied", frozen=frozen).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model.body, mesh=mesh)
+        if layout == "separate":
+            fully_shard(model.norm, mesh=mesh)
+            fully_shard(model.head, mesh=mesh, reshard_after_forward=False)
+        else:
+            modules = [model.norm, model.head]
+            if layout == "tied":
+                modules.insert(0, model.embed)
+            fully_shard(modules, mesh=mesh, reshard_after_forward=False)
+        fully_shard(model, mesh=mesh)
+        return model, ref_model
+
+    def _check_grads(self, model: nn.Module, ref_model: nn.Module) -> None:
+        for (name, param), ref_param in zip(
+            model.named_parameters(), ref_model.parameters()
+        ):
+            if ref_param.grad is None:
+                self.assertIsNone(param.grad, msg=name)
+                continue
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertEqual(param.grad.full_tensor(), ref_param.grad, msg=name)
+
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_partial_backward_parity(self):
+        self.run_subtests(
+            {
+                "layout": ["separate", "grouped", "tied"],
+                "outer_backward_follows": [True, False],
+                "deferred": [False, True],
+                "replicate": [False, True],
+            },
+            self._test_partial_backward_parity,
+        )
+
+    def _test_partial_backward_parity(
+        self, layout: str, outer_backward_follows: bool, deferred: bool, replicate: bool
+    ):
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, self.world_size // 2) if replicate else (self.world_size,),
+            mesh_dim_names=("replicate", "shard") if replicate else ("shard",),
+        )
+        model, ref_model = self._init_models(
+            mesh, layout, frozen=not outer_backward_follows
+        )
+        optim = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
+        ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2, momentum=0.9)
+        # Each parameter group with gradients reduces once per syncing step
+        num_groups_with_grads = (
+            {"separate": 4, "grouped": 3, "tied": 2}[layout]
+            if outer_backward_follows
+            else 1
+        )
+        events: list[str] = []
+        all_gather_single = dist.all_gather_single
+        reduce_scatter_single = dist.reduce_scatter_single
+
+        def record_all_gather(*args, **kwargs):
+            events.append("all-gather")
+            return all_gather_single(*args, **kwargs)
+
+        def record_reduce_scatter(*args, **kwargs):
+            events.append("reduce-scatter")
+            return reduce_scatter_single(*args, **kwargs)
+
+        head_hook = model.head.register_forward_pre_hook(
+            lambda *_: events.append("head")
+        )
+        with (
+            mock.patch.object(dist, "all_gather_single", record_all_gather),
+            mock.patch.object(dist, "reduce_scatter_single", record_reduce_scatter),
+        ):
+            for step in range(3):
+                num_reduce_scatters = 0
+                for microbatch in range(2):
+                    final = microbatch == 1
+                    model.set_requires_gradient_sync(final or not deferred)
+                    model.set_reshard_after_backward(final or not deferred)
+                    model.set_is_last_backward(final or not deferred)
+                    if replicate:
+                        model.set_requires_all_reduce(final)
+                    torch.manual_seed(100 * step + 10 * self.rank + microbatch)
+                    tokens = torch.randint(32, (16,), device=device_type.type)
+                    labels = torch.randint(32, (16,), device=device_type.type)
+                    hidden = model(tokens)
+                    policies = _fsdp_policies(model)
+                    prefetch_order = _backward_prefetch_order(model)
+                    events.clear()
+                    loss, hidden_grad = _chunked_head_loss(model, hidden, labels)
+                    # The head is all-gathered at most once, before its forwards
+                    num_all_gathers = events.count("all-gather")
+                    self.assertLessEqual(num_all_gathers, 1)
+                    self.assertEqual(
+                        [e for e in events if e != "reduce-scatter"],
+                        ["all-gather"] * num_all_gathers + ["head"] * 4,
+                    )
+                    self.assertEqual(_fsdp_policies(model), policies)
+                    if outer_backward_follows:
+                        # Kept for the outer backward, which otherwise ends
+                        # the step's backward
+                        self.assertEqual(
+                            _backward_prefetch_order(model), prefetch_order
+                        )
+                    if hidden_grad is not None:
+                        hidden.backward(hidden_grad)
+                    num_reduce_scatters += events.count("reduce-scatter")
+                    ref_loss = nn.functional.cross_entropy(
+                        ref_model.head(ref_model(tokens)), labels, reduction="sum"
+                    )
+                    ref_loss.backward()
+                    self.assertEqual(loss, ref_loss)
+                self.assertEqual(
+                    num_reduce_scatters, num_groups_with_grads * (1 if deferred else 2)
+                )
+                self._check_grads(model, ref_model)
+                for _optim in (optim, ref_optim):
+                    _optim.step()
+                    _optim.zero_grad()
+                check_sharded_parity(self, ref_model, model)
+            # Forward only: no reduction, and the head reshards
+            events.clear()
+            with torch.no_grad():
+                loss, _ = _chunked_head_loss(model, model(tokens), labels)
+                ref_loss = nn.functional.cross_entropy(
+                    ref_model.head(ref_model(tokens)), labels, reduction="sum"
+                )
+            self.assertEqual(loss, ref_loss)
+            self.assertNotIn("reduce-scatter", events)
+            self.assertIsInstance(model.head.weight, DTensor)
+        head_hook.remove()
+
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_partial_backward_exception(self):
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        model, ref_model = self._init_models(mesh, "grouped", frozen=False)
+        model.set_requires_gradient_sync(False)
+        torch.manual_seed(self.rank)
+        tokens = torch.randint(32, (16,), device=device_type.type)
+        labels = torch.randint(32, (16,), device=device_type.type)
+        hidden = model(tokens)
+        policies = _fsdp_policies(model)
+        with (
+            mock.patch.object(dist, "reduce_scatter_single") as reduce_scatter,
+            self.assertRaisesRegex(RuntimeError, "chunk failure"),
+        ):
+            _chunked_head_loss(model, hidden, labels, fail_at_chunk=2)
+        reduce_scatter.assert_not_called()
+        self.assertEqual(_fsdp_policies(model), policies)
+        del hidden
+        model.reset_iter_state()
+        self.assertEqual(_fsdp_policies(model), policies)
+        # The next step starts over
+        model.zero_grad(set_to_none=True)
+        model.set_requires_gradient_sync(True)
+        hidden = model(tokens)
+        loss, hidden_grad = _chunked_head_loss(model, hidden, labels)
+        hidden.backward(hidden_grad)
+        ref_loss = nn.functional.cross_entropy(
+            ref_model.head(ref_model(tokens)), labels, reduction="sum"
+        )
+        ref_loss.backward()
+        self.assertEqual(loss, ref_loss)
+        self._check_grads(model, ref_model)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_partial_backward_accumulates_in_reduce_dtype(self):
+        # The chunks' gradients accumulate across backwards, so they start in
+        # the reduce dtype, which custom backward kernels read as grad_dtype
+        torch.manual_seed(42)
+        model = _ChunkedLossModel(tie=False, frozen=False).to(device_type)
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+        fully_shard(model.body, mp_policy=mp_policy)
+        fully_shard(
+            [model.norm, model.head], mp_policy=mp_policy, reshard_after_forward=False
+        )
+        fully_shard(model, mp_policy=mp_policy)
+        hidden = model(torch.randint(32, (16,), device=device_type.type))
+        chunk = hidden.detach().requires_grad_()
+        with model.head.partial_backward(outer_backward_follows=True):
+            output = model.head(chunk)
+            self.assertEqual(model.head.weight.grad_dtype, torch.float32)
+            output.sum().backward()
+            self.assertEqual(model.head.weight.grad.dtype, torch.float32)
+        hidden.backward(chunk.grad)
+        self.assertEqual(model.head.weight.grad.dtype, torch.float32)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_complete_grouped_forward(self):
+        for reshard_after_forward in (True, False):
+            torch.manual_seed(42)
+            model = ChunkedHeadModel(16, 32, tie=False).to(device_type)
+            ref_model = copy.deepcopy(model)
+            fully_shard(
+                [model.norm, model.head], reshard_after_forward=reshard_after_forward
+            )
+            fully_shard(model)
+            torch.manual_seed(self.rank)
+            tokens = torch.randint(32, (2, 8), device=device_type.type)
+            hidden = model(tokens, skip_head=True)
+            # The head runs alone after the root forward, which leaves its
+            # group's forward in progress with the head's parameters unsharded
+            chunk = hidden.detach().requires_grad_()
+            output = model.head(chunk)
+            self.assertNotIsInstance(model.head.weight, DTensor)
+            output = model.head.complete_grouped_forward(output)
+            self.assertEqual(
+                isinstance(model.head.weight, DTensor), reshard_after_forward
+            )
+            self.assertIs(model.head.complete_grouped_forward(output), output)
+            # The backward hooks on the output unshard the head again
+            output.sum().backward()
+            hidden.backward(chunk.grad)
+            ref_model(tokens).sum().backward()
+            self._check_grads(model, ref_model)
+
+
+class TestFullyShardModuleMethods(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    def test_policy_getters(self):
+        mesh = init_device_mesh("cpu", (self.world_size,))
+        model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4), nn.Linear(4, 4))
+        fully_shard(model[0], mesh=mesh, reshard_after_forward=2)
+        fully_shard(model[1], mesh=mesh)
+        fully_shard(model, mesh=mesh)
+        self.assertEqual(model[0].get_reshard_after_forward(), 2)
+        self.assertIs(model[1].get_reshard_after_forward(), True)
+        # The root keeps its parameters after forward unless told otherwise
+        self.assertIs(model.get_reshard_after_forward(), True)
+        model(torch.randn(2, 4))
+        self.assertIs(model.get_reshard_after_forward(), False)
+        model.set_reshard_after_forward(True, recurse=False)
+        self.assertIs(model.get_reshard_after_forward(), True)
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                self.assertTrue(module.get_requires_gradient_sync())
+                self.assertTrue(module.get_requires_all_reduce())
+                self.assertTrue(module.get_reshard_after_backward())
+        model.set_requires_gradient_sync(False)
+        model.set_requires_all_reduce(True, recurse=False)
+        model.set_reshard_after_backward(False, recurse=False)
+        self.assertFalse(model.get_requires_gradient_sync())
+        self.assertTrue(model.get_requires_all_reduce())
+        self.assertFalse(model.get_reshard_after_backward())
+        self.assertFalse(model[1].get_requires_gradient_sync())
+        self.assertFalse(model[1].get_requires_all_reduce())
+        self.assertTrue(model[1].get_reshard_after_backward())
+        self.assertTrue(model[1].get_is_last_backward())
+        model.set_is_last_backward(False)
+        self.assertFalse(model[1].get_is_last_backward())
+
+    def test_reshard_during_grouped_forward(self):
+        mesh = init_device_mesh("cpu", (self.world_size,))
+        model = ChunkedHeadModel(8, 16, tie=False)
+        fully_shard([model.norm, model.head], mesh=mesh, reshard_after_forward=False)
+        fully_shard(model, mesh=mesh)
+        with torch.no_grad():
+            model.head(model(torch.randint(16, (2, 4)), skip_head=True))
+        self.assertNotIsInstance(model.head.weight, DTensor)
+        model.head.reshard()
+        self.assertIsInstance(model.head.weight, DTensor)
+        self.assertIsInstance(model.norm.weight, DTensor)
+
+    def test_all_reduce_hook_runs_for_every_param_group(self):
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("a", "b"))
+        bias_placement = ShardPlacementResult(Shard(0), FSDPMeshInfo(mesh["a"], 0))
+        model = nn.Linear(8, 8)
+        fully_shard(
+            model,
+            mesh=mesh["b"],
+            shard_placement_fn=lambda p: bias_placement if p is model.bias else None,
+        )
+        self.assertEqual(len(model._get_fsdp_state()._fsdp_param_groups), 2)
+        reduce_outputs: list[torch.Tensor] = []
+        model.set_all_reduce_hook(reduce_outputs.append)
+        model(torch.randn(2, 8)).sum().backward()
+        self.assertEqual(len(reduce_outputs), 2)
+
+    def test_free_and_restore_sharded_params(self):
+        model = nn.Linear(8, 8)
+        fully_shard(model, mesh=init_device_mesh("cpu", (self.world_size,)))
+        sharded_params = list(model.parameters())
+        model.unshard()
+        model._free_sharded_params()
+        for param in sharded_params:
+            self.assertEqual(param.to_local().untyped_storage().size(), 0)
+        model._restore_sharded_params()
+        new_values = [
+            torch.arange(param.numel(), dtype=param.dtype).view(param.shape)
+            for param in sharded_params
+        ]
+        with torch.no_grad():
+            for param, value in zip(sharded_params, new_values):
+                param.copy_(
+                    distribute_tensor(value, param.device_mesh, param.placements)
+                )
+        model.reshard()
+        model.unshard()
+        for param, value in zip(model.parameters(), new_values):
+            self.assertEqual(param, value)
+
+
 class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
     @property
     def world_size(self) -> int:
