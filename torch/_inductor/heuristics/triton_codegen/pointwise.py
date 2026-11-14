@@ -92,6 +92,8 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
             triton_config_fn(size_hints, 16, 256),
             triton_config_fn(size_hints, bs, 1),
             triton_config_fn(size_hints, 1, bs),
+            # Short, wide tile for long contiguous rows with per-row operands.
+            triton_config_fn(size_hints, 256, 4),
             *hinted_configs,
         ]
 
