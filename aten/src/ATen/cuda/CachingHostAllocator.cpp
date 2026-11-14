@@ -49,7 +49,26 @@ struct CUDACachingHostAllocatorImpl
     allocate_host_memory_slowpath(size, ptr);
   }
 
-  void allocate_host_memory_slowpath(size_t size, void** ptr) {
+  void allocate_host_mem_pool_memory(size_t size, void** ptr) override {
+    // The reserve segment is shared by all pools and was placed by whichever
+    // thread allocated first, so skip it. Still create it on first use, as
+    // allocate_host_memory does, so that free_block never creates it.
+    get_reserve_segment();
+#if defined(USE_ROCM) && ROCM_VERSION >= 70200
+    // Without NumaUser, HIP takes the pages from the NUMA node nearest the
+    // current device, whichever thread allocates. Before ROCm 7.2, NumaUser
+    // fails the allocation where get_mempolicy is blocked (Docker's default
+    // seccomp profile).
+    allocate_host_memory_slowpath(size, ptr, hipHostMallocNumaUser);
+#else
+    allocate_host_memory_slowpath(size, ptr);
+#endif
+  }
+
+  void allocate_host_memory_slowpath(
+      size_t size,
+      void** ptr,
+      unsigned int flags = cudaHostAllocDefault) {
     // Pinned memory pointers allocated by any device can be directly used by
     // any other device, regardless of the current device at the time of
     // allocation, since we assume unified addressing. So we grab any existing
@@ -71,13 +90,11 @@ struct CUDACachingHostAllocatorImpl
     if (use_register) {
       allocWithCudaHostRegister(ptr, size);
     } else {
-      // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
-      if (current_stream_is_capturing_fast_path()) {
-          at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-          C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
-      } else {
-          C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
-      }
+      // Use cudaHostAlloc for allocating pinned memory (global lock in driver).
+      // Relaxed: a capture on any thread, or on another stream of this
+      // thread, would otherwise reject the call and be invalidated.
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+      C10_CUDA_CHECK(cudaHostAlloc(ptr, size, flags));
     }
 
     auto end = std::chrono::steady_clock::now();
@@ -115,7 +132,11 @@ struct CUDACachingHostAllocatorImpl
       std::lock_guard<std::mutex> g(stats_.timing_mutex_);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(ptr) == 1);
       use_register = use_host_register[ptr];
+      // Erase before freeing: a concurrent allocation can get ptr back as soon
+      // as it is freed, and inserts its own entry.
+      use_host_register.erase(ptr);
     }
+    at::cuda::CUDAStreamCaptureModeGuard capture_mode{cudaStreamCaptureModeRelaxed};
     if (use_register) {
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
@@ -129,7 +150,6 @@ struct CUDACachingHostAllocatorImpl
     // Update the statistics on the time spent on cudaFreeHost/hostUnregister
     {
       std::lock_guard<std::mutex> g(stats_.timing_mutex_);
-      use_host_register.erase(ptr);
       stats_.host_free_time.increase(duration.count());
     }
   }
@@ -143,6 +163,14 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool query_event(CUDAEventPool::Event& event) override {
+    // Relaxed, so that a capture on this thread, or a global-mode capture on
+    // another thread, does not reject the query. Switching modes serializes
+    // threads in the driver, so do it only while a capture is registered with
+    // this allocator (begin_allocate_to_pool).
+    if (C10_UNLIKELY(any_capture_underway())) {
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+      return event->query();
+    }
     return event->query();
   }
 
@@ -243,12 +271,8 @@ struct CUDACachingHostAllocatorImpl
     }
 
     // Register the mapped pages using cudaHostRegister
-    if (current_stream_is_capturing_fast_path()) {
-      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-      AT_CUDA_CHECK(cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
-    } else {
-      AT_CUDA_CHECK(cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
-    }
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+    AT_CUDA_CHECK(cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
   }
 
   CUDAStream get_current_stream() const override {
