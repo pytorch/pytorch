@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -62,7 +63,11 @@ from torch.testing._internal.common_fsdp import (
     FSDPTestMultiThread,
     get_devtype,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -96,6 +101,8 @@ class _IncompletePlacement(Placement):
 class TestFlexShardMesh(TestCase):
     """Test FlexShard shard mesh validation."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def test_rejects_multi_dim_mesh(self):
         from torch.distributed.fsdp._flex_shard.utils import _validate_flex_shard_mesh
 
@@ -116,6 +123,8 @@ class TestFlexShardMesh(TestCase):
 
 class TestBucketAssignment(TestCase):
     """Test _assign_params_to_buckets."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_assigns_params_to_correct_bucket(self):
         """Params match the right bucket by fnmatch."""
@@ -243,6 +252,8 @@ class TestBucketAssignment(TestCase):
 
 class TestBucketPlacementValidation(TestCase):
     """Test explicit placement and bucket validation."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @staticmethod
     def _named_params(
@@ -439,21 +450,29 @@ class TestBucketPlacementValidation(TestCase):
                 self.assertEqual(param, expected[name])
                 self.assertIs(get_mesh(param), mesh)
 
-    def test_rejects_uneven_shard_on_nonzero_dim(self):
-        """As in FSDP2, only Shard(0) pads; Shard(1) must split evenly."""
+    def test_uneven_shard_on_nonzero_dim_reserves_first_chunk(self):
+        """Every rank reserves the first chunk's elements for a Shard(1) param
+        that splits unevenly, so that the ranks' slots line up in the
+        collectives, and stores its own chunk compactly at the start."""
 
         class TwoRankMesh:
+            def __init__(self, rank: int) -> None:
+                self.rank = rank
+
             def get_local_rank(self) -> int:
-                return 0
+                return self.rank
 
             def size(self) -> int:
                 return 2
 
         weight = nn.Parameter(torch.empty(2, 3))
-        with self.assertRaisesRegex(NotImplementedError, "split evenly"):
-            Shard(1).bucket_storage_layout(
-                [("weight", weight)], {"weight": (Shard(1),)}, TwoRankMesh()
+        for rank, local_shape in ((0, (2, 2)), (1, (2, 1))):
+            layout = Shard(1).bucket_storage_layout(
+                [("weight", weight)], {"weight": (Shard(1),)}, TwoRankMesh(rank)
             )
+            param_layout = layout.param_layouts["weight"]
+            self.assertEqual(param_layout.local_shape, torch.Size(local_shape))
+            self.assertEqual(param_layout.storage_nbytes, 4 * weight.element_size())
 
     def test_fsdp2_compatible_orders_params_as_fully_shard(self):
         """FSDP2 takes a module's own params after its children's."""
@@ -534,6 +553,8 @@ class TestBucketPlacementValidation(TestCase):
 
 
 class TestBucketReduceDtype(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_promotes_trainable_grad_dtypes_only(self):
         params = {
             fqn: nn.Parameter(torch.empty(2, 2, dtype=torch.bfloat16))
@@ -649,6 +670,8 @@ class TestBucketReduceDtype(TestCase):
 class TestBucketStorageLayout(FSDPTestMultiThread):
     """Test ParamInfo and ShardedBucketStorage layout for bucket materialization."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
@@ -712,6 +735,8 @@ class TestBucketStorageLayout(FSDPTestMultiThread):
 
 
 class TestMixedBucketComposition(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_mixed_payload_dtypes_use_one_byte_all_gather(self) -> None:
         with single_rank_cpu_mesh() as mesh:
             mixed = MixedBucketPlacement({})
@@ -828,6 +853,8 @@ class TestDistributedBuckets(FSDPTest):
         python -m pytest --pyargs flex_shard.tests.test_flex_shard_buckets \
           -q -k Distributed
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     @property
     def world_size(self) -> int:
@@ -1014,8 +1041,8 @@ class TestDistributedBuckets(FSDPTest):
 
         with mock.patch.object(
             dist,
-            "reduce_scatter_tensor",
-            wraps=dist.reduce_scatter_tensor,
+            "reduce_scatter_single",
+            wraps=dist.reduce_scatter_single,
         ) as reduce_scatter:
             reduced = mixed.reduce_prepared_grad(prepared_reduce, GradientReduction())
         self.assertEqual(reduce_scatter.call_count, 1)
@@ -1195,6 +1222,8 @@ class TestMultiMeshBuckets(FSDPTest):
     the full param. (This toy Transformer's MoE has no router gate -- it runs and
     averages all experts -- so only the expert FFN weights live on efsdp.)
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     @property
     def world_size(self) -> int:

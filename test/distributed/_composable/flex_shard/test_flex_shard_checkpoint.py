@@ -149,6 +149,14 @@ class TestFlexShardGlobalLayout(TestCase):
             _single_param_layout(Shard(0), (1, 4), 2, 3),
             GlobalLayout((1, 4), (), (), ()),
         )
+        self.assertEqual(
+            _single_param_layout(Shard(1), (2, 5), 1, 2),
+            GlobalLayout((2, 5), ((0, 3),), ((0, 0),), ((2, 2),)),
+        )
+        self.assertEqual(
+            _single_param_layout(Shard(1), (2, 1), 1, 2),
+            GlobalLayout((2, 1), (), (), ()),
+        )
 
     def test_block_shard(self) -> None:
         placement = BlockShard(blocks_per_rank=(2, 0, 1), dim=1)

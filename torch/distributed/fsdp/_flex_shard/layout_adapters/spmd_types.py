@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, TYPE_CHECKING
+from typing import Any, Protocol, TYPE_CHECKING
 
 import spmd_types as spmd
 
@@ -15,15 +15,26 @@ from ..placement_contract import GlobalLayout, set_global_layout
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     import torch.nn as nn
     from torch.distributed.device_mesh import DeviceMesh
 
 
+class _SpmdLayout(Protocol):
+    """What this adapter reads of an ``spmd_types.SpmdType``, typed by its
+    fields since the spmd_types that lint pins predates the class."""
+
+    @property
+    def partition_spec(self) -> Sequence[Any] | None: ...
+
+    @property
+    def local_type(self) -> Mapping[Any, Any]: ...
+
+
 def spmd_types_to_global_layout(
     module: nn.Module,
-    layouts: Mapping[str, spmd.SpmdType],  # pyrefly: ignore [missing-attribute]
+    layouts: Mapping[str, _SpmdLayout],
     mesh: DeviceMesh,
 ) -> None:
     """Declare the layout of local parameters described by ``SpmdType`` layouts.
@@ -49,7 +60,7 @@ def spmd_types_to_global_layout(
 
 def _spmd_global_layout(
     local_shape: tuple[int, ...],
-    layout: spmd.SpmdType,  # pyrefly: ignore [missing-attribute]
+    layout: _SpmdLayout,
     mesh: DeviceMesh,
 ) -> GlobalLayout:
     ndim = len(local_shape)
@@ -74,7 +85,7 @@ def _spmd_global_layout(
 
 
 def _shard_axes_per_dim(
-    layout: spmd.SpmdType,  # pyrefly: ignore [missing-attribute]
+    layout: _SpmdLayout,
     ndim: int,
     mesh: DeviceMesh,
 ) -> list[list[tuple[int, int]]]:

@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -6,6 +7,7 @@
 
 import copy
 import dataclasses
+import functools
 import weakref
 from collections import Counter
 from unittest import mock
@@ -42,7 +44,7 @@ from torch.distributed.fsdp._flex_shard.placements.shard import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed.common_flex_shard import (
     alloc_grads_in_param_layout,
     check_flex_shard_parity,
@@ -382,6 +384,8 @@ def _checkpoint_like_torch_remat(module: torch.nn.Module) -> None:
 
 
 class TestFlexShardTraining(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
         return 2
@@ -433,10 +437,10 @@ class TestFlexShardTraining(FSDPTest):
 
         packed_ptrs: list[int] = []
         original_pack = Shard._pack_reduce_scatter_grad
-        original_reduce_scatter = dist.reduce_scatter_tensor
+        original_reduce_scatter = dist.reduce_scatter_single
 
-        def record_packed_buffer(placement, tensors, infos, world_size):
-            packed, layout = original_pack(placement, tensors, infos, world_size)
+        def record_packed_buffer(placement, tensors, infos, world_size, *args):
+            packed, layout = original_pack(placement, tensors, infos, world_size, *args)
             packed_ptrs.append(packed.data_ptr())
             if len(packed_ptrs) == 2:
                 # The fix orders this producer stream after the first consumer.
@@ -459,7 +463,7 @@ class TestFlexShardTraining(FSDPTest):
             ),
             mock.patch.object(
                 dist,
-                "reduce_scatter_tensor",
+                "reduce_scatter_single",
                 delayed_reduce_scatter,
             ),
         ):
@@ -467,9 +471,10 @@ class TestFlexShardTraining(FSDPTest):
 
         for index, layer in enumerate(model):
             for param in layer.parameters():
-                grad = param.grad
-                assert grad is not None
-                self.assertEqual(grad, torch.full_like(grad, 2 * (index + 1)))
+                self.assertIsNotNone(param.grad)
+                self.assertEqual(
+                    param.grad, torch.full_like(param.grad, 2 * (index + 1))
+                )
         self.assertEqual(len(packed_ptrs), len(model))
         self.assertEqual(packed_ptrs[0], packed_ptrs[1])
 
@@ -700,6 +705,58 @@ class TestFlexShardTraining(FSDPTest):
             )
 
     @skip_if_lt_x_gpu(2)
+    def test_uneven_shard_dim1_matches_unsharded_reference(self):
+        # Shard(1) splits the 3- and 5-column weights unevenly over 2 ranks, in
+        # one bucket with Shard(0) params: the all-gather copies the weights out
+        # of the ranks' compact chunks, and the reduce-scatter pads them
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+
+        def shard_dim(param: torch.nn.Parameter) -> int:
+            return 1 if param.ndim > 1 else 0
+
+        def placement_fn(named_params, mesh):
+            return {fqn: (Shard(shard_dim(param)),) for fqn, param in named_params}
+
+        torch.manual_seed(42)
+        model = _UnevenMLPStack(device=device_type)
+        reference = copy.deepcopy(model)
+        flex_shard(
+            model, buckets=[BucketSpec(["*"], placement_fn=placement_fn, mesh=mesh)]
+        )
+
+        def check_parity() -> None:
+            for ref_param, param in zip(
+                reference.parameters(), model.parameters(), strict=True
+            ):
+                shard = functools.partial(
+                    expected_shard,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    dim=shard_dim(ref_param),
+                )
+                self.assertEqual(param.detach(), shard(ref_param.detach()))
+                if ref_param.grad is not None:
+                    self.assertEqual(param.grad, shard(ref_param.grad))
+
+        optimizer = make_test_sgd(model.parameters(), lr=0.1)
+        reference_optimizer = make_test_sgd(reference.parameters(), lr=0.1)
+        torch.manual_seed(43 + self.rank)
+        for _ in range(3):
+            optimizer.zero_grad(set_to_none=True)
+            reference_optimizer.zero_grad(set_to_none=True)
+            inputs = torch.randn(4, 3, device=device_type)
+            output = model(inputs)
+            reference_output = reference(inputs)
+            self.assertEqual(output, reference_output)
+            output.square().sum().backward()
+            reference_output.square().sum().backward()
+            _average_reference_grads(reference)
+            check_parity()
+            optimizer.step()
+            reference_optimizer.step()
+            check_parity()
+
+    @skip_if_lt_x_gpu(2)
     def test_copy_free_matches_reference(self):
         # The all-gather sends the local storage as is, refills gather straight
         # into the persistent buckets, and with grads allocated in the parameter
@@ -832,7 +889,7 @@ class TestFlexShardTraining(FSDPTest):
             "all_gather",
             "all_gather_into_tensor",
             "reduce_scatter",
-            "reduce_scatter_tensor",
+            "reduce_scatter_single",
         )
         for out_features, gradient_bucket in ((8, False), (8, True), (16, False)):
             # Linear(16, 16) then Linear(16, out_features) on 2 ranks: largest
@@ -911,7 +968,7 @@ class TestFlexShardTraining(FSDPTest):
                 self.assertEqual(calls["all_gather"] > 0, uneven, calls)
                 self.assertEqual(calls["reduce_scatter"] > 0, uneven, calls)
                 self.assertEqual(calls["all_gather_into_tensor"] > 0, not uneven, calls)
-                self.assertEqual(calls["reduce_scatter_tensor"] > 0, not uneven, calls)
+                self.assertEqual(calls["reduce_scatter_single"] > 0, not uneven, calls)
 
     @skip_if_lt_x_gpu(2)
     def test_owner_rows_reduce_grads_in_param_layout(self):
@@ -1041,7 +1098,7 @@ class TestFlexShardTraining(FSDPTest):
                 dist, "all_gather_single", wraps=dist.all_gather_single
             ) as all_gather,
             mock.patch.object(
-                dist, "reduce_scatter_tensor", wraps=dist.reduce_scatter_tensor
+                dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
             ) as reduce_scatter,
         ):
             model(x).sum().backward()
@@ -1099,6 +1156,7 @@ class TestFlexShardTraining(FSDPTest):
                     model(x).sum().backward()
                     reference(x).sum().backward()
                 model.set_requires_gradient_sync(True)
+                model.set_reshard_after_backward(True)
                 handle = model.finalize_backward(async_op=async_op)
                 if async_op:
                     with self.assertRaisesRegex(RuntimeError, "wait on the previous"):
@@ -1219,7 +1277,8 @@ class TestFlexShardTraining(FSDPTest):
         # forward hooks that gather its bucket, unshards every bucket first, as
         # Megatron-LM's EP overlap schedule does. It also splits each backward
         # into two calls, so backward finalization is manual: the buckets keep
-        # their grads until finalize_backward after the last microbatch. Two
+        # their grads until finalize_backward after the last microbatch, and,
+        # without reshard_after_backward, their params, as with FSDP2. Two
         # steps, so the second unshard gathers the updated shards, which its
         # outputs check. With async_op, the schedule waits on the unshard's
         # handle before it uses the params.
@@ -1257,6 +1316,7 @@ class TestFlexShardTraining(FSDPTest):
                 for _ in range(2):
                     optimizer.zero_grad(set_to_none=True)
                     reference_optimizer.zero_grad(set_to_none=True)
+                    model.set_reshard_after_backward(False)
                     handle = model.unshard(async_op=async_op)
                     if async_op:
                         handle.wait()
@@ -1276,6 +1336,7 @@ class TestFlexShardTraining(FSDPTest):
                         output.sum().backward()
                         hidden.backward(detached.grad)
                         reference_output.sum().backward()
+                    model.set_reshard_after_backward(True)
                     model.finalize_backward()
                     _average_reference_grads(reference)
                     optimizer.step()
@@ -1432,7 +1493,7 @@ class TestFlexShardTraining(FSDPTest):
             ),
             mock.patch.object(
                 dist,
-                "reduce_scatter_tensor",
+                "reduce_scatter_single",
                 side_effect=AssertionError("reduce-scatter on a 1-rank mesh"),
             ),
         ):
@@ -1614,6 +1675,9 @@ class TestFlexShardTraining(FSDPTest):
                             storage.set_requires_gradient_sync(last or storage is layer)
                     if mode == "keep":
                         model.set_requires_gradient_sync(last)
+                        if last:
+                            # As with FSDP2: reshard before the optimizer step
+                            model.set_reshard_after_backward(True)
                     loss = microbatch_loss(model, idx)
                     ref_loss = microbatch_loss(reference, idx)
                     self.assertEqual(loss, ref_loss)
@@ -1688,6 +1752,7 @@ class TestFlexShardTraining(FSDPTest):
         model.set_requires_gradient_sync(False)
         model.tok_embeddings(x).float().sum().backward()
         model.set_requires_gradient_sync(True)
+        model.set_reshard_after_backward(True)
         reference.tok_embeddings(x).float().sum().backward()
         unsharded_param = model.tok_embeddings.weight
         self.assertEqual(unsharded_param.dtype, torch.bfloat16)
@@ -1719,13 +1784,17 @@ class TestFlexShardTraining(FSDPTest):
         # grad reaches the reduce-scatter, whose copy-in widens it, and
         # grad_dtype is restored afterwards.
         runtime = bucket_runtime.BucketRuntime
-        with mock.patch.object(
-            runtime, "reduce_grads", autospec=True, side_effect=runtime.reduce_grads
-        ) as reduces:
+        reduced_dtypes = []
+        orig_reduce_grads = runtime.reduce_grads
+
+        def record_reduce_grads(self, grads, *args, **kwargs):
+            # The reduce frees its list's grads once copied in
+            reduced_dtypes.append([grad.dtype for grad in grads])
+            return orig_reduce_grads(self, grads, *args, **kwargs)
+
+        with mock.patch.object(runtime, "reduce_grads", record_reduce_grads):
             model.tok_embeddings(x).float().sum().backward()
-        self.assertEqual(
-            [grad.dtype for grad in reduces.call_args.args[1]], [torch.bfloat16]
-        )
+        self.assertEqual(reduced_dtypes, [[torch.bfloat16]])
         self.assertEqual(unsharded_param.grad_dtype, torch.float32)
 
     @skip_if_lt_x_gpu(2)
@@ -1814,8 +1883,8 @@ class TestFlexShardTraining(FSDPTest):
             ) as all_gather,
             mock.patch.object(
                 dist,
-                "reduce_scatter_tensor",
-                wraps=dist.reduce_scatter_tensor,
+                "reduce_scatter_single",
+                wraps=dist.reduce_scatter_single,
             ) as reduce_scatter,
         ):
             output = model(x)
@@ -2022,6 +2091,7 @@ class TestFlexShardTraining(FSDPTest):
         # bucket's fp32 reduce dtype promoted by b's grad_dtype.
         self.assertEqual(model.a._parameters["weight"].grad.dtype, torch.bfloat16)
         model.set_requires_gradient_sync(True)
+        model.set_reshard_after_backward(True)
         model(x).backward()
         # As in FSDP2, b's first backward, without sync, starts its grad and
         # keeps the upcast, so its two uses sum to 257 in fp32; the syncing
@@ -2081,6 +2151,7 @@ class TestFlexShardTraining(FSDPTest):
         model.set_requires_gradient_sync(False)
         model(x).sum().backward()
         model.set_requires_gradient_sync(True)
+        model.set_reshard_after_backward(True)
         reference(x).sum().backward()
         loss = model(x).sum()
         ref_loss = reference(x).sum()
