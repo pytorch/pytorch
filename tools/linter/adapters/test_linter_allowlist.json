@@ -423,7 +423,6 @@
   "test/inductor/test_inductor_ops.py",
   "test/inductor/test_inductor_scheduler.py",
   "test/inductor/test_inductor_utils.py",
-  "test/inductor/test_inplace_padding.py",
   "test/inductor/test_inplacing_pass.py",
   "test/inductor/test_interval_mask_packing.py",
   "test/inductor/test_kernel_benchmark.py",
