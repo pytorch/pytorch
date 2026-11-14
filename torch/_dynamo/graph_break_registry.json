@@ -6893,6 +6893,17 @@
       ]
     }
   ],
+  "GB3177": [
+    {
+      "Gb_type": "bytes() over an iterator with non-constant items",
+      "Context": "bytes({args[0]}), item {item}",
+      "Explanation": "bytes() can only fold items that are constant ints.",
+      "Hints": [
+        "Pass only constant ints to bytes(), not SymInts or tensors.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0361": [
     {
       "Gb_type": "triton kernel unsupported feature",

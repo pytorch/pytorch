@@ -129,6 +129,7 @@ from .object_protocol import (
     maybe_get_python_type,
     pycallable_check,
     pyiter_check,
+    pyiter_next,
     pylong_as_ssize_t,
     pylong_from_base,
     pynumber_absolute,
@@ -2217,6 +2218,46 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         if not args and not kwargs:
             return variables.ConstantVariable.create(b"")
+        if (
+            len(args) == 1
+            and not kwargs
+            and isinstance(
+                args[0],
+                (variables.IteratorVariable, variables.LocalGeneratorObjectVariable),
+            )
+        ):
+            # bytes(iterator_of_ints), e.g. a generator. Checked before the
+            # constant branch so a fresh list/tuple iterator is consumed too.
+            # Like CPython, pull one element at a time and raise at the first
+            # bad one, so unbounded iterators stop and later items are left.
+            # Other types may define __bytes__, the buffer protocol or
+            # __index__, which take priority in CPython.
+            out = bytearray()
+            iterator = generic_getiter(tx, args[0])
+            while True:
+                try:
+                    # Host-side loop with no resumable frame.
+                    with torch._dynamo.config.patch(nested_graph_breaks=False):
+                        item = pyiter_next(tx, iterator)
+                except ObservedUserStopIteration:
+                    handle_observed_exception(tx)
+                    break
+                item = pynumber_index(tx, item)
+                if not item.is_python_constant():
+                    unimplemented(
+                        gb_type="bytes() over an iterator with non-constant items",
+                        context=f"bytes({args[0]}), item {item}",
+                        explanation="bytes() can only fold items that are constant ints.",
+                        hints=[
+                            "Pass only constant ints to bytes(), not SymInts or tensors.",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+                value = item.as_python_constant()
+                if not 0 <= value < 256:
+                    raise_value_error(tx, "bytes must be in range(0, 256)")
+                out.append(value)
+            return VariableTracker.build(tx, bytes(out))
         if all(a.is_python_constant() for a in args) and all(
             v.is_python_constant() for v in kwargs.values()
         ):
