@@ -346,6 +346,24 @@ def _note_local(
 # changes its training flag. What is known about a module holds for one epoch.
 _epoch = 0
 _hooked = False
+# Hooks are code that runs at a call of a module and is not in its forward: a
+# graph of the call would not hold what they do.
+_HOOK_DICTS = (
+    "_forward_hooks",
+    "_forward_pre_hooks",
+    "_backward_hooks",
+    "_backward_pre_hooks",
+)
+_HOOK_REGISTRATIONS = (
+    "register_forward_hook",
+    "register_forward_pre_hook",
+    "register_full_backward_hook",
+    "register_full_backward_pre_hook",
+    "register_backward_hook",
+)
+_GLOBAL_HOOK_DICTS = tuple(
+    getattr(torch.nn.modules.module, "_global" + name) for name in _HOOK_DICTS
+)
 
 
 def _install_module_hooks() -> None:
@@ -386,6 +404,7 @@ def _install_module_hooks() -> None:
         "register_buffer",
         "register_parameter",
         "add_module",
+        *_HOOK_REGISTRATIONS,
     ):
         reporting(name, lambda *args, **kwargs: True)
     module.register_module = module.add_module  # type: ignore[method-assign]
@@ -394,7 +413,7 @@ def _install_module_hooks() -> None:
 class _ModuleState:
     """The tensors of a module and of its submodules, for one epoch."""
 
-    __slots__ = ("accessors", "epoch", "ids", "module", "token")
+    __slots__ = ("accessors", "epoch", "hooked", "ids", "module", "token")
 
     def __init__(self, module: nn.Module) -> None:
         self.module = weakref.ref(module)
@@ -406,9 +425,12 @@ class _ModuleState:
         # so a parameter that was replaced by another tensor is picked up.
         self.accessors: list[tuple[Any, Any]] = []
         ids, training = [], []
+        # Whether the module or one inside it has a hook.
+        self.hooked = False
         for m in module.modules():
             ids.append(id(m))
             training.append(m.training)
+            self.hooked = self.hooked or any(getattr(m, name) for name in _HOOK_DICTS)
             for store in (m._parameters, m._buffers):
                 for name, tensor in store.items():
                     if tensor is not None:
@@ -468,6 +490,10 @@ def _describe(obj: Any, flat: list[torch.Tensor], seen: dict[int, int]) -> Any:
         return (cls, tuple(obj), values)
     if isinstance(obj, nn.Module):
         state = _module_state(obj)
+        if state.hooked or any(_GLOBAL_HOOK_DICTS):
+            raise _Opaque(
+                0, "a module with hooks, which run code a graph does not hold"
+            )
         try:
             for store, name in state.accessors:
                 tensor = store[name]
