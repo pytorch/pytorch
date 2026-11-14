@@ -176,6 +176,10 @@ struct ConcretePyInterpreterVTable final
       const c10::OperatorHandle& op,
       const torch::jit::Stack& stack,
       const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
+  bool fake_try_fast_impl(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
   bool fake_try_decomp(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
@@ -183,7 +187,7 @@ struct ConcretePyInterpreterVTable final
       bool* has_python_cia) const override;
   bool fake_try_meta(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const override;
-  bool fake_try_custom_op_impl(
+  bool run_fake_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       const std::shared_ptr<c10::FakeTensorMode>& mode,
@@ -193,9 +197,8 @@ struct ConcretePyInterpreterVTable final
       torch::jit::Stack* stack,
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       std::optional<c10::Device> common_device) const override;
-  bool fake_try_prim_meta(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack) const override;
+  bool prim_meta_impl(const c10::OperatorHandle& op, torch::jit::Stack* stack)
+      const override;
   bool fake_infer_from_real_out(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
@@ -1062,6 +1065,10 @@ DEFINE_CACHED_PYTHON_IMPORT(
     py::module::import("torch._subclasses.fake_tensor")
         .attr("_check_for_subclass_arg"))
 DEFINE_CACHED_PYTHON_IMPORT(
+    get_fast_op_impls,
+    py::module::import("torch._subclasses.fake_impls")
+        .attr("get_fast_op_impls"))
+DEFINE_CACHED_PYTHON_IMPORT(
     get_op_implementations_checks,
     py::module::import("torch._subclasses.fake_impls")
         .attr("op_implementations_checks"))
@@ -1314,6 +1321,33 @@ void ConcretePyInterpreterVTable::invalidate_written_to_constants(
   }
 }
 
+bool ConcretePyInterpreterVTable::fake_try_fast_impl(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) const {
+  py::gil_scoped_acquire gil;
+  py::handle py_op = getTorchApiFunction(op);
+  py::object fast_impl = get_fast_op_impls()().attr("get")(py_op);
+  if (fast_impl.is_none()) {
+    return false;
+  }
+  py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
+  return run_fake_python_callback(
+      op,
+      stack,
+      [&](const py::object& args, const py::dict& kwargs) {
+        py::object out = fast_impl(py_mode, *args, **kwargs);
+        TORCH_CHECK(
+            !out.is(py::handle(Py_NotImplemented)),
+            "fast implementation for ",
+            op.operator_name(),
+            " returned NotImplemented");
+        return out;
+      },
+      /*convert=*/{},
+      "fast implementation");
+}
+
 // Try a registered Python decomposition for op.
 //
 // This mirrors the decomposition-selection block in
@@ -1433,7 +1467,7 @@ bool ConcretePyInterpreterVTable::fake_try_meta(
       "meta");
 }
 
-bool ConcretePyInterpreterVTable::fake_try_custom_op_impl(
+bool ConcretePyInterpreterVTable::run_fake_impl(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     const std::shared_ptr<c10::FakeTensorMode>& mode,
@@ -1492,7 +1526,7 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
 }
 
 // Try op's prim_meta_impl (prims meta rule) if it defines one.
-bool ConcretePyInterpreterVTable::fake_try_prim_meta(
+bool ConcretePyInterpreterVTable::prim_meta_impl(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) const {
   py::gil_scoped_acquire gil;
