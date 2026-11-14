@@ -7751,6 +7751,8 @@ instantiate_parametrized_tests(ShapeEnvReplacementCacheTest)
 
 
 class TestSingletonIntStaticEval(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_singleton_int_only_expr_can_be_statically_evaluated(self):
         from torch.utils._sympy.singleton_int import SingletonInt
 
@@ -8514,7 +8516,6 @@ class TestTransferSymbolsFromForeignShapeEnvDevice(TestCase):
 instantiate_device_type_tests(
     TestTransferSymbolsFromForeignShapeEnvDevice,
     globals(),
-    only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 
