@@ -5128,7 +5128,7 @@ class TestPythonChromeTraceExport(TestCase):
 
 
 instantiate_device_type_tests(
-    TestPythonChromeTraceExport, globals(), except_for=("cpu",)
+    TestPythonChromeTraceExport, globals(), except_for=("cpu",), allow_xpu=True
 )
 
 
