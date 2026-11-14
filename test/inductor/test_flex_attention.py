@@ -6956,6 +6956,100 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cpu
+    @skip_on_mps
+    def test_forward_refine_hook_receives_lowering_context(self, device):
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.virtualized import V
+
+        class RecordingChoices(InductorChoices):
+            def __init__(self):
+                self.contexts = []
+
+            def refine_flex_attention_fwd_configs(self, configs, context):
+                self.contexts.append(context)
+                return configs
+
+        def lowering_context(query, key, value, **kwargs):
+            choices = RecordingChoices()
+            torch._dynamo.reset()
+            with (
+                config.patch(force_disable_caches=True),
+                V.set_choices_handler(choices),
+            ):
+                torch.compile(flex_attention, fullgraph=True)(
+                    query, key, value, **kwargs
+                )
+            self.assertEqual(len(choices.contexts), 1)
+            return choices.contexts[0]
+
+        # Distinct sizes so that swapped context fields fail.
+        dense = lowering_context(
+            torch.randn(3, 4, 128, 64, device=device, dtype=torch.float16),
+            torch.randn(3, 2, 256, 64, device=device, dtype=torch.float16),
+            torch.randn(3, 2, 256, 32, device=device, dtype=torch.float16),
+            enable_gqa=True,
+        )
+        self.assertEqual(
+            (
+                dense.batch_size,
+                dense.num_heads,
+                dense.num_kv_heads,
+                dense.seq_len_q,
+                dense.seq_len_kv,
+                dense.qk_head_dim,
+                dense.v_head_dim,
+                dense.qk_head_dim_rounded,
+                dense.v_head_dim_rounded,
+            ),
+            (3, 4, 2, 128, 256, 64, 32, 64, 32),
+        )
+        self.assertTrue(dense.is_noop_block_mask)
+        self.assertTrue(dense.inputs_contiguous)
+        self.assertFalse(dense.score_mod_reads_buffers)
+        self.assertEqual(
+            (dense.dtype, dense.key_dtype, dense.value_dtype), (torch.float16,) * 3
+        )
+
+        query, key, value = (
+            torch.randn(1, 2, 256, 64, device=device, dtype=torch.float16)
+            for _ in range(3)
+        )
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        # A block mask with the query's batch also allows broadcasting K/V.
+        block_mask = create_block_mask(causal, 2, 1, 256, 256, device=device)
+        masked = lowering_context(
+            torch.randn(2, 2, 256, 64, device=device, dtype=torch.float16),
+            key,
+            value,
+            block_mask=block_mask,
+        )
+        self.assertFalse(masked.is_noop_block_mask)
+        self.assertEqual((masked.batch_size, masked.kv_batch_size), (2, 1))
+
+        bias = torch.randn(256, device=device, dtype=torch.float16)
+
+        def add_bias(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx]
+
+        self.assertTrue(
+            lowering_context(
+                query, key, value, score_mod=add_bias
+            ).score_mod_reads_buffers
+        )
+
+        transposed = (
+            torch.randn(1, 256, 2, 64, device=device, dtype=torch.float16).transpose(
+                1, 2
+            )
+            for _ in range(3)
+        )
+        self.assertFalse(lowering_context(*transposed).inputs_contiguous)
+
+    @supported_platform
+    @skip_on_cpu
     @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
     def test_backward_calls_flex_attention_backward_choices_hook(self, device):
         from torch._inductor.choices import InductorChoices
