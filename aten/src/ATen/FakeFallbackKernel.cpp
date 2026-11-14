@@ -277,13 +277,6 @@ bool cpp_meta_supports_symint(
           categories, at::impl::FakeDispatchCategory::CppMetaSupportsSymint);
 }
 
-bool may_be_plain_tensor(const at::Tensor& t) {
-  // Reject known subclasses natively; conversion checks the exact Python type
-  // under the GIL, including Parameters without the Python dispatch key.
-  return t.defined() && !t.is_fake() &&
-      !t.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
-}
-
 void fakeFallback(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatchKeySet,
@@ -354,6 +347,7 @@ void fakeFallback(
   }
 
   bool has_mode_fakes = false;
+  bool has_python_inputs = false;
   const bool symbolic_sizes = std::any_of(
       stack->end() - num_arguments,
       stack->end(),
@@ -366,6 +360,8 @@ void fakeFallback(
         const auto* impl = t.unsafeGetTensorImpl();
         has_mode_fakes = has_mode_fakes ||
             (t.is_fake() && impl->fake_tensor_mode() == mode);
+        has_python_inputs = has_python_inputs ||
+            (!t.is_fake() && impl->pyobj_slot()->load_pyobj() != nullptr);
       });
   // Python's whitelist uses the base name without namespace or overload.
   const auto should_allow_numbers_as_tensors = [&op] {
@@ -397,44 +393,12 @@ void fakeFallback(
         !(is_to_copy &&
           (*stack)[arguments_begin].toTensor().device().is_meta()) &&
         !avoiding_device_init()));
-  if (makes_constant) {
-    torch::jit::Stack outputs(stack->end() - num_arguments, stack->end());
-    {
-      // The selected mode is uninstalled, but a foreign fake still dispatches
-      // through its owning mode, as it does in Python's constant attempt.
-      auto tls = c10::impl::tls_local_dispatch_key_set();
-      tls.excluded_ = tls.excluded_.remove(c10::DispatchKey::Fake);
-      c10::impl::ForceDispatchKeyGuard guard(tls);
-      op.callBoxed(outputs);
-    }
-    if (outputs.size() == 1 && outputs[0].isTensor() &&
-        may_be_plain_tensor(outputs[0].toTensor()) &&
-        (outputs[0].toTensor().unsafeGetTensorImpl()->pyobj_slot()->load_pyobj() ||
-         may_turn_const(outputs[0].toTensor()))) {
-      // With a Python object, check its type before querying constant
-      // eligibility. Native outputs can skip the GIL when already ineligible.
-      auto fake = (*c10::impl::getGlobalPyInterpreter())
-                      ->from_real_tensor(
-                          mode,
-                          outputs[0].toTensor().getIntrusivePtr(),
-                          c10::impl::FakeTensorConversion::ClonedConstant);
-      if (fake) {
-        torch::jit::drop(*stack, num_arguments);
-        torch::jit::push(*stack, at::Tensor(std::move(fake)));
-        return;
-      }
-    }
-  }
-  // Larger plain lifts use the converter's existing alias and memo behavior.
-  if (is_lift && may_be_plain_tensor((*stack)[arguments_begin].toTensor())) {
-    auto fake = (*c10::impl::getGlobalPyInterpreter())
-                    ->from_real_tensor(
-                        mode,
-                        (*stack)[arguments_begin].toTensor().getIntrusivePtr(),
-                        c10::impl::FakeTensorConversion::PlainTensor);
-    if (fake) {
-      torch::jit::drop(*stack, num_arguments);
-      torch::jit::push(*stack, at::Tensor(std::move(fake)));
+  if (has_python_inputs || makes_constant) {
+    // Validate input subclasses before any real execution. Share the GIL scope
+    // with the initial constant attempt, output checks, and lift conversion.
+    if ((*c10::impl::getGlobalPyInterpreter())
+            ->fake_try_initial_constant(
+                op, stack, mode, makes_constant, is_lift)) {
       return;
     }
   }
