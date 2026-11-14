@@ -42,16 +42,15 @@ global_decomposition_table: dict[str, dict[torch._ops.OperatorBase, Callable]] =
 decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
 meta_table = global_decomposition_table["meta"]
+_static_shape_decomps_initialized: bool = False
 
 
 def is_torch_decomp_decomposition(func: OpOverload) -> bool:
     decompositions = torch._decomp.decompositions
-    # Note that the function in the decomposition table might be
-    # different from the one in the module because of the difference
-    # in out handling in aten API and torch public API
-    return decomposition_table[func].__module__.startswith(
-        "torch._decomp"
-    ) and decomposition_table[func].__name__ in dir(decompositions)
+    # Out-parameter wrappers can differ from the function in the module.
+    fn = decomposition_table[func]
+    in_decomp_module = fn.__module__.startswith("torch._decomp")
+    return in_decomp_module and hasattr(decompositions, fn.__name__)
 
 
 def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
@@ -104,6 +103,10 @@ def _add_op_to_registry(registry, op, fn):
                 torch._C._fake_dispatch_register_decomp(
                     schema.name, schema.overload_name
                 )
+                if _static_shape_decomps_initialized:
+                    from torch._meta_registrations import _register_static_shape_decomps
+
+                    _register_static_shape_decomps((op_overload,))
             elif registry is meta_table:
                 torch._C._fake_dispatch_register_meta(schema.name, schema.overload_name)
             elif registry is pre_autograd_decomposition_table:
@@ -301,10 +304,22 @@ def remove_decompositions(
     """
     for op in aten_ops:
         if isinstance(op, OpOverloadPacket):
-            for opo in op.op_overloads():
-                decompositions.pop(opo, None)
+            overloads = op.op_overloads()
         elif isinstance(op, OpOverload):
-            decompositions.pop(op, None)
+            overloads = (op,)
+        else:
+            continue
+        for overload in overloads:
+            decompositions.pop(overload, None)
+            schema = overload._schema
+            if decompositions is decomposition_table:
+                torch._C._fake_dispatch_deregister_decomp(
+                    schema.name, schema.overload_name
+                )
+            elif decompositions is meta_table:
+                torch._C._fake_dispatch_deregister_meta(
+                    schema.name, schema.overload_name
+                )
 
 
 # populate the table
