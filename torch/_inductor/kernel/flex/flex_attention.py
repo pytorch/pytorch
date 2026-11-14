@@ -346,6 +346,12 @@ def flex_attention(
             mask_mod_other_buffers,
         )
 
+    kv_num_blocks = ExternKernel.require_contiguous(kv_num_blocks)
+    kv_indices = ExternKernel.require_contiguous(kv_indices)
+    if full_kv_num_blocks is not None:
+        full_kv_num_blocks = ExternKernel.require_contiguous(full_kv_num_blocks)
+        full_kv_indices = ExternKernel.require_contiguous(full_kv_indices)
+
     (
         query,
         key,
@@ -916,6 +922,17 @@ def flex_attention_backward(*args, **kwargs):
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
+
+    kv_num_blocks = ExternKernel.require_contiguous(kv_num_blocks)
+    kv_indices = ExternKernel.require_contiguous(kv_indices)
+    if full_kv_num_blocks is not None:
+        full_kv_num_blocks = ExternKernel.require_contiguous(full_kv_num_blocks)
+        full_kv_indices = ExternKernel.require_contiguous(full_kv_indices)
+    q_num_blocks = ExternKernel.require_contiguous(q_num_blocks)
+    q_indices = ExternKernel.require_contiguous(q_indices)
+    if full_q_num_blocks is not None:
+        full_q_num_blocks = ExternKernel.require_contiguous(full_q_num_blocks)
+        full_q_indices = ExternKernel.require_contiguous(full_q_indices)
 
     (
         query,
