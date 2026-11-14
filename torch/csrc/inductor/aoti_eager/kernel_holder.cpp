@@ -16,6 +16,7 @@
 
 #include <ATen/Functions.h>
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 
 namespace torch::inductor {
 
@@ -103,7 +104,7 @@ std::vector<at::Tensor> unpack_tensors(
     const c10::Device& device) {
   auto ref_tensor = find_reference_tensor(stack);
   std::vector<at::Tensor> inputs;
-  for (size_t idx = 0; idx < stack.size(); idx++) {
+  for (const auto idx : c10::irange(stack.size())) {
     const auto& ivalue = stack[idx];
     const auto& ivalue_arg = arguments[idx];
     if (ivalue.isTensor()) {

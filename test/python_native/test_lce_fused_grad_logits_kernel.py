@@ -63,11 +63,13 @@ def _inputs(num_rows, V, device="cuda", logits_dtype=torch.float32):
 # unsupported device, so they need the CuTeDSL runtime's floor, sm_80.
 @unittest.skipIf(not TEST_CUDA, "CuTeDSL kernels are CUDA-only")
 @unittest.skipIf(not SM80OrLater, "the CuTeDSL runtime requires sm_80 or later")
+@unittest.skipIf(
+    not cu.runtime_available() or cu.check_native_jit_disabled(),
+    "CuTeDSL runtime unavailable or native DSL disabled",
+)
 class TestFusedGradLogitsKernel(TestCase):
     def setUp(self):
         super().setUp()
-        if not cu.runtime_available() or cu.check_native_jit_disabled():
-            self.skipTest("CuTeDSL runtime unavailable or native DSL disabled")
         from torch._native.ops.linear_cross_entropy import fused_grad_logits_kernel
 
         self.kernel = fused_grad_logits_kernel

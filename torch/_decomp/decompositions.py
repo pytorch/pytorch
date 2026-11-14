@@ -705,11 +705,18 @@ def binary_cross_entropy(
     weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
-    # We cannot currently model this without introducing data-dependent control flow
-    # TORCH_CHECK(
-    #     (input_val >= 0) && (input_val <= 1),
-    #     "all elements of input should be between 0 and 1"
-    # )
+    # The ATen kernels check the [0, 1] domain per element; a pointwise
+    # decomposition has to assert on the whole tensor instead. Without this the
+    # log terms below clamp to -100 and an out-of-domain value silently returns
+    # a finite loss. _assert_async is side-effectful and won't be DCE'd.
+    aten._assert_async.msg(
+        torch.all((self >= 0) & (self <= 1)),
+        "all elements of input should be between 0 and 1",
+    )
+    aten._assert_async.msg(
+        torch.all((target >= 0) & (target <= 1)),
+        "all elements of target should be between 0 and 1",
+    )
     loss = (target - 1) * torch.maximum(
         torch.log1p(-self), self.new_full((), -100)
     ) - target * torch.maximum(torch.log(self), self.new_full((), -100))
@@ -2910,12 +2917,12 @@ def adaptive_avg_pool2d(input: Tensor, output_size: tuple[int, int]):
     device = input.device
     shape = input.shape
     ndim = len(shape)
-    torch._check(
+    torch._check_value(
         ndim in (3, 4),
         lambda: f"adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got {ndim}",
     )
     for d in input.shape[-2:]:
-        torch._check(
+        torch._check_value(
             d != 0,
             lambda: "adaptive_avg_pool2d(): Expected input to have non-zero size for "
             f"non-batch dimensions, but input has shape {tuple(shape)}.",
@@ -5822,6 +5829,7 @@ def multi_margin_loss(
     weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
+    orig_target_shape = target.shape
     input = torch.atleast_2d(input)
     target = torch.atleast_1d(target)
     nframe = input.shape[0]
@@ -5858,7 +5866,9 @@ def multi_margin_loss(
     elif reduction == Reduction.SUM.value:
         return z.sum() / z.shape[1]
     else:
-        return z.mean(dim=1)
+        # Like eager, an unreduced loss has the target's shape, so a 0-d
+        # target gives a 0-d loss.
+        return z.mean(dim=1).reshape(orig_target_shape)
 
 
 @register_decomposition(aten.multilabel_margin_loss_forward)

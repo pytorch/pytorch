@@ -12,7 +12,7 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
         source "${SCRIPTPATH}/set_desired_python.sh"
 
         # build_env_setup.py needs its build-flag exports (USE_CUDA,
-        # TH_BINARY_BUILD, ...) to reach the wheel build subprocess; it
+        # USE_MAGMA, ...) to reach the wheel build subprocess; it
         # writes them here for us to source.
         ENV_FILE=$(mktemp)
         trap 'rm -f "$ENV_FILE"' EXIT

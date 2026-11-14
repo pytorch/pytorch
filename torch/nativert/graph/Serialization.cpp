@@ -2,6 +2,8 @@
 #include <fmt/ostream.h>
 #include <torch/nativert/graph/Serialization.h>
 #include <limits>
+
+#include <c10/util/irange.h>
 namespace torch::nativert {
 
 namespace {
@@ -144,6 +146,13 @@ enforceInputOrder(
   // 4. tensor_constant
   // 5. custom_obj
   // 6. user_input/constant_input
+  TORCH_CHECK(
+      inputSpecs.size() == graphInputs.size(),
+      "Graph signature declares ",
+      inputSpecs.size(),
+      " inputs but the graph has ",
+      graphInputs.size());
+
   std::vector<torch::_export::InputSpec> reorderedInputSpecs;
   std::vector<torch::_export::Argument> reorderedGraphInputs;
   std::vector<torch::_export::InputSpec::Tag> desiredOrder = {
@@ -154,7 +163,7 @@ enforceInputOrder(
       torch::_export::InputSpec::Tag::CUSTOM_OBJ};
 
   auto reorder = [&](auto condition) {
-    for (size_t i = 0; i < inputSpecs.size(); ++i) {
+    for (const auto i : c10::irange(inputSpecs.size())) {
       if (condition(inputSpecs[i])) {
         reorderedInputSpecs.push_back(inputSpecs[i]);
         reorderedGraphInputs.push_back(graphInputs[i]);

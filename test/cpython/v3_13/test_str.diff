@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_str.py b/test/cpython/v3_13/test_str.py
-index 46673cc56adb3561c98bf4b49ffd758265d3e88c..2ebb2ce5524965afa7c742b269a00ebedaa063f3 100644
+index 46673cc56adb3561c98bf4b49ffd758265d3e88c..06a1f12bdbcc8c909397f6e39a62781979bc8f6b 100644
 --- a/test/cpython/v3_13/test_str.py
 +++ b/test/cpython/v3_13/test_str.py
 @@ -1,3 +1,57 @@
@@ -17,7 +17,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..2ebb2ce5524965afa7c742b269a00ebe
 +import torch._dynamo.test_case
 +import unittest
 +from torch._dynamo.test_case import CPythonTestCase
-+from torch.testing._internal.common_utils import run_tests
++from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
 +
 +__TestCase = CPythonTestCase
 +
@@ -84,7 +84,31 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..2ebb2ce5524965afa7c742b269a00ebe
          codecs.register(search_function)
          self.addCleanup(codecs.unregister, search_function)
  
-@@ -2707,7 +2763,7 @@ class StrTest(string_tests.StringLikeTest,
+@@ -237,6 +293,7 @@ class StrTest(string_tests.StringLikeTest,
+                         pickled = "".join(pickle.loads(pickle.dumps(it, proto)))
+                         self.assertEqual(case, pickled)
+ 
++    @skipIfTorchDynamo("too slow: cross-product loop is unrolled at trace time")
+     def test_count(self):
+         string_tests.StringLikeTest.test_count(self)
+         # check mixed argument types
+@@ -267,6 +324,7 @@ class StrTest(string_tests.StringLikeTest,
+             pass
+         self.checkequal(3, MyStr('aaa'), 'count', 'a')
+ 
++    @skipIfTorchDynamo("too slow: cross-product loop is unrolled at trace time")
+     def test_find(self):
+         string_tests.StringLikeTest.test_find(self)
+         # test implementation details of the memchr fast path
+@@ -312,6 +370,7 @@ class StrTest(string_tests.StringLikeTest,
+         self.checkequal(-1, 'a' * 100, 'find', 'a\U00100304')
+         self.checkequal(-1, '\u0102' * 100, 'find', '\u0102\U00100304')
+ 
++    @skipIfTorchDynamo("too slow: cross-product loop is unrolled at trace time")
+     def test_rfind(self):
+         string_tests.StringLikeTest.test_rfind(self)
+         # test implementation details of the memrchr fast path
+@@ -2707,7 +2766,7 @@ class StrTest(string_tests.StringLikeTest,
              str(b"x", "utf-8", "strict", errors="ignore")
  
  
@@ -93,7 +117,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..2ebb2ce5524965afa7c742b269a00ebe
      def test_formatter_parser(self):
          def parse(format):
              return list(_string.formatter_parser(format))
-@@ -2783,4 +2839,4 @@ class StringModuleTest(unittest.TestCase):
+@@ -2783,4 +2842,4 @@ class StringModuleTest(unittest.TestCase):
  
  
  if __name__ == "__main__":

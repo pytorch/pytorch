@@ -33,7 +33,7 @@ from torch._dynamo.utils import (
     dynamo_timed,
     lazy_format_graph_code,
 )
-from torch._guards import CompileContext, TracingContext
+from torch._guards import CompileContext, require_python_fake_mode, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger, trace_structured
@@ -99,6 +99,7 @@ from .subclass_utils import (
     compute_inner_mutated_inp_indices_from_subclass_meta,
 )
 from .utils import (
+    _get_inner_meta,
     _is_primal,
     contain_metadata_mutation_ops,
     get_default_generator,
@@ -324,24 +325,12 @@ def aot_stage2_export(
     return compiled_fn, aot_state.fw_metadata
 
 
-def _get_inner_meta(
-    maybe_subclass_meta: SubclassMeta | None,
-    fw_metadata: ViewAndMutationMeta,
-) -> ViewAndMutationMeta:
-    """
-    Util to get view and mutation metadata.
-    """
-    return (
-        fw_metadata if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
-    )
-
-
 def _apply_tensorify_python_scalars(module: torch.fx.GraphModule) -> None:
     """
     Util to apply tensorify_python_scalars.
     """
     # TODO(anijain2305) - Add tensorify_python_scalars to the HOP graph passes.
-    fake_mode = detect_fake_mode()
+    fake_mode = require_python_fake_mode(detect_fake_mode())
     if fake_mode is not None and fake_mode.shape_env is not None:
         tensorify_python_scalars(module, fake_mode.shape_env, fake_mode)
 
@@ -2014,11 +2003,13 @@ def _partition_joint_graph_into_fw_bw(
         ):
             node.meta["aot_runtime_epilogue_input_mutation"] = True
 
+    # fx_g's primals are the unwrapped inputs, whose static positions are in
+    # inner_meta.
     fw_module, bw_module = partition_fn(
         fx_g,
         joint_inputs,
         num_fwd_outputs=num_inner_fwd_outputs,
-        static_lifetime_input_indices=fw_metadata.static_input_indices,
+        static_lifetime_input_indices=inner_meta.static_input_indices,
     )
 
     rng_states = [
@@ -2045,6 +2036,7 @@ def _maybe_unlift_partitioned_effect_tokens(
     fw_module: torch.fx.GraphModule,
     bw_module: torch.fx.GraphModule,
     joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+    inner_meta: ViewAndMutationMeta,
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,
     num_inner_fwd_outputs: int,
@@ -2055,7 +2047,9 @@ def _maybe_unlift_partitioned_effect_tokens(
     if config.unlift_effect_tokens and (
         num_tokens > 0 or fw_metadata.num_backward_tokens > 0
     ):
-        unlift_tokens(fw_module, fw_metadata, aot_config, bw_module)
+        unlift_tokens(
+            fw_module, fw_metadata, aot_config, bw_module, inner_meta=inner_meta
+        )
         num_inner_fwd_outputs -= num_tokens
         if isinstance(joint_inputs, tuple):
             joint_inputs = (
@@ -2302,6 +2296,7 @@ def _aot_stage2a_partition(
                     fw_module,
                     bw_module,
                     joint_inputs,
+                    inner_meta,
                     fw_metadata,
                     aot_config,
                     num_inner_fwd_outputs,
@@ -2317,7 +2312,7 @@ def _aot_stage2a_partition(
                 num_inner_fwd_outputs,
                 inner_meta,
                 aot_config,
-                fw_metadata.static_input_indices,
+                inner_meta.static_input_indices,
             )
             num_fw_outs_saved_for_bw, num_symints_saved_for_bw = (
                 _categorize_saved_tensors_for_backward(

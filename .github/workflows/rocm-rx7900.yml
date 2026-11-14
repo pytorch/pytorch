@@ -58,7 +58,7 @@ jobs:
 
   linux-jammy-rocm-py3_11-test:
     name: linux-jammy-rocm-py3.11-rx7900
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs:
       - linux-jammy-rocm-py3_11-build
       - target-determination
@@ -67,7 +67,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-rocm-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_11-build.outputs.test-matrix }}
       tests-to-include: >-
-         test_autograd inductor/test_torchinductor inductor/test_kernel_benchmark
+         test_autograd test_transformers inductor/test_torchinductor inductor/test_kernel_benchmark
          inductor/test_pad_mm inductor/test_benchmark_fusion inductor/test_aot_inductor
          inductor/test_torchinductor inductor/test_decompose_mem_bound_mm
          inductor/test_flex_attention inductor/test_max_autotune

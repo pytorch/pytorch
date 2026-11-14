@@ -4,12 +4,18 @@ import os
 import pickle
 from io import BytesIO
 from typing import cast
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
 from torch.distributed._serialization import _streaming_load, _streaming_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 DEBUG_ENV = "TORCH_SERIALIZATION_DEBUG"
@@ -23,16 +29,15 @@ class MyClass:
         return self.a == other.a
 
 
-class TestSerialization(TestCase):
+class SerializationTestBase(TestCase):
     def setUp(self) -> None:
         super().setUp()
         # disable debug asserts
-        self._old_debug = os.environ.get(DEBUG_ENV)
-        os.environ[DEBUG_ENV] = "0"
+        self.enterContext(patch.dict(os.environ, {DEBUG_ENV: "0"}))
 
-    def tearDown(self):
-        if self._old_debug is not None:
-            os.environ[DEBUG_ENV] = self._old_debug
+
+class TestSerialization(SerializationTestBase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_scalar_tensor(self) -> None:
         tensor = torch.tensor(42, dtype=torch.int32)
@@ -164,10 +169,12 @@ class TestSerialization(TestCase):
         with self.assertRaisesRegex(RuntimeError, "explicit pickle_module"):
             _streaming_load(file, weights_only=True, pickle_module=pickle)
 
-    @requires_cuda
-    def test_cuda(self) -> None:
-        device = torch.device("cuda:0")
 
+class TestSerializationAccelerator(SerializationTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_device_tensor(self, device) -> None:
+        device = torch.device(device)
         tensor = torch.tensor(42, dtype=torch.float, device=device)
         state_dict = {"scalar": tensor}
         file = BytesIO()
@@ -177,6 +184,9 @@ class TestSerialization(TestCase):
         result = _streaming_load(file)
         torch.testing.assert_close(result, state_dict)
         self.assertEqual(result["scalar"].device, device)
+
+
+instantiate_device_type_tests(TestSerializationAccelerator, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
