@@ -64,7 +64,7 @@ def register_woq_mm_ops() -> None:
         layout: Any = None,
     ) -> Any:
         _, _, _, layout, mat1, mat2 = mm_args(
-            input, weight, layout=layout, mat2_transposed=True
+            realize_inputs(input), weight, layout=layout, mat2_transposed=True
         )
         if not (
             mat1.get_dtype() in [torch.bfloat16, torch.float16, torch.float]
