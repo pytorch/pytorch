@@ -12,6 +12,7 @@ from typing_extensions import deprecated
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ._fsdp_api import (
     AllGather,
@@ -39,6 +40,7 @@ from ._fsdp_init import (
     _validate_mesh,
     _validate_module,
 )
+from ._fsdp_param import alloc_storage, free_storage
 from ._fsdp_param_group import _GradientReductionState
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
@@ -376,13 +378,136 @@ class FSDPModule:
     def reshard(self) -> None:
         """
         Reshards the module's parameters and registers the sharded parameters
-        to the module. This method is *not* recursive. By default, this frees
-        the unsharded parameter storage; call :meth:`set_keep_unsharded_storage`
-        to preserve it.
+        to the module, also while its forward is in progress (see
+        :meth:`complete_grouped_forward`). This method is *not* recursive. By
+        default, this frees the unsharded parameter storage; call
+        :meth:`set_keep_unsharded_storage` to preserve it.
         """
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
-            fsdp_param_group.reshard()
+            fsdp_param_group._to_sharded()
+
+    def complete_grouped_forward(self, output: Any = None) -> Any:
+        """
+        Completes the forward of the parameter group that ``fully_shard``
+        made of this module and the modules passed with it, if only some of
+        them ran. FSDP completes a group's forward when its last module
+        finishes, or at the end of the root module's forward. A group whose
+        modules run on their own after that, e.g. the output projection of
+        ``fully_shard([norm, output])`` called by a chunked loss, stays in its
+        forward until this method completes it: the parameters reshard as
+        :meth:`set_reshard_after_forward` says, and the backward hooks are
+        registered on the tensors in ``output``, which is returned. Call it
+        after each such call, or once with no ``output`` to end a forward-only
+        pass, e.g. before capturing a graph. This method is a no-op if the
+        group's forward is not in progress, and is *not* recursive.
+
+        Args:
+            output (Any): The output of the module's call, whose tensors get
+                the backward hooks.
+
+        Returns:
+            Any: ``output``, as autograd needs it for the hooks.
+        """
+        return self._get_fsdp_state()._complete_grouped_forward(
+            cast(nn.Module, self), output
+        )
+
+    @contextmanager
+    def partial_backward(self, *, outer_backward_follows: bool) -> Iterator[None]:
+        """
+        Runs forwards and backwards through this module alone, several times
+        within one step, e.g. the output projection of a chunked loss, which
+        computes the loss chunk by chunk from the detached output of the rest
+        of the model and backpropagates each chunk through this module. Call
+        it after the root module's forward. Within the scope:
+
+        - The module's parameters are all-gathered once, on entry, and stay
+          unsharded.
+        - Each call of the module completes its parameter group's forward (see
+          :meth:`complete_grouped_forward`).
+        - Its gradients accumulate without being reduced.
+        - Backwards leave the other FSDP modules alone: their parameters,
+          gradients awaiting reduction and backward prefetch order stay for the
+          backward through them.
+
+        On exit, if a backward ran within the scope, the module's gradients are
+        reduced and its parameters resharded as its settings say
+        (:meth:`set_requires_gradient_sync`, :meth:`set_requires_all_reduce`,
+        :meth:`set_reshard_after_backward`), except:
+
+        - With ``outer_backward_follows`` and a parameter group that the module
+          shares with others (``fully_shard([norm, output])``), the outer
+          backward does both, so that the group's gradients are reduced
+          together.
+        - With :meth:`set_manual_backward_finalization`, :meth:`finalize_backward`
+          does the reduction and leaves the residency to the caller.
+
+        Without ``outer_backward_follows``, exiting then ends the backward as the
+        end of a backward does, e.g. waiting for the reductions on the last
+        backward (:meth:`set_is_last_backward`). Exiting after a forward-only use
+        reshards the parameters. Exiting on an exception reduces nothing; call
+        :meth:`reset_iter_state` on the root module to recover. The settings
+        themselves do not change.
+
+        Args:
+            outer_backward_follows (bool): Whether a backward through the rest
+                of the model, e.g. from the gradients that a chunked loss
+                accumulated for the inputs of this module, follows the scope
+                in the same step.
+        """
+        with self._get_fsdp_state()._partial_backward(outer_backward_follows):
+            yield
+
+    def get_reshard_after_forward(self) -> bool | int:
+        """
+        Returns whether this module reshards its parameters after forward, or
+        the size of the group it reshards them to (see
+        :meth:`set_reshard_after_forward` and ``fully_shard``'s
+        ``reshard_after_forward``). The root module reports ``False`` for
+        ``fully_shard``'s default once its first forward made it the root.
+        """
+        groups = self._get_fsdp_state()._fsdp_param_groups
+        if not groups:
+            return True
+        post_forward_mesh_info = groups[0].post_forward_mesh_info
+        if post_forward_mesh_info is None:
+            return False
+        if post_forward_mesh_info is groups[0].mesh_info:
+            return True
+        return post_forward_mesh_info.shard_mesh_size
+
+    def get_reshard_after_backward(self) -> bool:
+        """
+        Returns whether this module reshards its parameters after backward
+        (see :meth:`set_reshard_after_backward`).
+        """
+        groups = self._get_fsdp_state()._fsdp_param_groups
+        return groups[0].reshard_after_backward if groups else True
+
+    def get_requires_gradient_sync(self) -> bool:
+        """
+        Returns whether this module reduces its gradients (see
+        :meth:`set_requires_gradient_sync`).
+        """
+        groups = self._get_fsdp_state()._fsdp_param_groups
+        return groups[0].reduce_grads if groups else True
+
+    def get_requires_all_reduce(self) -> bool:
+        """
+        Returns whether this module all-reduces its gradients across replicas
+        with HSDP (see :meth:`set_requires_all_reduce`), which
+        :meth:`set_requires_gradient_sync` also sets.
+        """
+        groups = self._get_fsdp_state()._fsdp_param_groups
+        return groups[0].all_reduce_grads if groups else True
+
+    def get_is_last_backward(self) -> bool:
+        """
+        Returns whether the next backward is the last one (see
+        :meth:`set_is_last_backward`).
+        """
+        return self._get_fsdp_state()._state_ctx.is_last_backward
 
     def set_keep_unsharded_storage(self, keep: bool, *, recurse: bool = True) -> None:
         """
@@ -875,19 +1000,18 @@ class FSDPModule:
                 hook in. This should only be set if not using native HSDP. If
                 using native HSDP, the hook will run in the internally defined
                 all-reduce stream used by the native HSDP all-reduce.
+
+        A module with several parameter groups (meshes from ``shard_placement_fn``)
+        runs the hook on each group's reduction output.
         """
         state = self._get_fsdp_state()
-        if len(state._fsdp_param_groups) > 1:
-            raise ValueError(
-                "set_all_reduce_hook is not supported with multiple param "
-                "groups (from per-param mesh via shard_placement_fn). "
-                "The hook would be ambiguous across groups with different meshes."
-            )
+        if stream is not None and any(
+            fsdp_param_group._is_hsdp for fsdp_param_group in state._fsdp_param_groups
+        ):
+            raise ValueError("stream cannot be set when using native HSDP")
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._all_reduce_hook = hook
             if stream is not None:
-                if fsdp_param_group._is_hsdp:
-                    raise ValueError("stream cannot be set when using native HSDP")
                 fsdp_param_group._all_reduce_hook_stream = stream
 
     def set_post_optim_event(self, event: torch.Event) -> None:
@@ -1288,6 +1412,24 @@ class FSDPModule:
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.unshard_async_op = async_op
 
+    def _free_sharded_params(self) -> None:
+        """
+        Frees the storage of this module's sharded parameters, which inference
+        on persistent unsharded parameters (:meth:`set_keep_unsharded_storage`)
+        does not need. Call :meth:`_restore_sharded_params` before reading or
+        writing the sharded parameters or unsharding again.
+        """
+        for tensor in _sharded_param_storages(self._get_fsdp_state()):
+            free_storage(tensor)
+
+    def _restore_sharded_params(self) -> None:
+        """
+        Re-allocates the storage that :meth:`_free_sharded_params` freed, with
+        undefined values, e.g. to load new weights into the sharded parameters.
+        """
+        for tensor in _sharded_param_storages(self._get_fsdp_state()):
+            alloc_storage(tensor)
+
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
             raise AssertionError(f"No FSDP state found on {self}")
@@ -1380,6 +1522,21 @@ class _UnshardHandleImpl(UnshardHandle):
                 fsdp_param_group.wait_for_unshard()
             # Avoid keeping a reference
             self._fsdp_param_groups = None
+
+
+def _sharded_param_storages(state: FSDPState) -> Iterator[torch.Tensor]:
+    """The tensors whose storage holds the state's sharded parameters, the
+    inner tensors for tensor subclasses."""
+    for fsdp_param_group in state._fsdp_param_groups:
+        for fsdp_param in fsdp_param_group.fsdp_params:
+            stack = [fsdp_param._sharded_param_data]
+            while stack:
+                tensor = stack.pop()
+                if is_traceable_wrapper_subclass(tensor):
+                    names, _ = tensor.__tensor_flatten__()
+                    stack.extend(getattr(tensor, name) for name in names)
+                else:
+                    yield tensor
 
 
 def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
