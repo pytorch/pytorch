@@ -608,7 +608,8 @@ class StrictNumericsTest(TestCase):
                 return x.sum(1)
 
         else:
-            args = (torch.randn(8, 300, device=device),)
+            # Rows over 2048 keep the online softmax reduction under strict numerics.
+            args = (torch.randn(8, 2500, device=device),)
             cfg = {"online_softmax": True}
             result_index = 1
             kernel_count = 2
@@ -693,8 +694,103 @@ class StrictNumericsTest(TestCase):
         self.assertIn("tensor_descriptor" if kind == "split" else "tl.store", code)
 
 
+# 7: unrolled reduction; 12: one element per lane; 64/128: one or two per lane on
+# 32/64-wide warps; 1500: partial last iteration; 2048 (1024 for fp64): largest row
+# eager handles with softmax_warp_forward. bf16 inputs are upcast before the
+# denominator, so they only need narrow rows.
+STRICT_SOFTMAX_CASES = (
+    *((w, torch.float32) for w in (7, 12, 64, 128, 1500, 2048)),
+    (12, torch.bfloat16),
+    (128, torch.bfloat16),
+    (12, torch.float64),
+    (1024, torch.float64),
+)
+
+
+def _softmax_case_name(case):
+    return f"{case[0]}_{str(case[1]).removeprefix('torch.')}"
+
+
+@unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA or ROCm and Triton")
+class StrictSoftmaxTest(TestCase):
+    """
+    Strict softmax matches eager softmax_warp_forward bit for bit (last dim, rows up to
+    2048 elements and 8192 bytes).
+    """
+
+    def _compile(self, fn, x, numerics):
+        with config.patch(
+            {"numerics": numerics, "online_softmax": True, "force_disable_caches": True}
+        ):
+            torch._dynamo.reset()
+            metrics.reset()
+            result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        return result, "\n".join(codes)
+
+    @parametrize("case", STRICT_SOFTMAX_CASES, name_fn=_softmax_case_name)
+    @parametrize(
+        "op", (torch.softmax, torch.log_softmax), name_fn=lambda op: op.__name__
+    )
+    def test_softmax_bitwise(self, device, op, case):
+        width, input_dtype = case
+        x = (torch.randn(1024, width, device=device) * 4).to(input_dtype)
+
+        def fn(z):
+            return op(z, dim=-1)
+
+        result, _ = self._compile(fn, x, "strict")
+        self.assertEqual(result.view(torch.uint8), fn(x).view(torch.uint8))
+
+    def test_softmax_stays_fused(self, device):
+        x = torch.randn(4096, 12, device=device)
+
+        def fn(z):
+            return torch.softmax(z, dim=-1)
+
+        _, default_code = self._compile(fn, x, "default")
+        default_kernels = metrics.generated_kernel_count
+        _, strict_code = self._compile(fn, x, "strict")
+        self.assertEqual(metrics.generated_kernel_count, default_kernels)
+        self.assertIn("tl.sum(", default_code)
+        self.assertNotIn("tl.sum(", strict_code)
+
+    def test_softmax_wider_than_warp_kernel_count(self, device):
+        # Rows wider than a warp add per-lane partial sums and the lane tree, and
+        # split the row max out of the softmax kernel.
+        x = torch.randn(4096, 128, device=device)
+
+        def fn(z):
+            return torch.softmax(z, dim=-1)
+
+        self._compile(fn, x, "default")
+        default_kernels = metrics.generated_kernel_count
+        self._compile(fn, x, "strict")
+        self.assertEqual(metrics.generated_kernel_count, default_kernels + 3)
+
+    def test_wide_softmax_uses_default_lowering(self, device):
+        x = torch.randn(64, 2500, device=device)
+
+        def fn(z):
+            return torch.softmax(z, dim=-1)
+
+        result, code = self._compile(fn, x, "strict")
+        self.assertIn("online_softmax_reduce", code)
+        self.assertEqual(result, fn(x))
+
+    @config.patch(strict_softmax_max_row=64)
+    def test_softmax_max_row_config(self, device):
+        x = torch.randn(64, 128, device=device)
+
+        def fn(z):
+            return torch.softmax(z, dim=-1)
+
+        _, code = self._compile(fn, x, "strict")
+        self.assertIn("tl.sum(", code)
+
+
 instantiate_device_type_tests(StrictNumericsCompileTest, globals(), only_for="cuda")
 instantiate_device_type_tests(StrictNumericsTest, globals(), only_for="cuda")
+instantiate_device_type_tests(StrictSoftmaxTest, globals(), only_for="cuda")
 
 
 # Compare eager and compiled pointwise OpInfos on reference and raw-bit inputs.

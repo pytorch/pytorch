@@ -91,6 +91,8 @@ from .ir import (
     View,
 )
 from .ops_handler import register_pointwise_op
+from .runtime.hints import get_warp_size
+from .runtime.runtime_utils import next_power_of_2
 from .utils import (
     ceildiv,
     convert_symint_to_expr,
@@ -10056,12 +10058,127 @@ register_comm_lowerings()
 register_symm_mem_lowerings()
 
 
+def _strict_softmax_row_len(x, dim) -> int | None:
+    """
+    Static row length if eager computes this softmax with softmax_warp_forward and the
+    row is within config.strict_softmax_max_row.
+    """
+    size = x.get_size()
+    dtype = x.get_dtype()
+    if (
+        config.numerics != "strict"
+        or not size
+        or x.get_device().type != "cuda"
+        or canonicalize_dim(len(size), dim) != len(size) - 1
+        or dtype not in (torch.float32, torch.float64)
+        or not isinstance(size[-1], (int, sympy.Integer))
+    ):
+        return None
+    row = int(size[-1])
+    # Eager's dispatch in host_softmax (SoftMax.cu).
+    if not (
+        0 < row <= min(2048, config.strict_softmax_max_row)
+        and row * dtype.itemsize <= 8192
+    ):
+        return None
+    return row
+
+
+def _halving_sum(vals):
+    while len(vals) > 1:
+        half = len(vals) // 2
+        vals = [
+            lo if hi is None else ops.add(lo, hi)
+            for lo, hi in zip(vals[:half], vals[half:])
+        ]
+    return vals[0]
+
+
+# Note [Strict softmax order]
+# Eager's host_softmax (aten/src/ATen/native/cuda/SoftMax.cu) uses
+# softmax_warp_forward (PersistentSoftmax.cuh) for last-dim rows of at most 2048
+# elements and 8192 bytes. Its denominator is summed in a fixed order: each lane adds
+# its warp-strided elements in sequence, then the lanes combine with an xor-shuffle
+# tree (equivalent to halving). _strict_softmax_sum encodes that order in the IR, so it
+# does not depend on the Triton layout or launch config. Rows that fit in one warp use
+# a single lane tree that fuses into the softmax kernel; wider rows first compute
+# per-lane partial sums in parallel, which costs three extra kernels but avoids
+# unrolling the whole row into one thread. Update both if eager changes its dispatch
+# limits or loop order.
+def _strict_softmax_sum(exp, row):
+    """Softmax denominator in eager's order, see Note [Strict softmax order]."""
+    size = exp.get_size()
+    device = exp.get_device()
+    dtype = exp.get_dtype()
+    lanes = min(next_power_of_2(row), get_warp_size(device))
+    loader = exp.make_loader()
+
+    if row <= lanes:
+        # One element per lane: the lane tree alone, which fuses into the softmax.
+        def inner_fn(idx):
+            return _halving_sum(
+                [
+                    loader([*idx[:-1], sympy.Integer(i)]) if i < row else None
+                    for i in range(lanes)
+                ]
+            )
+
+        return Pointwise.create(
+            device=device, dtype=dtype, inner_fn=inner_fn, ranges=[*size[:-1], 1]
+        )
+
+    def lane_sum(idx):
+        *outer, lane = idx
+        acc = None
+        for start in range(0, row, lanes):
+            pos = lane + start
+            if start + lanes <= row:
+                val = loader([*outer, pos])
+            else:
+                # Eager adds exp(-inf) == 0 for the padded tail.
+                val = ops.masked(
+                    range_mask_high(pos, sympy.Integer(row)),
+                    lambda pos=pos: loader([*outer, pos]),
+                    0.0,
+                )
+            acc = val if acc is None else ops.add(acc, val)
+        return acc
+
+    # Realized so that each lane's partial sum runs on its own thread instead of
+    # unrolling the whole row into one thread.
+    partials = Pointwise.create(
+        device=device, dtype=dtype, inner_fn=lane_sum, ranges=[*size[:-1], lanes]
+    )
+    partials.realize()
+    partial_loader = partials.make_loader()
+
+    def lane_tree(idx):
+        return _halving_sum(
+            [partial_loader([*idx[:-1], sympy.Integer(i)]) for i in range(lanes)]
+        )
+
+    return Pointwise.create(
+        device=device, dtype=dtype, inner_fn=lane_tree, ranges=[*size[:-1], 1]
+    )
+
+
 @register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
 def prepare_softmax_online(x, dim):
     """
     Lowering inductor_prims.prepare_softmax_online to compute max/sum with
     online softmax reductions when profitable.
+
+    Under numerics="strict", eligible rows sum the denominator in eager's order instead
+    (see Note [Strict softmax order]). This prim only exists when the post-grad
+    prepare_softmax pattern matches, so other softmaxes keep the default order. The
+    pattern also matches a hand-written amax/sub/exp/sum, which eager computes with
+    aten.sum rather than softmax_warp_forward, so only torch.softmax and
+    torch.log_softmax are guaranteed to match eager bit for bit.
     """
+    if (row := _strict_softmax_row_len(x, dim)) is not None:
+        amax = reduce_amax(x, dim, keepdims=True)
+        return amax, _strict_softmax_sum(lowerings[aten.exp](sub(x, amax)), row)
+
     kwargs = _make_reduction_inner(
         x, axis=dim, keepdims=True, dtype=None, override_return_dtype=None
     )

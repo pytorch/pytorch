@@ -191,6 +191,8 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
             }
         }
     }
+    // Inductor replicates this summation order under numerics="strict"; see
+    // Note [Strict softmax order] in torch/_inductor/lowering.py.
     warp_reduce<acc_t, WARP_BATCH, WARP_SIZE, Add>(sum);
 
     // store result

@@ -1206,7 +1206,8 @@ batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
 # "strict_pointwise" requests eager-compatible pointwise math, and
 # "strict_reduction" requests eager INNER_TREE order for reductions.
-# "strict" requests both. Strict modes may reduce performance.
+# "strict" requests both, and also sums eligible softmax denominators in eager's
+# order (see strict_softmax_max_row). Strict modes may reduce performance.
 # TODO: Route pointwise and reduction consumers through their respective modes.
 # pyrefly: ignore [bad-assignment]
 numerics: Literal["default", "strict_pointwise", "strict_reduction", "strict"] = Config(
@@ -1230,6 +1231,12 @@ strict_pointwise: bool = Config(
 )
 
 strict_reduction: bool = False
+
+# Under numerics="strict", last-dim softmaxes with a static row of at most this many
+# elements (eager's own limit is 2048) sum their denominator in eager's
+# softmax_warp_forward order. Rows wider than a warp take three extra kernels; rows
+# above this limit use the default lowering and may differ from eager in the last bit.
+strict_softmax_max_row: int = 2048
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
