@@ -10,6 +10,7 @@ from torch._higher_order_ops import foreach_map
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -1589,6 +1590,71 @@ class ForeachTests(TestCase):
                 torch.compile(fn_outplace)([t[0].clone()], e),
             )
         self.assertGreaterEqual(create_foreach_nodes_calls, 2)
+
+
+class ForeachInplaceTests(TestCase):
+    @parametrize(
+        "op",
+        (
+            torch._foreach_copy_,
+            torch._foreach_add_,
+            torch._foreach_mul_,
+            torch._foreach_div_,
+        ),
+        name_fn=lambda op: op.__name__,
+    )
+    @parametrize("order", ((1, 0), (1, 2, 0), (3, 2, 1, 0)))
+    @parametrize("source", ("clone", "pointwise"))
+    def test_cross_tensor_dependencies(self, device, op, order, source):
+        def fn(xs):
+            ys = [xs[i].clone() if source == "clone" else xs[i] + 1 for i in order]
+            op(xs, ys)
+
+        actual = [torch.full((1024, 1024), float(i + 2), device=device) for i in order]
+        expected = [x.clone() for x in actual]
+        fn(expected)
+        torch.compile(fn, fullgraph=True)(actual)
+        self.assertEqual(actual, expected)
+
+    @parametrize(
+        "op",
+        (torch._foreach_addcmul_, torch._foreach_addcdiv_),
+        name_fn=lambda op: op.__name__,
+    )
+    @parametrize("source_arg", (1, 2))
+    def test_cross_tensor_ternary_dependencies(self, device, op, source_arg):
+        def fn(xs, ys):
+            sources = [x + 1 for x in xs[1:] + xs[:1]]
+            if source_arg == 1:
+                op(xs, sources, ys, value=0.5)
+            else:
+                op(xs, ys, sources, value=0.5)
+
+        actual = [torch.full((32, 32), float(i + 2), device=device) for i in range(3)]
+        expected = [x.clone() for x in actual]
+        ys = [torch.full_like(x, 2) for x in actual]
+        fn(expected, ys)
+        torch.compile(fn, fullgraph=True)(actual, ys)
+        self.assertEqual(actual, expected)
+
+    @parametrize(
+        "op",
+        (torch._foreach_copy_, torch._foreach_add_),
+        name_fn=lambda op: op.__name__,
+    )
+    def test_cross_tensor_views(self, device, op):
+        def fn(a, b):
+            xs = [a[1:-1, 1:-1].t(), b[1:-1, 1:-1].t()]
+            op(xs, [(xs[1] + 1).t(), (xs[0] + 1).t()])
+
+        actual = [torch.randn(34, 34, device=device) for _ in range(2)]
+        expected = [x.clone() for x in actual]
+        fn(*expected)
+        torch.compile(fn, fullgraph=True)(*actual)
+        self.assertEqual(actual, expected)
+
+
+instantiate_device_type_tests(ForeachInplaceTests, globals())
 
 
 if __name__ == "__main__":
