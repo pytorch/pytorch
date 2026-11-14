@@ -22,6 +22,10 @@ import torch.nn.functional as F
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FSDPModule, fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._flex_shard import BucketSpec, flex_shard
+from torch.distributed.fsdp._flex_shard.placements.owned import (
+    make_bucketed_owned_full_param_placement_fn,
+)
+from torch.distributed.fsdp._flex_shard.placements.shard import per_param_placements
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
@@ -133,6 +137,7 @@ def _apply_fsdp2(
     reduce_dtype: torch.dtype | None,
     divide_factor: float | None,
     head_reshard_after_forward: bool = False,
+    layer_reshard_after_forward: bool | int = True,
 ) -> None:
     """Group the decoder as torchtitan's ``apply_fsdp_to_decoder`` does."""
     dims = {param: _shard_dim(fqn) for fqn, param in model.named_parameters()}
@@ -154,7 +159,7 @@ def _apply_fsdp2(
         fully_shard(
             layer,
             **fsdp_config,
-            reshard_after_forward=True,
+            reshard_after_forward=layer_reshard_after_forward,
             shard_placement_fn=lambda param: Shard(dims[param]),
         )
     fully_shard(model, **fsdp_config)
@@ -172,12 +177,13 @@ def _apply_flex_shard(
     divide_factor: float | None,
     fsdp2_compatible: bool = False,
     head_reshard_after_forward: bool = False,
+    layer_reshard_after_forward: bool | int = True,
 ) -> None:
     def placement_fn(named_params, mesh):
         del mesh
         return {fqn: (Shard(_shard_dim(fqn)),) for fqn, _ in named_params}
 
-    def bucket(patterns: list[str], reshard_after_forward: bool) -> BucketSpec:
+    def bucket(patterns: list[str], reshard_after_forward: bool | int) -> BucketSpec:
         return BucketSpec(
             patterns,
             placement_fn=placement_fn,
@@ -194,7 +200,10 @@ def _apply_flex_shard(
         model,
         buckets=[
             bucket(["tok_embeddings"], True),
-            *(bucket([f"layers.{i}"], True) for i in range(len(model.layers))),
+            *(
+                bucket([f"layers.{i}"], layer_reshard_after_forward)
+                for i in range(len(model.layers))
+            ),
             bucket(["norm", "lm_head"], head_reshard_after_forward),
         ],
     )
@@ -244,6 +253,7 @@ def _train(
     steps: int,
     microbatches: int,
     no_sync: bool,
+    all_reduce_last_only: bool = False,
 ) -> list[dict[str, object]]:
     """Train with AdamW; return per-step losses, local grads and params."""
     optim = torch.optim.AdamW(model.parameters(), lr=1e-2, foreach=True)
@@ -253,6 +263,8 @@ def _train(
         for microbatch in range(microbatches):
             if no_sync:
                 model.set_requires_gradient_sync(microbatch == microbatches - 1)
+            if all_reduce_last_only:
+                model.set_requires_all_reduce(microbatch == microbatches - 1)
             generator = torch.Generator().manual_seed(
                 10_000 * step + 100 * microbatch + rank
             )
@@ -598,6 +610,104 @@ class TestFlexShardChunkedLossFSDP2Parity(_FullyShardParity):
                 recorded[0], recorded[1], f"{context} reduce_scatter"
             )
             self._assert_same_history(histories[0], histories[1], context)
+
+
+class TestFlexShardHSDPAndReshardToSmallerGroup(_FullyShardParity):
+    """HSDP meshes and an int ``reshard_after_forward``, as ``fully_shard``'s."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    def _check_matches_fully_shard(
+        self, mesh, apply_kwargs: dict, train_kwargs: dict, context: str
+    ) -> None:
+        torch.manual_seed(0)
+        reference = _Decoder()
+        for param_dtype, reduce_dtype, divide_factor in [
+            (None, None, None),
+            (torch.bfloat16, torch.float32, 1.0),
+        ]:
+            config = (param_dtype, reduce_dtype, divide_factor)
+            histories, recorded = [], []
+            for apply in (
+                _apply_fsdp2,
+                functools.partial(_apply_flex_shard, fsdp2_compatible=True),
+            ):
+                model = copy.deepcopy(reference).to(device_type)
+                apply(model, mesh, *config, **apply_kwargs)
+                with _record_collective_inputs() as inputs:
+                    histories.append(
+                        _train(model, rank=self.rank, steps=3, **train_kwargs)
+                    )
+                recorded.append(inputs)
+            config_context = f"{context} {config}"
+            for collective in ("all_gather", "reduce_scatter"):
+                self.assertTrue(recorded[0][collective], msg=config_context)
+                self._assert_same_inputs(
+                    recorded[0][collective],
+                    recorded[1][collective],
+                    f"{config_context} {collective}",
+                )
+            self._assert_same_history(histories[0], histories[1], config_context)
+
+    @skip_if_lt_x_gpu(4)
+    def test_hsdp_matches_fully_shard(self):
+        # Sharded over dim 1 and all-reduced over dim 0, also when gradient
+        # accumulation all-reduces only the last microbatch
+        mesh = init_device_mesh(
+            device_type.type, (2, 2), mesh_dim_names=("replicate", "shard")
+        )
+        for microbatches, all_reduce_last_only in ((1, False), (2, True)):
+            self._check_matches_fully_shard(
+                mesh,
+                {},
+                {
+                    "microbatches": microbatches,
+                    "no_sync": False,
+                    "all_reduce_last_only": all_reduce_last_only,
+                },
+                f"HSDP microbatches={microbatches}",
+            )
+
+    @skip_if_lt_x_gpu(4)
+    def test_reshard_to_smaller_group_matches_fully_shard(self):
+        # The layers keep their 2-rank groups' parts after forward and gather
+        # them within those groups before backward
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        self._check_matches_fully_shard(
+            mesh,
+            {"layer_reshard_after_forward": 2},
+            {"microbatches": 2, "no_sync": False},
+            "reshard_after_forward=2",
+        )
+
+    @skip_if_lt_x_gpu(4)
+    def test_rejects_unsupported(self):
+        owned = make_bucketed_owned_full_param_placement_fn()
+        hsdp_names = ("replicate", "shard")
+        for mesh_shape, names, reshard_after_forward, placement_fn, error in (
+            ((2, 2), hsdp_names, True, owned, "has an HSDP mesh"),
+            ((2, 2), None, True, per_param_placements, "needs mesh_dim_names"),
+            ((4,), None, 2, owned, "reshards to a smaller group"),
+            ((4,), None, 3, per_param_placements, "divides its shard mesh size 4"),
+        ):
+            mesh = init_device_mesh(device_type.type, mesh_shape, mesh_dim_names=names)
+            model = nn.Linear(8, 8, device=device_type)
+            with self.assertRaisesRegex(ValueError, error):
+                flex_shard(
+                    model,
+                    buckets=[
+                        BucketSpec(
+                            ["*"],
+                            placement_fn,
+                            mesh=mesh,
+                            reshard_after_forward=reshard_after_forward,
+                        )
+                    ],
+                )
 
 
 if __name__ == "__main__":
