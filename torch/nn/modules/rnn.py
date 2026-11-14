@@ -314,7 +314,7 @@ class RNNBase(Module):
         if not torch.jit.is_scripting():
             if (
                 input.dtype != self._flat_weights[0].dtype  # type: ignore[union-attr]
-                and not torch._C._is_any_autocast_enabled()
+                and not torch.is_autocast_enabled(input.device.type)
             ):
                 raise ValueError(
                     f"RNN input dtype ({input.dtype}) does not match weight dtype ({self._flat_weights[0].dtype}). "  # type: ignore[union-attr]

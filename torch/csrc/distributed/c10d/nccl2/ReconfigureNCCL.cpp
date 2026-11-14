@@ -158,18 +158,6 @@ ReconfigureQuorum findReconfigureQuorum(
 #endif
 }
 
-void abortCommIgnoringErrors(
-    NcclApi& api,
-    ncclComm_t comm,
-    std::chrono::milliseconds timeout,
-    std::string_view operation) {
-  try {
-    waitForNcclCompletion(api, comm, api.commAbort(comm), timeout, operation);
-  } catch (const std::exception& e) {
-    LOG(ERROR) << e.what();
-  }
-}
-
 std::vector<uint8_t> uniqueIdToBytes(const ncclUniqueId& uniqueId) {
   return {
       reinterpret_cast<const uint8_t*>(&uniqueId),

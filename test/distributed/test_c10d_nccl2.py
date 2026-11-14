@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import weakref
@@ -388,6 +389,15 @@ instantiate_device_type_tests(
 )
 
 
+def _wait_done(fut: torch.futures.Future, timeout: float = 60.0):
+    # Future.wait() is unbounded; a done callback doesn't poll the work.
+    done = threading.Event()
+    fut.add_done_callback(lambda _: done.set())
+    if not done.wait(timeout):
+        raise TimeoutError("future not completed")
+    return fut.value()
+
+
 class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
@@ -485,6 +495,36 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_result_callback_issues_collective(self) -> None:
+        # Results are published with no queue lock held, so a result callback
+        # may issue an op on the same group.
+        store = dist.distributed_c10d._get_default_store()
+        issued = []
+        threads = []
+
+        def issue(fut: torch.futures.Future) -> None:
+            threads.append(threading.get_ident())
+            t = torch.ones(4, device=self.device)
+            issued.append(dist.all_reduce(t, async_op=True))
+
+        # Connect the ring first: the first collective blocks until peers join.
+        dist.all_reduce(torch.ones(1, device=self.device))
+        t = torch.ones(4, device=self.device)
+        if self.rank != 0:
+            store.wait(["result_callback_go"], timedelta(seconds=60))
+        # The work itself is not waited on: its wait() would publish the result
+        # on this thread rather than the watchdog's.
+        fut = dist.all_reduce(t, async_op=True).get_future_result().then(issue)
+        if self.rank == 0:
+            # Rank 0's op can't complete before the callback is attached.
+            store.set("result_callback_go", "1")
+        _wait_done(fut)
+        self.assertEqual(issued[0].wait(timedelta(seconds=60)), True)
+        if self.rank == 0:
+            self.assertNotEqual(threads[0], threading.get_ident())
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_coalescing_window_future_result(self) -> None:
         pg = dist.distributed_c10d._get_default_group()
         tensors = [torch.ones(4, device=self.device) for _ in range(2)]
@@ -495,6 +535,65 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         # Without wait() or is_completed(), only the watchdog completes this.
         result = WorkResult(work.get_future_result().wait())
         self.assertEqual(result, WorkResult.SUCCESS)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_window_p2p_future_result(self) -> None:
+        pg = dist.distributed_c10d._get_default_group()
+        send_t = torch.full((4,), float(self.rank + 1), device=self.device)
+        recv_t = torch.full((4,), -1.0, device=self.device)
+        # The group is shared with later tests, so the window must not leak.
+        pg._start_coalescing(self.device)
+        try:
+            works = [
+                dist.isend(send_t, (self.rank + 1) % self.world_size),
+                dist.irecv(recv_t, (self.rank - 1) % self.world_size),
+            ]
+            # Not issued yet, so the sentinels' result is still pending.
+            pending = [not work.get_future_result().done() for work in works]
+        finally:
+            window = pg._end_coalescing(self.device)
+        # Taken once: Work.get_future_result() polls the work.
+        window_result = window.get_future_result()
+        self.assertEqual(pending, [True, True])
+        # Each op's sentinel completes with the batch, not before it.
+        for work in works:
+            result = WorkResult(work.get_future_result().wait())
+            self.assertEqual(result, WorkResult.SUCCESS)
+            self.assertTrue(window_result.done())
+        window.wait()
+        self.assertEqual(WorkResult(window_result.wait()), WorkResult.SUCCESS)
+        peer = (self.rank - 1) % self.world_size
+        self.assertEqual(recv_t, torch.full_like(recv_t, float(peer + 1)))
+
+        pg._start_coalescing(self.device)
+        empty = pg._end_coalescing(self.device)
+        self.assertEqual(
+            WorkResult(empty.get_future_result().wait()), WorkResult.SUCCESS
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_window_p2p_issue_error(self) -> None:
+        pg = dist.distributed_c10d._get_default_group()
+        # Non-contiguous: issuing the batch fails its contiguity check on every
+        # rank before any NCCL call.
+        send_t = torch.ones(4, 2, device=self.device).t()
+        pg._start_coalescing(self.device)
+        try:
+            work = dist.isend(send_t, (self.rank + 1) % self.world_size)
+        except BaseException:
+            pg._end_coalescing(self.device)
+            raise
+        with self.assertRaisesRegex(ValueError, "Tensors must be contiguous"):
+            pg._end_coalescing(self.device)
+        self.assertEqual(
+            WorkResult(work.get_future_result().wait()), WorkResult.COMM_ERROR
+        )
+        # The group is still usable.
+        t = torch.ones(4, device=self.device)
+        dist.all_reduce(t)
+        self.assertEqual(t, torch.full_like(t, self.world_size))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -688,6 +787,179 @@ class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
         dist.destroy_process_group()
         del work
         gc.collect()
+
+
+_TEST_PSK = "0123456789abcdef0123456789abcdef"
+
+
+def _psk_options(psk: str | None) -> "dist.ProcessGroupNCCL.Options":
+    opts = dist.ProcessGroupNCCL.Options()
+    opts.encryption_psk = psk
+    return opts
+
+
+@unittest.skipIf(TEST_WITH_ROCM, "ncclSetEncryption is not supported on ROCm")
+@requires_nccl_version((2, 32, 3), "Need NCCL 2.32.3+ for ncclSetEncryption")
+class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
+    """The key is process-global, so each test needs fresh workers."""
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Route data over the socket transport, which NCCL encrypts.
+        env = {
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_NVLS_ENABLE": "0",
+            "NCCL_NET": "Socket",
+            # Nonblocking init overwrites the "built without TLS" error.
+            "TORCH_NCCL_USE_COMM_NONBLOCKING": "0",
+            "TORCH_NCCL_ENCRYPTION_PSK": "",
+        }
+        with mock.patch.dict(os.environ, env):
+            self._spawn_processes()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def _new_pg(self, psk: str | None) -> "dist.ProcessGroupNCCL2":
+        opts = _psk_options(psk)
+        # The key is applied at construction; skip creating communicators.
+        opts.lazy_init = True
+        store = dist.FileStore(self.file_name, self.world_size)
+        return dist.ProcessGroupNCCL2(store, self.rank, self.world_size, opts)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_encryption_psk_validation(self) -> None:
+        with self.assertRaisesRegex(ValueError, "NUL"):
+            self._new_pg(_TEST_PSK + "\0")
+        with self.assertRaisesRegex(RuntimeError, "ncclSetEncryption failed"):
+            self._new_pg("x" * 31)
+        # Failed keys are not applied, so this is still the first group.
+        self._new_pg(_TEST_PSK)
+        self._new_pg(_TEST_PSK)
+        self._new_pg(None)
+        with self.assertRaisesRegex(RuntimeError, "differs"):
+            self._new_pg(_TEST_PSK[::-1])
+        with self.assertRaisesRegex(RuntimeError, "use the nccl2 backend"):
+            dist.ProcessGroupNCCL(
+                dist.FileStore(self.file_name, self.world_size),
+                self.rank,
+                self.world_size,
+                _psk_options(_TEST_PSK),
+            )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_encryption_psk_requires_first_group(self) -> None:
+        self._new_pg(None)
+        with self.assertRaisesRegex(RuntimeError, "first nccl2 group"):
+            self._new_pg(_TEST_PSK)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_encryption_psk_env(self) -> None:
+        bad_psk = "y" * 31
+        with mock.patch.dict(os.environ, {"TORCH_NCCL_ENCRYPTION_PSK": bad_psk}):
+            with self.assertRaisesRegex(RuntimeError, "ncclSetEncryption failed") as cm:
+                self._new_pg(None)
+        self.assertNotIn(bad_psk, str(cm.exception))
+        with mock.patch.dict(os.environ, {"TORCH_NCCL_ENCRYPTION_PSK": _TEST_PSK}):
+            self._new_pg(None)
+            with self.assertRaisesRegex(RuntimeError, "differs"):
+                self._new_pg(_TEST_PSK[::-1])
+        self._new_pg(_TEST_PSK)
+        # The env key is only read until a key is applied.
+        with mock.patch.dict(os.environ, {"TORCH_NCCL_ENCRYPTION_PSK": "z" * 32}):
+            self._new_pg(None)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_encryption_psk_split(self) -> None:
+        device = torch.device("cuda", self.rank)
+        dist.init_process_group(
+            "nccl2",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=dist.FileStore(self.file_name, self.world_size),
+            device_id=device,
+        )
+        ranks = list(range(self.world_size))
+        with self.assertRaisesRegex(RuntimeError, "first nccl2 group"):
+            dist.split_group(split_ranks=[ranks], pg_options=_psk_options(_TEST_PSK))
+        dist.barrier()
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_encryption_psk_shrink(self) -> None:
+        device = torch.device("cuda", self.rank)
+        dist.init_process_group(
+            "nccl2",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=dist.FileStore(self.file_name, self.world_size),
+            device_id=device,
+        )
+        group = dist.new_group(device_id=device)
+        dist.barrier(group=group)
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "first nccl2 group"):
+                dist.shrink_group([1], group=group, pg_options=_psk_options(_TEST_PSK))
+        dist.barrier(group=group)
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_encryption_psk_legacy_shrink(self) -> None:
+        device = torch.device("cuda", self.rank)
+        dist.init_process_group(
+            "nccl-legacy",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=dist.FileStore(self.file_name, self.world_size),
+            device_id=device,
+        )
+        dist.barrier()
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "use the nccl2 backend"):
+                dist.shrink_group([1], pg_options=_psk_options(_TEST_PSK))
+        dist.barrier()
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_encrypted_allreduce(self) -> None:
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        try:
+            dist.init_process_group(
+                "nccl2",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=dist.FileStore(self.file_name, self.world_size),
+                device_id=device,
+                pg_options=_psk_options(_TEST_PSK),
+            )
+        except RuntimeError as e:
+            # Both ranks fail locally before connecting.
+            self.assertRegex(
+                str(e),
+                "built without TLS support|ncclCrypt: (failed to open|ncclOsDlsym failed)",
+            )
+            raise unittest.SkipTest("NCCL built without TLS support") from e
+        tensor = torch.full((1024,), self.rank + 1.0, device=device)
+        dist.all_reduce(tensor)
+        self.assertEqual(tensor, torch.full_like(tensor, 3.0))
+        dist.destroy_process_group()
 
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
@@ -1556,18 +1828,46 @@ class ProcessGroupNCCL2TimingTest(_ProcessGroupNCCL2OptionsTest):
         first = torch.ones(4, device=self.device)
         last = torch.ones(4, device=self.device)
         sleep_cycles = int(100 * get_cycles_per_ms())
+        sleep_start = torch.cuda.Event(enable_timing=True)
+        sleep_end = torch.cuda.Event(enable_timing=True)
         self._check_all_reduce()
         pg._start_coalescing(self.device)
         dist.all_reduce(first, async_op=True)
         # Delay the last op so the window starts well before it does.
+        sleep_start.record()
         torch.cuda._sleep(sleep_cycles)
+        sleep_end.record()
         last_work = dist.all_reduce(last, async_op=True)
         window = pg._end_coalescing(self.device)
         window.wait()
         torch.cuda.synchronize(self.device)
+        # _sleep counts shader clock cycles, which can tick faster than during
+        # the calibration, so compare against the measured sleep.
+        sleep_ms = sleep_start.elapsed_time(sleep_end)
+        # A much shorter sleep would put the gap check within launch noise.
+        self.assertGreater(sleep_ms, 10)
         # Compare against the last op rather than a fixed bound: rank skew
         # lengthens the last op's wait for its peer, not the gap before it.
-        self.assertGreater(window._get_duration() - last_work._get_duration(), 50)
+        self.assertGreater(
+            window._get_duration() - last_work._get_duration(), sleep_ms / 2
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_result_callback_issues_collective(self) -> None:
+        # With timing on, FlightRecorderHook holds the Work until its result,
+        # and the callback's op releases it on the watchdog.
+        ProcessGroupNCCL2Test.test_result_callback_issues_collective(self)
+        if self.rank != 0:
+            return
+        backend = dist.group.WORLD._get_backend(self.device)
+        trace = json.loads(
+            torch._C._distributed_c10d._dump_fr_trace_json(backend=backend.name())
+        )
+        # The hook held the op whose callback issued the last one, for its
+        # duration.
+        e = trace["entries"][-2]
+        self.assertGreater(e.get("duration_ms", 0.0), 0.0, msg=str(e))
 
 
 class ProcessGroupNCCLLazyTimingTest(ProcessGroupNCCL2TimingTest):
@@ -1749,6 +2049,63 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_timeout_publishes_results(self) -> None:
+        # The watchdog publishes a timeout, and finalize() resolves a work
+        # queued behind the timed-out one, which inherits the timeout, so
+        # neither result future hangs. Futures are only waited on:
+        # getFutureResult() and Work.wait() poll the work and could resolve it
+        # themselves.
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "0"}
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+        backend = pg._get_backend(self.device)
+        self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            t = torch.ones(1024, device=self.device)
+            hung = dist.all_reduce(t, group=pg, async_op=True).get_future_result()
+            # Long enough that only finalize() can end it.
+            dist.set_timeout(timedelta(hours=1), group=pg)
+            queued = dist.all_reduce(t, group=pg, async_op=True).get_future_result()
+            # Only the watchdog can complete this before shutdown.
+            self.assertEqual(WorkResult(_wait_done(hung)), WorkResult.TIMEOUT)
+            backend.shutdown()
+            self.assertTrue(queued.done())
+            self.assertEqual(WorkResult(queued.wait()), WorkResult.TIMEOUT)
+
+        self._wait_for_rank_zero(pg)
+        self._abort_timed_out_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_shutdown_drain_timeout_resolves_queued(self) -> None:
+        # Shutdown stops the watchdog first, so finalize() itself finds the
+        # timeout while the communicator is still healthy; the work queued
+        # behind it must report the timeout, not a communicator error.
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "0"}
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+        backend = pg._get_backend(self.device)
+        self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            t = torch.ones(1024, device=self.device)
+            hung = dist.all_reduce(t, group=pg, async_op=True).get_future_result()
+            dist.set_timeout(timedelta(hours=1), group=pg)
+            queued = dist.all_reduce(t, group=pg, async_op=True).get_future_result()
+            backend.shutdown()
+            self.assertTrue(hung.done())
+            self.assertTrue(queued.done())
+            self.assertEqual(WorkResult(hung.wait()), WorkResult.TIMEOUT)
+            self.assertEqual(WorkResult(queued.wait()), WorkResult.TIMEOUT)
+
+        self._wait_for_rank_zero(pg)
+        self._abort_timed_out_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_timeout_with_communicator_cleanup(self) -> None:
         env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "2"}
         with mock.patch.dict(os.environ, env):
@@ -1853,14 +2210,14 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
                 self.assertEqual(hung[0]["timeout_ms"], 5000)
                 # ... and it has to read as unfinished. The watchdog marked this
                 # work TIMEDOUT, which Work::isCompleted() also answers true to,
-                # so a completion report on a failed work would retire the entry
-                # and hide the culprit. Only successful completion is pushed.
+                # so retiring on any result would hide the culprit. Only a
+                # SUCCESS result retires an entry.
                 self.assertFalse(hung[0]["retired"], msg=str(hung[0]))
                 self.assertNotEqual(hung[0]["state"], "completed", msg=str(hung[0]))
                 # Unset reads None here; the JSON dump spells the same thing 0.
                 self.assertIsNone(hung[0]["time_discovered_completed_ns"])
-                # The healthy collectives on the same group did get their
-                # completion pushed, so the dump distinguishes them.
+                # The healthy collectives on the same group did succeed, so the
+                # dump distinguishes them.
                 healthy = [e for e in dump["entries"] if e["input_sizes"] == [[4]]]
                 self.assertTrue(healthy)
                 for e in healthy:
@@ -2257,6 +2614,7 @@ class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     def backend_str(cls) -> str:
         return "nccl-lazy"
 
+    @unittest.skip("nccl-lazy does not support communicator shrink")
     def test_shrink_with_nonblocking_communicator(self) -> None:
         self.skipTest("nccl-lazy does not support communicator shrink")
 

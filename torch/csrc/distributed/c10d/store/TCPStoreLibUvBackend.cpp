@@ -15,6 +15,7 @@
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/socket_fmt.h>
 #include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
+#include <torch/csrc/distributed/c10d/store/TCPStoreTLS.hpp>
 
 #ifdef TORCH_USE_LIBUV
 #include <uv.h>
@@ -34,9 +35,14 @@ Other callbacks don't provide exception safety so avoid there.
 */
 
 // This controls how many un-accepted TCP connections can be waiting in the
-// backlog. This should be at least world size to avoid issues on init. We set
-// it to -1 to use the host max value which is controlled by `soconnmax`.
+// backlog. This should be at least world size to avoid issues on init. -1 uses
+// the host max (`somaxconn`); libuv on Windows asserts a positive backlog, so
+// use SOMAXCONN there.
+#ifdef _WIN32
+auto constexpr DEFAULT_BACKLOG = SOMAXCONN;
+#else
 auto constexpr DEFAULT_BACKLOG = -1;
+#endif
 auto constexpr MAX_KEY_COUNT = static_cast<size_t>(128 * 1024);
 auto constexpr MAX_STRING_LEN = 8 * 1024;
 auto constexpr MAX_PAYLOAD_LEN = 8 * 1024 * 1024;
@@ -45,6 +51,15 @@ auto constexpr MAX_PAYLOAD_LEN = 8 * 1024 * 1024;
 // Too small and we'll need multiple buffers for one request
 // Too big and we might taxing malloc
 auto constexpr ALLOC_BUFFER_SIZE = static_cast<size_t>(4096);
+
+namespace {
+// Omits the backtrace from logs of per-connection errors.
+const char* errorMessage(const std::exception& e) {
+  auto err = dynamic_cast<const c10::Error*>(&e);
+  return err ? err->what_without_backtrace() : e.what();
+}
+} // namespace
+
 class UvHandle : public c10::intrusive_ptr_target {
  public:
   ~UvHandle() override = default;
@@ -61,6 +76,11 @@ class UvHandle : public c10::intrusive_ptr_target {
   }
 
   virtual uv_handle_t* unsafeGetHandle() = 0;
+
+  // Transforms outgoing data, e.g. to encrypt it.
+  virtual std::vector<uint8_t> encode(std::vector<uint8_t>&& data) {
+    return std::move(data);
+  }
 
  protected:
   void handleReady() {
@@ -91,6 +111,8 @@ class UvHandle : public c10::intrusive_ptr_target {
 
 class UvTcpSocket : public UvHandle {
   uv_tcp_t client{};
+  uv_shutdown_t shutdown_{};
+  bool shuttingDown_ = false;
   std::string address_{"unknown"};
 
   c10::intrusive_ptr<UvTcpSocket> iptr() {
@@ -183,11 +205,31 @@ class UvTcpSocket : public UvHandle {
     }
   }
 
+  // Drain queued writes before closing, and stop accepting more commands.
+  void closeAfterWrites() {
+    if (shuttingDown_ || uv_is_closing(unsafeGetHandle())) {
+      return;
+    }
+    shuttingDown_ = true;
+    uv_read_stop(unsafeGetStream());
+    int res = uv_shutdown(
+        &shutdown_, unsafeGetStream(), [](uv_shutdown_t* req, int /*status*/) {
+          borrow(req->handle)->close();
+        });
+    if (res != 0) {
+      close();
+    }
+  }
+
   uv_handle_t* unsafeGetHandle() override {
     return reinterpret_cast<uv_handle_t*>(&client);
   }
 
  protected:
+  bool isShuttingDown() const {
+    return shuttingDown_;
+  }
+
   uv_stream_t* unsafeGetStream() {
     return reinterpret_cast<uv_stream_t*>(&client);
   }
@@ -220,7 +262,8 @@ class UvTcpServer : public UvTcpSocket {
     auto res = c10::make_intrusive<UvTcpServer>(loop);
     res->handleReady();
     try {
-      int uv_res = uv_tcp_open(res->unsafeGetSocket(), socket);
+      int uv_res = uv_tcp_open(
+          res->unsafeGetSocket(), static_cast<uv_os_sock_t>(socket));
       C10D_CHECK_WITH(
           SocketError,
           uv_res == 0,
@@ -497,7 +540,11 @@ class StreamWriter {
     data.insert(data.end(), val.data(), val.data() + val.size());
   }
   void send() {
-    auto wd = c10::make_intrusive<WriterPayload>(std::move(data), handle);
+    auto out = handle->encode(std::move(data));
+    if (out.empty()) {
+      return;
+    }
+    auto wd = c10::make_intrusive<WriterPayload>(std::move(out), handle);
     wd->send();
   }
 };
@@ -699,6 +746,10 @@ class LibUVStoreDaemon : public BackgroundThread {
   uint16_t get_socket_port(uv_tcp_t* handle);
   void init(const TCPStoreOptions& opts);
 
+  const std::shared_ptr<TLSContext>& tlsContext() const {
+    return tlsContext_;
+  }
+
  protected:
   void run() override;
   void stop() override;
@@ -721,6 +772,7 @@ class LibUVStoreDaemon : public BackgroundThread {
   std::unordered_map<std::string, std::deque<std::vector<uint8_t>>> queues_;
 
   int port_;
+  std::shared_ptr<TLSContext> tlsContext_;
 
   static LibUVStoreDaemon& from_uv(uv_handle_t* stream) {
     return *static_cast<LibUVStoreDaemon*>(uv_handle_get_data(stream));
@@ -746,13 +798,126 @@ class LibUVStoreDaemon : public BackgroundThread {
 class UvClient : public UvTcpSocket {
   ChunkedStream stream;
   LibUVStoreDaemon* store;
+  bool transportChecked = false;
+  std::unique_ptr<TLSSession> tls;
+  uv_timer_t* handshakeTimer_ = nullptr;
+
+  void stopTLSHandshakeTimer() {
+    auto* timer = std::exchange(handshakeTimer_, nullptr);
+    if (timer == nullptr) {
+      return;
+    }
+    uv_close(reinterpret_cast<uv_handle_t*>(timer), [](uv_handle_t* handle) {
+      std::unique_ptr<uv_timer_t> timer(reinterpret_cast<uv_timer_t*>(handle));
+      auto client = c10::intrusive_ptr<UvClient>::reclaim(
+          static_cast<UvClient*>(uv_handle_get_data(handle)));
+    });
+  }
 
  protected:
   void processBuf(const uv_buf_t* buf, size_t nread) override {
+    if (!transportChecked) {
+      if (!acceptTransport(static_cast<uint8_t>(buf->base[0]))) {
+        // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+        free(buf->base);
+        return;
+      }
+      if (store->tlsContext()) {
+        tls = std::make_unique<TLSSession>(store->tlsContext());
+      }
+      transportChecked = true;
+    }
+    if (tls) {
+      processTLSBuf(buf, nread);
+      return;
+    }
+
     auto tmp = *buf;
     tmp.len = nread;
     stream.append(tmp);
+    parseCommands();
+  }
 
+  // Replies to a client using the wrong transport (TLS or plaintext) so it
+  // fails promptly, then closes the connection.
+  bool acceptTransport(uint8_t first) {
+    // Plaintext requests start with a QueryType byte.
+    static_assert(
+        static_cast<uint8_t>(QueryType::BARRIER) < kTLSHandshakeRecordType);
+    bool clientTLS = first == kTLSHandshakeRecordType;
+    bool serverTLS = store->tlsContext() != nullptr;
+    if (clientTLS == serverTLS) {
+      return true;
+    }
+    C10D_DEBUG(
+        "Rejected {} client {}", clientTLS ? "TLS" : "non-TLS", address());
+    std::vector<uint8_t> reply(
+        kTLSProtocolVersionAlert.begin(), kTLSProtocolVersionAlert.end());
+    if (serverTLS) {
+      auto magic = reinterpret_cast<const uint8_t*>(&tlsRequiredMagicNumber);
+      reply.assign(magic, magic + sizeof(tlsRequiredMagicNumber));
+    }
+    auto wd = c10::make_intrusive<WriterPayload>(std::move(reply), iptr());
+    wd->send();
+    closeAfterWrites();
+    return false;
+  }
+
+  void processTLSBuf(const uv_buf_t* buf, size_t nread) {
+    tls->feed(buf->base, nread);
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    free(buf->base);
+    // buf is freed, so errors must not propagate to read_callback.
+    try {
+      bool eof = false;
+      while (true) {
+        std::unique_ptr<char, decltype(&free)> chunk(
+            // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+            static_cast<char*>(malloc(ALLOC_BUFFER_SIZE)),
+            &free);
+        auto n = tls->read(chunk.get(), ALLOC_BUFFER_SIZE);
+        if (!n || *n == 0) {
+          eof = !n;
+          break;
+        }
+        stream.append(uv_buf_init(chunk.release(), *n));
+      }
+      if (tls->handshakeComplete()) {
+        stopTLSHandshakeTimer();
+      }
+      flushTLS();
+      parseCommands();
+      if (eof) {
+        store->clearClientWaitState(iptr());
+        tls->shutdown();
+        flushTLS();
+        closeAfterWrites();
+      }
+    } catch (std::exception& ex) {
+      C10D_DEBUG(
+          "Error processing TLS client {}: {}", address(), errorMessage(ex));
+      try {
+        // Send the alert so the client fails promptly.
+        flushTLS();
+      } catch (std::exception& flushEx) {
+        C10D_DEBUG("Failed to send TLS alert: {}", errorMessage(flushEx));
+      }
+      store->clearClientWaitState(iptr());
+      closeAfterWrites();
+    }
+  }
+
+  void flushTLS() {
+    std::vector<uint8_t> out;
+    tls->takeOutput(out);
+    if (out.empty()) {
+      return;
+    }
+    auto wd = c10::make_intrusive<WriterPayload>(std::move(out), iptr());
+    wd->send();
+  }
+
+  void parseCommands() {
     while (true) {
       stream.reset();
       uint8_t command = -1;
@@ -1232,8 +1397,56 @@ class UvClient : public UvTcpSocket {
     return c10::intrusive_ptr<UvClient>::reclaim_copy(this);
   }
 
+  void startTLSHandshakeTimer(uv_loop_t* loop) {
+    if (!store->tlsContext()) {
+      return;
+    }
+    auto timer = std::make_unique<uv_timer_t>();
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        uv_timer_init(loop, timer.get()) == 0,
+        "TCPStore TLS: cannot initialize handshake timer");
+    uv_handle_set_data(reinterpret_cast<uv_handle_t*>(timer.get()), this);
+    at::raw::intrusive_ptr::incref(this);
+    handshakeTimer_ = timer.release();
+    int res = uv_timer_start(
+        handshakeTimer_,
+        [](uv_timer_t* timer) {
+          auto* client = static_cast<UvClient*>(
+              uv_handle_get_data(reinterpret_cast<uv_handle_t*>(timer)));
+          C10D_DEBUG(
+              "TCPStore TLS handshake timed out for {}", client->address());
+          client->close();
+          client->stopTLSHandshakeTimer();
+        },
+        10000,
+        0);
+    TORCH_CHECK_WITH(
+        DistStoreError, res == 0, "TCPStore TLS: cannot start handshake timer");
+  }
+
+  std::vector<uint8_t> encode(std::vector<uint8_t>&& data) override {
+    if (isShuttingDown()) {
+      return {};
+    }
+    if (!tls) {
+      return std::move(data);
+    }
+    try {
+      std::vector<uint8_t> out;
+      tls->write(data.data(), data.size(), out);
+      return out;
+    } catch (std::exception& ex) {
+      C10D_DEBUG(
+          "Error writing to TLS client {}: {}", address(), errorMessage(ex));
+      close();
+      return {};
+    }
+  }
+
  protected:
   void onClose() override {
+    stopTLSHandshakeTimer();
     store->unregisterClient(iptr());
   }
 };
@@ -1243,6 +1456,7 @@ void LibUVStoreDaemon::onConnect(int status) {
   registerClient(client);
   try {
     tcpServer_->accept(client);
+    client->startTLSHandshakeTimer(&loop_);
     client->startRead();
   } catch (std::exception& e) {
     C10D_WARNING("Failed to accept client due to {}", e.what());
@@ -1257,6 +1471,7 @@ void LibUVStoreDaemon::onExitRequest() {
 }
 
 void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
+  tlsContext_ = TLSContext::fromConfig(tlsConfig(opts), /*isServer=*/true);
   if (opts.masterListenFd.has_value()) {
     tcpServer_ = UvTcpServer::makeWithSocket(&loop_, *opts.masterListenFd);
   } else {

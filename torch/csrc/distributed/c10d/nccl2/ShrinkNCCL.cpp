@@ -23,6 +23,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::Options> cloneOptions(
   options->group_desc = source->group_desc;
   options->global_ranks_in_group = source->global_ranks_in_group;
   options->enable_reconfigure = source->enable_reconfigure;
+  options->encryption_psk = source->encryption_psk;
   return options;
 }
 
@@ -114,11 +115,22 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
 
   auto excludedBeforeRank = static_cast<int>(std::ranges::count_if(
       excluded, [this](int rank) { return rank < getRank(); }));
-  auto child = c10::make_intrusive<ProcessGroupNCCL>(
-      store_->clone(),
-      getRank() - excludedBeforeRank,
-      getSize() - static_cast<int>(excluded.size()),
-      childOptions);
+  c10::intrusive_ptr<ProcessGroupNCCL> child;
+  try {
+    // Throws if childOptions->encryption_psk can't be applied.
+    child = c10::make_intrusive<ProcessGroupNCCL>(
+        store_->clone(),
+        getRank() - excludedBeforeRank,
+        getSize() - static_cast<int>(excluded.size()),
+        childOptions);
+  } catch (...) {
+    abortCommIgnoringErrors(
+        *nccl_api_,
+        childComm,
+        childOptions->timeout,
+        "NCCL abort of shrink child failed");
+    throw;
+  }
   child->initFromComm(childComm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }

@@ -602,6 +602,10 @@ class GraphLowering(torch.fx.Interpreter):
         ] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
+        # An as_strided of a graph input that may read outside the input's own
+        # elements. AOTI's CUDA graphs copy only those, so
+        # aot_inductor.cudagraphs rejects such graphs.
+        self.input_as_strided_node: torch.fx.Node | None = None
         self.kernel_free_cudagraph: bool = False
 
         # only keeping one node per device for stack trace purposes
@@ -1081,11 +1085,15 @@ class GraphLowering(torch.fx.Interpreter):
             self._warned_fallback.add(name)
             perf_hint_log.info("Using FallbackKernel: %s", name)
 
-    def add_device_info(self, device: torch.device) -> None:
+    def add_device_info(self, device: torch.device, *, runs_work: bool = True) -> None:
         self.device_types.add(device.type)
         if device.index is not None:
             self.device_idxs.add(device.index)
-        if V.graph.current_node and device not in self.device_node_mapping:
+        if (
+            runs_work
+            and V.graph.current_node
+            and device not in self.device_node_mapping
+        ):
             self.device_node_mapping[device] = V.graph.current_node
 
     @property
@@ -1573,7 +1581,7 @@ class GraphLowering(torch.fx.Interpreter):
                         old_args, old_kwargs = normalize(old_args, old_kwargs)
 
                         args, kwargs = constrain_to_fake_tensors(
-                            args, kwargs, fake_args, fake_kwargs
+                            args, kwargs, fake_args, fake_kwargs, fx_node=n
                         )
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
@@ -2119,6 +2127,7 @@ class GraphLowering(torch.fx.Interpreter):
                             kwargs,
                             inp_args,
                             inp_kwargs,
+                            fx_node=n,
                         )
                     else:
                         args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
