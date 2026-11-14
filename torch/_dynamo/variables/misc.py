@@ -1772,8 +1772,15 @@ class PythonModuleVariable(VariableTracker):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
-        if tx.output.deleted_globals_by_dict and name == "__dict__":
-            tx.output.check_deleted_global_dict_handout(self.value.__dict__)
+        if tx.output.deleted_globals_by_dict:
+            if name == "__dict__":
+                tx.output.check_deleted_global_dict_handout(self.value.__dict__)
+            else:
+                # Covers reads that bypass _load_attr, e.g.
+                # me.__getattribute__(name); the _load_attr hook stays because
+                # an Unsupported raised here is constant-folded there for
+                # python-constant objects.
+                tx.output.check_deleted_global_read(self.value.__dict__, name)
 
         attr_value = None
         if self.is_torch or name not in self.value.__dict__:

@@ -3283,11 +3283,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertNotIn("DELETE_GLOBAL_GUARD", globals())
         ref, loaded = self._test_serialization("DICT_NOT_CONTAINS", fn, x)
         self._test_check_fn(ref, loaded, {"x": x}, True)
-        globals()["DELETE_GLOBAL_GUARD"] = 1
-        try:
+        with mock.patch.dict(globals(), {"DELETE_GLOBAL_GUARD": 1}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
-        finally:
-            del globals()["DELETE_GLOBAL_GUARD"]
 
     def test_guard_through_globals_of_a_wrapper_from_another_module(self):
         # A guard reads through wrapper.__globals__, so the dict it read travels

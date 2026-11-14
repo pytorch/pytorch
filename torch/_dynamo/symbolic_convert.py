@@ -2648,35 +2648,42 @@ class InstructionTranslatorBase(
                 functools.partial(guard_builder, key=name)
             )
         )
-        # A pending write to the same dict through the module VT, or any
-        # mutation of the globals-dict VT (module __dict__ writes), races the
-        # replayed delete: the dict replay rebuilds from a snapshot after it,
-        # so eager resume has to order both instead.
+        # A pending write to the same dict through the module VT, or an
+        # already-materialized globals-dict VT, races the replayed delete:
+        # the dict replay rebuilds from a snapshot after it, so eager resume
+        # has to order both instead.
         registered_module = _registered_module_for_globals(
             self.f_globals.get("__name__"), self.f_globals
         )
-        if registered_module is not None:
-            module_value = registered_module[1]
-            if (
-                module_value in side_effects
-                and side_effects[module_value] is not target
-                and (
-                    side_effects.has_pending_mutation_of_attr(
-                        side_effects[module_value], name
-                    )
-                )
-            ) or self.f_globals in side_effects:
-                unimplemented(
-                    gb_type="DELETE_GLOBAL with a pending module-object write",
-                    context=name,
-                    explanation=(
-                        "Dynamo cannot order a global delete against a pending "
-                        "write to the module globals, whether through the "
-                        "module object or its __dict__, and the dict behind "
-                        "them is already materialized in the trace."
-                    ),
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+        if (
+            registered_module is not None
+            and (module_value := registered_module[1]) in side_effects
+            and side_effects[module_value] is not target
+            and side_effects.has_pending_mutation_of_attr(
+                side_effects[module_value], name
+            )
+        ):
+            unimplemented(
+                gb_type="DELETE_GLOBAL with a pending module-object write",
+                context=name,
+                explanation=(
+                    "Dynamo cannot order a global delete against a pending "
+                    "write to the module globals, whether through the "
+                    "module object or its __dict__."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if self.f_globals in side_effects:
+            unimplemented(
+                gb_type="DELETE_GLOBAL with a materialized module dict",
+                context=name,
+                explanation=(
+                    "The module __dict__ is materialized in the trace, so "
+                    "later accesses to it race the replayed global delete. "
+                    "Eager resume has to order them instead."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         pending_on_target = side_effects.has_pending_mutation_of_attr(target, name)
         if pending_on_target:
             if self._global_deleted_in_trace(target, name):

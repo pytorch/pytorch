@@ -2594,6 +2594,14 @@ def generic_getattr(
         if isinstance(obj, variables.PythonModuleVariable):
             value = tx.output.side_effects.load_attr(obj, name, deleted_ok=True)
             if not isinstance(value, variables.DeletedVariable):
+                # A pending descriptor store lands in module __dict__, so
+                # reading it back runs tp_descr_get the way type_getattro
+                # does; modules do not bind descriptors themselves.
+                if isinstance(
+                    value,
+                    (variables.StaticMethodVariable, variables.ClassMethodVariable),
+                ):
+                    return value.tp_descr_get_impl(tx, obj, obj)
                 return value
             if default is _NO_DEFAULT:
                 raise_observed_exception(AttributeError, tx)

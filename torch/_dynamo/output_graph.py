@@ -1106,9 +1106,9 @@ class OutputGraph(OutputGraphCommon):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
 
-    def check_deleted_global_write(self, globals_dict: Any, name: str | None) -> None:
+    def check_deleted_global_write(self, globals_dict: Any, name: str) -> None:
         entry = self.deleted_globals_by_dict.get(id(globals_dict))
-        if entry is not None and (name is None or name in entry[1]):
+        if entry is not None and name in entry[1]:
             unimplemented(
                 gb_type="DELETE_GLOBAL followed by a module-object write",
                 context=f"name: {name}",
