@@ -73,7 +73,7 @@ void init_cpp_fake(
 namespace impl {
 
 bool may_turn_const(const Tensor& t) {
-  return t.numel() <= 1 && !t.is_sparse() &&
+  return t.numel() <= 1 && !t.is_fake() && !t.is_sparse() &&
       !t.unsafeGetTensorImpl()->is_sparse_compressed() && !t.device().is_meta();
 }
 
