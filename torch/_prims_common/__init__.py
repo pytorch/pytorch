@@ -1130,6 +1130,12 @@ def is_complex_dtype(dtype: torch.dtype) -> bool:
     return dtype in _complex_dtypes
 
 
+def is_complex_number_or_tensor(a: object) -> bool:
+    if isinstance(a, torch.Tensor):
+        return is_complex_dtype(a.dtype)
+    return isinstance(a, complex)
+
+
 def is_grad_dtype(dtype: torch.dtype) -> bool:
     """
     Checks if the dtype can require a gradient.

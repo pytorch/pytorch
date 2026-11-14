@@ -145,7 +145,7 @@ def meta_linspace_logspace(
             lambda: "linspace only supports 0-dimensional start and end tensors",
         )
 
-    if any(isinstance(arg, complex) for arg in (start, end, steps)):
+    if any(map(utils.is_complex_number_or_tensor, (start, end, steps))):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
         )

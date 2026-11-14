@@ -2201,6 +2201,21 @@ def forward(self, x_1):
             self.assertEqual(fake_inverse.dtype, real_inverse.dtype)
             self.assertEqual(fake_counts.dtype, real_counts.dtype)
 
+    # From https://github.com/pytorch/pytorch/issues/203184
+    @parametrize("op", [torch.linspace, torch.logspace])
+    @parametrize("dtype", [None, torch.complex128, torch.float32])
+    def test_linspace_logspace_complex_tensor_endpoint_dtype(self, op, dtype):
+        start = torch.tensor(1.0 + 2.0j)
+        with FakeTensorMode() as mode:
+            fake_start = mode.from_tensor(start)
+        if dtype is torch.float32:
+            for s in (start, fake_start):
+                with self.assertRaisesRegex(RuntimeError, "can't be safely cast"):
+                    op(s, 0.0, 5, dtype=dtype)
+        else:
+            expected = op(start, 0.0, 5, dtype=dtype).dtype
+            self.assertEqual(op(fake_start, 0.0, 5, dtype=dtype).dtype, expected)
+
     def test_assert_tensor_metadata_with_list(self):
         with FakeTensorMode():
             x = torch.empty(10)
