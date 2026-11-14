@@ -16635,6 +16635,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.ones(10),))
 
+    @parametrize("dynamic", [False, True])
+    @parametrize("layout", ["padded", "permuted", "sliced"])
+    @config.patch(
+        comprehensive_padding=True,
+        disable_padding_cpu=False,
+        padding_stride_threshold=0,
+        padding_alignment_bytes=32,
+        pad_outputs=True,
+    )
+    def test_resize_padded_input(self, dynamic, layout):
+        def fn(x, size):
+            return torch.ops.aten.resize(x, size)
+
+        storage = torch.full((208,), -777.0, device=self.device)
+        padded = storage.as_strided((5, 5, 5), (40, 8, 1), storage_offset=3)
+        padded.copy_(torch.arange(125, device=self.device).reshape(5, 5, 5))
+        if layout == "permuted":
+            padded = padded.permute(2, 0, 1)
+        elif layout == "sliced":
+            padded = padded[::2]
+        compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+        for size in ((5, 5), (padded.numel(),), tuple(padded.shape)):
+            with self.subTest(size=size):
+                expected = fn(padded, size)
+                actual = compiled(padded, size)
+                self.assertEqual(actual, expected)
+
     def test_resize(self):
         def fn(x, size, memory_format):
             # NOTE: Tensor.resize() =/= aten::resize()
@@ -24027,7 +24054,7 @@ if RUN_GPU:
             torch.testing.assert_close(actual=actual, expected=reduce_3d(inp))
             for block_arg in ("YBLOCK", "XBLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"):
                 self.assertIn(block_arg, code[0])
-            self.assertNotIn("ZBLOCK", code[0])
+            self.assertNotIn("Z0_BLOCK", code[0])
             self.assertIn("tl.load", code[0])
 
         @config.patch({"triton.decompose_sort_ops": True})
