@@ -15,6 +15,7 @@ import re
 import secrets
 import sys
 import tempfile
+import textwrap
 from collections.abc import Callable, Iterator
 from itertools import chain, count
 from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
@@ -686,6 +687,93 @@ class TritonKernelSource:
     symbol_map: dict[str, str]
 
 
+def _triton_aggregate_class_def(aggregate: type, kernel_name: str) -> ast.ClassDef:
+    name = f"{aggregate.__module__}.{aggregate.__qualname__}"
+    copied = "torch.compile copies the aggregates a Triton kernel uses into its source"
+    if aggregate.__qualname__ != aggregate.__name__:
+        raise NotImplementedError(
+            f"Triton kernel {kernel_name} uses the aggregate {name}, which is not "
+            f"defined at module level. {copied}, which only works for module-level "
+            "classes: move the class to module scope."
+        )
+    try:
+        node = ast.parse(textwrap.dedent(inspect.getsource(aggregate))).body[0]
+    except (OSError, TypeError, SyntaxError, IndexError):
+        node = None
+    if isinstance(node, ast.ClassDef) and node.name == aggregate.__name__:
+        return node
+    # Before Triton 3.9, the replacement class loses __firstlineno__ on Python 3.13+,
+    # so inspect cannot find it; search the module source instead.
+    try:
+        tree = ast.parse(inspect.getsource(sys.modules[aggregate.__module__]))
+    except (KeyError, OSError, TypeError, SyntaxError) as e:
+        raise RuntimeError(
+            f"Cannot read the source of the Triton aggregate {name}, which Triton "
+            f"kernel {kernel_name} uses. {copied}: define the aggregate at module "
+            "level in a Python source file."
+        ) from e
+    pending: list[ast.AST] = [tree]
+    matches: list[ast.ClassDef] = []
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.ClassDef):
+            if node.name == aggregate.__name__:
+                matches.append(node)
+        elif not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            pending.extend(ast.iter_child_nodes(node))
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Cannot locate the Triton aggregate {name}, which Triton kernel "
+            f"{kernel_name} uses: its module has {len(matches)} module-level classes "
+            f"named {aggregate.__name__}. {copied}: give the aggregate a unique name."
+        )
+    return matches[0]
+
+
+class _TritonAggregateGlobals(ast.NodeVisitor):
+    """Collects the names a Triton aggregate's class body loads.
+
+    Method bodies are skipped: their locals cannot be told apart from globals here,
+    and the closure collects what the JIT methods use from their bytecode instead.
+    """
+
+    def __init__(self) -> None:
+        self.loads: OrderedSet[str] = OrderedSet()
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Load):
+            self.loads.add(node.id)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        self.visit(node.args)
+        if node.returns is not None:
+            self.visit(node.returns)
+
+
+def _triton_aggregate_source(
+    aggregate: type, kernel_name: str
+) -> tuple[str, OrderedSet[str]]:
+    """Return a module-level Triton aggregate's class definition and the names its
+    class body loads."""
+    class_def = _triton_aggregate_class_def(aggregate, kernel_name)
+    for stmt in class_def.body:
+        if (
+            isinstance(stmt, ast.AnnAssign)
+            and isinstance(stmt.annotation, ast.Constant)
+            and isinstance(stmt.annotation.value, str)
+        ):
+            # The generated module is not in sys.modules yet when aggregate
+            # resolves its fields with get_type_hints.
+            stmt.annotation = ast.parse(stmt.annotation.value, mode="eval").body
+    visitor = _TritonAggregateGlobals()
+    visitor.visit(class_def)
+    # Unparsing (needed for the rewritten annotations) drops the user's comments and
+    # formatting; the copy only has to define the same class.
+    return ast.unparse(class_def), visitor.loads
+
+
 def user_defined_triton_kernel_transitive_closure(
     kernel, epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None
 ) -> list[TritonKernelSource]:
@@ -747,7 +835,15 @@ def user_defined_triton_kernel_transitive_closure(
     source.splice(kernel_src, strip=True)
     add_source_module(None, source)
     # global constexpr vars handled above
-    symbols_included = OrderedSet([kernel.__name__])
+    symbols_included = {kernel.__name__: kernel}
+    aggregates_included: OrderedSet[type] = OrderedSet()
+
+    def conflicting_global(name: str) -> NotImplementedError:
+        return NotImplementedError(
+            f"Triton kernel {kernel.__name__} uses two different globals named "
+            f"{name}, at least one of them a Triton aggregate. torch.compile copies "
+            "both into one module, where one would shadow the other: rename one."
+        )
 
     def traverse(cur_kernel) -> None:
         # here we extract the unqualified names (i.e., not attributes and
@@ -759,19 +855,73 @@ def user_defined_triton_kernel_transitive_closure(
             for inst in dis.Bytecode(cur_kernel.fn)
             if inst.opname == "LOAD_GLOBAL"
         )
-        global_annotations = cur_kernel.fn.__globals__.get("__annotations__", {})
-        for symbol_name in cur_kernel.fn.__code__.co_names:
+        traverse_globals(
+            cur_kernel,
+            cur_kernel.fn.__code__.co_names,
+            cur_kernel.fn.__globals__,
+            unqualified_loads,
+        )
+
+    def traverse_globals(source_owner, names, global_scope, unqualified_loads) -> None:
+        global_annotations = global_scope.get("__annotations__", {})
+        for symbol_name in names:
             if symbol_name in symbols_included:
+                previous = symbols_included[symbol_name]
+                symbol = global_scope.get(symbol_name)
+                if (
+                    symbol_name in unqualified_loads
+                    and symbol_name in global_scope
+                    and symbol is not previous
+                    and any(
+                        isinstance(value, type)
+                        and getattr(value, "__triton_aggregate__", False)
+                        for value in (symbol, previous)
+                    )
+                ):
+                    raise conflicting_global(symbol_name)
                 continue
-            if symbol_name in cur_kernel.fn.__globals__:
-                symbol = cur_kernel.fn.__globals__[symbol_name]
-                if isinstance(symbol, JITFunction):
+            if symbol_name in global_scope:
+                symbol = global_scope[symbol_name]
+                if (
+                    symbol_name in unqualified_loads
+                    and isinstance(symbol, type)
+                    and getattr(symbol, "__triton_aggregate__", False)
+                    # Aggregates that ship with Triton are imported below.
+                    and not symbol.__module__.startswith("triton")
+                ):
+                    symbols_included[symbol_name] = symbol
+                    if symbol in aggregates_included:
+                        add_source_module(symbol, IndentedBuffer(), symbol_name)
+                        continue
+                    aggregates_included.add(symbol)
+                    # The class is emitted under its own name, not symbol_name.
+                    name = symbol.__name__
+                    if symbols_included.setdefault(name, symbol) is not symbol:
+                        raise conflicting_global(name)
+                    class_source, class_loads = _triton_aggregate_source(
+                        symbol, kernel.__name__
+                    )
+                    class_globals = vars(sys.modules[symbol.__module__])
+                    traverse_globals(symbol, class_loads, class_globals, class_loads)
+                    source = IndentedBuffer()
+                    source.newline()
+                    source.splice(class_source, strip=True)
+                    add_source_module(symbol, source, symbol_name)
+                    # hash_attrs (Triton 3.6+) holds __init__ and the methods; Triton
+                    # 3.4 and 3.5 only set the methods on the class.
+                    for method in getattr(symbol, "hash_attrs", vars(symbol).values()):
+                        if isinstance(method, JITFunction) or (
+                            ConstexprFunction is not None
+                            and isinstance(method, ConstexprFunction)
+                        ):
+                            traverse(method)
+                elif isinstance(symbol, JITFunction):
                     source = IndentedBuffer()
                     source.newline()
                     source.writeline("@triton.jit")
                     source.splice(symbol.src, strip=True)
                     add_source_module(symbol, source, symbol_name)
-                    symbols_included.add(symbol_name)
+                    symbols_included[symbol_name] = symbol
                     traverse(symbol)
                 elif ConstexprFunction is not None and isinstance(
                     symbol, ConstexprFunction
@@ -789,13 +939,13 @@ def user_defined_triton_kernel_transitive_closure(
                                 f"from {dtype_symbol.__module__} import dtype as dtype"
                             )
                             add_source_module(dtype_symbol, source)
-                            symbols_included.add("dtype")
+                            symbols_included["dtype"] = dtype_symbol
                     source = IndentedBuffer()
                     source.newline()
                     source.writeline("@triton.constexpr_function")
                     source.splice(symbol.src, strip=True)
                     add_source_module(symbol, source, symbol_name)
-                    symbols_included.add(symbol_name)
+                    symbols_included[symbol_name] = symbol
                     traverse(symbol)
                 elif isinstance(symbol, (int, str, bool, constexpr)):
                     source = IndentedBuffer()
@@ -816,8 +966,8 @@ def user_defined_triton_kernel_transitive_closure(
                         )
                     else:
                         source.writeline(f"{symbol_name} = {symbol_str}")
-                    add_source_module(cur_kernel, source)
-                    symbols_included.add(symbol_name)
+                    add_source_module(source_owner, source)
+                    symbols_included[symbol_name] = symbol
                 elif (
                     symbol_name in unqualified_loads
                     and symbol_name not in ("triton", "tl")
@@ -832,7 +982,7 @@ def user_defined_triton_kernel_transitive_closure(
                     source = IndentedBuffer()
                     source.writeline(f"import {symbol.__name__} as {symbol_name}")
                     add_source_module(None, source)
-                    symbols_included.add(symbol_name)
+                    symbols_included[symbol_name] = symbol
                 elif (
                     symbol_name in unqualified_loads
                     and symbol_name != "tl"  # already imported
@@ -856,7 +1006,7 @@ def user_defined_triton_kernel_transitive_closure(
                             f"{symbol.__name__} as {symbol_name}"
                         )
                     add_source_module(symbol, source)
-                    symbols_included.add(symbol_name)
+                    symbols_included[symbol_name] = symbol
 
     traverse(kernel)
     return source_modules
@@ -894,18 +1044,19 @@ def user_defined_triton_kernel_transitive_closure_source_code(
 def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) -> str:
     """Make what a kernel's source binds at its top level unique to the kernel.
 
-    The def named subs_name becomes kernel_name, and every other def and assignment
-    (helpers, and globals like ``BLOCK = tl.constexpr(64)`` from a user kernel's
-    closure) gets a ``_<kernel_name>`` suffix, as does every import after the first
-    def, which a user kernel's closure emits (``from triton.language import exp as
-    op``). The imports above it are the common kernel header, the same in every
-    kernel, and a repeat of one of them after the first def keeps its name: a
-    template that defines ``@triton.jit`` helpers above ``def_kernel`` gets the header
-    again where ``def_kernel`` is. A name is renamed only where it refers to the
-    global, so a parameter or local that shares it keeps its name: autotune configs
-    and launches pass parameters by name.
+    The def named subs_name becomes kernel_name, and every other def, class and
+    assignment (helpers, aggregates, and globals like ``BLOCK = tl.constexpr(64)``
+    from a user kernel's closure) gets a ``_<kernel_name>`` suffix, as does every
+    import after the first def or class, which a user kernel's closure emits
+    (``from triton.language import exp as op``). The imports above it are the
+    common kernel header, the same in every kernel, and a repeat of one of them
+    after the first def or class keeps its name: a template that defines
+    ``@triton.jit`` helpers above ``def_kernel`` gets the header again where
+    ``def_kernel`` is. A name is renamed only where it refers to the global, so a
+    parameter or local that shares it keeps its name: autotune configs and launches
+    pass parameters by name.
     """
-    defs = re.findall(r"^def (\w+)\(", src, re.MULTILINE)
+    defs = re.findall(r"^(?:def|class) (\w+)[(:]", src, re.MULTILINE)
     assigns = re.search(r"^\w+\s*(:[^=\n]*)?=", src, re.MULTILINE)
     body = src[src.find("\ndef ") :]
     imports = re.search(r"^(from|import) ", body, re.MULTILINE)
@@ -918,7 +1069,7 @@ def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) ->
     header: OrderedSet[str] = OrderedSet()
     seen_def = False
     for stmt in tree.body:
-        if isinstance(stmt, ast.FunctionDef):
+        if isinstance(stmt, (ast.FunctionDef, ast.ClassDef)):
             seen_def = True
             renames[stmt.name] = ""
         elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
@@ -943,25 +1094,67 @@ def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) ->
         line, start = a.lineno - 1, a.col_offset
         old = lines[line][start : a.end_col_offset].decode()
         spans.append((line, start, old, f"{a.name} as {renames[a.asname or a.name]}"))
-    for stmt in tree.body:
+
+    def rename_references(node, local, *, rename_stores=True):
+        globals_here = renames.keys() - local
+        for name in ast.walk(node):
+            if (
+                isinstance(name, ast.Name)
+                and name.id in globals_here
+                and (rename_stores or isinstance(name.ctx, ast.Load))
+            ):
+                spans.append(
+                    (name.lineno - 1, name.col_offset, name.id, renames[name.id])
+                )
+
+    def rename_statement(stmt, *, rename_definition=True, enclosing=()):
         local: OrderedSet[str] = OrderedSet()
+        if isinstance(stmt, ast.ClassDef):
+            line = stmt.lineno - 1
+            start = lines[line].index(f"class {stmt.name}".encode()) + len("class ")
+            spans.append((line, start, stmt.name, renames[stmt.name]))
+            for node in [*stmt.decorator_list, *stmt.bases, *stmt.keywords]:
+                rename_references(node, local)
+            for member in stmt.body:
+                if isinstance(member, ast.FunctionDef):
+                    rename_statement(member, rename_definition=False, enclosing=local)
+                    local.add(member.name)
+                else:
+                    rename_references(member, local, rename_stores=False)
+                    if isinstance(member, ast.Assign) or (
+                        isinstance(member, ast.AnnAssign) and member.value is not None
+                    ):
+                        local.update(
+                            node.id
+                            for node in ast.walk(member)
+                            if isinstance(node, ast.Name)
+                            and isinstance(node.ctx, ast.Store)
+                        )
+            return
         if isinstance(stmt, ast.FunctionDef):
+            for node in [*stmt.decorator_list, stmt.args]:
+                rename_references(node, enclosing)
+            if stmt.returns is not None:
+                rename_references(stmt.returns, enclosing)
             args = stmt.args
             params = [*args.posonlyargs, *args.args, *args.kwonlyargs]
             params += [a for a in (args.vararg, args.kwarg) if a is not None]
             local.update(a.arg for a in params)
-            for node in ast.walk(stmt):
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                    local.add(node.id)
-            line = stmt.lineno - 1
-            start = lines[line].index(f"def {stmt.name}(".encode()) + len("def ")
-            spans.append((line, start, stmt.name, renames[stmt.name]))
-        globals_here = renames.keys() - local
-        for node in ast.walk(stmt):
-            if isinstance(node, ast.Name) and node.id in globals_here:
-                spans.append(
-                    (node.lineno - 1, node.col_offset, node.id, renames[node.id])
-                )
+            for member in stmt.body:
+                for node in ast.walk(member):
+                    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                        local.add(node.id)
+            if rename_definition:
+                line = stmt.lineno - 1
+                start = lines[line].index(f"def {stmt.name}(".encode()) + len("def ")
+                spans.append((line, start, stmt.name, renames[stmt.name]))
+            for member in stmt.body:
+                rename_references(member, local)
+            return
+        rename_references(stmt, local)
+
+    for stmt in tree.body:
+        rename_statement(stmt)
     for line, start, old, new in sorted(spans, reverse=True):
         end = start + len(old.encode())
         lines[line] = lines[line][:start] + new.encode() + lines[line][end:]
