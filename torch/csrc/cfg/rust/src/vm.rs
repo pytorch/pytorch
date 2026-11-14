@@ -189,6 +189,12 @@ const TRIAL_SAMPLES: u8 = 10;
 /// the other has won: the rest of the samples would be calls at the speed of
 /// the slower one for nothing.
 const TRIAL_EARLY_SAMPLES: u8 = 3;
+/// A call that takes this long is measured with fewer calls: its time
+/// hardly varies from one call to the next, and every call of the slower
+/// kind is long.
+const TRIAL_SLOW_NS: u64 = 250_000_000;
+const TRIAL_SLOW_WARMUP_CALLS: u32 = 3;
+const TRIAL_SLOW_SAMPLES: u8 = 2;
 /// A callee whose measurement never gets quiet enough stays compiled.
 const TRIAL_MAX_CALLS: u32 = 400;
 /// How much faster the interpreter has to be: 1/32, about 3%.
@@ -1886,17 +1892,29 @@ impl Compiled {
         slot.set(trial);
         let events = TRIAL_EVENTS.fetch_add(1, Ordering::Relaxed) + 1;
         if trial.phase == TRIAL_WARMUP {
-            if trial.calls >= TRIAL_WARMUP_CALLS {
+            let start = std::time::Instant::now();
+            let result = run_compiled();
+            let slow = start.elapsed().as_nanos() as u64 >= TRIAL_SLOW_NS;
+            // The callee may have called itself: what is in the slot counts.
+            let trial = slot.get();
+            let warm = trial.calls >= TRIAL_WARMUP_CALLS
+                || (slow && trial.calls >= TRIAL_SLOW_WARMUP_CALLS);
+            if trial.phase == TRIAL_WARMUP && trial.epoch == epoch && warm {
                 slot.set(Trial { phase: TRIAL_SAMPLING, ..trial });
             }
-            return run_compiled();
+            return result;
         }
+        let slow = trial.compiled_best != u64::MAX
+            && trial.compiled_best >= TRIAL_SLOW_NS
+            && trial.interpreted_best != u64::MAX
+            && trial.interpreted_best >= TRIAL_SLOW_NS;
+        let enough = if slow { TRIAL_SLOW_SAMPLES } else { TRIAL_SAMPLES };
         // Which of the two a call measures is drawn, not alternated: calls
         // often come in a pattern (two layers of a model, one after the
         // other), and alternating would give each side one half of it.
-        let as_compiled = if trial.interpreted_samples >= TRIAL_SAMPLES {
+        let as_compiled = if trial.interpreted_samples >= enough {
             true
-        } else if trial.settled_samples >= TRIAL_SAMPLES {
+        } else if trial.settled_samples >= enough {
             false
         } else {
             let mut state = TRIAL_DRAW.load(Ordering::Relaxed);
@@ -1932,11 +1950,11 @@ impl Compiled {
         let seen = |samples: u8, enough: u8| samples >= enough && trial.interpreted_samples >= enough;
         let won = (seen(trial.compiled_samples, TRIAL_EARLY_SAMPLES)
             && quarter(trial.compiled_best) < trial.interpreted_best)
-            || (seen(trial.compiled_samples, TRIAL_SAMPLES)
+            || (seen(trial.compiled_samples, enough)
                 && trial.interpreted_best + margin >= trial.compiled_best);
         let lost = (seen(trial.settled_samples, TRIAL_EARLY_SAMPLES)
             && quarter(trial.interpreted_best) < trial.settled_best)
-            || (seen(trial.settled_samples, TRIAL_SAMPLES)
+            || (seen(trial.settled_samples, enough)
                 && trial.interpreted_best + margin < trial.settled_best);
         if won {
             trial.phase = TRIAL_COMPILED;
