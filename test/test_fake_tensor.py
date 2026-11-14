@@ -3712,6 +3712,10 @@ class TestFakeTensorConverter(TestCase):
     def test_memoized_conversion_from_meta(self, mode_cls, pytype):
         if mode_cls is CppFakeTensorMode and pytype is torch.nn.Parameter:
             self.skipTest("C++ fake tensors do not support Parameter pytype")
+        if TEST_WITH_TORCHDYNAMO and mode_cls is FakeTensorMode and pytype is not None:
+            self.skipTest(
+                "Dynamo guards on pytype, which differs from the actual FakeTensor type"
+            )
         x = torch.rand(2, 2).to(device="meta")
         mode = mode_cls()
         converter = mode.fake_tensor_converter
