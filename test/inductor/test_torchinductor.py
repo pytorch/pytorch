@@ -16635,6 +16635,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.ones(10),))
 
+    @parametrize("dynamic", [False, True])
+    @parametrize("layout", ["padded", "permuted", "sliced"])
+    @config.patch(
+        comprehensive_padding=True,
+        disable_padding_cpu=False,
+        padding_stride_threshold=0,
+        padding_alignment_bytes=32,
+        pad_outputs=True,
+    )
+    def test_resize_padded_input(self, dynamic, layout):
+        def fn(x, size):
+            return torch.ops.aten.resize(x, size)
+
+        storage = torch.full((208,), -777.0, device=self.device)
+        padded = storage.as_strided((5, 5, 5), (40, 8, 1), storage_offset=3)
+        padded.copy_(torch.arange(125, device=self.device).reshape(5, 5, 5))
+        if layout == "permuted":
+            padded = padded.permute(2, 0, 1)
+        elif layout == "sliced":
+            padded = padded[::2]
+        compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+        for size in ((5, 5), (padded.numel(),), tuple(padded.shape)):
+            with self.subTest(size=size):
+                expected = fn(padded, size)
+                actual = compiled(padded, size)
+                self.assertEqual(actual, expected)
+
     def test_resize(self):
         def fn(x, size, memory_format):
             # NOTE: Tensor.resize() =/= aten::resize()
@@ -24027,7 +24054,7 @@ if RUN_GPU:
             torch.testing.assert_close(actual=actual, expected=reduce_3d(inp))
             for block_arg in ("YBLOCK", "XBLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"):
                 self.assertIn(block_arg, code[0])
-            self.assertNotIn("ZBLOCK", code[0])
+            self.assertNotIn("Z0_BLOCK", code[0])
             self.assertIn("tl.load", code[0])
 
         @config.patch({"triton.decompose_sort_ops": True})
@@ -24068,6 +24095,69 @@ if RUN_GPU:
             expected = fn(inp)
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
+
+        def test_size_one_innermost_reduction_dim_stays_unsplit(self):
+            # A read that is contiguous along one reduction var and constant along
+            # another (a size-1 or broadcast innermost dim) still votes INNER, so
+            # these stay one unsplit kernel.
+            def fn(x):
+                return x.sum((1, 2))
+
+            def broadcast_sum(x):
+                return x[:, :, None].expand(4096, 8, 32).sum((1, 2))
+
+            for f, x in [
+                (fn, torch.randn(64, 4096, 1, device=GPU_TYPE)),
+                (broadcast_sum, torch.randn(4096, 8, device=GPU_TYPE)),
+            ]:
+                torch._dynamo.reset()
+                result, code = run_and_get_code(torch.compile(f), x)
+                self.assertEqual(result, f(x), atol=1e-4, rtol=1e-4)
+                self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
+        def test_small_strided_read_keeps_outer_reduction(self):
+            # Only reads constant across the whole reduction abstain from the
+            # INNER/OUTER vote; a transposed (strided) read still votes OUTER,
+            # including a small-dtype one (guards against weighting votes by
+            # itemsize).
+            def fn(x, mask):
+                return (x * mask.t()).sum(1)
+
+            x = torch.randn(1024, 1024, device=GPU_TYPE)
+            mask = torch.rand(1024, 1024, device=GPU_TYPE) < 0.5
+            result, code = run_and_get_code(torch.compile(fn), x, mask)
+            self.assertEqual(result, fn(x, mask))
+            self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
+
+        def test_small_broadcast_read_does_not_split_inner_reduction(self):
+            # The per-group mask is constant along the innermost reduction var, so
+            # it must not outvote the contiguous rows being reduced: this stays an
+            # unsplit inner reduction (one kernel).
+            def fn(x, mask):
+                masked = x.view(4096, 8, 32).masked_fill(
+                    mask.unsqueeze(-1), float("-inf")
+                )
+                return masked.flatten(1).amax(-1)
+
+            x = torch.randn(4096, 256, device=GPU_TYPE)
+            mask = torch.rand(4096, 8, device=GPU_TYPE) < 0.5
+            result, code = run_and_get_code(torch.compile(fn), x, mask)
+            self.assertEqual(result, fn(x, mask))
+            self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
+        def test_repeated_strided_read_keeps_outer_reduction(self):
+            # x.t() repeat-interleaved by 2 doesn't move at reduction step 1 but
+            # jumps a full row every other step, so it must still vote OUTER
+            # against the contiguous y.
+            def fn(y, x):
+                xt = x.t()[:, :, None].expand(256, 128, 2).reshape(256, 256)
+                return (y * xt).sum(1)
+
+            y = torch.randn(256, 256, device=GPU_TYPE)
+            x = torch.randn(128, 256, device=GPU_TYPE)
+            result, code = run_and_get_code(torch.compile(fn), y, x)
+            self.assertEqual(result, fn(y, x), atol=1e-4, rtol=1e-4)
+            self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_topk_decompose_sort_ops(self):
