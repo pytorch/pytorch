@@ -572,6 +572,51 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
 
 
+def _tdm_store_validation_required(output_node: ir.IRNode) -> bool:
+    """Whether a template's forced TMA stores must be validated per destination.
+
+    Only on gfx1250 TDM. There a forced store skips the descriptor checker's
+    dtype gate, and a store it still rejects raises rather than falling back.
+    The TDM heuristic decided the store against the choice's output layout and
+    dtype only, while fused epilogues add destinations of their own. Other
+    backends keep their selection-time checks unchanged.
+    """
+    if torch.version.hip is None:
+        return False
+    from .utils import _gfx1250_device_prereqs
+
+    return _gfx1250_device_prereqs(output_node.get_device())
+
+
+def _tdm_store_target_eligible(buffer: object, block_n: object) -> bool:
+    """Whether ``buffer``, as finally laid out, can take a TDM descriptor store.
+
+    Applies the heuristic's rules to the actual destination: its own dtype,
+    layout and the output tile's contiguous width (``BLOCK_N``) at that dtype.
+    Fails closed on anything it cannot inspect.
+    """
+    from .heuristics.template.triton import _tdm_block_aligned
+    from .utils import tdm_output_store_eligible
+
+    get_layout = getattr(buffer, "get_layout", None)
+    layout = get_layout() if get_layout is not None else None
+    eligible = (
+        isinstance(layout, ir.Layout)
+        and isinstance(block_n, (int, sympy.Integer))
+        and not isinstance(block_n, bool)
+        and tdm_output_store_eligible(layout)
+        and _tdm_block_aligned(int(block_n), layout.dtype.itemsize)
+    )
+    if not eligible:
+        log.debug(
+            "TDM: %s cannot take a descriptor store (BLOCK_N=%s); "
+            "using a regular store",
+            getattr(buffer, "get_name", lambda: buffer)(),
+            block_n,
+        )
+    return eligible
+
+
 class TritonTemplateKernel(TritonKernel):
     """
     A specialized kernel class for Triton templates that handles code generation
@@ -611,6 +656,16 @@ class TritonTemplateKernel(TritonKernel):
         always_freeze_layout: bool = False,
         index_dtype_override: str | None = None,
     ) -> None:
+        validate_tdm_stores = bool(tma_store) and _tdm_store_validation_required(
+            output_node
+        )
+        if validate_tdm_stores and not _tdm_store_target_eligible(
+            output_node, meta.get("BLOCK_N")
+        ):
+            # The store would be forced and could only fail; write the output
+            # through the regular block-indexed path instead.
+            tma_store = False
+            validate_tdm_stores = False
         tma_tiled = tma_store or tma_load_for_template_epilogue
         numel = sympy_product(output_node.get_size())
         if tma_tiled:
@@ -664,6 +719,8 @@ class TritonTemplateKernel(TritonKernel):
         self.kernel_name = kernel_name
         self.use_jit = use_jit
         self.tma_store = tma_store
+        # Fused epilogue stores inherit tma_store; see _store_forces_tma.
+        self._validate_tdm_stores = validate_tdm_stores
         self.tma_load_for_template_epilogue = tma_load_for_template_epilogue
         self.transpose_discontiguous_tensor_descriptors_override = (
             transpose_discontiguous_tensor_descriptors_override
@@ -956,6 +1013,19 @@ class TritonTemplateKernel(TritonKernel):
 
     def need_numel_args(self):
         return False
+
+    def _store_forces_tma(self, name: str, mode: StoreMode) -> bool:
+        force = super()._store_forces_tma(name, mode)
+        if not force or mode == "tma" or not self._validate_tdm_stores:
+            # mode="tma" is the template's own output, validated in __init__.
+            return force
+        # A fused epilogue destination inherits the forced store but may differ
+        # in dtype or layout (e.g. a bool comparison of an fp16 matmul). Let a
+        # destination that cannot take a TDM descriptor fall back to the
+        # regular checker, which falls back to tl.store.
+        return _tdm_store_target_eligible(
+            V.graph.try_get_buffer(name), self.meta.get("BLOCK_N")
+        )
 
     def estimate_kernel_num_bytes(self):
         """

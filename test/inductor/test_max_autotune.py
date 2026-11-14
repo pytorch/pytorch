@@ -7672,6 +7672,10 @@ class TestTDMConfigDenseAndGeneric(TestCase):
             else mock.patch.object(tdm_heuristics, "commit_tdm_operand_layout")
         )
         with (
+            # Lifecycle-only: keep the output-store decision, which needs real
+            # operands and BLOCK_N, out of these mocked configs whatever the
+            # ENABLE_TEMPLATE_TMA_STORE environment default is.
+            config.patch({"triton.enable_template_tma_store": False}),
             mock.patch.object(
                 tdm_heuristics, "tdm_descriptor_row_major", side_effect=[True, True]
             ),
@@ -7798,6 +7802,274 @@ class TestTDMConfigDenseAndGeneric(TestCase):
         self.assertTrue(
             issubclass(ROCmAddMMPersistentTDMTemplateConfigHeuristic, AddMMConfigMixin)
         )
+
+    def test_tdm_output_store_eligibility_requires_static_proof(self):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.utils import tdm_output_store_eligible
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        graph = GraphLowering(make_fx(lambda: torch.zeros(2, 3))())
+        shape_env = graph.sizevars.shape_env
+
+        def layout(size, stride, offset=0, dtype=torch.float16):
+            return FixedLayout(torch.device("cuda"), dtype, size, stride, offset)
+
+        int32_max = torch.iinfo(torch.int32).max
+        with V.set_graph_handler(graph):
+            # Row-major fp16, 256-byte outer stride.
+            self.assertTrue(tdm_output_store_eligible(layout((256, 128), (128, 1))))
+            # 16-byte offset is fine; 8-byte is not.
+            self.assertTrue(
+                tdm_output_store_eligible(layout((256, 128), (128, 1), offset=8))
+            )
+            self.assertFalse(
+                tdm_output_store_eligible(layout((256, 128), (128, 1), offset=4))
+            )
+            # 272-byte outer stride: 16-byte aligned but outside the 128-byte
+            # direct-path policy.
+            self.assertFalse(tdm_output_store_eligible(layout((256, 136), (136, 1))))
+            # Column-major output has no unit innermost stride.
+            self.assertFalse(tdm_output_store_eligible(layout((256, 128), (1, 256))))
+            # Rank and dtype.
+            self.assertFalse(
+                tdm_output_store_eligible(layout((2, 64, 64), (4096, 64, 1)))
+            )
+            self.assertFalse(
+                tdm_output_store_eligible(
+                    layout((256, 128), (128, 1), dtype=torch.float8_e4m3fn)
+                )
+            )
+            self.assertTrue(
+                tdm_output_store_eligible(
+                    layout((256, 128), (128, 1), dtype=torch.float32)
+                )
+            )
+            # A descriptor dimension beyond int32.
+            self.assertFalse(
+                tdm_output_store_eligible(layout((int32_max + 1, 64), (64, 1)))
+            )
+
+            # A symbolic outer stride is rejected even when its hint is aligned,
+            # and the decision installs no guard.
+            n = shape_env.create_symbol(
+                128, source=ConstantSource("tdm_out_n"), dynamic_dim=DimDynamic.DYNAMIC
+            )
+            guards_before = len(shape_env.guards)
+            # Static sizes isolate the stride rule: an unbounded symbolic size
+            # would already fail the int32 rule and mask a hint-based stride.
+            self.assertFalse(tdm_output_store_eligible(layout((256, 128), (n, 1))))
+            self.assertFalse(tdm_output_store_eligible(layout((256, n), (n, 1))))
+            self.assertEqual(len(shape_env.guards), guards_before)
+
+    def _drive_tdm_store_heuristic(self, block_ns, *, flag, store_eligible):
+        """Drive the TDM wrapper's output-store decision over injected configs.
+
+        Same scope as ``_drive_tdm_heuristic``: config generation and the
+        commit are mocked; only the wrapper's per-config ``tma_store`` runs.
+        """
+        from torch._inductor.heuristics.template import triton as tdm_heuristics
+        from torch._inductor.heuristics.template.triton import (
+            MMTemplateConfigMixin,
+            ROCmPersistentTDMTemplateConfigHeuristic,
+        )
+        from torch._inductor.kernel_inputs import MMKernelInputs
+
+        mat1, mat2 = mock.Mock(), mock.Mock()
+        kernel_inputs = MMKernelInputs([mat1, mat2], mat1_idx=0, mat2_idx=1)
+        generated = [{"BLOCK_N": block_n} for block_n in block_ns]
+        with (
+            config.patch({"triton.enable_template_tma_store": flag}),
+            mock.patch.object(
+                tdm_heuristics, "tdm_descriptor_row_major", side_effect=[True, True]
+            ),
+            mock.patch.object(tdm_heuristics, "get_num_sms", return_value=1),
+            mock.patch.object(
+                MMTemplateConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter(generated),
+            ),
+            mock.patch.object(tdm_heuristics, "commit_tdm_operand_layout"),
+            mock.patch.object(
+                tdm_heuristics,
+                "tdm_output_store_eligible",
+                return_value=store_eligible,
+            ) as eligible,
+            mock.patch.object(MMKernelInputs, "output_layout") as output_layout,
+            mock.patch.object(
+                MMKernelInputs, "out_dtype", return_value=torch.float16
+            ),
+        ):
+            heuristic = ROCmPersistentTDMTemplateConfigHeuristic()
+            configs = list(heuristic._get_template_configs_impl(kernel_inputs, "mm"))
+        return [c["tma_store"] for c in configs], eligible, output_layout
+
+    def test_tdm_heuristic_output_store_is_per_config_and_never_drops_configs(self):
+        # fp16: BLOCK_N=64 is a 128-byte row, BLOCK_N=32 only 64 bytes.
+        stores, eligible, _ = self._drive_tdm_store_heuristic(
+            [64, 32, 128], flag=True, store_eligible=True
+        )
+        self.assertEqual(stores, [True, False, True])
+        eligible.assert_called_once()
+
+        # An ineligible output keeps every config, with the regular store.
+        stores, _, _ = self._drive_tdm_store_heuristic(
+            [64, 128], flag=True, store_eligible=False
+        )
+        self.assertEqual(stores, [False, False])
+
+        # Flag off (the default): no store, and the output layout is not built.
+        stores, eligible, output_layout = self._drive_tdm_store_heuristic(
+            [64, 128], flag=False, store_eligible=True
+        )
+        self.assertEqual(stores, [False, False])
+        eligible.assert_not_called()
+        output_layout.assert_not_called()
+
+    def test_template_tma_store_validation_scope_and_rules(self):
+        from torch._inductor import select_algorithm
+
+        node = mock.Mock()
+        # CUDA/XPU builds are never re-checked, and do not probe the device.
+        with (
+            mock.patch.object(torch.version, "hip", None),
+            mock.patch(self._PREREQS, return_value=True) as prereqs,
+        ):
+            self.assertFalse(select_algorithm._tdm_store_validation_required(node))
+            prereqs.assert_not_called()
+        with mock.patch.object(torch.version, "hip", "7.14"):
+            # A non-gfx1250 ROCm device keeps whatever its backend selected.
+            with mock.patch(self._PREREQS, return_value=False):
+                self.assertFalse(select_algorithm._tdm_store_validation_required(node))
+            with mock.patch(self._PREREQS, return_value=True):
+                self.assertTrue(select_algorithm._tdm_store_validation_required(node))
+
+        graph = GraphLowering(make_fx(lambda: torch.zeros(2, 3))())
+
+        def dest(dtype, stride=(128, 1)):
+            return Buffer(
+                name="d",
+                layout=FixedLayout(torch.device("cuda"), dtype, (256, 128), stride, 0),
+            )
+
+        eligible = select_algorithm._tdm_store_target_eligible
+        with V.set_graph_handler(graph):
+            self.assertTrue(eligible(dest(torch.float16), 64))
+            # The tile width is checked at the destination's own dtype.
+            self.assertFalse(eligible(dest(torch.float16), 32))
+            self.assertTrue(eligible(dest(torch.float32), 32))
+            self.assertFalse(eligible(dest(torch.bool), 128))
+            self.assertFalse(eligible(dest(torch.float16, (136, 1)), 64))
+            # Fails closed on anything it cannot inspect.
+            self.assertFalse(eligible(None, 64))
+            self.assertFalse(eligible(dest(torch.float16), None))
+            self.assertFalse(eligible(dest(torch.float16), True))
+
+    def test_tdm_template_output_store_downgrades_ineligible_output(self):
+        # The template's own output (store mode "tma") is validated once, at
+        # construction: an ineligible one renders with the regular store path.
+        tma_store, code = self._emit_template_store(torch.float16, out_stride=(136, 1))
+        self.assertFalse(tma_store)
+        self.assertNotIn("tma_descriptor", code)
+
+    def _emit_template_store(
+        self,
+        dest_dtype,
+        *,
+        dest_stride=(128, 1),
+        out_stride=(128, 1),
+        prereqs=True,
+        block_n=64,
+    ):
+        """Emit one store through real TritonTemplateKernel store codegen.
+
+        The kernel is a gfx1250 TDM template with an fp16 output, requested
+        with tma_store=True as the heuristic selects it. The store targets a
+        second buffer, as a fused epilogue's does, with the generic descriptor
+        opt-ins off. Only the device probe and capability are mocked. Returns
+        the kernel's effective tma_store and the emitted store code.
+        """
+        from torch._inductor.select_algorithm import TritonTemplateKernel
+
+        graph = GraphLowering(make_fx(lambda: torch.zeros(2, 3))())
+        graph.current_device = torch.device("cuda")
+
+        def buf(name, dtype, size, stride):
+            node = Buffer(
+                name=name,
+                layout=FixedLayout(torch.device("cuda"), dtype, size, stride, 0),
+            )
+            graph.name_to_buffer[name] = node
+            return node
+
+        a = buf("A", torch.float16, (256, 192), (192, 1))
+        b = buf("B", torch.float16, (192, 128), (128, 1))
+        out = buf("buf0", torch.float16, (256, 128), out_stride)
+        buf("buf1", dest_dtype, (256, 128), dest_stride)
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(self._PREREQS, return_value=prereqs),
+            mock.patch.object(torch.version, "hip", "7.14"),
+            mock.patch("torch.cuda.get_device_capability", return_value=(12, 5)),
+        ):
+            kernel = TritonTemplateKernel(
+                kernel_name="k",
+                input_nodes=(a, b),
+                output_node=out,
+                defines="",
+                num_stages=2,
+                num_warps=4,
+                grid_fn=None,
+                meta={"BLOCK_M": 64, "BLOCK_N": block_n, "BLOCK_K": 64},
+                call_sizes=out.get_size(),
+                tma_store=True,
+            )
+            with (
+                V.set_kernel_handler(kernel),
+                kernel.create_subgraph_body("<STORE_OUTPUT>"),
+            ):
+                x_tree, y_tree = kernel.range_trees[:2]
+                x = x_tree.lookup(sympy.S.One, x_tree.numel).symbol()
+                y = y_tree.lookup(sympy.S.One, y_tree.numel).symbol()
+                value = kernel.cse.generate(
+                    kernel.compute,
+                    "tl.full([XBLOCK, YBLOCK], 1, tl.int1)",
+                    dtype=dest_dtype,
+                    shape=("XBLOCK", "YBLOCK"),
+                )
+                kernel.store("buf1", dest_stride[0] * x + y, value)
+                return kernel.tma_store, kernel.stores.getvalue()
+
+    def test_tdm_template_fused_store_validates_each_destination(self):
+        # An eligible fp16 destination keeps the descriptor store.
+        tma_store, code = self._emit_template_store(torch.float16)
+        self.assertTrue(tma_store)
+        self.assertIn("tma_descriptor0.store(", code)
+        self.assertNotIn("tl.store(", code)
+
+        # (a @ b) > 0: a bool destination would otherwise be forced into a
+        # descriptor over *i1, which Triton rejects (0-byte elements), and a
+        # rejected forced store raises instead of falling back. The template's
+        # own output keeps its descriptor store; only this destination falls back.
+        for block_n in (64, 128):
+            # BLOCK_N=128 makes a 128-byte bool row, so only the dtype rule
+            # rejects it; at 64 the tile-width rule would mask that rule.
+            tma_store, code = self._emit_template_store(torch.bool, block_n=block_n)
+            self.assertTrue(tma_store)
+            self.assertNotIn("tma_descriptor", code)
+            self.assertIn("tl.store(", code)
+
+        # Same dtype as the output, but a 272-byte row: outside the TDM policy.
+        tma_store, code = self._emit_template_store(torch.float16, dest_stride=(136, 1))
+        self.assertTrue(tma_store)
+        self.assertNotIn("tma_descriptor", code)
+        self.assertIn("tl.store(", code)
+
+    def test_tdm_template_store_validation_is_scoped_to_gfx1250(self):
+        # Off gfx1250 the per-destination veto does not run; other backends'
+        # forced-store behavior is unchanged by this path.
+        tma_store, code = self._emit_template_store(torch.float16, prereqs=False)
+        self.assertTrue(tma_store)
+        self.assertIn("tma_descriptor0.store(", code)
 
     def test_tdm_generic_descriptor_gate_composes_optins(self):
         from torch._inductor.utils import use_gfx1250_descriptor_codegen
@@ -8410,6 +8682,120 @@ class TestTDMEndToEnd(TestCase):
         self.assertIn("make_tensor_descriptor", joined)
         self.assertIn("load_tensor_descriptor", joined)
         torch.testing.assert_close(result, fn(bias, a, b), atol=2e-2, rtol=2e-2)
+
+    def _compile_with_store_and_get_code(self, fn, *args):
+        with config.patch({"triton.enable_template_tma_store": True}):
+            return self._compile_and_get_code(fn, *args)
+
+    @staticmethod
+    def _cpu_reference(fn, *args):
+        # A CPU fp32 reference keeps correctness independent of eager GEMM
+        # libraries on gfx1250.
+        out = fn(*(arg.cpu().float() for arg in args))
+        return out.to(args[-1].dtype)
+
+    @parametrize("op", ("mm", "addmm"))
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    def test_tdm_output_store(self, op: str, a_transposed: bool, b_transposed: bool):
+        M, N, K = 256, 128, 192
+
+        def make(rows, cols, transposed):
+            shape = (cols, rows) if transposed else (rows, cols)
+            t = torch.randn(*shape, device=GPU_TYPE, dtype=torch.float16)
+            return t.T if transposed else t
+
+        a = make(M, K, a_transposed)
+        b = make(K, N, b_transposed)
+        if op == "mm":
+            args = (a, b)
+
+            def fn(a, b):
+                return torch.mm(a, b)
+
+        else:
+            args = (torch.randn(N, device=GPU_TYPE, dtype=torch.float16), a, b)
+
+            def fn(bias, a, b):
+                return torch.addmm(bias, a, b)
+
+        result, code = self._compile_with_store_and_get_code(fn, *args)
+        FileCheck().check("triton_tem_fused").check("load_tensor_descriptor").check(
+            "tl.make_tensor_descriptor(out_ptr0"
+        ).check("tma_descriptor0.store(").run(code[0])
+        torch.testing.assert_close(
+            result.cpu(), self._cpu_reference(fn, *args), atol=2e-2, rtol=2e-2
+        )
+
+    def test_tdm_output_store_with_fused_bool_epilogue(self):
+        # A fused comparison writes a bool buffer, which cannot take a TDM
+        # descriptor. Fusion must still compile, with tl.store for that
+        # destination. Entries in {-1, 0, 1} make every sum exact, so the
+        # comparison has no rounding-dependent sign flips.
+        def fn(a, b):
+            return torch.mm(a, b) > 0
+
+        def make(rows, cols):
+            return torch.randint(-1, 2, (rows, cols), device=GPU_TYPE).half()
+
+        a, b = make(256, 192), make(192, 128)
+        # Fuse the epilogue directly, as the reported failure requires, rather
+        # than through benchmarked multi-template fusion, which can swallow it.
+        with config.patch(
+            {
+                "max_autotune_gemm_backends": "TRITON",
+                "benchmark_template_fusion": False,
+                "benchmark_fusion": False,
+                "pipeline_max_autotune_gemm": False,
+            }
+        ):
+            result, code = self._compile_with_store_and_get_code(fn, a, b)
+        self.assertEqual(result.dtype, torch.bool)
+        # The comparison is fused into the TDM template kernel.
+        self.assertRegex(code[0], r"triton_tem_fused\w*gt")
+        FileCheck().check("triton_tem_fused").check("load_tensor_descriptor").run(
+            code[0]
+        )
+        self.assertEqual(result.cpu(), self._cpu_reference(torch.mm, a, b) > 0)
+
+    def test_tdm_output_store_falls_back_for_ineligible_output(self):
+        # Operand outer strides stay 512 bytes, but the contiguous output's row
+        # is 136 fp16 = 272 bytes: 16-byte aligned, outside the 128-byte policy.
+        # TDM loads must remain, and the output must use tl.store, not raise.
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(136, 256, device=GPU_TYPE, dtype=torch.float16).T
+        result, code = self._compile_with_store_and_get_code(fn, a, b)
+        FileCheck().check("triton_tem_fused").check("load_tensor_descriptor").check(
+            "tl.store("
+        ).run(code[0])
+        self.assertNotIn("tl.make_tensor_descriptor(out_ptr0", code[0])
+        torch.testing.assert_close(
+            result.cpu(), self._cpu_reference(fn, a, b), atol=2e-2, rtol=2e-2
+        )
+
+    @largeTensorTest("20 GB", device=GPU_TYPE)
+    @largeTensorTest("16 GB", device="cpu")
+    def test_tdm_output_store_large_output_int64_indexing(self):
+        # An output past 2^31 elements makes the kernel index in int64; the
+        # descriptor store must still be emitted, with per-dim int32 coordinates.
+        M, N, K = 5592406, 384, 128
+        self.assertGreater(M * N, 2**31 - 1)
+        # Entries in {-1, 0, 1} keep every partial sum exact.
+        a = torch.randint(-1, 2, (M, K), device=GPU_TYPE, dtype=torch.int8).bfloat16()
+        b = torch.randint(-1, 2, (K, N), device=GPU_TYPE, dtype=torch.int8).bfloat16()
+
+        with config.patch({"triton.num_decompose_k_splits": 0}):
+            result, code = self._compile_with_store_and_get_code(torch.mm, a, b)
+        FileCheck().check("INDEX_DTYPE : tl.constexpr = tl.int64").check(
+            "tma_descriptor0.store("
+        ).run(code[0])
+        # Exact: every output is an integer in [-128, 128], representable in bf16.
+        self.assertEqual(
+            result.cpu(), self._cpu_reference(torch.mm, a, b), atol=0, rtol=0
+        )
 
     def test_tdm_generic_pointwise_correctness_and_selection(self):
         def fn(x, y):

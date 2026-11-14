@@ -5652,6 +5652,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and not graph.get_dtype(name).is_floating_point
         )
 
+    def _store_forces_tma(self, name: str, mode: StoreMode) -> bool:
+        """Whether the store to ``name`` must use a tensor descriptor.
+
+        A forced store skips the descriptor checker's dtype gate, and one the
+        checker still rejects raises rather than falling back, so subclasses
+        that force stores may veto destinations that cannot take one.
+        """
+        return mode == "tma" or getattr(self, "tma_store", False)
+
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
@@ -5667,7 +5676,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         tma_compatibility_checker = None
         if not buffer_misaligned and (mode is None or mode == "tma"):
-            force = mode == "tma" or getattr(self, "tma_store", False)
+            force = self._store_forces_tma(name, mode)
             tma_compatibility_checker = self.tma_compatibility_checker_cls(
                 self,
                 dtype,

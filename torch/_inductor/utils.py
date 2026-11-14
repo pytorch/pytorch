@@ -2882,6 +2882,49 @@ def use_triton_tdm_template(*matrices: IRNode) -> bool:
     )
 
 
+def tdm_output_store_eligible(layout: Layout) -> bool:
+    """Return whether a dense TDM template may store its output via a descriptor.
+
+    Store-only: a False result keeps the TDM template and its descriptor loads;
+    the template then writes the output with ``tl.store``. The template's TMA
+    store is forced, which skips the generic checker's dtype gate and, unless
+    the generic descriptor opt-ins are set, its gfx1250 shape bounds, and a
+    rejected forced store raises instead of falling back. Every rule must
+    therefore hold here, before the store is forced.
+
+    Decided by static proof only -- no hints, no guards -- so it never
+    specializes a dynamic graph, and a premise that holds only on the current
+    hint cannot be baked into a kernel reused for other shapes. Symbolic
+    layouts are therefore rejected; admitting them needs guards.
+    """
+    from .virtualized import V
+
+    dtype = layout.dtype
+    if dtype not in _TDM_SUPPORTED_DTYPES:
+        return False
+    sizes, strides = layout.size, layout.stride
+    if len(sizes) != 2 or len(strides) != 2:
+        return False
+
+    sizevars = V.graph.sizevars
+    if not sizevars.statically_known_equals(strides[1], 1):
+        return False
+    itemsize = dtype.itemsize
+    # Same rules as the operand policy: 16-byte base offset, and the outer
+    # stride meets the provisional 128-byte direct-path policy (which implies
+    # the 16-byte descriptor requirement).
+    if not sizevars.statically_known_multiple_of(
+        layout.offset * itemsize, _TDM_OPERAND_ALIGNMENT_BYTES
+    ):
+        return False
+    if not sizevars.statically_known_multiple_of(
+        strides[0] * itemsize, _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES
+    ):
+        return False
+    int32_max = torch.iinfo(torch.int32).max
+    return all(sizevars.statically_known_leq(size, int32_max) for size in sizes)
+
+
 def commit_tdm_operand_layout(*matrices: IRNode) -> None:
     """Specialize operands whose TDM configurations have actually materialized.
 

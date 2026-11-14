@@ -51,6 +51,7 @@ from ...utils import (
     mfma_kdim,
     rocm_gfx_arch,
     tdm_descriptor_row_major,
+    tdm_output_store_eligible,
     TMA_DESCRIPTOR_SIZE,
     tma_inner_dim,
     triton_type,
@@ -4011,6 +4012,16 @@ class ROCmPersistentTDMTemplateConfigHeuristic(
         # can empty the pool. Specializing for a template that then contributes
         # nothing is the defect this ordering avoids.
         generated = super()._get_template_configs_impl(kernel_inputs, op_name, **kwargs)
+        # The output store is decided per choice and never removes a config: an
+        # ineligible output or tile keeps the TDM loads and writes with tl.store.
+        # Evaluated lazily so the default (flag off) never builds the layout.
+        store_output_eligible = (
+            config.triton.enable_template_tma_store
+            and tdm_output_store_eligible(kernel_inputs.output_layout())
+        )
+        out_itemsize = (
+            kernel_inputs.out_dtype().itemsize if store_output_eligible else 0
+        )
         # Same Jinja template as TMATemplateConfigMixin, deliberately different
         # probes; see that class for why the two option blocks stay separate.
         configs = [
@@ -4021,6 +4032,13 @@ class ROCmPersistentTDMTemplateConfigHeuristic(
                 "NUM_SMS": get_num_sms(),
                 # The TDM capability gate requires make_tensor_descriptor.
                 "TMA_EXPERIMENTAL_API": False,
+                # The output tile's contiguous extent is BLOCK_N (the output is
+                # row-major, checked above) and must meet the same block rules
+                # as the operand tiles.
+                "tma_store": bool(
+                    store_output_eligible
+                    and _tdm_block_aligned(template_kwargs["BLOCK_N"], out_itemsize)
+                ),
             }
             for template_kwargs in generated
         ]
