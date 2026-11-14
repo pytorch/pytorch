@@ -737,12 +737,30 @@ class AOTICompiledModel:
         self.loader = loader
 
     def __call__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return self._run(self.loader.boxed_run, args, kwargs)
+
+    def run_with_lazy_cuda_graphs(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        """
+        Like calling the model, but runs it as CUDA graphs captured lazily,
+        while serving calls; requires a CUDA model compiled with
+        ``aot_inductor.cudagraphs=True``. A new input layout runs eagerly
+        first, is captured on its next call and replayed after that, up to
+        ``AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS`` (default 8) graphs per model
+        instance. Replayed outputs are copies; eager calls return the model's
+        own outputs. Once a graph is captured, the model's active constants
+        can't change, so ``load_constants`` fails. Not supported for models
+        loaded with ``run_single_threaded=True``, or on ROCm yet; see
+        https://github.com/ROCm/rocm-systems/issues/12677.
+        """
+        return self._run(self.loader.run_with_lazy_cuda_graphs, args, kwargs)
+
+    def _run(self, run_fn, args, kwargs):  # type: ignore[no-untyped-def]
         call_spec = self.loader.get_call_spec()
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
         flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-        flat_outputs = self.loader.boxed_run(flat_inputs)
+        flat_outputs = run_fn(flat_inputs)
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
     def get_metadata(self) -> dict[str, str]:
