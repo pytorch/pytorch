@@ -11105,6 +11105,21 @@ class TestNNDeviceType(NNTestCase):
         self._test_gumbel_softmax_straight_through(device, dtype)
         self._test_gumbel_softmax_grad(device, dtype)
 
+    @parametrize_test("hard", [False, True])
+    def test_gumbel_softmax_half_overflow(self, device, hard):
+        logits = torch.tensor(
+            [[1e4, -1e4, 0.5, -0.5]],
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        out = F.gumbel_softmax(logits, tau=0.1, hard=hard)
+        self.assertTrue(torch.isfinite(out).all(), f"output contains non-finite values: {out}")
+        if hard:
+            self.assertEqual(out.sum(dim=-1), torch.ones(1, device=device, dtype=torch.float16))
+        (out * torch.randn_like(out)).sum().backward()
+        self.assertTrue(torch.isfinite(logits.grad).all(), "gradient contains non-finite values")
+
     def _test_rnn_retain_variables(self, device, dtype):
         rnns = [nn.LSTM(10, 20, num_layers=2).to(device, dtype),
                 nn.GRU(10, 20, num_layers=2).to(device, dtype),
