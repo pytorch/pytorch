@@ -358,6 +358,62 @@ class TestCppWrapperCustomOps(InductorTestCase):
                 r"std::move\(dispatch_stack_\d+\[3\]\)\.toTensor\(\)",
             )
 
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    @config.patch(cpp_wrapper=True, implicit_fallbacks=True)
+    @parametrize("optional_present", (False, True))
+    def test_cpp_wrapper_optional_tensor_list_returns(self, optional_present):
+        runtime_present = [optional_present]
+        with torch.library._scoped_library("mylib_optional_lists", "FRAGMENT") as m:
+            m.define("guard(Tensor x) -> (Tensor[], Tensor, Tensor[]?)")
+            m.impl(
+                "guard",
+                lambda x: (
+                    [x + 1, x + 2],
+                    x + 3,
+                    [x + 4] if runtime_present[0] else None,
+                ),
+                "CPU",
+            )
+            m.impl(
+                "guard",
+                lambda x: (
+                    [torch.empty_like(x), torch.empty_like(x)],
+                    torch.empty_like(x),
+                    [torch.empty_like(x)] if optional_present else None,
+                ),
+                "Meta",
+            )
+            m.define("lone(Tensor x) -> Tensor[]?")
+            m.impl("lone", lambda x: [x * 2] if runtime_present[0] else None, "CPU")
+            m.impl(
+                "lone",
+                lambda x: [torch.empty_like(x)] if optional_present else None,
+                "Meta",
+            )
+            # Keeps lone alive when it was traced as None.
+            torch.fx.node.has_side_effect(torch.ops.mylib_optional_lists.lone.default)
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    first, middle, optional = torch.ops.mylib_optional_lists.guard(x)
+                    lone = torch.ops.mylib_optional_lists.lone(x)
+                    return first, middle, optional, lone, first[1] + middle
+
+            model = Model()
+            x = torch.randn(4)
+            compiled = torch.compile(model, fullgraph=True)
+            actual, codes = run_and_get_code(compiled, x)
+            self.assertEqual(actual, model(x))
+            code = "\n".join(codes)
+            self.assertEqual(code.count(".callBoxed("), 2)
+            num_lists = 3 if optional_present else 1
+            self.assertEqual(code.count(".toTensorList()"), num_lists)
+            self.assertNotIn("custom_op_wrapper", code)
+            if optional_present:
+                runtime_present[0] = False
+                with self.assertRaisesRegex(RuntimeError, "Expected TensorList"):
+                    compiled(x)
+
 
 instantiate_parametrized_tests(TestCppWrapperCustomOps)
 
