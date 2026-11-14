@@ -20,7 +20,6 @@ from typing import (
     Literal,
     overload,
     Self,
-    SupportsIndex,
     TYPE_CHECKING,
     TypeGuard,
     TypeVar,
@@ -2494,12 +2493,6 @@ class FakeTensorMode(TorchDispatchMode):
     # mode, you should reset the counter to the initial count.
     nt_tensor_id_counter: int = -1
     nt_tensor_id_initial_count: int = -1
-
-    def __reduce_ex__(self, protocol: SupportsIndex) -> str | tuple[Any, ...]:
-        if type(self) is not FakeTensorMode:
-            return super().__reduce_ex__(protocol)
-        # Copies of an existing Python mode must remain Python modes.
-        return (object.__new__, (FakeTensorMode,), self.__getstate__())
 
     def __init__(
         self,
