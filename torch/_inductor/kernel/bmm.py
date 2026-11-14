@@ -35,6 +35,9 @@ from .mm_common import (
     acc_type,
     is_batch_stride_largest_or_zero,
     mm_args,
+    native_matmul_scaled_add,
+    realize_helion_operands,
+    use_helion_mm,
     use_native_matmul,
     zero_addmm_input,
 )
@@ -308,6 +311,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             mat2 = may_require_contiguous(mat2, meta_mat2)
 
     if use_native_matmul(mat1, mat2):
+        if use_helion_mm(mat1, mat2):
+            # The Helion kernel reads the operands from memory; see tuned_mm.
+            mat1, mat2 = realize_helion_operands(mat1, mat2)
         mat1 = lowerings[aten.unsqueeze](mat1, -1)
         mat2 = lowerings[aten.unsqueeze](mat2, 1)
         args, kwargs = transform_args(
@@ -329,7 +335,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             args = [make_pointwise(_to_dtype)(x) for x in args]
 
         mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(mul_pointwise, 2)
+        dot_reduction = make_reduction("dot", override_return_dtype=out_dtype)(
+            mul_pointwise, 2
+        )
 
         return dot_reduction
 
@@ -467,17 +475,9 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         template_inp = zero_addmm_input(inp, mat1, mat2)
 
     if use_native_matmul(mat1, mat2):
-        if beta == 0:
-            arg1 = 0
-        else:
-            arg1 = lowerings[aten.mul](beta, inp)
-
-        if alpha == 0:
-            arg2 = 0
-        else:
-            arg2 = lowerings[aten.mul](alpha, lowerings[aten.bmm](mat1, mat2))
-
-        return lowerings[aten.add](arg1, arg2)
+        return native_matmul_scaled_add(
+            inp, alpha, beta, lambda: lowerings[aten.bmm](mat1, mat2)
+        )
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)

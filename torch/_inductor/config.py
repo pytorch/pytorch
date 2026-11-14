@@ -3281,6 +3281,19 @@ class halide:
     scan_kernels = False
 
 
+class helion:
+    """Configuration for Inductor-generated Helion kernels (codegen/helion.py)."""
+
+    # Emit the kernels codegen/helion.py supports as Helion, the rest as Triton.
+    enabled: bool = os.getenv("TORCHINDUCTOR_HELION", "0") == "1"
+    # With enabled, also emit static FP16/BF16/FP32 CUDA matmuls as Helion.
+    native_matmul: bool = os.getenv("TORCHINDUCTOR_HELION_NATIVE_MATMUL", "1") == "1"
+    # Passed as @helion.kernel(backend=...).
+    backend: Literal["triton", "cute"] = "triton"
+    # Passed as @helion.kernel(autotune_effort=...); "none" skips autotuning.
+    autotune_effort: Literal["none", "quick", "full"] = "quick"
+
+
 # create a directory containing lots of debug information
 def _get_debug_graph_format(format_env_name: str, legacy_svg_env_name: str) -> str:
     if format_env_name in os.environ:

@@ -29,7 +29,15 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 aten = torch.ops.aten
 
 
-@inductor_config.patch({"triton.native_matmul": True})
+# These tests check codegen and numerics, and compiling and benchmarking every
+# reduction config of their matmul kernels takes most of this file's runtime
+# (about 400 s of 730 s on a B200), so they use one heuristic config.
+@inductor_config.patch(
+    {
+        "triton.native_matmul": True,
+        "test_configs.force_filter_reduction_configs": True,
+    }
+)
 class TestTritonDotReduction(TestCase):
     def _check_equal(
         self, f: Callable, example_inputs: tuple[torch.Tensor], tol: float = 1e-4

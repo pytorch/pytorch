@@ -7,14 +7,19 @@ from typing import Any
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
-from torch._inductor.utils import get_current_backend, is_bf16x9_matmul, sympy_product
+from torch._inductor.utils import (
+    get_current_backend,
+    is_bf16x9_matmul,
+    sympy_product,
+    use_helion_native_matmul,
+)
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 from .. import config
 from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import _IntLike, Layout, TensorBox
+from ..ir import _IntLike, ExternKernel, Layout, TensorBox
 from ..utils import load_template, triton_type
 
 
@@ -174,7 +179,65 @@ def scale_mm_epilogue():
     return epilogue
 
 
+def use_helion_mm(mat1, mat2) -> bool:
+    """Whether a Helion kernel emits mat1 @ mat2; see use_helion_native_matmul()."""
+    *size, k = mat1.get_size()
+    return use_helion_native_matmul(
+        mat1.get_device(), mat1.get_dtype(), [*size, mat2.get_size()[-1]], k
+    )
+
+
+def realize_helion_operands(mat1, mat2):
+    """realize_inputs() for a Helion matmul, copying a mat2 broadcast along N.
+
+    HelionKernel takes a dot operand whose index has no tile_x for mat1. A mat2
+    with stride 0 along N, as in x @ v.expand(72, 136), is read at r0_index
+    alone, so it would be read as in1[tile_y, tile_r] and the dot fails:
+        CompilationError: input and other must have equal reduction dimensions
+    Its copy is read as in1[tile_r, tile_x]. A mat1 broadcast along M is read
+    as mat1 and needs no copy.
+    """
+    mat1, mat2 = realize_inputs(mat1, mat2)
+    if mat2.get_stride()[-1] == 0:
+        mat2 = ExternKernel.copy_input(mat2)
+    return mat1, mat2
+
+
+def native_matmul_scaled_add(inp, alpha, beta, matmul):
+    """beta * inp + alpha * matmul() for a native matmul addmm/baddbmm.
+
+    Unit and zero scales are skipped, so the fused epilogue of addmm(c, a, b)
+    is tmp3 = tmp2 + acc rather than
+        tmp3 = hl.full([], 1.0, dtype=torch.float32)
+        tmp4 = tmp3 * tmp2
+        tmp5 = tmp3 * acc
+        tmp6 = tmp4 + tmp5
+    """
+    from ..lowering import lowerings
+
+    aten = torch.ops.aten
+    # beta == 0 ignores inp, NaN and inf included.
+    if beta == 0:
+        bias = 0
+    elif beta == 1:
+        bias = inp
+    else:
+        bias = lowerings[aten.mul](beta, inp)
+    if alpha == 0:
+        product = 0
+    elif alpha == 1:
+        product = matmul()
+    else:
+        product = lowerings[aten.mul](alpha, matmul())
+    return lowerings[aten.add](bias, product)
+
+
 def use_native_matmul(mat1, mat2):
+    """Whether to lower this matmul to native dot IR (ops.dot + reduction("dot"))."""
+    # A matmul that Helion declines can still be a Triton native matmul.
+    if use_helion_mm(mat1, mat2):
+        return True
+
     if (
         is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
         or not config.triton.native_matmul

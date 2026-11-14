@@ -3667,6 +3667,55 @@ def is_bf16x9_matmul(device_type: str, dtype: torch.dtype) -> bool:
     )
 
 
+def use_helion_native_matmul(
+    device: torch.device | None,
+    dtype: torch.dtype,
+    size: Sequence[sympy.Expr | int],
+    k: sympy.Expr | int,
+) -> bool:
+    """Whether a Helion kernel emits a [*B, M, K] @ [*B, K, N] matmul of `size` [*B, M, N].
+
+    The lowering asks this of the operands and HelionScheduling of the native
+    matmul node, so a matmul lowered for Helion is a Helion kernel and one
+    lowered for Triton native matmul stays Triton. It takes static
+    FP16/BF16/FP32 CUDA matmuls with M, N, K > 1. The others use another
+    lowering, as HelionKernel fails on them:
+      M or N == 1: no tile_y or tile_x, KeyError: 'y' in tiled_view()
+      K == 0: AssertionError: dot not supported for zero-dimension tensors!
+      K == 1: the dot reduction over one element is a pointwise node, so
+        addmm(c, a[40, 1], b[1, 136], beta=0) has no K loop and dots 1-D tiles:
+          for tile_x in hl.tile(5440):
+              acc = hl.zeros([tile_x], dtype=torch.float32)
+              tmp0 = in0[tile_x.index // 136]
+              tmp1 = in1[(tile_x.index % 136)]
+              acc = torch.addmm(acc, tmp0, tmp1)
+        RuntimeError: a must be 2D. Most K == 1 matmuls are decomposed to a
+        multiply before lowering; baddbmm, addmm(beta=0) and
+        addmm(out_dtype=...) are not.
+      FP64: ControlFlowTensorMismatch: dtype torch.float32 != torch.float64
+      dynamic: NotImplementedError: Cannot read a Helion dot operand at r0_index + 72*yindex
+    BF16x9 has no Helion dot_precision and, as for Triton native matmul, uses
+    the regular lowering too. The Python wrapper is required: the C++ wrapper
+    would get helion_fused_mm_0(arg0_1, arg1_1, buf0); and fail to compile.
+    """
+    from .virtualized import V
+
+    sizes = [*size, k]
+    return (
+        config.helion.enabled
+        and config.helion.native_matmul
+        and config.cuda_backend == "triton"
+        and device is not None
+        and device.type == "cuda"
+        and not (V.graph.cpp_wrapper or V.graph.fx_wrapper)
+        and dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and not is_bf16x9_matmul(device.type, dtype)
+        and all(isinstance(size, (int, sympy.Integer)) for size in sizes)
+        and 0 not in sizes
+        and 1 not in (*size[-2:], k)
+    )
+
+
 def use_aten_gemm_kernels() -> bool:
     return not (
         config.max_autotune or config.max_autotune_gemm
