@@ -3761,6 +3761,33 @@ class TestCfgRegions(TestCase):
         (region,) = self.compiled_regions(compiled)
         self.assertTrue(region["where"].startswith("RegionCounting.forward"))
 
+    def test_module_with_a_hook(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        seen = []
+        with torch.no_grad():
+            for i in range(10):
+                if i == 4:
+                    # After the call was compiled: noticed on the next one.
+                    handle = model.bn.register_forward_hook(
+                        lambda module, args, output: seen.append(output.shape[0])
+                    )
+                if i == 8:
+                    handle.remove()
+                x = torch.randn(2 + i % 2, 3, 6, 6)
+                expected = model(x)
+                self.assertEqual(compiled(model, x), expected, atol=0, rtol=0)
+        # Once for eager and once for the compiled function, on every call
+        # while the hook was there.
+        self.assertEqual(seen, [2, 2, 3, 3, 2, 2, 3, 3])
+        reasons = " / ".join(
+            r["reason"]
+            for r in torch.cfg_compile.regions(compiled)
+            if r["state"] == "vm"
+        )
+        self.assertIn("a module with hooks", reasons)
+
     def test_no_grad_section_is_not_differentiated(self):
         torch.manual_seed(0)
         model, reference = RegionNet().train(), RegionNet().train()
