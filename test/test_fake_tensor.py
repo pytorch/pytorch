@@ -2563,18 +2563,21 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @fake_tensor_modes
-    @parametrize("op", ["detach", "shallow_copy_data"])
+    @parametrize("op", ["detach", "data", "shallow_copy_data"])
+    @parametrize("active", [False, True])
     @parametrize("symbolic", [False, True])
-    def test_metadata_copy(self, device, mode_cls, op, symbolic):
+    def test_metadata_copy(self, device, mode_cls, op, active, symbolic):
         mode = mode_cls(shape_env=ShapeEnv() if symbolic else None)
         source = mode.from_tensor(torch.arange(3.0, device=device))
         target = mode.from_tensor(torch.zeros(3, device=device))
+        with mode if active else contextlib.nullcontext():
+            if op == "detach":
+                result = source.detach()
+            elif op == "data":
+                result = source.data
+            else:
+                result = aten.shallow_copy_data_.default(target, source)
         with mode:
-            result = (
-                source.detach()
-                if op == "detach"
-                else aten.shallow_copy_data_.default(target, source)
-            )
             source.unsqueeze_(0)
             self.assertEqual(result.shape, (3,))
             output = result.sin()
@@ -2582,6 +2585,11 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             expected = torch.arange(3.0, device=device)
             self.assertEqual(maybe_get_real_tensor(result), expected)
             self.assertEqual(maybe_get_real_tensor(output), expected.sin())
+            self.assertTrue(
+                torch._C._is_alias_of(
+                    maybe_get_real_tensor(result), maybe_get_real_tensor(source)
+                )
+            )
 
     @onlyAccelerator
     def test_accelerator_initialized(self, device):
