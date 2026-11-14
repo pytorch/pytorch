@@ -1104,12 +1104,35 @@ DEFINE_CACHED_PYTHON_IMPORT(
     get_fake_tensor_device_mismatch_error,
     py::module::import("torch._subclasses.fake_tensor")
         .attr("FakeTensorDeviceMismatchError"))
-
+DEFINE_CACHED_PYTHON_IMPORT(
+    get_tree_map,
+    py::module::import("torch.utils._pytree").attr("tree_map"))
 DEFINE_CACHED_PYTHON_IMPORT(
     get_dynamo_config,
     py::module::import("torch._dynamo.config"))
 
 #undef DEFINE_CACHED_PYTHON_IMPORT
+
+// Match pytree tensor leaves: dictionary keys and object attributes are not
+// inputs.
+template <typename Fn>
+void for_each_tensor(const c10::IValue& value, const Fn& fn) {
+  if (value.isTensor()) {
+    fn(value.toTensor());
+  } else if (value.isList()) {
+    for (const auto& element : value.toListRef()) {
+      for_each_tensor(element, fn);
+    }
+  } else if (value.isTuple()) {
+    for (const auto& element : value.toTupleRef().elements()) {
+      for_each_tensor(element, fn);
+    }
+  } else if (value.isGenericDict()) {
+    for (const auto& entry : value.toGenericDict()) {
+      for_each_tensor(entry.value(), fn);
+    }
+  }
+}
 
 // Note [C++ fake op_impl outputs]
 // Under a C++ FakeTensorMode, Python op_implementations handlers may return raw
@@ -1119,8 +1142,7 @@ DEFINE_CACHED_PYTHON_IMPORT(
 //  - An already-fake output is kept as is, including its device.
 //  - A handler that needs a different device per output must return finalized
 //    fake tensors.
-//  - Only a returned tensor or the immediate elements of a returned tuple/list
-//    are converted, not arbitrary nested structures.
+//  - Tensor leaves in nested output containers are converted.
 // Any other tensor, e.g. a real CPU tensor, is an error.
 std::function<py::object(py::object)> make_fake_device_stamp(
     const c10::OperatorHandle& op,
@@ -1155,30 +1177,43 @@ std::function<py::object(py::object)> make_fake_device_stamp(
   };
 }
 
-// Apply `convert` to each returned tensor (tuple/list/single). Lists are
-// mutated in place (e.g. the _foreach_* ops hand back raw meta tensors to
-// stamp).
+// Apply `convert` to output leaves using Python's container semantics.
 py::object apply_output_convert(
     py::object result,
     const std::function<py::object(py::object)>& convert) {
   if (!convert) {
     return result;
   }
-  if (py::isinstance<py::tuple>(result)) {
-    py::tuple tup = result.cast<py::tuple>();
-    py::tuple converted(tup.size());
-    for (const auto i : c10::irange(tup.size())) {
-      converted[i] = convert(py::reinterpret_borrow<py::object>(tup[i]));
+  if (PyTuple_CheckExact(result.ptr())) {
+    auto tuple = result.cast<py::tuple>();
+    py::tuple converted(tuple.size());
+    for (const auto i : c10::irange(tuple.size())) {
+      converted[i] = apply_output_convert(
+          py::reinterpret_borrow<py::object>(tuple[i]), convert);
     }
     return converted;
   }
-  if (py::isinstance<py::list>(result)) {
-    py::list lst = result.cast<py::list>();
-    // NOLINTNEXTLINE(modernize-loop-convert)
-    for (const auto i : c10::irange(lst.size())) {
-      lst[i] = convert(py::reinterpret_borrow<py::object>(lst[i]));
+  if (PyList_CheckExact(result.ptr())) {
+    auto list = result.cast<py::list>();
+    py::list converted(list.size());
+    for (const auto i : c10::irange(list.size())) {
+      converted[i] = apply_output_convert(
+          py::reinterpret_borrow<py::object>(list[i]), convert);
     }
-    return result;
+    return converted;
+  }
+  if (PyDict_CheckExact(result.ptr())) {
+    py::dict converted;
+    for (auto entry : result.cast<py::dict>()) {
+      converted[entry.first] = apply_output_convert(
+          py::reinterpret_borrow<py::object>(entry.second), convert);
+    }
+    return converted;
+  }
+  if (py::isinstance<py::tuple>(result) || py::isinstance<py::list>(result) ||
+      py::isinstance<py::dict>(result)) {
+    // Preserve registered container subclasses, including named tuples.
+    return get_tree_map()(py::cpp_function(convert), result);
   }
   return convert(std::move(result));
 }
@@ -1430,21 +1465,12 @@ bool ConcretePyInterpreterVTable::fake_try_decomp(
         }
       };
       auto args = torch::jit::last(*stack, op.schema().arguments().size());
-      auto is_sparse_arg = [&](const c10::IValue& v) {
-        return v.isTensor() && v.toTensor().defined() &&
-            is_sparse(v.toTensor());
-      };
-      // isList() covers both Tensor[] and Tensor?[].
       for (const auto& arg : args) {
-        if (is_sparse_arg(arg) ||
-            (arg.isList() &&
-             std::any_of(
-                 arg.toListRef().begin(),
-                 arg.toListRef().end(),
-                 is_sparse_arg))) {
-          use_decomp = false;
-          break;
-        }
+        for_each_tensor(arg, [&](const at::Tensor& t) {
+          if (t.defined() && is_sparse(t)) {
+            use_decomp = false;
+          }
+        });
       }
     }
     if (use_decomp) {
@@ -1735,15 +1761,7 @@ bool ConcretePyInterpreterVTable::fake_try_initial_constant(
     }
   };
   for (const auto& argument : arguments) {
-    if (argument.isTensor()) {
-      check_input(argument.toTensor());
-    } else if (argument.isTensorList() || argument.isOptionalTensorList()) {
-      for (const auto& element : argument.toListRef()) {
-        if (element.isTensor()) {
-          check_input(element.toTensor());
-        }
-      }
-    }
+    for_each_tensor(argument, check_input);
   }
   const auto may_be_plain_tensor = [](const at::Tensor& t) {
     return t.defined() && !t.is_fake() &&
