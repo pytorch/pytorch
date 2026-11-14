@@ -498,7 +498,6 @@
   "test/inductor/test_warnings.py",
   "test/inductor/test_wrapper_codegen.py",
   "test/inductor/test_wrapper_preamble.py",
-  "test/inductor/test_xpu_basic.py",
   "test/lazy/test_debug_util.py",
   "test/lazy/test_functionalization.py",
   "test/lazy/test_generator.py",
