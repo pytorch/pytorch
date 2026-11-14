@@ -38,13 +38,6 @@ struct C10_API FakeTensorMode {
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
 
-  // Snapshot of _avoid_device_init() at construction. We assume backend
-  // availability stays stable for the mode's lifetime; rechecking it is not
-  // worth acquiring the GIL and crossing into Python on each relevant op.
-  // Create a new mode after changing backend availability. Python reads this
-  // same value, including when its wrapper is recreated.
-  bool avoid_device_init_ = false;
-
   // Snapshot of fake_tensor_prefer_device_type for native device resolution.
   // We assume the config stays fixed for the mode's lifetime; we have not found
   // real use cases requiring changes during that lifetime. Python op_impls
@@ -58,11 +51,6 @@ struct C10_API FakeTensorMode {
   // thread-local override used by dynamo's nonstrict_trace, takes precedence,
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
-
-  // Temporary scalar-output override, as in Python's FakeTensorMode.
-  bool allow_scalar_outputs_ = false;
-
-  bool allow_fallback_kernels_ = true;
 
   // Default used by from_tensor when its static_shapes argument is None.
   bool static_shapes_ = shape_env_ == nullptr;
@@ -99,7 +87,7 @@ struct C10_API FakeTensorMode {
   void clear_constant(c10::TensorImpl* fake_impl) noexcept;
 
   // return the real constant a fake tensor was created from, or nullptr
-  c10::intrusive_ptr<c10::TensorImpl> get_constant(
+  const c10::intrusive_ptr<c10::TensorImpl>& get_constant(
       c10::TensorImpl* fake_impl) const;
   // drop constant tracking for fake tensors aliasing this mutated storage
   void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
@@ -107,8 +95,6 @@ struct C10_API FakeTensorMode {
   void clear_non_cpu_constants();
 
  private:
-  // Constants can be invalidated by native dispatch without the GIL.
-  mutable std::mutex constant_mutex_;
   // key = constant storage, values = all fake tensors that share this storage
   // (aliases)
   struct ConstantAliases {

@@ -1,7 +1,6 @@
 #include <ATen/Context.h>
 #include <ATen/FakeTensor.h>
 #include <ATen/FakeTensorDispatchTables.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
@@ -34,11 +33,6 @@
 // wrap_meta_outputs_with_default_device_logic does.
 // Non-fake inputs are converted through the mode's converter when allowed;
 // metadata-mutating operations always require inputs owned by the mode.
-// Lifts and numbers-as-tensors calls first try Python's constant-creation path.
-// Deterministic ops on constant inputs run on their real constants, and writes
-// that cannot be evaluated invalidate constants sharing the written storage.
-// Symbolic inputs use Python's fast implementations before decomposition;
-// these implementations enter the mode only for their slow reference paths.
 // Python Meta registrations
 // that torch._meta_registrations installs as Meta kernels run here like C++
 // ones.
@@ -62,9 +56,19 @@
 // So that ops do not give results Python's FakeTensorMode would not, it raises
 // NotImplementedError where Python runs something other than these,
 // apart from the known divergences in the TODOs below:
+//  - handlers that allocate unbacked sizes;
 //  - ops run under the Python dispatcher, whose Python-dispatcher-only Meta
 //    registrations do not run here;
+//  - symbolic inputs (sizes, strides or scalars), for which Python decomposes
+//    most ops that lack a C++ Meta kernel supporting them;
 //  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors), or Any;
+//  - sparse inputs to ops without a sparse Meta kernel; unlike Meta, the sparse
+//    Meta keys have no backend fallback;
+//  - ops whose Meta kernel raises c10::NotImplementedError (as the Meta
+//    backend fallback does for an op without one), which Python then runs
+//    through maybe_run_unsafe_fallback (a Python Meta kernel's
+//    NotImplementedError is not caught here, so it propagates as is, without
+//    the message callers match below);
 //  - and the input checks below.
 // Callers that need to tell these apart from other NotImplementedErrors match
 // the message unsupported() raises.
@@ -95,11 +99,10 @@
 // native CIA kernels are not recorded in the tables. In-tree direct writers
 // (torch.export) override ops with native CIA kernels, which we always probe.
 //
-// rngprims are not in PrimMeta and use their registered fake implementations.
+// TODO: rngprims are not in PrimMeta. Philox also needs the unsupported
+// lift_fresh path to construct its offset tensor.
 
 namespace {
-
-using at::impl::may_turn_const;
 
 template <typename Fn>
 void for_each_tensor(
@@ -199,26 +202,14 @@ class UnsetFakeTensorModeGuard {
   bool fake_included_;
 };
 
-// FakeTensorMode's symbolic-dispatch predicate counts SymInt, not SymFloat
-// or SymBool, including when a SymInt was bound to a Tensor argument.
-bool has_symbolic_sizes(
-    const c10::IValue& ivalue,
-    const std::shared_ptr<c10::FakeTensorMode>& mode) {
-  if (ivalue.isSymInt()) {
+// Whether ivalue is or holds a symbolic number
+bool is_symbolic(const c10::IValue& ivalue) {
+  if (ivalue.isSymInt() || ivalue.isSymFloat() || ivalue.isSymBool()) {
     return true;
-  }
-  if (ivalue.isTensor() && ivalue.toTensor().defined()) {
-    const auto& t = ivalue.toTensor();
-    const auto* impl = t.unsafeGetTensorImpl();
-    return (t.is_fake() && impl->fake_tensor_mode() == mode &&
-            impl->has_symbolic_sizes_strides()) ||
-        (impl->is_symbolic_wrapped_number() && t.scalar_type() == at::kLong);
   }
   if (ivalue.isList()) {
     const auto elements = ivalue.toListRef();
-    return std::any_of(elements.begin(), elements.end(), [&](const auto& value) {
-      return has_symbolic_sizes(value, mode);
-    });
+    return std::any_of(elements.begin(), elements.end(), is_symbolic);
   }
   return false;
 }
@@ -252,7 +243,7 @@ bool has_nested_tensors(const c10::TypePtr& type) {
 }
 
 // Same as Python's _is_tensor_constructor in fake_impls.py
-bool _is_tensor_constructor(const c10::FunctionSchema& schema) {
+bool is_tensor_constructor(const c10::FunctionSchema& schema) {
   const auto& arguments = schema.arguments();
   return std::none_of(
              arguments.begin(),
@@ -265,9 +256,7 @@ bool _is_tensor_constructor(const c10::FunctionSchema& schema) {
 }
 
 bool has_op_impl_predicate(const c10::OperatorHandle& op) {
-  return op.hasTag(at::Tag::dynamic_output_shape) ||
-      op.hasTag(at::Tag::data_dependent_output) ||
-      _is_tensor_constructor(op.schema()) ||
+  return is_tensor_constructor(op.schema()) ||
       (op.operator_name().name.starts_with("aten::_foreach_") &&
        op.hasComputedKernelForDispatchKey(c10::DispatchKey::Meta));
 }
@@ -308,6 +297,9 @@ void fakeFallback(
   if (mode == nullptr) {
     unsupported(op, "fake tensors without a mode");
   }
+  if (mode->propagate_real_tensors_) {
+    unsupported(op, "propagate_real_tensors");
+  }
   // Python's FakeTensorMode is out of the FAKE dispatch mode slot while its
   // __torch_dispatch__ runs, apart from what it runs under `with self:`
   // (decompositions, say), so a Python Meta kernel calling active_fake_mode()
@@ -338,6 +330,12 @@ void fakeFallback(
     return;
   }
 
+  for (const auto idx : c10::irange(num_arguments)) {
+    const auto& ivalue = (*stack)[arguments_begin + idx];
+    if (is_symbolic(ivalue)) {
+      unsupported(op, "symbolic shapes");
+    }
+  }
   for (const auto* arguments : {&schema.arguments(), &schema.returns()}) {
     for (const auto& argument : *arguments) {
       if (has_nested_tensors(argument.type())) {
@@ -346,61 +344,17 @@ void fakeFallback(
     }
   }
 
+  // Lifts and scalar-only calls are handled before validation in Python;
+  // those paths are added separately.
   bool has_mode_fakes = false;
-  bool has_python_inputs = false;
-  const bool symbolic_sizes = std::any_of(
-      stack->end() - num_arguments,
-      stack->end(),
-      [&](const auto& value) { return has_symbolic_sizes(value, mode); });
   for_each_tensor(
       stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
-        if (!t.defined()) {
-          return;
-        }
-        const auto* impl = t.unsafeGetTensorImpl();
         has_mode_fakes = has_mode_fakes ||
-            (t.is_fake() && impl->fake_tensor_mode() == mode);
-        has_python_inputs = has_python_inputs ||
-            (!t.is_fake() && impl->pyobj_slot()->load_pyobj() != nullptr);
+            (t.defined() && t.is_fake() &&
+             t.unsafeGetTensorImpl()->fake_tensor_mode() == mode);
       });
-  // Python's whitelist uses the base name without namespace or overload.
-  const auto should_allow_numbers_as_tensors = [&op] {
-    std::string_view name = op.operator_name().name;
-    if (const auto end = name.rfind("::"); end != std::string_view::npos) {
-      name.remove_prefix(end + 2);
-    }
-    return at::should_allow_numbers_as_tensors(name);
-  };
-  const bool is_lift = schema.overload_name().empty() &&
-      (schema.name() == "aten::lift_fresh" ||
-       schema.name() == "aten::lift_fresh_copy");
-  const bool is_to_copy =
-      schema.name() == "aten::_to_copy" && schema.overload_name().empty();
-  const auto avoiding_device_init = [&] {
-    if (is_to_copy) {
-      const auto& device =
-          (*stack)[arguments_begin + *schema.argumentIndexWithName("device")];
-      return device.isDevice() && !device.toDevice().is_cpu() &&
-          mode->avoid_device_init_;
-    }
-    return schema.name() == "prims::device_put" &&
-        schema.overload_name().empty() &&
-        mode->avoid_device_init_;
-  };
-  const bool makes_constant = !has_mode_fakes &&
-      (is_lift ||
-       (!symbolic_sizes && should_allow_numbers_as_tensors() &&
-        !(is_to_copy &&
-          (*stack)[arguments_begin].toTensor().device().is_meta()) &&
-        !avoiding_device_init()));
-  if (has_python_inputs || makes_constant) {
-    // Validate input subclasses before any real execution. Share the GIL scope
-    // with the initial constant attempt, output checks, and lift conversion.
-    if ((*c10::impl::getGlobalPyInterpreter())
-            ->fake_try_initial_constant(
-                op, stack, mode, makes_constant, is_lift)) {
-      return;
-    }
+  if (!has_mode_fakes && !is_tensor_constructor(schema)) {
+    unsupported(op, "ops without fake tensor inputs");
   }
   replace_each_tensor(
       stack,
@@ -415,13 +369,8 @@ void fakeFallback(
           return std::nullopt;
         }
         const auto input_mode = impl->fake_tensor_mode();
-        if (t.is_fake()) {
-          if (input_mode == nullptr) {
-            unsupported(op, "fake tensors without a mode");
-          }
-          if (input_mode == mode) {
-            return std::nullopt;
-          }
+        if (t.is_fake() && (input_mode == mode || input_mode == nullptr)) {
+          return std::nullopt;
         }
         const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
         const auto raise = [&](std::string_view what) {
@@ -443,105 +392,6 @@ void fakeFallback(
             interpreter->from_real_tensor(mode, t.getIntrusivePtr()));
       });
 
-  bool all_constant = true;
-  bool any_constant = false;
-  c10::SmallVector<std::pair<const c10::TensorImpl*, at::Tensor>, 4> constants;
-  for_each_tensor(
-      stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
-        if (!t.defined() || !t.is_fake() ||
-            t.unsafeGetTensorImpl()->fake_tensor_mode() != mode) {
-          return;
-        }
-        auto constant = mode->get_constant(t.unsafeGetTensorImpl());
-        all_constant = all_constant && constant != nullptr;
-        any_constant = any_constant || constant != nullptr;
-        if (constant) {
-          constants.emplace_back(t.unsafeGetTensorImpl(), at::Tensor(std::move(constant)));
-        }
-      });
-  if (any_constant && all_constant && !symbolic_sizes &&
-      !op.hasTag(at::Tag::nondeterministic_seeded) &&
-      (!op.hasTag(at::Tag::inplace_view) ||
-       (schema.name() == "aten::detach_" && schema.overload_name().empty())) &&
-      !avoiding_device_init() &&
-      schema.name() != "aten::_nested_tensor_from_tensor_list") {
-    torch::jit::Stack outputs(stack->end() - num_arguments, stack->end());
-    replace_each_tensor(
-        &outputs,
-        0,
-        num_arguments,
-        [&](const at::Tensor& t) -> std::optional<at::Tensor> {
-          if (t.defined() && t.is_fake() &&
-              t.unsafeGetTensorImpl()->fake_tensor_mode() == mode) {
-            const auto it = std::find_if(
-                constants.begin(), constants.end(), [&](const auto& entry) {
-                  return entry.first == t.unsafeGetTensorImpl();
-                });
-            TORCH_INTERNAL_ASSERT(it != constants.end());
-            return it->second;
-          }
-          return std::nullopt;
-        });
-    {
-      c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
-          {c10::DispatchKey::Python,
-           c10::DispatchKey::PreDispatch,
-           c10::DispatchKey::Fake,
-           c10::DispatchKey::PythonTLSSnapshot}));
-      op.callBoxed(outputs);
-    }
-    bool all_outputs_constant = true;
-    for_each_tensor(&outputs, 0, outputs.size(), [&](const at::Tensor& t) {
-      if (t.defined() && !may_turn_const(t)) {
-        all_outputs_constant = false;
-      }
-    });
-    if (all_outputs_constant) {
-      replace_each_tensor(
-          &outputs,
-          0,
-          outputs.size(),
-          [&](const at::Tensor& t) -> std::optional<at::Tensor> {
-            if (!t.defined()) {
-              return std::nullopt;
-            }
-            return at::Tensor(
-                (*c10::impl::getGlobalPyInterpreter())
-                    ->from_real_tensor(
-                        mode,
-                        t.getIntrusivePtr(),
-                        c10::impl::FakeTensorConversion::Constant));
-          });
-      torch::jit::drop(*stack, num_arguments);
-      stack->insert(
-          stack->end(),
-          std::make_move_iterator(outputs.begin()),
-          std::make_move_iterator(outputs.end()));
-      return;
-    }
-    for_each_tensor(&outputs, 0, outputs.size(), [&](const at::Tensor& t) {
-      if (t.defined()) {
-        mode->invalidate_constant_aliases(t.storage().unsafeGetStorageImpl());
-      }
-    });
-  }
-  if (any_constant) {
-    (*c10::impl::getGlobalPyInterpreter())
-        ->invalidate_written_to_constants(op, *stack, mode);
-  }
-
-  auto* interpreter = c10::impl::getGlobalPyInterpreter();
-  c10::SafePyObject real(
-      mode->propagate_real_tensors_
-          ? (*interpreter)->fake_run_real_op(op, *stack, mode)
-          : nullptr,
-      interpreter);
-  const auto maybe_propagate_real_tensors = [&] {
-    if (real.ptr(interpreter)) {
-      (*interpreter)->propagate_real_tensors(op, real.ptr(interpreter), stack, mode);
-    }
-  };
-
   // Input devices in argument order, paired with whether each is a CPU scalar.
   c10::SmallVector<std::pair<c10::Device, bool>, 4> input_devices;
   // The sparse inputs' Meta keys; Meta is added before redispatch.
@@ -555,15 +405,27 @@ void fakeFallback(
         // A Python number passed for a Tensor argument, which the Meta kernel
         // takes as is, as Python's FakeTensorMode does
         if (impl->is_wrapped_number()) {
+          if (impl->is_symbolic_wrapped_number()) {
+            unsupported(op, "symbolic shapes");
+          }
           return;
         }
         // Their Meta kernels would make tensors of the wrong TensorImpl type
         if (impl->is_quantized() || impl->is_nested() || impl->is_mkldnn()) {
           unsupported(op, "quantized, nested or mkldnn inputs");
         }
+        if (impl->has_symbolic_sizes_strides()) {
+          unsupported(op, "symbolic shapes");
+        }
         const auto input_mode = impl->fake_tensor_mode();
         if (input_mode == nullptr) {
           unsupported(op, "fake tensors without a mode");
+        }
+        if (impl->real_tensor() != nullptr) {
+          unsupported(op, "propagate_real_tensors");
+        }
+        if (mode->get_constant(impl) != nullptr) {
+          unsupported(op, "constant inputs");
         }
         const auto fake_device = impl->fake_device();
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
@@ -605,7 +467,7 @@ void fakeFallback(
       schema.overload_name().empty();
   const bool allows_meta =
       schema.name() == "aten::add_" && schema.overload_name() == "Tensor";
-  const auto _find_common_device =
+  const auto find_common_device =
       [&](bool resolve) -> std::optional<c10::Device> {
     std::optional<c10::Device> common_device;
     bool common_is_cpu_zero_dim = false;
@@ -662,27 +524,13 @@ void fakeFallback(
   const auto has = [&](FakeDispatchCategory category) {
     return at::impl::fakeDispatchCategoriesHave(categories, category);
   };
-  if (symbolic_sizes &&
-      (*c10::impl::getGlobalPyInterpreter())
-          ->fake_try_fast_impl(op, stack, mode)) {
-    maybe_propagate_real_tensors();
-    return;
-  }
-  // FakeTensorMode._unbacked_special_fake_handling_ops, applied to all
-  // symbolic inputs, including backed symbols.
-  const bool unbacked_special =
-      (schema.overload_name().empty() &&
-       (schema.name() == "aten::view" || schema.name() == "aten::_unsafe_view")) ||
-      (schema.name() == "aten::slice" && schema.overload_name() == "Tensor");
   if (!has(FakeDispatchCategory::Meta) &&
-      !cpp_meta_supports_symint(op, categories) &&
-      !(symbolic_sizes && unbacked_special)) {
+      !cpp_meta_supports_symint(op, categories)) {
     const bool has_cia =
         op.hasKernelForDispatchKey(c10::DispatchKey::CompositeImplicitAutograd);
     // Probe every native CIA op too: export writes py_kernels directly,
     // bypassing the registration hook that sets the PythonCIA bit.
     const bool try_decomp =
-        (symbolic_sizes && has(FakeDispatchCategory::Decomp)) ||
         (has(FakeDispatchCategory::StaticShapeDecomp) && !has_sparse_inputs) ||
         has(FakeDispatchCategory::PythonCIA) || has_cia;
     if (try_decomp) {
@@ -690,7 +538,7 @@ void fakeFallback(
       auto decompose = [&] {
         bool has_python_cia = false;
         if (interpreter->fake_try_decomp(
-                op, stack, symbolic_sizes, &has_python_cia)) {
+                op, stack, /*has_symbolic_sizes=*/false, &has_python_cia)) {
           return true;
         }
         // OpOverload.decompose does not try native CIA after a Python CIA
@@ -703,7 +551,6 @@ void fakeFallback(
         return true;
       };
       if (interpreter->fake_run_with_mode_entered(mode, decompose)) {
-        maybe_propagate_real_tensors();
         return;
       }
     }
@@ -711,42 +558,50 @@ void fakeFallback(
   if (has(FakeDispatchCategory::PrimMeta)) {
     const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
     if (interpreter->fake_run_with_mode_entered(
-            mode, [&] { return interpreter->prim_meta_impl(op, stack); })) {
-      maybe_propagate_real_tensors();
+            mode, [&] { return interpreter->fake_try_prim_meta(op, stack); })) {
       return;
     }
   }
-  // Match library_utils.is_builtin before probing custom kernel registrations.
-  const auto op_namespace = op.operator_name().getNamespace();
-  const bool is_builtin = op_namespace &&
-      (*op_namespace == "aten" || *op_namespace == "prim" || *op_namespace == "prims");
-  if (real.ptr(interpreter) && mode->shape_env_ && !is_builtin &&
-      (*interpreter)->fake_infer_from_real_out(op, stack, mode, real.ptr(interpreter))) {
-    maybe_propagate_real_tensors();
-    return;
-  }
   if (has(FakeDispatchCategory::CustomOpImpl) &&
       (*c10::impl::getGlobalPyInterpreter())
-          ->run_fake_impl(op, stack, mode, real.ptr(interpreter))) {
-    maybe_propagate_real_tensors();
+          ->fake_try_custom_op_impl(op, stack, mode, /*real=*/nullptr)) {
     return;
+  }
+  // Integer indexing works without unbacked sizes; bool indexing calls nonzero.
+  const bool is_index_tensor =
+      schema.name() == "aten::index" && schema.overload_name() == "Tensor";
+  const bool is_static_repeat_interleave =
+      schema.name() == "aten::repeat_interleave" &&
+      schema.overload_name() == "Tensor" &&
+      (*stack)[arguments_begin + 1].isInt();
+  const bool allocates_unbacked = schema.name() == "aten::_spdiags" ||
+      schema.name() == "aten::_pack_padded_sequence" ||
+      (schema.name() == "aten::_padded_dense_to_jagged_forward" &&
+       (*stack)[arguments_begin + 2].isNone());
+  if (allocates_unbacked ||
+      (!is_index_tensor && !is_static_repeat_interleave &&
+       (op.hasTag(at::Tag::dynamic_output_shape) ||
+        op.hasTag(at::Tag::data_dependent_output)))) {
+    unsupported(op, "ops with data-dependent outputs");
   }
   // Constructors finalize their own output devices.
   const auto common_device = input_devices.empty()
       ? std::optional(c10::Device(c10::kCPU))
-      : _find_common_device(/*resolve=*/false);
+      : find_common_device(/*resolve=*/false);
   if (has(FakeDispatchCategory::OpImpl) || has_op_impl_predicate(op)) {
     if ((*c10::impl::getGlobalPyInterpreter())
             ->fake_try_op_impl(op, stack, mode, common_device)) {
-      maybe_propagate_real_tensors();
       return;
     }
   }
-  if (!op.hasComputedKernelForDispatchKey(c10::DispatchKey::Meta)) {
-    (*interpreter)->maybe_run_unsafe_fallback(
-        op, stack, mode, symbolic_sizes, nullptr);
-    maybe_propagate_real_tensors();
-    return;
+  if (input_devices.empty()) {
+    unsupported(op, "ops without fake tensor inputs");
+  }
+  if (has_sparse_inputs &&
+      !op.hasComputedKernelForDispatchKey(
+          meta_keyset.highestPriorityTypeId())) {
+    // Give a clearer error without constructing the dispatcher's kernel table.
+    unsupported(op, "sparse inputs to ops without a sparse Meta kernel");
   }
   meta_keyset = meta_keyset.add(c10::DispatchKey::Meta);
 
@@ -768,20 +623,17 @@ void fakeFallback(
     }
   }
 
-  // Boxed kernels may consume their arguments even when they throw.
-  auto arguments = torch::jit::last(*stack, num_arguments);
-  c10::SmallVector<c10::IValue, 8> saved_args(arguments.begin(), arguments.end());
   // Run the (sparse) Meta kernel with the inputs reporting the meta device (see
   // Note [C++ in_kernel_invocation]), as Python's in_kernel_invocation_manager
   // does. Match _DisableTorchDispatch so nested ops bypass dispatch modes.
-  try {
-    c10::impl::ExcludeDispatchKeyGuard exclude_dispatch(c10::DispatchKeySet(
-        {c10::DispatchKey::Fake,
-         c10::DispatchKey::Python,
-         c10::DispatchKey::PreDispatch,
-         c10::DispatchKey::PythonTLSSnapshot}));
-    c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
-    c10::impl::InKernelInvocationGuard in_kernel;
+  c10::impl::ExcludeDispatchKeyGuard exclude_dispatch(c10::DispatchKeySet(
+      {c10::DispatchKey::Fake,
+       c10::DispatchKey::Python,
+       c10::DispatchKey::PreDispatch,
+       c10::DispatchKey::PythonTLSSnapshot}));
+  c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
+  c10::impl::InKernelInvocationGuard in_kernel;
+  {
     // Uses global state; see Note [C++ fake fallback] for the concurrency limits.
     const bool suppress_invariants = has_sparse_inputs &&
         at::globalContext().checkSparseTensorInvariants().value_or(false);
@@ -793,15 +645,13 @@ void fakeFallback(
     if (suppress_invariants) {
       at::globalContext().setCheckSparseTensorInvariants(false);
     }
-    op.redispatchBoxed(meta_keyset, stack);
-  } catch (...) {
-    auto error = std::current_exception();
-    stack->resize(arguments_begin);
-    stack->insert(stack->end(), saved_args.begin(), saved_args.end());
-    (*interpreter)->maybe_run_unsafe_fallback(
-        op, stack, mode, symbolic_sizes, error);
-    // Python's NotImplementedError path returns the fallback directly.
-    return;
+    try {
+      op.redispatchBoxed(meta_keyset, stack);
+    } catch (const c10::NotImplementedError& e) {
+      // Python runs these through maybe_run_unsafe_fallback
+      unsupported(
+          op, "ops without a working Meta kernel", e.what_without_backtrace());
+    }
   }
 
   // Note [In-place conversion of Meta outputs]
@@ -850,35 +700,20 @@ void fakeFallback(
   // It does not provide Python's wrapping/memoization semantics.
   std::optional<c10::Device> output_common_device;
   std::unordered_set<const c10::TensorImpl*> converted_outputs;
-  auto wrap = [&](const at::Tensor& t, bool is_alias) -> std::optional<at::Tensor> {
+  auto wrap = [&](const at::Tensor& t, bool is_alias) {
     if (!t.defined()) {
-      return std::nullopt;
-    }
-    if (input_devices.empty()) {
-      const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
-      if (!should_allow_numbers_as_tensors()) {
-        auto name = schema.name();
-        name.replace(name.find("::"), 2, ".");
-        interpreter->raise_python_error(
-            c10::impl::FakePythonError::AssertionError,
-            c10::str(
-                "Could not find common device for ",
-                name,
-                ".",
-                schema.overload_name().empty() ? "default"
-                                               : schema.overload_name()));
-      }
-      return at::Tensor(interpreter->from_real_tensor(mode, t.getIntrusivePtr()));
+      return;
     }
     if (!output_common_device.has_value()) {
-      output_common_device = _find_common_device(/*resolve=*/true);
+      output_common_device = find_common_device(/*resolve=*/true);
     }
     auto* impl = t.unsafeGetTensorImpl();
     // The same Meta tensor can occur several times in the return values.
     if (converted_outputs.contains(impl)) {
-      return std::nullopt;
+      return;
     }
     if (t.is_fake() && impl->fake_tensor_mode() == mode) {
+      // device() reports meta inside the kernel invocation scope.
       const auto fake_device = impl->fake_device();
       TORCH_CHECK(
           fake_device == output_common_device,
@@ -889,7 +724,7 @@ void fakeFallback(
       if (output_dispatch_keys.has_value()) {
         impl->set_fake_dispatch_keys(output_dispatch_keys);
       }
-      return std::nullopt;
+      return;
     }
     TORCH_CHECK(
         !t.is_fake(),
@@ -911,18 +746,15 @@ void fakeFallback(
         device_argument != output_common_device) {
       converted_outputs.insert(impl);
     }
-    return std::nullopt;
   };
   const auto num_returns = schema.returns().size();
   const auto returns_begin = stack->size() - num_returns;
   for (const auto i : c10::irange(num_returns)) {
     const bool is_alias = schema.returns()[i].alias_info() != nullptr;
-    replace_each_tensor(
-        stack, returns_begin + i, 1, [&](const at::Tensor& t) {
-          return wrap(t, is_alias);
-        });
+    for_each_tensor(stack, returns_begin + i, 1, [&](const at::Tensor& t) {
+      wrap(t, is_alias);
+    });
   }
-  maybe_propagate_real_tensors();
 }
 
 TORCH_LIBRARY_IMPL(_, Fake, m) {
