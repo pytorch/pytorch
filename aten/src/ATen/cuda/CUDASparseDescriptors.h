@@ -211,6 +211,9 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
         sizeof(diag_type)));
   }
 #endif
+
+ private:
+  c10::MaybeOwned<Tensor> values_;
 };
 
 #if AT_USE_CUSPARSE_GENERIC_SPSV()
