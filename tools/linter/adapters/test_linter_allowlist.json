@@ -66,7 +66,6 @@
   "test/distributed/checkpoint/test_consolidate_hf_safetensors.py",
   "test/distributed/checkpoint/test_dtensor_checkpoint.py",
   "test/distributed/checkpoint/test_dtensor_resharding.py",
-  "test/distributed/checkpoint/test_file_system_checkpoint.py",
   "test/distributed/checkpoint/test_file_system_checkpoint_cpu.py",
   "test/distributed/checkpoint/test_format_utils.py",
   "test/distributed/checkpoint/test_fsdp_model_state.py",
