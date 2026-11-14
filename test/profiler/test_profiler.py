@@ -1354,6 +1354,16 @@ torch.ones(10) * 2
         with profile():
             self.assertEqual(profiler_type(), ActiveProfilerType.KINETO)
 
+    def test_stop_python_tracer_requires_kineto_profiler(self):
+        stop = torch._C._autograd._stop_python_tracer
+        with self.assertRaisesRegex(RuntimeError, "active Kineto profiler"):
+            stop()
+        with _profile_legacy():
+            with self.assertRaisesRegex(RuntimeError, "active Kineto profiler"):
+                stop()
+        with profile(activities=[ProfilerActivity.CPU], with_stack=True):
+            stop()
+
     def test_profiler_correlation_id(self):
         """
         We expect the correlation_id of CPU operator events to be unique across
