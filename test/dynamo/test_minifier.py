@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +11,11 @@ from torch._dynamo.test_minifier_common import (
     MinifierTestBase,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import set_cwd, skipIfNNModuleInlined
+from torch.testing._internal.common_utils import (
+    decorateIf,
+    set_cwd,
+    skipIfNNModuleInlined,
+)
 
 
 class MinifierTests(MinifierTestBase):
@@ -310,6 +315,10 @@ class TestAutocastDeviceDetection(torch._dynamo.test_case.TestCase):
             only_fwd=only_fwd,
         )
 
+    @decorateIf(
+        unittest.skip("device detection only meaningful for non-CPU devices"),
+        lambda params: torch.device(params["device"]).type == "cpu",
+    )
     def test_repro_minify_autocast_uses_tensor_device(self, device):
         if torch.device(device).type == "cpu":
             self.skipTest("device detection only meaningful for non-CPU devices")
@@ -338,6 +347,10 @@ class TestAutocastDeviceDetection(torch._dynamo.test_case.TestCase):
 
         mock_autocast.assert_called_once_with(torch.device(device).type, enabled=False)
 
+    @decorateIf(
+        unittest.skip("device detection only meaningful for non-CPU devices"),
+        lambda params: torch.device(params["device"]).type == "cpu",
+    )
     def test_repro_run_accuracy_branch_autocast_uses_tensor_device(self, device):
         if torch.device(device).type == "cpu":
             self.skipTest("device detection only meaningful for non-CPU devices")

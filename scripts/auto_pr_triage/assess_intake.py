@@ -450,6 +450,18 @@ def verify_description_claims(
     return sorted(supporters, key=str.casefold), actionable_issues
 
 
+def native_stack_trunk(pr_data: dict[str, Any]) -> str | None:
+    """Return the trunk of the GitHub-native stack the PR is in, or None when it is in none.
+
+    GitHub omits ``stack`` for a PR in no stack.
+    """
+
+    stack = pr_data.get("stack")
+    base = stack.get("base") if isinstance(stack, dict) else None
+    ref = base.get("ref") if isinstance(base, dict) else None
+    return ref if isinstance(ref, str) else None
+
+
 def assess_intake(
     pr: PullRequestRef,
     /,
@@ -485,9 +497,13 @@ def assess_intake(
         raise RuntimeError("pull request response is incomplete")
     if pr_number != pr.number or base_repo.casefold() != pr.repo.casefold():
         raise RuntimeError("pull request identity does not match the target")
-    # ghstack opens each PR in a stack against its own gh/<user>/<N>/base branch.
-    targets_main = base_ref == "main" or (
-        base_ref.startswith("gh/") and base_ref.endswith("/base")
+    # ghstack opens each PR in a stack against its own gh/<user>/<N>/base branch;
+    # a GitHub-native stack opens each PR above the bottom against the branch of
+    # the PR below it, and names the stack's trunk in `stack.base.ref`.
+    targets_main = (
+        base_ref == "main"
+        or (base_ref.startswith("gh/") and base_ref.endswith("/base"))
+        or native_stack_trunk(pr_data) == "main"
     )
     is_open_non_draft_pr_against_main = targets_main and state == "open" and not draft
 

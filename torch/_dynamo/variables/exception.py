@@ -19,7 +19,7 @@ from torch._guards import Source
 from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..source import AttrSource
-from ..utils import istype, tracked_repr, unpack_iterable
+from ..utils import FrameState, istype, tracked_repr, unpack_iterable
 from .base import (
     GetSet,
     getset_build,
@@ -36,7 +36,10 @@ from .object_protocol import generic_repr, generic_str
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.symbolic_convert import (
+        InliningGeneratorInstructionTranslator,
+        InstructionTranslatorBase,
+    )
 
 
 class FrameSummaryVariable(VariableTracker):
@@ -59,6 +62,51 @@ class FrameSummaryVariable(VariableTracker):
         "name": Member(getset_build(lambda s: s.frame_summary.name), readonly_setter),
         "line": Member(getset_build(lambda s: s.frame_summary.line), readonly_setter),
     }
+
+
+class FrameVariable(VariableTracker):
+    # PyFrame_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/frameobject.c#L1769
+    _cpython_type = types.FrameType
+
+    def __init__(
+        self, inline_tracer: "InliningGeneratorInstructionTranslator", **kwargs: Any
+    ) -> None:
+        super().__init__(**kwargs)
+        self.inline_tracer = inline_tracer
+
+    def python_type(self) -> type:
+        return types.FrameType
+
+    def _get_f_back(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # A generator frame is linked to its caller only while it is running,
+        # and a frame that outlives its generator can keep that link.
+        state = self.inline_tracer.frame_state
+        if state in {
+            FrameState.FRAME_CREATED,
+            FrameState.FRAME_SUSPENDED,
+            FrameState.FRAME_SUSPENDED_YIELD_FROM,
+        }:
+            return ConstantVariable.create(None)
+        unimplemented(
+            gb_type="Unsupported generator frame f_back",
+            context=f"{state}",
+            explanation="f_back is only modeled for created or suspended generators.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    tp_getset = {"f_back": GetSet(_get_f_back, readonly_setter)}
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if self.lookup_tp_getset_member(name) is None:
+            unimplemented(
+                gb_type="Unsupported generator frame attribute",
+                context=f"frame.{name}",
+                explanation=f"Dynamo does not model the frame attribute {name}.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().tp_getattro_impl(tx, name)
 
 
 class TracebackVariable(VariableTracker):

@@ -106,6 +106,11 @@ void initAOTIRunnerBindings(PyObject* module) {
           &AOTIModelContainerRunnerCuda::run,
           py::arg("inputs"),
           py::arg("stream_handle") = nullptr)
+      .def(
+          "run_with_lazy_cuda_graphs",
+          &AOTIModelContainerRunnerCuda::run_with_lazy_cuda_graphs,
+          py::arg("inputs"),
+          py::arg("stream_handle") = nullptr)
       .def("get_call_spec", &AOTIModelContainerRunnerCuda::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
