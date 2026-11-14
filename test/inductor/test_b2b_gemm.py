@@ -1,14 +1,20 @@
 # Owner(s): ["module: inductor"]
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.utils import counters
+from torch._inductor.fx_passes import b2b_gemm
+from torch._inductor.ir import FixedLayout, InputBuffer, TensorBox
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.select_algorithm import TritonTemplateCaller
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch._inductor.virtualized import V
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -367,6 +373,94 @@ class B2BGEMMTest(TestCase):
         choice = next(c for c in choices if isinstance(c, TritonTemplateCaller))
         return choice.output_node(), None
 
+    def check_tf32_policy(self, left_assoc, device_type, shape, sizevars, expected):
+        m, n, o, p = shape
+        tensors = [
+            TensorBox.create(
+                InputBuffer(
+                    name=name,
+                    layout=FixedLayout(torch.device(device_type), torch.float32, dims),
+                )
+            )
+            for name, dims in (("a", [m, n]), ("b", [n, o]), ("c", [o, p]))
+        ]
+        template = (
+            b2b_gemm.b2b_gemm_left_template
+            if left_assoc
+            else b2b_gemm.b2b_gemm_right_template
+        )
+        with (
+            V.set_graph_handler(Mock(sizevars=sizevars)),
+            patch.object(b2b_gemm, "build_subgraph_buffer", return_value=None),
+            patch.object(b2b_gemm, "_make_unoptimized_b2b_gemm_choice"),
+            patch.object(
+                b2b_gemm, "autotune_select_algorithm", return_value=(None, None)
+            ),
+            patch.object(template, "maybe_append_choice") as append,
+        ):
+            b2b_gemm.tuned_b2b_gemm(left_assoc, None, *tensors)
+        self.assertEqual(append.call_count, len(b2b_gemm.b2b_gemm_configs))
+        for call in append.call_args_list:
+            flags = call.kwargs
+            self.assertEqual(
+                (flags["ALLOW_TF32_INNER"], flags["ALLOW_TF32_OUTER"]), expected
+            )
+
+    @parametrize("left_assoc", (False, True))
+    @parametrize(
+        "device_type,cuda_tf32,xpu_tf32,shape,expected_left,expected_right",
+        (
+            ("xpu", False, True, (256, 32, 256, 32), (True, True), (True, True)),
+            ("xpu", True, False, (256, 32, 256, 32), (False, False), (False, False)),
+            ("cuda", False, True, (16, 512, 512, 512), (False, False), (False, False)),
+            ("cuda", True, False, (16, 512, 512, 32), (True, False), (False, False)),
+            ("cuda", True, False, (16, 32, 512, 512), (False, True), (True, False)),
+            ("cuda", True, False, (16, 512, 32, 512), (False, False), (False, True)),
+            ("cuda", True, False, (16, 512, 512, 512), (True, True), (True, True)),
+            ("cuda", True, False, (15, 512, 512, 512), (False, False), (True, False)),
+        ),
+    )
+    @recover_orig_fp32_precision
+    def test_b2b_gemm_tf32_policy(
+        self,
+        left_assoc,
+        device_type,
+        cuda_tf32,
+        xpu_tf32,
+        shape,
+        expected_left,
+        expected_right,
+    ):
+        torch.backends.cuda.matmul.fp32_precision = "tf32" if cuda_tf32 else "ieee"
+        expected = expected_left if left_assoc else expected_right
+        with patch(
+            "torch._dynamo.device_interface.XpuInterface.allow_tf32",
+            return_value=xpu_tf32,
+        ) as xpu_flag:
+            self.check_tf32_policy(
+                left_assoc, device_type, shape, SizeVarAllocator(), expected
+            )
+        if device_type == "xpu":
+            self.assertTrue(xpu_flag.called)
+        else:
+            xpu_flag.assert_not_called()
+
+    @parametrize("left_assoc", (False, True))
+    @recover_orig_fp32_precision
+    def test_b2b_gemm_tf32_policy_symbolic(self, left_assoc):
+        shape_env = ShapeEnv()
+        m = shape_env.create_symbol(
+            16, source=ConstantSource("dimension"), dynamic_dim=DimDynamic.DYNAMIC
+        )
+        sizevars = SizeVarAllocator(shape_env)
+        self.assertEqual(sizevars.optimization_hint(m), 16)
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        expected = (False, False) if left_assoc else (True, False)
+        self.check_tf32_policy(
+            left_assoc, "cuda", (m, 512, 512, 512), sizevars, expected
+        )
+        self.assertEqual(shape_env.guards, [])
+
     @parametrize("left_assoc", (False, True))
     @parametrize(
         "inner_dtype,outer_dtype,allow_tf32",
@@ -419,9 +513,9 @@ class B2BGEMMTest(TestCase):
         code = "\n".join(codes)
         self.assertIn(f"B2B_GEMM_{assoc.upper()}_TRITON_ENTRANCE", code)
         for role, dtype in (("INNER", inner_dtype), ("OUTER", outer_dtype)):
-            tf32 = allow_tf32 if dtype == torch.float32 else True
+            tf32 = dtype != torch.float32
             self.assertIn(f"ALLOW_TF32_{role} : tl.constexpr = {tf32}", code)
-        precise = outer_dtype == torch.float32 and not allow_tf32
+        precise = outer_dtype == torch.float32
         atol, rtol = (1e-3, 1e-5) if precise else (0.2, 0.01)
         self.assertEqual(actual, expected, atol=atol, rtol=rtol, exact_dtype=True)
 

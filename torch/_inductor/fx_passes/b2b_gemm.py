@@ -8,6 +8,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from ..._dynamo.utils import counters
+from ..heuristics.template.triton import mm_allow_tf32
 from ..ir import (
     ComputedBuffer,
     FixedLayout,
@@ -570,7 +571,12 @@ def tuned_b2b_gemm(
         subgraph,
     )
     choices: list[TritonTemplateCaller] = []
-    allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+    M, N = A.get_size()
+    O, P = C.get_size()
+    device_type = A.get_device_or_error().type
+    inner_m, inner_n, inner_k = (M, O, N) if is_left_assoc else (N, P, O)
+    allow_tf32_inner = mm_allow_tf32(inner_m, inner_n, inner_k, device_type)
+    allow_tf32_outer = mm_allow_tf32(M, P, O if is_left_assoc else N, device_type)
     for config in b2b_gemm_configs:
         if is_left_assoc:
             b2b_gemm_left_template.maybe_append_choice(
@@ -578,8 +584,8 @@ def tuned_b2b_gemm(
                 input_nodes=(A, B, C),
                 layout=layout,
                 subgraphs=[subgraph_buffer],
-                ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32,
-                ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32,
+                ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
+                ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
                 **config,
             )
         else:
@@ -588,8 +594,8 @@ def tuned_b2b_gemm(
                 input_nodes=(A, B, C),
                 layout=layout,
                 subgraphs=[subgraph_buffer],
-                ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32,
-                ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32,
+                ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
+                ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
                 **config,
             )
     # add the unoptimized choice to mitigate performance degradation
