@@ -311,6 +311,15 @@ class TestMasked(TestCase):
     def test_mask_layout(self, layout, device, dtype, op, sample_inputs):
         for sample in sample_inputs:
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            if (torch.device(device).type == "xpu" and layout == torch.sparse_csr
+                    and op.name in {"masked.sum", "masked.prod"} and t_inp._nnz() == 0
+                    and torch.masked._canonical_dim(t_kwargs["dim"], 2) == (0, 1)):
+                # https://github.com/intel/torch-xpu-ops/issues/6197, remove this block when fixed
+                with self.assertRaisesRegex(RuntimeError, "values must have dimensionality > sum of batch and block"):
+                    actual = op.op(t_inp, *t_args, **t_kwargs)
+                    torch._validate_sparse_compressed_tensor_args(
+                        actual.crow_indices(), actual.col_indices(), actual.values(), actual.shape, actual.layout)
+                continue
             actual = op.op(t_inp, *t_args, **t_kwargs)
 
             if actual.layout != layout:

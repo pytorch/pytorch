@@ -209,6 +209,17 @@ def sample_inputs_sparse_csr_masked_reduction(
                     kwargs=sample_input.kwargs,
                 )
             yield new_sample
+            if op_name in {"sum", "prod"}:
+                # zero-nnz sample
+                zeros = torch.zeros_like(sample_input.input)
+                sample_input_kwargs = new_sample.kwargs.copy()
+                if mask is not None:
+                    sample_input_kwargs.update(mask=zeros.bool().to_sparse_csr())
+                yield SampleInput(
+                    zeros.to_sparse_csr(),
+                    args=new_sample.args,
+                    kwargs=sample_input_kwargs,
+                )
             if sample_input.kwargs["dim"] == 0:
                 # Reductions of CSR tensors use different implementations for
                 # inner and/or outer dimensions. So, as a minimum of testing CSR
