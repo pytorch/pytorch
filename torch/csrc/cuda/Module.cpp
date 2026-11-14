@@ -1240,6 +1240,23 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly("pci_device_id", &cudaDeviceProp::pciDeviceID)
       .def_readonly("pci_domain_id", &cudaDeviceProp::pciDomainID)
       .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
+      // Number of XCCs (accelerator complex dies). Recent HIP reports it for
+      // the current compute partition; the ROCm 7.0 header documents it as the
+      // device's XCC count. None on CUDA builds and on ROCm before 7.0.
+      .def_property_readonly(
+          "xcc_count",
+          [](const cudaDeviceProp& prop) -> std::optional<int> {
+#if defined(USE_ROCM) && ROCM_VERSION >= 70000
+            int xcc_count = 0;
+            AT_CUDA_CHECK(hipDeviceGetAttribute(
+                &xcc_count,
+                hipDeviceAttributeNumberOfXccs,
+                devicePropertiesIndex(prop)));
+            return xcc_count;
+#else
+            return std::nullopt;
+#endif // defined(USE_ROCM) && ROCM_VERSION >= 70000
+          })
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name

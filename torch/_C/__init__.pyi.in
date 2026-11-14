@@ -2461,6 +2461,8 @@ class _CudaDeviceProperties:
     # platform-conditional.
     shared_memory_per_block_optin: _int
     regs_per_multiprocessor: _int
+    # None on CUDA and on ROCm before 7.0.
+    xcc_count: _int | None
 
 # Functions related to SDPA
 class _SDPAParams:
