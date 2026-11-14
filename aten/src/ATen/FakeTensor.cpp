@@ -1,7 +1,9 @@
 #include <ATen/FakeTensor.h>
 
 #include <ATen/Context.h>
+#include <ATen/core/Tensor.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 
 namespace at {
 namespace {
@@ -67,5 +69,22 @@ void init_cpp_fake(
     storage_impl->set_throw_on_mutable_data_ptr();
   }
 }
+
+namespace impl {
+
+Tensor fake_detach(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(!c10::impl::FakeTensorModeTLS::in_kernel_invocation());
+  return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
+      /*version_counter=*/0, /*allow_tensor_metadata_change=*/false));
+}
+
+Tensor& fake_shallow_copy_data_(Tensor& self, const Tensor& source) {
+  TORCH_INTERNAL_ASSERT(!c10::impl::FakeTensorModeTLS::in_kernel_invocation());
+  // Keep set_data's type/dtype checks and gradient accumulator reset.
+  self.set_data(source);
+  return self;
+}
+
+} // namespace impl
 
 } // namespace at
