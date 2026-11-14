@@ -96,6 +96,11 @@
 // native CIA kernels are not recorded in the tables. In-tree direct writers
 // (torch.export) override ops with native CIA kernels, which we always probe.
 //
+// Native composites observe a C++ fake's MKLDNN layout, whereas a Python
+// FakeTensor's TensorImpl is strided. For example, max_pool2d selects the
+// MKLDNN operator here and its unsafe fallback returns an MKLDNN fake;
+// Python selects the dense operator and returns a strided fake.
+//
 // rngprims are not in PrimMeta and use their registered fake implementations.
 
 namespace {
@@ -559,8 +564,8 @@ void fakeFallback(
           return;
         }
         // Their Meta kernels would make tensors of the wrong TensorImpl type
-        if (impl->is_quantized() || impl->is_nested() || impl->is_mkldnn()) {
-          unsupported(op, "quantized, nested or mkldnn inputs");
+        if (impl->is_quantized() || impl->is_nested()) {
+          unsupported(op, "quantized or nested inputs");
         }
         const auto input_mode = impl->fake_tensor_mode();
         if (input_mode == nullptr) {
