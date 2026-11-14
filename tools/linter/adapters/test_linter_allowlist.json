@@ -99,7 +99,6 @@
   "test/distributed/flight_recorder/test_loader.py",
   "test/distributed/fsdp/test_checkpoint_wrapper.py",
   "test/distributed/fsdp/test_fsdp_apply.py",
-  "test/distributed/fsdp/test_fsdp_clip_grad_norm.py",
   "test/distributed/fsdp/test_fsdp_comm.py",
   "test/distributed/fsdp/test_fsdp_comm_hooks.py",
   "test/distributed/fsdp/test_fsdp_core.py",
