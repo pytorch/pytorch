@@ -390,9 +390,25 @@ def get_intel_gpu_onboard(run_lambda):
             try:
                 obj = json.loads(txt)
                 device_list = obj.get("device_list", [])
-                if isinstance(device_list, list) and device_list:
-                    lst.extend(f'* {device["device_name"]}' for device in device_list)
-                else:
+                if isinstance(device_list, list):
+                    # xpu-smi 2.x enumerates every onboard GPU regardless of
+                    # ZE_AFFINITY_MASK, and describes the masked ones by
+                    # device_state only (e.g. "survivability mode"), with no
+                    # device_name. The [device_id] here is xpu-smi's id, which
+                    # ignores ZE_AFFINITY_MASK, so it differs from the masked
+                    # torch index [i] reported by get_intel_gpu_detected.
+                    for device in device_list:
+                        if not isinstance(device, dict):
+                            continue
+                        device_id = device.get("device_id", "N/A")
+                        name = device.get("device_name")
+                        if name:
+                            lst.append(f"* [{device_id}] {name}")
+                        elif device.get("device_state"):
+                            lst.append(f'* [{device_id}] {device["device_state"]}')
+                        else:
+                            lst.append(f"* [{device_id}] N/A")
+                if not lst:
                     lst.append("N/A")
             except (ValueError, TypeError) as e:
                 lst.append(txt)
