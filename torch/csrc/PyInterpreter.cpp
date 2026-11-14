@@ -161,6 +161,9 @@ struct ConcretePyInterpreterVTable final
 
   void reset_backward_hooks(const c10::TensorImpl* self) const override;
 
+  bool fake_run_with_mode_entered(
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
+      c10::function_ref<bool()> step) const override;
   bool fake_try_decomp(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
@@ -1195,6 +1198,31 @@ ActiveFakeMode get_active_fake_mode() {
 
 } // namespace
 
+bool ConcretePyInterpreterVTable::fake_run_with_mode_entered(
+    const std::shared_ptr<c10::FakeTensorMode>& mode,
+    c10::function_ref<bool()> step) const {
+  // Keep threading.local data alive from entry to exit on native threads too.
+  py::gil_scoped_acquire gil;
+  py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
+  py_mode.attr("__enter__")();
+  bool done = false;
+  try {
+    py::gil_scoped_release no_gil;
+    done = step();
+  } catch (py::error_already_set& e) {
+    py_mode.attr("__exit__")(e.type(), e.value(), e.trace());
+    throw;
+  } catch (...) {
+    // Native exceptions have no Python exception object; __exit__ only
+    // restores mode state.
+    py_mode.attr("__exit__")(
+        py::handle(PyExc_BaseException), py::none(), py::none());
+    throw;
+  }
+  py_mode.attr("__exit__")(py::none(), py::none(), py::none());
+  return done;
+}
+
 // Try a registered Python decomposition for op.
 //
 // This mirrors the decomposition-selection block in
@@ -1203,7 +1231,7 @@ ActiveFakeMode get_active_fake_mode() {
 // torch/_meta_registrations.py for its static shape case. This callback handles
 // the meta_table exclusion, the decomposition_table lookup with its
 // symbolic/static-shape and sparse eligibility, and the Python
-// CompositeImplicitAutograd lookup. It has no caller yet; a caller must handle
+// CompositeImplicitAutograd lookup. A caller must handle
 // the cpp_meta_supports_symint and _unbacked_special_fake_handling_ops
 // exclusions, and afterwards the native CompositeImplicitAutograd fallback.
 bool ConcretePyInterpreterVTable::fake_try_decomp(
