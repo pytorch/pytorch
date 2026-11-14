@@ -2211,6 +2211,40 @@ void scaled_gemm(
   return;
 }
 
+#ifdef USE_ROCM
+static void int8_gemm_rocblas(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    const int8_t* mat1_ptr,
+    int64_t mat1_ld,
+    const int8_t* mat2_ptr,
+    int64_t mat2_ld,
+    int32_t* result_ptr,
+    int64_t result_ld) {
+  auto handle = reinterpret_cast<rocblas_handle>(at::cuda::getCurrentCUDABlasHandle());
+  int32_t alpha = 1;
+  int32_t beta = 0;
+  TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_ex(
+      handle,
+      transpose_mat1 ? rocblas_operation_transpose : rocblas_operation_none,
+      transpose_mat2 ? rocblas_operation_transpose : rocblas_operation_none,
+      (rocblas_int)m, (rocblas_int)n, (rocblas_int)k,
+      &alpha,
+      mat1_ptr, rocblas_datatype_i8_r, (rocblas_int)mat1_ld,
+      mat2_ptr, rocblas_datatype_i8_r, (rocblas_int)mat2_ld,
+      &beta,
+      result_ptr, rocblas_datatype_i32_r, (rocblas_int)result_ld,
+      result_ptr, rocblas_datatype_i32_r, (rocblas_int)result_ld,
+      rocblas_datatype_i32_r,
+      rocblas_gemm_algo_standard,
+      0,
+      0)));
+}
+#endif
+
 void int8_gemm(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -2223,6 +2257,16 @@ void int8_gemm(
     int64_t mat2_ld,
     int32_t* result_ptr,
     int64_t result_ld) {
+
+#ifdef USE_ROCM
+  if (!at::detail::getCUDAHooks().isGPUArch(
+          at::detail::getCUDAHooks().getHipblasltSupportedArchs())) {
+    int8_gemm_rocblas(
+        transpose_mat1, transpose_mat2, m, n, k,
+        mat1_ptr, mat1_ld, mat2_ptr, mat2_ld, result_ptr, result_ld);
+    return;
+  }
+#endif
 
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32I;
   cudaDataType_t scaleType = CUDA_R_32I;
