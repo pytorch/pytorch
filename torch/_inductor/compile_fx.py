@@ -65,6 +65,7 @@ from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    check_aot_cudagraphs,
     cudagraph_trees_clone_live_user_visible_outputs,
     cudagraphs_log,
     format_default_skip_message,
@@ -757,8 +758,8 @@ def _validate_nested_region_cudagraphs(
 
     Partitioning isolates only first-level regions, so a nested region cannot
     get its own setting. region_encloses says whether a region opens a scope
-    (default: every region does); the regional_inductor backend compiles the
-    regions inside an uncompiled one on their own.
+    (default: every region does), for a caller that compiles the regions inside
+    some regions on their own.
     """
     from torch._higher_order_ops.invoke_subgraph import (
         get_backward_nested_region_config,
@@ -1189,8 +1190,9 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
-    # Read only by AOTAutograd cache lookups (cache key and post_compile): the
-    # backward's box (see CompilerConfigExtra.backward_cudagraphs).
+    # Read only when AOTAutograd post-compiles a cache hit or a precompile load,
+    # and hashed into the AOTAutograd cache key: the backward's box (see
+    # CompilerConfigExtra.backward_cudagraphs).
     backward_cudagraphs: BoxedBool | None
     cudagraphs_region_aware: bool
     cudagraphs_top_level: bool
@@ -1240,9 +1242,11 @@ def compile_fx_inner(
     """
     Compile one forward, backward or inference graph with Inductor.
 
-    A lazily compiled backward runs after compile_fx's config patches have
-    exited, so this re-establishes the per-graph config it needs:
-    config.triton.cudagraphs is set to ``cudagraphs_top_level`` when given
+    This establishes the per-graph config after the torch.compile options that
+    compile_fx re-applies around inner_compile, which may reset it, and also for
+    a lazily compiled backward that runs after compile_fx's config patches have
+    exited: config.triton.cudagraphs is set to ``cudagraphs_top_level`` when
+    given
     (nested regions apply their own overrides during lowering), and the
     cpp_wrapper Triton config is applied when ``cpp_wrapper`` is set. Whether
     the result is CUDA-graphed is decided by the ``cudagraphs`` box.
@@ -1263,9 +1267,10 @@ def compile_fx_inner(
     # compile_fx return and we may want to use the _LazyGraphModule for compiling
     # the backward graph as well.
     with contextlib.ExitStack() as stack:
-        # Keep the ambient setting at the effective top-level one; region-local
-        # overrides are applied while inspecting each region. This runs before the
-        # cpp_wrapper patch below, which must still be able to turn cudagraphs off.
+        # Keep the ambient setting at the effective top-level one (override_cudagraphs
+        # included); region-local overrides are applied while inspecting each region.
+        # This runs after the torch.compile options, which may reset it, and before
+        # the cpp_wrapper patch below, which must still be able to turn cudagraphs off.
         if (
             top_level := kwargs.get("cudagraphs_top_level")
         ) is not None and top_level != config.triton.cudagraphs:
@@ -2153,6 +2158,8 @@ class _InProcessFxCompile(FxCompile):
                                 output_strides.append(None)
 
                     _check_triton_bf16_support(graph)
+                    if graph.aot_mode and config.aot_inductor.cudagraphs:
+                        check_aot_cudagraphs(graph)
 
                     # TODO: The switching between AOT mode and not here is a bit
                     # messy, but it's localized to the block of code below so I'm
@@ -2924,7 +2931,7 @@ def fw_compiler_freezing(
 
 
 def get_wrapper_cudagraph_skip_reason() -> str | None:
-    if config.graph_partition:
+    if config.graph_partition and (config.cpp_wrapper or config.fx_wrapper):
         wrapper = "fx-wrapper" if config.fx_wrapper else "cpp-wrapper"
         return f"{wrapper} does not support graph partition yet"
     return None
@@ -3092,26 +3099,16 @@ def create_compiler_config_extra(
         else None
     )
 
-    # Although cudagraphs may have been enabled via config, various
-    # conditions (which are tested within the bowels of Inductor) may
-    # force cudagraphs to be disabled.  This mutable box lets us retrieve
-    # the final determination if cudagraphs actually can be used or not.
     top_level_cudagraphs = config.triton.cudagraphs
     cudagraphs_bwd_override: bool | None = None
 
-    # Override cudagraphs BoxedBool based on override_cudagraphs annotation.
+    # Apply the override_cudagraphs annotation to the top-level cudagraphs setting.
     # Disabling fwd disables bwd (copying activations isn't profitable),
     # so cudagraphs_bwd_override is only needed for fwd=True / bwd=False.
     if cudagraph_annotation is not None:
-        skip_reason = (
-            get_wrapper_cudagraph_skip_reason()
-            if config.cpp_wrapper or config.fx_wrapper
-            else None
-        )
+        skip_reason = get_wrapper_cudagraph_skip_reason()
         if cudagraph_annotation.fwd and skip_reason:
-            cudagraphs_log.info(
-                "ignoring override_cudagraphs annotation: %s", skip_reason
-            )
+            log.warning("ignoring override_cudagraphs annotation: %s", skip_reason)
         elif (
             cudagraph_annotation.fwd is not None
             and cudagraph_annotation.fwd != config.triton.cudagraphs
@@ -3186,6 +3183,10 @@ def create_compiler_config_extra(
     forward_cudagraphs_requested = (
         top_level_cudagraphs or _any_subgraph_enables_cudagraphs(pre_aot_graph)
     )
+    # Although cudagraphs may have been enabled via config, various
+    # conditions (which are tested within the bowels of Inductor) may
+    # force cudagraphs to be disabled.  This mutable box lets us retrieve
+    # the final determination if cudagraphs actually can be used or not.
     cudagraphs = BoxedBool(forward_cudagraphs_requested)
     backward_may_request_cudagraphs = (
         backward_top_level_cudagraphs

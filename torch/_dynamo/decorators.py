@@ -1843,6 +1843,9 @@ def override_cudagraphs(
              If None, don't override.
         bwd: If False, disable cudagraphs for backward. If True, force enable.
              If None, don't override.
+
+    With cpp_wrapper or fx_wrapper and graph_partition=True, fwd=True is ignored
+    with a warning: those wrappers can't partition a graph for CUDA Graphs.
     """
     return CudagraphOverrideContextManager(fwd=fwd, bwd=bwd)
 

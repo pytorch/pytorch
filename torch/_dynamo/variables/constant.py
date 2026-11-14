@@ -182,6 +182,10 @@ class ConstantVariable(VariableTracker):
             if value is NotImplemented:
                 return CONSTANT_VARIABLE_NOT_IMPLEMENTED
 
+        # Fast path: a plain leaf literal needs none of the collection routing.
+        if type(value) in common_constant_types:
+            return ConstantVariable(value, **kwargs)
+
         source = kwargs.get("source")
 
         # Routing for supported collection literals.
@@ -239,6 +243,9 @@ class ConstantVariable(VariableTracker):
 
     def is_python_constant(self) -> Literal[True]:
         return True
+
+    def python_type(self) -> type:
+        return type(self.value)
 
     def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         return ConstantVariable.create(repr(self.value))

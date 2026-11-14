@@ -305,7 +305,7 @@ def regional_inductor_invoke_subgraph(
 ) -> torch.fx.GraphModule:
     """
     Compile invoke_subgraph nodes if they have custom compiler specified
-    in node.meta["nested_region_config"].bw_compiler or fw_compiler
+    in node.meta["custom"]["nested_region_config"].fw_compiler or bw_compiler
     """
     from torch._inductor import config
     from torch._inductor.compile_fx import _validate_nested_region_cudagraphs
