@@ -443,7 +443,6 @@
   "test/inductor/test_minifier.py",
   "test/inductor/test_minifier_isolate.py",
   "test/inductor/test_mix_order_reduction.py",
-  "test/inductor/test_mkldnn_pattern_matcher.py",
   "test/inductor/test_mmdecomp.py",
   "test/inductor/test_module_level_kernels.py",
   "test/inductor/test_move_constructors_to_gpu.py",
