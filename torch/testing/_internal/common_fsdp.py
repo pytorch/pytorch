@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import inspect
 import os
 import re
 import sys
@@ -228,8 +229,15 @@ def get_full_params(model: nn.Module, recurse: bool = True):
         return deepcopy(list(model.parameters()))
 
 
-def _move_to_device(model: nn.Module, move_to_device: bool):
-    return model.to(DEVICE_TYPE) if move_to_device else model
+def _move_to_device(
+    model: nn.Module,
+    move_to_device: bool,
+    *,
+    device: torch.device | str | None = None,
+):
+    return (
+        model.to(DEVICE_TYPE if device is None else device) if move_to_device else model
+    )
 
 
 def _maybe_wrap_fsdp(model: nn.Module, wrap_fsdp: bool, *args, **kwargs):
@@ -266,6 +274,8 @@ class TransformerWithSharedParams(FSDPTestModel):
         device_init_mode: DEVICEInitMode,
         add_bn: bool,
         deterministic: bool,
+        *,
+        device: torch.device | str | None = None,
     ):
         super().__init__()
         self.rank = group.rank()
@@ -298,7 +308,7 @@ class TransformerWithSharedParams(FSDPTestModel):
         self.bs = 2
         self.bn = torch.nn.BatchNorm1d(self.bs) if add_bn else torch.nn.Identity()
         if device_init_mode == DEVICEInitMode.DEVICE_BEFORE:
-            self = self.to(DEVICE_TYPE)
+            self = self.to(DEVICE_TYPE if device is None else device)
         if deterministic:
             self.eval()
 
@@ -333,6 +343,8 @@ class TransformerWithSharedParams(FSDPTestModel):
         fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
         add_bn: bool = True,
+        *,
+        device: torch.device | str | None = None,
     ) -> nn.Module | FSDP:
         """
         Initializes a :class:`TransformerWithSharedParams` instance.
@@ -360,7 +372,7 @@ class TransformerWithSharedParams(FSDPTestModel):
             else:
                 pg = group
             return TransformerWithSharedParams(
-                pg, device_init_mode, add_bn, deterministic
+                pg, device_init_mode, add_bn, deterministic, device=device
             )
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
             # Default to the `ModuleWrapPolicy`
@@ -390,7 +402,7 @@ class TransformerWithSharedParams(FSDPTestModel):
                 tformer_pg = group
 
             m = TransformerWithSharedParams(
-                tformer_pg, device_init_mode, add_bn, deterministic
+                tformer_pg, device_init_mode, add_bn, deterministic, device=device
             )
             fsdp_model = FSDP(
                 m,
@@ -399,7 +411,7 @@ class TransformerWithSharedParams(FSDPTestModel):
                 **fsdp_kwargs,
             )
             if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-                fsdp_model = fsdp_model.to(DEVICE_TYPE)
+                fsdp_model = fsdp_model.to(DEVICE_TYPE if device is None else device)
             return fsdp_model
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
 
@@ -414,6 +426,8 @@ class NestedWrappedModule(FSDPTestModel):
         wrap_fsdp: bool,
         device_init_mode: DEVICEInitMode,
         deterministic: bool,
+        *,
+        device: torch.device | str | None = None,
         **fsdp_kwargs,
     ):
         super().__init__()
@@ -429,15 +443,19 @@ class NestedWrappedModule(FSDPTestModel):
         if deterministic:
             torch.manual_seed(0)
         self.module = nn.Sequential(
-            _move_to_device(nn.Linear(8, 4), move_to_device),
+            _move_to_device(nn.Linear(8, 4), move_to_device, device=device),
             _maybe_wrap(
                 nn.Sequential(
-                    _maybe_wrap(_move_to_device(nn.Linear(4, 16), move_to_device)),
-                    _move_to_device(nn.Linear(16, 16), move_to_device),
+                    _maybe_wrap(
+                        _move_to_device(nn.Linear(4, 16), move_to_device, device=device)
+                    ),
+                    _move_to_device(nn.Linear(16, 16), move_to_device, device=device),
                 ),
             ),
-            _maybe_wrap(_move_to_device(nn.Linear(16, 4), move_to_device)),
-            _move_to_device(nn.Linear(4, 8), move_to_device),
+            _maybe_wrap(
+                _move_to_device(nn.Linear(16, 4), move_to_device, device=device)
+            ),
+            _move_to_device(nn.Linear(4, 8), move_to_device, device=device),
         )
 
     def get_input(self, device):
@@ -461,6 +479,8 @@ class NestedWrappedModule(FSDPTestModel):
         device_init_mode: DEVICEInitMode,
         fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
+        *,
+        device: torch.device | str | None = None,
     ) -> nn.Module:
         """
         Initializes a :class:`NestedWrappedModule` instance.
@@ -485,6 +505,7 @@ class NestedWrappedModule(FSDPTestModel):
                 wrap_fsdp=False,
                 device_init_mode=device_init_mode,
                 deterministic=deterministic,
+                device=device,
             )
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
             # Does not wrap with top-level FSDP
@@ -493,10 +514,11 @@ class NestedWrappedModule(FSDPTestModel):
                 wrap_fsdp=True,
                 device_init_mode=device_init_mode,
                 deterministic=deterministic,
+                device=device,
                 **fsdp_kwargs,
             )
             if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-                fsdp_model = fsdp_model.to(DEVICE_TYPE)
+                fsdp_model = fsdp_model.to(DEVICE_TYPE if device is None else device)
             return fsdp_model
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
 
@@ -509,6 +531,8 @@ class AlwaysWrapNestedWrappedModule(NestedWrappedModule):
         device_init_mode: DEVICEInitMode,
         fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
+        *,
+        device: torch.device | str | None = None,
     ):
         """
         Initializes a :class:`NestedWrappedModule` instance, but unlike
@@ -524,6 +548,7 @@ class AlwaysWrapNestedWrappedModule(NestedWrappedModule):
             device_init_mode=device_init_mode,
             fsdp_kwargs=fsdp_kwargs,
             deterministic=deterministic,
+            device=device,
         )
         if fsdp_init_mode == FSDPInitMode.NO_FSDP:
             return model
@@ -531,7 +556,7 @@ class AlwaysWrapNestedWrappedModule(NestedWrappedModule):
             fsdp_kwargs = fsdp_kwargs or {}
             fsdp_model = FSDP(model, auto_wrap_policy=always_wrap_policy, **fsdp_kwargs)
             if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-                fsdp_model = fsdp_model.to(DEVICE_TYPE)
+                fsdp_model = fsdp_model.to(DEVICE_TYPE if device is None else device)
             return fsdp_model
 
 
@@ -542,6 +567,8 @@ class NonUniformReqGradNWM(NestedWrappedModule):
         wrap_fsdp: bool,
         device_init_mode: DEVICEInitMode,
         deterministic: bool,
+        *,
+        device: torch.device | str | None = None,
         **fsdp_kwargs,
     ):
         super(NestedWrappedModule, self).__init__()
@@ -563,17 +590,19 @@ class NonUniformReqGradNWM(NestedWrappedModule):
         if deterministic:
             torch.manual_seed(0)
         self.module = nn.Sequential(
-            _move_to_device(nn.Linear(8, 4), move_to_device),
+            _move_to_device(nn.Linear(8, 4), move_to_device, device=device),
             _maybe_wrap(
                 nn.Sequential(
-                    _maybe_wrap(_move_to_device(nn.Linear(4, 16), move_to_device)),
-                    _move_to_device(nn.Linear(16, 16), move_to_device),
+                    _maybe_wrap(
+                        _move_to_device(nn.Linear(4, 16), move_to_device, device=device)
+                    ),
+                    _move_to_device(nn.Linear(16, 16), move_to_device, device=device),
                 ),
             ),
             _maybe_wrap(
                 nn.Sequential(
-                    _move_to_device(nn.Linear(16, 4), move_to_device),
-                    _move_to_device(nn.Linear(4, 8), move_to_device),
+                    _move_to_device(nn.Linear(16, 4), move_to_device, device=device),
+                    _move_to_device(nn.Linear(4, 8), move_to_device, device=device),
                 ),
             ),
         )
@@ -591,6 +620,8 @@ class NonUniformReqGradNWM(NestedWrappedModule):
         device_init_mode: DEVICEInitMode,
         fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
+        *,
+        device: torch.device | str | None = None,
     ):
         """
         Initializes a :class:`NestedWrappedModule` instance, but unlike
@@ -611,6 +642,7 @@ class NonUniformReqGradNWM(NestedWrappedModule):
                 wrap_fsdp=False,
                 device_init_mode=device_init_mode,
                 deterministic=deterministic,
+                device=device,
             )
             NonUniformReqGradNWM._set_nonuniform_req_grad(ddp_model, req_grad_pattern)
             return ddp_model
@@ -622,10 +654,11 @@ class NonUniformReqGradNWM(NestedWrappedModule):
                 wrap_fsdp=True,
                 device_init_mode=device_init_mode,
                 deterministic=deterministic,
+                device=device,
                 **fsdp_kwargs,
             )
             if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-                fsdp_model = fsdp_model.to(DEVICE_TYPE)
+                fsdp_model = fsdp_model.to(DEVICE_TYPE if device is None else device)
             NonUniformReqGradNWM._set_nonuniform_req_grad(fsdp_model, req_grad_pattern)
             return fsdp_model
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
@@ -726,6 +759,8 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         deterministic: bool = False,
         delay_after_loss_ms: int = 0,
         delay_before_reduction_ms: int = 0,
+        *,
+        device: torch.device | str | None = None,
     ):
         return ModuleWithDelay.init(
             NestedWrappedModule,
@@ -734,6 +769,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
             device_init_mode=device_init_mode,
             fsdp_kwargs=fsdp_kwargs,
             deterministic=deterministic,
+            device=device,
             delay_after_loss_ms=delay_after_loss_ms,
             delay_before_reduction_ms=delay_before_reduction_ms,
         )
@@ -761,6 +797,8 @@ class MixtureOfExperts(NestedWrappedModule):
         device_init_mode: DEVICEInitMode,
         delay_before_free_ms: int,
         deterministic: bool,
+        *,
+        device: torch.device | str | None = None,
         **fsdp_kwargs,
     ):
         super().__init__(
@@ -768,6 +806,14 @@ class MixtureOfExperts(NestedWrappedModule):
             wrap_fsdp=wrap_fsdp,
             device_init_mode=device_init_mode,
             deterministic=deterministic,
+            device=device,
+            **(
+                {"device_id": fsdp_kwargs["device_id"]}
+                if device is not None
+                and torch.device(device).type == "cpu"
+                and "device_id" in fsdp_kwargs
+                else {}
+            ),
         )
         self.group = group
         self.delay_before_free_ms = delay_before_free_ms
@@ -779,7 +825,9 @@ class MixtureOfExperts(NestedWrappedModule):
         d_expert = 23
         d_shared = 12
         d_input = 8
-        expert = _move_to_device(nn.Linear(d_expert, d_shared), self.move_to_device)
+        expert = _move_to_device(
+            nn.Linear(d_expert, d_shared), self.move_to_device, device=device
+        )
 
         self.num_expert_params = sum(p.numel() for p in expert.parameters())
         for p in expert.parameters():
@@ -789,7 +837,9 @@ class MixtureOfExperts(NestedWrappedModule):
             # Keep all other parameters the same across ranks
             torch.manual_seed(0)
 
-        shared = _move_to_device(nn.Linear(d_shared, d_expert), self.move_to_device)
+        shared = _move_to_device(
+            nn.Linear(d_shared, d_expert), self.move_to_device, device=device
+        )
 
         if wrap_fsdp:
             # we create a process group of size 1 for the expert params
@@ -801,10 +851,14 @@ class MixtureOfExperts(NestedWrappedModule):
             shared = FSDP(shared, group, **fsdp_kwargs)  # type: ignore[assignment]
 
         self.module = nn.Sequential(
-            _move_to_device(nn.Linear(d_input, d_shared), self.move_to_device),
+            _move_to_device(
+                nn.Linear(d_input, d_shared), self.move_to_device, device=device
+            ),
             shared,
             expert,
-            _move_to_device(nn.Linear(d_shared, d_input), self.move_to_device),
+            _move_to_device(
+                nn.Linear(d_shared, d_input), self.move_to_device, device=device
+            ),
         )
 
     def forward(self, x):
@@ -855,6 +909,8 @@ class MixtureOfExperts(NestedWrappedModule):
         fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
         delay_before_free_ms: int = 0,
+        *,
+        device: torch.device | str | None = None,
     ):
         """
         Initializes a :class:`MixtureOfExperts` instance.
@@ -882,6 +938,7 @@ class MixtureOfExperts(NestedWrappedModule):
                 device_init_mode=device_init_mode,
                 delay_before_free_ms=delay_before_free_ms,
                 deterministic=deterministic,
+                device=device,
             )
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
             # Does not wrap with top-level FSDP
@@ -891,10 +948,11 @@ class MixtureOfExperts(NestedWrappedModule):
                 device_init_mode=device_init_mode,
                 delay_before_free_ms=delay_before_free_ms,
                 deterministic=deterministic,
+                device=device,
                 **fsdp_kwargs,
             )
             if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-                fsdp_model = fsdp_model.to(DEVICE_TYPE)
+                fsdp_model = fsdp_model.to(DEVICE_TYPE if device is None else device)
             return fsdp_model
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
 
@@ -1220,62 +1278,15 @@ class FSDPTestMixin:
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
 
-    @classmethod
-    def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
-        self = cls(test_name)
-        self.rank = rank
-        self.file_name = file_name
-        fake_pg = kwargs.get("fake_pg", False)
+    def backend(self, device) -> str:
+        return get_default_backend_for_device(device)
 
-        print(f"dist init r={self.rank}, world={self.world_size}")
-        if DEVICE_TYPE != "cpu" and torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
-
-        # Specify gloo backend to make 'init_process_group()' succeed,
-        # Actual tests will be skipped if there are not enough GPUs.
-        try:
-            if fake_pg:
-                from torch.testing._internal.distributed.fake_pg import FakeStore
-
-                store = FakeStore()
-                dist.init_process_group(
-                    backend="fake",
-                    world_size=self.world_size,
-                    rank=rank,
-                    store=store,
-                )
-            else:
-                dist.init_process_group(
-                    init_method=self.init_method,
-                    backend=DISTRIBUTED_BACKEND,
-                    world_size=int(self.world_size),
-                    rank=self.rank,
-                )
-        except RuntimeError as e:
-            if "recompile" in e.args[0]:
-                sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
-
-            raise
-
-        device_ids = None
-        device_id = self.rank % DEVICE_COUNT
-        if torch.accelerator.is_available():
-            torch.accelerator.set_device_index(device_id)
-        device_ids = [device_id]
-
-        # Execute barrier prior to running test to ensure that every process
-        # has finished initialization and that the following test
-        # immediately exiting due to a skip doesn't cause flakiness.
-        dist.barrier(device_ids=device_ids)
-
-        torch._dynamo.reset()
-        set_rng_seed()
-        self.run_test(test_name, pipe)
-        torch._dynamo.reset()
-
-        dist.barrier(device_ids=device_ids)
-
-        dist.destroy_process_group()
+    @property
+    def _device_type(self) -> str:
+        device_type = getattr(self, "device_type", None)
+        if callable(device_type):
+            device_type = device_type()
+        return torch.device(DEVICE_TYPE if device_type is None else device_type).type
 
     def _train_for_several_steps(
         self,
@@ -1293,8 +1304,14 @@ class FSDPTestMixin:
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
         model_device = next(model.parameters()).device
-        if sharded_grad_scaler_kwargs is None:
-            sharded_grad_scaler_kwargs = {}
+        sharded_grad_scaler_kwargs = dict(sharded_grad_scaler_kwargs or {})
+        scaler_device = sharded_grad_scaler_kwargs.get("device")
+        if scaler_device is None:
+            sharded_grad_scaler_kwargs["device"] = self._device_type
+        elif torch.device(scaler_device).type != self._device_type:
+            raise ValueError(
+                f"Grad scaler device {scaler_device} conflicts with test device {self._device_type}"
+            )
         sharded_grad_scaler = ShardedGradScaler(
             enabled=enable_sharded_grad_scaler, **sharded_grad_scaler_kwargs
         )
@@ -1303,9 +1320,9 @@ class FSDPTestMixin:
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
         for _ in range(num_steps):
             optim.zero_grad()
-            with torch.amp.autocast(DEVICE_TYPE, enabled=autocast):
-                # Inputs always cuda regardless of cpu offloading, or model.device
-                input = model.module.get_input(torch.device(DEVICE_TYPE))  # type: ignore[operator, union-attr]
+            with torch.amp.autocast(self._device_type, enabled=autocast):
+                # CPU offloading changes parameter storage, not the compute device.
+                input = model.module.get_input(torch.device(self._device_type))  # type: ignore[operator, union-attr]
                 if use_pure_fp16 or (mixed_precision and not isinstance(model, FSDP)):
                     if isinstance(input, torch.Tensor):
                         input = input.half()
@@ -1404,11 +1421,49 @@ class FSDPTestMixin:
         """
         if fsdp_init_mode == FSDPInitMode.NO_FSDP:
             raise AssertionError("Expects an FSDP init mode that wraps with FSDP")
-        if init_kwargs is None:
-            init_kwargs = {}
+        init_kwargs = dict(init_kwargs or {})
+        compute_device = torch.device(self._device_type)
+        if self._device_type != "cpu":
+            compute_device = torch.device(
+                self._device_type,
+                torch.get_device_module(self._device_type).current_device(),
+            )
+        for name, value in (
+            ("init_kwargs['device']", init_kwargs.get("device")),
+            ("device_id", fsdp_kwargs.get("device_id")),
+        ):
+            if value is None:
+                continue
+            if isinstance(value, int) and self._device_type == "cpu":
+                raise ValueError(f"{name}={value} conflicts with CPU test device")
+            requested_device = torch.device(value)
+            if requested_device.type != compute_device.type or (
+                requested_device.index is not None
+                and requested_device.index != compute_device.index
+            ):
+                raise ValueError(
+                    f"{name}={value} conflicts with test device {compute_device}"
+                )
+        try:
+            parameters = inspect.signature(model_class.init).parameters
+            device_parameter = parameters.get("device")
+        except (TypeError, ValueError):
+            device_parameter = None
+        if device_parameter is not None and device_parameter.kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        ):
+            if init_kwargs.get("device") is None:
+                init_kwargs["device"] = compute_device
+        # CPU parameters alone do not stop FSDP selecting the host accelerator.
+        # Do not add accelerator device_id defaults: they change init timing.
+        if self._device_type == "cpu" and fsdp_kwargs.get("device_id") is None:
+            fsdp_kwargs["device_id"] = torch.device("cpu")
         offload_params = cpu_offload is not None and cpu_offload.offload_params
         expects_device_error = (
-            offload_params and device_init_mode == DEVICEInitMode.DEVICE_AFTER
+            offload_params
+            and device_init_mode == DEVICEInitMode.DEVICE_AFTER
+            and self._device_type != "cpu"
         )
         lr = 1e-2
         rank = self.process_group.rank()
@@ -1425,12 +1480,12 @@ class FSDPTestMixin:
             **ref_init_kwargs,
         )
         if ref_init_fn is None:
-            if TEST_HPU:
+            if self._device_type == "hpu":
                 # _get_device_index cannot resolve bare "hpu" to an index;
                 # re-add ":0" for backward compatibility.
-                hpu = f"{DEVICE_TYPE}:0"
+                hpu = f"{self._device_type}:0"
                 ref_model = DDP(model, device_ids=[hpu], output_device=hpu)
-            elif DEVICE_TYPE == "cpu":
+            elif self._device_type == "cpu":
                 ref_model = DDP(model)
             else:
                 ref_model = DDP(model, device_ids=[rank], output_device=rank)
@@ -1482,7 +1537,7 @@ class FSDPTestMixin:
             # Change the model parameter dtype after FSDP initialization
             fsdp_model = fsdp_model.half()
         if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-            fsdp_model = fsdp_model.to(DEVICE_TYPE)
+            fsdp_model = fsdp_model.to(self._device_type)
         # Offloading parameters with `DEVICE_AFTER` should raise an error during
         # lazy initialization due to the parameter devices not being CPU;
         # otherwise, all parameter devices should be CPU
@@ -1497,7 +1552,7 @@ class FSDPTestMixin:
             self.assertRaisesRegex(
                 RuntimeError,
                 "An FSDP-managed module with parameter CPU offloading enabled "
-                f"has parameters on {DEVICE_TYPE}",
+                f"has parameters on {self._device_type}",
             )
             if expects_device_error
             else nullcontext()
@@ -1524,7 +1579,7 @@ class FSDPTestMixin:
             cpu_device = torch.device("cpu")
             for param in fsdp_model.parameters():
                 self.assertEqual(param.device, cpu_device)
-            fsdp_loss = fsdp_loss.to(DEVICE_TYPE)
+            fsdp_loss = fsdp_loss.to(self._device_type)
         fsdp_unsharded_params = get_full_params(fsdp_model)
         # Do not check dtype since the reference DDP loss may not be the same
         # dtype as the FSDP loss in the case of mixed precision
@@ -1556,7 +1611,9 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
     @property
     def world_size(self):
-        return DEVICE_COUNT
+        if self._device_type == "cpu":
+            return 1
+        return torch.get_device_module(self._device_type).device_count()
 
     @property
     def process_group(self):
@@ -1577,10 +1634,18 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
         self.rank = rank
         self.file_name = file_name
         fake_pg = kwargs.get("fake_pg", False)
+        device_ids = None
 
         print(f"dist init r={self.rank}, world={self.world_size}")
-        if torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+        if self._device_type != "cpu":
+            device_module = torch.get_device_module(self._device_type)
+            device_count = device_module.device_count()
+            if device_count < self.world_size:
+                sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+            device_id = self.rank % device_count
+            device_module.set_device(device_id)
+            if not fake_pg:
+                device_ids = [device_id]
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there are not enough GPUs.
@@ -1598,7 +1663,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
             else:
                 dist.init_process_group(
                     init_method=self.init_method,
-                    backend=DISTRIBUTED_BACKEND,
+                    backend=self.backend(self._device_type),
                     world_size=int(self.world_size),
                     rank=self.rank,
                 )
@@ -1608,24 +1673,21 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
             raise
 
-        device_ids = None
-        device_id = self.rank % DEVICE_COUNT
-        if torch.accelerator.is_available():
-            torch.accelerator.set_device_index(device_id)
-        device_ids = [device_id]
-
         # Execute barrier prior to running test to ensure that every process
         # has finished initialization and that the following test
         # immediately exiting due to a skip doesn't cause flakiness.
-        dist.barrier(device_ids=device_ids)
-
+        if device_ids is None:
+            dist.barrier()
+        else:
+            dist.barrier(device_ids=device_ids)
         torch._dynamo.reset()
         set_rng_seed()
         self.run_test(test_name, pipe)
         torch._dynamo.reset()
-
-        dist.barrier(device_ids=device_ids)
-
+        if device_ids is None:
+            dist.barrier()
+        else:
+            dist.barrier(device_ids=device_ids)
         dist.destroy_process_group()
 
 
