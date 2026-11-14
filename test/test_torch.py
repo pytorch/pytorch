@@ -3379,9 +3379,10 @@ class TestTorchDeviceType(TestCase):
     @onlyCUDA
     @dtypes(torch.uint8, torch.int16, torch.half)
     def test_cumsum_cumprod_last_dim_unaligned(self, device, dtype):
-        # Long rows with an odd length that start one element into their storage. On ROCm these
-        # are split into chunks and read without vector accesses.
-        for shape in ((2_000_003,), (3, 100_003)):
+        # Rows with an odd length that start one element into their storage, so that rows start at
+        # every offset within a dword. On ROCm the 1- and 2-byte elements are read and written as
+        # the whole dwords that cover them; long rows are also split into chunks.
+        for shape in ((2_000_003,), (3, 100_003), (64, 257), (1000, 31), (1000, 33)):
             if dtype.is_floating_point:
                 op = torch.cumprod
                 x = torch.tensor([-1, 1], dtype=dtype)[torch.randint(2, shape)]

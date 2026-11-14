@@ -491,6 +491,114 @@ __device__ __forceinline__ T warp_inclusive_scan(T v, int lane, int width, Binar
   return v;
 }
 
+// A thread's ITEMS 1- or 2-byte elements are a whole number of 16-byte vectors, but a row of them
+// can start anywhere within a dword. Unless the rows allow 16-byte accesses (vec_ok), they are
+// accessed as the whole dwords that cover them, at dword-aligned addresses, and shifted into
+// place, so each thread holds the same elements at any alignment and the results don't change.
+// The dwords at either end are shared with the neighbouring elements (or bytes just outside the
+// tensor, in the same dword as one of its elements): they are read but only written element by
+// element.
+template <typename T, int ITEMS>
+constexpr bool kDwordAccess = sizeof(T) < 4 && ITEMS * sizeof(T) % 16 == 0;
+
+__device__ __forceinline__ uint32_t funnel_shift(uint32_t hi, uint32_t lo, uint32_t bytes) {
+  return static_cast<uint32_t>(((static_cast<uint64_t>(hi) << 32) | lo) >> (8 * bytes));
+}
+
+// Elements are moved to and from dwords one at a time: a memcpy of the whole array makes the
+// compiler place Half / BFloat16 arrays in LDS instead of registers.
+template <typename T>
+using ElemBits = std::conditional_t<sizeof(T) == 1, uint8_t, uint16_t>;
+
+template <typename T>
+__device__ __forceinline__ T elem_from_dwords(const uint32_t* r, int j) {
+  constexpr int kPerDword = 4 / sizeof(T);
+  return __builtin_bit_cast(T, static_cast<ElemBits<T>>(r[j / kPerDword] >> (8 * sizeof(T) * (j % kPerDword))));
+}
+
+template <typename T>
+__device__ __forceinline__ uint32_t elem_to_dword_bits(T v, int j) {
+  constexpr int kPerDword = 4 / sizeof(T);
+  return static_cast<uint32_t>(__builtin_bit_cast(ElemBits<T>, v)) << (8 * sizeof(T) * (j % kPerDword));
+}
+
+// Loads the first n (1 <= n <= ITEMS) of the ITEMS elements at p; the rest are fill.
+template <int ITEMS, typename T>
+__device__ __forceinline__ void load_dwords(T (&x)[ITEMS], const T* p, uint32_t n, T fill) {
+  constexpr int W = ITEMS * sizeof(T) / 4;
+  const uint32_t m = reinterpret_cast<uintptr_t>(p) % 4;
+  const uint32_t* q = reinterpret_cast<const uint32_t*>(reinterpret_cast<const char*>(p) - m);
+  uint32_t w[W + 1];
+  if (n == ITEMS) {
+#pragma unroll
+    for (int i = 0; i < W / 4; ++i) {
+      const auto t = *reinterpret_cast<const GVec<uint32_t, 4>*>(q + 4 * i);
+#pragma unroll
+      for (int k = 0; k < 4; ++k) {
+        w[4 * i + k] = t.v[k];
+      }
+    }
+    w[W] = m != 0 ? q[W] : 0;
+  } else {
+    const uint32_t bytes = n * sizeof(T) + m;
+#pragma unroll
+    for (int i = 0; i <= W; ++i) {
+      w[i] = 4 * i < bytes ? q[i] : 0;
+    }
+  }
+  uint32_t r[W];
+#pragma unroll
+  for (int i = 0; i < W; ++i) {
+    r[i] = funnel_shift(w[i + 1], w[i], m);
+  }
+#pragma unroll
+  for (int j = 0; j < ITEMS; ++j) {
+    x[j] = j < n ? elem_from_dwords<T>(r, j) : fill;
+  }
+}
+
+template <int ITEMS, typename T>
+__device__ __forceinline__ void store_dwords(const T (&x)[ITEMS], T* p) {
+  constexpr int W = ITEMS * sizeof(T) / 4;
+  constexpr int kPerDword = 4 / sizeof(T);
+  uint32_t r[W] = {};
+#pragma unroll
+  for (int j = 0; j < ITEMS; ++j) {
+    r[j / kPerDword] |= elem_to_dword_bits(x[j], j);
+  }
+  const uint32_t m = reinterpret_cast<uintptr_t>(p) % 4;
+  if (m == 0) {
+#pragma unroll
+    for (int i = 0; i < W / 4; ++i) {
+      *reinterpret_cast<GVec<uint32_t, 4>*>(reinterpret_cast<uint32_t*>(p) + 4 * i) =
+          GVec<uint32_t, 4>{{r[4 * i], r[4 * i + 1], r[4 * i + 2], r[4 * i + 3]}};
+    }
+    return;
+  }
+  uint32_t* q = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(p) - m);
+  uint32_t w[W];
+#pragma unroll
+  for (int i = 1; i < W; ++i) {
+    w[i] = funnel_shift(r[i], r[i - 1], 4 - m);
+  }
+  *reinterpret_cast<GVec<uint32_t, 3>*>(q + 1) = GVec<uint32_t, 3>{{w[1], w[2], w[3]}};
+#pragma unroll
+  for (int i = 1; i < W / 4; ++i) {
+    *reinterpret_cast<GVec<uint32_t, 4>*>(q + 4 * i) =
+        GVec<uint32_t, 4>{{w[4 * i], w[4 * i + 1], w[4 * i + 2], w[4 * i + 3]}};
+  }
+  const uint32_t lead = (4 - m) / sizeof(T);
+#pragma unroll
+  for (int j = 0; j < kPerDword - 1; ++j) {
+    if (j < lead) {
+      p[j] = x[j];
+    }
+    if (j < kPerDword - lead) {
+      p[ITEMS - 1 - j] = x[ITEMS - 1 - j];
+    }
+  }
+}
+
 template <int ITEMS, int VEC, typename T>
 __device__ __forceinline__ void load_items(T (&x)[ITEMS], const T* p, uint64_t col, uint64_t end,
                                            bool valid, bool vec_ok, T fill) {
@@ -503,11 +611,17 @@ __device__ __forceinline__ void load_items(T (&x)[ITEMS], const T* p, uint64_t c
         x[i * VEC + j] = t.v[j];
       }
     }
-  } else {
-#pragma unroll
-    for (int j = 0; j < ITEMS; ++j) {
-      x[j] = (valid && col + j < end) ? p[col + j] : fill;
+    return;
+  }
+  if constexpr (kDwordAccess<T, ITEMS>) {
+    if (valid && col < end) {
+      load_dwords(x, p + col, static_cast<uint32_t>(end - col < ITEMS ? end - col : ITEMS), fill);
+      return;
     }
+  }
+#pragma unroll
+  for (int j = 0; j < ITEMS; ++j) {
+    x[j] = (valid && col + j < end) ? p[col + j] : fill;
   }
 }
 
@@ -527,12 +641,18 @@ __device__ __forceinline__ void store_items(const T (&x)[ITEMS], T* p, uint64_t 
       }
       *reinterpret_cast<GVec<T, VEC>*>(p + col + i * VEC) = t;
     }
-  } else {
+    return;
+  }
+  if constexpr (kDwordAccess<T, ITEMS>) {
+    if (col + ITEMS <= end) {
+      store_dwords(x, p + col);
+      return;
+    }
+  }
 #pragma unroll
-    for (int j = 0; j < ITEMS; ++j) {
-      if (col + j < end) {
-        p[col + j] = x[j];
-      }
+  for (int j = 0; j < ITEMS; ++j) {
+    if (col + j < end) {
+      p[col + j] = x[j];
     }
   }
 }
@@ -698,7 +818,7 @@ __device__ __forceinline__ T reduce_span(const T* __restrict__ p, uint64_t begin
     for (int u = 0; u < kReduceUnroll; ++u) {
       const uint64_t tile_base = base + u * tile < end ? base + u * tile : base;
       const T* q = p + tile_base + static_cast<uint64_t>(lane) * ITEMS;
-      // Both paths give each lane the same elements, so the result doesn't depend on alignment.
+      // Every path gives each lane the same elements, so the result doesn't depend on alignment.
       if constexpr (kVectorized) {
 #pragma unroll
         for (int i = 0; i < ITEMS / VEC; ++i) {
@@ -708,6 +828,8 @@ __device__ __forceinline__ T reduce_span(const T* __restrict__ p, uint64_t begin
             x[u][i * VEC + k] = g.v[k];
           }
         }
+      } else if constexpr (kDwordAccess<T, ITEMS>) {
+        load_dwords(x[u], q, ITEMS, init);
       } else {
 #pragma unroll
         for (int k = 0; k < ITEMS; ++k) {
@@ -839,7 +961,8 @@ template <int kItems, int kVec, int kRun, typename T, class BinaryFunction>
 void launch_with(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T init, BinaryFunction binary_op) {
   constexpr uintptr_t kAlign = kGlobalAlign<T>;
   // Vector accesses start at a row start plus a multiple of kItems, so only row starts need
-  // kAlign; partial vectors at the end of a row use scalar accesses.
+  // kAlign; partial vectors at the end of a row use scalar accesses (1- and 2-byte elements use
+  // dword accesses instead; see kDwordAccess).
   const bool vec_ok = static_cast<uintptr_t>(row_size) * sizeof(T) % kAlign == 0 &&
       reinterpret_cast<uintptr_t>(src) % kAlign == 0 &&
       reinterpret_cast<uintptr_t>(tgt) % kAlign == 0;
