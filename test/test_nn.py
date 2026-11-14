@@ -12000,6 +12000,263 @@ class TestNNDeviceType(NNTestCase):
                 self.assertTrue(bool(d_input.isfinite().all()))
                 self.assertEqual(d_input, reference[0])
 
+    @onlyCUDA
+    @largeTensorTest(lambda self, device, mode, input_requires_grad:
+                     (20 if input_requires_grad else 10) * 1024**3, device="cuda")
+    # Nearest grid-gradient-only calls are left out: their grid gradient is
+    # zero and the kernel reads no input, so no large offset is exercised.
+    @parametrize_test("mode,input_requires_grad",
+                      [(0, False), (0, True), (1, True), (2, False), (2, True)])
+    def test_grid_sample_2d_large_spatial_offset(self, device, mode, input_requires_grad):
+        # The last row of this channels-last input starts at 2**31 elements, so
+        # the 2D kernels index in 64 bits and the spatial offsets of bicubic
+        # forward reads, input-gradient scatters and bicubic grid-gradient reads
+        # must not be computed in 32 bits. The bilinear grid-gradient-only case
+        # reads the input directly in the kernel's index type and is a control.
+        # The 8 GiB input is held once without grad_input and twice with it.
+        height, width = 32769, 65536
+        inp = torch.empty((1, 1, height, width), device=device, dtype=torch.float32,
+                          memory_format=torch.channels_last).zero_()
+        self.assertEqual((height - 1) * inp.stride(2), 2**31)
+        reference = torch.zeros(1, 1, 5, 5, dtype=torch.float32)
+        reference[0, :, 0, 0] = torch.tensor([1.])
+        reference[0, :, -1, 0] = torch.tensor([3.])
+        # Make the far-row bicubic grid gradient nonzero, so dropped or
+        # incorrectly addressed input reads cannot accidentally pass.
+        reference[0, :, -1, 1] = torch.tensor([5.])
+        inp[0, :, 0, 0] = reference[0, :, 0, 0].to(device)
+        inp[0, :, -1, 0] = reference[0, :, -1, 0].to(device)
+        inp[0, :, -1, 1] = reference[0, :, -1, 1].to(device)
+        grad_output = torch.tensor([[[[1., 2.]]]], dtype=torch.float32)
+        grid = torch.tensor([[[[-1., -1.], [-1., 1.]]]], dtype=torch.float32)
+        if mode == 2 and not input_requires_grad:
+            # Bicubic forward reads the far row through the same helper.
+            expected_out = torch.grid_sampler_2d(reference, grid, mode, 0, True)
+            self.assertNotEqual(expected_out[0, 0, 0, 1].item(), 0)
+            actual_out = torch.grid_sampler_2d(inp, grid.to(device), mode, 0, True)
+            self.assertEqual(actual_out.cpu(), expected_out)
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        tail = (mode, 0, True, [input_requires_grad, True])
+        expected = bw(grad_output, reference, grid, *tail)
+        if mode == 2:
+            self.assertNotEqual(expected[1][0, 0, 1, 0].item(), 0)
+        actual = bw(grad_output.to(device), inp, grid.to(device), *tail)
+        if input_requires_grad:
+            self.assertEqual(actual[0][0, :, 0, 0].cpu(), expected[0][0, :, 0, 0])
+            self.assertEqual(actual[0][0, :, -1, 0].cpu(), expected[0][0, :, -1, 0])
+            self.assertEqual(actual[0].sum().cpu(), expected[0].sum())
+        else:
+            self.assertIsNone(actual[0])
+        expected[1][..., 0] *= (width - 1) / 4
+        expected[1][..., 1] *= (height - 1) / 4
+        self.assertEqual(actual[1].cpu(), expected[1])
+
+    @staticmethod
+    def _rocm_low_precision_grid_grad_cases(dtype):
+        # (description, grad_output, input, grid, mode, padding_mode,
+        # align_corners, expected grad_grid) on CPU, in dtype and layout.
+        zero = torch.zeros(1, 1, 1, 2)
+        stall = torch.tensor([[0., 1.], [0., 1.]]).expand(1, 2048, 2, 2)
+        ones = torch.ones(1, 2048, 1, 1)
+        # (input, grad_output, memory format, grid, mode, padding_mode, align_corners, expected)
+        cases = [
+            (stall, ones, torch.contiguous_format, zero, 0, 0, False, [2048., 0.]),
+            # Bicubic: 1.55859375 per channel, 3192 in total (3200 after BF16 rounding).
+            (stall, ones, torch.contiguous_format, zero, 2, 0, False,
+             [3192., 0.] if dtype == torch.half else [3200., 0.]),
+        ]
+        # Two-channel cases.
+        pairs = [
+            (torch.tensor([[-60000., 60000.], [-60000., 60000.]]).expand(1, 2, 2, 2),
+             torch.tensor([1., -1.]).reshape(1, 2, 1, 1), zero, 0, 0, False, [0., 0.]),
+        ]
+        # Channel sums that are finite in opmath but overflow the dtype, while
+        # the scaled result is representable: -2v or 2v per pair of channels.
+        if dtype == torch.half:
+            v, g = 60000., torch.tensor([1., 1.])
+        else:
+            v, g = 2.0 ** 127, torch.tensor([1., 255. / 256.])
+        g = g.reshape(1, 2, 1, 1)
+        flat = torch.full((1, 2, 2, 2), v)
+        for padding_mode in (1, 2):  # border, reflection: a clipped coordinate has zero gradient
+            pairs += [
+                (flat, g, torch.tensor([[[[1.5, 0.]]]]), 0, padding_mode, False, [0., 0.]),
+                (flat, g, torch.tensor([[[[0., 1.5]]]]), 0, padding_mode, False, [0., 0.]),
+            ]
+        # At the centre with align_corners=True, the coordinate multiplier is 0.5.
+        pairs += [
+            (torch.tensor([[0., v], [0., v]]).expand(1, 2, 2, 2), g, zero, 0, 0, True, [v, 0.]),
+            (torch.tensor([[0., 0.], [v, v]]).expand(1, 2, 2, 2), g, zero, 0, 0, True, [0., v]),
+        ]
+        if dtype == torch.bfloat16:
+            # Large taps that cancel within one channel must not absorb another
+            # channel's contribution: summed serially, even in FP32, 1 - 2**25
+            # rounds to -2**25 and the gradient becomes 0 instead of 1. The
+            # transposed ramp checks the y-gradient.
+            big = torch.full((2, 2), 2.0 ** 26)
+            ramp = torch.tensor([[0., 1.], [0., 1.]])
+            for plane, scale in ((ramp, torch.tensor([1., 0.])), (ramp.t(), torch.tensor([0., 1.]))):
+                mixed = torch.stack([plane, big]).unsqueeze(0)
+                # Bicubic: channel 0 contributes 1.5625 after BF16 rounds its taps.
+                for mode, value in ((0, 1.), (2, 1.5625)):
+                    pairs.append((mixed, torch.ones(1, 2, 1, 1), zero, mode, 0, False,
+                                  (scale * value).tolist()))
+        # Each two-channel case also runs with its channels at 0 and 256 of
+        # C=257 (the rest zero).
+        for inp, grad_output, grid, mode, padding_mode, align_corners, expected in pairs:
+            cases.append((inp, grad_output, torch.channels_last, grid, mode, padding_mode,
+                          align_corners, expected))
+            wide_inp = torch.zeros(1, 257, *inp.shape[2:])
+            wide_inp[:, 0], wide_inp[:, 256] = inp[:, 0], inp[:, 1]
+            wide_grad_output = torch.zeros(1, 257, 1, 1)
+            wide_grad_output[:, 0], wide_grad_output[:, 256] = grad_output[:, 0], grad_output[:, 1]
+            cases.append((wide_inp, wide_grad_output, torch.channels_last, grid, mode,
+                          padding_mode, align_corners, expected))
+        result = []
+        for inp, grad_output, fmt, grid, mode, padding_mode, align_corners, expected in cases:
+            inp = inp.to(dtype).contiguous(memory_format=fmt)
+            grad_output = grad_output.to(dtype).contiguous(memory_format=fmt)
+            desc = (f"C={inp.size(1)} mode={mode} grid={grid.tolist()} "
+                    f"padding_mode={padding_mode}")
+            result.append((desc, grad_output, inp, grid.to(dtype), mode, padding_mode,
+                           align_corners, expected))
+        return result
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.half, torch.bfloat16)
+    def test_grid_sample_2d_backward_low_precision_grid_grad(self, device, dtype):
+        # The grid gradient sums over channels. Summing in the input dtype
+        # stalls (FP16 1024 + 0.5 rounds back to 1024) or overflows before
+        # opposite channels cancel, and rounding the sum before scaling it
+        # overflows where the scaled result is representable. On ROCm the
+        # backward sums in opmath_t, groups reduced-precision taps per channel
+        # and rounds once, whether or not grad_input is requested, so every
+        # case below is exact.
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        for (desc, grad_output, inp, grid, mode, padding_mode, align_corners,
+             expected) in self._rocm_low_precision_grid_grad_cases(dtype):
+            grad_output, inp, grid = (t.to(device) for t in (grad_output, inp, grid))
+            for mask in ([False, True], [True, True]):
+                with self.subTest(case=desc, mask=mask):
+                    out = bw(grad_output, inp, grid, mode, padding_mode, align_corners, mask)
+                    self.assertEqual(out[1].flatten().float().cpu(), torch.tensor(expected),
+                                     atol=0, rtol=0)
+
+    @staticmethod
+    def _rocm_low_precision_oob_cases(dtype, sentinel):
+        # (description, grad_output, input, grid, mode) on CPU, in dtype, for
+        # samples near the edges with zeros padding. Grid points (+-9/8, 1/8)
+        # and their transposes, with align_corners=True on a 9x9 input, sit at
+        # source coordinates 8.5 or -0.5 on one axis and 4.5 on the other, so
+        # each bilinear or bicubic sample has both valid and out-of-bounds
+        # taps, and no valid tap is the (0, 0) pixel. That pixel holds
+        # `sentinel` in every plane: a kernel that loads an out-of-bounds tap
+        # from offset 0 without masking its contribution reads it, and the
+        # result becomes wrong or nonfinite. Arbitrary negative-edge points
+        # could legitimately sample (0, 0), so the points are fixed. At the
+        # half-pixel offset the bilinear weights and the cubic coefficients
+        # and their derivatives are exact in FP16 and BF16.
+        #
+        # Each channel is a seeded ramp plus noise, (x + y) / 8 + [0, 1/8),
+        # with a random sign that its grad_output shares, so the channel
+        # contributions add rather than cancel: every grid gradient is well
+        # above the roundoff bound of the test below, which therefore detects
+        # a zero or scaled result.
+        gen = torch.Generator().manual_seed(2025)
+        a, b = 9 / 8, 1 / 8
+        points = torch.tensor([[a, b], [-a, b], [b, a], [b, -a]])
+        grid = torch.stack([points, points.flip(0)]).reshape(2, 1, 4, 2)
+        yy, xx = torch.meshgrid(torch.arange(9.), torch.arange(9.), indexing="ij")
+        cases = []
+        for channels, fmt in ((8, torch.channels_last), (257, torch.channels_last),
+                              (64, torch.contiguous_format)):
+            sign = torch.randint(0, 2, (2, channels, 1, 1), generator=gen) * 2. - 1
+            inp = sign * ((xx + yy) / 8 + torch.rand(2, channels, 9, 9, generator=gen) / 8)
+            inp[:, :, 0, 0] = sentinel
+            grad_output = sign * (0.5 + torch.rand(2, channels, 1, 4, generator=gen) / 2)
+            for mode in (0, 2):  # bilinear, bicubic
+                cases.append((f"C={channels} {fmt} mode={mode}",
+                              grad_output.to(dtype).contiguous(memory_format=fmt),
+                              inp.to(dtype).contiguous(memory_format=fmt),
+                              grid.to(dtype), mode))
+        return cases
+
+    def _rocm_grid_grad_tap_bound(self, grad_output, inp, grid, mode):
+        # For each grid-gradient component: the coordinate scale times the sum,
+        # over channels and valid taps, of |input * tap derivative weight *
+        # grad_output|, in FP64. The tap weights come from the CPU backward on
+        # one-hot inputs; the (0, 0) pixel must carry no weight, which checks
+        # that the sentinel is never a valid tap and keeps it out of the bound.
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        N, C, H, W = inp.shape
+        k = H * W
+        one_hot = torch.eye(k, dtype=torch.float64).reshape(k, 1, H, W)
+        bound = torch.empty(grid.shape, dtype=torch.float64)
+        for n in range(N):
+            weights = bw(torch.ones(k, 1, *grid.shape[1:3], dtype=torch.float64), one_hot,
+                         grid[n:n + 1].double().expand(k, -1, -1, -1).contiguous(),
+                         mode, 0, True, [False, True])[1].abs()
+            self.assertEqual(weights[0], torch.zeros_like(weights[0]),
+                             msg="the sentinel pixel is a valid tap")
+            contributions = torch.einsum(
+                "ck,chw->khw", inp[n].double().reshape(C, k)[:, 1:].abs(),
+                grad_output[n].double().abs())
+            bound[n] = torch.einsum("khw,khwd->hwd", contributions, weights[1:])
+        return bound
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.half, torch.bfloat16)
+    def test_grid_sample_2d_backward_rocm_low_precision_grid_grad_oob(self, device, dtype):
+        # Out-of-bounds taps with zeros padding must contribute nothing to
+        # either gradient, including in the reduced-precision grid-gradient-only
+        # bilinear branch of the kernel, which loads out-of-bounds taps from
+        # offset 0 and masks their contributions. The input's (0, 0) pixel,
+        # which no valid tap reads, holds a large finite value or inf.
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        rounds = {torch.half: 2.0 ** -11, torch.bfloat16: 2.0 ** -8}[dtype]
+        both, grid_only = [True, True], [False, True]
+        for sentinel in (torch.finfo(dtype).max, math.inf):
+            for desc, grad_output, inp, grid, mode in self._rocm_low_precision_oob_cases(
+                    dtype, sentinel):
+                # Grid-gradient tolerance. With exact tap weights and
+                # coefficients, each tap is the dtype product of at most four
+                # dtype factors (three roundings), the taps are summed in FP32
+                # and the scaled result is rounded once more, so the error is
+                # within 4 unit roundoffs of the per-tap magnitude bound.
+                tol = 4 * rounds * self._rocm_grid_grad_tap_bound(grad_output, inp, grid, mode)
+                for mask in (grid_only, both):
+                    with self.subTest(case=desc, sentinel=sentinel, mask=mask):
+                        tail = (mode, 0, True, mask)
+                        expected = bw(grad_output.double(), inp.double(), grid.double(), *tail)
+                        self.assertTrue(expected[1].isfinite().all(),
+                                        msg="reference grid gradient must be finite")
+                        # The tolerance must reject a zero or quarter-scale
+                        # result, so it can detect lost or misscaled taps.
+                        for corrupt in (torch.zeros_like(expected[1]),
+                                        (expected[1] / 4).to(dtype).double()):
+                            self.assertFalse(((corrupt - expected[1]).abs() <= tol).all(),
+                                             msg="tolerance too loose for this fixture")
+                        actual = bw(grad_output.to(device), inp.to(device),
+                                    grid.to(device), *tail)
+                        grad_grid = actual[1].cpu().double()
+                        self.assertTrue(grad_grid.isfinite().all(), msg=f"{grad_grid}")
+                        err = (grad_grid - expected[1]).abs()
+                        self.assertTrue(
+                            (err <= tol).all(),
+                            msg=f"grid gradient error/tolerance up to "
+                                f"{(err / tol).max().item():.3g}: actual {grad_grid}, "
+                                f"expected {expected[1]}")
+                        if mask[0]:
+                            grad_magnitude = bw(grad_output.double().abs(), inp.double(),
+                                                grid.double(), *tail)[0].abs().max().item()
+                            self.assertTrue(expected[0].isfinite().all())
+                            self.assertEqual(actual[0].cpu().double(), expected[0],
+                                             atol=8 * rounds * grad_magnitude, rtol=0)
+                        else:
+                            self.assertIsNone(actual[0])
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float, torch.half, torch.bfloat16)
