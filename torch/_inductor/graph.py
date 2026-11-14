@@ -115,6 +115,7 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
+    _unstable_customized_partition_wrapper,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
@@ -423,6 +424,8 @@ class GraphLowering(torch.fx.Interpreter):
         inputs_to_check: Sequence[int] | None = None,
         fx_wrapper: bool = False,
         get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+        split_into_partitions: bool | None = None,
+        cudagraphs_per_partition: bool | None = None,
     ) -> None:
         super().__init__(gm)
         self.get_decomp_fn = get_decomp_fn
@@ -607,6 +610,35 @@ class GraphLowering(torch.fx.Interpreter):
         # aot_inductor.cudagraphs rejects such graphs.
         self.input_as_strided_node: torch.fx.Node | None = None
         self.kernel_free_cudagraph: bool = False
+        # Whether codegen splits this graph into partition functions. Codegen and
+        # the customized partition wrapper read this instead of
+        # config.graph_partition. It defaults to that config, which is patched off
+        # during cpp_wrapper/fx_wrapper/AOT lowering (maybe_disable_graph_partition).
+        # The config itself is still read by ConstructorMoverPass, the
+        # cpp_wrapper/fx_wrapper setup, and compile_fx's override_cudagraphs
+        # handling and main lowering; the scheduler's partition-minimizing reorder
+        # requires it and config.triton.cudagraphs, preserving the CUDA Graph
+        # optimization opt-in.
+        self.split_into_partitions = (
+            config.graph_partition
+            if split_into_partitions is None
+            else split_into_partitions
+        )
+        # Whether the partitions are for CUDA Graphs (or a customized partition
+        # wrapper): the scheduler then splits off cudagraph-unsafe ops, the
+        # post-lowering cudagraph checks leave those ops to it, call() leaves
+        # input alignment and NaN asserts to the partition functions, and
+        # post_compile captures the partitions instead of the whole graph.
+        if cudagraphs_per_partition is None:
+            cudagraphs_per_partition = self.split_into_partitions and (
+                config.triton.cudagraphs
+                or _unstable_customized_partition_wrapper.wrapper is not None
+            )
+        elif cudagraphs_per_partition and not self.split_into_partitions:
+            raise ValueError(
+                "cudagraphs_per_partition=True requires split_into_partitions=True"
+            )
+        self.cudagraphs_per_partition = cudagraphs_per_partition
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
@@ -1014,6 +1046,8 @@ class GraphLowering(torch.fx.Interpreter):
             is_inference=self.is_inference,
             is_backward=self.is_backward,
             name=self.qualify_name(subgraph_name),
+            split_into_partitions=False,
+            cudagraphs_per_partition=False,
         )
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
