@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: export"]
 # ruff: noqa: F841
 
+import contextlib
 import copy
 import unittest
 from types import SimpleNamespace
@@ -213,7 +214,10 @@ def forward(self, token, obj_attr, x, n):
 
     @fake_tensor_modes
     @parametrize("propagate_real_tensors", [False, True])
-    def test_method_schema(self, mode_cls, propagate_real_tensors):
+    @parametrize("active", [False, True])
+    def test_method_schema(self, mode_cls, propagate_real_tensors, active):
+        if not active and mode_cls is torch._subclasses.fake_tensor.FakeTensorMode:
+            self.skipTest("Python TorchBind dispatch requires an active fake mode")
         tq = _empty_tensor_queue()
         with torch._functorch.config.patch(
             fake_tensor_propagate_real_tensors=propagate_real_tensors
@@ -236,8 +240,11 @@ def forward(self, token, obj_attr, x, n):
 
         foo = torch.classes._TorchScriptTesting._Foo(2, 3)
         fake_foo = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, foo)
-        with fake_mode:
+        with fake_mode if active else contextlib.nullcontext():
             out = torch.ops._TorchScriptTesting.takes_foo(fake_foo, x)
+            self.assertIs(
+                torch._guards.active_fake_mode(), fake_mode if active else None
+            )
         self.assertIs(torch._subclasses.fake_tensor.maybe_get_fake_mode(out), fake_mode)
         self.assertEqual(
             (out.shape, out.stride(), out.device), (x.shape, x.stride(), x.device)
@@ -257,10 +264,17 @@ def forward(self, token, obj_attr, x, n):
             data={torch.ops._TorchScriptTesting.takes_foo.default},
             generic_fake_kernel=profile_kernel,
         )
-        with fake_mode, torch._dynamo.config.patch(_custom_ops_profile=profile):
+        with (
+            fake_mode if active else contextlib.nullcontext(),
+            torch._dynamo.config.patch(_custom_ops_profile=profile),
+        ):
             self.assertEqual(
                 torch.ops._TorchScriptTesting.takes_foo(fake_foo, x).shape, (7,)
             )
+            self.assertIs(
+                torch._guards.active_fake_mode(), fake_mode if active else None
+            )
+        self.assertIsNone(torch._guards.active_fake_mode())
 
     @parametrize("pre_dispatch", [True, False])
     def test_attribute(self, pre_dispatch):
