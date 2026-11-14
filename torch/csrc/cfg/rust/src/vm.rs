@@ -50,6 +50,9 @@ pub struct Options {
     pub callees: bool,
     /// Take the registered shortcuts through library code (see shortcuts.rs).
     pub shortcuts: bool,
+    /// Time each callee both compiled and interpreted, and leave it to the
+    /// interpreter if that is where it runs faster.
+    pub demote: bool,
 }
 
 impl Default for Options {
@@ -65,6 +68,7 @@ impl Default for Options {
             unroll: true,
             callees: true,
             shortcuts: true,
+            demote: true,
         }
     }
 }
@@ -127,7 +131,39 @@ struct Settled {
 struct SettledBlocks {
     blocks: Vec<std::cell::Cell<Settled>>,
     calls: std::cell::Cell<u64>,
+    trial: std::cell::Cell<Trial>,
 }
+
+/// Whether a callee is worth running compiled is measured, not assumed: the
+/// generic tier is slower than the interpreter on plain Python, so a callee
+/// without much tensor work can lose more than it gains. After some calls to
+/// warm up, calls alternate between the compiled form and the interpreter
+/// and are timed, and the faster of the two (by their best times) is what
+/// the callee is from then on. A sample only counts if no other callee was
+/// still being measured during it, so callees settle from the leaves up.
+#[derive(Clone, Copy)]
+struct Trial {
+    phase: u8,
+    calls: u32,
+    compiled_best: u64,
+    compiled_samples: u8,
+    interpreted_best: u64,
+    interpreted_samples: u8,
+}
+
+const TRIAL_WARMUP: u8 = 0;
+const TRIAL_SAMPLING: u8 = 1;
+const TRIAL_COMPILED: u8 = 2;
+const TRIAL_DEMOTED: u8 = 3;
+const TRIAL_WARMUP_CALLS: u32 = 12;
+const TRIAL_SAMPLES: u8 = 10;
+/// A callee whose measurement never gets quiet enough stays compiled.
+const TRIAL_MAX_CALLS: u32 = 400;
+/// How much faster the interpreter has to be: 1/32, about 3%.
+const TRIAL_MARGIN_SHIFT: u32 = 5;
+
+static TRIAL_EVENTS: AtomicU64 = AtomicU64::new(0);
+static TRIAL_DRAW: AtomicU64 = AtomicU64::new(0x9E37_79B9_7F4A_7C15);
 
 unsafe impl Send for SettledBlocks {}
 unsafe impl Sync for SettledBlocks {}
@@ -230,6 +266,29 @@ impl Callees {
         compiled.sort();
         interpreted.sort();
         (compiled, interpreted)
+    }
+
+    /// Qualified names of the compiled functions that were measured to run
+    /// faster in the interpreter and were left to it.
+    pub fn demoted(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .entries
+            .borrow()
+            .values()
+            .filter(|c| c.compiled.settled.trial.get().phase == TRIAL_DEMOTED)
+            .map(|c| unsafe {
+                let name = ffi::PyObject_GetAttrString(c.code.as_ptr(), c"co_qualname".as_ptr());
+                if name.is_null() {
+                    ffi::PyErr_Clear();
+                    return "?".to_string();
+                }
+                let text = pyffi::str_to_string(name);
+                ffi::Py_DECREF(name);
+                text
+            })
+            .collect();
+        names.sort();
+        names
     }
 
     /// Drops everything compiled so far, which also breaks the reference
@@ -944,6 +1003,14 @@ impl Compiled {
             settled: SettledBlocks {
                 blocks: (0..generic.len()).map(|_| std::cell::Cell::new(Settled { code: std::ptr::null(), specialized: false, entries: 0 })).collect(),
                 calls: std::cell::Cell::new(0),
+                trial: std::cell::Cell::new(Trial {
+                    phase: TRIAL_WARMUP,
+                    calls: 0,
+                    compiled_best: u64::MAX,
+                    compiled_samples: 0,
+                    interpreted_best: u64::MAX,
+                    interpreted_samples: 0,
+                }),
             },
             generic,
             state: Shared::new(state),
@@ -1308,15 +1375,23 @@ impl Compiled {
             (kw, ffi::PyTuple_GET_SIZE(kw) as usize)
         };
         let npos = args.len() - nkw;
-        if let Some((compiled, func, receiver)) = self.compiled_callee(callee) {
-            return self.call_compiled(&*compiled, func, receiver, &buf[1..args.len() + 1], kw);
+        let interpreted = || {
+            ffi::PyObject_Vectorcall(
+                callee,
+                buf.as_ptr().add(1),
+                npos | ffi::PY_VECTORCALL_ARGUMENTS_OFFSET,
+                kw,
+            )
+        };
+        match self.compiled_callee(callee) {
+            Some((compiled, func, receiver)) => self.tiered(
+                compiled,
+                func,
+                || self.call_compiled(&*compiled, func, receiver, &buf[1..args.len() + 1], kw),
+                interpreted,
+            ),
+            None => interpreted(),
         }
-        ffi::PyObject_Vectorcall(
-            callee,
-            buf.as_ptr().add(1),
-            npos | ffi::PY_VECTORCALL_ARGUMENTS_OFFSET,
-            kw,
-        )
     }
 
     /// The compiled form of what calling `callee` runs, if it is a Python
@@ -1361,7 +1436,9 @@ impl Compiled {
         if recent_code == code as usize && recent_globals == globals as usize {
             return if recent == INTERPRETED { None } else { Some(recent) };
         }
-        let found = self.compiled_function_slow(func, code, globals);
+        let found = self
+            .compiled_function_slow(func, code, globals)
+            .filter(|compiled| (**compiled).settled.trial.get().phase != TRIAL_DEMOTED);
         slot.set((code as usize, globals as usize, found.unwrap_or(INTERPRETED)));
         found
     }
@@ -1404,6 +1481,126 @@ impl Compiled {
                 None
             }
         }
+    }
+
+    /// `call` for the function that was handed to torch.cfg_compile, which
+    /// is measured against the interpreter as its callees are.
+    pub unsafe fn call_measured(&self, function: Obj, args: Obj, kwargs: Obj) -> Obj {
+        let phase = self.settled.trial.get().phase;
+        if phase == TRIAL_COMPILED || !self.options.demote {
+            return self.call(function, args, kwargs);
+        }
+        if phase == TRIAL_DEMOTED {
+            return ffi::PyObject_Call(function, args, kwargs);
+        }
+        self.trial_call(
+            self,
+            null_mut(),
+            || self.call(function, args, kwargs),
+            || ffi::PyObject_Call(function, args, kwargs),
+        )
+    }
+
+    /// Whether this function was measured to run faster in the interpreter
+    /// and is left to it.
+    pub fn is_demoted(&self) -> bool {
+        self.settled.trial.get().phase == TRIAL_DEMOTED
+    }
+
+    /// Calls a callee either compiled or through the interpreter, whichever
+    /// the measurement of the two has shown to be faster; while that is
+    /// still open, this call is part of the measurement.
+    #[inline(always)]
+    unsafe fn tiered(
+        &self,
+        compiled: *const Compiled,
+        func: Obj,
+        run_compiled: impl FnOnce() -> Obj,
+        run_interpreted: impl FnOnce() -> Obj,
+    ) -> Obj {
+        let slot = &(*compiled).settled.trial;
+        if slot.get().phase == TRIAL_COMPILED || !self.options.demote {
+            return run_compiled();
+        }
+        self.trial_call(compiled, func, run_compiled, run_interpreted)
+    }
+
+    #[inline(never)]
+    unsafe fn trial_call(
+        &self,
+        compiled: *const Compiled,
+        func: Obj,
+        run_compiled: impl FnOnce() -> Obj,
+        run_interpreted: impl FnOnce() -> Obj,
+    ) -> Obj {
+        let slot = &(*compiled).settled.trial;
+        let mut trial = slot.get();
+        if trial.phase == TRIAL_DEMOTED {
+            return run_interpreted();
+        }
+        trial.calls += 1;
+        slot.set(trial);
+        let events = TRIAL_EVENTS.fetch_add(1, Ordering::Relaxed) + 1;
+        if trial.phase == TRIAL_WARMUP {
+            if trial.calls >= TRIAL_WARMUP_CALLS {
+                slot.set(Trial { phase: TRIAL_SAMPLING, ..trial });
+            }
+            return run_compiled();
+        }
+        // Which of the two a call measures is drawn, not alternated: calls
+        // often come in a pattern (two layers of a model, one after the
+        // other), and alternating would give each side one half of it.
+        let as_compiled = if trial.compiled_samples >= TRIAL_SAMPLES {
+            false
+        } else if trial.interpreted_samples >= TRIAL_SAMPLES {
+            true
+        } else {
+            let mut state = TRIAL_DRAW.load(Ordering::Relaxed);
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            TRIAL_DRAW.store(state, Ordering::Relaxed);
+            state & 1 == 0
+        };
+        let start = std::time::Instant::now();
+        let result = if as_compiled { run_compiled() } else { run_interpreted() };
+        let elapsed = start.elapsed().as_nanos() as u64;
+        // The callee may have called itself: what is in the slot now counts.
+        let mut trial = slot.get();
+        if trial.phase != TRIAL_SAMPLING {
+            return result;
+        }
+        if !result.is_null() && TRIAL_EVENTS.load(Ordering::Relaxed) == events {
+            if as_compiled {
+                trial.compiled_best = trial.compiled_best.min(elapsed);
+                trial.compiled_samples += 1;
+            } else {
+                trial.interpreted_best = trial.interpreted_best.min(elapsed);
+                trial.interpreted_samples += 1;
+            }
+        }
+        if trial.compiled_samples >= TRIAL_SAMPLES && trial.interpreted_samples >= TRIAL_SAMPLES {
+            let margin = trial.interpreted_best >> TRIAL_MARGIN_SHIFT;
+            if trial.interpreted_best + margin < trial.compiled_best {
+                trial.phase = TRIAL_DEMOTED;
+                if !func.is_null() {
+                    // Calls stop finding the compiled form.
+                    let code = ffi::PyFunction_GetCode(func);
+                    let globals = ffi::PyFunction_GetGlobals(func);
+                    let recent = self
+                        .callees
+                        .recent
+                        .get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
+                    recent.set((code as usize, globals as usize, INTERPRETED));
+                }
+            } else {
+                trial.phase = TRIAL_COMPILED;
+            }
+        } else if trial.calls >= TRIAL_MAX_CALLS {
+            trial.phase = TRIAL_COMPILED;
+        }
+        slot.set(trial);
+        result
     }
 
     /// Calls a compiled callee with arguments in the vectorcall layout.
@@ -2156,16 +2353,22 @@ impl Compiled {
                 } else {
                     self.compiled_callee(method)
                 };
-                let r = match compiled {
-                    Some((compiled, func, bound_to)) => {
-                        self.call_compiled(&*compiled, func, bound_to, &buf[1..args.len() + 1], kw)
-                    }
-                    None => ffi::PyObject_Vectorcall(
+                let interpreted = || {
+                    ffi::PyObject_Vectorcall(
                         method,
                         buf.as_ptr().add(first),
                         args.len() + 1 - first - nkw,
                         kw,
+                    )
+                };
+                let r = match compiled {
+                    Some((compiled, func, bound_to)) => self.tiered(
+                        compiled,
+                        func,
+                        || self.call_compiled(&*compiled, func, bound_to, &buf[1..args.len() + 1], kw),
+                        interpreted,
                     ),
+                    None => interpreted(),
                 };
                 ffi::Py_DECREF(method);
                 checked(r)
@@ -2195,11 +2398,15 @@ impl Compiled {
                 let kwargs = if *kwargs == NONE { null_mut() } else { self.obj(regs, *kwargs) };
                 let callee = self.obj(regs, *callee);
                 let plain_kwargs = kwargs.is_null() || ffi::PyDict_CheckExact(kwargs) != 0;
+                let interpreted = || ffi::PyObject_Call(callee, tuple, kwargs);
                 let r = match self.compiled_callee(callee).filter(|_| plain_kwargs) {
-                    Some((compiled, func, receiver)) => {
-                        (*compiled).enter(func, Args::tuple(receiver, tuple), kwargs)
-                    }
-                    None => ffi::PyObject_Call(callee, tuple, kwargs),
+                    Some((compiled, func, receiver)) => self.tiered(
+                        compiled,
+                        func,
+                        || (*compiled).enter(func, Args::tuple(receiver, tuple), kwargs),
+                        interpreted,
+                    ),
+                    None => interpreted(),
                 };
                 ffi::Py_DECREF(tuple);
                 checked(r)
