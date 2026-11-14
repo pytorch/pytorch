@@ -1,11 +1,10 @@
 # Owner(s): ["module: unknown"]
 
-from functools import partial
+import unittest
 
 import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    OpDTypes,
     ops,
     skip,
     skipOps,
@@ -13,6 +12,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    decorateIf,
     run_tests,
     TestCase,
     TestGradients,
@@ -22,10 +22,15 @@ from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.hop_db import hop_db
 
 
-# gradcheck requires double precision
-_gradcheck_ops = partial(
-    ops, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble]
-)
+def _gradcheck_ops(op_list):
+    def decorator(test):
+        test = ops(op_list, allowed_dtypes=[torch.double, torch.cdouble])(test)
+        return decorateIf(
+            unittest.skip("Skipped! Op doesn't support autograd for this dtype."),
+            lambda p: p["dtype"] not in p["op"].supported_backward_dtypes(p["device"]),
+        )(test)
+
+    return decorator
 
 
 # Device-agnostic skips migrated from OpInfo definitions (see #177259).
@@ -78,7 +83,6 @@ class TestBwdGradients(TestGradients):
     #   costly and redundant with function grad (and gradgad) tests
     # @_gradcheck_ops(op_db)
     # def test_method_grad(self, device, dtype, op):
-    #     self._skip_helper(op, device, dtype)
     #     self._grad_test_helper(device, dtype, op, op.get_method())
 
     @skipOps(
@@ -88,7 +92,7 @@ class TestBwdGradients(TestGradients):
             xfail("as_strided", variant_name="partial_views"),
         }
     )
-    @_gradcheck_ops(op_db + custom_op_db)
+    @_gradcheck_ops([op for op in op_db + custom_op_db if op.inplace_variant])
     def test_inplace_grad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if not op.inplace_variant:
@@ -129,7 +133,9 @@ class TestBwdGradients(TestGradients):
             skip("masked.logaddexp"),
         }
     )
-    @_gradcheck_ops(op_db + hop_db + custom_op_db)
+    @_gradcheck_ops(
+        [op for op in op_db + hop_db + custom_op_db if op.supports_gradgrad]
+    )
     def test_fn_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if not op.supports_gradgrad:
@@ -141,7 +147,7 @@ class TestBwdGradients(TestGradients):
 
     # Test that gradients of gradients are properly raising
     @skipOps(_bwd_grad_all | {skip("sparse.mm", variant_name="reduce")})
-    @_gradcheck_ops(op_db + custom_op_db)
+    @_gradcheck_ops([op for op in op_db + custom_op_db if not op.supports_gradgrad])
     def test_fn_fail_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if op.supports_gradgrad:
@@ -155,7 +161,6 @@ class TestBwdGradients(TestGradients):
     #   costly and redundant with function gradgrad (and grad) tests
     # @_gradcheck_ops(op_db)
     # def test_method_gradgrad(self, device, dtype, op):
-    #     self._skip_helper(op, device, dtype)
     #     self._gradgrad_test_helper(device, dtype, op, op.get_method())
 
     @skipOps(
@@ -166,7 +171,9 @@ class TestBwdGradients(TestGradients):
             xfail("nn.functional.hardsigmoid"),
         }
     )
-    @_gradcheck_ops(op_db)
+    @_gradcheck_ops(
+        [op for op in op_db if op.inplace_variant and op.supports_inplace_autograd]
+    )
     def test_inplace_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if not op.inplace_variant or not op.supports_inplace_autograd:

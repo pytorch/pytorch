@@ -502,7 +502,13 @@ def generate_env_vars_string(*, stable_output: bool = False) -> str:
         return "# env var omitted due to stable_output=True"
 
     allow_list = ["TORCH", "DYNAMO", "INDUCTOR", "TRITON"]
-    skip_list = ["TRITON_LIBDEVICE_PATH", "TRITON_PTXAS_PATH", "TRITON_LIBCUDA_PATH"]
+    skip_list = [
+        "TRITON_LIBDEVICE_PATH",
+        "TRITON_PTXAS_PATH",
+        "TRITON_LIBCUDA_PATH",
+        # Secret.
+        "TORCH_NCCL_ENCRYPTION_PSK",
+    ]
     repro_env_vars = ["TORCHDYNAMO_REPRO_AFTER", "TORCHDYNAMO_REPRO_LEVEL"]
 
     def filter(key: str) -> bool:

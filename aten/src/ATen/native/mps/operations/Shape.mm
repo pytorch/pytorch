@@ -9,6 +9,7 @@
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Shape.h>
+#include <c10/util/safe_conv.h>
 
 #include <fmt/format.h>
 
@@ -90,14 +91,15 @@ static void cat_out_mps_contiguous_impl(const ITensorListRef& inputs, int64_t di
 // NOTE: `output` is expected to already have the correct size.
 template <typename idx_type_t>
 static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, const Tensor& output) {
+  const auto idx_type_name = get_type_str<idx_type_t>();
   CatSharedParams<idx_type_t> shared_params;
 
   shared_params.ndim = output.dim();
   shared_params.cat_dim = dimension;
 
   for (const auto dim : c10::irange(output.dim())) {
-    shared_params.output_strides[dim] = safe_downcast<idx_type_t, int64_t>(output.stride(dim));
-    shared_params.output_sizes[dim] = safe_downcast<idx_type_t, int64_t>(output.size(dim));
+    shared_params.output_strides[dim] = c10::safe_conv<idx_type_t, int64_t>(output.stride(dim), idx_type_name.c_str());
+    shared_params.output_sizes[dim] = c10::safe_conv<idx_type_t, int64_t>(output.size(dim), idx_type_name.c_str());
   }
 
   idx_type_t cat_dim_offset = 0;
@@ -122,12 +124,13 @@ static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, co
       auto num_threads = std::min(max_num_threads, numel_remaining);
       CatInputParams<idx_type_t> input_params;
 
-      input_params.cat_dim_offset = safe_downcast<idx_type_t, int64_t>(cat_dim_offset);
-      input_params.input_element_offset = safe_downcast<idx_type_t, int64_t>(input.numel() - numel_remaining);
+      input_params.cat_dim_offset = c10::safe_conv<idx_type_t, int64_t>(cat_dim_offset, idx_type_name.c_str());
+      input_params.input_element_offset =
+          c10::safe_conv<idx_type_t, int64_t>(input.numel() - numel_remaining, idx_type_name.c_str());
 
       for (const auto dim : c10::irange(input.dim())) {
-        input_params.input_strides[dim] = safe_downcast<idx_type_t, int64_t>(input.stride(dim));
-        input_params.input_sizes[dim] = safe_downcast<idx_type_t, int64_t>(input.size(dim));
+        input_params.input_strides[dim] = c10::safe_conv<idx_type_t, int64_t>(input.stride(dim), idx_type_name.c_str());
+        input_params.input_sizes[dim] = c10::safe_conv<idx_type_t, int64_t>(input.size(dim), idx_type_name.c_str());
       }
 
       dispatch_sync_with_rethrow(stream->queue(), ^() {

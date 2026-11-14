@@ -208,6 +208,9 @@ kJagged
 MemoryFormat
 get_contiguous_memory_format
 
+# torch/headeronly/core/TransposeType.h
+TransposeType
+
 # torch/headeronly/core/Dispatch_v2.h
 THO_DISPATCH_V2_TMPL
 THO_PRIVATE_CASE_TYPE_USING_HINT_TMPL

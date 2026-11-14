@@ -49,13 +49,15 @@ _PYTEST_SUITE = _TEST_DIR / "junit_xml_testdata/pytest_suite.py"
 _REPORT_TESTDATA = Path(__file__).resolve().parent / "testdata"
 # Run the fixture as the default config: drop the job's CI / PYTORCH_TEST_* /
 # PYTEST_ADDOPTS settings and a PYTHONPATH whose repo root would shadow the
-# installed torch, and don't write bytecode into test/.
+# installed torch, and don't write bytecode into test/. These tests pin how
+# skipped tests are reported, so keep test/conftest.py's collection pruner from
+# deselecting the mark-skipped fixtures.
 _CHILD_ENV = {
     k: v
     for k, v in os.environ.items()
     if k not in ("PYTHONPATH", "CI", "PYTEST_ADDOPTS")
     and not k.startswith("PYTORCH_TEST_")
-} | {"PYTHONDONTWRITEBYTECODE": "1"}
+} | {"PYTHONDONTWRITEBYTECODE": "1", "PYTEST_ADDOPTS": "-p no:prune_skips_plugin"}
 
 # The fixture's run context, which the report records, without the job's device
 # filter (XPU and CUDA jobs set PYTORCH_TESTING_DEVICE_ONLY_FOR).
@@ -1413,6 +1415,41 @@ class TestEnvVarValues(TestCase):
             values,
             {"FOO_EV_ALLOC_CONF": conf, "FOO_EV_DSL": "triton", "FOO_EV_INT": "08"},
         )
+        # The repro command gets the same strings, which are what the shell needs.
+        repro = {
+            k: v
+            for k, v in TestEnvironment.repro_env_vars.items()
+            if k.startswith("FOO_EV_")
+        }
+        self.assertEqual(
+            repro,
+            {"FOO_EV_ALLOC_CONF": conf, "FOO_EV_DSL": "triton", "FOO_EV_INT": "08"},
+        )
+
+    def test_include_in_report_separate_from_repro(self):
+        env = {"FOO_EV_REPORT_ONLY": "x", "FOO_EV_REPRO_ONLY": "y"}
+        with unittest.mock.patch.dict(os.environ, env):
+            self._def_setting(
+                "FOO_EV_REPORT_ONLY",
+                env_var="FOO_EV_REPORT_ONLY",
+                include_in_repro=False,
+                include_in_report=True,
+            )
+            self._def_setting(
+                "FOO_EV_REPRO_ONLY",
+                env_var="FOO_EV_REPRO_ONLY",
+                include_in_repro=True,
+                include_in_report=False,
+            )
+        self.assertEqual(TestEnvironment.env_var_values["FOO_EV_REPORT_ONLY"], "x")
+        self.assertNotIn("FOO_EV_REPORT_ONLY", TestEnvironment.repro_env_vars)
+        self.assertNotIn("FOO_EV_REPRO_ONLY", TestEnvironment.env_var_values)
+        self.assertEqual(TestEnvironment.repro_env_vars["FOO_EV_REPRO_ONLY"], "y")
+
+    def test_repro_env_var_prefix_quotes_values(self):
+        with unittest.mock.patch.dict(os.environ, {"FOO_EV_SPACE": "a b"}):
+            self._def_setting("FOO_EV_SPACE", env_var="FOO_EV_SPACE")
+        self.assertIn("FOO_EV_SPACE='a b'", TestEnvironment.repro_env_var_prefix())
 
 
 if __name__ == "__main__":

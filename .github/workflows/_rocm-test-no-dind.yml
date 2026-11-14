@@ -90,25 +90,32 @@ jobs:
           set -euo pipefail
 
           repository="pytorch/ci-image"
+          name="${ECR_IMAGE%:*}"
           tag="${ECR_IMAGE##*:}"
+          if [[ "${name}" != "ci-image" && "${name}" != */ci-image ]] || [[ -z "${tag}" || "${tag}" == "${ECR_IMAGE}" ]]; then
+            echo "::error::docker-image '${ECR_IMAGE}' is not a ci-image:<tag> reference; only ci-image tags are mirrored to GHCR."
+            exit 1
+          fi
           image="ghcr.io/${repository}:${tag}"
-          echo "docker-image=${image}" >> "${GITHUB_OUTPUT}"
 
           for attempt in $(seq 1 5); do
-            token="$(curl -fsSL "https://ghcr.io/token?scope=repository:${repository}:pull" | jq -r .token)"
-            status="$(curl -sS -o /dev/null -w '%{http_code}' \
-              -H "Authorization: Bearer ${token}" \
-              -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json' \
-              "https://ghcr.io/v2/${repository}/manifests/${tag}")"
-            if [[ "${status}" == "200" ]]; then
+            status="token request failed"
+            if token="$(curl -fsSL "https://ghcr.io/token?scope=repository:${repository}:pull" | jq -er .token)"; then
+              status="$(curl -sS -o /dev/null -w 'HTTP %{http_code}' \
+                -H "Authorization: Bearer ${token}" \
+                -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json' \
+                "https://ghcr.io/v2/${repository}/manifests/${tag}" || true)"
+            fi
+            if [[ "${status}" == "HTTP 200" ]]; then
+              echo "docker-image=${image}" >> "${GITHUB_OUTPUT}"
               echo "Resolved ${image}"
               exit 0
             fi
-            echo "attempt ${attempt}: HTTP ${status}"
+            echo "attempt ${attempt}: ${status}"
             sleep 30
           done
 
-          echo "::error::${image} is absent from the GHCR mirror. docker-builds only mirrors pushes to main/release, so a .ci/docker tree hash that has not landed yet lives only in ECR; run these shards on the DinD runner until the docker change merges."
+          echo "::error::${image} is not on the GHCR mirror. docker-builds mirrors only images built on main and release branches, so a .ci/docker change must merge before no-dind jobs can use its image."
           exit 1
 
   test:
@@ -132,10 +139,72 @@ jobs:
         with:
           no-sudo: true
 
-      - name: Job pod GPU check
+      # TheRock exposes rocminfo and amd-smi only after /etc/rocm_env.sh.
+      # Each step is a new shell, so source it in every step that calls them.
+      # The diagnostics only log; the GPU check below is the gate.
+      - name: Job pod ROCm version
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
+          amd-smi version || true
+          rocminfo 2>&1 | grep -m1 -E '^Runtime Version' | sed 's/^/rocminfo: /' || true
+
+      - name: Job pod system info
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat /etc/os-release || true
+          rocm-sdk version || true
+          whoami
+          id
+          df -h /dev/shm
+
+      - name: Job pod amd-smi
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
+          amd-smi monitor -ptumv
+          amd-smi list
+
+      - name: Job pod rocminfo
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
+          rocminfo
+
+      - name: Job pod GPU check
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f /etc/rocm_env.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/rocm_env.sh
+          fi
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           required=1
           config="${{ matrix.config }}"
@@ -258,6 +327,8 @@ jobs:
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           USE_ARC: "1"
+          # Same IPC workaround and driver requirement as _rocm-test.yml.
+          HSA_ENABLE_IPC_MODE_LEGACY: "1"
         shell: bash
         run: |
           set -euo pipefail
@@ -270,7 +341,7 @@ jobs:
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
 
-          # nproc sees the 192-core node, not the job pod's CPU quota.
+          # nproc sees every core on the node, not the job pod's CPU quota.
           cpus=""
           if [[ -r /sys/fs/cgroup/cpu.max ]]; then
             read -r quota period < /sys/fs/cgroup/cpu.max
@@ -293,9 +364,17 @@ jobs:
           if [[ "${TEST_CONFIG}" == *distributed* ]]; then
             timeout 180 python .ci/pytorch/rocm_preflight.py
           fi
-          # Match the old Docker test environment.
+          # Match the old Docker test environment, including
+          # --ulimit stack=10485760:83886080. bash ulimit -s is KiB. An
+          # unprivileged pod can only lower a hard limit, so never raise it.
           ulimit -S -c 0
           ulimit -H -c 0
+          stack_hard="$(ulimit -H -s)"
+          if [[ "${stack_hard}" == "unlimited" || "${stack_hard}" -gt 81920 ]]; then
+            ulimit -H -s 81920
+            stack_hard=81920
+          fi
+          ulimit -S -s "$(( stack_hard < 10240 ? stack_hard : 10240 ))"
           "${TEST_COMMAND}"
 
       - name: Print remaining test logs
