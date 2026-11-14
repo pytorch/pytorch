@@ -39,7 +39,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from itertools import chain
 from typing import Any, NamedTuple, TYPE_CHECKING
 
 import torch
@@ -534,32 +533,6 @@ class AllGatherResult(NamedTuple):
     # Kept until the collective completes, since a custom layout may pack it
     # into storage independent of the output
     all_gather_input: torch.Tensor | None = None
-
-
-def _get_all_gather_input_metadatas(
-    param_all_gather_inputs: list[list[torch.Tensor]],
-) -> tuple[list[list[torch.dtype]], list[list[int]], torch.dtype]:
-    param_all_gather_input_dtypes: list[list[torch.dtype]] = []
-    param_all_gather_input_numels: list[list[int]] = []
-    first_input = next(chain.from_iterable(param_all_gather_inputs), None)
-    if first_input is None:
-        raise ValueError("cannot all-gather a parameter group without any payloads")
-    all_gather_dtype = first_input.dtype
-    for all_gather_inputs in param_all_gather_inputs:
-        input_dtypes: list[torch.dtype] = []
-        input_numels: list[int] = []
-        for all_gather_input in all_gather_inputs:
-            if all_gather_input.dtype != all_gather_dtype:
-                all_gather_dtype = torch.uint8
-            input_dtypes.append(all_gather_input.dtype)
-            input_numels.append(all_gather_input.numel())
-        param_all_gather_input_dtypes.append(input_dtypes)
-        param_all_gather_input_numels.append(input_numels)
-    return (
-        param_all_gather_input_dtypes,
-        param_all_gather_input_numels,
-        all_gather_dtype,
-    )
 
 
 def _prepare_default_all_gather_outputs(

@@ -1,19 +1,14 @@
 # mypy: allow-untyped-defs
-import inspect
 import itertools
-import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import auto, Enum
 from typing import Any, cast, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from torch.distributed.fsdp._flex_shard.placements.shard_all_gather import (
-        ParamAllGather,
-    )
-
     from ._fsdp_api import DataParallelMeshDims
+    from ._fsdp_engine import FullyShardBucket
 
 import torch
 import torch.distributed as dist
@@ -29,22 +24,16 @@ if dist._is_spmd_types_available():
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
-from torch.distributed.fsdp._flex_shard.placements.shard_all_gather import (
-    ParamAllGatherInputs,
-)
 from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
-from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
+from .._flex_shard.placements.shard import Shard as EngineShard
+from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
-    _chunk_with_empty,
     _from_local_no_grad,
-    _get_dim_chunked_size,
     _raise_assert_with_print,
-    _to_dtype_if_needed,
     DataParallelMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
@@ -147,64 +136,16 @@ class ParamModuleInfo:
     shared_param_names: list[str] = field(default_factory=list)
 
 
-def _get_param_module_infos(
-    params: list[nn.Parameter], modules: tuple[nn.Module, ...]
-) -> list[ParamModuleInfo]:
-    """
-    Shared parameter: lin1.weight = lin2.weight
-    Shared module: mlp.lin1 = mlp.lin2
-    We do not remove duplicates when traversing both modules and parameters to
-    find shared modules' parameters and shared parameters within a module.
-    """
-    params_set = set(params)
-    param_to_module_info: dict[nn.Parameter, ParamModuleInfo] = {}
-    for module in modules:
-        for _, submodule in module.named_modules(remove_duplicate=False):
-            for param_name, param in _named_parameters_with_duplicates(
-                submodule, recurse=False
-            ):
-                if param in params_set:
-                    if param not in param_to_module_info:
-                        param_to_module_info[param] = ParamModuleInfo(
-                            submodule, param_name
-                        )
-                    else:
-                        param_to_module_info[param].shared_modules.append(submodule)
-                        param_to_module_info[param].shared_param_names.append(
-                            param_name
-                        )
-    if len(param_to_module_info) != len(params):
-        raise AssertionError(f"Some parameters are not in the module tree of {modules}")
-    return [param_to_module_info[param] for param in params]
-
-
 class FSDPParam:
     """
-    This class manages a parameter with FSDP or FSDP variants applied,
-    implementing dim-0 per-parameter sharding.
+    The DTensor view of one parameter of a ``fully_shard`` group: the spec of
+    its sharded DTensor over the data-parallel mesh, composed with any TP/EP or
+    SPMD sharding it had, and the conversions between that DTensor and the
+    local data that the group's engine bucket stores, gathers and reduces.
     """
 
-    orig_dtype: torch.dtype
-    param_dtype: torch.dtype | None
-    reduce_dtype: torch.dtype | None
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
-    contiguous_sharded_stride: tuple[int, ...]
-    padded_sharded_param_size: torch.Size  # ND
-    # Whether this rank's Shard(i), i > 0, shard is shorter than the padded shard,
-    # so collectives pad it (Shard(0) shards are stored padded)
-    needs_nonzero_dim_padding: bool
-    # This rank's shard of the parameter, until bind_storage copies it into
-    # storage and builds the sharded parameter
-    _init_shard: torch.Tensor | None
-    # Whether the parameter keeps its sharded data in storage of its own
-    # (bind_storage(None)) rather than in its group's engine bucket
-    owns_storage: bool
-    _requires_grad: bool  # of the parameter passed to fully_shard
-    # 1D, slot_numel elements: the stored data (stored_size) first, then zeros
-    _sharded_param_data: torch.Tensor
-    sharded_param: nn.Parameter  # ND
-    _unsharded_param: nn.Parameter  # ND
     _sharding_spec: DTensorSpec
     # Sharding specs for sharded grads, whose dtype can differ from the param's.
     # Cached per dtype so each backward doesn't build a DTensorSpec per param,
@@ -213,18 +154,7 @@ class FSDPParam:
     _unsharded_dtensor_spec: (
         DTensorSpec | None
     )  # set for DTensor params (SPMD or TP/EP)
-    # All-gather extension metadata from the latest all_gather_inputs call
-    _all_gather_metadata: Any | None
-    _release_all_gather_outputs_after_post_all_gather: bool
     _orig_param_uid: int
-    # An unset grad_dtype still requires gradients to match the parameter dtype,
-    # so sharded_grad_dtype stores that dtype as a concrete cast target and the
-    # override flag records whether grad_dtype was set. Unset and an explicit
-    # grad_dtype matching the parameter dtype have the same value, but only
-    # unset follows dtype conversions. None is an explicit unrestricted policy,
-    # so the override flag cannot be inferred from the dtype.
-    _has_sharded_grad_dtype_override: bool
-    sharded_grad_dtype: torch.dtype | None
 
     def __init__(
         self,
@@ -235,25 +165,18 @@ class FSDPParam:
         device: torch.device,
         shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
         mp_policy: MixedPrecisionPolicy,
-        offload_policy: OffloadPolicy,
     ):
         self._module_info: ParamModuleInfo = module_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.mp_policy = mp_policy
-        self.offload_to_cpu: bool = isinstance(offload_policy, CPUOffloadPolicy)
-        self.pin_memory = (
-            self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
-        )
-        self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
         self._param_fqn: str | None = None  # prefixed from root module
-        # TODO: Remove this padding logic once DTensor pads the local tensor:
-        # https://github.com/pytorch/pytorch/issues/113045
-        self._post_load_hook_handle = (
-            module_info.module.register_load_state_dict_post_hook(
-                lambda *args, **kwargs: self.reset_sharded_param()
-            )
-        )
+        self.sharded_state = ShardedState.SHARDED
+        # The group whose engine bucket stores this parameter, and its index
+        # there, set by the group
+        self._group: FullyShardBucket | None = None
+        self._index = -1
+        self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
 
     @torch.no_grad()
     def _init_sharded_param(
@@ -262,7 +185,7 @@ class FSDPParam:
         device: torch.device,
         shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
         mesh_info: DataParallelMeshInfo,
-    ):
+    ) -> None:
         shard_placement_result = None
         if callable(shard_placement_fn):
             shard_placement_result = resolve_shard_placement(
@@ -283,9 +206,9 @@ class FSDPParam:
             raise NotImplementedError(
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
-        # Capture the policy before parameter rewrites (e.g. spmd_types -> DTensor).
-        self._has_sharded_grad_dtype_override = param._has_grad_dtype_override
-        self.sharded_grad_dtype = param.grad_dtype
+        # Capture the policy before parameter rewrites (e.g. spmd_types -> DTensor)
+        self._init_grad_dtype_override = param._has_grad_dtype_override
+        self._init_grad_dtype = param.grad_dtype
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
         elif fsdp_placement.dim < 0:
@@ -333,83 +256,13 @@ class FSDPParam:
             shard_rank = 0
             shard_world_size = 1
 
-        chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
-        sharded_param = chunks[shard_rank]
-        self.sharded_size = _get_dim_chunked_size(
-            sharded_param, param_data.size(), dim=shard_dim
+        self.sharded_size = EngineShard(shard_dim).compute_local_shape(
+            param_data.size(), shard_rank, shard_world_size
         )
-        self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
-        padded_sharded_size = chunks[0].size()  # 0th always padded
-        self.padded_sharded_param_size = padded_sharded_size
-        self.needs_nonzero_dim_padding = (
-            shard_dim != 0 and self.sharded_size != padded_sharded_size
-        )
-        # The group's bucket copies this into its storage (bind_storage), which
-        # lets `param_data` be freed when the `fully_shard` call returns
-        self._init_shard = sharded_param
+        # The tensor whose chunks the group's engine bucket stores: the
+        # parameter, or the local tensor of a DTensor parameter
+        self.shard_source = param_data
         self._requires_grad = param.requires_grad
-        self.owns_storage = False
-
-    @property
-    def stored_size(self) -> torch.Size:
-        """The size of the sharded data in storage. Shard(0) data is stored
-        padded, so that the all-gather needs no copy to pad it. For Shard(i),
-        i > 0, padding would sit between the rows of the dims before i, so the
-        shard is stored as is."""
-        if self.fsdp_placement.dim == 0:
-            return self.padded_sharded_param_size
-        return self.sharded_size
-
-    @property
-    def slot_numel(self) -> int:
-        """The elements of this parameter's storage slot, the padded shard's on
-        every rank, so that the ranks' slots line up in the collectives."""
-        return self.padded_sharded_param_size.numel()
-
-    @torch.no_grad()
-    def bind_storage(
-        self, data: torch.Tensor | None, *, holds_param: bool = True
-    ) -> None:
-        """Keep the sharded data at the start of ``data``, this parameter's slot
-        of its group's bucket storage (``slot_numel`` elements), or, for
-        ``None``, in storage of its own, for tensor subclasses and parameters with an
-        all-gather extension at init. Copies the shard taken at init, or the
-        local tensor of a sharded parameter replaced since (to_empty,
-        load_state_dict(assign=True), a dtype change), and points the sharded
-        parameter at its slot, unless another parameter of the group holds it
-        (``holds_param=False``, a parameter tied after ``fully_shard``)."""
-        init = self._init_shard is not None
-        source = self._init_shard if init else self._sharded_local_tensor
-        if source is None:
-            raise AssertionError(f"{self._display_name} has no sharded data to bind")
-        self.owns_storage = data is None
-        if data is None:
-            data = source.new_zeros(self.slot_numel)
-            if self.offload_to_cpu and not data.is_meta:
-                data = data.cpu()
-                if self.pin_memory:
-                    data = data.pin_memory()
-        stored_numel = self.stored_size.numel()
-        stored = data if data.numel() == stored_numel else data[:stored_numel]
-        shard_dim = self.fsdp_placement.dim
-        length = self.sharded_size[shard_dim]
-        local = stored.view(self.stored_size).narrow(shard_dim, 0, length)
-        if not local.is_meta and local.numel() > 0:
-            # A replaced Shard(0) local tensor may hold the padding too
-            local.copy_(source.narrow(shard_dim, 0, length))
-        self._sharded_param_data = data.view(-1)
-        if init:
-            self._init_shard = None
-            self.sharded_param = nn.Parameter(
-                self.to_sharded_dtensor(local), requires_grad=self._requires_grad
-            )
-            if self._has_sharded_grad_dtype_override:
-                self.sharded_param.grad_dtype = self.sharded_grad_dtype
-            self._setattr_on_modules(self.sharded_param)
-            self.sharded_state = ShardedState.SHARDED
-            self._init_extensions()
-        elif holds_param:
-            cast(DTensor, self.sharded_param)._local_tensor = local
 
     def _resolve_spmd_types_for_storage(
         self,
@@ -822,129 +675,6 @@ class FSDPParam:
         )
         return param
 
-    def init_dtype_attrs(self, mp_policy: MixedPrecisionPolicy):
-        param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
-        self.orig_dtype = self.sharded_param.dtype
-        if not self._has_sharded_grad_dtype_override:
-            self.sharded_grad_dtype = self.orig_dtype
-        # Clamp `param_dtype` to `None` if no casting is required or if the
-        # parameter is non-floating-point (mixed precision is only meaningful
-        # for floating-point parameters)
-        if param_dtype == self.orig_dtype or not self.orig_dtype.is_floating_point:
-            param_dtype = None
-        self.param_dtype = param_dtype
-        self.reduce_dtype = reduce_dtype
-
-    def _init_extensions(self) -> None:
-        inner_tensor = self._sharded_local_tensor
-        has_fsdp_pre_all_gather = hasattr(inner_tensor, "fsdp_pre_all_gather")
-        has_fsdp_post_all_gather = hasattr(inner_tensor, "fsdp_post_all_gather")
-        release_all_gather_outputs_fn = getattr(
-            inner_tensor,
-            "fsdp_should_release_all_gather_outputs_after_post_all_gather",
-            None,
-        )
-        has_release_all_gather_outputs = release_all_gather_outputs_fn is not None
-        if has_fsdp_pre_all_gather != has_fsdp_post_all_gather:
-            raise AssertionError(
-                "Both fsdp_pre_all_gather and fsdp_post_all_gather should be defined "
-                f"if using all-gather extensions: {inner_tensor}"
-            )
-        if has_release_all_gather_outputs and not has_fsdp_post_all_gather:
-            raise AssertionError(
-                "fsdp_should_release_all_gather_outputs_after_post_all_gather "
-                "requires fsdp_pre_all_gather and fsdp_post_all_gather to be "
-                f"defined: {inner_tensor}"
-            )
-        if has_fsdp_pre_all_gather and isinstance(self.mesh_info, FSDPMeshInfo):
-            _validate_uneven_shard_pre_all_gather(
-                # pyrefly: ignore [missing-attribute]
-                inner_tensor.fsdp_pre_all_gather,
-                self._orig_size,
-                shard_dim=self.fsdp_placement.dim,
-                shard_world_size=self.mesh_info.shard_mesh_size,
-            )
-        self._all_gather_metadata = None
-        self._release_all_gather_outputs_after_post_all_gather = False
-        if release_all_gather_outputs_fn is not None:
-            # The extension owns whether its post-all-gather representation
-            # aliases the raw all-gather outputs, so it must declare when those
-            # outputs are no longer needed.
-            should_release = release_all_gather_outputs_fn()
-            if not isinstance(should_release, bool):
-                raise AssertionError(
-                    "fsdp_should_release_all_gather_outputs_after_post_all_gather "
-                    f"must return a bool, got {type(should_release)}"
-                )
-            if (
-                should_release
-                and self.post_forward_mesh_info is not None
-                and self.post_forward_mesh_info != self.mesh_info
-            ):
-                raise NotImplementedError(
-                    "Releasing all-gather outputs after post-all-gather is not "
-                    "supported when reshard_after_forward is an int because FSDP "
-                    "uses those outputs to construct the post-forward shard"
-                )
-            self._release_all_gather_outputs_after_post_all_gather = should_release
-
-    def check_post_forward_reshard(self, all_gather: "ParamAllGather") -> None:
-        """FSDP2's limits for resharding to a smaller mesh after forward, for a
-        parameter whose all-gather outputs ``all_gather`` holds."""
-        if self.is_dtensor:
-            raise NotImplementedError(
-                f"Resharding {self._display_name} to smaller mesh is not supported "
-                "for DTensor parameters yet"
-            )
-        if (num_outputs := len(all_gather.all_gather_outputs)) != 1:
-            raise NotImplementedError(
-                f"Resharding {self._display_name} to smaller mesh is not supported "
-                f"for all-gather extensions with {num_outputs} inputs yet"
-            )
-        if self.post_forward_mesh_info is None:
-            raise AssertionError("Expected post_forward_mesh_info to not be None")
-        shard_dim, orig_size = self.fsdp_placement.dim, self._orig_size
-        world_size = self.post_forward_mesh_info.shard_mesh_size
-        if shard_dim > 0 and orig_size.numel() and orig_size[0] % world_size:
-            # Flat post-forward shards of unpadded Shard(i>0) parameters match dim-0
-            # chunks only if the world size divides dim 0
-            raise NotImplementedError(
-                f"Resharding the Shard({shard_dim}) parameter {self._display_name} to "
-                f"{world_size} ranks after forward requires dim 0 of its size "
-                f"{tuple(orig_size)} to be divisible by {world_size}"
-            )
-        if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
-            # The post-forward parameter views a chunk of the extension's output. The
-            # largest post-forward shard is the same bound on every rank, so all
-            # ranks raise together.
-            output = all_gather.all_gather_outputs[0]
-            rows = -(-orig_size[0] // world_size)
-            shard_numel = rows * math.prod(orig_size[1:])
-            if output.numel() // world_size < shard_numel:
-                raise NotImplementedError(
-                    f"Resharding {self._display_name} to smaller mesh needs "
-                    f"post-forward shards of up to {shard_numel} elements, but its "
-                    f"all-gather extension output has {output.numel() // world_size} "
-                    "per rank"
-                )
-            if self.sharded_param.requires_grad and not (
-                output.is_floating_point() or output.is_complex()
-            ):
-                raise NotImplementedError(
-                    f"Resharding {self._display_name} to smaller mesh needs a "
-                    "floating or complex all-gather extension output to require "
-                    f"gradients, but its output has dtype {output.dtype}"
-                )
-
-    def _setattr_on_modules(self, param: nn.Parameter) -> None:
-        unsafe_setattr_param(
-            self._module_info.module, self._module_info.param_name, param
-        )
-        for shared_module, shared_param_name in zip(
-            self._module_info.shared_modules, self._module_info.shared_param_names
-        ):
-            unsafe_setattr_param(shared_module, shared_param_name, param)
-
     def to_sharded_dtensor(self, tensor: torch.Tensor) -> DTensor:
         """
         Converts a local tensor representing either the sharded parameter or
@@ -960,136 +690,60 @@ class FSDPParam:
             self._sharding_spec_by_dtype[tensor.dtype] = spec
         return _from_local_no_grad(tensor, spec)
 
-    @property
-    def all_gather_inputs(self) -> ParamAllGatherInputs:
-        sharded_local_tensor = self._sharded_local_tensor
-        if hasattr(sharded_local_tensor, "fsdp_pre_all_gather"):
-            if self.offload_to_cpu:
-                sharded_local_tensor = sharded_local_tensor.to(
-                    self.device, non_blocking=True
-                )
-            pre_all_gather_signature = inspect.signature(
-                # pyrefly: ignore [missing-attribute]
-                sharded_local_tensor.fsdp_pre_all_gather
+    def check_post_forward_reshard(self) -> None:
+        """FSDP2's limit for resharding DTensor parameters to a smaller mesh
+        after forward."""
+        if self.is_dtensor:
+            raise NotImplementedError(
+                f"Resharding {self._display_name} to smaller mesh is not supported "
+                "for DTensor parameters yet"
             )
-            num_fn_params = len(pre_all_gather_signature.parameters)
-            # Old signature only passes mesh; keep for BC for now
-            if num_fn_params not in (1, 5):
-                raise AssertionError(
-                    f"Invalid fsdp_pre_all_gather: {pre_all_gather_signature}\n"
-                    "Expects fsdp_pre_all_gather(self, mesh: DeviceMesh, "
-                    "outer_size: torch.Size, outer_stride: tuple[int, ...], "
-                    "module: nn.Module, mp_policy: MixedPrecisionPolicy)"
-                )
-            if num_fn_params == 1:
-                (
-                    all_gather_inputs,
-                    self._all_gather_metadata,
-                    # pyrefly: ignore [missing-attribute]
-                ) = sharded_local_tensor.fsdp_pre_all_gather(self.shard_mesh_from_root)
-            else:
-                (
-                    all_gather_inputs,
-                    self._all_gather_metadata,
-                    # pyrefly: ignore [missing-attribute]
-                ) = sharded_local_tensor.fsdp_pre_all_gather(
-                    self.shard_mesh_from_root,
-                    self._orig_size,
-                    self._contiguous_orig_stride,
-                    self._module_info.module,
-                    self.mp_policy,
-                )
-            # Only the 5-argument hook gets outer_size to pad with (#137005), so
-            # only its Tensor inputs are checked for the padded sharded size
-            return ParamAllGatherInputs(
-                all_gather_inputs, from_extension=True, check_padding=num_fn_params == 5
-            )
-        sharded_param_data = self._sharded_param_data
-        if self.offload_to_cpu:
-            sharded_param_data = sharded_param_data.to(self.device, non_blocking=True)
-        if self.needs_nonzero_dim_padding:
-            dim = self.fsdp_placement.dim
-            padded = sharded_param_data.new_zeros(
-                self.padded_sharded_param_size, dtype=self.param_dtype
-            )
-            padded.narrow(dim, 0, self.sharded_size[dim]).copy_(
-                sharded_param_data[: self.sharded_size.numel()].view(self.sharded_size)
-            )
-            return ParamAllGatherInputs([padded.view(-1)])
-        return ParamAllGatherInputs(
-            [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
-        )
 
-    def post_all_gather(
-        self, all_gather_outputs: tuple[torch.Tensor, ...], out: nn.Parameter | None
-    ) -> tuple[torch.Tensor, Sequence[torch.Tensor]] | None:
-        """Run the all-gather extension's ``fsdp_post_all_gather``, if any (see
-        ``ParamRepresentation.post_all_gather``)."""
-        inner_tensor = self._sharded_local_tensor
-        if not hasattr(inner_tensor, "fsdp_post_all_gather"):
-            return None
-        dtype = self.param_dtype or self.orig_dtype
-        metadata, self._all_gather_metadata = self._all_gather_metadata, None
-        if out is not None:
-            inner_tensor.fsdp_post_all_gather(
-                all_gather_outputs, metadata, dtype, out=out
-            )
-            return None
-        unsharded_tensor, inner_tensors = inner_tensor.fsdp_post_all_gather(
-            all_gather_outputs, metadata, dtype
-        )
-        shard_dim = self.fsdp_placement.dim
-        if (
-            shard_dim != 0
-            and isinstance(self.mesh_info, FSDPMeshInfo)
-            and self._orig_size[shard_dim] % self.mesh_info.shard_mesh_size
-            and unsharded_tensor.numel() != self._orig_size.numel()
-        ):
-            # Unlike Shard(0) padding, which a prefix of the output drops,
-            # padding inside the rows must be dropped by the extension. Every
-            # rank gets the same output, so every rank raises.
-            raise ValueError(
-                f"{self._display_name} is unevenly sharded on dim {shard_dim}, "
-                "so fsdp_post_all_gather must drop the padding in each row of "
-                "the all-gather outputs and return the "
-                f"{tuple(self._orig_size)} parameter, but it returned a tensor "
-                f"of size {tuple(unsharded_tensor.size())}"
-            )
-        return unsharded_tensor, inner_tensors
+    def refresh(self, sharded_param: nn.Parameter) -> None:
+        """Re-read the spec of a sharded parameter that a module may have
+        replaced (``nn.Module._apply``, ``load_state_dict(assign=True)``)."""
+        if not isinstance(sharded_param, DTensor):
+            raise AssertionError(f"Expected DTensor, got {type(sharded_param)}")
+        self._sharding_spec = sharded_param._spec
+        self._sharding_spec_by_dtype.clear()
+
+    # The engine bucket's state of this parameter, which tools read #
+    @property
+    def _bucket_param(self):
+        if self._group is None:
+            raise AssertionError(f"{self._display_name} has no group yet")
+        return self._group.bucket.bucket_params[self._index]
 
     @property
-    def _display_name(self) -> str:
-        # The FQN is set in lazy init
-        return self._param_fqn or self._module_info.param_name
+    def sharded_param(self) -> nn.Parameter:  # ND
+        return self._bucket_param.sharded_param
+
+    @property
+    def _sharded_param_data(self) -> torch.Tensor:
+        return cast("FullyShardBucket", self._group).homing.slots[self._index]
+
+    @property
+    def _unsharded_param(self) -> nn.Parameter:
+        params = cast("FullyShardBucket", self._group).bucket.unsharded_params
+        if params is None:
+            raise AttributeError(f"{self._display_name} has not been unsharded yet")
+        return params[self._index]
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
         return self._unsharded_param
 
     @property
-    def unsharded_grad_dtype(self) -> torch.dtype | None:
-        if self.reduce_dtype is not None:
-            return self.reduce_dtype
-        if self._has_sharded_grad_dtype_override:
-            return self.sharded_grad_dtype
-        # Use the original parameter dtype recorded at lazy initialization.
-        return self.orig_dtype
-
-    @property
     def unsharded_accumulated_grad(self) -> torch.Tensor | None:
         # The autograd leaf owns accumulation even while its parameter data is
-        # resharded. Never fold reduced history into this native-dtype buffer.
-        # Unused within FSDP; kept to avoid breaking potential external callers.
-        param = getattr(self, "_unsharded_param", None)
-        return param.grad if param is not None else None
+        # resharded. Kept to avoid breaking potential external callers.
+        params = cast("FullyShardBucket", self._group).bucket.unsharded_params
+        return params[self._index].grad if params is not None else None
 
     @property
-    def unsharded_zero_grad_data(self) -> torch.Tensor:
-        # Use the dtype autograd would produce so group gradients stay uniform
-        param = self.unsharded_param
-        return self._get_grad_inner_tensor(
-            torch.zeros_like(param, dtype=param.grad_dtype)
-        )
+    def _display_name(self) -> str:
+        # The FQN is set in lazy init
+        return self._param_fqn or self._module_info.param_name
 
     @property
     def may_reduce_grad_outside_dp(self) -> bool:
@@ -1112,32 +766,6 @@ class FSDPParam:
             isinstance(placement, Replicate)
             for i, placement in enumerate(spec.placements)
             if i not in dp_dims
-        )
-
-    @property
-    def defers_grad_upcast(self) -> bool:
-        """Whether a forward and its backward may set the unsharded
-        ``grad_dtype=None`` so that autograd leaves gradients in the compute
-        dtype instead of casting each one to the unsharded gradient dtype. The
-        reduce-scatter copy-in widens fresh gradients, AccumulateGrad adds later
-        ones in place to accumulated wider ones, and post-backward widens a fresh
-        gradient that isn't reduced. Gradients from several uses in one such
-        backward are summed in the compute dtype."""
-        grad_dtype = self.unsharded_grad_dtype
-        compute_dtype = self.param_dtype or self.orig_dtype
-        # A larger floating-point dtype holds a smaller one exactly (e.g. fp32
-        # and bf16). Compare sizes since torch.promote_types rejects float8.
-        # Gradients reduced outside DP keep autograd's upcast so that reduction
-        # runs in the wider dtype too. All-gather extensions run their own
-        # compute, which may read grad_dtype to pick the dtype its backward
-        # produces, so it stays fixed for them.
-        return (
-            grad_dtype is not None
-            and compute_dtype.is_floating_point
-            and grad_dtype.is_floating_point
-            and grad_dtype.itemsize > compute_dtype.itemsize
-            and not self.may_reduce_grad_outside_dp
-            and not hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather")
         )
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
@@ -1212,65 +840,8 @@ class FSDPParam:
     def shard_mesh_from_root(self):
         return self.shard_mesh
 
-    def _capture_grad_dtype_policy(self, param: nn.Parameter) -> None:
-        # Parameters rebuilt by nn.Module._apply or load_state_dict(assign=True)
-        # lose grad_dtype, and an override cannot be unset, so only an explicit
-        # grad_dtype on the parameter updates the policy.
-        if param._has_grad_dtype_override:
-            self._has_sharded_grad_dtype_override = True
-            self.sharded_grad_dtype = param.grad_dtype
-
-    def reset_sharded_param(self):
-        # Re-read the sharded parameter after ops like `nn.Module._apply` or
-        # `load_state_dict(assign=True)` that may replace it or its local tensor.
-        module_info = self._module_info
-        new_param = getattr(module_info.module, module_info.param_name)
-        self._capture_grad_dtype_policy(self.sharded_param)
-        if new_param is not self.sharded_param:
-            if torch.__future__.get_swap_module_params_on_conversion():
-                raise AssertionError(
-                    f"Expects swap_tensors to preserve object but got {new_param} "
-                    f"instead of {self.sharded_param}"
-                )
-            self._capture_grad_dtype_policy(new_param)
-            self.sharded_param = new_param
-        if not self._has_sharded_grad_dtype_override:
-            self.sharded_grad_dtype = new_param.dtype
-        elif not new_param._has_grad_dtype_override:
-            new_param.grad_dtype = self.sharded_grad_dtype
-        local_tensor = new_param._local_tensor
-        if local_tensor.is_meta:
-            return
-        if not isinstance(self.sharded_param, DTensor):
-            raise AssertionError(f"Expected DTensor, got {type(self.sharded_param)}")
-        accepted = (self.sharded_size, self.stored_size)
-        if local_tensor.size() not in accepted:
-            raise AssertionError(
-                f"{self._display_name} expects a local tensor of size "
-                f"{self.sharded_size} but got {local_tensor.size()}"
-            )
-        if self.owns_storage and not _same_storage_slot(
-            local_tensor, self._sharded_param_data
-        ):
-            self.bind_storage(None)
-        # Otherwise the group's bucket copies a replaced local tensor into its
-        # storage (FullyShardBucket.refresh)
-        self._sharding_spec = self.sharded_param._spec
-        self._sharding_spec_by_dtype.clear()
-
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
-
-
-def _same_storage_slot(tensor: torch.Tensor, data: torch.Tensor) -> bool:
-    """Whether ``tensor`` starts at ``data`` in the same storage, compared by
-    identity since empty storages all have data_ptr() 0 (e.g. a rank's shard of
-    a (1, ...) parameter over 2 ranks)."""
-    return bool(
-        tensor.untyped_storage()._cdata == data.untyped_storage()._cdata
-        and tensor.storage_offset() * tensor.element_size()
-        == data.storage_offset() * data.element_size()
-    )
 
 
 def _get_dtensor_spec_with_dtype(spec: DTensorSpec, dtype: torch.dtype) -> DTensorSpec:
@@ -1281,47 +852,3 @@ def _get_dtensor_spec_with_dtype(spec: DTensorSpec, dtype: torch.dtype) -> DTens
         spec,
         tensor_meta=TensorMeta(tensor_meta.shape, tensor_meta.stride, dtype),
     )
-
-
-# NOTE: These bypass `nn.Module.__setattr__` checks, which incur non-trivial
-# CPU overhead, if the module did not override it. For FSDP, we know we do not
-# need those checks when transitioning between sharded/unsharded parameters.
-def unsafe_setattr_param(
-    module: nn.Module, param_name: str, param: nn.Parameter
-) -> None:
-    if getattr(module.__setattr__, "__func__", None) is nn.Module.__setattr__:
-        module._parameters[param_name] = param
-    else:  # slow path
-        setattr(module, param_name, param)
-
-
-def set_requires_grad_if_needed(
-    src_tensor: torch.Tensor, dst_tensor: torch.Tensor
-) -> None:
-    # Only call `requires_grad_` if needed to avoid the Python <> C++ context
-    # switch overhead
-    if src_tensor.requires_grad != dst_tensor.requires_grad:
-        dst_tensor.requires_grad_(src_tensor.requires_grad)
-
-
-def _validate_uneven_shard_pre_all_gather(
-    pre_all_gather: Callable[..., Any],
-    orig_size: torch.Size,
-    *,
-    shard_dim: int,
-    shard_world_size: int,
-) -> None:
-    """
-    Raises if the parameter is unevenly sharded on a nonzero dim and its
-    ``fsdp_pre_all_gather`` takes only ``mesh``: only the 5-argument hook gets
-    ``outer_size`` to pad its shard with (#137005).
-    """
-    uneven = shard_dim != 0 and orig_size[shard_dim] % shard_world_size != 0
-    if uneven and len(inspect.signature(pre_all_gather).parameters) == 1:
-        raise NotImplementedError(
-            f"FSDP does not support uneven sharding on dim {shard_dim} for "
-            "all-gather extensions whose fsdp_pre_all_gather takes only "
-            f"mesh: {orig_size} (world size: {shard_world_size}). Use "
-            "fsdp_pre_all_gather(self, mesh, outer_size, outer_stride, module, "
-            "mp_policy) to get the unsharded size to pad the shard with."
-        )

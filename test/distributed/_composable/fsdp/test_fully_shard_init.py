@@ -10,14 +10,12 @@ import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._flex_shard.param_homing import param_owners
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_managed_modules,
     _get_managed_states,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import (
-    _get_param_module_infos,
-    ParamModuleInfo,
-)
+from torch.distributed.fsdp._fully_shard._fsdp_param import ParamModuleInfo
 from torch.distributed.fsdp._fully_shard._fully_shard import FSDPModule
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
@@ -341,6 +339,18 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         self.assertEqual(len(managed_buffers), len(expected_managed_buffers))
         self.assertEqual(set(managed_params), set(expected_managed_params))
         self.assertEqual(set(managed_buffers), set(expected_managed_buffers))
+
+
+def _get_param_module_infos(params, modules):
+    return [
+        ParamModuleInfo(
+            owner.module,
+            owner.param_name,
+            [shared.module for shared in shared_owners],
+            [shared.param_name for shared in shared_owners],
+        )
+        for owner, shared_owners in param_owners(params, modules)
+    ]
 
 
 class TestFullyShardParamModuleInfos(FSDPTestMultiThread):

@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 import torch
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp._flex_shard import bucket_runtime, BucketSpec, flex_shard
+from torch.distributed.fsdp._flex_shard import BucketSpec, flex_shard
 from torch.distributed.fsdp._flex_shard.placements.shard import per_param_placements
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
@@ -93,7 +93,7 @@ class TestFlexShardCUDAGraph(FSDPTest):
 
     def _assert_idle(self, model: torch.nn.Module, context: str) -> None:
         """Nothing a step started is left for the next one, as with FSDP2."""
-        contexts = getattr(model, bucket_runtime._EAGER_COMM_CONTEXTS_ATTR).values()
+        contexts = model._contexts()
         for comm_context in contexts:
             for bucket in comm_context.buckets:
                 self.assertFalse(bucket.is_unsharded, msg=context)

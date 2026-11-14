@@ -155,6 +155,18 @@ class TestFullyShardEngine(FSDPTest):
             )
 
     @skip_if_lt_x_gpu(2)
+    def test_empty_shards_stay_homed(self):
+        # A (1, 16) weight leaves every rank but 0 an empty shard, whose local
+        # tensor reports data_ptr() 0 while its slot does not: a rank taking
+        # that for a replaced parameter would re-home alone at each unshard
+        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 1)).to(device_type)
+        fully_shard(model)
+        model(torch.randn(4, 16, device=device_type)).sum().backward()
+        model.unshard()
+        model.reshard()
+        self.assertTrue(model._get_fsdp_state()._fsdp_param_groups[0].homing.homed())
+
+    @skip_if_lt_x_gpu(2)
     def test_state_dict_deepcopy_and_save(self):
         # The sharded parameters' local tensors view the bucket at nonzero
         # offsets, which the state dict's detached DTensors keep
@@ -193,7 +205,7 @@ class TestFullyShardEngine(FSDPTest):
                 param.copy_(ref_param)
         inp = torch.randn(4, 16, device=device_type)
         self.assertEqual(model(inp), reference(inp))
-        self.assertTrue(model[0]._get_fsdp_state()._fsdp_param_groups[0].homed())
+        self.assertTrue(model[0]._get_fsdp_state()._fsdp_param_groups[0].homing.homed())
 
     @skip_if_lt_x_gpu(2)
     def test_meta_init_and_load_state_dict_assign(self):
@@ -215,7 +227,7 @@ class TestFullyShardEngine(FSDPTest):
         }
         model.load_state_dict(sharded_sd, assign=True)
         actual = self._train_step(model, torch.float32)
-        self.assertTrue(model._get_fsdp_state()._fsdp_param_groups[0].homed())
+        self.assertTrue(model._get_fsdp_state()._fsdp_param_groups[0].homing.homed())
         self.assertEqual(len(expected), len(actual))
         for exp, act in zip(expected, actual):
             self.assertEqual(exp, act, atol=0, rtol=0)

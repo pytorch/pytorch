@@ -25,6 +25,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp._flex_shard import (
     BucketSpec,
@@ -44,6 +45,8 @@ from torch.distributed.fsdp._flex_shard.bucket_storage import (
 )
 from torch.distributed.fsdp._flex_shard.flex_shard import (
     _materialize_bucket_storages,
+    build_flex_bucket,
+    FlexShardModule,
     PreparedFlexShardInputs,
 )
 from torch.distributed.fsdp._flex_shard.placements.block_shard import BlockShard
@@ -81,6 +84,7 @@ from torch.testing._internal.distributed.common_flex_shard import (
     transformer_bucket_specs,
     transformer_inputs,
 )
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 device_type = torch.device(get_devtype())
@@ -416,7 +420,7 @@ class TestBucketPlacementValidation(TestCase):
                         )
                     ],
                 )
-            self.assertFalse(hasattr(model, "_sharded_bucket_storages"))
+            self.assertNotIsInstance(model, FlexShardModule)
 
     def test_flex_shard_mixes_shard_dims_in_one_bucket(self):
         class TwoParamModule(nn.Module):
@@ -530,6 +534,58 @@ class TestBucketPlacementValidation(TestCase):
             ],
         )
 
+    def test_params_with_storage_of_their_own_require_shard(self):
+        # A tensor subclass parameter keeps storage of its own, whose
+        # all-gather inputs only Shard buckets ask for
+        def block_placement(named_params, mesh):
+            del mesh
+            return {fqn: (BlockShard(blocks_per_rank=(1,)),) for fqn, _ in named_params}
+
+        with single_rank_cuda_mesh() as mesh:
+            model = nn.Linear(4, 4, bias=False, device=device_type)
+            weight = model.weight.detach()
+            model.weight = nn.Parameter(TwoTensor(weight, weight.clone()))
+            with self.assertRaisesRegex(ValueError, "keeps storage of its own"):
+                flex_shard(
+                    model,
+                    buckets=[
+                        BucketSpec(["*"], placement_fn=block_placement, mesh=mesh)
+                    ],
+                )
+
+    def test_all_gather_extensions_get_the_bucket_mesh(self):
+        meshes = []
+
+        def fsdp_pre_all_gather(self, mesh, outer_size, outer_stride, module, policy):
+            meshes.append(mesh)
+            return (self.to(torch.bfloat16),), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(self, outputs, metadata, param_dtype, *, out=None):
+            (tensor,) = outputs
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(tensor)
+                return None
+            upcast = tensor.to(param_dtype)
+            return upcast, (tensor, upcast)
+
+        with single_rank_cuda_mesh() as mesh:
+            model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4)).to(device_type)
+            flex_shard(
+                model,
+                buckets=[
+                    BucketSpec(["*"], placement_fn=per_param_placements, mesh=mesh)
+                ],
+            )
+            for param in model.parameters():
+                param.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(param)
+                param.fsdp_post_all_gather = fsdp_post_all_gather.__get__(param)
+            for _ in range(2):
+                model(torch.randn(2, 4, device=device_type)).sum().backward()
+            self.assertGreater(len(meshes), 0)
+            self.assertTrue(all(m is mesh for m in meshes))
+
     def test_fsdp2_compatible_requires_shard(self):
         def block_placement(named_params, mesh):
             del mesh
@@ -549,7 +605,7 @@ class TestBucketPlacementValidation(TestCase):
                         )
                     ],
                 )
-            self.assertFalse(hasattr(model, "_sharded_bucket_storages"))
+            self.assertNotIsInstance(model, FlexShardModule)
 
 
 class TestBucketReduceDtype(TestCase):
@@ -976,12 +1032,10 @@ class TestDistributedBuckets(FSDPTest):
             mesh=mesh,
             reshard_after_forward=False,
         )
-        storage = ShardedBucketStorage.from_bucket(
+        storage = build_flex_bucket(
             model,
             named_params,
             placements,
-            mesh,
-            device,
             bucket_spec,
         )
         infos = [storage.param_infos[fqn] for fqn, _ in named_params]

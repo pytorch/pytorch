@@ -515,7 +515,7 @@ class TestFlexShardTraining(FSDPTest):
                 )
             ],
         )
-        comm_context = next(iter(model._flex_shard_eager_comm_contexts.values()))
+        comm_context = model._runtimes()[0].context
         torch.cuda.empty_cache()
 
         original_finish_prepared_unshard = placement_type.finish_prepared_unshard
@@ -1121,12 +1121,11 @@ class TestFlexShardTraining(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_finalize_backward(self):
         # Grads accumulated without sync reduce-scatter outside backward, as a
-        # pipeline stage does after its last backward: after automatic
-        # finalization at each backward's end, and in manual mode, where
-        # backward finishes nothing itself.
+        # pipeline stage does after its last backward, in manual mode, where
+        # backward finishes nothing itself, as FSDP2's finalize_backward.
         mesh = init_device_mesh(device_type.type, (self.world_size,))
-        for manual, async_op in ((False, True), (True, False)):
-            with self.subTest(manual=manual, async_op=async_op):
+        for async_op in (True, False):
+            with self.subTest(async_op=async_op):
                 torch.manual_seed(0)
                 model = torch.nn.Sequential(
                     torch.nn.Linear(8, 8), torch.nn.ReLU(), torch.nn.Linear(8, 6)
@@ -1143,7 +1142,7 @@ class TestFlexShardTraining(FSDPTest):
                         )
                     ],
                 )
-                model.set_manual_backward_finalization(manual)
+                model.set_manual_backward_finalization(True)
                 model.set_requires_gradient_sync(False)
                 model.set_reshard_after_backward(False)
                 torch.manual_seed(1 + self.rank)
@@ -1155,7 +1154,7 @@ class TestFlexShardTraining(FSDPTest):
                 model.set_reshard_after_backward(True)
                 handle = model.finalize_backward(async_op=async_op)
                 if async_op:
-                    with self.assertRaisesRegex(RuntimeError, "wait on the previous"):
+                    with self.assertRaisesRegex(RuntimeError, "must be waited on"):
                         model.finalize_backward()
                     handle.wait()
                 else:
@@ -1361,7 +1360,7 @@ class TestFlexShardTraining(FSDPTest):
                 for pattern in ("0.*", "2.*")
             ],
         )
-        (context,) = getattr(model, bucket_runtime._EAGER_COMM_CONTEXTS_ATTR).values()
+        (context,) = model._contexts()
         handle = model.unshard(async_op=True)
         self.assertEqual(len(context.pending_unshards), 2)
         self.assertFalse(any(bucket.is_unsharded for bucket in context.buckets))
@@ -1499,7 +1498,7 @@ class TestFlexShardTraining(FSDPTest):
             self.assertTrue(torch.equal(output, reference_output))
             with RecordStreams():
                 output.sum().backward()
-            for context in model._flex_shard_eager_comm_contexts.values():
+            for context in model._contexts():
                 self.assertNotIn(context.reduce_grad_stream, backward_streams)
             reference_output.sum().backward()
             for param, reference_param in zip(
@@ -1535,11 +1534,7 @@ class TestFlexShardTraining(FSDPTest):
                 for pattern in ("0.*", "2.*")
             ],
         )
-        bucket = [
-            bucket
-            for context in model._flex_shard_eager_comm_contexts.values()
-            for bucket in context.buckets
-        ][-1]
+        bucket = model._runtimes()[-1]
         handle = bucket.begin_unshard()
         send_buf, gather_buf = handle.prepared.buffers
         self.assertEqual(
@@ -1583,7 +1578,7 @@ class TestFlexShardTraining(FSDPTest):
         # stream keeping them reserved.
         mesh = init_device_mesh(device_type.type, (self.world_size,))
         model = self._two_bucket_mlp(mesh)
-        (context,) = getattr(model, bucket_runtime._EAGER_COMM_CONTEXTS_ATTR).values()
+        (context,) = model._contexts()
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
         for _ in range(2):
@@ -2086,7 +2081,6 @@ class TestFlexShardTraining(FSDPTest):
         self.assertEqual(unsharded_param.grad_dtype, torch.float32)
         self.assertEqual(unsharded_param.grad.dtype, torch.float32)
         # A backward without sync then adds 1 to the kept 256 in fp32.
-        model.set_manual_backward_finalization(False)
         model.set_requires_gradient_sync(False)
         model(x).backward()
         grad = unsharded_param.grad
