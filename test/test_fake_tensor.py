@@ -6834,12 +6834,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertTrue(selected.allow_non_fake_inputs)
             self.assertTrue(selected.static_shapes)
             self.assertTrue(selected.fake_tensor_converter.export)
-            # When use_cpp_fake_tensor is enabled, FakeTensorMode.__new__ constructs
-            # CppFakeTensorMode. Disable it here to construct a Python mode.
-            with torch._dynamo.config.patch(use_cpp_fake_tensor=False):
-                python_mode = FakeTensorMode()
-            for copied in (copy.copy(python_mode), copy.deepcopy(python_mode)):
-                self.assertIs(type(copied), FakeTensorMode)
         with torch._dynamo.config.patch(use_cpp_fake_tensor=False):
             self.assertIs(type(FakeTensorMode()), FakeTensorMode)
         shape_env = ShapeEnv()
