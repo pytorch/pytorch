@@ -8,6 +8,11 @@ the bucket gathers parameters and reduces gradients. Parameters stay plain
 :func:`get_placements` and :func:`get_global_layout`); optimizers see ordinary
 local tensors.
 
+Buckets take ``fully_shard``'s :class:`~torch.distributed.fsdp.MixedPrecisionPolicy`
+and :class:`~torch.distributed.fsdp.OffloadPolicy`, and placement functions
+return DTensor's :class:`~torch.distributed.tensor.Shard` for parameters sharded
+on a dim, or one of the placements below.
+
 ``fully_shard`` and ``flex_shard`` share one engine in
 ``torch.distributed.fsdp._flex_shard``: placements and bucket storage.
 ``flex_shard`` schedules its buckets with the engine's bucket runtime;
@@ -34,8 +39,6 @@ from torch.distributed.fsdp._flex_shard import (
     init_from_full,
     is_flex_shard_param,
     LocalStorageLayout,
-    MixedPrecisionPolicy,
-    OffloadPolicy,
     Placement,
     register_optimizer_checkpoint_hook,
     relayout_bucket,
@@ -53,7 +56,6 @@ from torch.distributed.fsdp._flex_shard.placements import (
     make_shard_placement_fn,
     MixedBucketPlacement,
     per_param_placements,
-    Shard,
 )
 
 
@@ -82,8 +84,6 @@ __all__ = [
     "make_bucketed_owned_full_param_placement_fn",
     "make_shard_placement_fn",
     "MixedBucketPlacement",
-    "MixedPrecisionPolicy",
-    "OffloadPolicy",
     "per_param_placements",
     "Placement",
     "register_optimizer_checkpoint_hook",
@@ -91,7 +91,6 @@ __all__ = [
     "set_global_layout",
     "set_partial_grad_group",
     "set_state_dict_global_layouts",
-    "Shard",
 ]
 
 # The public names are defined in the private engine package

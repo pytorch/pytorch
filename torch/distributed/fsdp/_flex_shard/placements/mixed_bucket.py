@@ -261,6 +261,9 @@ class _MixedShard0(_MixedBucketMember, Shard):
 
     __eq__ = _MixedBucketMember.__eq__
     __hash__ = _MixedBucketMember.__hash__
+    # Its bucket's collective is the mixed bucket's
+    matches_fsdp2_collectives = False
+    supports_cpu_offload = False
 
     def __init__(self, mixed_bucket: MixedBucketPlacement) -> None:
         Shard.__init__(self, 0)

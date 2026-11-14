@@ -15,6 +15,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
+from torch.distributed.tensor import Shard as DTensorShard
 
 from ..all_gather_layout import (
     AllGatherInputMetadata,
@@ -44,6 +45,8 @@ from .utils import foreach_copy_, reduce_grads_on_one_rank, reduce_scatter_grads
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from torch.distributed.device_mesh import DeviceMesh
 
     from ..all_gather_layout import AllGatherLayout
@@ -78,6 +81,8 @@ class Shard(Placement):
     # Finish copies the gathered values into a refill's persistent buffers;
     # run gathers into a separate buffer.
     refills_persistent_buffers_in_finish = True
+    matches_fsdp2_collectives = True
+    supports_cpu_offload = True
 
     @dataclass(frozen=True)
     class _ReduceGradLayout:
@@ -132,6 +137,10 @@ class Shard(Placement):
 
     def __init__(self, dim: int = 0):
         self.dim = dim
+
+    @override
+    def _api_placement(self) -> DTensorShard:
+        return DTensorShard(self.dim)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Shard):
@@ -1192,15 +1201,29 @@ def reduce_scatter_input_fn(
     return copy_in
 
 
+def _engine_placements(
+    param_placements: Mapping[str, tuple[Placement | DTensorShard, ...]],
+) -> dict[str, tuple[Placement, ...]]:
+    """``placement_fn``'s placements, with DTensor's ``Shard(dim)`` as the
+    engine's ``Shard(dim)``."""
+    return {
+        fqn: tuple(
+            Shard(placement.dim) if isinstance(placement, DTensorShard) else placement
+            for placement in placements
+        )
+        for fqn, placements in param_placements.items()
+    }
+
+
 def make_shard_placement_fn(dim: int = 0) -> PlacementFn:
-    """Return a placement function assigning ``Shard(dim)`` per parameter."""
+    """Return a placement function assigning DTensor's ``Shard(dim)`` per parameter."""
 
     def placement_fn(
         named_params: list[tuple[str, nn.Parameter]],
         mesh: DeviceMesh,
-    ) -> dict[str, tuple[Placement, ...]]:
+    ) -> dict[str, tuple[DTensorShard]]:
         del mesh
-        return {fqn: (Shard(dim),) for fqn, _ in named_params}
+        return {fqn: (DTensorShard(dim),) for fqn, _ in named_params}
 
     return placement_fn
 
@@ -1208,9 +1231,10 @@ def make_shard_placement_fn(dim: int = 0) -> PlacementFn:
 def per_param_placements(
     named_params: list[tuple[str, nn.Parameter]],
     mesh: DeviceMesh,
-) -> dict[str, tuple[Placement, ...]]:
-    """Shard(0) per parameter (FSDP2-style)."""
-    return make_shard_placement_fn(0)(named_params, mesh)
+) -> dict[str, tuple[DTensorShard]]:
+    """DTensor's ``Shard(0)`` per parameter (FSDP2-style)."""
+    del mesh
+    return {fqn: (DTensorShard(0),) for fqn, _ in named_params}
 
 
 __all__ = [

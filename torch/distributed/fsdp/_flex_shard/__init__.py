@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from .bucket_storage import BucketSpec, MixedPrecisionPolicy, OffloadPolicy, PlacementFn
+from .bucket_storage import BucketSpec, PlacementFn
 from .checkpoint import (
     get_flex_shard_global_layouts,
     register_optimizer_checkpoint_hook,
@@ -50,8 +50,6 @@ __all__ = [
     "init_from_full",
     "is_flex_shard_param",
     "LocalStorageLayout",
-    "MixedPrecisionPolicy",
-    "OffloadPolicy",
     "Placement",
     "PlacementFn",
     "register_optimizer_checkpoint_hook",

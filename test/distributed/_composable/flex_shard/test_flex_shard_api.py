@@ -5,11 +5,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from dataclasses import replace
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed.fsdp import CPUOffloadPolicy, MixedPrecisionPolicy
 from torch.distributed.fsdp._flex_shard import (
     BucketSpec,
     flex_shard,
@@ -17,13 +17,10 @@ from torch.distributed.fsdp._flex_shard import (
     get_placements,
     GradientReduction,
     is_flex_shard_param,
-    MixedPrecisionPolicy,
-    OffloadPolicy,
 )
-from torch.distributed.fsdp._flex_shard.placements.shard import (
-    per_param_placements,
-    Shard,
-)
+from torch.distributed.fsdp._flex_shard.placements.block_shard import BlockShard
+from torch.distributed.fsdp._flex_shard.placements.shard import per_param_placements
+from torch.distributed.tensor import Shard
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -141,47 +138,51 @@ class TestFlexShardAPI(TestCase):
         with self.assertRaisesRegex(ValueError, "requires gradient_reduce_op=AVG"):
             GradientReduction(dist.ReduceOp.SUM, 2)
 
-    def test_offload_policy_is_rejected_until_supported(self):
+    def test_cpu_offload_requires_placements_that_support_it(self):
+        def block_placements(named_params, mesh):
+            del mesh
+            return {fqn: (BlockShard(blocks_per_rank=(1,)),) for fqn, _ in named_params}
+
         with single_rank_cuda_mesh() as mesh:
             _, model = make_transformer_model()
-            with self.assertRaisesRegex(NotImplementedError, "offload_policy"):
+            with self.assertRaisesRegex(NotImplementedError, "support CPU offload"):
                 flex_shard_cuda(
                     model,
                     mesh,
                     buckets=[
                         BucketSpec(
                             ["*"],
-                            placement_fn=per_param_placements,
+                            placement_fn=block_placements,
                             mesh=mesh,
-                            offload_policy=OffloadPolicy(pin_memory=False),
+                            offload_policy=CPUOffloadPolicy(pin_memory=False),
                             reshard_after_forward=False,
                         )
                     ],
                 )
 
-    def test_param_dtype_overrides_span_buckets_sharing_the_policy(self):
-        bf16 = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
-        with_override = replace(bf16, param_dtype_overrides={"1.weight": torch.float32})
-
+    def test_param_dtype_override_fn(self):
         with single_rank_cuda_mesh() as mesh:
 
-            def shard(*policies):
+            def shard(override_dtype):
                 model = nn.Sequential(
                     nn.Linear(4, 4, bias=False), nn.Linear(4, 4, bias=False)
                 )
-                buckets = [
-                    BucketSpec(
-                        [f"{i}.*"],
-                        placement_fn=per_param_placements,
-                        mesh=mesh,
-                        mp_policy=policy,
-                        reshard_after_forward=False,
-                    )
-                    for i, policy in enumerate(policies)
-                ]
-                return flex_shard_cuda(model, mesh, buckets=buckets)
+                mp_policy = MixedPrecisionPolicy(
+                    param_dtype=torch.bfloat16,
+                    param_dtype_override_fn=lambda param: (
+                        override_dtype if param is model[1].weight else None
+                    ),
+                )
+                bucket = BucketSpec(
+                    ["*"],
+                    placement_fn=per_param_placements,
+                    mesh=mesh,
+                    mp_policy=mp_policy,
+                    reshard_after_forward=False,
+                )
+                return flex_shard_cuda(model, mesh, buckets=[bucket])
 
-            model = shard(with_override, with_override)
+            model = shard(torch.float32)
             unsharded_dtypes = {
                 fqn: info.unsharded_dtype
                 for storage in model.sharded_bucket_storages
@@ -191,9 +192,39 @@ class TestFlexShardAPI(TestCase):
                 unsharded_dtypes,
                 {"0.weight": torch.bfloat16, "1.weight": torch.float32},
             )
+            with self.assertRaisesRegex(ValueError, "param_dtype_override_fn"):
+                shard(torch.float16)
 
-            with self.assertRaisesRegex(ValueError, r"\['1\.weight'\]"):
-                shard(with_override, bf16)
+    def test_mixed_precision_casts_at_hooked_modules(self):
+        with single_rank_cuda_mesh() as mesh:
+            model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4))
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, output_dtype=torch.float32
+            )
+            buckets = [
+                BucketSpec([name], per_param_placements, mesh, mp_policy=mp_policy)
+                for name in ("0", "1")
+            ]
+            flex_shard_cuda(model, mesh, buckets=buckets)
+            input_dtypes = []
+            for linear in model:
+                linear.register_forward_pre_hook(
+                    lambda module, args: input_dtypes.append(args[0].dtype)
+                )
+            output = model(torch.randn(2, 4, device="cuda"))
+            self.assertEqual(input_dtypes, [torch.bfloat16] * 2)
+            self.assertEqual(output.dtype, torch.float32)
+
+            # Buckets that hook one module must cast alike
+            no_cast = MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, cast_forward_inputs=False
+            )
+            buckets = [
+                BucketSpec(["weight"], per_param_placements, mesh, mp_policy=mp_policy),
+                BucketSpec(["bias"], per_param_placements, mesh, mp_policy=no_cast),
+            ]
+            with self.assertRaisesRegex(ValueError, "must cast its forward inputs"):
+                flex_shard_cuda(nn.Linear(4, 4), mesh, buckets=buckets)
 
     def test_cpu_mesh_is_rejected(self):
         with single_rank_cpu_mesh() as mesh:
