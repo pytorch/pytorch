@@ -6290,17 +6290,43 @@ def meta_zeros(
 
 @register_meta(aten.select_scatter.default)
 def meta_select_scatter(self, src, dim, index):
+    dim = maybe_wrap_dim(dim, self.dim())
+    slice_shape = self.shape[:dim] + self.shape[dim + 1 :]
+    _scatter_shape_check(src, slice_shape)
     return _scatter_meta_output(self)
 
 
 @register_meta(aten.slice_scatter.default)
 def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, sym_eq
+
+    dim = maybe_wrap_dim(dim, self.dim())
+    if free_unbacked_symbols((start, end, step, self.shape[dim])):
+        src_shape = src.shape[:dim] + src.shape[dim + 1 :]
+        self_shape = self.shape[:dim] + self.shape[dim + 1 :]
+        torch._check(
+            src.dim() == self.dim() and sym_eq(src_shape, self_shape),
+            lambda: f"expected src to have a size equal to the slice of self. src size = {list(src.shape)}",
+        )
+    else:
+        slice_shape = aten.slice.Tensor(self, dim, start, end, step).shape
+        _scatter_shape_check(src, slice_shape)
     return _scatter_meta_output(self)
 
 
 @register_meta(aten.diagonal_scatter.default)
 def meta_diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
+    _scatter_shape_check(src, self.diagonal(offset, dim1, dim2).shape)
     return _scatter_meta_output(self)
+
+
+def _scatter_shape_check(src, slice_shape):
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
+    torch._check(
+        sym_eq(slice_shape, src.shape),
+        lambda: f"expected src to have a size equal to the slice of self. src size = {list(src.shape)}, slice size = {list(slice_shape)}",
+    )
 
 
 def _scatter_meta_output(self):
