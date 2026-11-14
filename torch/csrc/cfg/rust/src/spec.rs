@@ -467,9 +467,10 @@ impl CfgPass for TensorAccessors {
             // Between the attribute load and its use only constants may be
             // loaded: the read moves from the former to the latter.
             let first = load_pos.unwrap_or(pos);
-            let only_consts = unit.insts[first + 1..pos]
-                .iter()
-                .all(|u| matches!(u.inst.op, Op::Const(_)));
+            let only_consts = unit
+                .insts
+                .get(first + 1..pos)
+                .is_none_or(|between| between.iter().all(|u| matches!(u.inst.op, Op::Const(_))));
             if rank < min_rank || !only_consts {
                 pos += 1;
                 continue;
