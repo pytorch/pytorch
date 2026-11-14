@@ -179,11 +179,9 @@ class AllGatherState(NamedTuple):
 
 
 class ReduceScatterState(NamedTuple):
-    # The reduce-scatter input, or the reduce-dtype gradients of a single-rank
-    # group (see foreach_reduce), which the reduce-scatter stream reads before
-    # event
-    keepalive: torch.Tensor | list[torch.Tensor]
-    event: torch.Event | None
+    # For a single-rank group, the reduce-dtype copies of the gradients
+    reduce_scatter_input: torch.Tensor | list[torch.Tensor]
+    event: torch.Event | None  # last use of the input (see foreach_reduce)
     allocation_stream: torch.Stream  # Owns the input allocation
     param_group: FSDPParamGroup  # Identifies the owning FSDP root
 
@@ -797,7 +795,7 @@ class FSDPParamGroup:
                             fsdp_params_with_grad, partial_sizes, reduce_dtype
                         )
                 (
-                    keepalive,
+                    reduce_scatter_input,
                     reduce_scatter_event,
                     post_reduce_stream,
                     self._post_reduce_event,
@@ -836,7 +834,7 @@ class FSDPParamGroup:
                 )
                 self.comm_ctx.reduce_scatter_states.append(
                     ReduceScatterState(
-                        keepalive,
+                        reduce_scatter_input,
                         reduce_scatter_event,
                         self.device_handle.current_stream(),
                         self,
@@ -861,7 +859,7 @@ class FSDPParamGroup:
                     #      hazard exists structurally in regular FSDP but has
                     #      not been observed to fire, plausibly because
                     #      ``reduce_scatter_states.append(...)`` ref-holds
-                    #      ``keepalive`` and cross-layer allocator
+                    #      ``reduce_scatter_input`` and cross-layer allocator
                     #      pressure is looser than within a group. Dropping
                     #      the gate needs a real-model overlap-loss measurement.
                     #   2. ROCm-specific vs cross-platform. Only observed on
