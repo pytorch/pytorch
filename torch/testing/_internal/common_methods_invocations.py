@@ -5623,10 +5623,17 @@ def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(get_tensor_input(()), 1, -1, True, True)
 
 
-def _make_dsl_topk_arg(shape, *, device, dtype):
-    # Generic tests compare indices exactly; tie behavior has dedicated tests.
-    values = torch.randperm(math.prod(shape), dtype=torch.int64, device=device)
-    return values.reshape(shape).to(dtype)
+def _make_dsl_topk_arg(shape, *, k, largest=True, device, dtype):
+    # Unique values are impossible for narrow dtypes at the large N required
+    # by these kernels. Make exactly K entries better than the background so
+    # no tie crosses the selection boundary. Values stay exactly representable
+    # in every supported dtype, and ties within the selected set follow the
+    # lower-index ordering used by both the kernels and the stable reference.
+    background = -64 if largest else 64
+    row = torch.full((shape[-1],), background, dtype=torch.int64, device=device)
+    row[:k] = torch.arange(k, dtype=torch.int64, device=device).remainder(127) - 63
+    row = row.to(dtype)
+    return row.expand(*shape[:-1], -1).contiguous()
 
 
 def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
@@ -5648,14 +5655,14 @@ def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
     # M=256 is >= typical GPU SM count so the cond's SM-wave gate passes.
     for K in (64, 128, 256, 512, 1024):
         N = max(_RADIX_MIN_N_MULTIPLIER[K] * K, 4096)
-        yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
-        yield SampleInput(make_arg((256, N)).contiguous(), args=(K, -1))
-        yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
+        yield SampleInput(make_arg((256, N), k=K).contiguous(), args=(K,))
+        yield SampleInput(make_arg((256, N), k=K).contiguous(), args=(K, -1))
+        yield SampleInput(make_arg((4, 64, N), k=K).contiguous(), args=(K,))
 
     for K in (16, 32):
         N = _REGISTER_N_RANGE[K][1]
-        yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
-        yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
+        yield SampleInput(make_arg((256, N), k=K).contiguous(), args=(K,))
+        yield SampleInput(make_arg((4, 64, N), k=K).contiguous(), args=(K,))
 
 
 def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
@@ -5679,18 +5686,34 @@ def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
         if n_range is None:
             raise AssertionError(f"missing radix gate for K={K} dtype={dtype}")
         N = n_range[0]
-        yield SampleInput(make_arg((radix_rows, N)).contiguous(), args=(K,))
-        yield SampleInput(make_arg((radix_rows, N)).contiguous(), args=(K, -1))
-        yield SampleInput(make_arg((4, radix_rows // 4, N)).contiguous(), args=(K,))
+        yield SampleInput(make_arg((radix_rows, N), k=K).contiguous(), args=(K,))
+        yield SampleInput(
+            make_arg((radix_rows, N), k=K, largest=False).contiguous(),
+            args=(K,),
+            kwargs={"largest": False},
+        )
+        yield SampleInput(
+            make_arg((radix_rows, N), k=K).contiguous(), args=(K, -1)
+        )
+        yield SampleInput(
+            make_arg((4, radix_rows // 4, N), k=K).contiguous(), args=(K,)
+        )
 
     n_range = _REGISTER_N_BOUNDS.get(dtype)
     min_cu_waves = _REGISTER_MIN_CU_WAVES.get(dtype)
     if n_range is not None and min_cu_waves is not None:
         register_rows = min_rows * min_cu_waves
         for K, N in ((2, n_range[0]), (16, n_range[1])):
-            yield SampleInput(make_arg((register_rows, N)).contiguous(), args=(K,))
             yield SampleInput(
-                make_arg((4, register_rows // 4, N)).contiguous(), args=(K,)
+                make_arg((register_rows, N), k=K).contiguous(), args=(K,)
+            )
+            yield SampleInput(
+                make_arg((register_rows, N), k=K, largest=False).contiguous(),
+                args=(K,),
+                kwargs={"largest": False},
+            )
+            yield SampleInput(
+                make_arg((4, register_rows // 4, N), k=K).contiguous(), args=(K,)
             )
 
 
@@ -23210,6 +23233,7 @@ if "flydsl" in dsl_ops_by_dsl:
 
     from torch._native.ops.topk.flydsl_impl import (
         _SUPPORTED_ARCHES as _flydsl_topk_supported_arches,
+        _SUPPORTED_DTYPES as _flydsl_topk_supported_dtypes,
     )
 
     # These are deterministic OpInfo assertion failures, not crashes.
@@ -23220,8 +23244,8 @@ if "flydsl" in dsl_ops_by_dsl:
         DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
     )
     _flydsl_topk_kwargs = dict(
-        dtypes=_dispatch_dtypes((torch.float32,)),
-        dtypesIfCUDA=_dispatch_dtypes((torch.float32,)),
+        dtypes=_dispatch_dtypes(_flydsl_topk_supported_dtypes),
+        dtypesIfCUDA=_dispatch_dtypes(_flydsl_topk_supported_dtypes),
         sample_inputs_func=sample_inputs_flydsl_topk,
         ref=reference_topk,
         supports_autograd=False,
