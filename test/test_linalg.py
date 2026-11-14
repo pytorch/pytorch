@@ -63,7 +63,10 @@ from torch.testing._internal.common_utils import (
 )
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
-mx_msg = "MX gemm is only supported on CUDA capability 10.0+ and gfx950/gfx1250"
+mx_msg = (
+    "MX gemm is only supported on CUDA capability 10.0+ and "
+    "gfx950/gfx1250/gfx1250-strict"
+)
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -82,8 +85,14 @@ def blaslt_supported_device():
                 archs.append('gfx95')
             if ROCM_VERSION >= (7, 14):
                 archs.append('gfx1250')
+            if ROCM_VERSION >= (10, 3):
+                archs.append('gfx1250-strict')
+            gcn_arch_name = torch.cuda.get_device_properties(0).gcnArchName
+            # "gfx1250" is a prefix of "gfx1250-strict".
+            if 'gfx1250-strict' in gcn_arch_name:
+                return ROCM_VERSION >= (10, 3)
             for arch in archs:
-                if arch in torch.cuda.get_device_properties(0).gcnArchName:
+                if arch in gcn_arch_name:
                     return True
         else:
             return True

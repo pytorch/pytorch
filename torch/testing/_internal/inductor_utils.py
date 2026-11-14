@@ -92,7 +92,10 @@ GPU_TYPE = get_gpu_type()
 
 
 def running_on_tdm_device() -> bool:
-    """Return whether the active ROCm device and Triton support gfx1250 TDM."""
+    """Return whether the active ROCm device and Triton support gfx1250 TDM.
+
+    gfx1250-strict is included: it is a peer target of gfx1250.
+    """
     if not torch.version.hip or not HAS_CUDA_AND_TRITON:
         return False
     try:

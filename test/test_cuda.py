@@ -1216,16 +1216,21 @@ print("RETRIED")
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
                 if ROCM_VERSION >= (10, 3):
-                    archs.extend(["gfx1170", "gfx1171"])
+                    archs.extend(["gfx1170", "gfx1171", "gfx1250-strict"])
                 archs.append("gfx1250")
                 # blasDefaultBackend() only prefers hipblaslt when every visible
                 # device matches, so device 0 alone is not enough.
+                # "gfx1250" is a prefix of "gfx1250-strict". The strict target
+                # is gated on ROCm 10.3, so do not let the shorter name match it.
                 gcn_arch_names = [
                     torch.cuda.get_device_properties(i).gcnArchName
                     for i in range(torch.cuda.device_count())
                 ]
                 hipblaslt_preferred = all(
-                    any(arch in name for arch in archs) for name in gcn_arch_names
+                    ROCM_VERSION >= (10, 3)
+                    if "gfx1250-strict" in name
+                    else any(arch in name for arch in archs)
+                    for name in gcn_arch_names
                 )
                 if hipblaslt_preferred:
                     self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
@@ -1317,7 +1322,7 @@ print("RETRIED")
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if gcn_arch in ["gfx942", "gfx950", "gfx1250"]:
+            if gcn_arch in ["gfx942", "gfx950", "gfx1250", "gfx1250-strict"]:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -14662,7 +14667,7 @@ class TestCompileKernel(TestCase):
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
             gcn_arch = get_device_properties().gcnArchName.split(":", 1)[0]
-            if gcn_arch == "gfx1250":
+            if gcn_arch in ("gfx1250", "gfx1250-strict"):
                 max_smem = 320 * 1024
             elif gcn_arch == "gfx950":
                 max_smem = 160 * 1024

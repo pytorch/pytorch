@@ -218,10 +218,10 @@ __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_p
   auto *from = reinterpret_cast<const vec_t *>(base_ptr);
 #if defined(USE_ROCM)
   // NOTE: This nontemporal vectorized load is tuned for gfx942 (CDNA3, Wave64).
-  // Do NOT extend to gfx1250 (GFX12.5, Wave32) without first validating
-  // intrinsic codegen and re-benchmarking — the register layout and wave
-  // width differ. gfx1250 falls through to the generic path below, which
-  // is correctness-safe.
+  // Do NOT extend to gfx1250/gfx1250-strict (GFX12.5, Wave32) without first
+  // validating intrinsic codegen and re-benchmarking -- the register layout
+  // and wave width differ. gfx1250/gfx1250-strict fall through to the generic
+  // path below, which is correctness-safe.
   if(__builtin_amdgcn_processor_is("gfx942")) {
     using longx2 = __attribute__((__vector_size__(4*sizeof(int)))) int;
     if constexpr (sizeof(vec_t) == sizeof(int)) {

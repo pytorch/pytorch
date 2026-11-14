@@ -297,8 +297,9 @@ endmacro()
 # Returns the subset of PYTORCH_ROCM_ARCH that CK GEMM supports, i.e. the archs
 # in TORCH_CK_GEMM_ARCH_LIST (the single source of truth, declared in the
 # top-level CMakeLists.txt and also surfaced to C++ via ATen/ROCmCKGEMMConfig.h).
-# Matches on the base arch so feature-suffixed targets (e.g. gfx942:xnack+) are
-# kept, mirroring the substring match in at::cuda::detail::CUDAHooks::isGPUArch.
+# Strips the ':' feature suffix and compares the offload target exactly.
+# gfx942:xnack+ stays eligible; gfx1250-strict does not match gfx1250.
+# Same boundary as at::cuda::detail::CUDAHooks::isGPUArch.
 # Usage:
 #   torch_filter_ck_gemm_arches(variable_to_store_arches)
 #

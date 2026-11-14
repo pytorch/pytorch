@@ -47,6 +47,7 @@ from ...utils import (
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    is_gfx1250_arch,
     kpack_supported,
     mfma_kdim,
     rocm_gfx_arch,
@@ -4417,7 +4418,7 @@ class ROCmScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, ROCmConfigHeurist
     # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
-        if rocm_gfx_arch() in ("gfx950", "gfx1250"):
+        if rocm_gfx_arch() == "gfx950" or is_gfx1250_arch(rocm_gfx_arch()):
             configs = [c for c in configs if c.block_k > 64]
         return super()._filter_configs(configs)
 

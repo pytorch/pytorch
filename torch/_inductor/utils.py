@@ -2651,8 +2651,8 @@ def _descriptor_shape_fits_in_int32(
 
 
 def is_gfx1250_arch(arch: str) -> bool:
-    """Return True only for gfx1250, including feature-suffixed GCN names."""
-    return arch.split(":", 1)[0] == "gfx1250"
+    """Return True for gfx1250 peer targets, including feature suffixes."""
+    return arch.split(":", 1)[0] in ("gfx1250", "gfx1250-strict")
 
 
 # The torch.version attributes are process-constant, so the parse happens once.

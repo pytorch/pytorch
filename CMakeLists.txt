@@ -1207,6 +1207,22 @@ cmake_dependent_option(
 # Cannot be put into Dependencies.cmake due circular dependency:
 # USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
 #
+# AOTriton publishes a gfx1250 image and no gfx1250-strict image. Flash and
+# mem-eff attention on ROCm compile against aotriton headers and link
+# __caffe2_aotriton, so a strict-only arch list has to turn those options off
+# before the include below. Leave mixed lists alone: gfx1250 still has an image.
+# Remove this once AOTriton publishes gfx1250-strict kernels.
+if(USE_ROCM AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
+  set(_aotriton_supported_arches ${PYTORCH_ROCM_ARCH})
+  list(REMOVE_ITEM _aotriton_supported_arches "gfx1250-strict")
+  if(_aotriton_supported_arches STREQUAL "")
+    message(STATUS "AOTriton disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch with an AOTriton image")
+    caffe2_update_option(USE_FLASH_ATTENTION OFF)
+    caffe2_update_option(USE_MEM_EFF_ATTENTION OFF)
+  endif()
+  unset(_aotriton_supported_arches)
+endif()
+
 if(USE_ROCM)
   if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
     include(cmake/External/aotriton.cmake)
