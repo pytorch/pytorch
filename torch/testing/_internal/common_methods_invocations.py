@@ -25240,7 +25240,7 @@ python_ref_db = [
             # The following dtypes did not work in forward but are listed by the OpInfo: {torch.bool}.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             # RuntimeError: torch.bool not supported for floor_divide
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, device_type='mps', dtypes=(torch.bool,)),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(

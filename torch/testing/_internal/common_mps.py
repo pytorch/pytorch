@@ -258,6 +258,7 @@ if torch.backends.mps.is_available():
                 torch.float32,
             ],
             "float_power": None,
+            "_refs.float_power": None,
             # Convolution for integral types is not supported on MPS
             "nn.functional.conv1d": [torch.int64],
             "nn.functional.conv2d": [torch.int64],
@@ -427,6 +428,67 @@ if torch.backends.mps.is_available():
             },
         }
 
+        # Failures in TestBinaryUfuncsDevice, keyed by test name and then by op name
+        BINARY_UFUNCS_XFAILLIST: dict[
+            str, dict[str, tuple[torch.dtype, ...] | None]
+        ] = {
+            "test_type_promotion": {
+                # MPS bug: with an `out=` of a different dtype, binary kernels compute in
+                # the output dtype rather than the common one, e.g. bitwise_and(int16,
+                # int32, out=float16) looks up a nonexistent half bitwise_and kernel
+                **dict.fromkeys(
+                    (
+                        "atan2",
+                        "bitwise_and",
+                        "bitwise_or",
+                        "bitwise_xor",
+                        "clamp_max",
+                        "clamp_min",
+                        "copysign",
+                        "floor_divide",
+                        "fmod",
+                        "gcd",
+                        "lcm",
+                        "maxbinary",
+                        "maximum",
+                        "minbinary",
+                        "minimum",
+                        "remainder",
+                        "special.chebyshev_polynomial_t",
+                        "special.chebyshev_polynomial_u",
+                        "special.chebyshev_polynomial_v",
+                        "special.chebyshev_polynomial_w",
+                        "special.hermite_polynomial_h",
+                        "special.hermite_polynomial_he",
+                        "special.laguerre_polynomial_l",
+                        "special.legendre_polynomial_p",
+                        "special.shifted_chebyshev_polynomial_t",
+                        "special.shifted_chebyshev_polynomial_u",
+                        "special.shifted_chebyshev_polynomial_v",
+                        "special.shifted_chebyshev_polynomial_w",
+                        "special.xlog1py",
+                        "special.zeta",
+                        "xlogy",
+                    ),
+                    None,
+                ),
+            },
+            "test_reference_numerics_extremal_values": {
+                # MPS bug: complex sub of inf/nan operands
+                "sub": (torch.complex64,),
+                "_refs.sub": (torch.complex64,),
+            },
+        }
+
+        # These ops xfail test_type_promotion because of its float32 x float64
+        # checks, which are not run on MPS
+        BINARY_UFUNCS_TYPE_PROMOTION_SKIPLIST = (
+            "__rdiv__",
+            "complex",
+            "_refs._conversions.complex",
+            "_refs._conversions.polar",
+        )
+
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
             if device_type is not None:
                 d.device_type = device_type
@@ -482,17 +544,30 @@ if torch.backends.mps.is_available():
                         DecorateInfo(unittest.expectedFailure, dtypes=xfaillist[key]),
                     )
 
-            for test_name, xfails in UNARY_UFUNCS_XFAILLIST.items():
-                if key in xfails:
-                    addDecorator(
-                        op,
-                        DecorateInfo(
-                            unittest.expectedFailure,
-                            "TestUnaryUfuncs",
-                            test_name,
-                            dtypes=xfails[key],
-                        ),
-                    )
+            for cls_name, xfaillist in (
+                ("TestUnaryUfuncs", UNARY_UFUNCS_XFAILLIST),
+                ("TestBinaryUfuncsDevice", BINARY_UFUNCS_XFAILLIST),
+            ):
+                for test_name, xfails in xfaillist.items():
+                    if key in xfails:
+                        addDecorator(
+                            op,
+                            DecorateInfo(
+                                unittest.expectedFailure,
+                                cls_name,
+                                test_name,
+                                dtypes=xfails[key],
+                            ),
+                        )
+            if key in BINARY_UFUNCS_TYPE_PROMOTION_SKIPLIST:
+                addDecorator(
+                    op,
+                    DecorateInfo(
+                        unittest.skip("float64 is not supported on MPS"),
+                        "TestBinaryUfuncsDevice",
+                        "test_type_promotion",
+                    ),
+                )
 
             # If op is not supported for complex types, expect it to fail
             if key in UNSUPPORTED_COMPLEX_OPS:
