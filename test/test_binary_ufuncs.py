@@ -3287,72 +3287,76 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(actual, expected, exact_dtype=False)
 
     @onlyNativeDeviceTypes
-    @dtypesIfCPU(torch.float32, torch.float64, torch.float16)
-    @dtypes(torch.float32, torch.float64)
-    def test_nextafter(self, device, dtype):
+    @ops(
+        [op for op in binary_ufuncs if op.name in ("nextafter", "_refs.nextafter")],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    def test_nextafter(self, device, dtype, op):
+        if dtype == torch.bfloat16:
+            # NumPy has no bfloat16 dtype, so use explicit expected values.
+            cases = (
+                # (from, to, expected)
+                (0, 1, 9.183549615799121e-41),
+                (0, -1, -9.183549615799121e-41),
+                (1, -2, 0.99609375),
+                (1, 0, 0.99609375),
+                (1, 2, 1.0078125),
+                (-1, -2, -1.0078125),
+                (-1, 0, -0.99609375),
+                (2, -1, 1.9921875),
+                (2, 1, 1.9921875),
+                (20, 3000, 20.125),
+                (20, -3000, 19.875),
+                (3000, -20, 2992.0),
+                (-3000, 20, -2992.0),
+                (65536, 0, 65280.0),
+                (65536, inf, 66048.0),
+                (-65536, 0, -65280.0),
+                (-65536, -inf, -66048.0),
+                (nan, 0, nan),
+                (0, nan, nan),
+                (nan, nan, nan),
+                (nan, inf, nan),
+                (inf, nan, nan),
+                (inf, -inf, 3.3895313892515355e38),
+                (-inf, inf, -3.3895313892515355e38),
+                (inf, 0, 3.3895313892515355e38),
+                (0, inf, 9.183549615799121e-41),
+                (-inf, 0, -3.3895313892515355e38),
+                (0, -inf, -9.183549615799121e-41),
+            )
+
+            for from_v, to_v, expected in cases:
+                with self.subTest(from_v=from_v, to_v=to_v):
+                    from_t = torch.tensor([from_v], device=device, dtype=dtype)
+                    to_t = torch.tensor([to_v], device=device, dtype=dtype)
+                    actual = op(from_t, to_t).item()
+                    self.assertEqual(actual, expected, atol=0, rtol=0)
+            return
+
         # Test special cases
         t1 = torch.tensor([0, 0, 10], device=device, dtype=dtype)
         t2 = torch.tensor([inf, -inf, 10], device=device, dtype=dtype)
-        actual = torch.nextafter(t1, t2)
+        actual = op(t1, t2)
         expected = np.nextafter(t1.cpu().numpy(), t2.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-        actual = torch.nextafter(t2, t1)
+        actual = op(t2, t1)
         expected = np.nextafter(t2.cpu().numpy(), t1.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
         t1 = torch.tensor([0, nan], device=device, dtype=dtype)
         t2 = torch.tensor([nan, 0], device=device, dtype=dtype)
-        self.assertTrue(torch.nextafter(t1, t2).isnan().all())
+        self.assertTrue(op(t1, t2).isnan().all())
 
-        a = torch.randn(100, device=device, dtype=dtype)
-        b = torch.randn(100, device=device, dtype=dtype)
-        actual = torch.nextafter(a, b)
-        expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
-        self.assertEqual(actual, expected, atol=0, rtol=0)
-
-    @onlyNativeDeviceTypes
-    @dtypes(torch.bfloat16)
-    def test_nextafter_bfloat16(self, device, dtype):
-        nan = float("nan")
-        inf = float("inf")
-        cases = (
-            # (from, to, expected)
-            (0, 1, 9.183549615799121e-41),
-            (0, -1, -9.183549615799121e-41),
-            (1, -2, 0.99609375),
-            (1, 0, 0.99609375),
-            (1, 2, 1.0078125),
-            (-1, -2, -1.0078125),
-            (-1, 0, -0.99609375),
-            (2, -1, 1.9921875),
-            (2, 1, 1.9921875),
-            (20, 3000, 20.125),
-            (20, -3000, 19.875),
-            (3000, -20, 2992.0),
-            (-3000, 20, -2992.0),
-            (65536, 0, 65280.0),
-            (65536, inf, 66048.0),
-            (-65536, 0, -65280.0),
-            (-65536, -inf, -66048.0),
-            (nan, 0, nan),
-            (0, nan, nan),
-            (nan, nan, nan),
-            (nan, inf, nan),
-            (inf, nan, nan),
-            (inf, -inf, 3.3895313892515355e38),
-            (-inf, inf, -3.3895313892515355e38),
-            (inf, 0, 3.3895313892515355e38),
-            (0, inf, 9.183549615799121e-41),
-            (-inf, 0, -3.3895313892515355e38),
-            (0, -inf, -9.183549615799121e-41),
-        )
-
-        for from_v, to_v, expected in cases:
-            from_t = torch.tensor([from_v], device=device, dtype=dtype)
-            to_t = torch.tensor([to_v], device=device, dtype=dtype)
-            actual = torch.nextafter(from_t, to_t).item()
-            self.assertEqual(actual, expected, atol=0, rtol=0)
+        for i, sample in enumerate(op.reference_inputs(device, dtype)):
+            with self.subTest(sample=i):
+                actual = op(sample.input, *sample.args, **sample.kwargs)
+                numpy_sample = sample.numpy()
+                expected = np.nextafter(
+                    numpy_sample.input, *numpy_sample.args, **numpy_sample.kwargs
+                )
+                self.assertEqual(actual, expected, atol=0, rtol=0, exact_device=False)
 
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
     def test_floor_divide_int_min(self, device, dtype):
