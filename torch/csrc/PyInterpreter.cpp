@@ -1564,13 +1564,15 @@ bool ConcretePyInterpreterVTable::fake_infer_from_real_out(
       "infer_fake_from_real_out");
 }
 
-// Both entry points hold the GIL. Keep conversion here so the initial constant
-// attempt can validate inputs, execute, check outputs and convert in one scope.
-c10::intrusive_ptr<c10::TensorImpl> from_real_tensor_with_gil(
-    const std::shared_ptr<c10::FakeTensorMode>& mode,
-    const c10::intrusive_ptr<c10::TensorImpl>& real_impl,
-    c10::impl::FakeTensorConversion conversion) {
+c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::
+    from_real_tensor(
+        const std::shared_ptr<c10::FakeTensorMode>& mode,
+        const c10::intrusive_ptr<c10::TensorImpl>& real_impl,
+        c10::impl::FakeTensorConversion conversion) const {
   using c10::impl::FakeTensorConversion;
+  // The initial constant attempt already holds the GIL. A nested guard keeps
+  // it held; standalone conversion calls acquire it here.
+  py::gil_scoped_acquire gil;
   const bool only_plain_tensor =
       conversion == FakeTensorConversion::PlainTensor ||
       conversion == FakeTensorConversion::ClonedConstant;
@@ -1627,15 +1629,6 @@ c10::intrusive_ptr<c10::TensorImpl> from_real_tensor_with_gil(
   return fake_tensor.unsafeReleaseIntrusivePtr();
 }
 
-c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::
-    from_real_tensor(
-        const std::shared_ptr<c10::FakeTensorMode>& mode,
-        const c10::intrusive_ptr<c10::TensorImpl>& real_impl,
-        c10::impl::FakeTensorConversion conversion) const {
-  py::gil_scoped_acquire gil;
-  return from_real_tensor_with_gil(mode, real_impl, conversion);
-}
-
 bool ConcretePyInterpreterVTable::fake_try_initial_constant(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
@@ -1690,7 +1683,7 @@ bool ConcretePyInterpreterVTable::fake_try_initial_constant(
     }
     if (outputs.size() == 1 && outputs[0].isTensor() &&
         may_be_plain_tensor(outputs[0].toTensor())) {
-      fake = from_real_tensor_with_gil(
+      fake = from_real_tensor(
           mode,
           outputs[0].toTensor().getIntrusivePtr(),
           FakeTensorConversion::ClonedConstant);
@@ -1698,7 +1691,7 @@ bool ConcretePyInterpreterVTable::fake_try_initial_constant(
   }
   // Larger plain lifts reuse the converter's existing alias and memo behavior.
   if (!fake && is_lift && may_be_plain_tensor(arguments[0].toTensor())) {
-    fake = from_real_tensor_with_gil(
+    fake = from_real_tensor(
         mode,
         arguments[0].toTensor().getIntrusivePtr(),
         FakeTensorConversion::PlainTensor);
