@@ -61,7 +61,6 @@
   "test/distributed/checkpoint/e2e/test_fine_tuning.py",
   "test/distributed/checkpoint/e2e/test_fsdp_ep.py",
   "test/distributed/checkpoint/fsdp/test_fsdp_dsd.py",
-  "test/distributed/checkpoint/test_async_process_executor.py",
   "test/distributed/checkpoint/test_checkpoint.py",
   "test/distributed/checkpoint/test_consolidate_hf_safetensors.py",
   "test/distributed/checkpoint/test_dtensor_checkpoint.py",
