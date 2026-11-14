@@ -1160,6 +1160,32 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
                 # modes go out of scope (which in of itself takes time to loop through all operators).
                 return handler
 
+        if key == DispatchKey.Fake:
+            from torch._subclasses.fake_tensor import (
+                FakeTensorMode,
+                unset_fake_temporarily,
+            )
+
+            fake_handler = self.python_key_table.get(FakeTensorMode)
+            if fake_handler is not None:
+
+                def fake_mode_handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+                    with unset_fake_temporarily() as mode:
+                        if mode is not None:
+                            return fake_handler(mode, *args, **kwargs)
+
+                    # FakeTensor.__torch_dispatch__ enters the first input's mode.
+                    for arg in pytree.arg_tree_leaves(*args, **kwargs):
+                        if isinstance(arg, torch.Tensor):
+                            mode = torch._C._maybe_get_fake_mode(arg)
+                            if mode is not None:
+                                with mode:
+                                    return fake_mode_handler(*args, **kwargs)
+                    return self._op_dk(key, *args, **kwargs)
+
+                # Like PreDispatch, the active mode is resolved on each call.
+                return fake_mode_handler
+
         final_key = resolve_key(self, key)
 
         # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
