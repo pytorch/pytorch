@@ -1702,6 +1702,34 @@ class DecompOneOffTests(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expand"):
             addmv_decomp(vec_input, mat, vec)
 
+    def test_addmm_activation_gelu_approximation_registry(self, device):
+        # Decomp must match eager: exact GELU for a backend that has not
+        # registered an approximation, and the declared approximation once it
+        # registers via register_eager_gelu_approximation().
+        from torch._decomp import decompositions
+
+        decomp = decomposition_table[aten._addmm_activation.default]
+        a = torch.randn(4, 4, device=device)
+        b = torch.randn(4, 4, device=device)
+        c = torch.randn(4, 4, device=device)
+
+        device_type = torch.device(device).type
+        old = dict(decompositions._EAGER_GELU_APPROXIMATION)
+        try:
+            decompositions._EAGER_GELU_APPROXIMATION.pop(device_type, None)
+            ref = aten.gelu(c + a @ b)
+            self.assertEqual(decomp(c, a, b, use_gelu=True), ref)
+
+            decompositions.register_eager_gelu_approximation(device_type, "tanh")
+            ref = aten.gelu(c + a @ b, approximate="tanh")
+            self.assertEqual(decomp(c, a, b, use_gelu=True), ref)
+
+            # use_gelu=False still returns relu regardless of the registry
+            self.assertEqual(decomp(c, a, b, use_gelu=False), aten.relu(c + a @ b))
+        finally:
+            decompositions._EAGER_GELU_APPROXIMATION.clear()
+            decompositions._EAGER_GELU_APPROXIMATION.update(old)
+
     @onlyCPU
     @skipIfCrossRef
     def test_linalg_vector_norm_decomp_correctness(self, device):
