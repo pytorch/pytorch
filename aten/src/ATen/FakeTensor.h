@@ -38,6 +38,9 @@ TORCH_API void init_cpp_fake(
 
 namespace impl {
 
+// FakeTensorMode.may_turn_const with CONSTANT_NUMEL_LIMIT == 1.
+TORCH_API bool may_turn_const(const Tensor& tensor);
+
 // Metadata-only fake kernels. The caller validates the inputs and disables
 // dispatch, but must not enter InKernelInvocationGuard: the copies stay fake.
 TORCH_API Tensor fake_detach(const Tensor& self);

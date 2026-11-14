@@ -72,6 +72,11 @@ void init_cpp_fake(
 
 namespace impl {
 
+bool may_turn_const(const Tensor& t) {
+  return t.numel() <= 1 && !t.is_sparse() &&
+      !t.unsafeGetTensorImpl()->is_sparse_compressed() && !t.device().is_meta();
+}
+
 Tensor fake_detach(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(!c10::impl::FakeTensorModeTLS::in_kernel_invocation());
   return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(

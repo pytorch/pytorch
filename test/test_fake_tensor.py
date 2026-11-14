@@ -2066,11 +2066,18 @@ def forward(self, x_1):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
+    @fake_tensor_modes
     @parametrize("allow", [False, True])
     @parametrize("override", [None, False, True])
     @parametrize("channels", [1, 2])
-    def test_mixed_real_and_fake_inputs(self, allow, override, channels):
+    def test_mixed_real_and_fake_inputs(self, mode_cls, allow, override, channels):
         from torch._subclasses.fake_tensor import fake_tensor_tls
+
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
 
         class _TestPattern(torch.nn.Module):
             def __init__(self) -> None:
@@ -2094,14 +2101,20 @@ def forward(self, x_1):
                 return conv
 
         mod = _TestPattern()
-        mode = FakeTensorMode(allow_non_fake_inputs=allow)
+        mode = mode_cls(allow_non_fake_inputs=allow)
         allowed = allow if override is None else override
         with (
             patch.object(fake_tensor_tls, "allow_non_fake_inputs_override", override),
             mode,
         ):
             x = torch.randn(1, channels, 3, 3)
-            if allowed:
+            if mode_cls is CppFakeTensorMode:
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    "numbers-as-tensors operations without fake inputs",
+                ):
+                    mod(x)
+            elif allowed:
                 out = mod(x)
                 self.checkType(out, "cpu", (1, channels, 3, 3))
                 self.assertIs(maybe_get_fake_mode(out), mode)
@@ -3415,6 +3428,7 @@ class TestFakeTensorMoveModule(TestCase):
         self.assertEqual(out.device, gpu_device)
 
 
+@instantiate_parametrized_tests
 class TestFakeTensorConstHandling(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -3426,10 +3440,33 @@ class TestFakeTensorConstHandling(TestCase):
         for arg in args:
             self.assertTrue(maybe_get_fake_constant(arg) is None)
 
-    def test_simple(self):
-        with FakeTensorMode():
-            x = torch.tensor(4.0)
-            self.assertEqual(x.item(), 4.0)
+    @fake_tensor_modes
+    @parametrize(
+        "data",
+        [
+            subtest(4.0, name="scalar"),
+            subtest([], name="empty"),
+            subtest([4.0], name="one"),
+            subtest([4.0, 5.0], name="two"),
+        ],
+    )
+    def test_simple(self, mode_cls, data):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
+        expected = torch.tensor(data)
+        with mode_cls() as mode:
+            x = torch.tensor(data)
+            if mode_cls is not CppFakeTensorMode and expected.ndim == 0:
+                self.assertEqual(x.item(), 4.0)
+        prims.utils.compare_tensor_meta(x, expected, check_strides=True)
+        self.assertIs(maybe_get_fake_mode(x), mode)
+        if expected.numel() <= 1:
+            self.assertEqual(maybe_get_fake_constant(x), expected)
+        else:
+            self.assertNotConst(x)
 
     def test_inplace_add(self):
         with FakeTensorMode():
@@ -6795,7 +6832,11 @@ class TestCppFakeTensorModeBindings(TestCase):
     @parametrize(
         "kind", ["tensor", "parameter", "parameter_subclass", "tensor_subclass"]
     )
-    def test_fake_fallback_subclasses_without_python_dispatch(self, mode_cls, kind):
+    @parametrize("size", [1, 2])
+    @parametrize("op", ["with_fake", "add", "add_", "lift_fresh_copy", "sin", "cat"])
+    def test_fake_fallback_subclasses_without_python_dispatch(
+        self, mode_cls, kind, size, op
+    ):
         class ParameterSubclass(torch.nn.Parameter):
             pass
 
@@ -6808,30 +6849,53 @@ class TestCppFakeTensorModeBindings(TestCase):
             "parameter_subclass": ParameterSubclass,
             "tensor_subclass": TensorSubclass,
         }[kind]
-        real = torch.empty(2, 3, device="cpu")
+        base = torch.ones(size)
+        real = base
         if tensor_cls is not torch.Tensor:
             real = torch.Tensor._make_subclass(tensor_cls, real)
         self.assertIs(type(real).__torch_dispatch__, torch.Tensor.__torch_dispatch__)
         self.assertFalse(torch._C._dispatch_keys(real).has(torch._C.DispatchKey.Python))
         mode = mode_cls(allow_non_fake_inputs=True)
-        fake = mode.from_tensor(torch.empty(2, 3, device="cpu"))
+        fake = mode.from_tensor(torch.empty(size)) if op == "with_fake" else None
+        calls = {
+            "with_fake": lambda: torch.add(real, fake),
+            "add": lambda: real + 1,
+            "add_": lambda: real.add_(1),
+            "lift_fresh_copy": lambda: aten.lift_fresh_copy.default(real),
+            "sin": lambda: real.sin(),
+            "cat": lambda: torch.cat([base, real]),
+        }
         with mode, torch._C.DisableTorchFunctionSubclass():
             if kind == "tensor_subclass":
                 if mode_cls is CppFakeTensorMode:
-                    error, msg = (
-                        RuntimeError,
-                        "does not support converting tensor subclass TensorSubclass",
-                    )
+                    error, msg = NotImplementedError, "tensor subclass inputs"
                 else:
-                    error, msg = TypeError, "Multiple dispatch failed"
+                    error, msg = (
+                        TypeError,
+                        "Multiple dispatch failed|unsupported operand type",
+                    )
                 with self.assertRaisesRegex(error, msg):
-                    torch.add(real, fake)
+                    calls[op]()
+            elif mode_cls is CppFakeTensorMode and op in ("add", "add_"):
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    "numbers-as-tensors operations without fake inputs",
+                ):
+                    calls[op]()
             else:
-                result = torch.add(real, fake)
-                self.assertTrue(is_fake_tensor(result))
-                self.assertIs(maybe_get_fake_mode(result), mode)
-                self.assertEqual(result.shape, (2, 3))
+                result = calls[op]()
+                if op == "add_":
+                    self.assertIs(result, real)
+                else:
+                    self.assertTrue(is_fake_tensor(result))
+                    self.assertIs(maybe_get_fake_mode(result), mode)
+                self.assertEqual(result.shape, (size * 2 if op == "cat" else size,))
                 self.assertEqual(result.device, torch.device("cpu"))
+        if kind == "tensor_subclass" or (
+            mode_cls is CppFakeTensorMode and op in ("add", "add_")
+        ):
+            # In particular, rejection must precede the real add_ computation.
+            self.assertEqual(base, torch.ones(size))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
@@ -6910,6 +6974,58 @@ class TestCppFakeTensorModeBindings(TestCase):
                         op(fake, device=device)
         self.assertEqual(retained.device, torch.device(output_device))
         self.assertIs(maybe_get_fake_mode(retained), mode)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @fake_tensor_modes
+    @parametrize("size", [1, 2])
+    @parametrize("parameter", [False, True])
+    @parametrize("allow", [False, True])
+    def test_fake_fallback_lift_storage(self, mode_cls, size, parameter, allow):
+        mode = mode_cls(allow_non_fake_inputs=allow)
+        real = torch.arange(size, dtype=torch.float32)
+        if parameter:
+            real = torch.nn.Parameter(real, requires_grad=False)
+        expected = real.clone()
+        with mode:
+            if parameter and not allow:
+                with self.assertRaisesRegex(
+                    AssertionError, "Please convert all Tensors"
+                ):
+                    aten.lift_fresh.default(real)
+                return
+            lifted = aten.lift_fresh.default(real)
+            repeated = aten.lift_fresh.default(real)
+            self.assertIs(torch._guards.active_fake_mode(), mode)
+        self.assertIs(maybe_get_fake_mode(lifted), mode)
+        prims.utils.compare_tensor_meta(lifted, real, check_strides=True)
+        if size == 1 and not parameter:
+            constant = maybe_get_fake_constant(lifted)
+            self.assertEqual(constant, expected)
+            self.assertNotEqual(constant.data_ptr(), real.data_ptr())
+            real.add_(1)
+            self.assertEqual(constant, expected)
+            self.assertIsNot(lifted, repeated)
+        else:
+            self.assertIsNone(maybe_get_fake_constant(lifted))
+            converted = mode.from_tensor(real)
+            if parameter:
+                # Normal dispatch lifts the converted Parameter into fresh aliases.
+                self.assertIsNot(lifted, repeated)
+                for alias in (repeated, converted):
+                    self.assertEqual(
+                        alias.untyped_storage()._cdata,
+                        lifted.untyped_storage()._cdata,
+                    )
+            else:
+                self.assertIs(lifted, repeated)
+                self.assertIs(converted, lifted)
+            with mode:
+                relifted = aten.lift_fresh.default(lifted)
+            self.assertIs(maybe_get_fake_mode(relifted), mode)
+            self.assertEqual(
+                relifted.untyped_storage()._cdata, lifted.untyped_storage()._cdata
+            )
+            self.assertIsNone(maybe_get_fake_constant(relifted))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("alias", ["detach", "data"])

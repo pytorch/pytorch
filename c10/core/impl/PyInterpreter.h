@@ -131,6 +131,13 @@ struct C10_API PyInterpreter;
 // no c10 error type becomes
 enum class FakePythonError { AssertionError };
 
+enum class FakeTensorConversion {
+  Default,
+  Constant,
+  PlainTensor,
+  ClonedConstant,
+};
+
 struct C10_API PyInterpreterVTable {
   virtual ~PyInterpreterVTable() = default;
 
@@ -346,11 +353,26 @@ struct C10_API PyInterpreterVTable {
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       PyObject* real) const = 0;
-  // Converts real to a fake tensor of mode through mode's fake tensor
-  // converter.
+  // Validates real input subclasses, then optionally tries initial constant
+  // computation or a plain lift while holding the GIL. Replaces the
+  // arguments with the converted output on success; otherwise leaves them
+  // intact.
+  virtual bool fake_try_initial_constant(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
+      bool makes_constant,
+      bool is_lift) const = 0;
+  // Converts real through mode's converter under one GIL acquisition.
+  // PlainTensor and ClonedConstant return nullptr unless real has the exact
+  // Python Tensor type (or no Python object). ClonedConstant checks the type
+  // before constant eligibility and cloning with dispatch disabled; it also
+  // returns nullptr for ineligible constants. Constant preserves input aliases.
   virtual c10::intrusive_ptr<TensorImpl> from_real_tensor(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
-      const c10::intrusive_ptr<TensorImpl>& real) const = 0;
+      const c10::intrusive_ptr<TensorImpl>& real,
+      FakeTensorConversion conversion =
+          FakeTensorConversion::Default) const = 0;
   // Whether real tensor inputs are allowed: fake_tensor_tls's override if set,
   // else mode's allow_non_fake_inputs_.
   virtual bool allow_non_fake_inputs(

@@ -201,9 +201,18 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       PyObject* /*real*/) const override {
     PANIC(fake_infer_from_real_out);
   }
+  bool fake_try_initial_constant(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/,
+      bool /*makes_constant*/,
+      bool /*is_lift*/) const override {
+    PANIC(fake_try_initial_constant);
+  }
   c10::intrusive_ptr<TensorImpl> from_real_tensor(
       const std::shared_ptr<FakeTensorMode>& /*mode*/,
-      const c10::intrusive_ptr<TensorImpl>& /*real*/) const override {
+      const c10::intrusive_ptr<TensorImpl>& /*real*/,
+      FakeTensorConversion /*conversion*/) const override {
     PANIC(from_real_tensor);
   }
   bool allow_non_fake_inputs(
