@@ -1661,7 +1661,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   const bool in_capture_stream =
       at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None;
   auto device = in_capture_stream ? at::kCUDA : at::kCPU;
-  if (use_dropout) {
+#ifdef USE_ROCM
+  // The CK forward draws its own philox state and returns the seed/offset that
+  // its backward expects.
+  const bool use_ck =
+      at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck;
+#else
+  constexpr bool use_ck = false;
+#endif
+  if (use_dropout && !use_ck) {
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
         std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
@@ -1685,7 +1693,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), options);
       offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), options);
     }
-  } else {
+  } else if (!use_ck) {
     // Not using dropout. AOTAutograd may still save these dummy tensors, and
     // ROCm attention backends may read their pointers. Keep their device
     // independent of CUDA graph capture and their value deterministic.
@@ -1712,6 +1720,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     logsumexp = at::zeros(
         {lse_batch_size, num_heads, compute_logsumexp ? max_seqlen_q : 0},
         query.options().dtype(at::ScalarType::Float));
+    if (use_ck) {
+      // Normally the CK branch below provides these.
+      const auto options = query.options().dtype(at::kLong);
+      seed_t = at::zeros({}, options);
+      offset_t = at::zeros({}, options);
+    }
     return std::make_tuple(
         std::move(res),
         std::move(logsumexp),
@@ -1721,8 +1735,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
         max_seqlen_k_.has_value() ? max_seqlen_k_.value() : max_seqlen_k);
   }
 
-  if(at::globalContext().getROCmFAPreferredBackend() ==
-    at::ROCmFABackend::Ck) {
+  if (use_ck) {
 
 #if defined(USE_ROCM_CK_SDPA)
     std::optional<Tensor> out(res);
@@ -1734,8 +1747,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
          k,
          v,
          lse,
-         seed_t,
-         offset_t,
+         ck_seed_t,
+         ck_offset_t,
          p] =
             pytorch_flash::mem_eff_forward_ck(
                                     query,
@@ -1755,6 +1768,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                                     seqused_k);                           // seqused_k_
 
     logsumexp = lse;
+    // With dropout, CK returns its uint64 seed/offset; the op returns int64 like
+    // the other backends. Without dropout, CK returns uninitialized int64
+    // placeholders, which nothing reads, instead of filling zeros.
+    seed_t = ck_seed_t.view(at::kLong);
+    offset_t = ck_offset_t.view(at::kLong);
 #else
     TORCH_CHECK(false, "Attempting to use CK mem_eff_forward backend in a build that has not built CK");
 #endif
