@@ -1087,6 +1087,46 @@ def module_error_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_gra
             error_type=ValueError,
             error_regex="in_channels must be divisible by groups",
         ),
+        # out_channels must be divisible by groups.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size, groups=2),
+                forward_input=FunctionInput(make_input((2, C_in) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="out_channels must be divisible by groups",
+        ),
+        # padding strings must be 'same' or 'valid'.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size, padding='foo'),
+                forward_input=FunctionInput(make_input((2, C_in) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="Invalid padding string 'foo'",
+        ),
+        # padding='same' needs stride 1.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size, padding='same', stride=2),
+                forward_input=FunctionInput(make_input((2, C_in) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="padding='same' is not supported for strided convolutions",
+        ),
+        # padding_mode must be a known mode.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size, padding_mode='foo'),
+                forward_input=FunctionInput(make_input((2, C_in) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="padding_mode must be one of",
+        ),
     ]
 
 
