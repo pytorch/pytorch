@@ -370,6 +370,73 @@ static std::optional<Scalar> prepare_clamp_bound(
   return std::nullopt;
 }
 
+static Tensor prepare_clamp_tensor_bound(
+    const Tensor& bound,
+    ScalarType dtype,
+    bool is_lower_bound) {
+  if (bound.dim() != 0 || bound.scalar_type() == dtype ||
+      (c10::isFloat8Type(bound.scalar_type()) &&
+       !c10::isFloat8Type(dtype)) ||
+      (!isBarebonesUnsignedType(dtype) &&
+       !isBarebonesUnsignedType(bound.scalar_type()) &&
+       !(dtype == kHalf &&
+         (bound.scalar_type() == kInt || bound.scalar_type() == kLong)) &&
+       c10::promoteTypes(dtype, bound.scalar_type()) == dtype)) {
+    return bound;
+  }
+  // Validate the original bound, not TensorIterator's possibly narrowed copy.
+  // CUDA bounds synchronize only on this potentially lossy conversion path.
+  auto scalar = bound.item();
+  bool no_op = false;
+  if (isIntegralType(dtype, /*includeBool=*/false)) {
+    if (!prepare_clamp_bound(scalar, dtype, is_lower_bound)) {
+      no_op = true;
+      scalar = AT_DISPATCH_V2(
+          dtype,
+          "clamp_tensor_bound_limit",
+          AT_WRAP([&]() -> Scalar {
+            return is_lower_bound
+                ? Scalar(std::numeric_limits<scalar_t>::lowest())
+                : Scalar(std::numeric_limits<scalar_t>::max());
+          }),
+          AT_EXPAND(AT_INTEGRAL_TYPES_V2));
+    }
+  } else if (isFloatingType(dtype)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kHalf, kBFloat16, dtype, "clamp_tensor_bound_check", [&] {
+          scalar.to<scalar_t>();
+        });
+  }
+  return no_op ? at::scalar_tensor(scalar, bound.options().dtype(dtype))
+               : bound;
+}
+
+static bool redispatch_clamp_tensor_bounds(
+    const Tensor& self,
+    OptionalTensorRef min,
+    OptionalTensorRef max,
+    const Tensor& result,
+    ScalarType dtype) {
+  const auto lo = min
+      ? std::make_optional(prepare_clamp_tensor_bound(*min, dtype, true))
+      : std::nullopt;
+  const auto hi = max
+      ? std::make_optional(prepare_clamp_tensor_bound(*max, dtype, false))
+      : std::nullopt;
+  if ((min && !lo->is_same(*min)) || (max && !hi->is_same(*max))) {
+    auto& out = const_cast<Tensor&>(result);
+    if (min && max) {
+      at::clamp_outf(self, lo, hi, out);
+    } else if (min) {
+      at::clamp_min_outf(self, *lo, out);
+    } else {
+      at::clamp_max_outf(self, *hi, out);
+    }
+    return true;
+  }
+  return false;
+}
+
 DEFINE_DISPATCH(
     where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
@@ -952,7 +1019,10 @@ TORCH_IMPL_FUNC(clamp_Tensor_out)
 (const Tensor& self,
  const OptionalTensorRef min,
  const OptionalTensorRef max,
- const Tensor& /*unused*/) {
+ const Tensor& result) {
+  if (redispatch_clamp_tensor_bounds(self, min, max, result, common_dtype())) {
+    return;
+  }
   if (min && max) {
     clamp_stub(device_type(), *this);
   } else if (min) {
@@ -980,6 +1050,10 @@ TORCH_IMPL_FUNC(clamp_max_out)
 
 TORCH_IMPL_FUNC(clamp_max_Tensor_out)
 (const Tensor& self, const Tensor& max, const Tensor& result) {
+  if (redispatch_clamp_tensor_bounds(
+          self, OptionalTensorRef{}, max, result, common_dtype())) {
+    return;
+  }
   minimum_stub(device_type(), *this);
 }
 
@@ -998,6 +1072,10 @@ TORCH_IMPL_FUNC(clamp_min_out)
 
 TORCH_IMPL_FUNC(clamp_min_Tensor_out)
 (const Tensor& self, const Tensor& min, const Tensor& result) {
+  if (redispatch_clamp_tensor_bounds(
+          self, min, OptionalTensorRef{}, result, common_dtype())) {
+    return;
+  }
   maximum_stub(device_type(), *this);
 }
 
