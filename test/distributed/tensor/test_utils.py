@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
+    DTensorTestBase,
     generate_shard_orders,
     LocalDTensorContinuousTestBase,
     LocalDTensorTestBase,
@@ -613,8 +614,12 @@ class LocalTest(TestCase):
                         )
 
 
-class UtilTest(DTensorContinuousTestBase):
-    world_size = 8
+# Each test builds its own multi-dim meshes, and every mesh's NCCL communicators
+# hold /dev/shm until the workers exit, so run each test in fresh processes.
+class UtilTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
 
     def _compute_start_end_offsets(self, global_offset, local_size, n_dim):
         offset = []
@@ -2269,9 +2274,7 @@ class TestIsTensorShardable(LocalTensorTestBase):
         self.assertFalse(is_tensor_evenly_shardable([16, 8], spec))
 
 
-UtilTestWithLocalTensor = create_local_tensor_test_class(
-    UtilTest, base_class=LocalDTensorContinuousTestBase
-)
+UtilTestWithLocalTensor = create_local_tensor_test_class(UtilTest)
 TestStridedShardingWithLocalTensor = create_local_tensor_test_class(
     TestStridedSharding, base_class=LocalDTensorContinuousTestBase
 )
