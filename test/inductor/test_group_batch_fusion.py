@@ -1149,6 +1149,107 @@ class TestGroupBatchFusion(TestCase):
         # CPU graph, so the XPU-only option must not fuse.
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
 
+    @parametrize(
+        "consumer",
+        [
+            "clone",
+            "contiguous",
+            "to_float64",
+            "zero_pad",
+            "nonzero_pad",
+            "two_contiguous",
+        ],
+    )
+    @parametrize("m", [1, 32])
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_linear_lhs_copy_consumers_keep_numerics(self, consumer, m):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 48, bias=False)
+                self.b = torch.nn.Linear(64, 48, bias=False)
+                self.c = torch.nn.Linear(64, 48, bias=False)
+
+            def forward(self, x):
+                large = self.a(x)
+                if consumer == "clone":
+                    out = large.clone()
+                elif consumer == "contiguous":
+                    out = large.contiguous()
+                elif consumer == "to_float64":
+                    out = large.to(torch.float64)
+                elif consumer == "zero_pad":
+                    out = torch.nn.functional.pad(large, (0, 0))
+                elif consumer == "nonzero_pad":
+                    out = torch.nn.functional.pad(large, (0, 2))
+                else:
+                    return (
+                        large.contiguous(),
+                        large.contiguous(),
+                        torch.sin(self.b(x)),
+                        self.c(x),
+                    )
+                return out, torch.sin(self.b(x)), self.c(x)
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(m, 64)
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        if consumer == "to_float64":
+            # The inputs are float32 GEMMs; compare at float32 precision.
+            self.assertEqual(actual[0].float(), expected[0].float())
+            self.assertEqual(actual[1:], expected[1:])
+        else:
+            self.assertEqual(actual, expected)
+        self.assertEqual([t.stride() for t in actual], [t.stride() for t in expected])
+        self.assertEqual(subsets, [3])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        if consumer == "two_contiguous":
+            self.assertEqual(actual[0].data_ptr(), actual[1].data_ptr())
+
+    @parametrize("p,inplace", [(0.5, False), (0.0, False), (0.5, True)])
+    @parametrize("m", [1, 32])
+    @torch._inductor.config.patch(
+        fallback_random=True,
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_linear_lhs_dropout_keeps_numerics(self, p, inplace, m):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 48, bias=False)
+                self.b = torch.nn.Linear(64, 48, bias=False)
+                self.c = torch.nn.Linear(64, 48, bias=False)
+
+            def forward(self, x):
+                dropped = torch.nn.functional.dropout(
+                    self.a(x), p, True, inplace=inplace
+                )
+                return dropped, torch.sin(self.b(x)), self.c(x)
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(m, 64)
+        with torch.no_grad():
+            torch.manual_seed(1234)
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                torch.manual_seed(1234)
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual([t.stride() for t in actual], [t.stride() for t in expected])
+        self.assertEqual(subsets, [3])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
     @parametrize("consumer", ["custom_contiguous", "merge_view"])
     @torch._inductor.config.patch(
         post_grad_fusion_options={
