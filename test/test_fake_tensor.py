@@ -809,6 +809,12 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     @fake_tensor_modes
     @parametrize("leaf", [False, True])
     def test_non_parameter_grad(self, mode_cls, leaf):
+        if (
+            mode_cls is CppFakeTensorMode
+            and not leaf
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         mode = mode_cls()
         t = torch.rand([4], requires_grad=True)
         if not leaf:
@@ -3656,6 +3662,10 @@ class TestFakeTensorConverter(TestCase):
     def test_memoized_conversion_from_meta(self, mode_cls, pytype):
         if mode_cls is CppFakeTensorMode and pytype is torch.nn.Parameter:
             self.skipTest("C++ fake tensors do not support Parameter pytype")
+        if TEST_WITH_TORCHDYNAMO and mode_cls is FakeTensorMode and pytype is not None:
+            self.skipTest(
+                "Dynamo guards on pytype, which differs from the actual FakeTensor type"
+            )
         x = torch.rand(2, 2).to(device="meta")
         mode = mode_cls()
         converter = mode.fake_tensor_converter
