@@ -428,7 +428,6 @@
   "test/inductor/test_interval_mask_packing.py",
   "test/inductor/test_kernel_benchmark.py",
   "test/inductor/test_kernel_configs.py",
-  "test/inductor/test_kernel_optimization.py",
   "test/inductor/test_layout_optim.py",
   "test/inductor/test_lookup_table.py",
   "test/inductor/test_loop_ordering.py",
