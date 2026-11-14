@@ -4,6 +4,7 @@ import functools
 import os
 import unittest
 from datetime import timedelta
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -12,7 +13,12 @@ from torch._C._distributed_c10d import Backend as C10dBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed import config as dist_config
 from torch.distributed._mesh_layout import _FlatLayout, _MeshLayout
-from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
+from torch.distributed.device_mesh import (
+    _get_device_handle,
+    _mesh_resources,
+    DeviceMesh,
+    init_device_mesh,
+)
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     _TORCHCOMM_AVAILABLE,
@@ -31,8 +37,17 @@ from torch.distributed.tensor._collective_utils import (
     unpad_tensor,
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_HPU,
+    TEST_XPU,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -2214,6 +2229,71 @@ class ProcessGroupOpaqueTypeTest(TestCase):
                 f"member but does not exist on the ProcessGroup class. "
                 f"Was it renamed or removed?",
             )
+
+
+class DeviceMeshGetDeviceHandleTest(TestCase):
+    """Test that _get_device_handle resolves device modules in a device-agnostic way.
+
+    The tests mock torch.accelerator.current_accelerator to stay deterministic and
+    run on any host (no accelerator required).
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_get_device_handle_explicit_device_type(self):
+        self.assertIs(_get_device_handle("cuda"), torch.cuda)
+        self.assertIsNone(_get_device_handle("non_existent_device"))
+
+    @parametrize(
+        "acc, expected",
+        [
+            (torch.device("cuda"), torch.cuda),
+            (mock.Mock(type="npu"), mock.Mock()),
+        ],
+        name_fn=lambda acc, expected: acc.type,
+    )
+    def test_get_device_handle_default_resolves_current_accelerator(
+        self, acc, expected
+    ):
+        with mock.patch("torch.accelerator.current_accelerator", return_value=acc):
+            # OOT backends (e.g. npu) may not expose a module on torch unless
+            # registered; create=True keeps the patch valid on any host.
+            with mock.patch.object(torch, acc.type, expected, create=True):
+                self.assertIs(_get_device_handle(), expected)
+
+    def test_get_device_handle_default_falls_back_to_cpu(self):
+        with mock.patch("torch.accelerator.current_accelerator", return_value=None):
+            self.assertIs(_get_device_handle(), torch.cpu)
+
+
+instantiate_parametrized_tests(DeviceMeshGetDeviceHandleTest)
+
+
+class DeviceMeshGetDeviceHandleAcceleratorTest(TestCase):
+    """Verify _get_device_handle default/explicit resolution against the running
+    accelerator on real hardware. Instantiated per device via
+    instantiate_device_type_tests; CPU is excluded because the fallback path is
+    already covered by the GENERIC mock tests above.
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_default_resolves_to_running_accelerator(self, device):
+        acc = torch.accelerator.current_accelerator(check_available=True)
+        self.assertIsNotNone(acc)
+        self.assertEqual(device.split(":")[0], acc.type)
+        self.assertIs(_get_device_handle(), torch.get_device_module(acc))
+
+    def test_explicit_type_matches_running_accelerator(self, device):
+        device_type = device.split(":")[0]
+        self.assertIs(
+            _get_device_handle(device_type), torch.get_device_module(device_type)
+        )
+
+
+instantiate_device_type_tests(
+    DeviceMeshGetDeviceHandleAcceleratorTest, globals(), except_for="cpu"
+)
 
 
 if __name__ == "__main__":

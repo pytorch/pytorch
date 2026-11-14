@@ -176,13 +176,18 @@ else:
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
-    def _get_device_handle(device_type: str = "cuda"):
+    def _get_device_handle(device_type: str | None = None):
         """
         Get the module corresponding to the device_type which is cuda or cuda-like device.
         For example, when the device_type is cuda, the module `torch.cuda` is returned.
+        When the device_type is None, the current accelerator is used, falling back to
+        `torch.cpu` when no accelerator is available.
         Return None when there is no corresponding module for device_type, otherwise
         return the corresponding module.
         """
+        if device_type is None:
+            acc = torch.accelerator.current_accelerator(check_available=True)
+            device_type = acc.type if acc is not None else "cpu"
         return getattr(torch, device_type, None)
 
     class DeviceMesh(CustomClassBase):
@@ -579,7 +584,7 @@ else:
                 ranks_match_default = ranks == pg_ranks_by_dim.flatten().tolist()
                 if not preserve_rank_order or ranks_match_default:
                     if (
-                        torch.cuda.is_available()
+                        torch.accelerator.is_available()
                         and get_backend(default_group) == "gloo"
                     ):
                         dim_group = new_group(
