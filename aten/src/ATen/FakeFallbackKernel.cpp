@@ -3,6 +3,7 @@
 #include <ATen/FakeTensorDispatchTables.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/native/ElementwiseRefMeta.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreterHooks.h>
@@ -36,7 +37,8 @@
 // Lifts and numbers-as-tensors calls first try Python's constant-creation path.
 // Deterministic ops on constant inputs run on their real constants, and writes
 // that cannot be evaluated invalidate constants sharing the written storage.
-// Symbolic inputs use Python's fast implementations before decomposition;
+// Symbolic add/sub/mul/div first try the shared native binary metadata helper.
+// Other symbolic cases use Python's fast implementations before decomposition;
 // these implementations enter the mode only for their slow reference paths.
 // Python Meta registrations that torch._meta_registrations installs as Meta
 // kernels run here like C++ ones. When the Python dispatcher is enabled, preserve
@@ -661,6 +663,34 @@ void fakeFallback(
   const auto has = [&](FakeDispatchCategory category) {
     return at::impl::fakeDispatchCategoriesHave(categories, category);
   };
+  if (symbolic_sizes && schema.overload_name() == "Tensor" &&
+      (schema.name() == "aten::add" || schema.name() == "aten::sub" ||
+       schema.name() == "aten::mul" || schema.name() == "aten::div")) {
+    const auto& self = (*stack)[arguments_begin].toTensor();
+    const auto& other = (*stack)[arguments_begin + 1].toTensor();
+    if (self.layout() == c10::kStrided && other.layout() == c10::kStrided) {
+      using at::native::ELEMENTWISE_TYPE_PROMOTION_KIND;
+      // Like Python's fast implementation, defer nontrivial broadcasting and
+      // strides to the reference implementation. Alpha validation also stays
+      // with that reference path, matching Python's fast-path behavior.
+      auto result = at::native::fast_binary_impl(
+          self,
+          other,
+          schema.name() == "aten::div"
+              ? ELEMENTWISE_TYPE_PROMOTION_KIND::INT_TO_FLOAT
+              : ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT);
+      if (result.defined()) {
+        const auto device = _find_common_device(/*resolve=*/true);
+        TORCH_INTERNAL_ASSERT(device.has_value());
+        at::init_cpp_fake(
+            result.unsafeGetTensorImpl(), *device, mode);
+        torch::jit::drop(*stack, num_arguments);
+        torch::jit::push(*stack, std::move(result));
+        maybe_propagate_real_tensors();
+        return;
+      }
+    }
+  }
   if (symbolic_sizes &&
       (*c10::impl::getGlobalPyInterpreter())
           ->fake_try_fast_impl(op, stack, mode)) {

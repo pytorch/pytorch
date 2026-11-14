@@ -2268,24 +2268,38 @@ def forward(self, x_1):
 
     @fake_tensor_modes
     @parametrize("symbolic", [False, True])
-    def test_fast_div_int_to_float(self, mode_cls, symbolic):
+    @parametrize(
+        "op", [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
+    )
+    @parametrize(
+        "shape_case",
+        ["same", "broadcast", "both_broadcast", "transpose", "channels_last"],
+    )
+    def test_fast_binary(self, mode_cls, symbolic, op, shape_case):
         shape_env = ShapeEnv() if symbolic else None
         mode = mode_cls(shape_env=shape_env)
         size = shape_env.create_unbacked_symint() if shape_env is not None else 2
         with mode:
-            x = torch.empty(size, 2, device="cpu", dtype=torch.int32)
-            y = torch.empty(size, 2, device="cpu", dtype=torch.int32)
+            x = torch.empty(size, 2, 3, 4, device="cpu", dtype=torch.int32)
+            y = torch.empty_like(x)
+            if shape_case == "broadcast":
+                y = torch.empty(1, 2, 3, 4, dtype=x.dtype)
+            elif shape_case == "both_broadcast":
+                x = torch.empty(size, 1, 3, 4, dtype=x.dtype)
+                y = torch.empty(1, 2, 3, 4, dtype=x.dtype)
+            elif shape_case == "transpose":
+                x, y = x.transpose(-1, -2), y.transpose(-1, -2)
+            elif shape_case == "channels_last":
+                x = x.contiguous(memory_format=torch.channels_last)
+                y = y.contiguous(memory_format=torch.channels_last)
         from torch._subclasses.fake_impls import get_fast_op_impls
 
-        fast_div = get_fast_op_impls()[torch.ops.aten.div.Tensor]
-        z = fast_div(mode, x, y)
-        self.assertEqual(z.dtype, torch.float32)
-        self.assertEqual(z.shape, x.shape)
+        z = get_fast_op_impls()[op](mode, x, y)
+        self.assertEqual(z.dtype, torch.float32 if op == aten.div.Tensor else x.dtype)
         self.assertIs(maybe_get_fake_mode(z), mode)
-        if symbolic:
-            dispatched = torch.ops.aten.div.Tensor(x, y)
-            prims.utils.compare_tensor_meta(z, dispatched, check_strides=True)
-            self.assertIs(maybe_get_fake_mode(dispatched), mode)
+        dispatched = op(x, y)
+        prims.utils.compare_tensor_meta(z, dispatched, check_strides=True)
+        self.assertIs(maybe_get_fake_mode(dispatched), mode)
 
     @fake_tensor_modes
     @parametrize("symbolic", [False, True])
