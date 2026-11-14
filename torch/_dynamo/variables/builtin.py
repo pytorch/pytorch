@@ -2992,11 +2992,37 @@ class BuiltinVariable(BaseBuiltinVariable):
                     or instancecheck in _VALUE_INDEPENDENT_INSTANCECHECKS
                 )
             )
-            value = (
-                NO_SUCH_SUBOBJ
-                if answered_by_type
-                else arg.get_real_python_backed_value()
-            )
+            if answered_by_type:
+                value = NO_SUCH_SUBOBJ
+            elif (
+                sys.version_info >= (3, 12)
+                and isinstance(arg, variables.FunctoolsPartialVariable)
+                and arg.value is None
+                and type(member) is getattr(typing, "_ProtocolMeta", None)
+                and getattr(member, "_is_protocol", False)
+                and getattr(member, "_is_runtime_protocol", False)
+                and getattr(member, "__protocol_attrs__", {"__dict__"})
+                <= {"func", "args", "keywords"}
+            ):
+                # Static protocol lookup sees the readonly members, regardless
+                # of the partial's payload or whether it can be materialized.
+                value = functools.partial(int)
+            elif (
+                sys.version_info >= (3, 12)
+                and isinstance(arg, variables.ClassMethodVariable)
+                and arg.is_synthetic
+                and isinstance(arg.descriptor, variables.NestedUserFunctionVariable)
+                and type(member) is getattr(typing, "_ProtocolMeta", None)
+                and getattr(member, "_is_protocol", False)
+                and getattr(member, "_is_runtime_protocol", False)
+                and getattr(member, "__protocol_attrs__", {"__dict__"})
+                <= {"__func__", "__wrapped__"}
+            ):
+                # The stdlib hook uses getattr_static. These readonly members
+                # are present regardless of the wrapped function.
+                value = classmethod(type)
+            else:
+                value = arg.get_real_python_backed_value()
             if value is not NO_SUCH_SUBOBJ:
                 try:
                     val = isinstance(value, member)
@@ -3054,7 +3080,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_classmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker
     ) -> VariableTracker:
-        return variables.ClassMethodVariable.create(func)
+        return variables.ClassMethodVariable.create(tx, func)
 
     def call_staticmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker

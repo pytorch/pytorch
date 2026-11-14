@@ -1704,6 +1704,12 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             # Python object; their __dict__ starts empty and any custom
             # attribute is recorded in the side effects table.
             return {}
+        elif (
+            isinstance(vt, variables.ClassMethodVariable) and vt.is_synthetic
+        ):
+            # A new classmethod's state is populated entirely through the
+            # side-effects table; its backing object is only a placeholder.
+            return {}
         else:
             value = vt.get_real_python_backed_value()
             if value is not NO_SUCH_SUBOBJ:
@@ -1947,6 +1953,13 @@ class DunderDictVariable(ConstDictVariable):
     tp_methods = {
         "copy": Method(dict_copy),
     }
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if isinstance(self.items.item, variables.ClassMethodVariable):
+            codegen(self.items.item)
+            codegen.extend_output(codegen.create_load_attrs("__dict__"))
+            return
+        super().reconstruct(codegen)
 
     # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),
     # so we don't need to install guards. Guard installation is overridden to no-op.

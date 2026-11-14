@@ -1,12 +1,17 @@
 # Owner(s): ["module: dynamo"]
 """Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
 
+import abc
 import collections
+import functools
 import inspect
 import sys
 import traceback
 import types
 import unittest
+from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -914,6 +919,979 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         expected = fn(torch.ones(1))
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
         self.assertEqual(result, expected)
+
+    def test_classmethod_super_attribute_binding(self):
+        class C:
+            @classmethod
+            def goo(cls):
+                return cls
+
+        class D(C):
+            pass
+
+        def fn():
+            d = D()
+            class_method = super(D, D).goo
+            instance_method = super(D, d).goo
+            return (
+                class_method.__self__ is D,
+                class_method() is D,
+                instance_method.__self__ is D,
+                instance_method() is D,
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    def test_classmethod_noncallable_payload(self):
+        def fn():
+            meth = classmethod(1).__get__(1)
+            call_raises = False
+            try:
+                meth()
+            except TypeError:
+                call_raises = True
+            return meth.__self__ is int, meth.__func__ == 1, call_raises
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+        self.assertEqual(result, (True, True, True))
+
+    def test_classmethod_generic_payload_calls(self):
+        class Callable:
+            def __call__(self, cls, value):
+                return cls, value
+
+        class C:
+            pass
+
+        def fn():
+            partial = classmethod(
+                functools.partial(lambda cls, x, y: (cls, x + y), y=2)
+            )
+            return (
+                classmethod(getattr).__get__(None, C)("__name__"),
+                partial.__get__(None, C)(3),
+                classmethod(Callable()).__get__(None, C)(4),
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    def test_classmethod_generic_method_semantics(self):
+        def impl(cls, value=1):
+            return cls, value
+
+        class C:
+            bm = classmethod(functools.partial(impl, value=2))
+
+        class D(C):
+            pass
+
+        other_payload = functools.partial(impl, value=2)
+
+        def fn():
+            class_method = C.bm
+            direct = classmethod(other_payload).__get__(None, C)
+            return (
+                C.bm in {C.bm},
+                class_method == C.bm,
+                class_method != D.bm,
+                class_method != direct,
+                direct in {classmethod(other_payload).__get__(None, C)},
+                class_method.__self__ is C,
+                class_method(),
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+        def escape():
+            return C.bm
+
+        expected_method = escape()
+        result_method = torch.compile(escape, backend="eager", fullgraph=True)()
+        self.assertIs(result_method.__self__, expected_method.__self__)
+        self.assertEqual(result_method(), expected_method())
+
+        def instance_fn():
+            instance = C()
+            method = instance.bm
+            return method in {instance.bm}, method.__self__ is C, method()
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(instance_fn, backend="eager", fullgraph=True)()
+        self.assertEqual(torch.compile(instance_fn, backend="eager")(), instance_fn())
+
+        class EqualCallable:
+            def __init__(self, value):
+                self.value = value
+
+            def __call__(self, cls):
+                return cls
+
+            def __eq__(self, other):
+                return isinstance(other, EqualCallable) and self.value == other.value
+
+            def __hash__(self):
+                return hash(self.value)
+
+        left = EqualCallable(1)
+        right = EqualCallable(1)
+
+        def equal_payloads():
+            left_method = classmethod(left).__get__(None, C)
+            right_method = classmethod(right).__get__(None, C)
+            return left_method == right_method, left_method in {right_method}
+
+        self.assertEqual(
+            torch.compile(equal_payloads, backend="eager", fullgraph=True)(),
+            equal_payloads(),
+        )
+
+    def test_classmethod_partial_payload_identity(self):
+        class C:
+            pass
+
+        def impl(cls):
+            return cls
+
+        @torch.compiler.assume_constant_result
+        def same_payload(cm, payload):
+            return cm.__func__ is payload
+
+        @torch.compiler.assume_constant_result
+        def shared_payload(left, right, payload):
+            return (
+                left.__func__ is payload,
+                right.__func__ is payload,
+                left.__func__ is right.__func__,
+            )
+
+        def separate_argument():
+            payload = functools.partial(impl)
+            return same_payload(classmethod(payload), payload)
+
+        def bound_methods():
+            payload = functools.partial(impl)
+            left = classmethod(payload).__get__(None, C)
+            right = classmethod(payload).__get__(None, C)
+            return (
+                left == right,
+                left in {right},
+                left.__func__ is right.__func__,
+            )
+
+        def repeated_materialization():
+            payload = functools.partial(impl)
+            return shared_payload(
+                classmethod(payload), classmethod(payload), payload
+            )
+
+        payload_alias = functools.partial(impl)
+        same_payload_alias = payload_alias
+
+        def separately_tracked_aliases():
+            return same_payload(classmethod(payload_alias), same_payload_alias)
+
+        def separately_tracked_bound_methods():
+            left = classmethod(payload_alias).__get__(None, C)
+            right = classmethod(same_payload_alias).__get__(None, C)
+            return (
+                left == right,
+                left in {right},
+                left.__func__ is right.__func__,
+            )
+
+        for fn in (
+            separate_argument,
+            bound_methods,
+            repeated_materialization,
+            separately_tracked_aliases,
+            separately_tracked_bound_methods,
+        ):
+            with self.subTest(fn=fn.__name__):
+                expected = fn()
+                self.assertEqual(
+                    torch.compile(fn, backend="eager", fullgraph=True)(), expected
+                )
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend="eager")(), expected)
+
+        compiled_aliases = torch.compile(
+            separately_tracked_aliases, backend="eager", fullgraph=True
+        )
+        self.assertTrue(compiled_aliases())
+        same_payload_alias = functools.partial(impl)
+        self.assertFalse(compiled_aliases())
+
+        payload = functools.partial(impl)
+
+        def return_descriptor():
+            return classmethod(payload)
+
+        eager_descriptor = return_descriptor()
+        fullgraph_descriptor = torch.compile(
+            return_descriptor, backend="eager", fullgraph=True
+        )()
+        torch._dynamo.reset()
+        nonfull_descriptor = torch.compile(
+            return_descriptor, backend="eager"
+        )()
+        self.assertIs(eager_descriptor.__func__, payload)
+        self.assertIs(fullgraph_descriptor.__func__, payload)
+        self.assertIs(nonfull_descriptor.__func__, payload)
+
+    def test_classmethod_cross_conversion_identity(self):
+        def f():
+            pass
+
+        @torch.compiler.assume_constant_result
+        def identity(value):
+            return value
+
+        def repeated_conversion():
+            cm = classmethod(f)
+            return identity(cm) is identity(cm)
+
+        def conversion_and_tracker():
+            cm = classmethod(f)
+            return identity(cm) is cm
+
+        def escaping_alias():
+            cm = classmethod(f)
+            return identity(cm), cm
+
+        for fullgraph in (True, False):
+            torch._dynamo.reset()
+            first, second = torch.compile(
+                escaping_alias, backend="eager", fullgraph=fullgraph
+            )()
+            self.assertIs(first, second)
+
+        def mutate_after_conversion():
+            cm = classmethod(f)
+            alias = identity(cm)
+            cm.y = 1
+            return alias.y
+
+        @torch.compiler.assume_constant_result
+        def pack(value):
+            return (value,)
+
+        def container_alias():
+            cm = classmethod(f)
+            return pack(cm), cm
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "assume_constant_result argument conversion failed",
+        ):
+            torch.compile(container_alias, backend="eager", fullgraph=True)()
+        torch._dynamo.reset()
+        packed, cm = torch.compile(container_alias, backend="eager")()
+        self.assertIs(packed[0], cm)
+
+        def impl(cls):
+            return cls
+
+        @torch.compiler.assume_constant_result
+        def payload_matches(cm, payload):
+            return cm.payload is payload
+
+        def dictionary_alias():
+            payload = functools.partial(impl)
+            cm = classmethod(impl)
+            cm.payload = payload
+            return payload_matches(cm, payload)
+
+        def dictionary_list_alias():
+            payload = []
+            cm = classmethod(impl)
+            cm.payload = payload
+            return payload_matches(cm, payload)
+
+        def mutation_between_conversions():
+            cm = classmethod(f)
+            first = identity(cm)
+            cm.x = 42
+            second = identity(cm)
+            during = second.x
+            del cm.x
+            third = identity(cm)
+            return first is second is third, during, "x" in third.__dict__
+
+        for fn in (
+            repeated_conversion,
+            conversion_and_tracker,
+            mutate_after_conversion,
+            dictionary_alias,
+            dictionary_list_alias,
+            mutation_between_conversions,
+        ):
+            with self.subTest(fn=fn.__name__):
+                expected = fn()
+                self.assertEqual(
+                    torch.compile(fn, backend="eager", fullgraph=True)(), expected
+                )
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend="eager")(), expected)
+
+    def test_assume_constant_result_classmethod_opaque_result(self):
+        @dataclass
+        class Box:
+            payload: object
+
+        @torch.compiler.assume_constant_result
+        def wrap(value, kind):
+            if kind == "namespace":
+                return types.SimpleNamespace(payload=value)
+            if kind == "dataclass":
+                return Box(value)
+            return {"nested": [Box(types.SimpleNamespace(payload=value))]}
+
+        def fn(kind):
+            cm = classmethod(int)
+            return wrap(cm, kind), cm
+
+        for kind in ("namespace", "dataclass", "nested"):
+            with self.subTest(kind=kind):
+                for compiled in (False, True):
+                    torch._dynamo.reset()
+                    run = torch.compile(fn, backend="eager") if compiled else fn
+                    wrapper, cm = run(kind)
+                    payload = (
+                        wrapper["nested"][0].payload.payload
+                        if kind == "nested"
+                        else wrapper.payload
+                    )
+                    self.assertIs(payload, cm)
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "assume_constant_result argument conversion failed",
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(kind)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires static protocol lookup")
+    def test_synthetic_partial_protocol(self):
+        @runtime_checkable
+        class HasFunc(Protocol):
+            func: object
+
+        def fn():
+            payload = functools.partial(int, "5")
+            return isinstance(payload, HasFunc), payload()
+
+        self.assertEqual(fn(), (True, 5))
+        for fullgraph in (True, False):
+            torch._dynamo.reset()
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=fullgraph)(), fn()
+            )
+
+    def test_assume_constant_result_partial_mutable_argument(self):
+        def size(values):
+            return len(values)
+
+        @torch.compiler.assume_constant_result
+        def read(payload, values):
+            return payload(), payload.args[0] is values
+
+        def fn():
+            values = [1]
+            payload = functools.partial(size, values)
+            before = read(payload, values)
+            values.append(2)
+            after = read(payload, values)
+            return before, after
+
+        self.assertEqual(fn(), ((1, True), (2, True)))
+        for fullgraph in (True, False):
+            torch._dynamo.reset()
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=fullgraph)(), fn()
+            )
+
+    def test_assume_constant_result_mutated_partial_keywords(self):
+        def impl(cls, value=0):
+            return cls, value
+
+        payload = functools.partial(impl, value=1)
+
+        @torch.compiler.assume_constant_result
+        def read_keyword(value):
+            return value.keywords["value"]
+
+        def fn():
+            payload.keywords["value"] = 2
+            return read_keyword(payload)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(payload.keywords["value"], 1)
+        self.assertEqual(torch.compile(fn, backend="eager")(), 2)
+        self.assertEqual(payload.keywords["value"], 2)
+
+    def test_classmethod_isabstractmethod(self):
+        @abc.abstractmethod
+        def abstract():
+            pass
+
+        class Truthy:
+            __isabstractmethod__ = 7
+
+        truthy = Truthy()
+
+        def fn():
+            abstract_cm = classmethod(abstract)
+
+            def concrete():
+                pass
+
+            concrete_cm = classmethod(concrete)
+
+            truthy_cm = classmethod(truthy)
+
+            set_error = False
+            try:
+                abstract_cm.__isabstractmethod__ = False
+            except AttributeError:
+                set_error = True
+
+            del_error = False
+            try:
+                del abstract_cm.__isabstractmethod__
+            except AttributeError:
+                del_error = True
+
+            return (
+                abstract_cm.__isabstractmethod__,
+                concrete_cm.__isabstractmethod__,
+                truthy_cm.__isabstractmethod__,
+                type(truthy_cm.__isabstractmethod__) is bool,
+                set_error,
+                del_error,
+                abstract_cm.__isabstractmethod__,
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+        def set_raises():
+            cm = classmethod(abstract)
+            cm.__isabstractmethod__ = False
+
+        def delete_raises():
+            cm = classmethod(abstract)
+            del cm.__isabstractmethod__
+
+        for raises in (set_raises, delete_raises):
+            with self.subTest(raises=raises.__name__):
+                with self.assertRaises(AttributeError):
+                    raises()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(raises, backend="eager", fullgraph=True)()
+                with self.assertRaises(AttributeError):
+                    torch.compile(raises, backend="eager")()
+
+    def test_classmethod_isabstractmethod_exception(self):
+        class Raising:
+            @property
+            def __isabstractmethod__(self):
+                raise RuntimeError("boom")
+
+        def fn():
+            try:
+                classmethod(Raising()).__isabstractmethod__
+            except RuntimeError:
+                return True
+            return False
+
+        self.assertTrue(fn())
+        self.assertTrue(torch.compile(fn, backend="eager", fullgraph=True)())
+
+    def test_classmethod_synthetic_value_does_not_escape(self):
+        def f():
+            pass
+
+        @runtime_checkable
+        class HasFunction(Protocol):
+            __func__: object
+
+        @torch.compiler.assume_constant_result
+        def has_function(cm):
+            return cm.__func__ is f
+
+        def protocol_fn():
+            return isinstance(classmethod(f), HasFunction)
+
+        def constant_fn():
+            return has_function(classmethod(f))
+
+        class C:
+            @classmethod
+            def method(cls):
+                return cls
+
+        def source_backed_fn():
+            return C.method.__self__ is C
+
+        self.assertTrue(protocol_fn())
+        self.assertTrue(constant_fn())
+        for fn in (protocol_fn, constant_fn):
+            with self.subTest(fn=fn.__name__):
+                self.assertTrue(
+                    torch.compile(fn, backend="eager", fullgraph=True)()
+                )
+                self.assertTrue(torch.compile(fn, backend="eager")())
+        from torch._dynamo.variables.descriptors import (
+            ClassAttrClassMethodVariable,
+            ClassMethodVariable,
+        )
+
+        original = ClassMethodVariable.from_descriptor
+        source_backed = []
+
+        def checked_from_descriptor(tx, descriptor, name, source=None):
+            result = original(tx, descriptor, name, source)
+            self.assertIsInstance(result, ClassAttrClassMethodVariable)
+            self.assertIs(result.get_real_python_backed_value(), descriptor)
+            source_backed.append(result)
+            return result
+
+        with mock.patch.object(
+            ClassMethodVariable,
+            "from_descriptor",
+            side_effect=checked_from_descriptor,
+        ):
+            self.assertTrue(
+                torch.compile(source_backed_fn, backend="eager", fullgraph=True)()
+            )
+        self.assertTrue(source_backed)
+
+    def test_classmethod_synthetic_materialization(self):
+        def f():
+            pass
+
+        @runtime_checkable
+        class HasFunction(Protocol):
+            __func__: object
+
+        @torch.compiler.assume_constant_result
+        def state(cm):
+            return cm.__func__ is f, dict(cm.__dict__)
+
+        @torch.compiler.assume_constant_result
+        def same(left, right):
+            return left is right
+
+        @torch.compiler.assume_constant_result
+        def self_alias(cm):
+            return cm.alias is cm
+
+        @torch.compiler.assume_constant_result
+        def wrapped_name(cm):
+            return cm.__func__.__name__
+
+        def plain():
+            cm = classmethod(f)
+            return state(cm), isinstance(cm, HasFunction), same(cm, cm)
+
+        def mutated():
+            cm = classmethod(f)
+            cm.x = 42
+            return state(cm)
+
+        def deleted():
+            cm = classmethod(f)
+            del cm.__name__
+            return state(cm)
+
+        def self_referential():
+            cm = classmethod(f)
+            cm.alias = cm
+            return self_alias(cm)
+
+        def nested():
+            def inner():
+                pass
+
+            return wrapped_name(classmethod(inner))
+
+        for fn in (plain, mutated, deleted):
+            with self.subTest(fn=fn.__name__):
+                expected = fn()
+                result = torch.compile(fn, backend="eager", fullgraph=True)()
+                self.assertEqual(result, expected)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "assume_constant_result argument conversion failed",
+        ):
+            torch.compile(nested, backend="eager", fullgraph=True)()
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(nested, backend="eager")(), nested())
+
+        tensor = torch.ones(1)
+
+        @torch.compiler.assume_constant_result
+        def wrapped_is_tensor(cm):
+            return cm.__func__ is tensor
+
+        def nonconstant():
+            return wrapped_is_tensor(classmethod(tensor))
+
+        self.assertTrue(
+            torch.compile(nonconstant, backend="eager", fullgraph=True)()
+        )
+        torch._dynamo.reset()
+        self.assertTrue(torch.compile(nonconstant, backend="eager")())
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(self_referential, backend="eager", fullgraph=True)()
+        self.assertEqual(
+            torch.compile(self_referential, backend="eager")(), self_referential()
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires static protocol lookup")
+    def test_classmethod_nested_function_protocol(self):
+        @runtime_checkable
+        class HasFunction(Protocol):
+            __func__: object
+
+        def fn():
+            def inner():
+                return 1
+
+            return isinstance(classmethod(inner), HasFunction)
+
+        self.assertTrue(fn())
+        for fullgraph in (True, False):
+            torch._dynamo.reset()
+            self.assertTrue(torch.compile(fn, backend="eager", fullgraph=fullgraph)())
+
+    def test_classmethod_nested_function_constant_conversion(self):
+        @torch.compiler.assume_constant_result
+        def read(cm):
+            return cm.__func__()
+
+        def immutable():
+            value = 3
+
+            def inner():
+                return value
+
+            return read(classmethod(inner))
+
+        def mutable():
+            values = [1]
+
+            def inner():
+                return len(values)
+
+            values.append(2)
+            return read(classmethod(inner))
+
+        @torch.compiler.assume_constant_result
+        def metadata(cm, fn):
+            wrapped = cm.__func__
+            return (
+                wrapped is fn,
+                wrapped.__name__,
+                wrapped.__qualname__,
+                wrapped.__defaults__,
+                wrapped.__annotations__,
+                wrapped.extra,
+            )
+
+        def mutated():
+            def inner(x=1):
+                return x
+
+            inner.__dict__["extra"] = 2
+            inner.__name__ = "changed"
+            inner.__qualname__ = "changed.qualname"
+            inner.__defaults__ = (3,)
+            inner.__annotations__ = {"x": int}
+            return metadata(classmethod(inner), inner)
+
+        def cyclic():
+            def inner():
+                return inner.__name__
+
+            return read(classmethod(inner))
+
+        for fn in (immutable, mutable, mutated, cyclic):
+            with self.subTest(fn=fn.__name__):
+                expected = fn()
+                torch._dynamo.reset()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(fn, backend="eager", fullgraph=True)()
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend="eager")(), expected)
+
+    def test_classmethod_nested_function_reconstruct_alias(self):
+        def fn():
+            def inner():
+                return 1
+
+            cm = classmethod(inner)
+            return cm, inner, cm.__func__ is inner
+
+        for fullgraph in (True, False):
+            torch._dynamo.reset()
+            cm, inner, same = torch.compile(fn, backend="eager", fullgraph=fullgraph)()
+            self.assertTrue(same)
+            self.assertIs(cm.__func__, inner)
+            self.assertEqual(inner(), 1)
+
+    def test_classmethod_descriptor_delegation_by_python_version(self):
+        class C:
+            pass
+
+        def f(*args):
+            return args
+
+        prop = property(lambda cls: cls.__name__)
+
+        def staticmethod_fn():
+            bound = classmethod(staticmethod(f)).__get__(None, C)
+            if sys.version_info < (3, 13):
+                return type(bound) is types.FunctionType, bound()
+            return bound.__self__ is C, bound.__func__.__func__ is f
+
+        expected = staticmethod_fn()
+        result = torch.compile(staticmethod_fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+        def property_fn():
+            bound = classmethod(prop).__get__(None, C)
+            if sys.version_info < (3, 13):
+                return bound
+            return bound.__self__ is C, bound.__func__ is prop
+
+        expected = property_fn()
+        result = torch.compile(property_fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+        def helper(cls):
+            return cls
+
+        class Alias:
+            alias = classmethod(helper)
+
+        def alias_fn():
+            return Alias.alias.__self__ is Alias, Alias.alias() is Alias
+
+        self.assertEqual(
+            torch.compile(alias_fn, backend="eager", fullgraph=True)(), alias_fn()
+        )
+
+    def test_classmethod_super_disabled(self):
+        class Base:
+            @classmethod
+            @torch.compiler.disable
+            def cm(cls, value=0):
+                return cls, value
+
+        class Child(Base):
+            pass
+
+        def call_class():
+            return super(Child, Child).cm(1)
+
+        def call_instance():
+            return super(Child, Child()).cm(2)
+
+        def return_method():
+            return super(Child, Child).cm
+
+        for fn in (call_class, call_instance):
+            with self.subTest(fn=fn.__name__):
+                expected = fn()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(fn, backend="eager", fullgraph=True)()
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend="eager")(), expected)
+
+        expected_method = return_method()
+        fullgraph_method = torch.compile(
+            return_method, backend="eager", fullgraph=True
+        )()
+        self.assertIs(fullgraph_method.__self__, expected_method.__self__)
+        self.assertEqual(fullgraph_method(), expected_method())
+        torch._dynamo.reset()
+        result_method = torch.compile(return_method, backend="eager")()
+        self.assertIs(result_method.__self__, expected_method.__self__)
+        self.assertEqual(result_method(), expected_method())
+
+    def test_classmethod_super_constant_dispatch(self):
+        class Base:
+            @classmethod
+            @torch.compiler.assume_constant_result
+            def cm(cls):
+                return "base", cls
+
+        class Child(Base):
+            @classmethod
+            def cm(cls):
+                return "child", cls
+
+        def class_receiver():
+            return super(Child, Child).cm()
+
+        def instance_receiver():
+            return super(Child, Child()).cm()
+
+        for fn in (class_receiver, instance_receiver):
+            with self.subTest(fn=fn.__name__):
+                expected = fn()
+                result = torch.compile(fn, backend="eager", fullgraph=True)()
+                self.assertEqual(result, expected)
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend="eager")(), expected)
+
+    def test_classmethod_super_module_receiver(self):
+        class Base(torch.nn.Module):
+            @classmethod
+            def cm(cls):
+                return cls
+
+        class Child(Base):
+            pass
+
+        module = Child()
+
+        def fn(value):
+            return super(Child, value).cm() is Child
+
+        self.assertTrue(torch.compile(fn, backend="eager", fullgraph=True)(module))
+
+    @unittest.skipUnless(sys.version_info >= (3, 14), "Python 3.14+")
+    def test_classmethod_annotation_getsets(self):
+        def fn():
+            def f():
+                pass
+
+            cm = classmethod(f)
+            cm.__annotations__ = {"x": "annotation"}
+            cm.__annotate__ = lambda format: {"format": format}
+            assigned = cm.__annotations__, cm.__annotate__(1)
+            del cm.__annotations__
+            del cm.__annotate__
+            return (
+                assigned,
+                cm.__annotations__ is f.__annotations__,
+                cm.__annotate__ is f.__annotate__,
+                tuple(cm.__dict__),
+            )
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, fn())
+        self.assertEqual(
+            result[-1], ("__module__", "__name__", "__qualname__", "__doc__")
+        )
+
+    def test_classmethod_super_attribute_reconstruct(self):
+        class Base:
+            @classmethod
+            def cm(cls):
+                return cls
+
+        class Child(Base):
+            pass
+
+        def class_receiver():
+            return super(Child, Child).cm
+
+        def instance_receiver():
+            return super(Child, Child()).cm
+
+        for fn in (class_receiver, instance_receiver):
+            with self.subTest(fn=fn.__name__):
+                expected = fn()
+                for fullgraph in (True, False):
+                    torch._dynamo.reset()
+                    result = torch.compile(
+                        fn, backend="eager", fullgraph=fullgraph
+                    )()
+                    self.assertIs(result.__self__, expected.__self__)
+                    self.assertIs(result(), expected())
+
+    def test_classmethod_instance_state(self):
+        def fn():
+            def f(value: int = 1):
+                "f docstring"
+                return value
+
+            cm = classmethod(f)
+            metadata_keys = tuple(cm.__dict__)
+
+            cm.x = 42
+            attribute_values = cm.x, cm.__dict__["x"]
+            del cm.x
+
+            set_func_error = False
+            try:
+                cm.__func__ = 1
+            except AttributeError:
+                set_func_error = True
+
+            del_wrapped_error = False
+            try:
+                del cm.__wrapped__
+            except AttributeError:
+                del_wrapped_error = True
+
+            cm.__dict__["__func__"] = 123
+            cm.__dict__["__wrapped__"] = 456
+            return (
+                metadata_keys,
+                attribute_values,
+                hasattr(cm, "x"),
+                set_func_error,
+                del_wrapped_error,
+                cm.__func__ is f,
+                cm.__wrapped__ is f,
+                cm.__dict__["__func__"],
+                cm.__dict__["__wrapped__"],
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+        copied_attrs = ("__module__", "__name__", "__qualname__", "__doc__")
+        if sys.version_info < (3, 14):
+            copied_attrs += ("__annotations__",)
+        self.assertEqual(result[0], copied_attrs)
+
+    def test_classmethod_instance_state_reconstruct(self):
+        def fn():
+            def f():
+                pass
+
+            cm = classmethod(f)
+            attrs = cm.__dict__
+            del cm.__name__
+            attrs["__func__"] = "shadow"
+            cm.x = 42
+            cm.alias = cm
+            return cm, attrs, cm
+
+        cm, attrs, alias = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(cm, alias)
+        self.assertIs(cm.__dict__, attrs)
+        self.assertIs(cm.alias, cm)
+        self.assertNotIn("__name__", attrs)
+        self.assertEqual(attrs["__func__"], "shadow")
+        self.assertIs(cm.__func__, cm.__wrapped__)
+        self.assertTrue(callable(cm.__func__))
+        self.assertEqual(cm.x, 42)
 
     def test_classmethod_wrapped_callable_name_differs_from_attr(self):
         """The bound method is sourced by the class attribute, not by the
