@@ -148,7 +148,9 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
-_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"]
+_Backend: TypeAlias = Literal[
+    "AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE", "HELION"
+]
 _R = TypeVar("_R")
 
 
@@ -317,9 +319,22 @@ class FlexKernelOptions(TypedDict, total=False):
           for BF16 on ROCm gfx950, requiring the optional FlyDSL dependency.
           Unsupported backward configurations fall back to Triton, including GQA,
           decode, gradients through LSE, and shapes exceeding the dQ workspace limit.
+        - "HELION": Experimental: Helion kernels compiled with Helion's CuTe backend
+          (Blackwell GPUs, float16 / bfloat16, static shapes), user needs to have helion installed
 
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
     Raises an error if the requested forward backend cannot be used. Default: "AUTO"
+    """
+
+    HELION_AUTOTUNE_TOLERANCE: NotRequired[float]
+    """Autotuning accuracy tolerance with ``BACKEND="HELION"``.
+
+    The Helion kernels autotune when compiling, at Helion's autotune effort (the
+    ``HELION_AUTOTUNE_EFFORT`` environment variable: "full" by default, minutes
+    per kernel; "none" skips autotuning). Helion caches tuned configs on disk.
+    A candidate config is accepted when each output element is within this
+    fraction of the output's peak magnitude of Helion's default config.
+    Default: 0.02
     """
 
 

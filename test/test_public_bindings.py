@@ -380,6 +380,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.codegen.cutedsl._inline_asm",  # depends on cutlass
             "torch._inductor.kernel.flex_gemm.compile_pool",  # depends on cutlass
             "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
+            "torch._inductor.kernel.flex.flex_helion_kernels",  # depends on helion
             "torch._inductor.codegen.cuda.gemm_template",
             "torch._inductor.codegen.cpp_template",
             "torch._inductor.codegen.cpp_gemm_template",

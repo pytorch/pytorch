@@ -600,6 +600,7 @@ test_python_smoke_b200() {
   # Targeted Blackwell smoke tests including FlashAttention CuTe coverage
   install_flash_attn_cute
   install_cutlass_operators
+  install_helion
   (
     setup_cuda_smoke_compat
     time env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -633,6 +634,10 @@ test_python_smoke_b200() {
     $PYTHON_TEST_EXTRA_OPTION \
     --upload-artifacts-while-running \
     --pytest-xdist-workers 32
+  time python test/run_test.py \
+    --include inductor/test_flex_helion \
+    $PYTHON_TEST_EXTRA_OPTION \
+    --upload-artifacts-while-running
   time env TORCHINDUCTOR_COMPILE_THREADS=1 python test/run_test.py \
     --include inductor/test_flex_gemm \
     $PYTHON_TEST_EXTRA_OPTION \

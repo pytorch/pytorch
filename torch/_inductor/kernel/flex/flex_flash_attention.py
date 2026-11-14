@@ -8,13 +8,14 @@ import inspect
 import warnings
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, cast, Literal
+from typing import Any, cast
 
 import sympy
 from sympy import Expr, Integer
 
 import torch
 from torch.fx import GraphModule
+from torch.nn.attention.flex_attention import _Backend
 
 from ...codegen.cutedsl.aux_scalars import CuteDSLAuxScalarBindings
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
@@ -368,7 +369,7 @@ def _use_flex_flash_attention(
     mask_graph: Subgraph,
     kernel_options: dict[str, Any],
     num_score_mod_placeholders: int,
-    backend: Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"],
+    backend: _Backend,
 ) -> bool:
     """Determine if we should use flex flash attention for the given inputs.
 
@@ -626,7 +627,7 @@ def _can_use_flex_flash_attention_backward(
 def _use_flex_flash_attention_backward(
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
-    backend: Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"],
+    backend: _Backend,
     joint_outputs: Any | None = None,
     score_mod_other_buffers: Sequence[TensorBox] | None = None,
 ) -> bool:

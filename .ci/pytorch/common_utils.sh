@@ -388,6 +388,18 @@ function install_flydsl() {
   echo "FlyDSL installation complete."
 }
 
+function install_helion() {
+  echo "Installing Helion from the pinned commit..."
+  # flex_attention's BACKEND="HELION" needs Helion fixes newer than the PyPI
+  # release in the docker image, so build the pinned commit over it. --no-deps:
+  # Helion depends on torch and triton, which must stay the CI builds.
+  local commit
+  commit=$(get_pinned_commit helion)
+  pip_install hatchling hatch-vcs filecheck psutil rich
+  retry pip_build_and_install "git+https://github.com/pytorch/helion.git@${commit}" dist/helion
+  echo "Helion installation complete."
+}
+
 function install_nvmath() {
   echo "Installing nvmath-python from PyPI..."
   pip_install nvmath-python==0.9.0
