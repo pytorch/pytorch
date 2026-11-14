@@ -2784,6 +2784,23 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
             cfn(x).backward()
 
+    @parametrize("case", ["identity", "sin_of_identity", "identity_of_other_input"])
+    def test_checkpoint_noop_folded_into_graph_input(self, case):
+        # Inductor's no-op removal folds `t * 1` into the graph input t and copies
+        # the checkpoint recompute tag onto it (#199258).
+        body = {
+            "identity": lambda x, c: x * 1,
+            "sin_of_identity": lambda x, c: (x * 1).sin(),
+            "identity_of_other_input": lambda x, c: x * (c * 1.0),
+        }[case]
+
+        def fn(x, c):
+            return checkpoint(body, x, c, use_reentrant=False)
+
+        x = torch.randn(32, requires_grad=True)
+        c = torch.randn(32)
+        self._validate(fn, "inductor", x, c)
+
 
 instantiate_parametrized_tests(ActivationCheckpointingViaTagsGenericTests)
 
