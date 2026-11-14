@@ -443,6 +443,7 @@ impl Region {
             d.set_item("uses", uses)?;
             d.set_item("text", text)?;
             d.set_item("replayable", u.origin as usize == i && u.inst.op.is_replayable())?;
+            d.set_item("steppable", u.origin as usize == i && u.inst.op.is_steppable())?;
             out.append(d)?;
         }
         Ok(out.into_any().unbind())
@@ -589,6 +590,38 @@ impl Region {
         Ok(true)
     }
 
+    /// Puts a call of `callable` in front of the instruction at `start`,
+    /// which must still be the generic one, and leaves the instructions as
+    /// they are. The callable gets the values that are needed from `start`
+    /// on, which are returned, with `torch._cfg_rs.UNDEFINED` for one that
+    /// has no value. If it returns None the instructions run; otherwise it
+    /// returns `(block, index, values, cleared)` and execution goes on at
+    /// instruction `index` of `block`, anywhere in the function, with the
+    /// values of the dict `values` (by value number) set and those in the
+    /// list `cleared` unset. Returns None for a function with exception
+    /// handlers, whose frame slots a leap would not carry over.
+    fn leap(&self, start: usize, callable: &Bound<'_, PyAny>) -> PyResult<Option<Vec<V>>> {
+        let (unit, cx) = self.parts()?;
+        if start >= unit.insts.len() {
+            return Err(PyIndexError::new_err("no such instruction"));
+        }
+        if unit.insts[start].origin as usize != start || cx.func().exc_reg != NONE {
+            return Ok(None);
+        }
+        let inputs: Vec<V> = cx.cf.live_at(unit.block, start).iter().collect();
+        let callee = unsafe { PyObj::from_borrowed(callable.as_ptr()) };
+        let bc = unit.insts[start].inst.bc;
+        unit.insts.insert(
+            start,
+            crate::spec::UInst {
+                inst: Inst { dst: NONE, op: Op::Leap(callee, inputs.clone()), bc, kills: Vec::new() },
+                origin: NONE,
+                removable: false,
+            },
+        );
+        Ok(Some(inputs))
+    }
+
     /// Replaces the instruction at `index` with the constant True, False or
     /// None.
     fn replace_with_const(&self, index: usize, value: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -689,7 +722,136 @@ impl Replay {
     fn run(&self, py: Python<'_>, lo: usize, hi: usize, env: &Bound<'_, PyDict>, traced: bool) -> PyResult<()> {
         self.check(lo, hi)?;
         let compiled = self.compiled()?;
-        match unsafe { compiled.replay(self.block, lo, hi, env.as_ptr(), traced) } {
+        match unsafe { compiled.replay(self.block, lo, hi, env.as_ptr(), traced, false) } {
+            Ok(()) => Ok(()),
+            Err(index) => {
+                let err = PyErr::fetch(py);
+                let _ = err.value_bound(py).setattr("cfg_index", index);
+                Err(err)
+            }
+        }
+    }
+
+    // What follows is about the function as a whole, for code that goes
+    // on from the range into other blocks.
+
+    /// The generic instructions of a block, as `Region.instructions` gives
+    /// them for the block of a pass.
+    fn instructions_of(&self, py: Python<'_>, block: usize) -> PyResult<PyObject> {
+        let compiled = self.compiled()?;
+        let func = &compiled.func;
+        let Some(found) = func.blocks.get(block) else {
+            return Err(PyIndexError::new_err("no such block"));
+        };
+        let out = PyList::empty_bound(py);
+        for (i, inst) in found.insts.iter().enumerate() {
+            let d = PyDict::new_bound(py);
+            let text = func.op_repr(&inst.op);
+            d.set_item("index", i)?;
+            d.set_item("op", text.split_whitespace().next().unwrap_or(""))?;
+            d.set_item("dst", if inst.dst == NONE { None } else { Some(inst.dst) })?;
+            let mut uses = Vec::new();
+            inst.op.for_each_use(|v| uses.push(v));
+            d.set_item("uses", uses)?;
+            d.set_item("text", text)?;
+            d.set_item("replayable", inst.op.is_replayable())?;
+            d.set_item("steppable", inst.op.is_steppable())?;
+            out.append(d)?;
+        }
+        Ok(out.into_any().unbind())
+    }
+
+    /// How a block ends: its kind (`jump`, `br`, `br_null`, or `leave` for
+    /// what ends the function), the value it looks at, and the blocks it
+    /// goes to (`br`: if true, if false; `br_null`: if the value is unset, if
+    /// it is set).
+    fn terminator(&self, block: usize) -> PyResult<(String, Option<V>, Vec<usize>)> {
+        let compiled = self.compiled()?;
+        let Some(found) = compiled.func.blocks.get(block) else {
+            return Err(PyIndexError::new_err("no such block"));
+        };
+        Ok(match &found.term {
+            Term::Jump(b) => ("jump".to_string(), None, vec![*b as usize]),
+            Term::Br { cond, then_, else_ } => {
+                ("br".to_string(), Some(*cond), vec![*then_ as usize, *else_ as usize])
+            }
+            Term::BrNull { v, null, nonnull } => {
+                ("br_null".to_string(), Some(*v), vec![*null as usize, *nonnull as usize])
+            }
+            _ => ("leave".to_string(), None, Vec::new()),
+        })
+    }
+
+    /// What going from block `pred` to block `block` does to the values: the
+    /// moves `(to, from)` that the phis of `block` stand for, all at once
+    /// (`from` is None for a value that is unset on this edge), and the
+    /// values that are not needed beyond the edge.
+    fn edge(&self, pred: usize, block: usize) -> PyResult<(Vec<(V, Option<V>)>, Vec<V>)> {
+        let compiled = self.compiled()?;
+        let position = compiled
+            .func
+            .blocks
+            .get(block)
+            .and_then(|found| found.preds.iter().position(|p| *p as usize == pred));
+        let Some(position) = position else {
+            return Err(PyIndexError::new_err("no such edge"));
+        };
+        let moves = compiled.analysis.edge_moves[block][position]
+            .iter()
+            .map(|(dst, src)| (*dst, (*src != UNDEF).then_some(*src)))
+            .collect();
+        Ok((moves, compiled.analysis.edge_kills[block][position].clone()))
+    }
+
+    /// The values that are needed from instruction `index` of a block on;
+    /// with `read`, only those that an instruction reads, not the ones that
+    /// are merely kept alive to the end of their scope.
+    #[pyo3(signature = (block, index, read=false))]
+    fn live(&self, block: usize, index: usize, read: bool) -> PyResult<Vec<V>> {
+        let compiled = self.compiled()?;
+        let fits = compiled.func.blocks.get(block).is_some_and(|found| index <= found.insts.len());
+        if !fits {
+            return Err(PyIndexError::new_err("no such instruction"));
+        }
+        if read {
+            return Ok(compiled.read_at(block, index).iter().collect());
+        }
+        Ok(compiled.live_at(block, index).iter().collect())
+    }
+
+    /// Whether `Region.leap` works in this function: not in one with
+    /// exception handlers.
+    #[getter]
+    fn leaps(&self) -> PyResult<bool> {
+        Ok(self.compiled()?.func.exc_reg == NONE)
+    }
+
+    /// The globals of the function.
+    #[getter]
+    fn globals(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let compiled = self.compiled()?;
+        Ok(unsafe { PyObject::from_borrowed_ptr(py, compiled.func.globals.as_ptr()) })
+    }
+
+    /// `run` for the instructions lo..hi of any block, which may also be
+    /// ones that work on what a replay made itself (see `steppable` in
+    /// `instructions_of`).
+    #[pyo3(signature = (block, lo, hi, env, traced=false))]
+    fn step(
+        &self,
+        py: Python<'_>,
+        block: usize,
+        lo: usize,
+        hi: usize,
+        env: &Bound<'_, PyDict>,
+        traced: bool,
+    ) -> PyResult<()> {
+        let compiled = self.compiled()?;
+        let fits = compiled.func.blocks.get(block).is_some_and(|found| lo <= hi && hi <= found.insts.len());
+        if !fits {
+            return Err(PyIndexError::new_err("no such instructions"));
+        }
+        match unsafe { compiled.replay(block, lo, hi, env.as_ptr(), traced, true) } {
             Ok(()) => Ok(()),
             Err(index) => {
                 let err = PyErr::fetch(py);
