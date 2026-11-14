@@ -1,0 +1,20 @@
+# Owner(s): ["module: rocm"]
+# DO NOT MERGE. Second workflow on the ciflow/rocm-mi300 tag, to prove one
+# label can start more than one workflow. Delete this file after the check.
+name: rocm-mi300-load-poc
+
+on:
+  push:
+    tags:
+      - ciflow/rocm-mi300/*
+
+permissions:
+  contents: read
+
+jobs:
+  poc:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Record that this extra workflow started
+        run: echo "rocm-mi300-load-poc started for ${GITHUB_SHA}"
