@@ -511,6 +511,38 @@ unsafe fn match_class(subject: Obj, class: Obj, nargs: isize, names: Obj) -> Obj
     result
 }
 
+/// Does what the interpreter does when it checks its eval breaker: run
+/// signal handlers and pending calls, let a scheduled garbage collection
+/// happen, hand the GIL to a thread that asked for it, raise an asynchronous
+/// exception. There is no entry to that from outside the interpreter, so
+/// this calls a Python function that does nothing: the interpreter checks on
+/// entering it. A loop of compiled code calls this every 64 iterations.
+/// Returns false with an error set if something was raised.
+unsafe fn tick() -> bool {
+    static NOTHING: std::sync::atomic::AtomicPtr<ffi::PyObject> =
+        std::sync::atomic::AtomicPtr::new(null_mut());
+    let mut nothing = NOTHING.load(Ordering::Relaxed);
+    if nothing.is_null() {
+        let py = pyo3::Python::assume_gil_acquired();
+        match py.eval_bound("lambda: None", None, None) {
+            Ok(function) => {
+                nothing = function.into_ptr();
+                NOTHING.store(nothing, Ordering::Relaxed);
+            }
+            Err(err) => {
+                err.restore(py);
+                return false;
+            }
+        }
+    }
+    let result = ffi::PyObject_CallNoArgs(nothing);
+    if result.is_null() {
+        return false;
+    }
+    ffi::Py_DECREF(result);
+    true
+}
+
 thread_local! {
     /// How many compiled functions are running on this thread, one inside the
     /// other.
@@ -2528,7 +2560,7 @@ impl Compiled {
                 }
                 if cur <= pred {
                     back_edges = back_edges.wrapping_add(1);
-                    if back_edges & 63 == 0 && ffi::PyErr_CheckSignals() != 0 {
+                    if back_edges & 63 == 0 && !tick() {
                         self.fail(frames, block.bc_start);
                         raised!('blocks, cur);
                     }
@@ -2570,6 +2602,16 @@ impl Compiled {
                                     self.exec_op(regs, op)
                                 }
                             }
+                        };
+                        // The interpreter looks for pending signals when a
+                        // call returns; a handler runs there, and what it
+                        // raises is raised by the call.
+                        let result = match result {
+                            Ok(obj) if inst.op.is_call() && ffi::PyErr_CheckSignals() != 0 => {
+                                capi::release(obj);
+                                Err(())
+                            }
+                            other => other,
                         };
                         match result {
                             Ok(obj) => {

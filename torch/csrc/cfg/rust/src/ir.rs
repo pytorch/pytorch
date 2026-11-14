@@ -378,6 +378,15 @@ impl Op {
         }
     }
 
+    /// Whether the instruction calls something: where the interpreter would
+    /// look for pending signals afterwards.
+    pub fn is_call(&self) -> bool {
+        matches!(
+            self,
+            Op::Call { .. } | Op::CallMethod { .. } | Op::CallEx { .. } | Op::Dispatch(_)
+        )
+    }
+
     /// Instructions that can be dropped when their result is unused: they
     /// neither have effects nor can raise in a way a program could rely on.
     pub fn is_pure(&self) -> bool {
