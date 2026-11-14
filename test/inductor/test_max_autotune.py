@@ -3908,11 +3908,7 @@ class TestMaxAutotune(TestCase):
         ):
             result = torch.compile(mm, fullgraph=True)(x, w)
 
-        # Loads before the graph input pointer read back 0 on ROCm, so the
-        # negative case computes zeros there and cannot be compared. Same
-        # limitation as test_as_strided_past_input_extent in test_torchinductor.py.
-        if view_offset >= 0 or not TEST_WITH_ROCM:
-            torch.testing.assert_close(result, mm(x, w), rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(result, mm(x, w), rtol=1e-2, atol=1e-2)
 
         self.assertTrue(autotune_args, "autotuning did not build benchmark inputs")
         # The fake input has to satisfy as_strided with the data pointer placed
