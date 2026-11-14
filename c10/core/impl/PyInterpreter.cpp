@@ -149,6 +149,33 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(reset_backward_hooks);
   }
 
+  bool fake_run_with_mode_entered(
+      const std::shared_ptr<c10::FakeTensorMode>& /*mode*/,
+      c10::function_ref<bool()> /*step*/) const override {
+    PANIC(fake_run_with_mode_entered);
+  }
+  void fake_raise_device_mismatch(
+      const c10::OperatorHandle& /*op*/,
+      c10::Device /*common_device*/,
+      c10::Device /*device*/) const override {
+    PANIC(fake_raise_device_mismatch);
+  }
+  void raise_python_error(FakePythonError /*kind*/, const std::string& /*msg*/)
+      const override {
+    PANIC(raise_python_error);
+  }
+  void invalidate_written_to_constants(
+      const c10::OperatorHandle& /*op*/,
+      const torch::jit::Stack& /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
+    PANIC(invalidate_written_to_constants);
+  }
+  bool fake_try_fast_impl(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
+    PANIC(fake_try_fast_impl);
+  }
   bool fake_try_decomp(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
@@ -161,45 +188,69 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       torch::jit::Stack* /*stack*/) const override {
     PANIC(fake_try_meta);
   }
-  bool fake_try_custom_op_impl(
+  bool run_fake_impl(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/,
       PyObject* /*real*/) const override {
-    PANIC(fake_try_custom_op_impl);
+    PANIC(run_fake_impl);
   }
   bool fake_try_op_impl(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
-      c10::Device /*common_device*/) const override {
+      const std::shared_ptr<FakeTensorMode>& /*mode*/,
+      std::optional<c10::Device> /*common_device*/) const override {
     PANIC(fake_try_op_impl);
   }
-  bool fake_try_prim_meta(
+  bool prim_meta_impl(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/) const override {
-    PANIC(fake_try_prim_meta);
+    PANIC(prim_meta_impl);
   }
   bool fake_infer_from_real_out(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/,
       PyObject* /*real*/) const override {
     PANIC(fake_infer_from_real_out);
   }
-  c10::intrusive_ptr<TensorImpl> to_meta_tensor(
-      const c10::intrusive_ptr<TensorImpl>& /*real*/) const override {
-    PANIC(to_meta_tensor);
+  void maybe_run_unsafe_fallback(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/,
+      bool /*has_symbolic_sizes*/,
+      std::exception_ptr /*error*/) const override {
+    PANIC(maybe_run_unsafe_fallback);
   }
-  bool allow_non_fake_inputs() const override {
+  bool fake_try_initial_constant(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/,
+      bool /*makes_constant*/,
+      bool /*is_lift*/) const override {
+    PANIC(fake_try_initial_constant);
+  }
+  c10::intrusive_ptr<TensorImpl> from_real_tensor(
+      const std::shared_ptr<FakeTensorMode>& /*mode*/,
+      const c10::intrusive_ptr<TensorImpl>& /*real*/,
+      FakeTensorConversion /*conversion*/) const override {
+    PANIC(from_real_tensor);
+  }
+  bool allow_non_fake_inputs(
+      const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
     PANIC(allow_non_fake_inputs);
   }
   PyObject* fake_run_real_op(
       const c10::OperatorHandle& /*op*/,
-      const torch::jit::Stack& /*fake_args*/) const override {
+      const torch::jit::Stack& /*fake_args*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
     PANIC(fake_run_real_op);
   }
   void propagate_real_tensors(
       const c10::OperatorHandle& /*op*/,
       PyObject* /*real*/,
-      torch::jit::Stack* /*stack*/) const override {
+      torch::jit::Stack* /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
     PANIC(propagate_real_tensors);
   }
 };
