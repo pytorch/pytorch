@@ -27,7 +27,12 @@ from torch.distributed.debug._frontend import (
     Response,
     Route,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 try:
@@ -52,7 +57,9 @@ def _reset_debug_server_state() -> None:
     debug_module._DEBUG_SERVER_PROC = None
 
 
-class TestDebug(TestCase):
+class DebugServerTestBase(TestCase):
+    """Shared setUp/tearDown for tests that start the debug server."""
+
     def setUp(self) -> None:
         super().setUp()
         _reset_debug_server_state()
@@ -68,6 +75,10 @@ class TestDebug(TestCase):
             except Exception:
                 pass
         _reset_debug_server_state()
+
+
+class TestDebug(DebugServerTestBase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_all(self) -> None:
         store = dist.TCPStore("localhost", 0, 1, is_master=True, wait_for_workers=False)
@@ -100,10 +111,6 @@ class TestDebug(TestCase):
         with self.subTest("fr_trace"):
             self.assertIn("Memberships", fetch("/fr_trace"))
             self.assertIn("pg_status", fetch("/fr_trace_json"))
-
-            if torch.cuda.is_available():
-                self.assertIn("Memberships", fetch("/fr_trace_nccl"))
-                self.assertIn("pg_status", fetch("/fr_trace_nccl_json"))
 
         with self.subTest("error codes"):
             resp = session.get(f"http://localhost:{port}/blah")
@@ -160,6 +167,32 @@ class TestDebug(TestCase):
         stop_debug_server()
 
 
+class TestDebugOnCUDA(DebugServerTestBase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_fr_trace_nccl(self) -> None:
+        """NCCL-only fr_trace endpoints, split from TestDebug.test_all."""
+        store = dist.TCPStore("localhost", 0, 1, is_master=True, wait_for_workers=False)
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(store.port)
+        os.environ["RANK"] = "0"
+        os.environ["WORLD_SIZE"] = "1"
+
+        port = 25995
+
+        def fetch(path: str) -> str:
+            resp = session.get(f"http://localhost:{port}{path}")
+            resp.raise_for_status()
+            return resp.text
+
+        start_debug_server(port=port)
+
+        self.assertIn("Memberships", fetch("/fr_trace_nccl"))
+        self.assertIn("pg_status", fetch("/fr_trace_nccl_json"))
+
+        stop_debug_server()
+
+
 class _StubHandler(DebugHandler):
     """Minimal handler for testing PeriodicDumper without network access."""
 
@@ -197,6 +230,8 @@ class _ErrorHandler(DebugHandler):
 
 
 class TestPeriodicDumper(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_writes_dump_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             h = _StubHandler("mystub", "hello world")
@@ -276,6 +311,8 @@ class TestPeriodicDumper(TestCase):
 
 
 class TestFetchUnavailableWorkers(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _get_refused_port() -> int:
         """Return a port that will refuse connections."""
@@ -366,6 +403,8 @@ class TestFetchUnavailableWorkers(TestCase):
 
 
 class TestFormatFetchSummary(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_all_success_returns_none(self) -> None:
         addrs = ["http://host0:1", "http://host1:1"]  # @lint-ignore
         resps = [Response(200, "ok"), Response(200, "ok")]
@@ -399,6 +438,8 @@ class TestFormatFetchSummary(TestCase):
 
 
 class TestFetchTimeout(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_handler_default_fetch_timeout(self) -> None:
         from torch.distributed.debug._frontend import _DEFAULT_FETCH_TIMEOUT
 
@@ -419,6 +460,8 @@ class TestFetchTimeout(TestCase):
 
 
 class TestHandlerPartialDumps(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     import torch.distributed.debug._debug_handlers
 
     @patch("torch.distributed.debug._debug_handlers.fetch_all")
@@ -480,6 +523,8 @@ class TestHandlerPartialDumps(TestCase):
 
 
 class TestTorchCommsHealthCheckHandler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
@@ -641,6 +686,8 @@ class TestTorchCommsHealthCheckHandler(TestCase):
 
 
 class TestC10dHealthCheckHandler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         from torch.distributed.debug._debug_handlers import C10dHealthCheckHandler
@@ -699,6 +746,9 @@ class TestC10dHealthCheckHandler(TestCase):
         self.assertEqual(calls[0].args[0], "c10d_health_check")
         self.assertEqual(calls[1].args[:2], ("fr_dump_file", "backend=custom"))
         self.assertEqual(calls[2].args[:2], ("fr_dump_file", "backend=nccl2"))
+
+
+instantiate_device_type_tests(TestDebugOnCUDA, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
