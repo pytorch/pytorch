@@ -1,9 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <algorithm>
+#include <array>
 #include <bit>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
@@ -77,9 +79,73 @@ inline void cpu_cum_base_kernel(const Tensor& result,
   iter.for_each(loop, grain_size);
 }
 
+// cumsum over a dim that is not the innermost one of contiguous tensors. A
+// strided scan of one column at a time misses the cache (and TLB) on every
+// step, so walk the rows instead and keep running sums for a block of
+// contiguous columns. Each column still adds its elements in the same order.
+template <typename scalar_t>
+void cumsum_outer_dim(const Tensor& result, const Tensor& self, int64_t dim) {
+  // TensorIterator checks this on the strided path.
+  at::assert_no_partial_overlap(result, self);
+  using acc_t = at::acc_type<scalar_t, false>;
+  constexpr int64_t kBlock = 256;
+  const int64_t n = self.size(dim);
+  const int64_t inner = c10::multiply_integers(self.sizes().slice(dim + 1));
+  const int64_t outer = self.numel() / (n * inner);
+  // Narrower column blocks when there are fewer full ones than threads, e.g. for a 2-D input.
+  const int64_t splits = divup(int64_t{at::get_num_threads()}, outer);
+  // At least a cache line per block, so that adjacent tasks do not write into the same line.
+  constexpr int64_t kMinBlock = std::max<int64_t>(16, 64 / sizeof(scalar_t));
+  const int64_t block = std::clamp(divup(divup(inner, splits), kMinBlock) * kMinBlock, kMinBlock, kBlock);
+  const int64_t blocks = divup(inner, block);
+  const scalar_t* in = self.const_data_ptr<scalar_t>();
+  scalar_t* out = result.data_ptr<scalar_t>();
+  const int64_t grain_size = std::max(int64_t{1}, internal::GRAIN_SIZE / (n * block));
+  at::parallel_for(0, outer * blocks, grain_size, [&](int64_t begin, int64_t end) {
+    std::array<acc_t, kBlock> acc;
+    for (const auto task : c10::irange(begin, end)) {
+      const int64_t col = (task % blocks) * block;
+      const int64_t len = std::min(block, inner - col);
+      const int64_t offset = task / blocks * n * inner + col;
+      std::fill_n(acc.begin(), len, acc_t(0));
+      for (const auto i : c10::irange(n)) {
+        const scalar_t* src = in + offset + i * inner;
+        scalar_t* dst = out + offset + i * inner;
+        int64_t j = 0;
+        // The compiler does not vectorize the scalar loop for half and bfloat16.
+        if constexpr (is_reduced_floating_point_v<scalar_t>) {
+          using bVec = Vectorized<scalar_t>;
+          using fVec = Vectorized<float>;
+          for (; j + bVec::size() <= len; j += bVec::size()) {
+            auto [x0, x1] = convert_to_float<scalar_t>(bVec::loadu(src + j));
+            auto a0 = fVec::loadu(acc.data() + j) + x0;
+            auto a1 = fVec::loadu(acc.data() + j + fVec::size()) + x1;
+            a0.store(acc.data() + j);
+            a1.store(acc.data() + j + fVec::size());
+            convert_from_float<scalar_t>(a0, a1).store(dst + j);
+          }
+        }
+        for (; j < len; ++j) {
+          acc[j] += src[j];
+          dst[j] = (scalar_t)acc[j];
+        }
+      }
+    }
+  });
+}
+
 void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
+
+  // With only size-1 dims after it, the scan dim is contiguous and the strided kernel is faster.
+  const bool has_inner = c10::multiply_integers(self.sizes().slice(wrap_dim + 1)) > 1;
+  if (has_inner && self.is_contiguous() && result.is_contiguous()) {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, self.scalar_type(), "cumsum_out_cpu", [&] {
+      cumsum_outer_dim<scalar_t>(result, self, wrap_dim);
+    });
+    return;
+  }
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, self.scalar_type(), "cumsum_out_cpu", [&] {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
