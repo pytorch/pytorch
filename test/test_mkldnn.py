@@ -877,6 +877,51 @@ class TestMkldnn(TestCase):
         x = torch.randn(N, C, 64, 64, dtype=torch.float32) * 10
         self._test_avg_pool_base(dim=2, input=x)
 
+    def test_avg_pool2d_ceil_mode_regression(self):
+        x = torch.arange(1., 9., dtype=torch.float32).reshape(1, 1, 2, 4)
+        output = F.avg_pool2d(
+            x.to_mkldnn(), 3, stride=2, ceil_mode=True, count_include_pad=True,
+        )
+        self.assertTrue(output.is_mkldnn)
+        self.assertEqual(output.to_dense(), torch.tensor([[[[4., 5.5]]]], dtype=torch.float32))
+
+    @parametrize("dtype", types)
+    @parametrize("ceil_mode", [False, True])
+    @parametrize("count_include_pad", [False, True])
+    @parametrize("case", [
+        ((4, 4), 3, 2, 0),
+        ((4, 4), 3, 2, 1),
+        ((5, 5), 3, 2, 0),
+        ((5, 5), 3, 2, 1),
+        ((4, 6), (3, 2), (2, 3), (1, 0)),
+        ((4, 4), 3, None, 0),
+    ])
+    def test_avg_pool2d_ceil_mode(self, dtype, ceil_mode, count_include_pad, case):
+        lowp_support = {
+            torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
+            torch.half: torch.ops.mkldnn._is_mkldnn_fp16_supported,
+        }
+        if dtype in lowp_support and (not lowp_support[dtype]() or (IS_WINDOWS and dtype == torch.bfloat16)):
+            self.skipTest("CPU does not support this low-precision pooling configuration")
+
+        shape, kernel, stride, padding = case
+        x = torch.randn(2, 3, *shape, dtype=dtype, requires_grad=True)
+        mkldnn_x = x.detach().to_mkldnn().requires_grad_()
+        kwargs = dict(kernel_size=kernel, stride=stride, padding=padding,
+                      ceil_mode=ceil_mode, count_include_pad=count_include_pad)
+        expected = F.avg_pool2d(x, **kwargs)
+        actual = F.avg_pool2d(mkldnn_x, **kwargs)
+        self.assertTrue(actual.is_mkldnn)
+        actual = actual.to_dense()
+        atol, rtol = {torch.float: (1e-6, 1e-5), torch.bfloat16: (1e-2, 1e-2),
+                      torch.half: (1e-3, 1e-3)}[dtype]
+        self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+
+        grad = torch.randn_like(expected)
+        expected.backward(grad)
+        actual.backward(grad)
+        self.assertEqual(mkldnn_x.grad.to_dense(), x.grad, atol=atol, rtol=rtol)
+
     def test_avg_pool3d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
