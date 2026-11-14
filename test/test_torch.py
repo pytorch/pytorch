@@ -3237,12 +3237,14 @@ class TestTorchDeviceType(TestCase):
     @onlyCUDA
     @dtypes(*all_types_and(torch.half, torch.bfloat16, torch.complex64))
     def test_cumsum_cumprod_outer_dim(self, device, dtype):
-        # On ROCm, scans along a non-last dim of length >= 16 run a tiled kernel that also splits
-        # long columns into chunks. The inputs keep every result exact in `dtype` for any combine
-        # order: integers wrap around (odd factors for cumprod, so products never reach 0), and
-        # floating-point inputs are small integers for cumsum and +-1 (+-1j) for cumprod.
+        # On ROCm, scans along a non-last dim of length >= 32 (>= 16 on gfx1250) run a tiled kernel
+        # that also splits long columns into chunks. The inputs keep every result exact in `dtype`
+        # for any combine order: integers wrap around (odd factors for cumprod, so products never
+        # reach 0), and floating-point inputs are small integers for cumsum and +-1 (+-1j) for
+        # cumprod.
         cases = [
             ((16, 5), 0),
+            ((32, 5), 0),
             ((300, 3), 0),
             ((1024, 4), 0),
             ((257, 33), 0),
@@ -3280,7 +3282,7 @@ class TestTorchDeviceType(TestCase):
     @onlyCUDA
     @dtypes(*floating_types_and(torch.complex64))
     def test_logcumsumexp_outer_dim(self, device, dtype):
-        cases = [((16, 5), 0), ((1024, 4), 0), ((257, 33), 0), ((4, 300, 33), 1), ((65536, 4), 0)]
+        cases = [((16, 5), 0), ((32, 5), 0), ((1024, 4), 0), ((257, 33), 0), ((4, 300, 33), 1), ((65536, 4), 0)]
         ref_dtype = torch.complex128 if dtype.is_complex else torch.double
         for shape, dim in cases:
             x = torch.randn(shape, dtype=dtype, device=device)
@@ -3339,7 +3341,7 @@ class TestTorchDeviceType(TestCase):
         # folding elements that are not adjacent (e.g. all the 2^e first) overflows. 1-D,
         # chunked last-dim and chunked outer-dim lines on ROCm.
         e = {torch.half: 9, torch.bfloat16: 120, torch.float: 120, torch.double: 1000, torch.cfloat: 120}[dtype]
-        cases = [((1_000_000,), 0), ((3, 200_000), 1), ((65536, 2), 0), ((1, 65536, 1), 1)]
+        cases = [((2_000_000,), 0), ((3, 200_000), 1), ((65536, 2), 0), ((1, 65536, 1), 1)]
         for (shape, dim), op in product(cases, (torch.cumsum, torch.cumprod)):
             if op is torch.cumsum:
                 pattern = [2.0**e] * 16 + [-2.0**e] * 16
@@ -3379,7 +3381,7 @@ class TestTorchDeviceType(TestCase):
     def test_cumsum_cumprod_last_dim_unaligned(self, device, dtype):
         # Long rows with an odd length that start one element into their storage. On ROCm these
         # are split into chunks and read without vector accesses.
-        for shape in ((1_000_003,), (3, 100_003)):
+        for shape in ((2_000_003,), (3, 100_003)):
             if dtype.is_floating_point:
                 op = torch.cumprod
                 x = torch.tensor([-1, 1], dtype=dtype)[torch.randint(2, shape)]
