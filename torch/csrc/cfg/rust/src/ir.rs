@@ -1,11 +1,18 @@
 //! The SSA control-flow-graph IR.
 //!
 //! A `Function` is built once from the bytecode of a Python function and never
-//! changes. Its instructions have exactly the semantics of the bytecode they
-//! came from.
+//! changes: it is the generic tier, whose instructions have exactly the
+//! semantics of the bytecode they came from. Specialized code is expressed in
+//! the same IR (see `BlockCode`) with three extra instructions: `Dispatch`,
+//! which calls a post-dispatch kernel directly, the tensor accessors, and
+//! `Guard`, which falls back to the generic tier when an assumption breaks.
+//! Both tiers share one numbering of SSA values, which is what makes moving
+//! between them a matter of picking an instruction index.
 
+use crate::capi::SiteSlot;
 use crate::pyffi::{self, PyObj};
 use std::fmt::Write;
+use std::sync::Arc;
 
 pub type V = u32;
 pub type B = u32;
@@ -70,12 +77,57 @@ pub enum Op {
     Unpack(V, u32),
     TupleGet(V, u32),
     Call { callee: V, args: Vec<V>, kwnames: u32 },
+    /// getattr followed by a call. Only appears as the fallback of a lowered
+    /// method call, whose attribute load was dropped.
+    CallMethod { recv: V, name: u32, args: Vec<V>, kwnames: u32 },
     CallEx { callee: V, args: V, kwargs: V },
     GetIter(V),
     /// The next item, or null when the iterator is exhausted.
     IterNext(V),
     /// Raises UnboundLocalError if the value is undefined.
     CheckBound(V, u32),
+
+    // ---- specialized tier only ----
+    Dispatch(Box<DispatchOp>),
+    /// size(dim) of a value guarded to be a tensor of sufficient rank.
+    TensorSize { t: V, dim: i64 },
+    TensorDim(V),
+    Guard(Box<GuardOp>),
+}
+
+/// A call of a post-dispatch kernel. `operands` feed the prepared call sites
+/// of `slot`; when none of them accepts the operands (a dispatch key changed,
+/// say) the generic `fallback` runs instead and produces the same value.
+#[derive(Clone)]
+pub struct DispatchOp {
+    pub slot: Arc<SiteSlot>,
+    pub operands: Vec<V>,
+    pub fallback: Op,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum GuardCond {
+    /// v is a tensor with at least min_rank dimensions.
+    TensorRank { v: V, min_rank: u32 },
+    /// v is a tensor and lo <= v.size(dim) <= hi.
+    DimRange { v: V, dim: i64, lo: i64, hi: i64 },
+}
+
+impl GuardCond {
+    pub fn value(&self) -> V {
+        match self {
+            GuardCond::TensorRank { v, .. } | GuardCond::DimRange { v, .. } => *v,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct GuardOp {
+    pub cond: GuardCond,
+    /// Index of the generic instruction to resume at when the guard fails.
+    pub resume: u32,
+    /// The values the generic tier needs at `resume`; they count as uses.
+    pub live: Vec<V>,
 }
 
 #[derive(Clone)]
@@ -132,7 +184,9 @@ impl Op {
             | Op::TupleGet(a, _)
             | Op::GetIter(a)
             | Op::IterNext(a)
-            | Op::CheckBound(a, _) => f(*a),
+            | Op::CheckBound(a, _)
+            | Op::TensorSize { t: a, .. }
+            | Op::TensorDim(a) => f(*a),
             Op::Binary(_, a, b)
             | Op::Compare(_, a, b)
             | Op::Is(a, b, _)
@@ -180,12 +234,39 @@ impl Op {
                 f(*callee);
                 args.iter().for_each(|v| f(*v))
             }
+            Op::CallMethod { recv, args, .. } => {
+                f(*recv);
+                args.iter().for_each(|v| f(*v))
+            }
             Op::CallEx { callee, args, kwargs } => {
                 f(*callee);
                 f(*args);
                 opt(*kwargs, &mut f)
             }
+            Op::Dispatch(d) => {
+                d.operands.iter().for_each(|v| f(*v));
+                d.fallback.for_each_use(f)
+            }
+            Op::Guard(g) => {
+                f(g.cond.value());
+                g.live.iter().for_each(|v| f(*v))
+            }
         }
+    }
+
+    /// Instructions that can be dropped when their result is unused: they
+    /// neither have effects nor can raise in a way a program could rely on.
+    pub fn is_pure(&self) -> bool {
+        matches!(
+            self,
+            Op::Const(_)
+                | Op::TensorSize { .. }
+                | Op::TensorDim(_)
+                | Op::TupleGet(..)
+                | Op::IsNone(..)
+                | Op::Is(..)
+                | Op::BuildTuple(_)
+        )
     }
 }
 
@@ -215,12 +296,16 @@ pub struct Block {
     pub bc_start: u32,
 }
 
-/// Executable code of one basic block: its instructions with their kill
-/// lists.
+/// Executable code of one basic block: the generic code of the block, or one
+/// specialized version of it.
 pub struct BlockCode {
     pub insts: Vec<Inst>,
     pub term: Term,
     pub term_kills: Vec<V>,
+    /// Checked before a specialized version is entered.
+    pub entry_guards: Vec<GuardCond>,
+    /// Version number, for specialized code; 0 for generic code.
+    pub id: u32,
 }
 
 pub struct Function {
@@ -231,6 +316,8 @@ pub struct Function {
     /// co_consts, followed by co_names, followed by constants the frontend
     /// introduced.
     pub consts: Vec<PyObj>,
+    pub const_true: u32,
+    pub const_false: u32,
     pub blocks: Vec<Block>,
     pub nvalues: u32,
     /// The value of each parameter, in co_varnames order.
@@ -310,6 +397,18 @@ impl Function {
         parts.join(", ")
     }
 
+    pub fn guard_repr(&self, cond: &GuardCond) -> String {
+        match cond {
+            GuardCond::TensorRank { v, min_rank } => {
+                format!("rank({}) >= {}", self.value_name(*v), min_rank)
+            }
+            GuardCond::DimRange { v, dim, lo, hi } => {
+                let hi = if *hi == i64::MAX { "inf".to_string() } else { hi.to_string() };
+                format!("{} <= size({}, {}) <= {}", lo, self.value_name(*v), dim, hi)
+            }
+        }
+    }
+
     pub fn op_repr(&self, op: &Op) -> String {
         let n = |v: &V| self.value_name(*v);
         match op {
@@ -365,6 +464,12 @@ impl Function {
             Op::Call { callee, args, kwnames } => {
                 format!("call {}({})", n(callee), self.call_args(args, *kwnames))
             }
+            Op::CallMethod { recv, name, args, kwnames } => format!(
+                "call_method {}.{}({})",
+                n(recv),
+                self.name_str(*name),
+                self.call_args(args, *kwnames)
+            ),
             Op::CallEx { callee, args, kwargs } => {
                 if *kwargs == NONE {
                     format!("call_ex {}(*{})", n(callee), n(args))
@@ -375,6 +480,15 @@ impl Function {
             Op::GetIter(a) => format!("get_iter {}", n(a)),
             Op::IterNext(a) => format!("iter_next {}", n(a)),
             Op::CheckBound(a, _) => format!("check_bound {}", n(a)),
+            Op::Dispatch(d) => format!(
+                "dispatch {}({})    ; else {}",
+                d.slot.describe(),
+                self.values(&d.operands),
+                self.op_repr(&d.fallback)
+            ),
+            Op::TensorSize { t, dim } => format!("tensor_size {} {}", n(t), dim),
+            Op::TensorDim(t) => format!("tensor_dim {}", n(t)),
+            Op::Guard(g) => format!("guard {}    ; else resume generic at {}", self.guard_repr(&g.cond), g.resume),
         }
     }
 

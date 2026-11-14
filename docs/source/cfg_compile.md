@@ -11,6 +11,11 @@
 ```
 
 ```{eval-rst}
+.. autoclass:: torch.cfg_compile.Pipeline
+    :members:
+```
+
+```{eval-rst}
 .. autofunction:: torch.cfg_compile.is_available
 ```
 
