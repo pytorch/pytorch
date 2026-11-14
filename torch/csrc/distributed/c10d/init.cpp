@@ -1279,8 +1279,7 @@ Example:
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
 
-  py::enum_<::c10d::nvshmem_extension::ShmemSignalOp>(
-      module, "_ShmemSignalOp")
+  py::enum_<::c10d::nvshmem_extension::ShmemSignalOp>(module, "_ShmemSignalOp")
       .value("SET", ::c10d::nvshmem_extension::shmem_signal_set())
       .value("ADD", ::c10d::nvshmem_extension::shmem_signal_add());
 
