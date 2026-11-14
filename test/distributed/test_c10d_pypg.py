@@ -22,12 +22,16 @@ from torch.distributed.distributed_c10d import (
 )
 from torch.futures import Future
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def create_work(result):
@@ -214,6 +218,8 @@ class WindowProcessGroup(dist.ProcessGroup):
 
 # We cannot use parametrize as some tests are defined on the base class and use _get_process_group
 class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._spawn_threads()
@@ -281,12 +287,16 @@ class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
 
 
 class TestDDPWithWorkSubclass(AbstractDDPSingleRank, MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def use_wrapper(self):
         return False
 
 
 class TestDDPWithWorkWrapper(AbstractDDPSingleRank, MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def use_wrapper(self):
         return True
@@ -306,6 +316,8 @@ class BlockWork(dist._Work):
 
 
 class TestPyProcessGroup(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_attr_overrides(self):
         pg = DummyAttrProcessGroup(0, 1)
         self.assertEqual(pg.name(), "dummy-attr")
@@ -594,14 +606,18 @@ class TestPyProcessGroup(TestCase):
         self.assertEqual(dist._new_window(t, group=pg), "fake-window")
         self.assertIs(pg.new_window_tensor, t)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
-    def test_block_current_stream(self) -> None:
-        torch.cuda.synchronize()
 
-        stream = torch.cuda.Stream()
+class TestPyProcessGroupDevice(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_block_current_stream(self, device) -> None:
+        device_module = torch.get_device_module(device)
+        device_module.synchronize()
+
+        stream = device_module.Stream()
         with stream:
             # nothing in queue so instantly resolves
-            event1 = torch.cuda.Event()
+            event1 = device_module.Event()
             event1.record()
             event1.synchronize()
             self.assertTrue(event1.query())
@@ -610,7 +626,7 @@ class TestPyProcessGroup(TestCase):
             work.block_current_stream()
 
             # stream is blocked so doesn't resolve
-            event = torch.cuda.Event()
+            event = device_module.Event()
             event.record()
             time.sleep(0.1)
             self.assertFalse(event.query())
@@ -621,13 +637,13 @@ class TestPyProcessGroup(TestCase):
             stream.synchronize()
             self.assertTrue(event.query())
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
-    def test_block_current_stream_use_after_free(self) -> None:
+    def test_block_current_stream_use_after_free(self, device) -> None:
         """
-        This tests that the CPU control tensor is not freed before the CUDA kernel executes.
+        This tests that the CPU control tensor is not freed before the device kernel executes.
         """
-        torch.cuda.synchronize()
-        stream = torch.cuda.Stream()
+        device_module = torch.get_device_module(device)
+        device_module.synchronize()
+        stream = device_module.Stream()
         with stream:
             a = BlockWork()
             a.block_current_stream()
@@ -641,7 +657,7 @@ class TestPyProcessGroup(TestCase):
             del b
 
             # a is still blocking so this doesn't resolve
-            event = torch.cuda.Event()
+            event = device_module.Event()
             event.record()
             time.sleep(0.1)
             self.assertFalse(event.query())
@@ -653,7 +669,12 @@ class TestPyProcessGroup(TestCase):
             self.assertTrue(event.query())
 
 
+instantiate_device_type_tests(TestPyProcessGroupDevice, globals(), only_for="cuda")
+
+
 class TestBatchSendRecv(MultiProcessTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._spawn_processes()
