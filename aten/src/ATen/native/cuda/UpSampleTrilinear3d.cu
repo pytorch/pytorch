@@ -65,8 +65,8 @@ __device__ __forceinline__ void compute_output_range(
         scale - static_cast<accscalar_t>(0.5);
   }
 
-  const int min_output_bound = static_cast<int>(ceil(lo));
-  const int max_output_bound = static_cast<int>(floor(hi));
+  const int min_output_bound = static_cast<int>(std::ceil(lo));
+  const int max_output_bound = static_cast<int>(std::floor(hi));
   // The inverse bounds are rounded in accscalar_t. Include one extra output on
   // each side and filter by exact interpolation participation below.
   min_output = min_output_bound > 0 ? min_output_bound - 1 : 0;
@@ -697,6 +697,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
   });
 }
 
+#ifndef USE_ROCM
 static void upsample_trilinear3d_backward_out_cuda_template_deterministic(
     const Tensor& grad_input_,
     const Tensor& grad_output_,
@@ -750,7 +751,6 @@ static void upsample_trilinear3d_backward_out_cuda_template_deterministic(
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales_w);
 
-#ifndef USE_ROCM
         if (grad_input_.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
           Tensor grad_output =
               grad_output_.contiguous(at::MemoryFormat::ChannelsLast3d);
@@ -809,7 +809,6 @@ static void upsample_trilinear3d_backward_out_cuda_template_deterministic(
           C10_CUDA_KERNEL_LAUNCH_CHECK();
           return;
         }
-#endif
 
         Tensor grad_output = grad_output_.contiguous();
         Tensor grad_input = grad_input_.is_contiguous()
@@ -843,6 +842,7 @@ static void upsample_trilinear3d_backward_out_cuda_template_deterministic(
         }
       });
 }
+#endif
 
 } // namespace
 
