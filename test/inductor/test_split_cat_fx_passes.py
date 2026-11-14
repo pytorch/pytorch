@@ -601,6 +601,24 @@ class TestSplitCatFxPasses(TestCase):
 
             return cat1, stack1, relu1, relu2
 
+        def split_cat_dim_mismatch_diff_cat_size(x):
+            parts = torch.split(x, 4, dim=1)
+            one = torch.ones((2, 4, 32, 16), device=x.device)
+            return torch.cat(
+                [
+                    one,
+                    parts[1],
+                    parts[2],
+                    parts[3],
+                    one,
+                    parts[5],
+                    parts[6],
+                    parts[7],
+                    one,
+                ],
+                dim=2,
+            )
+
         # TODO: Add more tests:
         # * Cases where replacement shouldn't happen
         default_args = [
@@ -644,6 +662,25 @@ class TestSplitCatFxPasses(TestCase):
             (input_shuffling_direct_output, 1, 1, 2, 2, 3, default_args),
             (unequal_split_multiple_output, 1, 1, 2, 2, 3, default_args),
             (multi_split_cat, 1, 1, 2, 2, 3, multi_args),
+            (split_cat_dim_mismatch_diff_cat_size, 1, 1, 1, 1, 4, default_args),
+            (
+                split_cat_dim_mismatch_diff_cat_size,
+                0,
+                0,
+                0,
+                0,
+                0,
+                [torch.randn(2, 32, 33, 16)],
+            ),
+            (
+                split_cat_dim_mismatch_diff_cat_size,
+                0,
+                0,
+                0,
+                0,
+                0,
+                [torch.randn(2, 32, 64, 16)],
+            ),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
