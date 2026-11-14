@@ -392,7 +392,6 @@
   "test/inductor/test_distributed_patterns.py",
   "test/inductor/test_dropout_align_random_eager.py",
   "test/inductor/test_dynamic_tunable_ops.py",
-  "test/inductor/test_efficient_conv_bn_eval.py",
   "test/inductor/test_embedding.py",
   "test/inductor/test_exc_lowering_stack_trace.py",
   "test/inductor/test_extension_backend.py",
