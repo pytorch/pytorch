@@ -28,6 +28,7 @@ from torch._dynamo.testing import (
     CompileCounterWithBackend,
     normalize_gm,
 )
+from torch._functorch._aot_autograd.utils import get_device_rng_state
 from torch._functorch.partitioners import has_recomputable_rng_ops, is_rng_op
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.fx.experimental.sym_node import SymNode
@@ -196,6 +197,41 @@ def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
             return CheckpointPolicy.PREFER_RECOMPUTE
 
     return _custom_policy
+
+
+def _check_random_op_input_dim_matches_rng_state(test_case, device):
+    def gn(x):
+        return F.dropout(x, p=0.1, training=True).square()
+
+    def context_fn():
+        return create_selective_checkpoint_contexts(
+            _get_custom_policy(
+                must_recompute_list=[torch.ops.aten.native_dropout.default]
+            )
+        )
+
+    def fn(x):
+        return torch.utils.checkpoint.checkpoint(
+            gn, x, use_reentrant=False, context_fn=context_fn
+        )
+
+    cnt = CompileCounterWithBackend("inductor")
+    compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+    # An input dim equal to the RNG state size must not share its symbol.
+    rng_state_size = get_device_rng_state(torch.device(device)).numel()
+    for size in (rng_state_size, rng_state_size + 12):
+        x = torch.randn(size, 32, device=device, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_()
+        torch.manual_seed(5678)
+        ref = fn(x_ref)
+        ref.sum().backward()
+        torch.manual_seed(5678)
+        out = compiled_fn(x)
+        out.sum().backward()
+        test_case.assertEqual(out, ref)
+        test_case.assertEqual(x.grad, x_ref.grad)
+    # A recompile for the second size would skip the size check under test.
+    test_case.assertEqual(cnt.frame_count, 1)
 
 
 class ActivationCheckpointingViaTagsTestBase(torch._dynamo.test_case.TestCase):
@@ -1843,6 +1879,16 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self.assertTrue(count_ops(bwd_graph, [], freq=0, op=torch.ops.aten.sin.default))
         # Check that the sdpa op is recomputed in the backward graph
         self.assertTrue(count_ops(bwd_graph, [], freq=1, op=sdpa_op))
+
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_compile_checkpoint_random_op_input_dim_matches_rng_state(self, device):
+        _check_random_op_input_dim_matches_rng_state(self, device)
 
 
 class ActivationCheckpointingViaTagsGenericTests(
@@ -3808,6 +3854,16 @@ class RematerializeACNodesPassCUDAOnlyTests(RematerializeACNodesPassTestBase):
 instantiate_device_type_tests(
     ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
 )
+
+
+class ActivationCheckpointingCpuRngTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    # The class above skips cpu, whose generator state has its own size.
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_compile_checkpoint_random_op_input_dim_matches_rng_state(self):
+        _check_random_op_input_dim_matches_rng_state(self, "cpu")
 
 
 class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCase):
