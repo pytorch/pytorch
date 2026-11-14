@@ -692,6 +692,8 @@ def _expand_single_dim_strategy_to_mesh(
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
+    is_inplace = op_schema.is_inplace_op()
+
     def _create_expanded_strategy_impl(
         op_schema: OpSchema,
         output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
@@ -702,11 +704,6 @@ def _expand_single_dim_strategy_to_mesh(
             prepared_strategy = _PreparedSingleDimStrategy(
                 strategy_info, op_schema, output_tensor_meta
             )
-
-            # Detect inplace ops by checking if the base op name ends with '_'
-            op_name = op.name()
-            base_name = op_name.split("::")[1].split(".")[0]
-            is_inplace = base_name.endswith("_")
 
             element_mesh = prepared_strategy.element_mesh or mesh
             full_mesh_strategy_filter = None

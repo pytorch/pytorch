@@ -3,12 +3,37 @@
 
 import random
 
+import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpSchema, RuntimeSchemaInfo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 class TestOpSchema(TestCase):
+    @parametrize("op_name", ["__lshift__", "__rshift__"])
+    @parametrize("overload", ["Scalar", "Tensor"])
+    def test_shift_variants(self, op_name, overload):
+        op = getattr(getattr(torch.ops.aten, op_name), overload)
+        schema = OpSchema(op, (), {})
+        self.assertFalse(schema.is_inplace_op())
+        self.assertFalse(schema.is_out_variant_op())
+
+        inplace_name = "__i" + op_name[2:]
+        inplace_op = getattr(getattr(torch.ops.aten, inplace_name), overload)
+        schema = OpSchema(inplace_op, (), {})
+        self.assertTrue(schema.is_inplace_op())
+        self.assertFalse(schema.is_out_variant_op())
+
+        out_op = getattr(getattr(torch.ops.aten, op_name), overload + "_out")
+        schema = OpSchema(out_op, (), {})
+        self.assertFalse(schema.is_inplace_op())
+        self.assertTrue(schema.is_out_variant_op())
+
     def test_equality_checks_lists_of_dtensor_spec(self):
         """If x == y, then we must have h(x) == h(y)."""
         dts = DTensorSpec(mesh=None, placements=tuple(), tensor_meta=None)
@@ -129,6 +154,9 @@ class TestOpSchema(TestCase):
         OpSchema(op=None, args_schema=(dts,), kwargs_schema={})
         del dts
         self.assertIsNone(ref(), "DTensorSpec leaked via OpSchema._comparison_key")
+
+
+instantiate_parametrized_tests(TestOpSchema)
 
 
 if __name__ == "__main__":
