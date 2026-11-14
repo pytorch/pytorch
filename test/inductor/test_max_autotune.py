@@ -3440,6 +3440,13 @@ class TestMaxAutotune(TestCase):
             any(name.startswith("decompose_k_mm") for name in names), names
         )
 
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
     @fresh_cache()
     @config.patch(
         max_autotune=True,
@@ -3447,9 +3454,9 @@ class TestMaxAutotune(TestCase):
         autotune_fallback_to_aten=False,
     )
     def test_decompose_k_max_k_per_split_numerics(self):
-        # Each decompose_k partial accumulates K // split products into one fp32
-        # value. With K = 2**18 and split 2, that chunk is long enough for outputs
-        # near zero to miss tolerance against an fp32 reference.
+        # With K = 2**18, split 2 (chunks of 131072) misses this tolerance on B200;
+        # whether it does depends on the BLAS kernel, so only the bounded path is
+        # checked numerically.
         M, N, K = 64, 64, 2**18
         torch.manual_seed(0)
         a = torch.randn(M, K, device=GPU_TYPE).to(torch.bfloat16)
@@ -3497,13 +3504,12 @@ class TestMaxAutotune(TestCase):
         )
         self.assertTrue(within_tolerance(out))
 
-        # Unbounded: the single split is 2 (chunks of 131072).
-        out, names = compile_decompose_k_only(0)
+        # Unbounded: the single split is 2.
+        _, names = compile_decompose_k_only(0)
         self.assertTrue(names, names)
         self.assertTrue(
             all(n.startswith("decompose_k_mm_2_split") for n in names), names
         )
-        self.assertFalse(within_tolerance(out))
 
     @config.patch(
         {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "TRITON"}
