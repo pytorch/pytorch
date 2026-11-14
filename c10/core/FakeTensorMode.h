@@ -45,8 +45,11 @@ struct C10_API FakeTensorMode {
   // same value, including when its wrapper is recreated.
   bool avoid_device_init_ = false;
 
-  // Snapshot of fake_tensor_prefer_device_type at mode construction. Later
-  // config changes do not affect this mode. Kept as a string to preserve
+  // Snapshot of fake_tensor_prefer_device_type for native device resolution.
+  // We assume the config stays fixed for the mode's lifetime; we have not found
+  // real use cases requiring changes during that lifetime. Python op_impls
+  // still read live config, so changing it can give different device decisions
+  // across paths; see Note [C++ fake fallback]. Kept as a string to preserve
   // Python's substring matching of device types.
   std::optional<std::string> prefer_device_type_;
 
