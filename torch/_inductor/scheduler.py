@@ -11393,7 +11393,13 @@ class Scheduler:
         # Non-injective scatter: range vars absent from write index mean
         # multiple iterations hit the same location. Can't fuse the reader
         # in or it will see partially-written state between iterations.
-        if not OrderedSet(write.var_names) <= write.index.free_symbols:
+        # Compare against the writer's ranges, since trailing unused vars are
+        # dropped from write.var_names
+        writer = self.name_to_buf[weak_dep.mutating_buf].defining_op
+        if not isinstance(writer, SchedulerNode):
+            return False
+        iter_numel = sympy_product(writer.get_ranges()[0])
+        if not V.graph.sizevars.statically_known_equals(write.get_numel(), iter_numel):
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]
