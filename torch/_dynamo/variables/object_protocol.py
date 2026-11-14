@@ -114,7 +114,7 @@ def vt_identity_compare(
     from .exception import ExceptionVariable, TracebackVariable
     from .functions import (
         _WrappedSkipFunctionMethodDescriptorCommonVariable,
-        UserMethodVariable,
+        MethodTypeVariableMixin,
     )
     from .lists import ListVariable
     from .sets import (
@@ -143,7 +143,7 @@ def vt_identity_compare(
         OrderedSetVariable,
         TracebackVariable,
         ExceptionVariable,
-        UserMethodVariable,
+        MethodTypeVariableMixin,
         _WrappedSkipFunctionMethodDescriptorCommonVariable,
         CurrentDeviceVariable,
     )

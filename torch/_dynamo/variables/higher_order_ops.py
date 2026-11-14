@@ -38,7 +38,10 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import constants_identical, get_fake_value
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
-from torch._dynamo.variables.functions import UserFunctionVariable, UserMethodVariable
+from torch._dynamo.variables.functions import (
+    MethodTypeVariableMixin,
+    UserFunctionVariable,
+)
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.script_object import CustomClassObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
@@ -2038,7 +2041,7 @@ def speculate_subgraph_with_auto_output_flattening(
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
         # functions and methods both reach this path
-        if isinstance(f, (UserFunctionVariable, UserMethodVariable)):
+        if isinstance(f, (UserFunctionVariable, MethodTypeVariableMixin)):
             f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
@@ -2243,7 +2246,7 @@ def speculate_subgraph(
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
         # functions and methods both reach this path
-        if isinstance(f, (UserFunctionVariable, UserMethodVariable)):
+        if isinstance(f, (UserFunctionVariable, MethodTypeVariableMixin)):
             f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
@@ -4609,7 +4612,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
                 context_fn = ctx.guard_as_python_constant()
-            elif isinstance(ctx, torch._dynamo.variables.UserMethodVariable):
+            elif isinstance(ctx, torch._dynamo.variables.MethodTypeVariableMixin):
                 # Binding the method needs its receiver as a real object. When
                 # the receiver was built inside the region that is impossible,
                 # so graph break with the reason rather than the generic one.
@@ -4687,7 +4690,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
 
         if isinstance(func_var, torch._dynamo.variables.UserFunctionVariable):
             func = func_var.fn
-        elif isinstance(func_var, torch._dynamo.variables.UserMethodVariable):
+        elif isinstance(func_var, torch._dynamo.variables.MethodTypeVariableMixin):
             func = func_var.guard_as_python_constant()
         elif isinstance(
             func_var, torch._dynamo.variables.functions.FunctoolsPartialVariable

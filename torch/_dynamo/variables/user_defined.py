@@ -1736,6 +1736,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[1],
                 source=self.source,
             )
+        elif self.value is types.MethodType and len(args) == 2 and not kwargs:
+            if args[1].python_type() is type(None):
+                raise_type_error(tx, "instance must not be None")
+            func = args[0].realize()
+            if isinstance(func, variables.BuiltinVariable):
+                return variables.BoundBuiltinCallableMethodVariable(func, args[1])
         elif self.value is weakref.ref:
             if len(args) > 1:
                 callback = args[1]

@@ -6412,6 +6412,26 @@
       ]
     }
   ],
+  "GB7707": [
+    {
+      "Gb_type": "non-constant attribute name on method",
+      "Context": "method={self}, name={name}",
+      "Explanation": "Dynamo requires a constant attribute name when setting or deleting a MethodType attribute.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8141": [
+    {
+      "Gb_type": "sourceless builtin MethodType without tracked receiver",
+      "Context": "method={value}",
+      "Explanation": "Dynamo cannot reconstruct a builtin-backed MethodType unless its receiver is already tracked.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0336": [
     {
       "Gb_type": "out_dtype: unexpected kwargs",
