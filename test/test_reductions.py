@@ -2778,8 +2778,9 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
-    # CUDA median with dim returns the first occurrence of the median value
-    @onlyCUDA
+    # CUDA and XPU median with dim returns the first occurrence of the median value
+    @onlyAccelerator
+    @skipIfMPS
     @dtypes(torch.int8, torch.int32, torch.half, torch.float)
     def test_median_dim_index_is_first_occurrence(self, device, dtype):
         for size in [(7, 1100), (5, 19999)]:
