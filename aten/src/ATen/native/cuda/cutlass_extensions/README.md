@@ -10,7 +10,7 @@ mentioned functionality.
 
 The original copy of these files is made from commit `f8e42aa` of
 *FasterTransformer project*.  The changes from original files are
-minimal, just to support *CUTLASS* 3.x (*FasterTransfomer* project
+minimal, just to support *CUTLASS* 3.x (*FasterTransformer* project
 was, as of mentioned commit, based on *CUTLASS* 2.10).  However, the
 copies of files in the *PyTorch* source tree are linted using
 *PyTorch* lint rules, so at this stage they differ quite a bit from

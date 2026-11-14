@@ -343,7 +343,7 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // Why we are special casing the check for tensor type here?
     // this is because tensor types might get specialized on tensors when
     // we pass inputs to the function, i.e. TensorType can filled with
-    // specific shape info, requires_grad info, etc. so the OwerRRef we
+    // specific shape info, requires_grad info, etc. so the OwnerRRef we
     // found might already have those infos, but the `type` we passed in
     // here is a plain TensorType, they are not equal relationship:
     // specialized TensorType <: plain TensorType
@@ -372,7 +372,7 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
 
 c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
     const TypePtr& type) {
-  // Don't add this OnwerRRef to the owners_ map yet, otherwise
+  // Don't add this OwnerRRef to the owners_ map yet, otherwise
   // it will never be removed from there. Instead, only add it to the
   // map in prepareChildFork, in case this local RRef is being passed
   // to another worker.

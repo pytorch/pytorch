@@ -150,7 +150,7 @@
  *    have to deal with `IValue` (e.g. `c10::List`). In this context,
  *    what may be happening is that `IValue` doesn't store internally
  *    your type `T`. Instead, it constructs a type new `T` every time
- *    you try to get `T` for it (see `IListRef<at::OptinalTensorRef>`).
+ *    you try to get `T` for it (see `IListRef<at::OptionalTensorRef>`).
  */
 
 namespace c10 {

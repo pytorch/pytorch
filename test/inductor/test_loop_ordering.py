@@ -751,7 +751,7 @@ class LoopOrderingTest(TestCase):
 
         To make loop reordering work, we don't merge loops when creating
         SchedulerNode. Thus we need explicitly normalize MemoryDep when
-        we check if two MemeoryDep matches.
+        we check if two MemoryDep matches.
         """
 
         def f(x):

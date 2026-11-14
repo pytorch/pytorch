@@ -967,7 +967,7 @@ void set_device(int device) {
 // other vector) to pass to a common helper function. The alternative is to use
 // C++20's ranges which we don't have access to yet.
 
-// Given an Edge or optional<InputMetdata>, return the InputMetadata
+// Given an Edge or optional<InputMetadata>, return the InputMetadata
 template <typename T>
 const static InputMetadata& get_input_metadata(const T& thing);
 
@@ -983,7 +983,8 @@ const InputMetadata& get_input_metadata<Edge>(const Edge& thing) {
   return thing.function->input_metadata(thing.input_nr);
 }
 
-// Given an Edge or optional<InputMetdata>, return if there is an InputMetadata.
+// Given an Edge or optional<InputMetadata>, return if there is an
+// InputMetadata.
 template <typename T>
 static bool has_input_metadata(const T& thing);
 
@@ -1011,7 +1012,7 @@ std::vector<std::optional<InputMetadata>> collect_input_metadata(
   return input_metadata;
 }
 
-// Given an vector<Edge> or vector<optional<InputMetdata>>, validate the
+// Given an vector<Edge> or vector<optional<InputMetadata>>, validate the
 // outputs. This involves using the InputMetadata to check the outputs and also
 // potentially calling .sum_to on the outputs.
 template <typename T>
