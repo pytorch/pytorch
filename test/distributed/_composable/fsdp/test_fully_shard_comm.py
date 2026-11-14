@@ -1321,6 +1321,7 @@ class TestFullyShardSingleRank(FSDPTestMultiThread):
                         lambda param: unsharded_grads.append(param.grad)
                     )
             loss.backward()
+            self.assertTrue(unsharded_grads)
             for grad in unsharded_grads:
                 grad.fill_(float("nan"))
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
@@ -1346,17 +1347,26 @@ class TestFullyShardSingleRank(FSDPTestMultiThread):
         )
         inp = torch.randn(4, dim, device=device)
         hook_grads: list[list[torch.Tensor]] = [[], []]
+        num_copy_ins: list[int] = []
         for module, grads in zip((model, ref_model), hook_grads):
 
             def hook(param: nn.Parameter, grads=grads) -> None:
-                torch.cuda._sleep(100_000_000)
+                device_sleep(device.type, 100_000_000)
                 grads.append(param.grad.to_local().clone())
                 param.grad = None
 
             for param in module.parameters():
                 param.register_post_accumulate_grad_hook(hook)
-            module(inp).sum().backward()
+            loss = module(inp).sum()
+            with _RecordFuncs() as funcs:
+                loss.backward()
+            num_copy_ins.append(
+                funcs.count(torch.ops.fsdp.chunk_cat_mixed_dtype.default)
+            )
         device_module.synchronize()
+        # Only the reference takes the buffered path
+        self.assertEqual(num_copy_ins, [0, 2])
+        self.assertEqual(len(hook_grads[0]), 2)
         self.assertEqual(hook_grads[0], hook_grads[1], atol=0, rtol=0)
 
     @skip_if_lt_x_gpu(1)
