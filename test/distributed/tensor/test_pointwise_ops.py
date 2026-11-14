@@ -8,6 +8,7 @@ from unittest import skip
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch.distributed._local_tensor import LocalTensorMode
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -1356,6 +1357,43 @@ class TestPointwiseRuleValidation(TestCase):
         super().tearDown()
         if torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
+
+    def test_nan_to_num_partial_redistribution(self):
+        # nan_to_num is not max/min-preserving in the presence of NaN/Inf or
+        # custom replacement values, so it must not preserve Partial(max/min)
+        # placements: applying it before an outstanding distributed max/min
+        # reduction silently changes the result.
+        # https://github.com/pytorch/pytorch/issues/203922
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            cases = [
+                ("amax", float("nan"), 5.0, {}, Partial("max")),
+                ("amin", float("nan"), -5.0, {}, Partial("min")),
+                ("amax", float("inf"), 5.0, {"posinf": -1.0}, Partial("max")),
+                ("amin", -float("inf"), -5.0, {"neginf": 1.0}, Partial("min")),
+            ]
+            for reduction, a, b, kwargs, partial_placement in cases:
+                with self.subTest(reduction=reduction, kwargs=kwargs):
+                    full = torch.tensor([[a, -3.0], [b, 2.0]])
+                    shard = distribute_tensor(full, mesh, [Shard(0)])
+                    pending = getattr(shard, reduction)(dim=0)
+                    # the outstanding reduction still carries the Partial placement
+                    self.assertEqual(pending.placements, (partial_placement,))
+                    actual = torch.nan_to_num(pending, **kwargs)
+                    # the op must materialize the pending reduction to Replicate
+                    self.assertEqual(actual.placements, (Replicate(),))
+                    got = actual.full_tensor().reconcile()
+                    expected = torch.nan_to_num(
+                        getattr(full, reduction)(dim=0), **kwargs
+                    )
+                    self.assertEqual(got, expected)
+                    # without a Partial rule, the in-place variant raises instead
+                    # of silently keeping the unsound placement
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "in-place operations that require placement changes",
+                    ):
+                        pending.nan_to_num_()
 
     def _with_even_sizes(self, fn):
         """Run fn with opinfo sizes overridden to be evenly divisible by world_size."""
