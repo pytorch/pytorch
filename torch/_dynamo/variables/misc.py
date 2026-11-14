@@ -867,6 +867,33 @@ class AutogradFunctionVariable(VariableTracker):
                 )
         return result
 
+    _inherited_setup_context_guard = staticmethod(
+        functools.partial(
+            GuardBuilder.ID_MATCH,
+            recompile_hint=(
+                "This torch.autograd.Function.apply call uses the inherited "
+                "setup_context, so forward receives ctx (a "
+                "torch.autograd.function.FunctionCtx). Dynamo guards the exact "
+                "setup_context method because a custom method would change how "
+                "forward is called. This check also runs under torch.no_grad()."
+            ),
+        ),
+    )
+    _overridden_setup_context_guard = staticmethod(
+        functools.partial(
+            GuardBuilder.ID_MATCH,
+            recompile_hint=(
+                "This torch.autograd.Function.apply call uses a custom "
+                "setup_context, so forward receives no ctx. When this call tracks "
+                "gradients, setup_context prepares ctx (a "
+                "torch.autograd.function.FunctionCtx) for backward. Dynamo guards "
+                "the exact setup_context function because replacing it could "
+                "change the forward or backward path. This check also runs under "
+                "torch.no_grad(), even if the replacement is another custom method."
+            ),
+        ),
+    )
+
     def call_apply(
         self,
         tx: "InstructionTranslatorBase",
@@ -882,13 +909,17 @@ class AutogradFunctionVariable(VariableTracker):
             if self.fn_cls_source is not None
             else None
         )
+        setup_context = self.fn_cls.setup_context
+        is_setup_ctx_defined = setup_context is not _SingleLevelFunction.setup_context
         if setup_ctx_src is not None:
             # Function.apply changes calling conventions based on whether
             # setup_context is the exact inherited implementation.
-            install_guard(setup_ctx_src.make_guard(GuardBuilder.ID_MATCH))
-
-        setup_context = self.fn_cls.setup_context
-        is_setup_ctx_defined = setup_context is not _SingleLevelFunction.setup_context
+            guard_fn = (
+                self._overridden_setup_context_guard
+                if is_setup_ctx_defined
+                else self._inherited_setup_context_guard
+            )
+            install_guard(setup_ctx_src.make_guard(guard_fn))
 
         if torch._C._are_functorch_transforms_active():
             from torch._C._functorch import TransformType

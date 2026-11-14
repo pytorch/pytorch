@@ -375,31 +375,62 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), x + 1)
         self.assertEqual(cnt.frame_count, 2)
 
-    def test_apply_guards_setup_context_identity(self):
+    @parametrize(
+        "overridden,expected_call",
+        (
+            (False, "uses the inherited setup_context"),
+            (True, "uses a custom setup_context"),
+        ),
+    )
+    @parametrize("grad_enabled", (False, True))
+    def test_apply_guards_setup_context_identity(
+        self, overridden, expected_call, grad_enabled
+    ):
         class Function(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, x):
-                return x + 1
+            def forward(ctx_or_x, x=None):
+                return (ctx_or_x if x is None else x) + 1
 
             @staticmethod
             def backward(ctx, grad_output):
                 return grad_output
 
+        if overridden:
+            def setup_context(ctx, inputs, output):
+                pass
+
+            Function.setup_context = staticmethod(setup_context)
+
         def fn(x):
             return Function.apply(x)
 
         x = torch.randn(2, requires_grad=True)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(x), x + 1)
+        failures = []
+        opt_fn = torch._dynamo.optimize(
+            "eager",
+            nopython=True,
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(fn)
+        with torch.set_grad_enabled(grad_enabled):
+            self.assertEqual(opt_fn(x), x + 1)
 
-        inherited = torch.autograd.Function.setup_context
-        replacement = types.FunctionType(inherited.__code__, inherited.__globals__)
-        Function.setup_context = staticmethod(replacement)
-        with torch._dynamo.config.patch(error_on_recompile=True):
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.RecompileError, "setup_context"
-            ):
-                opt_fn(x)
+            original = Function.setup_context
+            replacement = types.FunctionType(original.__code__, original.__globals__)
+            Function.setup_context = staticmethod(replacement)
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.RecompileError, "setup_context"
+                ):
+                    opt_fn(x)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("___check_obj_id(Function.setup_context", failures[0])
+        self.assertIn(
+            "(HINT: This torch.autograd.Function.apply call",
+            failures[0],
+        )
+        self.assertIn("torch.autograd.function.FunctionCtx", failures[0])
+        self.assertIn(expected_call, failures[0])
+        self.assertIn("torch.no_grad()", failures[0])
 
     def test_apply_override_not_routed_to_autograd_function(self):
         class Function(torch.autograd.Function):
