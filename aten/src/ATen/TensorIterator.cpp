@@ -1271,7 +1271,9 @@ bool TensorIteratorBase::can_use_32bit_indexing() const {
   for (auto& op : operands_) {
     int64_t max_offset = 1;
     for (const auto dim : c10::irange(ndim())) {
-      max_offset += (shape_[dim] - 1) * op.stride_bytes[dim];
+      // std::abs: flip (CUDA) negates strides, and a signed sum lets a negative
+      // extent cancel a positive one, admitting offsets that overflow int32.
+      max_offset += (shape_[dim] - 1) * std::abs(op.stride_bytes[dim]);
     }
     if (max_offset > max_value) {
       return false;
