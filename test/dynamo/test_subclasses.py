@@ -1778,6 +1778,18 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
 
+    def test_construct_parameter_subclass(self):
+        class MyParam(torch.nn.Parameter):
+            pass
+
+        def fn(x):
+            return MyParam(x, requires_grad=False)
+
+        x = torch.randn(2)
+        out = compile_full_eager(fn)(x)
+        self.assertIs(type(out), MyParam)
+        self.assertEqual(out, x)
+
     def test_subclass_with_disabled_torch_function(self):
         class MySubclass(torch.Tensor):
             __torch_function__ = torch._C._disabled_torch_function_impl
@@ -1986,6 +1998,38 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
 
         self.assertEqual(res, ref)
         self.assertEqual(res[0].bar, ref[0].bar)
+
+    @parametrize("op", ("linear", "module", "matmul"))
+    @parametrize("property_first", (False, True))
+    def test_constructed_subclass_method_descriptor_guard(self, op, property_first):
+        class MySubclass(torch.Tensor):
+            def __init__(self, data):
+                super().__init__()
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        weight = torch.randn(3, 4)
+        linear = torch.nn.Linear(4, 3)
+
+        def fn(x):
+            x = MySubclass(x)
+            if op == "linear":
+                t = torch.nn.functional.linear(x, weight)
+            elif op == "module":
+                t = linear(x)
+            else:
+                t = x @ weight.T
+            if property_first:
+                return t.shape, t.dtype, t.device, t.numel(), t.dim(), t.is_complex()
+            return t.numel(), t.dtype, t.dim(), t.is_complex(), t.shape, t.device
+
+        x = torch.randn(2, 4)
+        opt_fn = torch.compile(fn, backend="eager")
+        expected = fn(x)
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(opt_fn(x), expected)
 
     def test_as_subclass_attr_mutation(self):
         # Make sure the attribute mutation for newly constructed tensor subclass
@@ -3129,6 +3173,32 @@ class GraphModule(torch.nn.Module):
         out_ref = f(x)
         out_test = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(out_ref, out_test)
+
+    @parametrize("nested_graph_breaks", (False, True))
+    def test_hasattr_wrapper_subclass_method_after_graph_break(
+        self, nested_graph_breaks
+    ):
+        def fn(x):
+            wrapped = TwoTensor(x, x + 1)
+            torch._dynamo.graph_break()
+            has_flatten = hasattr(wrapped, "__tensor_flatten__")
+            flatten = getattr(wrapped, "__tensor_flatten__", None)
+            return x + 1 if has_flatten and flatten is not None else x - 1
+
+        x = torch.ones(2)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_hasattr_wrapper_subclass_method_on_input(self):
+        def fn(t, y):
+            if hasattr(t, "__tensor_flatten__") and not hasattr(t, "missing"):
+                return y + 1
+            return y - 1
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for t in (TwoTensor(x, x), x):
+            self.assertEqual(opt_fn(t, x), fn(t, x))
 
     def test_support_bases(self):
         import torch.fx._symbolic_trace

@@ -221,7 +221,9 @@ aiter::mha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
     float p_undrop = 1.0 - p_dropout;
 
     aiter::mha_bwd_args args{};
-    args.use_asm_v3     = hdim <= 192; // ASM v3 only supports head dim <= 192
+    // ASM v3 only supports head dim <= 192. On gfx950 its hd128 kernel (used for head
+    // dims 65..128) returns wrong dq/dk/dv at seqlen_q == 1; use CK tile for any seqlen_q == 1.
+    args.use_asm_v3     = hdim <= 192 && seqlen_q > 1;
     args.v3_atomic_fp32 = true;
     args.v3_bf16_cvt    = 1;
     args.v3_api_check   = false;
@@ -579,11 +581,12 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
         dv = dv.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
     }
 
+    // Undefined unless a bias gradient was requested: the kernel writes none otherwise
+    // (has_dbias is false), and a dense [b, h, s_q, s_k] placeholder could exceed device
+    // memory at long sequence lengths.
     at::Tensor dbias;
     if(bias_requires_grad) {
         dbias = grad_bias.value();
-    } else {
-        dbias = at::empty({batch_size, num_heads, seqlen_q, seqlen_k}, q.options());
     }
 
 

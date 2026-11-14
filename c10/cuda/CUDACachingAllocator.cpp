@@ -320,6 +320,17 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
+// Expandable segments have no ROCm fabric handle path, so ROCm keeps POSIX fds
+// even on devices where get_fabric_access() is true for symmetric memory.
+bool use_fabric_handles(c10::DeviceIndex device) {
+#ifdef USE_ROCM
+  (void)device;
+  return false;
+#else
+  return cuda::get_fabric_access(device);
+#endif
+}
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || \
     defined(USE_ROCM)
 
@@ -529,7 +540,7 @@ struct ExpandableSegment {
         "reserving an expandable segment at a requested address is not supported on ROCm");
     hipError_t reserve_err =
         hipMemAddressReserve(&ptr_, reserve_bytes, 0ULL, 0, 0ULL);
-    if (C10_UNLIKELY(reserve_err != hipSuccess)) {
+    if (reserve_err != hipSuccess) [[unlikely]] {
       const char* err_str = hipGetErrorString(reserve_err);
       logVaExhaustion(err_str ? err_str : "unknown error");
     }
@@ -537,7 +548,7 @@ struct ExpandableSegment {
 #else
     CUresult reserve_err = DriverAPI::get()->cuMemAddressReserve_(
         &ptr_, reserve_bytes, 0ULL, requested_addr.value_or(0), 0ULL);
-    if (C10_UNLIKELY(reserve_err != CUDA_SUCCESS)) {
+    if (reserve_err != CUDA_SUCCESS) [[unlikely]] {
       const char* err_str = nullptr;
       DriverAPI::get()->cuGetErrorString_(reserve_err, &err_str);
       logVaExhaustion(err_str ? err_str : "unknown error");
@@ -591,7 +602,7 @@ struct ExpandableSegment {
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       if (ipcEnabled()) {
-        if (cuda::get_fabric_access(device_)) {
+        if (use_fabric_handles(device_)) {
 #ifndef USE_ROCM
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
 #endif
@@ -697,7 +708,7 @@ struct ExpandableSegment {
     header.pid = get_self_pid();
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
-    header.handle_type = cuda::get_fabric_access(device_)
+    header.handle_type = use_fabric_handles(device_)
         ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
         : Expandable_Segments_Handle_Type::POSIX_FD;
 
@@ -753,7 +764,7 @@ struct ExpandableSegment {
         header.handle_type == Expandable_Segments_Handle_Type::POSIX_FD ||
             (header.handle_type ==
                  Expandable_Segments_Handle_Type::FABRIC_HANDLE &&
-             cuda::get_fabric_access(device)),
+             use_fabric_handles(device)),
         "Unsupported expandable_segments IPC handle type ",
         static_cast<int>(header.handle_type),
         " on device ",
@@ -889,7 +900,7 @@ struct ExpandableSegment {
     if (!ipcEnabled()) {
       return Expandable_Segments_Handle_Type::UNSPECIFIED;
     }
-    return cuda::get_fabric_access(device_)
+    return use_fabric_handles(device_)
         ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
         : Expandable_Segments_Handle_Type::POSIX_FD;
   }
@@ -1817,8 +1828,10 @@ class DeviceCachingAllocator {
 
   void prepare_for_malloc(
       const std::shared_ptr<GatheredContext>& context,
-      cudaStream_t stream) {
-    if (C10_LIKELY(!is_capture_context())) {
+      cudaStream_t stream,
+      bool has_active_captures) {
+    // Deferred frees span streams; a noncapturing request must not drain them.
+    if (!has_active_captures) [[likely]] {
       // Processes end-of-life events for outstanding allocations used on
       // multiple streams (checks if their GPU-side uses are complete and
       // recycles their memory if so)
@@ -1860,7 +1873,14 @@ class DeviceCachingAllocator {
       drain_deferred_custom_frees_noexcept(std::move(frees));
     });
 
-    prepare_for_malloc(context, stream);
+    const bool has_active_captures =
+        C10_UNLIKELY(capture_tracker_.hasActiveCaptures());
+    const auto allocation_context = has_active_captures
+        ? capture_tracker_.allocationContext(stream)
+        : CUDAGraphMemory::AllocationContext{};
+    const cudaStream_t block_reuse_stream =
+        has_active_captures ? capture_tracker_.reuseStream(stream) : stream;
+    prepare_for_malloc(context, stream, has_active_captures);
 
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
@@ -1873,7 +1893,7 @@ class DeviceCachingAllocator {
     AllocParams params(
         device_id,
         size,
-        stream,
+        block_reuse_stream,
         &pool,
         alloc_size,
         is_expandable_segments_active);
@@ -1889,10 +1909,9 @@ class DeviceCachingAllocator {
     // Can't reuse an existing block; try to get a new one.
     if (!block_found) {
       // Do garbage collection if the flag is set.
-      if (C10_UNLIKELY(
-              allowed_memory_maximum.has_value() &&
-              AcceleratorAllocatorConfig::garbage_collection_threshold() >
-                  0.0)) {
+      if (allowed_memory_maximum.has_value() &&
+          AcceleratorAllocatorConfig::garbage_collection_threshold() > 0.0)
+          [[unlikely]] {
         garbage_collect_cached_blocks(context);
         drain_deferred_custom_frees_outside_lock(lock);
       }
@@ -2145,8 +2164,12 @@ class DeviceCachingAllocator {
 
     bool split_remainder = should_split(
         params.block, params.size(), params.is_expandable_segments_active);
-    return alloc_found_block(
+    Block* block = alloc_found_block(
         params, orig_size, std::move(context), split_remainder);
+    if (has_active_captures) {
+      capture_tracker_.recordAllocation(block, allocation_context);
+    }
+    return block;
   }
 
   Block* mallocWithAddress(size_t orig_size, cudaStream_t stream, void* addr) {
@@ -2162,16 +2185,23 @@ class DeviceCachingAllocator {
     // to have.
     auto context = maybeGatherContext(RecordContext::STATE);
     std::unique_lock<std::recursive_mutex> lock(mutex);
-    prepare_for_malloc(context, stream);
+    const bool has_active_captures =
+        C10_UNLIKELY(capture_tracker_.hasActiveCaptures());
+    const auto allocation_context = has_active_captures
+        ? capture_tracker_.allocationContext(stream)
+        : CUDAGraphMemory::AllocationContext{};
+    prepare_for_malloc(context, stream, has_active_captures);
 
     const size_t size = round_size(orig_size);
+    const cudaStream_t block_reuse_stream =
+        has_active_captures ? capture_tracker_.reuseStream(stream) : stream;
 
     // The same block pool is used for both prefix block and requested block.
     // Prefix block may have a significantly larger size than requested block
     // when multiple small blocks coalesced into a large prefix block.
     auto& pool = get_pool(size, stream);
     Block* containing_block =
-        get_free_block_containing_address(pool, size, stream, addr);
+        get_free_block_containing_address(pool, size, block_reuse_stream, addr);
     if (!containing_block) {
       return nullptr;
     }
@@ -2198,7 +2228,7 @@ class DeviceCachingAllocator {
       AllocParams prefix_params(
           device_id,
           prefix_size,
-          stream,
+          block_reuse_stream,
           &pool,
           get_allocation_size(prefix_size),
           is_expandable_segments_active);
@@ -2218,7 +2248,7 @@ class DeviceCachingAllocator {
     AllocParams requested_params(
         device_id,
         size,
-        stream,
+        block_reuse_stream,
         &pool,
         get_allocation_size(size),
         is_expandable_segments_active);
@@ -2230,6 +2260,9 @@ class DeviceCachingAllocator {
         requested_params, orig_size, std::move(context), split_remainder);
     if (prefix_block) {
       free_locked(prefix_block, nullptr);
+    }
+    if (has_active_captures) {
+      capture_tracker_.recordAllocation(requested_block, allocation_context);
     }
     return requested_block;
   }
@@ -2398,10 +2431,6 @@ class DeviceCachingAllocator {
         &info.terminals,
         &info.num_terminals));
 #endif
-    TORCH_INTERNAL_ASSERT(
-        info.status != cudaStreamCaptureStatusInvalidated,
-        "Invalid stream capture status");
-
     return info;
   }
 
@@ -2599,6 +2628,10 @@ class DeviceCachingAllocator {
   void free_locked(
       Block* block,
       const std::shared_ptr<GatheredContext>& context) {
+    if (C10_UNLIKELY(capture_tracker_.hasActiveCaptures())) {
+      capture_tracker_.recordFree(
+          block, cuda::getCurrentCUDAStream(device_id).stream());
+    }
     block->allocated = false;
 
     // following logic might modifying underlying Block, causing the size
@@ -2631,7 +2664,7 @@ class DeviceCachingAllocator {
 
     // If the block has been used on more than one stream, handle accordingly.
     if (!block->stream_uses.empty()) {
-      if (C10_UNLIKELY(is_capture_context())) {
+      if (is_capture_context()) [[unlikely]] {
         if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
           // record_free_markers returns a vector of free markers,
           // or an empty vector if any associated stream is not currently
@@ -2718,8 +2751,15 @@ class DeviceCachingAllocator {
       // special synchronization
       return;
     }
+    if (C10_UNLIKELY(capture_tracker_.hasActiveCaptures())) {
+      if (capture_tracker_.reuseStream(stream.stream()) == block->stream) {
+        // Ignore uses in the allocation's reuse domain, since they don't
+        // require separate stream-lifetime tracking.
+        return;
+      }
+    }
     block->stream_uses.insert(stream);
-    if (C10_UNLIKELY(is_capture_context())) {
+    if (is_capture_context()) [[unlikely]] {
       block_to_cudagraph_stream_uses[block].insert(stream);
     }
   }
@@ -3261,7 +3301,7 @@ class DeviceCachingAllocator {
     // If division is zero, return the power-of-2 ceiling.
     size_t power2_floor = std::bit_floor(size);
     size_t power2_division = power2_floor >> (std::bit_width(divisions) - 1);
-    if (C10_UNLIKELY(power2_division == 0)) {
+    if (power2_division == 0) [[unlikely]] {
       return (power2_floor << 1);
     }
     size_t round_size_floor = size & (~(power2_division - 1));
@@ -3415,10 +3455,21 @@ class DeviceCachingAllocator {
     capture_tracker_.captureBegin();
   }
 
+  void markCaptureBegin(
+      const CUDAGraphMemory::CaptureRegistration& registration) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    capture_tracker_.captureBegin(registration);
+  }
+
   // Called by CUDAGraph after cudaStreamEndCapture.
   void markCaptureEnd() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     capture_tracker_.captureEnd();
+  }
+
+  size_t markCaptureEnd(CaptureId_t capture_id) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    return capture_tracker_.captureEnd(capture_id);
   }
 
   // Public entry to is_capture_context() for callers outside the allocator
@@ -3426,7 +3477,7 @@ class DeviceCachingAllocator {
   // memory allocation). Cheap when no capture is active on this device.
   bool isCaptureContext() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    if (C10_LIKELY(!capture_tracker_.hasActiveCaptures())) {
+    if (!capture_tracker_.hasActiveCaptures()) [[likely]] {
       return false;
     }
     // The default stream's handle is nullptr, which the driver resolves
@@ -3435,11 +3486,12 @@ class DeviceCachingAllocator {
     return is_capture_context();
   }
 
-  // Called by CUDAGraph::reset and MemPool::~MemPool()
+  // Called by CUDAGraph::reset, MemPool::~MemPool(), and by CUDAGraph during
+  // capture to drop the extra reference a conditional node's re-routing takes.
   void releasePool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    // The instantiated cudaGraphExec_t has been destroyed. We can't blindly
-    // delete and cudaFree the mempool its capture used, because
+    // When a graph releases its pool, we can't blindly delete and cudaFree
+    // the mempool its capture used, because
     //  1. other graph(s) might share the same pool
     //  2. the user might still hold references to output tensors allocated
     //  during capture.
@@ -3594,7 +3646,7 @@ class DeviceCachingAllocator {
     }
     if (handle_type == Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
       TORCH_CHECK(
-          cuda::get_fabric_access(device_id),
+          use_fabric_handles(device_id),
           "the expandable segment at ",
           address,
           " was saved with fabric handles, but device ",
@@ -4088,7 +4140,7 @@ class DeviceCachingAllocator {
   // The device-wide state read is safe because all callers hold `mutex`
   // (see CUDAGraphMemory::CaptureTracker::hasActiveCaptures()).
   bool is_capture_context() {
-    if (C10_LIKELY(!capture_tracker_.hasActiveCaptures())) {
+    if (!capture_tracker_.hasActiveCaptures()) [[likely]] {
       return false;
     }
     cudaStream_t stream = cuda::getCurrentCUDAStream(device_id).stream();
@@ -4101,7 +4153,7 @@ class DeviceCachingAllocator {
     // user-managed pools via use_mem_pool / NCCL registration / inductor
     // warmup). When non-empty we route allocations into the matching private
     // pool. It is usually empty, so we can short-circuit on the common path.
-    if (C10_UNLIKELY(!allocation_scopes_.empty())) {
+    if (!allocation_scopes_.empty()) [[unlikely]] {
       // Search allocation_scopes_ in LIFO order.
       for (auto& [pool_id, scope] : std::views::reverse(allocation_scopes_)) {
         if (scope(stream)) {
@@ -4163,9 +4215,9 @@ class DeviceCachingAllocator {
   bool get_free_block(AllocParams& p) {
     BlockPool& pool = *p.pool;
 
-    if (C10_UNLIKELY(
-            allowed_memory_maximum.has_value() &&
-            AcceleratorAllocatorConfig::garbage_collection_threshold() > 0.0)) {
+    if (allowed_memory_maximum.has_value() &&
+        AcceleratorAllocatorConfig::garbage_collection_threshold() > 0.0)
+        [[unlikely]] {
       // Track block reuse interval only when garbage collection is enabled.
       ++pool.get_free_blocks_call_count;
     }
@@ -4799,7 +4851,7 @@ class DeviceCachingAllocator {
   void remove_cudagraph_stream_uses(Block* block) {
     // remove stream uses added during cudagraph capture
     // (i.e., block->stream_uses - block->cudagraph_stream_uses)
-    if (C10_UNLIKELY(block_to_cudagraph_stream_uses.contains(block))) {
+    if (block_to_cudagraph_stream_uses.contains(block)) [[unlikely]] {
       stream_set streams(std::move(block->stream_uses));
       AT_ASSERT(block->stream_uses.empty());
       for (auto& stream : streams) {
@@ -4833,7 +4885,7 @@ class DeviceCachingAllocator {
 
   void insert_events_deferred_until_no_capture(
       const std::shared_ptr<GatheredContext>& context) {
-    if (C10_UNLIKELY(!deferred_blocks.empty())) {
+    if (!deferred_blocks.empty()) [[unlikely]] {
       for (auto& [block, inserted_empty_nodes] : deferred_blocks) {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
         // only streams recorded before cudagraph will be used to insert events
@@ -4972,7 +5024,7 @@ static void* uncached_allocate(size_t size) {
   // if someone tries to use forceUncachedAllocator while capturing.
   C10_CUDA_CHECK(cudaMalloc(&devPtr, size));
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
+  if (interp) [[unlikely]] {
     (*interp)->trace_gpu_memory_allocation(
         c10::kCUDA, reinterpret_cast<uintptr_t>(devPtr));
   }
@@ -4985,7 +5037,7 @@ static void uncached_delete(void* ptr) {
   }
 
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
+  if (interp) [[unlikely]] {
     (*interp)->trace_gpu_memory_deallocation(
         c10::kCUDA, reinterpret_cast<uintptr_t>(ptr));
   }
@@ -5080,7 +5132,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     // throw_on_cudamalloc_oom
     // + per_process_memory_fraction policy. Throw OutOfMemoryError so callers
     // with OOM error handlers can catch it gracefully.
-    if (C10_UNLIKELY(!block)) {
+    if (!block) [[unlikely]] {
       TORCH_CHECK_WITH(
           OutOfMemoryError,
           false,
@@ -5091,7 +5143,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     add_allocated_block(block);
     *devPtr = block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_memory_allocation(
           c10::kCUDA, reinterpret_cast<uintptr_t>(*devPtr));
     }
@@ -5143,7 +5195,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     add_allocated_block(block);
     *devPtr = block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_memory_allocation(
           c10::kCUDA, reinterpret_cast<uintptr_t>(*devPtr));
     }
@@ -5158,7 +5210,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_memory_deallocation(
           c10::kCUDA, reinterpret_cast<uintptr_t>(block->ptr));
     }
@@ -5589,9 +5641,21 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->markCaptureBegin();
   }
 
+  void markCaptureBegin(
+      c10::DeviceIndex device,
+      const CUDAGraphMemory::CaptureRegistration& registration) {
+    assertValidDevice(device);
+    device_allocator[device]->markCaptureBegin(registration);
+  }
+
   void markCaptureEnd(c10::DeviceIndex device) override {
     assertValidDevice(device);
     device_allocator[device]->markCaptureEnd();
+  }
+
+  size_t markCaptureEnd(c10::DeviceIndex device, CaptureId_t capture_id) {
+    assertValidDevice(device);
+    return device_allocator[device]->markCaptureEnd(capture_id);
   }
 
   bool isCaptureContext(c10::DeviceIndex device) override {
@@ -5848,6 +5912,38 @@ void local_raw_delete(void* ptr) {
 }
 
 } // namespace Native
+
+} // namespace cuda::CUDACachingAllocator
+
+namespace cuda::CUDAGraphMemory {
+
+// TODO: Migrate out-of-tree allocators before replacing the legacy
+// CUDAAllocator capture hooks with registration-aware hooks.
+void markCaptureBegin(
+    c10::DeviceIndex device,
+    const CaptureRegistration& registration) {
+  auto* current_allocator = CUDACachingAllocator::get();
+  if (current_allocator == &CUDACachingAllocator::Native::allocator) {
+    CUDACachingAllocator::Native::allocator.markCaptureBegin(
+        device, registration);
+  } else {
+    current_allocator->markCaptureBegin(device);
+  }
+}
+
+size_t markCaptureEnd(c10::DeviceIndex device, CaptureId_t capture_id) {
+  auto* current_allocator = CUDACachingAllocator::get();
+  if (current_allocator == &CUDACachingAllocator::Native::allocator) {
+    return CUDACachingAllocator::Native::allocator.markCaptureEnd(
+        device, capture_id);
+  }
+  current_allocator->markCaptureEnd(device);
+  return 0;
+}
+
+} // namespace cuda::CUDAGraphMemory
+
+namespace cuda::CUDACachingAllocator {
 
 namespace CudaMallocAsync {
 // If this is put in its own header file, it gets incorrectly renamed in HIPify.

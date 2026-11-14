@@ -54,6 +54,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
+    decorateIf,
     expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -73,11 +74,15 @@ from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._sympy.functions import (
     CleanDiv,
+    FloatTrueDiv,
     FloorDiv,
     IsNonOverlappingAndDenseIndicator,
     Max,
     Min,
     Mod,
+    OpaqueUnaryFn_sqrt,
+    PythonMod,
+    ToFloat,
 )
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -637,6 +642,40 @@ class TestPySymInt(TestCase):
         self.assertExpectedInline(
             str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(ToFloat(s97)), 2.0)"""
         )
+
+    def test_evaluate_expr_float_without_hint(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 64).node.expr
+        scale = FloatTrueDiv(1.0, OpaqueUnaryFn_sqrt(ToFloat(s0)))
+        self.assertEqual(shape_env.guarding_hint_or_throw(scale), 0.125)
+        self.assertEqual(shape_env.evaluate_expr(scale), 0.125)
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]),
+            """Eq(FloatTrueDiv(1.0, OpaqueUnaryFn_sqrt(ToFloat(s97))), 0.125)""",
+        )
+
+    @parametrize("hint", (None, 0.125))
+    def test_guarding_hint_or_throw_float(self, hint):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 64).node.expr
+        expr = FloatTrueDiv(1.0, OpaqueUnaryFn_sqrt(ToFloat(s0)))
+        value = SymFloat(SymNode(expr, shape_env, float, hint=hint))
+        self.assertEqual(guarding_hint_or_throw(value), 0.125)
+        self.assertEqual(guarding_hint_or_throw(value.node), 0.125)
+        self.assertEqual(guarding_hint_or_throw(0.125), 0.125)
+
+    @parametrize("numerator", (1.0, 64.0))
+    def test_guarding_hint_or_throw_float_does_not_cache_hint(self, numerator):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 64).node.expr
+        expr = FloatTrueDiv(numerator, OpaqueUnaryFn_sqrt(ToFloat(s0)))
+        node = SymNode(expr, shape_env, float, hint=sym_node._NO_HINT)
+        self.assertIsNone(node.hint)
+        for value in (SymFloat(node), node):
+            hint = guarding_hint_or_throw(value)
+            self.assertEqual(hint, numerator / 8.0)
+            self.assertIsInstance(hint, float)
+            self.assertIsNone(node.hint)
 
     def test_sym_floor(self):
         shape_env = ShapeEnv()
@@ -1549,6 +1588,130 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
                 tracer.graph.output(out_proxy.node)
                 gm = fx.GraphModule(tracer.root, tracer.graph)
                 self.assertEqual(gm(2, 3, 4), expected)
+                # Every rebuilt node must target sym_op itself: Inductor only
+                # lowers the real sym operators, so a helper wrapper as a node
+                # target fails with "is not an OpOverload".
+                targets = {n.target for n in gm.graph.nodes if n.op == "call_function"}
+                self.assertEqual(targets, {sym_op})
+
+    def test_build_proxy_untracked_symint_no_cycle(self):
+        """
+        A SymInt computed with proxy tracing disabled (as DTensor sharding
+        propagation does) is untracked, so make_fx resolves it through its
+        sympy symbol. A traced op computed from it that simplifies to that same
+        symbol, directly (sym_max(y, 1)) or through another such op
+        (sym_max(y, 1) // 1), becomes the symbol's provider, so forcing its lazy
+        proxy (thunkified, as under AOTAutograd) must not resolve y back to
+        itself and recurse forever.
+        """
+        from torch.fx.experimental.proxy_tensor import (
+            disable_proxy_modes_tracing,
+            maybe_enable_thunkify,
+        )
+
+        def make_f(size_fn):
+            def f(x):
+                with maybe_enable_thunkify():
+                    with disable_proxy_modes_tracing():
+                        y = x.shape[0] * 2 // 2
+                    return x.new_zeros(size_fn(y))
+
+            return f
+
+        for name, size_fn in [
+            ("direct", lambda y: torch.sym_max(y, 1)),
+            ("indirect", lambda y: torch.sym_max(y, 1) // 1),
+        ]:
+            with self.subTest(name):
+                gm = make_fx(make_f(size_fn), tracing_mode="symbolic")(torch.randn(4))
+                self.assertEqual(gm(torch.randn(5)).shape, (5,))
+
+    def test_build_proxy_untracked_symint_no_cross_symbol_cycle(self):
+        """
+        p == s1 is computed from an untracked a == s0 and q == s0 from an
+        untracked b == s1, so each becomes the provider of the symbol the other
+        resolves. Forcing q (through the untracked m == s0) forces p, whose
+        lookup of s0 must skip q and use x's size instead of recursing.
+        """
+        from torch.fx.experimental.proxy_tensor import (
+            disable_proxy_modes_tracing,
+            maybe_enable_thunkify,
+        )
+
+        def f(x, y):
+            with maybe_enable_thunkify():
+                with disable_proxy_modes_tracing():
+                    a = x.shape[0] * 5 // 5
+                    b = y.shape[0] * 5 // 5
+                    m = x.shape[0] * 9 // 9
+                p = y.shape[0] * a // a
+                q = x.shape[0] * b // b
+                return x.new_zeros(m) + y.sum()
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(4), torch.randn(3))
+        self.assertEqual(gm(torch.randn(6), torch.randn(2)).shape, (6,))
+
+    def test_build_proxy_untracked_symint_cycle_error(self):
+        """
+        half == s0 is computed from an untracked w == 2*s0 and becomes the s0
+        provider, so rebuilding w binds it to 2 * half. Forcing w then forces
+        half, whose operand is w: a cycle through symnode_tracker that the
+        sympy_expr_tracker lookup never sees. It must raise a clear error
+        instead of recursing forever.
+        """
+        from torch.fx.experimental.proxy_tensor import (
+            disable_proxy_modes_tracing,
+            maybe_enable_thunkify,
+        )
+
+        def f(x):
+            with maybe_enable_thunkify():
+                with disable_proxy_modes_tracing():
+                    w = x.shape[0] * 2
+                half = w // 2
+                return x.new_zeros(w), x.new_zeros(half)
+
+        with self.assertRaisesRegex(RuntimeError, "Cycle while computing the proxy"):
+            make_fx(f, tracing_mode="symbolic")(torch.randn(4))
+
+    def test_build_proxy_untracked_symint_no_tangent_dependency(self):
+        """
+        AOTAutograd tracks the tangent placeholders before the forward runs, so
+        a tangent's size can become the sympy_expr_tracker entry for s0. A later
+        traced op that simplifies to s0 (n below) must still replace that entry,
+        so the untracked m resolves to a forward value rather than the tangent.
+        That holds when n is computed from tracked sizes, and when one of its
+        inputs is untracked but resolves a different symbol (s1).
+        This uses aot_function because under torch.compile the SymInt graph
+        input for s0 hides the tangent's size.
+        """
+        from functorch.compile import aot_function, nop
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+
+        def make_f(make_n):
+            def f(x, w):
+                with disable_proxy_modes_tracing():
+                    a = w.shape[0] * 5 // 5
+                    m = x.shape[0] * 5 // 5
+                n = make_n(x.shape[0], a)
+                z = x.new_zeros(m) + n
+                y = x.reshape(x.shape[0] * 2 // 2) * w.sum()
+                return z, y
+
+            return f
+
+        for name, make_n in [
+            ("tracked_inputs", lambda s0, s1: s0 * 3 // 3),
+            ("untracked_input", lambda s0, s1: s0 * s1 // s1),
+        ]:
+            with self.subTest(name):
+                f = make_f(make_n)
+                x = torch.randn(4, requires_grad=True)
+                w = torch.randn(5, requires_grad=True)
+                compiled = aot_function(
+                    f, fw_compiler=nop, bw_compiler=nop, dynamic=True
+                )
+                self.assertEqual(compiled(x, w), f(x, w))
 
     def test_build_proxy_for_pow(self):
         """
@@ -2154,6 +2317,9 @@ class f(torch.nn.Module):
             torch.ops.aten.replication_pad3d(x, [1, 1, 1, 1, 1, 1])
 
 
+instantiate_parametrized_tests(TestPySymInt)
+
+
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
 )
@@ -2274,7 +2440,14 @@ class TestSymNumberMagicMethods(TestCase):
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
-    @parametrize("fn", list(sym_node.magic_methods.keys()))
+    @parametrize(
+        "fn",
+        [
+            fn
+            for fn in sym_node.magic_methods
+            if fn in sym_node.bool_magic_methods and fn != "sym_ite"
+        ],
+    )
     def test_bool_method(self, fn):
         # sym_ite has its own tests
         if fn not in sym_node.bool_magic_methods or fn == "sym_ite":
@@ -2284,9 +2457,26 @@ class TestSymNumberMagicMethods(TestCase):
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
 
-    @parametrize("fn", list(sym_node.magic_methods.keys()))
-    @parametrize("first_type", ["int", "float"])
+    @parametrize(
+        "fn",
+        [
+            fn
+            for fn in sym_node.magic_methods
+            if fn not in sym_node.only_float_magic_methods
+            and fn not in sym_node.bool_magic_methods
+        ],
+    )
+    @parametrize("first_type", ["int"])
     @parametrize("second_type", ["int", "float"])
+    @decorateIf(
+        unittest.skip("Second argument is unused or only accepts integers"),
+        lambda p: p["second_type"] == "float"
+        and (
+            p["fn"] in sym_node.bitwise_ops
+            or p["fn"] in sym_node.unary_methods
+            or p["fn"] in ("mod", "round")
+        ),
+    )
     def test_method(self, fn, first_type, second_type):
         if first_type == "float":
             # TODO: Hmm, this looks like we skip all floats
@@ -5785,19 +5975,6 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         """Test narrow with unbacked start with cpp_wrapper"""
         self.test_narrow_unbacked_start()
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_narrow_with_tensor_start(self):
-        @torch.compile(backend="inductor", fullgraph=True)
-        def f(x, start, end):
-            return torch.narrow(x, 0, start, end)
-
-        x = torch.tensor(
-            [False], device="cuda:0" if torch.cuda.is_available() else "cpu"
-        )
-        start = torch.tensor(0)
-        res = f(x, start, 0)
-        self.assertEqual(res.shape, torch.Size([0]))
-
     @skipIfTorchDynamo("mark_unbacked not supported")
     def test_unbacked_norm_no_dde(self):
         def vector_norm(x):
@@ -7062,6 +7239,24 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertEqual(result.shape, (1, 1))
 
 
+class TestUnbackedOpsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_narrow_with_tensor_start(self, device):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f(x, start, end):
+            return torch.narrow(x, 0, start, end)
+
+        x = torch.tensor([False], device=device)
+        start = torch.tensor(0)
+        res = f(x, start, 0)
+        self.assertEqual(res.shape, torch.Size([0]))
+
+
+instantiate_device_type_tests(TestUnbackedOpsDevice, globals())
+
+
 instantiate_parametrized_tests(TestUnbacked)
 
 
@@ -7252,6 +7447,307 @@ class TestMaybeFastEvalComparison(TestCase):
         compiled_result = compiled_fn(token_states, expert_weights, tokens_per_expert)
 
         self.assertEqual(eager_result, compiled_result)
+
+
+class ShapeEnvRangeCacheInvalidationTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_range_constraint_updates_floor_div_result(self):
+        shape_env = ShapeEnv()
+        s = create_symint(shape_env, 4, duck=False)
+        sym = s.node.expr
+        expr = FloorDiv(Min(sym, 5), 2)
+        expected = CleanDiv(Min(sym, 5), 2)
+        # The first call installs the exact-division guard; the second warms
+        # the helper's cache with those guards already in place.
+        self.assertEqual(shape_env._simplify_floor_div(expr), expected)
+        self.assertEqual(shape_env._simplify_floor_div(expr), expected)
+        shape_env.constrain_symbol_range(sym, compiler_min=2, compiler_max=4)
+        # Previously, the helper's cache retained the old range-dependent
+        # result even after this range constraint.
+        self.assertEqual(shape_env._simplify_floor_div(expr), FloorDiv(sym, 2))
+
+    def test_range_constraint_updates_cached_results(self):
+        shape_env = ShapeEnv()
+        s = create_symint(shape_env, 5, duck=False)
+        sym = s.node.expr
+        expr = Min(sym, 5)
+        probe = sympy.Le(sym, 5, evaluate=False)
+        self.assertEqual(shape_env.simplify(expr), expr)
+        self.assertIsNone(shape_env._maybe_evaluate_static(probe))
+        shape_env.constrain_symbol_range(sym, compiler_min=2, compiler_max=5)
+        # Before range-version invalidation, these same calls returned stale
+        # Min(5, sym) and None even after the range was narrowed.
+        with self.subTest("simplified result"):
+            self.assertEqual(shape_env.simplify(expr), sym)
+        with self.subTest("static result"):
+            self.assertEqual(shape_env._maybe_evaluate_static(probe), sympy.true)
+
+    def test_refine_ranges_invalidates_simplify_cache(self):
+        shape_env = ShapeEnv()
+        s = create_symint(shape_env, 5, duck=False)
+        sym = s.node.expr
+        self.assertEqual(shape_env.simplify(Min(sym, 5)), Min(5, sym))
+        counts = (
+            len(shape_env.replacements),
+            len(shape_env.divisible),
+            len(shape_env.axioms),
+        )
+        shape_env._refine_ranges(sympy.Le(sym, 5))
+        self.assertEqual(shape_env.var_to_range[sym], ValueRanges(2, 5))
+        self.assertEqual(
+            (
+                len(shape_env.replacements),
+                len(shape_env.divisible),
+                len(shape_env.axioms),
+            ),
+            counts,
+        )
+        self.assertEqual(shape_env.simplify(Min(sym, 5)), sym)
+
+    def test_update_var_to_range_change_invalidates_static_cache(self):
+        shape_env = ShapeEnv()
+        s = create_symint(shape_env, 10, duck=False)
+        sym = s.node.expr
+        probe = sympy.Le(sym, 10, evaluate=False)
+        self.assertIsNone(shape_env._maybe_evaluate_static(probe))
+        v0 = shape_env._version_counter
+        shape_env._update_var_to_range(sym, ValueRanges(2, 10))
+        with self.subTest("version"):
+            self.assertGreater(shape_env._version_counter, v0)
+        with self.subTest("static evaluation"):
+            self.assertEqual(shape_env._maybe_evaluate_static(probe), sympy.true)
+
+    def test_update_var_to_range_noop_preserves_version(self):
+        shape_env = ShapeEnv()
+        s = create_symint(shape_env, 10, duck=False)
+        sym = s.node.expr
+        probe = sympy.Le(sym, 10, evaluate=False)
+        self.assertIsNone(shape_env._maybe_evaluate_static(probe))
+        v0 = shape_env._version_counter
+        hits = shape_env._maybe_evaluate_static.cache_info().hits
+        shape_env._update_var_to_range(sym, ValueRanges(2, int_oo))
+        self.assertEqual(shape_env._version_counter, v0)
+        self.assertIsNone(shape_env._maybe_evaluate_static(probe))
+        self.assertEqual(shape_env._maybe_evaluate_static.cache_info().hits, hits + 1)
+
+
+class ShapeEnvReplacementCacheTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _chain_rejected_by_range(self, shape_env):
+        # a -> b + 1 and b -> c + d. _find(a) can't store c + d + 1 as a's
+        # replacement while c + d + 1 isn't known to fit a's range [0, 100].
+        a, b, c, d = (shape_env.create_unbacked_symint().node.expr for _ in range(4))
+        shape_env._set_replacement(b, c + d, "test")
+        shape_env._update_var_to_range(a, ValueRanges(0, 100))
+        shape_env._set_replacement(a, b + 1, "test")
+        return a, b, c, d
+
+    @parametrize("method", ["replace", "_find"])
+    def test_range_change_refreshes_partial_compression(self, method):
+        shape_env = ShapeEnv()
+        a, b, c, d = self._chain_rejected_by_range(shape_env)
+        fn = getattr(shape_env, method)
+        self.assertEqual(fn(a), b + 1)
+        shape_env._update_var_to_range(c, ValueRanges(0, 50))
+        shape_env._update_var_to_range(d, ValueRanges(0, 49))
+        # c + d + 1 now fits a's range, so a resolves fully. Guards the narrower
+        # cache key: a range change must still clear it.
+        self.assertEqual(fn(a), c + d + 1)
+
+    def test_range_change_refreshes_sym_node_expr(self):
+        shape_env = ShapeEnv()
+        a, b, c, d = self._chain_rejected_by_range(shape_env)
+        node = SymNode(a, shape_env, int, None)
+        self.assertEqual(node.expr, b + 1)
+        shape_env._update_var_to_range(c, ValueRanges(0, 50))
+        shape_env._update_var_to_range(d, ValueRanges(0, 49))
+        # Previously, SymNode kept the expr computed before the range change.
+        self.assertEqual(node.expr, c + d + 1)
+
+    def test_range_change_refreshes_mod(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+        self.assertIsInstance((a % b).node.expr, PythonMod)
+        shape_env.constrain_symbol_range(a.node.expr, 0, 10)
+        shape_env.constrain_symbol_range(b.node.expr, 1, 10)
+        # Both operands are now known nonnegative, so mod lowers to Mod.
+        # Previously, the symbolic op memo returned the PythonMod.
+        self.assertIsInstance((a % b).node.expr, Mod)
+
+    def test_mod_not_memoized(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+        _ = a % b
+        _ = a % b
+        self.assertFalse(any(k[0] == "mod" for k in shape_env._symop_cache))
+
+    def test_range_change_refreshes_symop_memo(self):
+        shape_env = ShapeEnv()
+        a, b, c, d = self._chain_rejected_by_range(shape_env)
+        node = SymNode(a, shape_env, int, None)
+        one = SymNode(sympy.Integer(1), shape_env, int, 1)
+        self.assertEqual(node.add(one)._expr, b + 2)
+        shape_env._update_var_to_range(c, ValueRanges(0, 50))
+        shape_env._update_var_to_range(d, ValueRanges(0, 49))
+        # Previously, the memo was keyed on the unresolved a and returned b + 2.
+        self.assertEqual(node.add(one)._expr, c + d + 2)
+
+    def test_optimized_summation_flag_after_replacement(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 3, duck=False)
+        s1 = create_symint(shape_env, 3, duck=False)
+        s2 = create_symint(shape_env, 5, duck=False)
+        p = s0 + s1
+        self.assertTrue(p.node._optimized_summation)
+        shape_env._set_replacement(s0.node.expr, s1.node.expr, "test")
+        self.assertEqual(p.node.expr, 2 * s1.node.expr)
+        # Previously, the stale flag spliced s2 into Mul(2, s1)'s args, giving
+        # s1 + s2 + 2.
+        self.assertEqual((p + s2).node.expr, 2 * s1.node.expr + s2.node.expr)
+
+    def _count_symop_hits(self, shape_env):
+        class CountingDict(dict):
+            hits = 0
+
+            def get(self, key, default=None):
+                val = super().get(key, default)
+                if val is not None:
+                    self.hits += 1
+                return val
+
+        shape_env._symop_cache = CountingDict()
+        return shape_env._symop_cache
+
+    def test_symop_memo_hits_on_repeat(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 3, duck=False)
+        b = create_symint(shape_env, 5, duck=False)
+        memo = self._count_symop_hits(shape_env)
+        r1 = a * b
+        self.assertEqual(memo.hits, 0)
+        r2 = a * b
+        self.assertEqual(memo.hits, 1)
+        self.assertEqual(r1.node.expr, r2.node.expr)
+
+    def test_symop_memo_shared_by_equal_resolved_operands(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 3, duck=False)
+        s1 = create_symint(shape_env, 3, duck=False)
+        s2 = create_symint(shape_env, 5, duck=False)
+        p = s0 + s1
+        shape_env._set_replacement(s0.node.expr, s1.node.expr, "test")
+        q = s1 * 2
+        memo = self._count_symop_hits(shape_env)
+        expected = 2 * s1.node.expr + s2.node.expr
+        self.assertEqual((p + s2).node.expr, expected)
+        hits = memo.hits
+        # q has a different _expr but resolves to the same 2*s1, so it shares
+        # p + s2's entry.
+        self.assertEqual((q + s2).node.expr, expected)
+        self.assertEqual(memo.hits, hits + 1)
+
+    def test_optimized_summation_flag_survives_unrelated_replacement(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 3, duck=False)
+        s1 = create_symint(shape_env, 4, duck=False)
+        s2 = create_symint(shape_env, 5, duck=False)
+        s3 = create_symint(shape_env, 5, duck=False)
+        s4 = create_symint(shape_env, 6, duck=False)
+        # Three terms: _optimized_add only re-derives the flag for two-term sums,
+        # so this relies on the flag passed in.
+        t = s0 + s1 + s4
+        self.assertTrue(t.node._optimized_summation)
+        shape_env._set_replacement(s3.node.expr, s2.node.expr, "test")
+        r = t + s2
+        self.assertTrue(r.node._optimized_summation)
+        self.assertEqual(
+            r.node.expr,
+            s0.node.expr + s1.node.expr + s2.node.expr + s4.node.expr,
+        )
+
+    def test_replacement_change_clears_symop_memo(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+        _ = a + 1
+        self.assertIn(("add", a.node.expr, sympy.Integer(1)), shape_env._symop_cache)
+        shape_env._set_replacement(b.node.expr, a.node.expr + 1, "test")
+        _ = a + 2
+        # Read the dict directly: only the entry from after the change remains.
+        self.assertEqual(
+            list(shape_env._symop_cache), [("add", a.node.expr, sympy.Integer(2))]
+        )
+
+    @parametrize("method", ["replace", "_find"])
+    def test_runtime_assert_preserves_cache_hit(self, method):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+        query = shape_env.create_unbacked_symint().node.expr
+        fn = getattr(shape_env, method)
+        self.assertEqual(fn(query), query)
+        ranges = shape_env.var_to_range.copy()
+        version = shape_env._version_counter
+        replacements_version = shape_env._replacements_version_counter
+        torch._check(a <= b)
+        self.assertEqual(shape_env.num_deferred_runtime_asserts, 1)
+        self.assertTrue(shape_env.axioms)
+        self.assertEqual(shape_env.var_to_range, ranges)
+        self.assertGreater(shape_env._version_counter, version)
+        self.assertEqual(shape_env._replacements_version_counter, replacements_version)
+        hits = fn.cache_info().hits
+        # Previously, learning this unrelated assertion discarded the result.
+        self.assertEqual(fn(query), query)
+        self.assertEqual(fn.cache_info().hits, hits + 1)
+
+    @parametrize("method", ["replace", "_find"])
+    def test_replacement_change_updates_result(self, method):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint().node.expr
+        b = shape_env.create_unbacked_symint().node.expr
+        fn = getattr(shape_env, method)
+        self.assertEqual(fn(a), a)
+        version = shape_env._replacements_version_counter
+        shape_env._set_replacement(a, b + 1, "test")
+        self.assertGreater(shape_env._replacements_version_counter, version)
+        self.assertEqual(fn(a), b + 1)
+        hits = fn.cache_info().hits
+        self.assertEqual(fn(a), b + 1)
+        self.assertEqual(fn.cache_info().hits, hits + 1)
+
+    @parametrize("method", ["replace", "_find"])
+    def test_transitive_replacement_and_noop(self, method):
+        # replace/_find are cached until replacements or ranges change.
+        # Check that a change down a chain still refreshes the result, and
+        # that re-setting an existing replacement keeps the cache warm.
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint().node.expr
+        b = shape_env.create_unbacked_symint().node.expr
+        c = shape_env.create_unbacked_symint().node.expr
+        shape_env._set_replacement(a, b + 1, "test")
+        fn = getattr(shape_env, method)
+        self.assertEqual(fn(a), b + 1)
+        # a depends on b only through a -> b + 1; changing b must still
+        # refresh the cached result for a.
+        shape_env._set_replacement(b, c + 2, "test")
+        self.assertEqual(fn(a), c + 3)
+        self.assertEqual(shape_env.replacements[a], c + 3)
+        self.assertEqual(fn(a), c + 3)
+        # Setting a replacement that is already stored is a no-op: no counter
+        # bump, so the next call is a cache hit.
+        version = shape_env._replacements_version_counter
+        shape_env._set_replacement(a, c + 3, "test")
+        self.assertEqual(shape_env._replacements_version_counter, version)
+        hits = fn.cache_info().hits
+        self.assertEqual(fn(a), c + 3)
+        self.assertEqual(fn.cache_info().hits, hits + 1)
+
+
+instantiate_parametrized_tests(ShapeEnvReplacementCacheTest)
 
 
 class TestSingletonIntStaticEval(TestCase):

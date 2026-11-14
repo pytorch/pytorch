@@ -78,11 +78,8 @@ else()
   message("disabling CUDA because USE_CUDA is set false")
 endif()
 
-if(NOT USE_NNPACK)
-  set(AT_NNPACK_ENABLED 0)
-else()
-  set(AT_NNPACK_ENABLED 1)
-endif()
+# NNPACK has been removed
+set(AT_NNPACK_ENABLED 0)
 
 list(APPEND ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/src)

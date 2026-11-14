@@ -946,6 +946,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       !options_->enable_reconfigure,
       "ProcessGroupNCCL does not support enable_reconfigure "
       "(reconfigure-based fault tolerance).");
+  TORCH_CHECK(
+      !options_->encryption_psk.has_value(),
+      "ProcessGroupNCCL does not support encryption_psk; use the nccl2 "
+      "backend.");
 
   // An empty global_ranks_in_group means "this group spans the whole world, in
   // rank order"; see groupRanks(). Materialize that mapping here rather than
@@ -2395,6 +2399,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
+        desyncDebugger_.flush();
         LOG(ERROR) << c10::str(
             pg_->logPrefix(),
             " failure detected by watchdog at work sequence id: ",
@@ -2558,6 +2563,9 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       heartbeat_++;
     }
     done = pg_->workMetaList_.empty();
+
+    lock.unlock();
+    desyncDebugger_.flush();
   }
 }
 
@@ -2590,6 +2598,8 @@ void ProcessGroupNCCL::DesyncDebugger::init(
 void ProcessGroupNCCL::DesyncDebugger::run() {
   if (!enabled_)
     return;
+  // Publish this rank's state before reading the report.
+  flush();
   auto logPrefix = c10::str("Rank ", rank_);
   ::c10d::C10dLoggingData log;
   log.integers["pg_id"] = pgId_;
@@ -2625,7 +2635,6 @@ void ProcessGroupNCCL::DesyncDebugger::run() {
   }
 }
 
-// Log work start to store.
 void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
   if (!enabled_)
     return;
@@ -2633,12 +2642,9 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
     return;
 
   work.startTraceUpdated_ = true;
-  // If not successful, disable the debugger
-  enabled_ = c10d::traceUpdate(
-      store_, traceKeyStart_, work.seq_, opTypeToString(work.opType_));
+  pendingStart_ = {work.seq_, opTypeToString(work.opType_)};
 }
 
-// Log work end to store.
 void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
   if (!enabled_)
     return;
@@ -2648,9 +2654,21 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
     logWorkStart(work);
   }
 
-  // If not successful, disable the debugger
-  enabled_ = c10d::traceUpdate(
-      store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
+  pendingEnd_ = {work.seq_, opTypeToString(work.opType_)};
+}
+
+void ProcessGroupNCCL::DesyncDebugger::flush() {
+  auto start = std::exchange(pendingStart_, std::nullopt);
+  auto end = std::exchange(pendingEnd_, std::nullopt);
+  if (enabled_ && start.has_value()) {
+    // If not successful, disable the debugger
+    enabled_ =
+        c10d::traceUpdate(store_, traceKeyStart_, start->first, start->second);
+  }
+  if (enabled_ && end.has_value()) {
+    // If not successful, disable the debugger
+    enabled_ = c10d::traceUpdate(store_, traceKeyEnd_, end->first, end->second);
+  }
 }
 
 // We want to have both PG ID and global unique ID (guid) for the logging
@@ -6185,6 +6203,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
     auto nccl_opts =
         c10::static_intrusive_pointer_cast<ProcessGroupNCCL::Options>(
             opts_override);
+    TORCH_CHECK(
+        !nccl_opts->encryption_psk.has_value(),
+        "ProcessGroupNCCL does not support encryption_psk; use the nccl2 "
+        "backend.");
     config = &nccl_opts->config;
     // If user provided override options, honor is_high_priority_stream as well
     high_priority_stream = nccl_opts->is_high_priority_stream;

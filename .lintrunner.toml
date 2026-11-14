@@ -39,7 +39,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/flake8_linter.py',
     '--',
@@ -142,7 +142,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/pyrefly_linter.py',
     '--config=pyrefly.toml',
@@ -230,7 +230,6 @@ exclude_patterns = [
     'torch/csrc/profiler/kineto/libkineto/src/Roc*',
     'torch/csrc/profiler/kineto/libkineto/src/plugin/xpupti/**',
     'torch/csrc/distributed/**/*.cu',
-    'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
     'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/aoti_torch/c/shim.h',
@@ -430,7 +429,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/nativefunctions_linter.py',
     '--native-functions-yml=aten/src/ATen/native/native_functions.yaml',
@@ -444,7 +443,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/gha_linter.py',
     '--',
@@ -883,6 +882,7 @@ command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=cudaStreamSynchronize',
+    '--line-allowlist-pattern=C10_CUDA_ERROR_HANDLED',
     '--linter-name=RAWCUDA',
     '--error-name=raw CUDA API usage',
     """--error-description=\
@@ -998,7 +998,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/cmake_linter.py',
     '--config=.cmakelintrc',
@@ -1019,7 +1019,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/shellcheck_linter.py',
     '--',
@@ -1078,6 +1078,23 @@ include_patterns = ['**']
 command = [
     'python3',
     'scripts/codeowners/check_taxonomy.py',
+    '--lintrunner',
+]
+
+[[linter]]
+code = 'CODEOWNERS_GENERATED'
+include_patterns = [
+    'CODEOWNERS',
+    'OWNERSHIP.yaml',
+    'scripts/codeowners/generate_codeowners.py',
+]
+command = [
+    'uv',
+    'run',
+    '--python',
+    '3.11',
+    '--script',
+    'scripts/codeowners/generate_codeowners.py',
     '--lintrunner',
 ]
 
@@ -1165,7 +1182,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/test_has_main_linter.py',
     '--',
@@ -1255,7 +1272,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
@@ -1275,7 +1292,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/no_workflows_on_fork.py',
     '--',
@@ -1288,7 +1305,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/codespell_linter.py',
     '--',
@@ -1328,7 +1345,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/pyfmt_linter.py',
     '--',
@@ -1424,7 +1441,6 @@ exclude_patterns = [
     'test/test_mkldnn.py',
     'test/test_mkldnn_fusion.py',
     'test/test_mkldnn_verbose.py',
-    'test/test_mobile_optimizer.py',
     'test/test_model_dump.py',
     'test/test_modules.py',
     'test/test_monitor.py',
@@ -1510,7 +1526,6 @@ exclude_patterns = [
     'torch/testing/_internal/codegen/__init__.py',
     'torch/testing/_internal/codegen/random_topo_test.py',
     'torch/testing/_internal/common_cuda.py',
-    'torch/testing/_internal/common_jit.py',
     'torch/testing/_internal/common_methods_invocations.py',
     'torch/testing/_internal/common_modules.py',
     'torch/testing/_internal/common_nn.py',
@@ -1529,7 +1544,6 @@ exclude_patterns = [
     'torch/testing/_internal/generated/__init__.py',
     'torch/testing/_internal/hypothesis_utils.py',
     'torch/testing/_internal/inductor_utils.py',
-    'torch/testing/_internal/jit_metaprogramming_utils.py',
     'torch/testing/_internal/jit_utils.py',
     'torch/testing/_internal/logging_tensor.py',
     'torch/testing/_internal/logging_utils.py',
@@ -1613,7 +1627,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/pyproject_linter.py',
     '--',
@@ -1629,7 +1643,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/license_files_linter.py',
     '--',
@@ -1648,7 +1662,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/cmake_minimum_required_linter.py',
     '--',
@@ -1735,7 +1749,7 @@ command = [
     'uv',
     'run',
     '--python',
-    '3.10',
+    '3.11',
     '--script',
     'tools/linter/adapters/ruff_linter.py',
     '--config=pyproject.toml',
@@ -1991,6 +2005,18 @@ include_patterns = ["torch/_dynamo/**/*.py"]
 command = [
   "python3",
   "tools/linter/adapters/gb_registry_linter.py",
+]
+
+[[linter]]
+code = "RAW_VT_CONSTRUCTION"
+include_patterns = [
+  "torch/**/*.py",
+  "tools/linter/adapters/raw_vt_construction_linter.py",
+  "tools/test/test_raw_vt_construction_linter.py",
+]
+command = [
+  "python3",
+  "tools/linter/adapters/raw_vt_construction_linter.py",
 ]
 
 [[linter]]
