@@ -16,6 +16,7 @@ import math
 from math import inf, nan, isnan
 import re
 import random
+import tempfile
 from random import randrange
 from itertools import product
 from functools import reduce, partial
@@ -12637,6 +12638,60 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             check(a.as_strided((1, k), a_stride), b)
         # with a size-1 contraction dim it is the other stride that is arbitrary
         check(genf(n, 1, x_dtype).as_strided((n, 1), (1, 0)), genf(1, n, torch.int8))
+
+    @onlyCPU
+    @unittest.skipIf(
+        not (torch.backends.mkldnn.is_available() and torch.cpu._is_vnni_supported()),
+        "_int_mm only dispatches to oneDNN gemm on x86 with AVX512-VNNI",
+    )
+    @parametrize("x_dtype", [torch.int8, torch.uint8])
+    def test__int_mm_cpu_operand_layouts(self, device, x_dtype):
+        # Operands oneDNN's gemm cannot read in place must be copied for it. The matmul
+        # primitive computes with a reference kernel, so check oneDNN's verbose log
+        m, k, n = 8, 32, 16
+        mkldnn = torch.backends.mkldnn
+
+        def genf(rows, cols, dtype=torch.int8):
+            info = torch.iinfo(dtype)
+            return torch.randint(
+                info.min, info.max, (rows, cols), dtype=dtype, device=device
+            )
+
+        def int_mm_logged(a, b):
+            # oneDNN flushes each verbose line to fd 1, so capture it at the fd level
+            with tempfile.TemporaryFile() as log, warnings.catch_warnings(record=True) as warns:
+                warnings.simplefilter("always")
+                stdout = os.dup(1)
+                os.dup2(log.fileno(), 1)
+                try:
+                    with mkldnn.verbose(mkldnn.VERBOSE_ON):
+                        out = torch._int_mm(a, b)
+                finally:
+                    os.dup2(stdout, 1)
+                    os.close(stdout)
+                log.seek(0)
+                execs = [line for line in log.read().decode().splitlines() if ",exec," in line]
+            return out, execs, [str(w.message) for w in warns]
+
+        cases = [
+            # size-1 dims whose arbitrary stride is not 1
+            (genf(1, 2 * k, x_dtype).as_strided((1, k), (0, 2)), genf(k, n)),
+            (genf(m, 3, x_dtype).as_strided((m, 1), (3, 0)), genf(1, n)),
+            (genf(m, k, x_dtype), genf(k, 3).as_strided((k, 1), (3, 0))),
+            (genf(m, 1, x_dtype), genf(1, 3 * n).as_strided((1, n), (0, 3))),
+            # no unit stride, broadcast, and overlapping operands
+            (genf(m, 2 * k, x_dtype)[:, ::2], genf(k, 2 * n)[:, ::2]),
+            (genf(k, 2 * m, x_dtype)[:, ::2].t(), genf(n, 2 * k)[:, ::2].t()),
+            (genf(1, k, x_dtype).expand(m, k), genf(1, n).expand(k, n)),
+            (genf(1, m + k, x_dtype).as_strided((m, k), (1, 1)), genf(k, n)),
+        ]
+        for a, b in cases:
+            layout = f"{a.stride()} @ {b.stride()}"
+            out, execs, warns = int_mm_logged(a, b)
+            self.assertEqual(out.float(), torch.mm(a.float(), b.float()), msg=layout)
+            # a gemm call oneDNN rejects is still logged, then falls back with a warning
+            self.assertFalse(warns, msg=f"{layout} fell back from oneDNN: {warns}")
+            self.assertTrue(len(execs) == 1 and ",cpu,gemm_api," in execs[0], msg=f"{layout} did not run oneDNN gemm: {execs}")
 
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_mm_cpu_unaligned(self, device, dtype):
