@@ -409,11 +409,9 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
 
         # Enable storage retention recursively and verify the child parameters
         model.set_keep_unsharded_storage(keep=True, recurse=True)
-        param_group = model[0]._get_fsdp_state()._fsdp_param_group
+        param_group = model[0]._get_fsdp_state()._fsdp_param_groups[0]
         self.assertIsNotNone(param_group)
-        self.assertTrue(
-            all(param.keep_unsharded_storage for param in param_group.fsdp_params)
-        )
+        self.assertTrue(param_group.bucket.keep_persistent_storage)
 
         def get_data_ptrs() -> list[int]:
             return [
@@ -426,13 +424,93 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
 
         # State dict reshards without releasing the unsharded storage
         model.state_dict()
-        self.assertTrue(param_group.is_sharded)
+        self.assertFalse(param_group.bucket.is_unsharded)
+        self.assertIsNone(param_group.bucket.post_forward_storage)
         self.assertEqual(get_data_ptrs(), data_ptrs)
 
         # Forward triggers an unshard that should reuse the retained storage
         with torch.inference_mode():
             model(torch.randn(2, 8, device=device))
         self.assertEqual(get_data_ptrs(), data_ptrs)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_load_state_dict_assign_after_forward(self):
+        # load_state_dict(assign=True) replaces the sharded parameters; forwards
+        # after it, also once training started, use the loaded values
+        torch.manual_seed(42)
+        model = MLP(8, device=device_type)
+        loaded = MLP(8, device=device_type)
+        fully_shard(model)
+        fully_shard(loaded)
+        reference = MLP(8, device=device_type)
+        reference.load_state_dict(
+            {k: v.full_tensor() for k, v in loaded.state_dict().items()}
+        )
+        inp = torch.randn(2, 8, device=device_type)
+        model(inp).sum().backward()
+        model.load_state_dict(
+            {k: v.detach().clone() for k, v in loaded.state_dict().items()},
+            assign=True,
+        )
+        for param in model.parameters():
+            self.assertIsInstance(param, DTensor)
+        self.assertEqual(model(inp), reference(inp))
+        model.zero_grad(set_to_none=True)
+        model(inp).sum().backward()
+        self.assertTrue(all(param.grad is not None for param in model.parameters()))
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_module_to_dtype_after_forward(self):
+        torch.manual_seed(42)
+        model = MLP(8, device=device_type)
+        fully_shard(model)
+        reference = MLP(8, device=device_type)
+        reference.load_state_dict(
+            {k: v.full_tensor() for k, v in model.state_dict().items()}
+        )
+        inp = torch.randn(2, 8, device=device_type)
+        model(inp).sum().backward()
+        model.zero_grad(set_to_none=True)
+
+        model.to(torch.float64)
+        reference.to(torch.float64)
+        self.assertEqual(model(inp.double()), reference(inp.double()))
+        for param in model.parameters():
+            self.assertEqual(param.dtype, torch.float64)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_params_left_on_meta_must_be_replaced_before_forward(self):
+        def make() -> nn.Module:
+            return nn.Sequential(
+                nn.Linear(8, 8, device=device_type), nn.Linear(8, 8, device="meta")
+            )
+
+        inp = torch.randn(2, 8, device=device_type)
+        model = make()
+        fully_shard(model)
+        with self.assertRaisesRegex(
+            RuntimeError, r"still on meta device: \['1.weight', '1.bias'\]"
+        ):
+            model(inp)
+
+        model = make()
+        fully_shard(model)
+        full = {
+            "1.weight": torch.arange(64.0, device=device_type).view(8, 8) / 64,
+            "1.bias": torch.arange(8.0, device=device_type) / 8,
+        }
+        mesh = model[0].weight.device_mesh
+        model.load_state_dict(
+            {k: distribute_tensor(v, mesh, [Shard(0)]) for k, v in full.items()},
+            strict=False,
+            assign=True,
+        )
+        reference = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8)).to(device_type)
+        reference.load_state_dict(
+            {k: v.full_tensor() for k, v in model.state_dict().items()}
+        )
+        self.assertEqual(reference[1].weight, full["1.weight"])
+        self.assertEqual(model(inp), reference(inp))
 
     @skip_if_lt_x_gpu(1)
     def test_rank0_offload_full_state_dict(self):

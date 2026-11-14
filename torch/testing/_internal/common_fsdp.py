@@ -29,9 +29,9 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
 from torch.distributed.fsdp._common_utils import TrainingState
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
-    FSDPParamGroup,
-    RegisterPostBackwardFunction,
+from torch.distributed.fsdp._flex_shard.bucket_runtime import (
+    _InputGradsTrigger,
+    BucketRuntime,
 )
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
@@ -1016,42 +1016,6 @@ def patch_all_gather(new_all_gather_into_tensor: Callable):
 
 
 @contextlib.contextmanager
-def patch_foreach_all_gather(new_foreach_all_gather: Callable):
-    orig_foreach_all_gather = (
-        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather
-    )
-    dist.barrier()
-    torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather = (
-        new_foreach_all_gather
-    )
-    try:
-        yield
-    finally:
-        dist.barrier()
-        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather = (
-            orig_foreach_all_gather
-        )
-
-
-@contextlib.contextmanager
-def patch_foreach_reduce(new_foreach_reduce: Callable):
-    orig_foreach_foreach_reduce = (
-        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce
-    )
-    dist.barrier()
-    torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce = (
-        new_foreach_reduce
-    )
-    try:
-        yield
-    finally:
-        dist.barrier()
-        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce = (
-            orig_foreach_foreach_reduce
-        )
-
-
-@contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
     orig_reduce_scatter = dist.reduce_scatter_single
     dist.barrier()
@@ -1075,56 +1039,110 @@ def patch_all_reduce(new_all_reduce: Callable):
         dist.all_reduce = orig_all_reduce
 
 
+# Depth of the engine's pre-forward hooks running, in which FSDP2 reports
+# unshards as FORWARD, also in an activation-checkpointing recompute
+_forward_hook_depth = 0
+
+# The ``BucketRuntime`` method that runs each patchable FSDP event: every
+# all-gather, prefetches included, starts with ``begin_unshard``
+_EVENT_METHODS = {
+    "unshard": "begin_unshard",
+    "reshard": "reshard",
+    "post_backward": "post_backward",
+}
+
+
 @no_type_check
 @contextlib.contextmanager
+def _patch_method(name: str, new_fn: Callable):
+    attr = _EVENT_METHODS[name]
+    patches = [(attr, getattr(BucketRuntime, attr), new_fn)]
+    if name == "unshard":
+        for hook_name in ("pre_forward_hook", "group_pre_forward_hook"):
+            orig_hook = getattr(BucketRuntime, hook_name)
+
+            def counted(*args, _orig=orig_hook, **kwargs):
+                global _forward_hook_depth
+                _forward_hook_depth += 1
+                try:
+                    return _orig(*args, **kwargs)
+                finally:
+                    _forward_hook_depth -= 1
+
+            patches.append((hook_name, orig_hook, counted))
+    dist.barrier()
+    for patch_attr, _, patched in patches:
+        setattr(BucketRuntime, patch_attr, patched)
+    try:
+        yield
+    finally:
+        dist.barrier()
+        for patch_attr, original, _ in patches:
+            setattr(BucketRuntime, patch_attr, original)
+
+
 def patch_unshard(new_unshard: Callable):
-    orig_unshard = FSDPParamGroup.unshard
-    dist.barrier()
-    FSDPParamGroup.unshard = new_unshard
-    try:
-        yield
-    finally:
-        dist.barrier()
-        FSDPParamGroup.unshard = orig_unshard
+    return _patch_method("unshard", new_unshard)
 
 
-@no_type_check
-@contextlib.contextmanager
 def patch_reshard(new_reshard: Callable):
-    orig_reshard = FSDPParamGroup.reshard
-    dist.barrier()
-    FSDPParamGroup.reshard = new_reshard
-    try:
-        yield
-    finally:
-        dist.barrier()
-        FSDPParamGroup.reshard = orig_reshard
+    return _patch_method("reshard", new_reshard)
 
 
-@no_type_check
-@contextlib.contextmanager
 def patch_post_backward(new_post_backward: Callable):
-    orig_post_backward = FSDPParamGroup.post_backward
-    dist.barrier()
-    FSDPParamGroup.post_backward = new_post_backward
-    try:
-        yield
-    finally:
-        dist.barrier()
-        FSDPParamGroup.post_backward = orig_post_backward
+    return _patch_method("post_backward", new_post_backward)
+
+
+def orig_fsdp_method(name: str) -> Callable:
+    """The unpatched method that ``patch_unshard``, ``patch_reshard`` or
+    ``patch_post_backward`` replaces, for wrappers to call."""
+    return getattr(BucketRuntime, _EVENT_METHODS[name])
+
+
+def post_backward_trigger_cls() -> Any:
+    """The autograd function whose backward runs a group's post-backward."""
+    return _InputGradsTrigger
 
 
 @no_type_check
 @contextlib.contextmanager
 def patch_register_post_backward_hook_backward(new_backward: Callable):
-    orig_backward = RegisterPostBackwardFunction.backward
+    orig_backward = _InputGradsTrigger.backward
     dist.barrier()
-    RegisterPostBackwardFunction.backward = new_backward
+    _InputGradsTrigger.backward = new_backward
     try:
         yield
     finally:
         dist.barrier()
-        RegisterPostBackwardFunction.backward = orig_backward
+        _InputGradsTrigger.backward = orig_backward
+
+
+def fsdp_event_training_state(group: Any, event: str, **kwargs: Any) -> Any:
+    """The ``TrainingState`` of a bucket's (``BucketRuntime``) unshard,
+    reshard or post-backward event, derived from where the event runs."""
+    from torch.distributed.fsdp._fully_shard._fsdp_common import (
+        TrainingState as FSDPTrainingState,
+    )
+
+    if event == "post_backward":
+        return FSDPTrainingState.POST_BACKWARD
+    if event == "unshard" and _forward_hook_depth:
+        return FSDPTrainingState.FORWARD
+    if torch._C._current_graph_task_id() != -1:
+        return (
+            FSDPTrainingState.POST_BACKWARD
+            if event == "reshard"
+            else FSDPTrainingState.PRE_BACKWARD
+        )
+    if event == "reshard":
+        after_forward = kwargs.get("after_forward")
+        return FSDPTrainingState.FORWARD if after_forward else FSDPTrainingState.IDLE
+    explicit = kwargs.get("on_current_stream")
+    return FSDPTrainingState.IDLE if explicit else FSDPTrainingState.FORWARD
+
+
+def fsdp_event_fqn(group: Any) -> str | None:
+    return group.debug_fqn
 
 
 def reduce_scatter_with_assert(

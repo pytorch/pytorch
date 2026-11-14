@@ -31,18 +31,12 @@ from torch.distributed.fsdp import (
     share_comm_ctx,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import ReduceScatter
-from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _default_reduce_scatter_input_fn,
-    foreach_all_gather,
-    foreach_reduce,
-)
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
     ShardPlacementResult,
     TrainingState,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
 from torch.distributed.tensor import distribute_tensor, DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
@@ -54,14 +48,13 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
+    DoubleLinear,
     FSDPTest,
     FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     MLPStack,
     patch_all_gather,
-    patch_foreach_all_gather,
-    patch_foreach_reduce,
     patch_reduce_scatter,
 )
 from torch.testing._internal.common_utils import (
@@ -89,6 +82,16 @@ c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
 
 from torch.testing._internal.common_fsdp import get_devtype
+
+
+def context_buckets(model: nn.Module) -> list:
+    """The engine buckets of every fully_shard module under ``model``."""
+    return [
+        bucket
+        for module in model.modules()
+        if isinstance(module, FSDPModule)
+        for bucket in module._get_fsdp_state()._fsdp_param_groups
+    ]
 
 
 device_type = torch.device(get_devtype())
@@ -288,7 +291,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         model.set_keep_unsharded_storage(True)
         # Get unsharded storage pointers to compare against later
         model.unshard()
-        param_group = model._get_fsdp_state()._fsdp_param_group
+        param_group = model._get_fsdp_state()._fsdp_param_groups[0]
         self.assertIsNotNone(param_group)
         data_ptrs = [
             fsdp_param.unsharded_param.data_ptr()
@@ -298,7 +301,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         # Trigger a reshard, which should not free the unsharded storage
         with torch.inference_mode():
             model(torch.randn(2, 8, device=device))
-        self.assertTrue(param_group.is_sharded_post_forward)
+        self.assertIsNotNone(param_group.bucket.post_forward_storage)
         model.unshard()
         # The unsharded storage pointers remain unchanged after resharding
         self.assertEqual(
@@ -330,25 +333,6 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
             model(inp).sum().backward()
             self._assert_dtensor_params(model.parameters())
-
-    def test_modules_to_run_forward_empty_for_single_module(self):
-        # ``_force_complete_incomplete_states`` guards on
-        # ``_modules_to_run_forward`` being non-empty. Single-module
-        # ``fully_shard(m)`` registers the raw pre/post hooks instead of
-        # the group wrapper (see ``FSDPState.init``), so the set must
-        # remain empty for its lifetime — otherwise force-complete would
-        # spuriously fire on ungrouped states.
-        device = torch.device(device_type.type, 0)
-        model = MLP(8, device)
-        fully_shard(model.in_proj)
-        fully_shard(model.out_proj)
-        fully_shard(model)
-        for submod in (model, model.in_proj, model.out_proj):
-            self.assertEqual(submod._get_fsdp_state()._modules_to_run_forward, set())
-        inp = torch.randn((2, 8), device=device_type.type)
-        model(inp).sum().backward()
-        for submod in (model, model.in_proj, model.out_proj):
-            self.assertEqual(submod._get_fsdp_state()._modules_to_run_forward, set())
 
     def _assert_tensor_params(self, params: Iterable[nn.Parameter]):
         # need to iterate over the list multiple times
@@ -1077,8 +1061,9 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
     def test_partial_group_forward_then_standalone(self):
         """Chunked-loss pattern: model forward skips one module in a grouped
         ``fully_shard([norm, head])``, then that module is called standalone
-        per-chunk. Validates ``_force_complete_incomplete_states`` +
-        ``mp_policy`` casts across resharding / weight-tying / AC axes.
+        per-chunk. Validates that the root post-forward completes the group's
+        forward, and ``mp_policy`` casts, across resharding / weight-tying / AC
+        axes.
         """
         self.run_subtests(
             {
@@ -1118,16 +1103,43 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         hidden = model(tokens, skip_head=True)
         chunk = hidden.detach().requires_grad_()
         model.head(chunk).sum().backward()
-        comm_ctx = model.head._get_fsdp_state()._comm_ctx
-        # The standalone head forward leaves this deferred state for the root
-        # backward boundary to release.
-        self.assertIsNotNone(comm_ctx.all_gather_state)
+        # The standalone head forward leaves the group's forward pass and
+        # prefetches for the root backward boundary to release.
+        context = model._get_fsdp_state()._engine_context
+        runtimes = [bucket.bucket for bucket in context_buckets(model)]
 
         # Pipeline schedules use non-final backwards while accumulating grads.
         model.set_is_last_backward(False)
         hidden.backward(chunk.grad)
 
-        self.assertIsNone(comm_ctx.all_gather_state)
+        self.assertEqual(context.pending_unshards, [])
+        for runtime in runtimes:
+            self.assertIsNone(runtime.group_pass)
+            self.assertFalse(runtime.is_unsharded)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_partial_group_forward_completed_by_caller(self):
+        """complete_grouped_forward and reshard end a partial grouped forward,
+        e.g. to release the parameters after evaluation."""
+        dim, vocab_size = 32, 128
+        model = ChunkedHeadModel(dim, vocab_size, tie=False).to(device_type)
+        fully_shard([model.norm, model.head], reshard_after_forward=False)
+        fully_shard(model)
+        tokens = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
+        with torch.no_grad():
+            model.head(model(tokens, skip_head=True))
+        head_runtime = model.head._get_fsdp_state()._fsdp_param_groups[0].bucket
+        self.assertEqual(head_runtime.modules_to_run, {model.norm})
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                module.complete_grouped_forward()
+                module.reshard()
+        for bucket in context_buckets(model):
+            self.assertIsNone(bucket.bucket.group_pass)
+            self.assertFalse(bucket.bucket.is_unsharded)
+        model(tokens).sum().backward()
+        for param in model.parameters():
+            self.assertIsNotNone(param.grad)
 
     def _test_partial_group_forward_then_standalone(
         self,
@@ -1423,7 +1435,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         fully_shard(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         tokens = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
-        param_group = model.head._get_fsdp_state()._fsdp_param_group
+        param_group = model.head._get_fsdp_state()._fsdp_param_groups[0]
         self.assertIsNotNone(param_group)
 
         for iter_idx in range(5):
@@ -1438,7 +1450,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 # If the group resharded mid-loop, the next chunk's
                 # pre_forward would re-all-gather — defeats the toggle.
                 self.assertTrue(
-                    param_group.is_unsharded,
+                    param_group.bucket.is_unsharded,
                     lambda msg: f"{msg}\nhead group resharded mid-chunk at iter {iter_idx}",
                 )
             # Restore + explicit reshard (matches ChunkedCELoss exit).
@@ -1446,7 +1458,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model.head.set_reshard_after_backward(True)
             model.head.reshard()
             self.assertFalse(
-                param_group.is_unsharded,
+                param_group.bucket.is_unsharded,
                 lambda msg: f"{msg}\nhead.reshard() did not reshard at iter {iter_idx}",
             )
             h.backward(torch.cat(h_grads, dim=1).to(h.dtype))
@@ -1488,10 +1500,12 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model(tokens, skip_head=True)
         model.body.armed = False
 
-        comm_ctx = model._get_fsdp_state()._comm_ctx
-        self.assertIsNotNone(comm_ctx.all_gather_state)
+        state = model._get_fsdp_state()
         model.reset_iter_state()
-        self.assertIsNone(comm_ctx.all_gather_state)
+        self.assertEqual(state._engine_context.pending_unshards, [])
+        self.assertIsNone(state._state_ctx.iter_forward_root)
+        for bucket in context_buckets(model):
+            self.assertIsNone(bucket.bucket.group_pass)
 
         # Proves the reset is real: the next iteration completes cleanly.
         model(tokens).sum().backward()
@@ -1564,10 +1578,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
     def test_double_partial_forward_then_backward(self):
         """Two back-to-back ``model(x, skip_head=True)`` calls before
         backward: both partial forwards must re-register their post_backward
-        autograd node. ``_force_complete_incomplete_states`` resets the
-        inner group's ``_training_state`` to IDLE so the second forward
-        sees ``entering_forward_pass=True`` and registers normally; without
-        that reset, backward would hang on a missing reduce-scatter.
+        autograd node. The root post-forward completes the inner group's
+        forward pass so the second forward opens a new one and registers
+        normally; without that, backward would hang on a missing
+        reduce-scatter.
         """
         dim, vocab_size = 32, 128
 
@@ -1606,6 +1620,406 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model.head.weight.grad,
             "head.weight.grad should be None (head unused in partial forward)",
         )
+
+
+class _ChunkedLossModel(nn.Module):
+    """A decoder whose output projection a chunked loss runs on its own. A
+    frozen decoder detaches after the embedding, so no outer backward follows
+    the chunked loss, while a tied head still trains the embedding."""
+
+    def __init__(self, *, tie: bool, frozen: bool) -> None:
+        super().__init__()
+        self.frozen = frozen
+        self.embed = nn.Embedding(32, 16)
+        self.body = nn.Linear(16, 16)
+        self.norm = nn.LayerNorm(16)
+        self.head = nn.Linear(16, 32, bias=False)
+        if tie:
+            self.head.weight = self.embed.weight
+        if frozen:
+            self.body.requires_grad_(False)
+            self.norm.requires_grad_(False)
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        hidden = self.embed(tokens)
+        if self.frozen:
+            hidden = hidden.detach()
+        return self.norm(self.body(hidden))
+
+
+def _chunked_head_loss(
+    model: _ChunkedLossModel,
+    hidden: torch.Tensor,
+    labels: torch.Tensor,
+    fail_at_chunk: int | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Runs the head and its backward chunk by chunk in ``partial_backward``.
+    Returns the loss and the gradient for ``hidden``, if it requires one."""
+    outer_backward_follows = hidden.requires_grad
+    total_loss, hidden_grads = hidden.new_zeros(()), []
+    with model.head.partial_backward(outer_backward_follows=outer_backward_follows):
+        for index, (chunk, label) in enumerate(
+            zip(hidden.detach().chunk(4), labels.chunk(4))
+        ):
+            if index == fail_at_chunk:
+                raise RuntimeError("chunk failure")
+            chunk = chunk.detach().requires_grad_(outer_backward_follows)
+            loss = nn.functional.cross_entropy(
+                model.head(chunk), label, reduction="sum"
+            )
+            total_loss += loss.detach()
+            if torch.is_grad_enabled():
+                loss.backward()
+                if outer_backward_follows:
+                    hidden_grads.append(chunk.grad)
+    return total_loss, torch.cat(hidden_grads) if hidden_grads else None
+
+
+def _fsdp_policies(model: nn.Module) -> tuple:
+    return model.get_is_last_backward(), [
+        (
+            module.get_reshard_after_forward(),
+            module.get_reshard_after_backward(),
+            module.get_requires_gradient_sync(),
+            module.get_requires_all_reduce(),
+        )
+        for module in model.modules()
+        if isinstance(module, FSDPModule)
+    ]
+
+
+def _outer_backward_state(model: _ChunkedLossModel) -> list:
+    """What the outer backward reads of the groups other than the head's:
+    whether their parameters are unsharded and their post-backward counts."""
+    head_buckets = model.head._get_fsdp_state()._fsdp_param_groups
+    return [
+        (
+            runtime.is_unsharded,
+            runtime.backward_calls,
+            runtime.input_triggers,
+            runtime.input_triggers_run,
+            runtime.post_backward_ran,
+            runtime.needs_sync,
+        )
+        for bucket in context_buckets(model)
+        if bucket not in head_buckets
+        for runtime in (bucket.bucket,)
+    ]
+
+
+class TestFullyShardPartialBackward(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        if device_type.type == "cpu":
+            return 4
+        return min(4, torch.get_device_module(device_type).device_count())
+
+    def _init_models(self, mesh: DeviceMesh, layout: str, frozen: bool):
+        torch.manual_seed(42)
+        model = _ChunkedLossModel(tie=layout == "tied", frozen=frozen).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model.body, mesh=mesh)
+        if layout == "separate":
+            fully_shard(model.norm, mesh=mesh)
+            fully_shard(model.head, mesh=mesh, reshard_after_forward=False)
+        else:
+            modules = [model.norm, model.head]
+            if layout == "tied":
+                modules.insert(0, model.embed)
+            fully_shard(modules, mesh=mesh, reshard_after_forward=False)
+        fully_shard(model, mesh=mesh)
+        return model, ref_model
+
+    def _check_grads(self, model: nn.Module, ref_model: nn.Module) -> None:
+        for (name, param), ref_param in zip(
+            model.named_parameters(), ref_model.parameters()
+        ):
+            if ref_param.grad is None:
+                self.assertIsNone(param.grad, msg=name)
+                continue
+            dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
+            self.assertEqual(param.grad.full_tensor(), ref_param.grad, msg=name)
+
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_partial_backward_parity(self):
+        self.run_subtests(
+            {
+                "layout": ["separate", "grouped", "tied"],
+                "outer_backward_follows": [True, False],
+                "deferred": [False, True],
+                "replicate": [False, True],
+            },
+            self._test_partial_backward_parity,
+        )
+
+    def _test_partial_backward_parity(
+        self, layout: str, outer_backward_follows: bool, deferred: bool, replicate: bool
+    ):
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, self.world_size // 2) if replicate else (self.world_size,),
+            mesh_dim_names=("replicate", "shard") if replicate else ("shard",),
+        )
+        model, ref_model = self._init_models(
+            mesh, layout, frozen=not outer_backward_follows
+        )
+        optim = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
+        ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2, momentum=0.9)
+        # Each parameter group with gradients reduces once per syncing step
+        num_groups_with_grads = (
+            {"separate": 4, "grouped": 3, "tied": 2}[layout]
+            if outer_backward_follows
+            else 1
+        )
+        events: list[str] = []
+        all_gather_single = dist.all_gather_single
+        reduce_scatter_single = dist.reduce_scatter_single
+
+        def record_all_gather(*args, **kwargs):
+            events.append("all-gather")
+            return all_gather_single(*args, **kwargs)
+
+        def record_reduce_scatter(*args, **kwargs):
+            events.append("reduce-scatter")
+            return reduce_scatter_single(*args, **kwargs)
+
+        head_hook = model.head.register_forward_pre_hook(
+            lambda *_: events.append("head")
+        )
+        with (
+            mock.patch.object(dist, "all_gather_single", record_all_gather),
+            mock.patch.object(dist, "reduce_scatter_single", record_reduce_scatter),
+        ):
+            for step in range(3):
+                num_reduce_scatters = 0
+                for microbatch in range(2):
+                    final = microbatch == 1
+                    model.set_requires_gradient_sync(final or not deferred)
+                    model.set_reshard_after_backward(final or not deferred)
+                    model.set_is_last_backward(final or not deferred)
+                    if replicate:
+                        model.set_requires_all_reduce(final)
+                    torch.manual_seed(100 * step + 10 * self.rank + microbatch)
+                    tokens = torch.randint(32, (16,), device=device_type.type)
+                    labels = torch.randint(32, (16,), device=device_type.type)
+                    hidden = model(tokens)
+                    policies = _fsdp_policies(model)
+                    outer_state = _outer_backward_state(model)
+                    events.clear()
+                    loss, hidden_grad = _chunked_head_loss(model, hidden, labels)
+                    # The head is all-gathered at most once, before its forwards
+                    num_all_gathers = events.count("all-gather")
+                    self.assertLessEqual(num_all_gathers, 1)
+                    self.assertEqual(
+                        [e for e in events if e != "reduce-scatter"],
+                        ["all-gather"] * num_all_gathers + ["head"] * 4,
+                    )
+                    self.assertEqual(_fsdp_policies(model), policies)
+                    if outer_backward_follows:
+                        # Kept for the outer backward, which otherwise ends
+                        # the step's backward
+                        self.assertEqual(_outer_backward_state(model), outer_state)
+                    if hidden_grad is not None:
+                        hidden.backward(hidden_grad)
+                    num_reduce_scatters += events.count("reduce-scatter")
+                    ref_loss = nn.functional.cross_entropy(
+                        ref_model.head(ref_model(tokens)), labels, reduction="sum"
+                    )
+                    ref_loss.backward()
+                    self.assertEqual(loss, ref_loss)
+                self.assertEqual(
+                    num_reduce_scatters, num_groups_with_grads * (1 if deferred else 2)
+                )
+                self._check_grads(model, ref_model)
+                for _optim in (optim, ref_optim):
+                    _optim.step()
+                    _optim.zero_grad()
+                check_sharded_parity(self, ref_model, model)
+            # Forward only: no reduction, and the head reshards
+            events.clear()
+            with torch.no_grad():
+                loss, _ = _chunked_head_loss(model, model(tokens), labels)
+                ref_loss = nn.functional.cross_entropy(
+                    ref_model.head(ref_model(tokens)), labels, reduction="sum"
+                )
+            self.assertEqual(loss, ref_loss)
+            self.assertNotIn("reduce-scatter", events)
+            self.assertIsInstance(model.head.weight, DTensor)
+        head_hook.remove()
+
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_partial_backward_exception(self):
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        model, ref_model = self._init_models(mesh, "grouped", frozen=False)
+        model.set_requires_gradient_sync(False)
+        torch.manual_seed(self.rank)
+        tokens = torch.randint(32, (16,), device=device_type.type)
+        labels = torch.randint(32, (16,), device=device_type.type)
+        hidden = model(tokens)
+        policies = _fsdp_policies(model)
+        with (
+            mock.patch.object(dist, "reduce_scatter_single") as reduce_scatter,
+            self.assertRaisesRegex(RuntimeError, "chunk failure"),
+        ):
+            _chunked_head_loss(model, hidden, labels, fail_at_chunk=2)
+        reduce_scatter.assert_not_called()
+        self.assertEqual(_fsdp_policies(model), policies)
+        del hidden
+        model.reset_iter_state()
+        self.assertEqual(_fsdp_policies(model), policies)
+        # The next step starts over
+        model.zero_grad(set_to_none=True)
+        model.set_requires_gradient_sync(True)
+        hidden = model(tokens)
+        loss, hidden_grad = _chunked_head_loss(model, hidden, labels)
+        hidden.backward(hidden_grad)
+        ref_loss = nn.functional.cross_entropy(
+            ref_model.head(ref_model(tokens)), labels, reduction="sum"
+        )
+        ref_loss.backward()
+        self.assertEqual(loss, ref_loss)
+        self._check_grads(model, ref_model)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_partial_backward_accumulates_in_reduce_dtype(self):
+        # The chunks' gradients accumulate across backwards, so they start in
+        # the reduce dtype, which custom backward kernels read as grad_dtype
+        torch.manual_seed(42)
+        model = _ChunkedLossModel(tie=False, frozen=False).to(device_type)
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+        fully_shard(model.body, mp_policy=mp_policy)
+        fully_shard(
+            [model.norm, model.head], mp_policy=mp_policy, reshard_after_forward=False
+        )
+        fully_shard(model, mp_policy=mp_policy)
+        hidden = model(torch.randint(32, (16,), device=device_type.type))
+        chunk = hidden.detach().requires_grad_()
+        with model.head.partial_backward(outer_backward_follows=True):
+            output = model.head(chunk)
+            self.assertEqual(model.head.weight.grad_dtype, torch.float32)
+            output.sum().backward()
+            self.assertEqual(model.head.weight.grad.dtype, torch.float32)
+        hidden.backward(chunk.grad)
+        self.assertEqual(model.head.weight.grad.dtype, torch.float32)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_complete_grouped_forward(self):
+        for reshard_after_forward in (True, False):
+            torch.manual_seed(42)
+            model = ChunkedHeadModel(16, 32, tie=False).to(device_type)
+            ref_model = copy.deepcopy(model)
+            fully_shard(
+                [model.norm, model.head], reshard_after_forward=reshard_after_forward
+            )
+            fully_shard(model)
+            torch.manual_seed(self.rank)
+            tokens = torch.randint(32, (2, 8), device=device_type.type)
+            hidden = model(tokens, skip_head=True)
+            # The head runs alone after the root forward, which leaves its
+            # group's forward in progress with the head's parameters unsharded
+            chunk = hidden.detach().requires_grad_()
+            output = model.head(chunk)
+            self.assertNotIsInstance(model.head.weight, DTensor)
+            output = model.head.complete_grouped_forward(output)
+            self.assertEqual(
+                isinstance(model.head.weight, DTensor), reshard_after_forward
+            )
+            self.assertIs(model.head.complete_grouped_forward(output), output)
+            # The backward hooks on the output unshard the head again
+            output.sum().backward()
+            hidden.backward(chunk.grad)
+            ref_model(tokens).sum().backward()
+            self._check_grads(model, ref_model)
+
+
+class TestFullyShardModuleMethods(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    def test_policy_getters(self):
+        mesh = init_device_mesh("cpu", (self.world_size,))
+        model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4), nn.Linear(4, 4))
+        fully_shard(model[0], mesh=mesh, reshard_after_forward=2)
+        fully_shard(model[1], mesh=mesh)
+        fully_shard(model, mesh=mesh)
+        self.assertEqual(model[0].get_reshard_after_forward(), 2)
+        self.assertIs(model[1].get_reshard_after_forward(), True)
+        # The root keeps its parameters after forward unless told otherwise
+        self.assertIs(model.get_reshard_after_forward(), True)
+        model(torch.randn(2, 4))
+        self.assertIs(model.get_reshard_after_forward(), False)
+        model.set_reshard_after_forward(True, recurse=False)
+        self.assertIs(model.get_reshard_after_forward(), True)
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                self.assertTrue(module.get_requires_gradient_sync())
+                self.assertTrue(module.get_requires_all_reduce())
+                self.assertTrue(module.get_reshard_after_backward())
+        model.set_requires_gradient_sync(False)
+        model.set_requires_all_reduce(True, recurse=False)
+        model.set_reshard_after_backward(False, recurse=False)
+        self.assertFalse(model.get_requires_gradient_sync())
+        self.assertTrue(model.get_requires_all_reduce())
+        self.assertFalse(model.get_reshard_after_backward())
+        self.assertFalse(model[1].get_requires_gradient_sync())
+        self.assertFalse(model[1].get_requires_all_reduce())
+        self.assertTrue(model[1].get_reshard_after_backward())
+        self.assertTrue(model[1].get_is_last_backward())
+        model.set_is_last_backward(False)
+        self.assertFalse(model[1].get_is_last_backward())
+
+    def test_reshard_during_grouped_forward(self):
+        mesh = init_device_mesh("cpu", (self.world_size,))
+        model = ChunkedHeadModel(8, 16, tie=False)
+        fully_shard([model.norm, model.head], mesh=mesh, reshard_after_forward=False)
+        fully_shard(model, mesh=mesh)
+        with torch.no_grad():
+            model.head(model(torch.randint(16, (2, 4)), skip_head=True))
+        self.assertNotIsInstance(model.head.weight, DTensor)
+        model.head.reshard()
+        self.assertIsInstance(model.head.weight, DTensor)
+        self.assertIsInstance(model.norm.weight, DTensor)
+
+    def test_all_reduce_hook_runs_for_every_param_group(self):
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("a", "b"))
+        bias_placement = ShardPlacementResult(Shard(0), FSDPMeshInfo(mesh["a"], 0))
+        model = nn.Linear(8, 8)
+        fully_shard(
+            model,
+            mesh=mesh["b"],
+            shard_placement_fn=lambda p: bias_placement if p is model.bias else None,
+        )
+        self.assertEqual(len(model._get_fsdp_state()._fsdp_param_groups), 2)
+        reduce_outputs: list[torch.Tensor] = []
+        model.set_all_reduce_hook(reduce_outputs.append)
+        model(torch.randn(2, 8)).sum().backward()
+        self.assertEqual(len(reduce_outputs), 2)
+
+    def test_free_and_restore_sharded_params(self):
+        model = nn.Linear(8, 8)
+        fully_shard(model, mesh=init_device_mesh("cpu", (self.world_size,)))
+        sharded_params = list(model.parameters())
+        model.unshard()
+        model._free_sharded_params()
+        for param in sharded_params:
+            self.assertEqual(param.to_local().untyped_storage().size(), 0)
+        model._restore_sharded_params()
+        new_values = [
+            torch.arange(param.numel(), dtype=param.dtype).view(param.shape)
+            for param in sharded_params
+        ]
+        with torch.no_grad():
+            for param, value in zip(sharded_params, new_values):
+                param.copy_(
+                    distribute_tensor(value, param.device_mesh, param.placements)
+                )
+        model.reshard()
+        model.unshard()
+        for param, value in zip(model.parameters(), new_values):
+            self.assertEqual(param, value)
 
 
 class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
@@ -1933,6 +2347,56 @@ class TestFullyShardSharedParams(FSDPTestContinuous):
         model.tok_embeddings.reshard()
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_train_params_tied_after_fully_shard(self):
+        """
+        Test training with params tied after fully_shard, as torchtitan's
+        decoder re-ties its embedding and output weights after meta-device
+        init. The group then holds the tied param once per module.
+        """
+        vocab_size, hidden_size = 16, 8
+
+        class TiedModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tok_embeddings = nn.Embedding(vocab_size, hidden_size)
+                self.norm = nn.RMSNorm(hidden_size)
+                self.output = nn.Linear(hidden_size, vocab_size, bias=False)
+
+            def forward(self, ids):
+                return self.output(self.norm(self.tok_embeddings(ids)))
+
+        torch.manual_seed(42)
+        ref_model = TiedModel().to(device_type)
+        ref_model.tok_embeddings.weight = ref_model.output.weight
+        with torch.device("meta"):
+            model = TiedModel()
+        fully_shard([model.tok_embeddings, model.norm, model.output])
+        fully_shard(model)
+        model.to_empty(device=device_type)
+        model.tok_embeddings.weight = model.output.weight
+        with torch.no_grad():
+            for param, ref_param in zip(
+                model.parameters(), ref_model.parameters(), strict=True
+            ):
+                param.copy_(distribute_tensor(ref_param, param.device_mesh))
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank)
+        for _ in range(3):
+            ids = torch.randint(0, vocab_size, (2, 8), device=device_type.type)
+            losses = []
+            for _model in (ref_model, model):
+                losses.append(_model(ids).sum())
+                losses[-1].backward()
+            for param in ref_model.parameters():
+                dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+            self.assertEqual(losses[0], losses[1])
+            for _optim in (ref_optim, optim):
+                _optim.step()
+                _optim.zero_grad()
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_shared_params_separate_fsdp_groups_error(self):
         """
         Test that applying fully_shard to modules with shared parameters
@@ -2063,7 +2527,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         state = model._get_fsdp_state()
         for fsdp_state in state._state_ctx.all_states:
             for group in fsdp_state._fsdp_param_groups:
-                self.assertTrue(group.is_unsharded)
+                self.assertTrue(group.bucket.is_unsharded)
 
         # The already-reduced group takes the reshard-only finalization path.
         model.zero_grad(set_to_none=True)
@@ -2072,7 +2536,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         model.finalize_backward()
         for fsdp_state in state._state_ctx.all_states:
             for group in fsdp_state._fsdp_param_groups:
-                self.assertFalse(group.is_unsharded)
+                self.assertFalse(group.bucket.is_unsharded)
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_manual_backward_finalization_respects_gradient_sync(self):
@@ -2099,6 +2563,32 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
             dist.all_reduce(ref_param.grad, op=dist.ReduceOp.AVG)
             self.assertIsNotNone(param.grad)
             self.assertEqual(ref_param.grad, param.grad.full_tensor())
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_manual_backward_finalization_widens_kept_grads(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(nn.Embedding(16, 8), nn.Linear(8, 8, bias=False))
+        model.to(device_type)
+        mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
+        fully_shard(model[0], mp_policy=mp_policy, reshard_after_forward=False)
+        fully_shard(model, mp_policy=mp_policy, reshard_after_forward=False)
+        model.set_manual_backward_finalization(True)
+        torch.manual_seed(42 + self.rank)
+        # As a pipeline stage's microbatches: gradient sync is turned off just
+        # before each backward. The embedding's inputs do not require gradients,
+        # so the end of each backward runs its post-backward, which widens its
+        # kept gradient before the next microbatch accumulates into it
+        for _ in range(2):
+            out = model(torch.randint(0, 16, (4,), device=device_type.type))
+            model.set_requires_gradient_sync(False)
+            model.set_reshard_after_backward(False)
+            out.sum().backward()
+            self.assertEqual(model[0].weight.grad.dtype, torch.float32)
+        model.set_requires_gradient_sync(True)
+        model.set_reshard_after_backward(True)
+        model.finalize_backward()
+        for param in model.parameters():
+            self.assertEqual(param.grad.dtype, torch.float32)
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_manual_backward_finalization_requires_root(self):
@@ -2148,7 +2638,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         with self.assertRaisesRegex(RuntimeError, "requires manual"):
             model.finalize_backward(async_op=True)
         state = model._get_fsdp_state()
-        self.assertIsNone(state._comm_ctx.active_gradient_reduction)
+        self.assertIsNone(state._engine_context.pending_finalization)
 
         model.zero_grad(set_to_none=True)
         model.set_manual_backward_finalization(True)
@@ -2166,7 +2656,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         output.sum().backward()
         self.assertEqual(len(errors), 1)
         self.assertIn("must be called after backward completes", errors[0])
-        self.assertIsNone(state._comm_ctx.active_gradient_reduction)
+        self.assertIsNone(state._engine_context.pending_finalization)
         model.finalize_backward(async_op=True).wait()
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
@@ -2194,7 +2684,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
                 model.set_manual_backward_finalization(False)
             model.finalize_backward()
         state = model._get_fsdp_state()
-        self.assertEqual(state._comm_ctx.reduce_scatter_states, [])
+        self.assertEqual(state._engine_context.reduce_grad_states, [])
         self.assertIsNone(state._state_ctx.manual_backward_finalization_active)
         model.set_manual_backward_finalization(not initial_mode)
 
@@ -2257,7 +2747,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         state = model._get_fsdp_state()
         for fsdp_state in state._state_ctx.all_states:
             for group in fsdp_state._fsdp_param_groups:
-                self.assertFalse(group.is_unsharded)
+                self.assertFalse(group.bucket.is_unsharded)
 
         for input_tensor in inputs:
             ref_model(input_tensor).sum().backward()
@@ -2357,7 +2847,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         self.assertIsInstance(handle, GradientReductionHandle)
         state = model._get_fsdp_state()
         self.assertTrue(state._state_ctx.gradient_reduction_pending)
-        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 1)
+        self.assertEqual(len(state._engine_context.reduce_grad_states), 1)
         with self.assertRaisesRegex(RuntimeError, "before finalizing"):
             model.finalize_backward(async_op=True)
         with self.assertRaisesRegex(RuntimeError, "before forward"):
@@ -2368,7 +2858,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
         handle.wait()
         handle.wait()
         self.assertFalse(state._state_ctx.gradient_reduction_pending)
-        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 0)
+        self.assertEqual(len(state._engine_context.reduce_grad_states), 0)
 
         for input_tensor in inputs:
             ref_model(input_tensor).sum().backward()
@@ -2398,11 +2888,11 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
             model(torch.randn(4, 8, device=device_type.type)).sum().backward()
 
         state = model._get_fsdp_state()
-        self.assertGreater(len(state._comm_ctx.reduce_scatter_states), 0)
+        self.assertGreater(len(state._engine_context.reduce_grad_states), 0)
         self.assertTrue(
             all(
-                reduction.allocation_stream == backward_stream
-                for reduction in state._comm_ctx.reduce_scatter_states
+                reduction.result.allocation_streams[0] == backward_stream
+                for reduction in state._engine_context.reduce_grad_states
             )
         )
         finalize_stream = device_module.Stream()
@@ -2507,7 +2997,7 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
             model(input_tensor).sum().backward()
         model.set_requires_gradient_sync(True)
         state = model._get_fsdp_state()
-        comm.get_cap = lambda: state._comm_ctx.reduce_scatter_max_input_buffers
+        comm.get_cap = lambda: state._engine_context.max_pending_reduce_grads
 
         handle = model.finalize_backward(async_op=async_op)
         if handle is not None:
@@ -2548,9 +3038,9 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
             model(input_tensor).sum().backward()
 
         state = model._get_fsdp_state()
-        self.assertEqual(len(state._comm_ctx.reduce_scatter_states), 1)
+        self.assertEqual(len(state._engine_context.reduce_grad_states), 1)
         self.assertEqual(
-            state._comm_ctx.reduce_scatter_states[0].allocation_stream,
+            state._engine_context.reduce_grad_states[0].result.allocation_streams[0],
             backward_stream,
         )
         model[0].set_requires_gradient_sync(True)
@@ -3408,6 +3898,8 @@ class TestFullyShardShareCommContext(FSDPTest):
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_share_comm_context(self):
+        from torch.distributed.fsdp._flex_shard import bucket_runtime
+
         torch.manual_seed(42)
         n_layers = 3
         lin_dim = 16
@@ -3419,94 +3911,43 @@ class TestFullyShardShareCommContext(FSDPTest):
             fully_shard(layer)
             layer._get_fsdp_state()._lazy_init()
         share_comm_ctx(list(model))
-        shared_comm_ctx = model[0]._get_fsdp_state()._comm_ctx
+        # The roots share one engine context, whose streams run their
+        # all-gathers and reduce-scatters
+        contexts = {id(layer._get_fsdp_state()._engine_context) for layer in model}
+        self.assertEqual(len(contexts), 1)
 
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn(4, 3, lin_dim, device=device_type.type)
         ref_loss = ref_model(inp).sum()
 
-        all_gather_streams = set()
-        reduce_scatter_streams = set()
+        unshard_streams = set()
+        reduce_grad_streams = set()
+        orig_begin_unshard = bucket_runtime.begin_bucket_unshard
+        orig_begin_reduce_grad = bucket_runtime.begin_reduce_grad
 
-        from torch.distributed.fsdp._fully_shard._fsdp_api import (
-            AllGather,
-            AllReduce,
-            ReduceScatter,
-        )
-        from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-            DefaultAllReduce,
-        )
-        from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam
-
-        orig_foreach_all_gather = foreach_all_gather
-
-        def foreach_all_gather_with_assert(
-            fsdp_params: list[FSDPParam],
-            group: dist.ProcessGroup,
-            async_op: bool,
-            all_gather_copy_in_stream: torch.Stream,
-            all_gather_stream: torch.Stream,
-            device: torch.device,
-            all_gather_comm: AllGather,
+        def begin_unshard_with_record(
+            tensors, infos, mesh, unshard_stream, *args, **kwargs
         ):
-            nonlocal all_gather_streams
-            all_gather_streams.add(all_gather_stream)
-            return orig_foreach_all_gather(
-                fsdp_params,
-                group,
-                async_op,
-                all_gather_copy_in_stream,
-                all_gather_stream,
-                device,
-                all_gather_comm,
+            unshard_streams.add(unshard_stream)
+            return orig_begin_unshard(
+                tensors, infos, mesh, unshard_stream, *args, **kwargs
             )
 
-        orig_foreach_reduce = foreach_reduce
-
-        @torch.no_grad()
-        def foreach_reduce_with_assert(
-            fsdp_params: list[FSDPParam],
-            unsharded_grads: list[torch.Tensor],
-            reduce_scatter_group: dist.ProcessGroup,
-            reduce_scatter_stream: torch.Stream,
-            reduce_scatter_comm: ReduceScatter,
-            reduce_dtype: torch.dtype,
-            device: torch.device,
-            gradient_divide_factor: float | None,
-            all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
-            all_reduce_stream: torch.Stream,
-            all_reduce_grads: bool,
-            partial_reduce_output: torch.Tensor | None,  # only used for HSDP
-            all_reduce_hook: Callable[[torch.Tensor], None] | None,
-            force_sum_reduction_for_comms: bool = False,
-            *,
-            prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
-            all_reduce_comm: AllReduce = DefaultAllReduce(),
+        def begin_reduce_grad_with_record(
+            tensors, infos, mesh, reduction, reduce_grad_stream, *args, **kwargs
         ):
-            nonlocal reduce_scatter_streams
-            reduce_scatter_streams.add(reduce_scatter_stream)
-            return orig_foreach_reduce(
-                fsdp_params,
-                unsharded_grads,
-                reduce_scatter_group,
-                reduce_scatter_stream,
-                reduce_scatter_comm,
-                reduce_dtype,
-                device,
-                gradient_divide_factor,
-                all_reduce_group,
-                all_reduce_stream,
-                all_reduce_grads,
-                partial_reduce_output,
-                all_reduce_hook,
-                force_sum_reduction_for_comms,
-                prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
-                all_reduce_comm=all_reduce_comm,
+            reduce_grad_streams.add(reduce_grad_stream)
+            return orig_begin_reduce_grad(
+                tensors, infos, mesh, reduction, reduce_grad_stream, *args, **kwargs
             )
 
         with (
-            patch_foreach_all_gather(foreach_all_gather_with_assert),
-            patch_foreach_reduce(foreach_reduce_with_assert),
+            mock.patch.object(
+                bucket_runtime, "begin_bucket_unshard", begin_unshard_with_record
+            ),
+            mock.patch.object(
+                bucket_runtime, "begin_reduce_grad", begin_reduce_grad_with_record
+            ),
         ):
             loss = model(inp).sum()
             self.assertEqual(ref_loss, loss)
@@ -3514,9 +3955,8 @@ class TestFullyShardShareCommContext(FSDPTest):
             loss.backward()
             for param in ref_model.parameters():
                 dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
-        self.assertEqual(len(all_gather_streams), 1)
-        self.assertEqual(len(reduce_scatter_streams), 1)
-        self.assertEqual(len(shared_comm_ctx._last_post_reduce_events), 0)
+        self.assertEqual(len(unshard_streams), 1)
+        self.assertEqual(len(reduce_grad_streams), 1)
         check_sharded_parity(self, ref_model, model)
 
 
@@ -3682,12 +4122,10 @@ class TestFullyShardCudaGraph(FSDPTest):
         device = torch.device("cuda", self.rank)
         fake_pg = dist.new_group(backend="fake")
         mesh = DeviceMesh.from_group(fake_pg, "cuda")
-        model = nn.Sequential(
-            nn.Linear(8, 8, bias=False),
-            nn.Linear(8, 8, bias=False),
-        ).to(device)
+        model = nn.Sequential(nn.Linear(8, 8, bias=False), DoubleLinear(8)).to(device)
         fully_shard(model[0], mesh=mesh)
-        fully_shard(model[1], mesh=mesh)
+        fully_shard(model[1].lin1, mesh=mesh)
+        fully_shard(model[1].lin2, mesh=mesh)
         fully_shard(model, mesh=mesh)
         static_inputs = [torch.randn(4, 8, device=device) for _ in range(2)]
 
@@ -3695,29 +4133,35 @@ class TestFullyShardCudaGraph(FSDPTest):
             model.set_is_last_backward(False)
             model.set_reshard_after_backward(False)
             model.set_requires_gradient_sync(False)
-            model(static_inputs[0]).sum().backward()
+            out1, out2 = model(static_inputs[0])
+            (out1.sum() + out2.sum()).backward()
             model.set_is_last_backward(True)
             model.set_reshard_after_backward(True)
             model.set_requires_gradient_sync(True)
-            model(static_inputs[1]).sum().backward()
+            # lin2's backward prefetches lin1, which this backward leaves unused
+            _, out2 = model(static_inputs[1])
+            out2.sum().backward()
 
         stream = torch.cuda.Stream()
         with torch.cuda.stream(stream):
             run_accumulation()
             model.zero_grad(set_to_none=True)
 
-        pending_all_gather_cleanups = 0
-        orig_finalize_backward = FSDPParamGroup.finalize_backward
+        from torch.distributed.fsdp._flex_shard.bucket_runtime import BucketCommContext
 
-        def finalize_backward(param_group: FSDPParamGroup) -> None:
+        # The last backward releases the prefetches that the non-last one left
+        pending_all_gather_cleanups = 0
+        orig_release_prefetch = BucketCommContext._release_prefetch
+
+        def release_prefetch(context, pending) -> None:
             nonlocal pending_all_gather_cleanups
-            result = param_group._all_gather_result
-            if result is not None and result.all_gather_event is not None:
-                pending_all_gather_cleanups += 1
-            orig_finalize_backward(param_group)
+            pending_all_gather_cleanups += 1
+            orig_release_prefetch(context, pending)
 
         graph = torch.cuda.CUDAGraph()
-        with mock.patch.object(FSDPParamGroup, "finalize_backward", finalize_backward):
+        with mock.patch.object(
+            BucketCommContext, "_release_prefetch", release_prefetch
+        ):
             with torch.cuda.graph(graph, stream=stream):
                 run_accumulation()
         self.assertGreater(pending_all_gather_cleanups, 0)

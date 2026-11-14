@@ -9461,6 +9461,12 @@ def shallow_copy_data_(self, source_tensor):
     return TensorBox.create(ir.ShallowCopyDataKernel(self, source_tensor))
 
 
+if torch.distributed.is_available():
+    # Defines the FSDP engine's ops (fsdp::copy_, fsdp::all_gather_copy_in, ...),
+    # which this file and the bucketing passes lower. Imported by its full name,
+    # since this module's ``ops`` is Inductor's.
+    import torch.distributed.fsdp._flex_shard.ops
+
 if hasattr(torch.ops.fsdp, "copy_"):
 
     @register_lowering(torch.ops.fsdp.copy_.default)

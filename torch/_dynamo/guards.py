@@ -3929,11 +3929,6 @@ class GuardBuilder(GuardBuilderBase):
 
     # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
-    def FSDP_TRAINING_STATE(self, guard: Guard) -> None:
-        pass  # we always guard on this via GlobalStateGuard()
-
-    # Global state guard — not source-specific, checked separately at runtime.
-    @skip_guard_check_spec
     def GLOBAL_STATE(self, guard: Guard) -> None:
         output_graph = self.check_fn_manager.output_graph
         if output_graph is None:
