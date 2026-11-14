@@ -602,8 +602,7 @@ struct IdentityMap {};
 template <typename Map, typename scalar_t, typename out_t = scalar_t>
 void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
   constexpr bool is_identity = std::is_same_v<Map, IdentityMap>;
-  constexpr bool is_nansum = std::is_same_v<Map, NanToZeroMap>;
-  static_assert(!(is_identity || is_nansum) || std::is_same_v<scalar_t, out_t>);
+  static_assert(!is_identity || std::is_same_v<scalar_t, out_t>);
   auto loop =
     [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -630,12 +629,6 @@ void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
           if constexpr (is_identity) {
               basic_loop(ptrs, inner_strides, 0, size0,
                          [](scalar_t a, scalar_t b) { return a + b; });
-          } else if constexpr (is_nansum) {
-              basic_loop(ptrs, inner_strides, 0, size0, [](scalar_t a, scalar_t b) {
-                auto a_notnan = at::_isnan(a) ? scalar_t(0) : a;
-                auto b_notnan = at::_isnan(b) ? scalar_t(0) : b;
-                return a_notnan + b_notnan;
-              });
           } else {
               using acc_t = at::acc_type<scalar_t, true>;
               basic_loop(ptrs, inner_strides, 0, size0, [](out_t a, scalar_t b) {
@@ -683,12 +676,11 @@ void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
       }
     };
 
-  if constexpr (!is_identity && !is_nansum) {
+  if constexpr (!is_identity) {
     // TensorIterator::parallel_reduce would add up the per-thread results of a
     // reduction to one element with this same loop, applying Map to them again
     // (and reading them as scalar_t). The output is written once here, so it
-    // can also be a reduced precision scalar_t. nansum keeps that combine, which
-    // also masks a NaN per-thread result.
+    // can also be a reduced precision scalar_t.
     if (iter.output_base(0).numel() == 1) {
       using acc_t = at::acc_type<scalar_t, true>;
       const acc_t total = at::parallel_reduce(
