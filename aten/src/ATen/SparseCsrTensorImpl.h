@@ -79,6 +79,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   }
 
  private:
+  void resize_values_(IntArrayRef size);
   inline int64_t block_dim() const noexcept {
     return (layout_ == kSparseBsr || layout_ == kSparseBsc ? 2 : 0);
   }
