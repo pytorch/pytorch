@@ -367,6 +367,7 @@ class _UnresolvedTritonExport(RuntimeError):
 
 
 def _triton_export_rejection(kernel: CachingAutotuner) -> str | None:
+    from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
     if len(kernel.launchers) != 1:
@@ -381,7 +382,7 @@ def _triton_export_rejection(kernel: CachingAutotuner) -> str | None:
     if (
         kernel.inductor_meta.get("coordinate_descent_tuning", False)
         and kernel._should_coordesc_tune
-        and not getattr(result.config, "found_by_coordesc", False)
+        and triton_config_to_hashable(result.config) != kernel.coordesc_config_hash
     ):
         return "coordinate_descent_tuning_incomplete"
     return None

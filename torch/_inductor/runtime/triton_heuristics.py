@@ -675,6 +675,10 @@ class CachingAutotuner(KernelInterface):
 
     # Set for a pinned kernel: builds it unpinned, for the configs to fall back to.
     fallback: Callable[[], CachingAutotuner] | None = None
+    # The coordinate descent's winner config hash; a class-level default so instances
+    # built without __init__ still have it.
+    coordesc_config_hash: Hashable | None = None
+
     # The state set after __init__ that falling back keeps, rather than taking the
     # unpinned instance's: the held lock, and the launch a lazy precompile from run()
     # is part of.
@@ -701,6 +705,7 @@ class CachingAutotuner(KernelInterface):
         filename: str | None = None,
         reset_to_zero_arg_names: list[str] | None = None,
         autotune_cache_info: dict[str, Any] | None = None,
+        coordesc_config_hash: Hashable | None = None,
     ):
         super().__init__()
 
@@ -748,6 +753,7 @@ class CachingAutotuner(KernelInterface):
         self.cuda_kernel_saved = False
         self.cpu_kernel_saved = False
         self.autotune_cache_info = autotune_cache_info
+        self.coordesc_config_hash = coordesc_config_hash
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
                 "CachingAutotuner gets %d configs for %s",
@@ -899,10 +905,10 @@ class CachingAutotuner(KernelInterface):
             found_by_coordesc = getattr(best_config, "found_by_coordesc", False)
             # Grab the best compiled config, if it's in the list of available ones
             best_config_hash = triton_config_to_hashable(best_config)
+            self.coordesc_config_hash = best_config_hash if found_by_coordesc else None
 
             for compile_result in self.compile_results:
                 if triton_config_to_hashable(compile_result.config) == best_config_hash:
-                    compile_result.config.found_by_coordesc = found_by_coordesc
                     self.compile_results = [compile_result]
                     return
 
@@ -2606,7 +2612,7 @@ class CachingAutotuner(KernelInterface):
             benchmark_one_config, launcher.config, None
         )
         coordesc_time_taken_ns = time.time_ns() - start_time
-        best_config.found_by_coordesc = True
+        self.coordesc_config_hash = triton_config_to_hashable(best_config)
 
         if self.save_cache_hook:
             self.save_cache_hook(
@@ -2791,9 +2797,11 @@ class CachingAutotuner(KernelInterface):
                     self._combo_sequential_autotune(self.launchers[0], *args, **kwargs)
                 ]
 
-        if not getattr(
-            self.launchers[0].config, "found_by_coordesc", False
-        ) and self.inductor_meta.get("coordinate_descent_tuning", False):
+        if self.inductor_meta.get(
+            "coordinate_descent_tuning", False
+        ) and self.coordesc_config_hash != triton_config_to_hashable(
+            self.launchers[0].config
+        ):
             self.launchers = [
                 self.coordinate_descent_tuning(self.launchers[0], *args, **kwargs)
             ]
@@ -4086,6 +4094,10 @@ def _cached_autotune(
                         )
                     tconfig.kwargs.pop("XBLOCK")
 
+        coordesc_config_hash = None
+        if getattr(configs[0], "found_by_coordesc", False):
+            coordesc_config_hash = triton_config_to_hashable(configs[0])
+
         if inductor_meta.get("profile_bandwidth"):
             return debug_autotuner_cls(
                 fn,
@@ -4105,7 +4117,9 @@ def _cached_autotune(
                 custom_kernel=custom_kernel,
                 filename=filename,
                 with_bandwidth_info=True,
+                coordesc_config_hash=coordesc_config_hash,
             )
+
         return caching_autotuner_cls(
             fn,
             triton_meta=triton_meta,
@@ -4120,6 +4134,7 @@ def _cached_autotune(
             custom_kernel=custom_kernel,
             filename=filename,
             autotune_cache_info=autotune_cache_info,
+            coordesc_config_hash=coordesc_config_hash,
         )
 
     return decorator

@@ -7946,6 +7946,7 @@ class TestPrecompileRuntimeCache(TestCase):
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     @parametrize("tuning", ("rblock", "coordesc", "combo"))
     def test_static_export_preserves_late_winner(self, tuning):
+        from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
         from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
         from torch.compiler._runtime_cache import _freeze_triton_kernel
 
@@ -7956,7 +7957,7 @@ class TestPrecompileRuntimeCache(TestCase):
         if tuning == "coordesc":
             kernel.inductor_meta["coordinate_descent_tuning"] = True
             kernel._should_coordesc_tune = True
-            launcher.config.found_by_coordesc = True
+            kernel.coordesc_config_hash = triton_config_to_hashable(launcher.config)
         elif tuning == "combo":
             kernel.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
             launcher.config.found_by_combo_autotune = True
@@ -8859,6 +8860,7 @@ class TestPrecompileRuntimeCache(TestCase):
 
         from torch._inductor import config as inductor_config
         from torch._inductor.async_compile import CompiledTritonKernels
+        from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
         from torch._inductor.utils import clear_caches
         from torch.compiler import _runtime_cache
 
@@ -8908,7 +8910,10 @@ class TestPrecompileRuntimeCache(TestCase):
                     self.assertEqual(len(served.launchers), 1)
                     self.assertEqual(served.launchers[0].config.kwargs, winner.kwargs)
                     if coordesc:
-                        self.assertTrue(served.launchers[0].config.found_by_coordesc)
+                        self.assertEqual(
+                            served.coordesc_config_hash,
+                            triton_config_to_hashable(served.launchers[0].config),
+                        )
                     self.assertTrue(os.listdir(triton.knobs.cache.dir))
             finally:
                 CompiledTritonKernels.cache_clear()

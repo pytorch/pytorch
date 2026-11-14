@@ -1895,14 +1895,17 @@ class TestRecheckAutotuneCache(TestCase):
         # The compile_results should be narrowed to just the matching one
         self.assertEqual(len(autotuner.compile_results), 1)
         self.assertIs(autotuner.compile_results[0], compile_result)
-        # And found_by_coordesc must be propagated
-        self.assertTrue(autotuner.compile_results[0].config.found_by_coordesc)
+        # And the coordesc_config_hash must be propagated
+        self.assertEqual(
+            autotuner.coordesc_config_hash,
+            triton_config_to_hashable(autotuner.compile_results[0].config),
+        )
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_recheck_propagates_found_by_coordesc_true(self):
         """
         When the cached best config has found_by_coordesc=True,
-        it must be propagated to the compile result's config.
+        its hash must be stored as the coordesc_config_hash.
         """
         cfg_a = triton_config({"x": 16}, 64)
         cfg_b = triton_config({"x": 256}, 64)
@@ -1927,8 +1930,11 @@ class TestRecheckAutotuneCache(TestCase):
 
         self.assertEqual(len(autotuner.compile_results), 1)
         self.assertIs(autotuner.compile_results[0], result_b)
-        # The flag must be propagated from the cached config
-        self.assertTrue(autotuner.compile_results[0].config.found_by_coordesc)
+        # The hash must be propagated from the cached config
+        self.assertEqual(
+            autotuner.coordesc_config_hash,
+            triton_config_to_hashable(autotuner.compile_results[0].config),
+        )
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_recheck_propagates_found_by_coordesc_false(self):
@@ -1937,10 +1943,10 @@ class TestRecheckAutotuneCache(TestCase):
         propagated so that coordinate descent can still run if enabled.
         """
         cfg = triton_config({"x": 16}, 64)
-        cfg.found_by_coordesc = True
         compile_result = self._make_compile_result(cfg)
 
         autotuner = self._make_autotuner_with_results([cfg], [compile_result])
+        autotuner.coordesc_config_hash = triton_config_to_hashable(cfg)
 
         cached_cfg = triton_config({"x": 16}, 64)
         cached_cfg.found_by_coordesc = False
@@ -1952,7 +1958,7 @@ class TestRecheckAutotuneCache(TestCase):
             autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
 
         self.assertEqual(len(autotuner.compile_results), 1)
-        self.assertFalse(autotuner.compile_results[0].config.found_by_coordesc)
+        self.assertIsNone(autotuner.coordesc_config_hash)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_recheck_no_cache_hit_leaves_results_unchanged(self):
