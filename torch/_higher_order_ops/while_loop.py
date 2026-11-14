@@ -12,6 +12,7 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._higher_order_ops.utils import (
     _check_alias_and_mutation,
+    _fake_mode_handler,
     _find_or_create_fake_mode,
     _maybe_run_with_interpreter,
     autograd_not_implemented,
@@ -594,6 +595,9 @@ def while_loop_fake_tensor_mode(
         )
 
 
+while_loop_op.py_impl(DispatchKey.Fake)(_fake_mode_handler(while_loop_fake_tensor_mode))
+
+
 @while_loop_op.py_functionalize_impl
 def while_loop_func(
     ctx,
@@ -998,6 +1002,12 @@ while_loop_stack_output_op.py_impl(ProxyTorchDispatchMode)(
 
 while_loop_stack_output_op.py_impl(FakeTensorMode)(
     functools.partial(while_loop_fake_tensor_mode, stack_output=True)
+)
+
+while_loop_stack_output_op.py_impl(DispatchKey.Fake)(
+    _fake_mode_handler(
+        functools.partial(while_loop_fake_tensor_mode, stack_output=True)
+    )
 )
 
 while_loop_stack_output_op.py_functionalize_impl(
