@@ -79,7 +79,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-cublas==13.4.3.11; platform_system == 'Linux' | "
             "nvidia-cusolver==12.2.0.11; platform_system == 'Linux' | "
             "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-            "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
+            "nvidia-cudnn-cu13==9.28.1.4; platform_system == 'Linux' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
             "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
             "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
@@ -87,7 +87,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "windows": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "cuda-pathfinder>=1.8.5; platform_system == 'Windows' and platform_machine == 'AMD64' | "
-            "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cudnn-cu13==9.28.1.4; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Windows' and platform_machine == 'AMD64'"
         ),
     },
@@ -98,7 +98,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-cusolver==12.3.2.15; platform_system == 'Linux' | "
             "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
             "cupti-python==13.4.0; platform_system == 'Linux' and python_version < '3.15' | "
-            "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
+            "nvidia-cudnn-cu13==9.28.1.4; platform_system == 'Linux' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
             "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
             "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
@@ -106,7 +106,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "windows": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.3; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "cuda-pathfinder>=1.8.5; platform_system == 'Windows' and platform_machine == 'AMD64' | "
-            "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cudnn-cu13==9.28.1.4; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Windows' and platform_machine == 'AMD64'"
         ),
     },
@@ -115,7 +115,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.5.0; platform_system == 'Linux' | "
             "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
             "cupti-python==13.5.0; platform_system == 'Linux' and python_version < '3.15' | "
-            "nvidia-cudnn-cu13==9.27.0.42; platform_system == 'Linux' | "
+            "nvidia-cudnn-cu13==9.28.1.4; platform_system == 'Linux' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
             "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
             "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
