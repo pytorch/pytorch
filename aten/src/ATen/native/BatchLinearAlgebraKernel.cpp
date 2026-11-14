@@ -8,6 +8,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cpu/zmath.h>
 
+#include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 
 #if AT_MKL_ENABLED()
@@ -1018,6 +1019,11 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
     const bool in_parallel = at::in_parallel_region();
     const int saved_mkl_threads =
         in_parallel ? mkl_set_num_threads_local(1) : 0;
+    const auto restore_mkl_threads = c10::make_scope_exit([&] {
+      if (in_parallel) {
+        mkl_set_num_threads_local(saved_mkl_threads);
+      }
+    });
 #endif
     for (const auto i : c10::irange(start, end)) {
       scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
@@ -1031,11 +1037,6 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
           pivots_working_ptr,
           infos_working_ptr);
     }
-#if AT_MKL_ENABLED()
-    if (in_parallel) {
-      mkl_set_num_threads_local(saved_mkl_threads);
-    }
-#endif
   };
   // avoid overflow
   auto matrix_rank = std::min(m, n);

@@ -6037,6 +6037,9 @@ class TestLinalg(TestCase):
             P, L, U = torch.lu_unpack(LU, pivots)
             self.assertEqual(P @ L @ U, A)
         finally:
+            # This restores the thread count. MKL's dynamic threading, which
+            # torch.set_num_threads turns off, stays off for the rest of the
+            # process, as it does after any torch.set_num_threads call.
             torch.set_num_threads(prev_num_threads)
 
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
