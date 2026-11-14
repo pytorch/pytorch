@@ -108,14 +108,15 @@ Tensor fake_tensor_data(
       result.unsafeGetTensorImpl()->set_real_tensor(real->shallow_copy_and_detach(
           real->version_counter(), /*allow_tensor_metadata_change=*/false));
     }
-    auto mode = self.unsafeGetTensorImpl()->fake_tensor_mode();
-    if (auto constant = mode->get_constant(self.unsafeGetTensorImpl())) {
-      // ExtraMeta's shallow copy drops constants; register this storage alias.
-      mode->set_constant(
-          result.unsafeGetTensorImpl(),
-          constant->shallow_copy_and_detach(
-              constant->version_counter(),
-              /*allow_tensor_metadata_change=*/false));
+    if (auto mode = self.unsafeGetTensorImpl()->fake_tensor_mode()) {
+      if (auto constant = mode->get_constant(self.unsafeGetTensorImpl())) {
+        // ExtraMeta's shallow copy drops constants; register this storage alias.
+        mode->set_constant(
+            result.unsafeGetTensorImpl(),
+            constant->shallow_copy_and_detach(
+                constant->version_counter(),
+                /*allow_tensor_metadata_change=*/false));
+      }
     }
   }
   return result;
