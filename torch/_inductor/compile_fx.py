@@ -2086,7 +2086,8 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping
+                                V.graph.device_node_mapping,
+                                V.graph.device_type,
                             )
                         )
 
@@ -2263,12 +2264,19 @@ def cudagraphify(
     kernel_free_cudagraph: bool = False,
     user_visible_output_idxs: tuple[int, ...] = (),
 ) -> Callable[..., Any]:
-    from torch._inductor.cudagraph_trees import (
-        cudagraphify_impl as new_cudagraphify_impl,
-    )
-
     cudagraphify_fn: Callable[..., Any]
     if config.triton.cudagraph_trees:
+        from torch._inductor.graph_tree_backend import is_graph_tree_backend_available
+
+        if not is_graph_tree_backend_available():
+            raise RuntimeError(
+                "No Graph Trees backend is available for the current accelerator"
+            )
+
+        from torch._inductor.cudagraph_trees import (
+            cudagraphify_impl as new_cudagraphify_impl,
+        )
+
         managed_input_rerecord_limit = (
             config.triton.cudagraph_managed_input_rerecord_limit
         )
@@ -2304,7 +2312,11 @@ def cudagraphify(
     def run(new_inputs: Sequence[InputType]) -> Any:
         compiled_fn = getattr(thread_local, "compiled_fn", None)
         if compiled_fn is None:
-            with dynamo_utils.preserve_rng_state():
+            accelerator = torch.accelerator.current_accelerator()
+            with dynamo_utils.preserve_rng_state(
+                device_type=None if accelerator is None else accelerator.type,
+                device_index=device_index,
+            ):
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
             thread_local.compiled_fn = compiled_fn
         return compiled_fn(new_inputs)  # type: ignore[arg-type]
