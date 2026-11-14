@@ -227,7 +227,7 @@ _vec_softmax_backward(
         auto buffer = std::make_unique<scalar_t[]>(CHUNK_SIZE);
         scalar_t* tmp_sum_data = buffer.get();
 
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / num_chunks;
           int64_t k = i % num_chunks;
           int64_t inner_idx_begin = k * CHUNK_SIZE;
@@ -244,7 +244,7 @@ _vec_softmax_backward(
           }
 
           // compute sum of grad_output * output
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             const scalar_t* grad_output_ptr = grad_output_data_base + offset;
@@ -264,7 +264,7 @@ _vec_softmax_backward(
           }
 
           // compute output * (grad_output - sum)
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             const scalar_t* grad_output_ptr = grad_output_data_base + offset;
@@ -319,7 +319,7 @@ _vec_softmax_backward(
         auto output_buffer = std::make_unique<float[]>(dim_size * CHUNK_SIZE);
         float* output_buffer_data = output_buffer.get();
 
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / num_chunks;
           int64_t k = i % num_chunks;
           int64_t inner_idx_begin = k * CHUNK_SIZE;
@@ -337,7 +337,7 @@ _vec_softmax_backward(
           }
 
           // compute sum of grad_output * output
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             const scalar_t* grad_output_ptr = grad_output_data_base + offset;
@@ -379,7 +379,7 @@ _vec_softmax_backward(
           }
 
           // compute output * (grad_output - sum)
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             scalar_t* grad_input_ptr = grad_input_data_base +
                 outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
@@ -438,7 +438,7 @@ _vec_log_softmax_backward(
         auto buffer = std::make_unique<scalar_t[]>(CHUNK_SIZE);
         scalar_t* tmp_sum_data = buffer.get();
 
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / num_chunks;
           int64_t k = i % num_chunks;
           int64_t inner_idx_begin = k * CHUNK_SIZE;
@@ -455,7 +455,7 @@ _vec_log_softmax_backward(
           }
 
           // compute sum of grad_output
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             const scalar_t* grad_output_ptr = grad_output_data_base +
                 outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
@@ -473,7 +473,7 @@ _vec_log_softmax_backward(
           }
 
           // compute grad_output - output.exp() * sum
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             const scalar_t* grad_output_ptr = grad_output_data_base + offset;
@@ -526,7 +526,7 @@ _vec_log_softmax_backward(
         auto grad_output_buffer = std::make_unique<float[]>(dim_size * CHUNK_SIZE);
         float* grad_output_buffer_data = grad_output_buffer.get();
 
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / num_chunks;
           int64_t k = i % num_chunks;
           int64_t inner_idx_begin = k * CHUNK_SIZE;
@@ -544,7 +544,7 @@ _vec_log_softmax_backward(
           }
 
           // compute sum of grad_output
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             const scalar_t* grad_output_ptr = grad_output_data_base +
                 outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
@@ -576,7 +576,7 @@ _vec_log_softmax_backward(
           }
 
           // compute grad_output - output.exp() * sum
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             const scalar_t* output_ptr = output_data_base + offset;
@@ -616,7 +616,7 @@ struct vec_host_softmax_lastdim {
   static void apply(const Tensor& output, const Tensor& input) {
     int64_t outer_size = 1;
     int64_t dim_size = input.size(input.ndimension() - 1);
-    for (int64_t i = 0; i < input.ndimension() - 1; ++i)
+    for (const auto i : c10::irange(input.ndimension() - 1))
       outer_size *= input.size(i);
     const scalar_t* input_data_base = input.const_data_ptr<scalar_t>();
     scalar_t* output_data_base = output.data_ptr<scalar_t>();
@@ -895,7 +895,7 @@ struct vec_softmax {
     int64_t dim_size = input.size(dim);
     int64_t inner_size = 1;
     for (const auto i : c10::irange(dim))outer_size *= input.size(i);
-    for (int64_t i = dim + 1; i < input.dim(); ++i)
+    for (const auto i : c10::irange(dim + 1, input.dim()))
       inner_size *= input.size(i);
     const scalar_t* input_data_base = input.const_data_ptr<scalar_t>();
     scalar_t* output_data_base = output.data_ptr<scalar_t>();
@@ -915,7 +915,7 @@ struct vec_host_softmax_backward_lastdim {
   apply(const Tensor& grad_input, const Tensor& grad, const Tensor& output) {
     int64_t outer_size = 1;
     int64_t dim_size = grad.size(grad.ndimension() - 1);
-    for (int64_t i = 0; i < grad.ndimension() - 1; ++i)
+    for (const auto i : c10::irange(grad.ndimension() - 1))
       outer_size *= grad.size(i);
     scalar_t* grad_input_data_base = grad_input.mutable_data_ptr<scalar_t>();
     const scalar_t* grad_data_base = grad.const_data_ptr<scalar_t>();
@@ -942,7 +942,7 @@ struct vec_host_softmax_backward {
     for (const auto i : c10::irange(dim)) {
       outer_size *= grad.size(i);
     }
-    for (int64_t i = dim + 1; i < grad.dim(); ++i) {
+    for (const auto i : c10::irange(dim + 1, grad.dim())) {
       inner_size *= grad.size(i);
     }
     scalar_t* grad_input_data_base = grad_input.mutable_data_ptr<scalar_t>();

@@ -54,8 +54,8 @@ void cpu_adaptive_max_pool2d(
           // compute local max
           int64_t maxindex = ih0 * input_width + iw0;
           accscalar_t maxval = -std::numeric_limits<accscalar_t>::infinity();
-          for (int64_t ih = ih0; ih < ih1; ih ++) {
-            for (int64_t iw = iw0; iw < iw1; iw ++) {
+          for (const auto ih : c10::irange(ih0, ih1)) {
+            for (const auto iw : c10::irange(iw0, iw1)) {
               int64_t index = ih * input_width + iw;
               scalar_t val = input_ptr[index];
               if ((val > maxval) || std::isnan(val)) {
@@ -149,8 +149,8 @@ cpu_adaptive_max_pool2d_channels_last(
         out[d1] = -std::numeric_limits<scalar_t>::infinity();
       }
       // Pass II: compute local max
-      for (int64_t ih = ih0; ih < ih1; ih ++) {
-        for (int64_t iw = iw0; iw < iw1; iw ++) {
+      for (const auto ih : c10::irange(ih0, ih1)) {
+        for (const auto iw : c10::irange(iw0, iw1)) {
           const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
@@ -267,8 +267,8 @@ cpu_adaptive_max_pool2d_channels_last(
         max[d1] = -std::numeric_limits<float>::infinity();
       }
       // Pass II: compute local max
-      for (int64_t ih = ih0; ih < ih1; ih ++) {
-        for (int64_t iw = iw0; iw < iw1; iw ++) {
+      for (const auto ih : c10::irange(ih0, ih1)) {
+        for (const auto iw : c10::irange(iw0, iw1)) {
           const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
@@ -525,9 +525,9 @@ void cpu_adaptive_max_pool3d(
             // compute local max
             int64_t maxindex = id0 * input_height * input_width + ih0 * input_width + iw0;
             accscalar_t maxval = -std::numeric_limits<accscalar_t>::infinity();
-            for (int64_t id = id0; id < id1; id ++) {
-              for (int64_t ih = ih0; ih < ih1; ih ++) {
-                for (int64_t iw = iw0; iw < iw1; iw ++) {
+            for (const auto id : c10::irange(id0, id1)) {
+              for (const auto ih : c10::irange(ih0, ih1)) {
+                for (const auto iw : c10::irange(iw0, iw1)) {
                   int64_t index = id * input_height * input_width + ih * input_width + iw;
                   scalar_t val = input_ptr[index];
                   if ((val > maxval) || std::isnan(val)) {
@@ -629,9 +629,9 @@ cpu_adaptive_max_pool3d_channels_last(
         out[d1] = -std::numeric_limits<scalar_t>::infinity();
       }
       // Pass II: compute local max
-      for (int64_t id = id0; id < id1; id ++) {
-        for (int64_t ih = ih0; ih < ih1; ih ++) {
-          for (int64_t iw = iw0; iw < iw1; iw ++) {
+      for (const auto id : c10::irange(id0, id1)) {
+        for (const auto ih : c10::irange(ih0, ih1)) {
+          for (const auto iw : c10::irange(iw0, iw1)) {
             const scalar_t* in = input_data + n * input_depth * input_height * input_width * channels +
                 id * input_height * input_width * channels + ih * input_width * channels + iw * channels;
 
@@ -755,9 +755,9 @@ cpu_adaptive_max_pool3d_channels_last(
         max[d1] = -std::numeric_limits<float>::infinity();
       }
       // Pass II: compute local max
-      for (int64_t id = id0; id < id1; id ++) {
-        for (int64_t ih = ih0; ih < ih1; ih ++) {
-          for (int64_t iw = iw0; iw < iw1; iw ++) {
+      for (const auto id : c10::irange(id0, id1)) {
+        for (const auto ih : c10::irange(ih0, ih1)) {
+          for (const auto iw : c10::irange(iw0, iw1)) {
             const BFloat16* in = input_data + n * input_depth * input_height * input_width * channels +
                 id * input_height * input_width * channels + ih * input_width * channels + iw * channels;
 
