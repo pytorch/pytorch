@@ -22,6 +22,11 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_MIX_ORDER_XBLOCK,
 )
 from torch._inductor.runtime.runtime_utils import last_power_of_2, next_power_of_2
+from torch._inductor.runtime.tiling import (
+    get_max_block,
+    get_pointwise_block_product,
+    get_pointwise_prefixes,
+)
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
 
@@ -82,7 +87,7 @@ def _match_target_block_product(
         dim, score = max(relative_scores.items(), key=lambda item: item[1])
 
         if (
-            block_sizes[dim] >= TRITON_MAX_BLOCK[dim.capitalize()]
+            block_sizes[dim] >= get_max_block(dim, TRITON_MAX_BLOCK)
             or block_sizes[dim] >= size_hints[dim]
         ):
             del relative_scores[dim]
@@ -126,12 +131,15 @@ def _adapt_config_for_tiling(
     return triton_config_tiled_reduction(
         size_hints,
         block_sizes["x"],
-        block_sizes["y"],
+        get_pointwise_block_product(block_sizes, exclude="x"),
         block_sizes["r0_"],
         num_stages=num_stages,
         register_intensive=register_intensive,
         waves_per_eu=waves_per_eu,
         warp_size=warp_size,
+        pointwise_blocks={
+            p: block_sizes[p] for p in get_pointwise_prefixes(block_sizes)
+        },
     )
 
 
@@ -292,9 +300,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             # Default XBLOCK=2 launches too few programs to fill
             # the device. Prefer XBLOCK=1 so the autotuner has a candidate
             # that can saturate all CUs.
-            1
-            if (torch.version.hip and size_hints.get("x", 0) <= 64)
-            else (2 if rnumel <= 2048 else 1),
+            (
+                1
+                if (torch.version.hip and size_hints.get("x", 0) <= 64)
+                else (2 if rnumel <= 2048 else 1)
+            ),
             min(rnumel, contiguous_rblock),
             register_intensive=register_intensive,
         )
@@ -481,21 +491,28 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         else:
             configs = []
             tiling_scores = _get_tiling_scores(inductor_meta, size_hints)
-            x_y_scores = {dim: tiling_scores[dim] for dim in ("x", "y")}
+            pointwise_scores = {
+                dim: tiling_scores[dim]
+                for dim in reversed(get_pointwise_prefixes(size_hints))
+            }
             for target_block_size in xblock_vals:
                 if target_block_size * rnumel > MAX_PERSISTENT_BLOCK_NUMEL:
                     continue
 
                 block_sizes = _match_target_block_product(
-                    size_hints, x_y_scores, target_block_size
+                    size_hints, pointwise_scores, target_block_size
                 )
                 configs.append(
                     triton_config_tiled_reduction(
                         size_hints,
                         block_sizes["x"],
-                        block_sizes["y"],
+                        get_pointwise_block_product(block_sizes, exclude="x"),
                         rnumel,
                         warp_size=warp_size,
+                        pointwise_blocks={
+                            p: block_sizes[p]
+                            for p in get_pointwise_prefixes(block_sizes)
+                        },
                     )
                 )
 

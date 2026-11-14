@@ -31,6 +31,7 @@ from ..runtime.hints import (
     TRITON_DEFAULT_RSPLIT_SIZE,
     TritonMeta,
 )
+from ..runtime.tiling import get_z_blocks
 from ..stream_utils import (
     AOTI_SUPPORTED_STREAM_OP_NAMES,
     AOTI_UNSUPPORTED_STREAM_OP_REASONS,
@@ -218,9 +219,7 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         else:
             xblocks = [config_dict.get("XBLOCK", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])]
             yblocks = [config_dict.get("YBLOCK", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])]
-            zblocks = [
-                config_dict.get("Z0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["Z0_BLOCK"])
-            ]
+            zblocks = get_z_blocks(config_dict)
             r0blocks = [
                 config_dict.get("R0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])
             ]

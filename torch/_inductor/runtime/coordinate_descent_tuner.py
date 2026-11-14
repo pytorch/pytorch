@@ -17,6 +17,15 @@ from .hints import (
     TRITON_MAX_TENSOR_NUMEL,
 )
 from .runtime_utils import red_text, triton_config_to_hashable
+from .tiling import (
+    block_to_prefix,
+    get_max_block,
+    get_pointwise_prefixes,
+    get_reduction_prefixes,
+    pointwise_prefixes,
+    reduction_prefixes,
+    TRITON_LAUNCH_GRID_NDIM,
+)
 
 
 if TYPE_CHECKING:
@@ -89,7 +98,7 @@ class CoordescTuner:
         )
 
     def get_config_max(self, prefix: str) -> int:
-        max_block = TRITON_MAX_BLOCK[prefix.upper()]
+        max_block = get_max_block(prefix, TRITON_MAX_BLOCK)
         size_hint = self.size_hints.get(prefix) if self.size_hints is not None else None
         return min(max_block, size_hint) if size_hint is not None else max_block
 
@@ -120,15 +129,23 @@ class CoordescTuner:
     @property
     def tunable_fields(self) -> list[str]:
         out: list[str] = [
-            "XBLOCK",
-            "YBLOCK",
-            "Z0_BLOCK",
+            *(
+                f"{p.upper()}BLOCK"
+                for p in reversed(
+                    get_pointwise_prefixes(
+                        self.size_hints or pointwise_prefixes(TRITON_LAUNCH_GRID_NDIM)
+                    )
+                )
+            ),
             # NOTE: we should not tune R0_BLOCK for persistent reduction.
             # We rely on the fact that persistent reduction's triton.Config
             # does not have the R0_BLOCK field to guarantee that.
-            "R0_BLOCK",
-            "R1_BLOCK",
-            "R2_BLOCK",
+            *(
+                f"{p.upper()}BLOCK"
+                for p in get_reduction_prefixes(
+                    self.size_hints or reduction_prefixes(TRITON_LAUNCH_GRID_NDIM)
+                )
+            ),
             # the following 3 are for mm
             "BLOCK_M",
             "BLOCK_N",
@@ -141,7 +158,7 @@ class CoordescTuner:
             out.append("waves_per_eu")
         if self.is_native_matmul:
             out.append("num_stages")
-            out.remove("Z0_BLOCK")  # Z0_BLOCK=1 always in native matmul
+            out = [field for field in out if field != "Z0_BLOCK"]
 
         if self.is_mix_order_reduction:
             # unlike TritonConfig.num_stages, this one is
@@ -167,7 +184,7 @@ class CoordescTuner:
 
         block_suffix = "BLOCK"
         if name.endswith(block_suffix):
-            prefix = name.strip(block_suffix).lower()
+            prefix = block_to_prefix(name)
             return val > self.get_config_max(prefix)
         if name == "num_warps":
             return val > self.get_warpsmax()
