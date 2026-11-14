@@ -5,6 +5,7 @@
 #include <structmember.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/overflows.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
@@ -368,7 +369,8 @@ static PyObject* THPStorage_fromBuffer(
   uint8_t* src = static_cast<uint8_t*>(buffer.buf);
   auto fake_mode_active =
       c10::impl::TorchDispatchModeTLS::get_mode(
-          c10::impl::TorchDispatchModeKey::FAKE) != std::nullopt;
+          c10::impl::TorchDispatchModeKey::FAKE) != std::nullopt ||
+      c10::impl::FakeTensorModeTLS::get_state() != nullptr;
   auto storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,

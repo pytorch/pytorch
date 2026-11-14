@@ -55,13 +55,17 @@ struct C10_API FakeTensorMode {
   // across epochs; the memo bindings read it through the fake's mode.
   uint64_t epoch_ = 0;
 
+  // Whether ops also run on the real tensors the fakes carry.
+  bool propagate_real_tensors_ = false;
+
   // Defined out of line, as both instantiate constant_storage_mapping_'s
   // destructor, which needs TensorImpl to be complete.
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
       bool allow_meta = true,
-      bool allow_unsafe_data_ptr_access = true);
+      bool allow_unsafe_data_ptr_access = true,
+      bool propagate_real_tensors = false);
   ~FakeTensorMode();
 
   // record the real constant a fake tensor was created from; the constant is
