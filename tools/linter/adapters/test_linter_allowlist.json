@@ -110,7 +110,6 @@
   "test/distributed/fsdp/test_fsdp_grad_acc.py",
   "test/distributed/fsdp/test_fsdp_hybrid_shard.py",
   "test/distributed/fsdp/test_fsdp_ignored_modules.py",
-  "test/distributed/fsdp/test_fsdp_input.py",
   "test/distributed/fsdp/test_fsdp_memory.py",
   "test/distributed/fsdp/test_fsdp_meta.py",
   "test/distributed/fsdp/test_fsdp_misc.py",
