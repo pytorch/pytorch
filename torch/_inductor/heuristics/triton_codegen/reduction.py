@@ -648,7 +648,17 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 inductor_meta=inductor_meta,
                 triton_meta=triton_meta,
             )
+        # Cooperative launches require all CTAs resident. Cap grid size by
+        # raising XBLOCK when needed (RSPLIT * ceil(xnumel/XBLOCK) <= #SMs).
+        max_blocks = triton_meta["device"].multi_processor_count
         for config in configs:
+            xblock = int(config.kwargs.get("XBLOCK", 1))  # type: ignore[union-attr]
+            while (
+                split * ((xnumel + xblock - 1) // xblock) > max_blocks
+                and xblock < xnumel
+            ):
+                xblock = next_power_of_2(xblock + 1)
+            config.kwargs["XBLOCK"] = xblock  # type: ignore[union-attr]
             config.kwargs["RSPLIT"] = split  # type: ignore[union-attr]
         return configs
 

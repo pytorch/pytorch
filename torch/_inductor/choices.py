@@ -529,15 +529,23 @@ class InductorChoices:
         device: torch.device, numel: sympy.Expr, reduction_numel: sympy.Expr
     ) -> bool:
         """Heuristic to decide if a cooperative reduction should be used."""
-        if config.triton.force_cooperative_reductions:
-            return True
-        if not config.triton.cooperative_reductions or device.type == "cpu":
-            return False
+        if not config.triton.force_cooperative_reductions:
+            if not config.triton.cooperative_reductions or device.type == "cpu":
+                return False
 
         xhint = V.graph.sizevars.optimization_hint(numel, fallback=2)
+        # CooperativeReductionGrid launches RSPLIT * ceil(xnumel / XBLOCK) CTAs
+        # that must all be resident. Autotune configs can use XBLOCK=1, so a
+        # large xnumel makes the cooperative launch unlaunchable (CUDA invalid
+        # argument). Keep the same small-x bound under force_cooperative_reductions.
+        # See https://github.com/pytorch/pytorch/issues/204790
         if xhint <= 8:
+            if config.triton.force_cooperative_reductions:
+                return True
             threshold = 32768 * xhint
         elif xhint <= 16:
+            if config.triton.force_cooperative_reductions:
+                return True
             threshold = 2097152
         else:
             return False
