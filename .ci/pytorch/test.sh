@@ -714,6 +714,7 @@ test_h100_symm_mem() {
   # Disable NVLink Switch features (not available on AWS H100 instances)
   export NVSHMEM_DISABLE_NVLS=1
   export NCCL_NVLS_ENABLE=0
+  python test/run_test.py --cpp --verbose -i cpp/CUDASymmetricMemoryPeerSetupTest
   _run_fabric_handle_tests
 }
 
@@ -2096,6 +2097,8 @@ test_distributed() {
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
+      python test/run_test.py --cpp --verbose -i cpp/StoreExchangeTest
+      python test/run_test.py --cpp --verbose -i cpp/CUDASymmetricMemoryPeerSetupTest
     fi
     python test/run_test.py --cpp --verbose -i cpp/NCCLDevCommManagerTest
   fi
