@@ -4,6 +4,7 @@ import abc
 import builtins
 import collections
 import collections.abc
+import contextvars
 import copy
 import dataclasses
 import dis
@@ -3382,6 +3383,23 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.ones(2)
         args = (x, [Key(), Key()], {Key(): 0}, {0: Key()}, {0: Key()}, Key())
         self.assertEqual(opt_fn(*args), fn(*args))
+        relation_guards = {"NOT_ALIASING", "DUPLICATE_INPUT"}
+        self.assertFalse([g for g in guards if g.create_fn_name() in relation_guards])
+
+    def test_is_on_context_var_value_adds_no_relation_guard(self):
+        # A ContextVar value depends on the context the code runs in, so a
+        # relation guard on it can fail on the frame that created it (seen with
+        # `torch.compiler.config`, whose values live in ContextVars).
+        sentinel = object()
+        var = contextvars.ContextVar("var", default=sentinel)
+
+        def fn(x):
+            return x + 1 if var.get() is sentinel else x - 1
+
+        guards = []
+        opt_fn = torch._dynamo.optimize("eager", guard_export_fn=guards.extend)(fn)
+        x = torch.ones(2)
+        self.assertEqual(opt_fn(x), fn(x))
         relation_guards = {"NOT_ALIASING", "DUPLICATE_INPUT"}
         self.assertFalse([g for g in guards if g.create_fn_name() in relation_guards])
 

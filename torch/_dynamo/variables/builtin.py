@@ -58,6 +58,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    ContextVarGetSource,
     DictGetItemSource,
     GetItemSource,
     GlobalSource,
@@ -388,6 +389,16 @@ def _polyfills_dir() -> str:
     return os.path.dirname(polyfills.__file__)
 
 
+def _reads_context_var(source: Source) -> bool:
+    # A ContextVar value depends on the context the code runs in, so it can
+    # differ between tracing and guard evaluation.
+    while source is not None:
+        if isinstance(source, ContextVarGetSource):
+            return True
+        source = getattr(source, "base", None)
+    return False
+
+
 def _guard_identity_fold(
     tx: "InstructionTranslatorBase",
     a: VariableTracker,
@@ -409,6 +420,8 @@ def _guard_identity_fold(
     # Polyfills such as list.index, operator.countOf and dict.__eq__ compare
     # elements with `is`; like `in`, they add no relation guard.
     if tx.f_code.co_filename.startswith(_polyfills_dir()):
+        return
+    if _reads_context_var(a.source) or _reads_context_var(b.source):
         return
     if _fold_disagrees_with_frame(tx, a.source, b.source, is_same):
         return
