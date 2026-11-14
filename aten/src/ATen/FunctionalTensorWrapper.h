@@ -13,6 +13,10 @@
 
 namespace at {
 
+namespace functionalization {
+struct TORCH_API resize__ViewMeta;
+}
+
 // Note [Functionalization Pass In Core]
 // The Functionalization pass is used to remove aliasing from a pytorch program.
 //
@@ -148,6 +152,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // tensor by replaying the views off of the alias.
   void mutate_view_meta(
       const std::shared_ptr<at::functionalization::ViewMeta>& meta);
+
+  void mutate_resize_view_meta(
+      const std::shared_ptr<functionalization::resize__ViewMeta>& meta);
 
   // Custom implementation of self.set_(src)
   void set__impl(const FunctionalTensorWrapper* other);

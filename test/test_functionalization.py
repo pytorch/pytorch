@@ -18,9 +18,11 @@ from torch._subclasses.functional_tensor import (
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
@@ -2426,6 +2428,46 @@ class TestViewMetaSerialization(TestCase):
         ):
             restored = pickle.loads(pickle.dumps(view_meta))
             self.assertEqual(restored.as_tuple(), view_meta.as_tuple())
+
+
+class TestFunctionalizationResize(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("shrink_size", [0, 2])
+    @parametrize("remove", ["mutations", "mutations_and_views"])
+    def test_resize_shrink_then_grow(self, device, shrink_size, remove):
+        def f(x):
+            y = x + 1
+            alias = y.view(-1)
+            y.resize_(shrink_size)
+            shrunk_alias = y.view(-1)
+            alias.add_(10)
+            y.resize_(4)
+            before_copy = y.clone()
+            y.copy_(torch.full_like(y, 5))
+            return before_copy, y, alias, shrunk_alias
+
+        x = torch.arange(8, dtype=torch.float32, device=device)
+        self.assertEqual(torch.func.functionalize(f, remove=remove)(x), f(x))
+
+    @parametrize("remove", ["mutations", "mutations_and_views"])
+    def test_resize_shrink_then_grow_input_with_offset(self, device, remove):
+        def f(x):
+            alias = x.view(-1)
+            x.resize_(0)
+            x.resize_(8)
+            x.copy_(torch.full_like(x, 5))
+            return x, alias
+
+        x = torch.arange(9, dtype=torch.float32, device=device)
+        eager_input = x.clone()
+        self.assertEqual(
+            torch.func.functionalize(f, remove=remove)(x[1:]), f(eager_input[1:])
+        )
+        self.assertEqual(x, eager_input)
+
+
+instantiate_device_type_tests(TestFunctionalizationResize, globals())
 
 
 if __name__ == "__main__":
