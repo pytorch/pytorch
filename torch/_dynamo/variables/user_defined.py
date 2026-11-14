@@ -1397,19 +1397,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
             name == "mro"
             and len(args) == 0
             and not kwargs
-            and type(self.value) is type
             and self.lookup_cls_mro_attr("mro") is NO_SUCH_SUBOBJ
+            and self.lookup_metaclass_attr("mro") is type.__dict__["mro"]
+            and type.mro(self.value) == list(self.value.__mro__)
         ):
-            # type.mro() returns a new list. With metaclass type, CPython
-            # recomputes __mro__ with the same C3 whenever a base changes, so
-            # the two always match. A custom metaclass can leave __mro__ stale.
+            # type.mro() returns a new list. While cls.mro resolves to type.mro,
+            # CPython recomputes __mro__ with the same C3 whenever a base
+            # changes, so the two match. A metaclass that defined mro when the
+            # class was created leaves __mro__ stale, hence the comparison.
             # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2935-L2945
             # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L3001-L3014
             if self.source is not None:
-                # cls.mro is type.mro while no class in the MRO defines mro.
+                # cls.mro is type.mro while no class in the MRO, and no metaclass
+                # before type, defines mro.
                 guard_mro_absent(
                     tx, self.value, self.source, "mro", len(self.value.__mro__)
                 )
+                meta = type(self.value)
+                stop = meta.__mro__.index(type)
+                guard_mro_absent(tx, meta, TypeSource(self.source), "mro", stop)
             mro_source = self.source and TypeMROSource(self.source)
             mro = VariableTracker.build(tx, self.value.__mro__, mro_source)
             items = mro.unpack_var_sequence(tx)
