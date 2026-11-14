@@ -6530,12 +6530,7 @@ class PythonWrapperCodegen(CodeGen):
                 if inductor_config_patches
                 else contextlib.nullcontext()
             )
-            # Keep legacy config readers consistent with the unsplit subgraph.
-            with (
-                ctx,
-                config.patch("graph_partition", False),
-                V.set_graph_handler(subgraph.graph),
-            ):
+            with ctx, V.set_graph_handler(subgraph.graph):
                 # Call the codegen of subgraph recursively
                 subgraph_code, _ = subgraph.graph.codegen()
             subgraph_name = subgraph.graph.name

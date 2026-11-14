@@ -120,11 +120,24 @@ TEST_PIN_MEMORY = torch.accelerator.is_available() and not (
 # Mixing different start method is a recipe for disaster (e.g., using a fork
 # `mp.Event` with a spawn `mp.Process` segfaults). So we set this globally
 # to avoid bugs.
-#
+
 # Get a multiprocessing context because some test / third party library will
 # set start_method when imported, and setting again triggers `RuntimeError`.
 mp = mp.get_context(method="spawn")
 
+# test_multiprocessing_contexts and test_nested_tensor_multiprocessing ask for
+# forkserver explicitly. On Python 3.14 that server imports __main__ before
+# os.fork(). Importing this module runs is_available() here and in
+# common_utils, which registers the accelerator at-fork handler, so every
+# worker forked from that server fails to initialize the accelerator.
+# Preload torch instead of __main__. Importing torch does not initialize the
+# accelerator (see test_lazy_init) and workers still share that import.
+# This is a test workaround. A user script that touches the accelerator at
+# import and then uses forkserver, explicitly or as the 3.14 default on
+# non-macOS POSIX, still fails. torch.utils.data and torch.multiprocessing
+# do not handle that case.
+if "forkserver" in torch.multiprocessing.get_all_start_methods():
+    torch.multiprocessing.set_forkserver_preload(["torch"])
 
 # 60s of timeout?
 # Yes, in environments where physical CPU resources are shared, e.g., CI, the
