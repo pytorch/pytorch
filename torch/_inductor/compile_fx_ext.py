@@ -27,13 +27,14 @@ from torch._inductor.output_code import (
 )
 from torch._inductor.utils import patch_subprocess_env
 from torch._subclasses import FakeTensorMode
+from torch.fx.graph_module import _get_attr
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
 from .codegen.common import custom_backend_codegen_configs
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
 from .debug import DebugContext
-from .graph import GraphLowering
+from .graph import _is_cpu_strided_tensor_pinned, GraphLowering
 from .virtualized import V
 
 
@@ -424,11 +425,34 @@ class _CapturedLogs:
                 logger.setLevel(level)
 
 
+def _pinned_constant_targets(gm: torch.fx.GraphModule) -> tuple[str, ...]:
+    """
+    Names of graph constants pinned in this process.
+
+    A compile worker reproduces pin_memory codegen from this metadata instead
+    of touching real pinned memory. Only the root graph is scanned; sorted so
+    the pickled payload is deterministic.
+    """
+    return tuple(
+        sorted(
+            node.target
+            for node in gm.graph.find_nodes(op="get_attr")
+            if isinstance(t := _get_attr(gm, node.target), torch.Tensor)
+            and _is_cpu_strided_tensor_pinned(t)
+        )
+    )
+
+
 class _SerializedFxCompile(FxCompile):
     """
     This is used to represent an FxCompile which occurs across a serialized
     boundary.
     """
+
+    # Compiles deliberately bypassed before or during serialization (HOPs,
+    # triton kernel wrappers, non pickle-safe ops). Tests use this to tell
+    # expected in-process fallbacks apart from graphs that failed to pickle.
+    _stat_serialize_fallbacks: int = 0
 
     @override
     def codegen_and_compile(
@@ -481,6 +505,7 @@ class _SerializedFxCompile(FxCompile):
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
             log.debug("Skipping %s compile: %s", type(self), e)
+            _SerializedFxCompile._stat_serialize_fallbacks += 1
             return None
 
         # User-kernel wrapper nodes contain references to a kernel side table
@@ -489,6 +514,7 @@ class _SerializedFxCompile(FxCompile):
             log.debug(
                 "Skipping %s compile: graph contains user kernel wrappers", type(self)
             )
+            _SerializedFxCompile._stat_serialize_fallbacks += 1
             return None
 
         context = torch._guards.TracingContext.try_get()
@@ -514,6 +540,9 @@ class _SerializedFxCompile(FxCompile):
         from pickle import PicklingError
 
         try:
+            # Read by the compile worker to reproduce pin_memory codegen;
+            # popped in the finally so the caller's gm is unchanged.
+            gm.meta["pinned_constants"] = _pinned_constant_targets(gm)
             input = _WireProtocolInput(
                 gm,
                 example_inputs,
@@ -533,7 +562,14 @@ class _SerializedFxCompile(FxCompile):
                 fake_tensor_mode,
             ).serialize()
             return (input, constants)
-        except (AttributeError, BypassFxGraphCache, PicklingError):
+        except BypassFxGraphCache as e:
+            # The ops filter bypasses graphs with non pickle-safe ops (e.g.
+            # prims.convert_element_type after decompositions); expected, like
+            # the pre-serialization bypasses above.
+            log.debug("Skipping %s compile: %s", type(self), e)
+            _SerializedFxCompile._stat_serialize_fallbacks += 1
+            return None
+        except (AttributeError, PicklingError):
             # For example: AttributeError: Can't pickle local object
             # 'make_opaque_unary_fn.<locals>.OpaqueUnaryFn'
 
@@ -541,6 +577,8 @@ class _SerializedFxCompile(FxCompile):
             log.warning("Unable to pickle input graph or example inputs", exc_info=True)
 
             return None
+        finally:
+            gm.meta.pop("pinned_constants", None)
 
     @abstractmethod
     def _send_to_child(

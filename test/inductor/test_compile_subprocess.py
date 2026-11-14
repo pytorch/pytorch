@@ -16,6 +16,7 @@ from unittest.mock import patch
 import torch
 import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
+from torch._inductor.compile_fx_ext import _SerializedFxCompile
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
@@ -106,11 +107,31 @@ test_failures.update(
     }
 )
 
+# Tests exempt from tearDown's no-in-process-compile check: they use
+# in-process compilation as part of their expected flow (async compile runs
+# the in-process path first; progressive compilation's fast scheme is one),
+# or their graphs reference test-local classes, which GraphPickler cannot
+# pickle, so the in-process fallback is expected. Keyed by base name; the
+# device suffix is stripped before matching since the fallback reasons are
+# device-independent.
+_EXPECTED_IN_PROCESS_COMPILE = frozenset(
+    {
+        "test_async",
+        "test_progressive",
+        "test_aoti_eager_dtype_device_layout",
+        "test_device_context_with_python_scalar",
+        "test_dont_constant_fold",
+        "test_inductor_multiple_specializations",
+        "test_sdpa_unaligned_mask_freezing",
+    }
+)
+
 
 class TestSubprocess(TestCase):
     def setUp(self):
         torch._dynamo.reset()
         FxCompile._reset_stats()
+        _SerializedFxCompile._stat_serialize_fallbacks = 0
 
         super().setUp()
 
@@ -123,16 +144,24 @@ class TestSubprocess(TestCase):
         )
 
     def tearDown(self):
-        # Check that the test didn't instigate an in-process compile - which
-        # would mean that something about the fx graph failed to serialize. If
-        # some tests are expected to fail then we should probably add a list of
-        # expected failures here.
-        self.assertEqual(
-            FxCompile._compile_stats[type(_InProcessFxCompile)].codegen_and_compile, 0
-        )
-        self._stack.close()
-        TestCase.tearDown(self)
-        torch._dynamo.reset()
+        try:
+            # Check that the test didn't instigate an in-process compile - which
+            # would mean that something about the fx graph failed to pickle.
+            # Deliberate serialization bypasses (e.g. HOPs, triton kernel
+            # wrappers, non pickle-safe ops) are expected, so they are allowed
+            # through.
+            name = self._testMethodName
+            if device := getattr(self, "device", ""):
+                name = name.removesuffix(f"_{device}")
+            if name not in _EXPECTED_IN_PROCESS_COMPILE:
+                self.assertEqual(
+                    FxCompile._compile_stats[_InProcessFxCompile].codegen_and_compile,
+                    _SerializedFxCompile._stat_serialize_fallbacks,
+                )
+        finally:
+            self._stack.close()
+            TestCase.tearDown(self)
+            torch._dynamo.reset()
 
     @requires_gpu()
     @requires_triton()
@@ -270,6 +299,95 @@ class TestSubprocess(TestCase):
             self.assertGreater(_AsyncFxCompile._stat_eager_runs, 0)
             self.assertEqual(_AsyncFxCompile._stat_bg_started, 2)
             self.assertEqual(_AsyncFxCompile._stat_bg_finished, 2)
+
+    @requires_gpu()
+    def test_pinned_constants(self):
+        def inline():
+            return torch.tensor([1, 2, 3], pin_memory=True)
+
+        def buffer():
+            return torch.tensor([[1.0] * 128] * 128, pin_memory=True)
+
+        for fn in (inline, buffer):
+            with self.subTest(fn=fn.__name__):
+                torch._dynamo.reset()
+                out = torch.compile(fn)()
+                self.assertTrue(out.is_pinned())
+                self.assertEqual(out, fn())
+                # These graphs must serialize and compile in the subprocess;
+                # a fallback here would hide the pinned-ness regression.
+                self.assertEqual(_SerializedFxCompile._stat_serialize_fallbacks, 0)
+
+    @requires_gpu()
+    def test_pinned_constants_rebind(self):
+        from torch._inductor.output_code import CompiledFxGraphConstantsWithGm
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm._pinned = pinned = torch.tensor([1, 2, 3], pin_memory=True)
+
+        class _G:
+            pinned_constant_names = {"c0": "_pinned"}
+            frozen_param_names = {}
+            constants = {}
+            opaque_value_type_classes = {}
+
+        unwrapped = CompiledFxGraphConstantsWithGm(gm).unwrap(_G())
+        self.assertIs(unwrapped["c0"], pinned)
+
+    @requires_gpu()
+    def test_pinned_constants_pruned(self):
+        # Names pruned from graph.constants (e.g. by the CPP GEMM template)
+        # must not stay in pinned_constant_names, else unwrap fails on the
+        # deleted module attribute.
+        from collections import Counter
+        from types import SimpleNamespace
+
+        from torch._inductor.output_code import (
+            CompiledFxGraph,
+            CompiledFxGraphConstantsWithGm,
+        )
+        from torch._inductor.utils import BoxedBool
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm._x = x = torch.tensor([1.0])
+        # No _pruned attribute on gm: pruned constants are deleted from the
+        # module, like the CPP GEMM template does for weights.
+        graph = SimpleNamespace(
+            cache_key="",
+            cache_path=None,
+            cache_linemap=[],
+            device_types=[],
+            device_idxs=[],
+            mutated_inputs=[],
+            mutated_input_idxs=[],
+            constants={"c1": x},
+            allocated_constant_name={"c1": "_x"},
+            pinned_constant_names={"c0": "_pruned", "c1": "_x"},
+            torchbind_constants={},
+            opaque_value_type_classes={},
+            kernel_free_cudagraph=False,
+            partition_maps=None,
+        )
+        cfg = CompiledFxGraph(
+            None,
+            graph,
+            gm,
+            [],
+            None,
+            {},
+            Counter(),
+            BoxedBool(False),
+            [],
+            (),
+            None,
+            {},
+            (),
+            "",
+            "",
+        )
+        self.assertEqual(cfg.pinned_constant_names, {"c1": "_x"})
+        unwrapped = CompiledFxGraphConstantsWithGm(gm).unwrap(cfg)
+        self.assertIs(unwrapped["c1"], x)
 
 
 if RUN_CPU:
