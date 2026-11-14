@@ -9392,6 +9392,49 @@ def sym_numel(a):
     return a.get_numel()
 
 
+@register_lowering(aten.sym_storage_offset.default)
+def sym_storage_offset(a):
+    # Read the offset off the IR tensor. Without a lowering this op falls back to
+    # being re-executed on a tensor rebuilt by ir_node_to_tensor(), which
+    # allocates with torch.empty_strided() and therefore always reports 0.
+    #
+    # Like as_strided, this op's result depends on a storage, and the contract
+    # is the inverse of the as_strided lowering rather than eager's
+    # storage_offset(): the offset is relative to the IR storage `a` resolves
+    # to, which is the storage as_strided resolves its base to. That makes
+    # auto_functionalized_v2's regenerated view
+    # as_strided(base, size, stride, sym_storage_offset(view)) land on `view`.
+    # The two agree with eager when that storage is an Inductor buffer or a
+    # graph input. When it is the output of an aliasing fallback, e.g. a
+    # view.dtype that changes the element size, both count from that output
+    # instead of from the eager storage. Dynamo and export compute a
+    # user-level storage_offset() symbolically, so this op only reaches
+    # Inductor from such regenerated views.
+    a.realize()
+    x = a.data if isinstance(a, TensorBox) else a
+    if isinstance(x, ir.BaseView):
+        # A lazy view (a slice, a diagonal, a same-width dtype view) keeps its
+        # start in its indexing, not in its base's layout; a ReinterpretView
+        # makes the offset explicit.
+        try:
+            x = ir.ExternKernel.convert_to_reinterpret_view(x)
+        except NotImplementedError as e:
+            # The view's indexing is not affine in Inductor's layout of its base,
+            # e.g. Inductor chose other strides for the base than eager did. Then
+            # as_strided with eager's size and stride cannot reproduce the view
+            # at any offset, so fail loudly instead of returning a wrong value.
+            raise NotImplementedError(
+                f"sym_storage_offset of a view with no affine offset: {x}"
+            ) from e
+    storage, layout = ir.as_storage_and_layout(x, freeze=False)
+    offset = layout.offset
+    if isinstance(storage.data, ir.InputBuffer):
+        # Graph-input layouts are relative to the input tensor; as_strided
+        # subtracts the input's own storage offset, so add it back here.
+        offset += V.graph.graph_input_storage_offsets.get(storage.data.get_name(), 0)
+    return offset
+
+
 def _unwrap_symbolic_magic_arg(x):
     if isinstance(x, SymTypes):
         return x.node.expr
