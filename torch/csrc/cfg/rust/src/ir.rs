@@ -53,6 +53,21 @@ pub enum Op {
     CellSet(V, V),
     /// Any operand but the code object can be NONE.
     MakeFunction { code: V, defaults: V, kwdefaults: V, annotations: V, closure: V },
+    /// Reads a frame slot: a register that holds a local variable outside of
+    /// SSA form, because an exception handler has to find its current value.
+    /// The result is undefined if the slot is empty.
+    LoadSlot(V),
+    /// Writes a frame slot; storing the undefined value empties it.
+    StoreSlot(V, V),
+    /// The exception a handler block was entered with. First in its block.
+    CaughtException,
+    /// Makes exc the exception being handled; yields the one that was (None
+    /// if there was none).
+    PushExcInfo(V),
+    /// Restores the exception being handled to what PushExcInfo yielded.
+    PopExcInfo(V),
+    /// Whether exc matches the class, or tuple of classes, of an except clause.
+    ExcMatch(V, V),
     LoadAttr(V, u32),
     StoreAttr { obj: V, name: u32, val: V },
     StoreGlobal(u32, V),
@@ -151,7 +166,11 @@ pub enum Term {
     Br { cond: V, then_: B, else_: B },
     BrNull { v: V, null: B, nonnull: B },
     Return(V),
+    /// `raise exc from cause`; without an exception (NONE), a bare `raise` of
+    /// the exception being handled.
     Raise { exc: V, cause: V },
+    /// Raises exc again as it is, without a new traceback entry.
+    Reraise(V),
 }
 
 impl Term {
@@ -160,11 +179,12 @@ impl Term {
             Term::Jump(_) => {}
             Term::Br { cond, .. } => f(*cond),
             Term::BrNull { v, .. } => f(*v),
-            Term::Return(v) => f(*v),
+            Term::Return(v) | Term::Reraise(v) => f(*v),
             Term::Raise { exc, cause } => {
-                f(*exc);
-                if *cause != NONE {
-                    f(*cause);
+                for v in [exc, cause] {
+                    if *v != NONE {
+                        f(*v);
+                    }
                 }
             }
         }
@@ -175,7 +195,7 @@ impl Term {
             Term::Jump(b) => vec![*b],
             Term::Br { then_, else_, .. } => vec![*then_, *else_],
             Term::BrNull { null, nonnull, .. } => vec![*nonnull, *null],
-            Term::Return(_) | Term::Raise { .. } => vec![],
+            Term::Return(_) | Term::Raise { .. } | Term::Reraise(_) => vec![],
         }
     }
 }
@@ -188,7 +208,12 @@ impl Op {
             }
         };
         match self {
-            Op::Const(_) | Op::LoadGlobal(_) | Op::LoadDeref(_) | Op::LoadClosure(_) => {}
+            Op::Const(_)
+            | Op::LoadGlobal(_)
+            | Op::LoadDeref(_)
+            | Op::LoadClosure(_)
+            | Op::LoadSlot(_)
+            | Op::CaughtException => {}
             Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
                 f(*code);
                 for v in [defaults, kwdefaults, annotations, closure] {
@@ -197,6 +222,9 @@ impl Op {
             }
             Op::LoadAttr(a, _)
             | Op::StoreDeref(_, a)
+            | Op::StoreSlot(_, a)
+            | Op::PushExcInfo(a)
+            | Op::PopExcInfo(a)
             | Op::MakeCell(a)
             | Op::CellGet(a, _)
             | Op::StoreGlobal(_, a)
@@ -224,6 +252,7 @@ impl Op {
             | Op::SetUpdate(a, b)
             | Op::DictUpdate(a, b)
             | Op::DictMerge(a, b)
+            | Op::ExcMatch(a, b)
             | Op::CellSet(a, b) => {
                 f(*a);
                 f(*b)
@@ -334,6 +363,10 @@ pub struct Block {
     pub term: Term,
     pub preds: Vec<B>,
     pub bc_start: u32,
+    /// The block that handles an exception raised in this one, or NONE. A
+    /// handler block is only entered that way: its `preds` are the blocks it
+    /// catches from, and it starts with `caught_exception`.
+    pub handler: B,
 }
 
 /// Executable code of one basic block: the generic code of the block, or one
@@ -375,6 +408,11 @@ pub struct Function {
     pub closure: Option<PyObj>,
     /// Names of the variables the closure's cells hold.
     pub freevars: Vec<String>,
+    /// The register a caught exception is handed to its handler in, or NONE
+    /// for a function without handlers.
+    pub exc_reg: V,
+    /// The frame slots (see `Op::LoadSlot`).
+    pub slots: Vec<V>,
     pub defaults: Option<PyObj>,
     pub kwdefaults: Option<PyObj>,
     pub argcount: usize,
@@ -464,6 +502,12 @@ impl Function {
             Op::StoreDeref(i, v) => format!("store_deref {} {}", i, n(v)),
             Op::LoadClosure(i) => format!("load_closure {}", i),
             Op::MakeCell(v) => format!("make_cell {}", n(v)),
+            Op::LoadSlot(s) => format!("load_slot {}", n(s)),
+            Op::StoreSlot(s, v) => format!("store_slot {} {}", n(s), n(v)),
+            Op::CaughtException => "caught_exception".to_string(),
+            Op::PushExcInfo(v) => format!("push_exc_info {}", n(v)),
+            Op::PopExcInfo(v) => format!("pop_exc_info {}", n(v)),
+            Op::ExcMatch(e, t) => format!("exc_match {} {}", n(e), n(t)),
             Op::CellGet(c, name) => format!("cell_get {} '{}'", n(c), self.name_str(*name)),
             Op::CellSet(c, v) => format!("cell_set {} {}", n(c), n(v)),
             Op::MakeFunction { code, closure, .. } => {
@@ -563,8 +607,11 @@ impl Function {
                 format!("br_exhausted {} b{} b{}", self.value_name(*v), null, nonnull)
             }
             Term::Return(v) => format!("return {}", self.value_name(*v)),
+            Term::Reraise(v) => format!("reraise {}", self.value_name(*v)),
             Term::Raise { exc, cause } => {
-                if *cause == NONE {
+                if *exc == NONE {
+                    "raise".to_string()
+                } else if *cause == NONE {
                     format!("raise {}", self.value_name(*exc))
                 } else {
                     format!("raise {} from {}", self.value_name(*exc), self.value_name(*cause))
@@ -587,12 +634,15 @@ impl Function {
     pub fn dump_block_header(&self, out: &mut String, b: usize) {
         let block = &self.blocks[b];
         let preds: Vec<String> = block.preds.iter().map(|p| format!("b{}", p)).collect();
+        let handler =
+            if block.handler == NONE { String::new() } else { format!(", handler: b{}", block.handler) };
         let _ = writeln!(
             out,
-            "b{}:    ; line {}, preds: [{}]",
+            "b{}:    ; line {}, preds: [{}]{}",
             b,
             self.line_of(block.bc_start),
-            preds.join(", ")
+            preds.join(", "),
+            handler
         );
         for phi in &block.phis {
             let srcs: Vec<String> = phi

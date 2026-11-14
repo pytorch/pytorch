@@ -33,7 +33,13 @@ struct RawBlock {
     start: usize,
     end: usize,
     succs: Vec<usize>,
+    /// For a handler block: the blocks whose exceptions it catches.
     preds: Vec<usize>,
+    /// The block that catches an exception raised in this one.
+    handler: Option<usize>,
+    /// For a handler block: the stack depth it unwinds to, and whether the
+    /// offset of the raising instruction is pushed under the exception.
+    catches: Option<(usize, bool)>,
 }
 
 struct Builder<'a> {
@@ -72,6 +78,10 @@ struct Builder<'a> {
     out_terms: Vec<Option<Term>>,
     extra_consts: Vec<PyObj>,
     nconsts: u32,
+    /// Locals kept in frame slots instead of SSA values, and their slots.
+    slots: HashMap<u32, V>,
+    /// Instructions for the start of the entry block.
+    prologue: Vec<Inst>,
 }
 
 impl<'a> Builder<'a> {
@@ -201,7 +211,10 @@ impl<'a> Builder<'a> {
     }
 
     fn translate_block(&mut self, b: usize) -> PyResult<()> {
-        let depth = self.entry_depth[b].unwrap_or(0);
+        // A handler finds the stack as it was below its depth; what is above
+        // it (the raising offset, the exception) is pushed further down.
+        let catches = self.cfg[b].catches;
+        let depth = catches.map_or(self.entry_depth[b].unwrap_or(0), |(depth, _)| depth);
         let mut stack: Vec<V> = Vec::with_capacity(depth + 8);
         for i in 0..depth {
             let v = if self.null_slots[b].get(i).copied().unwrap_or(false) {
@@ -212,7 +225,20 @@ impl<'a> Builder<'a> {
             stack.push(v);
         }
         self.entry_stacks[b] = stack.clone();
-        let mut insts: Vec<Inst> = Vec::new();
+        let mut insts: Vec<Inst> = if b == 0 { std::mem::take(&mut self.prologue) } else { Vec::new() };
+        if let Some((_, lasti)) = catches {
+            let off = self.instrs[self.cfg[b].start].off;
+            if lasti {
+                // Only used to restore a line number we do not track.
+                let none = self.extra_const(unsafe { PyObj::from_borrowed(ffi::Py_None()) });
+                let v = self.new_value();
+                insts.push(Inst { dst: v, op: Op::Const(none), bc: off, kills: Vec::new() });
+                stack.push(v);
+            }
+            let exc = self.new_value();
+            insts.push(Inst { dst: exc, op: Op::CaughtException, bc: off, kills: Vec::new() });
+            stack.push(exc);
+        }
         let mut kwnames: u32 = NONE;
         let mut term: Option<Term> = None;
         let (start, end) = (self.cfg[b].start, self.cfg[b].end);
@@ -298,6 +324,28 @@ impl<'a> Builder<'a> {
                 Bc::LoadConst => {
                     let v = emit!(off, Op::Const(arg));
                     stack.push(v);
+                }
+                // A local that lives in a frame slot is read and written there.
+                Bc::LoadFast | Bc::LoadFastCheck | Bc::LoadFastAndClear | Bc::DeleteFast
+                    if self.slots.contains_key(&arg) =>
+                {
+                    let slot = self.slots[&arg];
+                    let v = emit!(off, Op::LoadSlot(slot));
+                    self.value_names[v as usize] = self.varnames.get(arg as usize).cloned();
+                    if matches!(ins.op, Bc::LoadFastCheck | Bc::DeleteFast) {
+                        let name = self.varname_const(arg)?;
+                        effect!(off, Op::CheckBound(v, name));
+                    }
+                    if matches!(ins.op, Bc::LoadFastAndClear | Bc::DeleteFast) {
+                        effect!(off, Op::StoreSlot(slot, UNDEF));
+                    }
+                    if ins.op != Bc::DeleteFast {
+                        stack.push(v);
+                    }
+                }
+                Bc::StoreFast if self.slots.contains_key(&arg) => {
+                    let v = pop_value!();
+                    effect!(off, Op::StoreSlot(self.slots[&arg], v));
                 }
                 Bc::LoadFast | Bc::LoadFastCheck => {
                     let v = self.read_var(arg, b);
@@ -648,9 +696,30 @@ impl<'a> Builder<'a> {
                             let cause = pop_value!();
                             (pop_value!(), cause)
                         }
-                        _ => return unsupported("bare raise is not supported"),
+                        _ => (NONE, NONE),
                     };
                     term = Some(Term::Raise { exc, cause });
+                }
+                Bc::PushExcInfo => {
+                    let exc = pop_value!();
+                    let previous = emit!(off, Op::PushExcInfo(exc));
+                    stack.push(previous);
+                    stack.push(exc);
+                }
+                Bc::PopExcept => {
+                    let previous = pop_value!();
+                    effect!(off, Op::PopExcInfo(previous));
+                }
+                Bc::CheckExcMatch => {
+                    let class = pop_value!();
+                    let exc = peek!(1);
+                    let v = emit!(off, Op::ExcMatch(exc, class));
+                    self.bool_values.insert(v);
+                    stack.push(v);
+                }
+                Bc::Reraise => {
+                    let exc = pop_value!();
+                    term = Some(Term::Reraise(exc));
                 }
                 Bc::LoadAssertionError => {
                     let obj = unsafe { PyObj::from_borrowed(ffi::PyExc_AssertionError) };
@@ -664,7 +733,7 @@ impl<'a> Builder<'a> {
                     let v = emit!(off, Op::Format { val, conv: (arg & 3) as u8, spec });
                     stack.push(v);
                 }
-                Bc::Reraise | Bc::Other => {
+                Bc::Other => {
                     return unsupported(format!(
                         "bytecode {} (line {}) is not supported",
                         self.table.names[ins.code as usize],
@@ -758,9 +827,23 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
 
     let exc_table = code.getattr("co_exceptiontable")?;
     let exc_table = exc_table.downcast::<PyBytes>()?;
-    for entry in bytecode::parse_exception_table(exc_table.as_bytes()) {
-        if !handler_is_transparent(&instrs, &index_of_off, entry.target) {
-            return unsupported("try/except/finally and with blocks are not supported");
+    let mut handled = bytecode::parse_exception_table(exc_table.as_bytes());
+    // The handlers of an inlined comprehension only restore its variable and
+    // re-raise. As long as nothing in the function catches exceptions, that
+    // variable is never looked at again and they can be left out.
+    if handled.iter().all(|e| handler_is_transparent(&instrs, &index_of_off, e.target)) {
+        handled.clear();
+    }
+    // Locals assigned where an exception can be caught: a handler has to
+    // find the value they had when the exception was raised.
+    let mut slot_vars: Vec<u32> = Vec::new();
+    for ins in &instrs {
+        let covered = handled.iter().any(|e| ins.off >= e.start && ins.off < e.end);
+        if covered
+            && matches!(ins.op, Bc::StoreFast | Bc::DeleteFast | Bc::LoadFastAndClear)
+            && !slot_vars.contains(&ins.arg)
+        {
+            slot_vars.push(ins.arg);
         }
     }
 
@@ -786,6 +869,18 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         }
         if (ins.op.ends_flow() || ins.op.is_conditional_jump()) && i + 1 < instrs.len() {
             leaders.insert(i + 1);
+        }
+    }
+    // A block is either wholly inside the range of a handler or outside it.
+    for entry in &handled {
+        for off in [entry.start, entry.end, entry.target] {
+            match index_of_off.get(&off) {
+                Some(i) => {
+                    leaders.insert(*i);
+                }
+                None if off == entry.end => {}
+                None => return unsupported("exception table does not line up with the bytecode"),
+            }
         }
     }
     let mut starts: Vec<usize> = leaders.into_iter().collect();
@@ -822,7 +917,20 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
                 None => return unsupported("control falls off the end of the bytecode"),
             }
         }
-        raw.push(RawBlock { start: *start, end, succs: out, preds: Vec::new() });
+        raw.push(RawBlock { start: *start, end, succs: out, preds: Vec::new(), handler: None, catches: None });
+    }
+    for b in 0..raw.len() {
+        let off = instrs[raw[b].start].off;
+        let Some(entry) = handled.iter().find(|e| off >= e.start && off < e.end) else {
+            continue;
+        };
+        let h = raw_of_start[&index_of_off[&entry.target]];
+        let catches = (entry.depth as usize, entry.lasti);
+        if raw[h].catches.is_some_and(|c| c != catches) {
+            return unsupported("a handler is entered with different stack depths");
+        }
+        raw[h].catches = Some(catches);
+        raw[b].handler = Some(h);
     }
 
     // Reverse postorder over the reachable blocks; this is also the block
@@ -832,9 +940,11 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     let mut work: Vec<(usize, usize)> = vec![(0, 0)];
     state[0] = 1;
     while let Some((b, i)) = work.pop() {
-        if i < raw[b].succs.len() {
+        // The handler counts as one more successor, so that it is numbered
+        // after everything it catches.
+        let next = raw[b].succs.get(i).copied().or(if i == raw[b].succs.len() { raw[b].handler } else { None });
+        if let Some(s) = next {
             work.push((b, i + 1));
-            let s = raw[b].succs[i];
             if state[s] == 0 {
                 state[s] = 1;
                 work.push((s, 0));
@@ -855,14 +965,21 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             end: raw[*b].end,
             succs: raw[*b].succs.iter().map(|s| new_id[*s]).collect(),
             preds: Vec::new(),
+            handler: raw[*b].handler.map(|h| new_id[h]),
+            catches: raw[*b].catches,
         })
         .collect();
     for b in 0..cfg.len() {
-        for s in cfg[b].succs.clone() {
+        // For SSA construction the blocks a handler catches from are its
+        // predecessors: what it reads has one value in all of them.
+        for s in cfg[b].succs.iter().chain(cfg[b].handler.iter()).copied().collect::<Vec<_>>() {
             if !cfg[s].preds.contains(&b) {
                 cfg[s].preds.push(b);
             }
         }
+    }
+    if cfg.iter().any(|block| block.catches.is_some() && block.preds.iter().any(|p| cfg[*p].handler.is_none())) {
+        return unsupported("an exception handler is also a jump target");
     }
     if !cfg[0].preds.is_empty() {
         return unsupported("the entry block is a jump target");
@@ -935,6 +1052,8 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             out_terms: (0..nblocks).map(|_| None).collect(),
             extra_consts: Vec::new(),
             nconsts,
+            slots: HashMap::new(),
+            prologue: Vec::new(),
         };
         let undef = builder.new_value();
         debug_assert_eq!(undef, UNDEF);
@@ -949,6 +1068,25 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
                 builder.write_var(i as u32, 0, UNDEF);
             }
         }
+        for var in &slot_vars {
+            let slot = builder.new_value();
+            builder.value_names[slot as usize] = varnames.get(*var as usize).cloned();
+            builder.slots.insert(*var, slot);
+            // An argument starts out in the register it was bound to.
+            if (*var as usize) < nparams {
+                builder.prologue.push(Inst {
+                    dst: NONE,
+                    op: Op::StoreSlot(slot, params[*var as usize]),
+                    bc: 0,
+                    kills: Vec::new(),
+                });
+            }
+        }
+        for b in 0..nblocks {
+            if let Some((depth, lasti)) = builder.cfg[b].catches {
+                builder.entry_depth[b] = Some(depth + lasti as usize + 1);
+            }
+        }
         builder.entry_depth[0] = Some(0);
         builder.sealed[0] = true;
         for b in 0..nblocks {
@@ -957,7 +1095,9 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             }
             builder.translate_block(b)?;
             builder.filled[b] = true;
-            for s in builder.cfg[b].succs.clone() {
+            let after: Vec<usize> =
+                builder.cfg[b].succs.iter().chain(builder.cfg[b].handler.iter()).copied().collect();
+            for s in after {
                 if builder.cfg[s].preds.iter().all(|p| builder.filled[*p]) {
                     builder.seal(s);
                 }
@@ -1012,6 +1152,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             term,
             preds: builder.cfg[b].preds.iter().map(|p| *p as B).collect(),
             bc_start: instrs[builder.cfg[b].start].off,
+            handler: builder.cfg[b].handler.map_or(NONE, |h| h as B),
         });
     }
     for phi in &builder.phi_order {
@@ -1039,6 +1180,9 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         all_consts.push(PyObj::from_borrowed(ffi::Py_False()));
         all_consts.push(PyObj::from_borrowed(ffi::Py_None()));
     }
+    let exc_reg = if handled.is_empty() { NONE } else { builder.new_value() };
+    let mut slots: Vec<V> = builder.slots.values().copied().collect();
+    slots.sort_unstable();
     let nvalues = builder.forward.len() as u32;
     let value_names = std::mem::take(&mut builder.value_names);
     drop(builder);
@@ -1091,6 +1235,8 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         builtins: unsafe { PyObj::from_borrowed(builtins.as_ptr()) },
         closure: opt_attr("__closure__")?,
         freevars: code.getattr("co_freevars")?.extract()?,
+        exc_reg,
+        slots,
         defaults: opt_attr("__defaults__")?,
         kwdefaults: opt_attr("__kwdefaults__")?,
         argcount,
@@ -1136,12 +1282,20 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         ($($v:expr),*) => {{ $( *$v = f(*$v)?; )* }};
     }
     match op {
-        Op::Const(_) | Op::LoadGlobal(_) | Op::LoadDeref(_) | Op::LoadClosure(_) => {}
+        Op::Const(_)
+        | Op::LoadGlobal(_)
+        | Op::LoadDeref(_)
+        | Op::LoadClosure(_)
+        | Op::LoadSlot(_)
+        | Op::CaughtException => {}
         Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
             r!(code, defaults, kwdefaults, annotations, closure)
         }
         Op::LoadAttr(a, _)
         | Op::StoreDeref(_, a)
+        | Op::StoreSlot(_, a)
+        | Op::PushExcInfo(a)
+        | Op::PopExcInfo(a)
         | Op::MakeCell(a)
         | Op::CellGet(a, _)
         | Op::StoreGlobal(_, a)
@@ -1169,6 +1323,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::SetUpdate(a, b)
         | Op::DictUpdate(a, b)
         | Op::DictMerge(a, b)
+        | Op::ExcMatch(a, b)
         | Op::CellSet(a, b) => r!(a, b),
         Op::StoreAttr { obj, val, .. } => r!(obj, val),
         Op::SetItem { obj, key, val } => r!(obj, key, val),
@@ -1206,7 +1361,7 @@ pub fn rewrite_term_uses(term: &mut Term, f: &mut dyn FnMut(V) -> PyResult<V>) -
         Term::Jump(_) => {}
         Term::Br { cond, .. } => *cond = f(*cond)?,
         Term::BrNull { v, .. } => *v = f(*v)?,
-        Term::Return(v) => *v = f(*v)?,
+        Term::Return(v) | Term::Reraise(v) => *v = f(*v)?,
         Term::Raise { exc, cause } => {
             *exc = f(*exc)?;
             *cause = f(*cause)?;

@@ -221,6 +221,7 @@ fn unroll(func: &mut Function, lp: &Loop) {
         term: Term::Br { cond: holds, then_: entry, else_: h as B },
         preds: vec![lp.pre as B],
         bc_start: bc,
+        handler: NONE,
     };
     func.blocks[lp.pre].term = Term::Jump(guard as B);
     func.blocks[h].preds[pre_slot] = guard as B;
@@ -257,7 +258,14 @@ fn unroll(func: &mut Function, lp: &Loop) {
         if j == k {
             // The tail stands for the header finding the iterator exhausted.
             let exit = lp.exit;
-            func.blocks.push(Block { phis, insts: Vec::new(), term: Term::Jump(exit as B), preds, bc_start: bc });
+            func.blocks.push(Block {
+                phis,
+                insts: Vec::new(),
+                term: Term::Jump(exit as B),
+                preds,
+                bc_start: bc,
+                handler: NONE,
+            });
             func.blocks[exit].preds.push(tail as B);
             let mut renamed: HashMap<V, V> = HashMap::new();
             let in_loop: HashSet<usize> = lp.blocks.iter().copied().collect();
@@ -314,6 +322,7 @@ fn unroll(func: &mut Function, lp: &Loop) {
                     }),
                     preds: preds.clone(),
                     bc_start: block.bc_start,
+                    handler: NONE,
                 }
             } else {
                 let mut insts = block.insts.clone();
@@ -341,6 +350,7 @@ fn unroll(func: &mut Function, lp: &Loop) {
                     term,
                     preds: block.preds.iter().map(|p| copy(j, position[&(*p as usize)])).collect(),
                     bc_start: block.bc_start,
+                    handler: NONE,
                 }
             };
             debug_assert_eq!(func.blocks.len(), copy(j, pos) as usize);
@@ -355,6 +365,10 @@ pub fn unroll_loops(func: &mut Function) -> usize {
     // Headers that were unrolled stay behind as the fallback of their guard.
     let mut done: HashSet<usize> = HashSet::new();
     let mut unrolled = 0;
+    // Loops of a function that catches exceptions are left alone for now.
+    if func.exc_reg != NONE {
+        return 0;
+    }
     while let Some(lp) = find_loop(func, &done) {
         done.insert(lp.header);
         unroll(func, &lp);
