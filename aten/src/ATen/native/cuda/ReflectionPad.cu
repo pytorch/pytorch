@@ -290,7 +290,9 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
               [b * (channels * width * height) + c * (width * height) +
                reflect_tl_out];
         }
-      } else if (is_right) { // top right
+      }
+      // With large pads a column can be in both the left and the right zone.
+      if (is_right) { // top right
         // TR corner is just (0, cols - 1)
         const int64_t corner_tr_out_row = pad_t;
         const int64_t corner_tr_out_col = pad_l + input_dim_x - 1;
@@ -354,7 +356,8 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
               [b * (channels * width * height) + c * (width * height) +
                reflect_bl_out];
         }
-      } else if (is_right) {
+      }
+      if (is_right) {
         // (rows-1, cols-1)
         const int64_t corner_br_row = input_dim_y - 1;
         const int64_t corner_br_col = input_dim_x - 1;
