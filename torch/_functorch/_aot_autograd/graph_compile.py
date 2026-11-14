@@ -2220,9 +2220,17 @@ def _compute_indices_of_inps_to_detach(
     bw_output = next(reversed(bw_module.graph.find_nodes(op="output")))
     bw_outs = bw_output.args[0]
 
+    num_primal_outs = len(fw_metadata.input_info)
+    mut_grad_indices = [
+        idx
+        for idx in fw_metadata.mutated_inp_runtime_indices
+        if fw_metadata.input_info[idx].mutates_data
+        and fw_metadata.input_info[idx].requires_grad
+    ]
     num_backward_tokens = inner_meta.num_backward_tokens
     expected_bw_outs = (
-        len(fw_metadata.input_info)
+        num_primal_outs
+        + len(mut_grad_indices)
         + inner_meta.num_outputs_rng_offset
         + num_backward_tokens
     )
@@ -2231,16 +2239,13 @@ def _compute_indices_of_inps_to_detach(
             f"expected len(bw_outs) == {expected_bw_outs}, got {len(bw_outs)}"
         )
 
-    bw_outs_no_rng_no_tokens = bw_outs
-    if (inner_meta.num_outputs_rng_offset + num_backward_tokens) > 0:
-        bw_outs_no_rng_no_tokens = bw_outs[
-            : -(inner_meta.num_outputs_rng_offset + num_backward_tokens)
-        ]
-    if len(bw_outs_no_rng_no_tokens) != len(fw_metadata.input_info):
-        raise AssertionError(
-            f"expected len(bw_outs_no_rng_no_tokens) == {len(fw_metadata.input_info)}, "
-            f"got {len(bw_outs_no_rng_no_tokens)}"
+    bw_outs_no_rng_no_tokens = bw_outs[:num_primal_outs]
+    mut_grad_by_idx = dict(
+        zip(
+            mut_grad_indices,
+            bw_outs[num_primal_outs : num_primal_outs + len(mut_grad_indices)],
         )
+    )
 
     for i, bw_out in enumerate(bw_outs_no_rng_no_tokens):
         # If our input experiences a metadata mutation inside the graph (e.g. set_()),
@@ -2253,7 +2258,12 @@ def _compute_indices_of_inps_to_detach(
             fw_metadata.input_info[i].requires_grad
             and not fw_metadata.input_info[i].is_leaf
         )
-        if bw_out is None and not metadata_mutation_in_graph and is_non_leaf:
+        if (
+            bw_out is None
+            and mut_grad_by_idx.get(i) is None
+            and not metadata_mutation_in_graph
+            and is_non_leaf
+        ):
             indices_of_inps_to_detach.append(i)
 
     return indices_of_inps_to_detach

@@ -14,6 +14,7 @@ import itertools
 import pprint
 import typing
 import warnings
+import weakref
 from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -3205,11 +3206,21 @@ def _codegen_backward_epilogue(
     num_bw_tokens = fw_metadata.num_backward_tokens
     is_rng = fw_metadata.is_rng_op_functionalized
     has_subclass = maybe_subclass_meta is not None
+    num_mut_grads = sum(
+        1
+        for idx in getattr(fw_metadata, "mutated_inp_runtime_indices", ())
+        if fw_metadata.input_info[idx].mutates_data
+        and fw_metadata.input_info[idx].requires_grad
+    )
 
     if has_subclass:
-        args = "out, make_subclass_override=None"
+        args = (
+            "out, make_subclass_override=None, ctx=None"
+            if num_mut_grads > 0
+            else "out, make_subclass_override=None"
+        )
     else:
-        args = "out"
+        args = "out, ctx=None" if num_mut_grads > 0 else "out"
     buf = PySourceBuilder(
         "_backward_epilogue", args=args, artifact_name="backward_epilogue"
     )
@@ -3243,15 +3254,48 @@ def _codegen_backward_epilogue(
                 buf.bind(_wrap_=codegen_wrap_fn)
                 buf.writeline("if make_subclass_override is None:")
                 with buf.indent():
-                    buf.writeline("return _wrap_(out)")
-            buf.writeline(
-                "return _wrap_subclasses_(out, "
-                "subclass_metas=_grad_input_metas_, "
-                "included_subclass_symints=True, is_runtime=True, "
-                "make_subclass_override=make_subclass_override)"
-            )
-        else:
-            buf.writeline("return out")
+                    buf.writeline("out = _wrap_(out)")
+                buf.writeline("else:")
+                with buf.indent():
+                    buf.writeline(
+                        "out = _wrap_subclasses_(out, "
+                        "subclass_metas=_grad_input_metas_, "
+                        "included_subclass_symints=True, is_runtime=True, "
+                        "make_subclass_override=make_subclass_override)"
+                    )
+            else:
+                buf.writeline(
+                    "out = _wrap_subclasses_(out, "
+                    "subclass_metas=_grad_input_metas_, "
+                    "included_subclass_symints=True, is_runtime=True, "
+                    "make_subclass_override=make_subclass_override)"
+                )
+
+        if num_mut_grads > 0:
+            buf.bind(torch=torch)
+            buf.writeline(f"_mut_grads = out[-{num_mut_grads}:]")
+            buf.writeline(f"out = out[:-{num_mut_grads}]")
+            buf.writeline("if ctx is not None:")
+            with buf.indent():
+                buf.writeline(
+                    "for _ref, _g in zip(ctx._mutated_inp_refs, _mut_grads):"
+                )
+                with buf.indent():
+                    buf.writeline("_inp = _ref()")
+                    buf.writeline(
+                        "if _g is not None and _inp is not None "
+                        "and _inp.retains_grad and _inp.shape == _g.shape "
+                        "and (_gf := _inp.grad_fn) is not None "
+                        "and any(_nf is ctx for _nf, _ in _gf.next_functions):"
+                    )
+                    with buf.indent():
+                        buf.writeline(
+                            "_inp.grad = (_g.clone() if _g.layout != torch.strided "
+                            "else _g.clone(memory_format=torch.contiguous_format)) "
+                            "if _inp.grad is None else _inp.grad + _g"
+                        )
+
+        buf.writeline("return out")
 
     return buf.build()
 
@@ -3263,6 +3307,13 @@ def _codegen_compiled_forward(
     num_rng: int,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
+
+    mut_grad_indices = [
+        idx
+        for idx in getattr(fw_metadata, "mutated_inp_runtime_indices", ())
+        if fw_metadata.input_info[idx].mutates_data
+        and fw_metadata.input_info[idx].requires_grad
+    ]
 
     buf = PySourceBuilder(
         "_compiled_forward",
@@ -3282,6 +3333,11 @@ def _codegen_compiled_forward(
                     "f'expected BackwardState, got {type(_bw_state)}')"
                 )
             buf.writeline("ctx._compiled_autograd_backward_state = _bw_state")
+
+        if mut_grad_indices:
+            buf.bind(_weakref_ref=weakref.ref)
+            refs = ", ".join(f"_weakref_ref(args[{idx}])" for idx in mut_grad_indices)
+            buf.writeline(f"ctx._mutated_inp_refs = ({refs},)")
 
         if num_rng > 0:
             buf.writeline("args = _rng_add_(ctx, args)")
@@ -3427,7 +3483,10 @@ def _codegen_compiled_backward(
         buf.writeline("def impl_fn(double_ctx=None):")
         with buf.indent():
             buf.writeline("out = _impl_(_ctx_, all_args)")
-            buf.writeline("return _epilogue_(out)")
+            buf.writeline(
+                "return _epilogue_(out, ctx=_ctx_) "
+                "if hasattr(_ctx_, '_mutated_inp_refs') else _epilogue_(out)"
+            )
 
         buf.writeline(
             "if (torch._C._is_key_in_tls('context')"
