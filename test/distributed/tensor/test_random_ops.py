@@ -8,7 +8,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
 from torch.distributed._local_tensor import LocalTensor, maybe_run_for_local_tensor
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -1106,6 +1106,55 @@ DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
 DistTensorRandomOpsTest3DWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomOpsTest3D,
 )
+
+
+class DTensorDeviceMismatchRandomOpsTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    def _cpu_offloaded_linear(self):
+        # fully_shard with CPUOffloadPolicy keeps the mesh on the accelerator,
+        # so to_empty(device="cpu") yields CPU local tensors on that mesh.
+        lin = torch.nn.Linear(4, 4, bias=False)
+        fully_shard(
+            lin, mesh=self.build_device_mesh(), offload_policy=CPUOffloadPolicy()
+        )
+        lin.to_empty(device="cpu")
+        return lin
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_random_op_on_cpu_offloaded_param_raises(self):
+        lin = self._cpu_offloaded_linear()
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(RuntimeError, "local tensors on cpu"),
+        ):
+            lin.weight.normal_()
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_random_op_on_accelerator_local_tensor_with_cpu_mesh_raises(self):
+        # e.g. module.to_empty(device=...) on CPU-mesh DTensor params keeps the mesh.
+        cpu_mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        cpu_dtensor = DTensor.from_local(torch.empty(4, 4), cpu_mesh, [Replicate()])
+        dtensor = torch.empty_like(cpu_dtensor, device=self.device_type)
+        with self.assertRaisesRegex(
+            RuntimeError, f"local tensors on {self.device_type}"
+        ):
+            dtensor.normal_()
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_random_op_on_cpu_offloaded_param_with_distribute_region_disabled(self):
+        lin = self._cpu_offloaded_linear()
+        torch.distributed.tensor.randn(4, device_mesh=self.build_device_mesh())
+        random._rng_tracker.distribute_region_enabled = False
+        with torch.no_grad():
+            samples = [lin.weight.normal_().to_local().clone() for _ in range(2)]
+        self.assertNotEqual(samples[0], samples[1])
+
 
 if __name__ == "__main__":
     run_tests()
