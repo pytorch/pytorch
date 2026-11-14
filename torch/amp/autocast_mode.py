@@ -40,7 +40,14 @@ def is_autocast_available(device_type: str) -> bool:
 def autocast_decorator(autocast_instance, func):
     @functools.wraps(func)
     def decorate_autocast(*args, **kwargs):
-        with autocast_instance:
+        # Fresh context each call so overlapping decorator invocations do not
+        # clobber restore state stored on a shared autocast instance (#202706).
+        with autocast(
+            device_type=autocast_instance.device,
+            dtype=autocast_instance.fast_dtype,
+            enabled=autocast_instance._enabled,
+            cache_enabled=autocast_instance._cache_enabled,
+        ):
             return func(*args, **kwargs)
 
     decorate_autocast.__script_unsupported = (  # type: ignore[attr-defined]
