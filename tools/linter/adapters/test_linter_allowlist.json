@@ -436,7 +436,6 @@
   "test/inductor/test_loop_ordering.py",
   "test/inductor/test_low_contention_collectives.py",
   "test/inductor/test_max_autotune.py",
-  "test/inductor/test_max_autotune_blackwell.py",
   "test/inductor/test_memory.py",
   "test/inductor/test_memory_planning.py",
   "test/inductor/test_memory_planning_pools.py",
