@@ -2479,6 +2479,30 @@ def forward(self, x_1, output_1):
         self.assertEqual(2 * t, compiled_func(t))
 
     @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    def test_triton_kernel_in_place_omitted_default_arg(self, backend):
+        @triton.jit
+        def scale_kernel(
+            out_ptr,
+            in_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            SCALE: "tl.constexpr" = 2.0,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x * SCALE, mask=mask)
+
+        def f(x):
+            scale_kernel[(1,)](x, x, x.numel(), BLOCK_SIZE=16)
+            return x
+
+        t = torch.rand(5, device=GPU_TYPE)
+        expected = 2 * t
+        self.assertEqual(expected, torch.compile(f, backend=backend, fullgraph=True)(t))
+
+    @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_inner_triton_function(self, backend):
         def f(x: torch.Tensor):
@@ -6275,6 +6299,29 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
+            ["out_ptr"],
+        )
+
+    @make_mutation_test
+    def test_omitted_default_arg():
+        @triton.jit
+        def scale_kernel(
+            out_ptr,
+            in_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            SCALE: "tl.constexpr" = 2.0,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x * SCALE, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            scale_kernel,
+            {"out_ptr": t, "in_ptr": t, "n_elements": 4, "BLOCK_SIZE": 4},
             {},
             ["out_ptr"],
         )
