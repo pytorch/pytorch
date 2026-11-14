@@ -1271,6 +1271,29 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 # TorchBindOpOverload will skip C++ dispatcher and purely dispatched in python
 # when its inputs contain FakeScriptObject in a similar way as higher order ops.
 class TorchBindOpOverload(OpOverload[_P, _T]):
+    def _get_dispatch(self, key: DispatchKey) -> DispatchKey | Callable[_P, _T]:
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        if (
+            key != DispatchKey.Fake
+            or self.has_kernel_for_dispatch_key(key)
+            or FakeTensorMode in self.python_key_table
+        ):
+            return super()._get_dispatch(key)
+
+        def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+            from torch._subclasses.fake_tensor import dispatch_torchbind_fake
+
+            with _unset_fake_mode_for_fake_key(args, kwargs) as mode:
+                if mode is None:
+                    raise AssertionError(
+                        f"no fake mode found for {self} on the Fake key"
+                    )
+                return dispatch_torchbind_fake(mode, self, args, kwargs)
+
+        # Resolve registrations and the active mode on each call.
+        return handler
+
     def _fallthrough_keys(self) -> list[DispatchKey]:
         # TODO: we should be calling the fallback for these, but a fallthrough is almost close
         # enough to the fallback in most cases that we care about.
