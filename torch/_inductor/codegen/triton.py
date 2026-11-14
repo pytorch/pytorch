@@ -473,6 +473,7 @@ class BlockDescriptorOptions:
         get_max_block: Callable[[str], int],
         stride_sorter_cls: type[BlockParameters.StrideSorter],
         can_lift: bool = False,
+        for_store: bool = False,
     ) -> BlockDescriptorOptions:
         """Helper to create a BlockDescriptorOptions instance"""
 
@@ -538,11 +539,16 @@ class BlockDescriptorOptions:
             stride_sorter_cls=stride_sorter_cls, shape_env=V.graph._shape_env
         )
 
-        # Strip out dimensions of stride 0.
-        # These will be restored with tl.broadcast_to.
-        broadcasting_dims = [
-            sizevars.statically_known_equals(stride, 0) for stride in params.strides
-        ]
+        # Strip out dimensions of stride 0 for load descriptors.
+        # These will be restored with tl.broadcast_to. For stores non-singleton
+        # Broadcasting dims cannot be removed as the descriptor block shape
+        # needs to match the kernel block shape
+        if for_store:
+            broadcasting_dims = [False] * len(params.strides)
+        else:
+            broadcasting_dims = [
+                sizevars.statically_known_equals(stride, 0) for stride in params.strides
+            ]
 
         # Record the post-broadcast shape before broadcasting dims are removed.
         # The pre-broadcast shape is identical to this, except broadcasting dims are
@@ -4536,6 +4542,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 nonlocal tma_compatibility_checker
                 stride_sorter_cls: type[BlockParameters.StrideSorter]
+                for_store: bool = False
                 if use_block_ptr_enabled():
                     can_lift = False
                     stride_sorter_cls = BlockParameters.IdentityStrideSorter
@@ -4543,6 +4550,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
+                    for_store = tma_compatibility_checker.for_store
                     can_lift = tma_compatibility_checker.can_lift()
 
                     if (
@@ -4577,6 +4585,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     get_max_block=self.max_block,
                     can_lift=can_lift,
                     stride_sorter_cls=stride_sorter_cls,
+                    for_store=for_store,
                 )
                 if isinstance(options, TensorDescriptorOptions):
                     if len(options.params.block_shape) > TRITON_MAX_TENSOR_DIMS:
