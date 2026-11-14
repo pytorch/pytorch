@@ -967,6 +967,7 @@ impl Compiled {
                 xdecref(package);
                 checked(found)
             }
+            Op::Hold(_) => Ok(null_mut()),
             Op::LoadSlot(slot) => {
                 let o = reg(regs, *slot);
                 capi::retain(o);
