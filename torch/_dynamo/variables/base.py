@@ -2655,18 +2655,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                         issubclass(derived_py, self_py)
                     )
         # __reduce_ex__ is a C builtin (object.__reduce_ex__) that Dynamo
-        # cannot trace into.  Constant-fold it for VTs backed by a real
-        # Python object so that copy.deepcopy can trace through.
-        if (
-            name == "__reduce_ex__"
-            and len(args) == 1
-            and not kwargs
-            and self.is_python_constant()
-        ):
-            protocol = args[0].as_python_constant()
-            return VariableTracker.build(
-                tx, self.as_python_constant().__reduce_ex__(protocol)
-            )
+        # cannot trace into. Like CPython, defer to a __reduce__ the type
+        # defines; otherwise constant-fold it for VTs backed by a real Python
+        # object so that copy.deepcopy can trace through.
+        if name == "__reduce_ex__" and len(args) == 1 and not kwargs:
+            if self.lookup_tp_method("__reduce__") is not None:
+                return self.call_method(tx, "__reduce__", [], {})
+            if self.is_python_constant():
+                protocol = args[0].as_python_constant()
+                return VariableTracker.build(
+                    tx, self.as_python_constant().__reduce_ex__(protocol)
+                )
 
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",

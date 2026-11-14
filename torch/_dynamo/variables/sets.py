@@ -445,6 +445,34 @@ class BaseSetVariable(VariableTracker):
     ) -> VariableTracker:
         return set_copy(self)
 
+    def set_reduce(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # set.__reduce__ (https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c)
+        # returns (type(self), (list(self),), self.__getstate__()). The default
+        # object.__getstate__ gives the instance __dict__ if non-empty, else None.
+        cls = self.python_type()
+        default_getstate = cls.__getstate__ is object.__getstate__
+        if default_getstate and any("__slots__" in vars(c) for c in cls.__mro__):
+            # The default __getstate__ also packs slot values; not modeled.
+            return None
+        keys = VariableTracker.build(tx, list).call_function(tx, [self], {})
+        state: VariableTracker = ConstantVariable.create(None)
+        if not default_getstate:
+            state = self.call_method(tx, "__getstate__", [], {})
+        elif isinstance(self, variables.UserDefinedObjectVariable) and hasattr(
+            self.value, "__dict__"
+        ):
+            instance_dict = self.get_dict_vt(tx)
+            if instance_dict.mp_length_impl(tx).as_python_constant():
+                state = instance_dict
+        cls_vt = VariableTracker.build(tx, type).call_function(tx, [self], {})
+        reduce_args = variables.TupleVariable([keys])
+        return variables.TupleVariable([cls_vt, reduce_args, state])
+
     def getitem_const(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
@@ -847,6 +875,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
         "remove": Method(remove),
         "discard": Method(discard),
         "clear": Method(clear),
+        "__reduce__": Method(BaseSetVariable.set_reduce),
     }
 
 
@@ -1284,6 +1313,7 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         "union": Method(BaseSetVariable.union),
         "issubset": Method(BaseSetVariable.issubset),
         "issuperset": Method(BaseSetVariable.issuperset),
+        "__reduce__": Method(BaseSetVariable.set_reduce),
     }
 
     def tp_init_impl(
