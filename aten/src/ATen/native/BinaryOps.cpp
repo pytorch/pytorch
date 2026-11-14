@@ -9,6 +9,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/ElementwiseRefMeta.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -1590,9 +1591,26 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
       isFloatingType(self.scalar_type()) &&
-      result.scalar_type() == self.scalar_type() &&
       ldexp_stub.is_device_supported(self.device().type())) {
-    return _ldexp_int_exponent(self, other, result);
+    if (result.scalar_type() == self.scalar_type()) {
+      return _ldexp_int_exponent(self, other, result);
+    }
+    // TensorIterator only casts outputs when it also promotes inputs, which would
+    // turn the integer exponent into a float, and the CPU kernel can't cast
+    // dynamically. So compute in self's dtype and copy, like cholesky_inverse_out.
+    // The mul fallback below computes 2**other in self's dtype, which
+    // over/underflows even when the result is representable in self's dtype.
+    // Mixed-device inputs (e.g. CPU scalars) are left to mul_out, which still
+    // computes 2**other in self's dtype.
+    if (self.device() == other.device() && self.device() == result.device()) {
+      Tensor tmp = at::ldexp(self, other);
+      // Restride on resize like codegen's resize_out, so out keeps the layout
+      // TensorIterator computes from the inputs.
+      if (at::native::resize_output(result, tmp.sizes())) {
+        result.as_strided_(tmp.sizes(), tmp.strides());
+      }
+      return result.copy_(tmp);
+    }
   }
 
   return at::mul_out(result, self, _pow2(self, other));
@@ -1602,7 +1620,9 @@ Tensor ldexp(const Tensor& self, const Tensor& other) {
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
       isFloatingType(self.scalar_type()) &&
       ldexp_stub.is_device_supported(self.device().type())) {
-    Tensor result = at::empty_like(self);
+    // An empty output lets TensorIterator size it to the broadcast shape; a
+    // self-shaped one would be resized with a warning when other is larger.
+    Tensor result = at::empty({0}, self.options());
     return _ldexp_int_exponent(self, other, result);
   }
 
