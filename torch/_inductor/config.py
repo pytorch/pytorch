@@ -1143,6 +1143,8 @@ max_template_fusion_benchmarked_choices: int = 1
 # unfused side and biases small GEMMs toward fusion. When True, one measured
 # benchmark floor is subtracted from the unfused sum, only on CUDA and only when
 # the min choice was event-timed like the epilogue/fused benchmarks.
+# The floor is the measured time of a 1-element `zero_`, so it also includes a
+# tiny kernel's execution, not just the timing overhead.
 # Off by default while it is validated.
 template_fusion_subtract_benchmark_floor: bool = (
     os.environ.get("TORCHINDUCTOR_TEMPLATE_FUSION_SUBTRACT_BENCHMARK_FLOOR", "0") == "1"

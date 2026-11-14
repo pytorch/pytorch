@@ -512,13 +512,16 @@ if HAS_GPU_AND_TRITON:
                 self._check_tma_store_view_epilogue_fuses()
             self.assertTrue(tma_store_choices)
 
+        @unittest.skipIf(
+            GPU_TYPE != "cuda" or torch.version.hip is not None,
+            "the benchmark floor is only subtracted on CUDA",
+        )
         @fresh_cache()
         @config.patch(
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "ATEN,TRITON",
                 "max_template_fusion_benchmarked_choices": 1,
-                "template_fusion_subtract_benchmark_floor": True,
             }
         )
         def test_template_fusion_does_not_double_count_benchmark_floor(self):
@@ -548,32 +551,48 @@ if HAS_GPU_AND_TRITON:
 
             a = torch.randn(384, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
             b = torch.randn(1024, 512, device=GPU_TYPE, dtype=torch.bfloat16)
-            with (
-                unittest.mock.patch.object(
-                    MultiTemplateBuffer, "choice_timings", choice_timings
-                ),
-                unittest.mock.patch.object(
-                    Scheduler, "benchmark_fused_nodes", return_value=(epilogue_ms, "")
-                ),
-                unittest.mock.patch.object(
-                    Scheduler, "benchmark_codegened_module", return_value=(fused_ms, "")
-                ),
-                unittest.mock.patch.object(
-                    Scheduler, "_benchmark_floor_ms", return_value=FLOOR
-                ),
-            ):
-                out, code = run_and_get_code(torch.compile(f), a, b)
-            FileCheck().check("extern_kernels.mm").check_not("triton_tem_fused").run(
-                code[0]
-            )
-            self.assertEqual(out, f(a, b), atol=1e-5, rtol=1e-5)
 
+            def compile_with_floor_subtracted(subtract):
+                torch._dynamo.reset()
+                with (
+                    config.patch(template_fusion_subtract_benchmark_floor=subtract),
+                    unittest.mock.patch.object(
+                        MultiTemplateBuffer, "choice_timings", choice_timings
+                    ),
+                    unittest.mock.patch.object(
+                        Scheduler,
+                        "benchmark_fused_nodes",
+                        return_value=(epilogue_ms, ""),
+                    ),
+                    unittest.mock.patch.object(
+                        Scheduler,
+                        "benchmark_codegened_module",
+                        return_value=(fused_ms, ""),
+                    ),
+                    unittest.mock.patch.object(
+                        Scheduler, "_benchmark_floor_ms", return_value=FLOOR
+                    ),
+                ):
+                    out, code = run_and_get_code(torch.compile(f), a, b)
+                self.assertEqual(out, f(a, b), atol=1e-5, rtol=1e-5)
+                return code[0]
+
+            # Flag off: the double-counted floor makes the fused template win.
+            FileCheck().check("triton_tem_fused").run(
+                compile_with_floor_subtracted(False)
+            )
+            # Flag on: one floor is subtracted and the unfused extern mm wins.
+            FileCheck().check("extern_kernels.mm").check_not("triton_tem_fused").run(
+                compile_with_floor_subtracted(True)
+            )
+
+        @unittest.skipIf(GPU_TYPE != "cuda", "the benchmark floor is measured on CUDA")
         def test_benchmark_floor_ms_measured_and_cached(self):
             from torch._inductor import scheduler as scheduler_mod
             from torch._inductor.runtime.benchmarking import benchmarker
 
             scheduler_mod._BENCHMARK_FLOOR_MS.clear()
-            device = torch.device(GPU_TYPE, torch.cuda.current_device())
+            device = torch.device(GPU_TYPE)
             with unittest.mock.patch.object(
                 benchmarker, "benchmark", wraps=benchmarker.benchmark
             ) as bench:
