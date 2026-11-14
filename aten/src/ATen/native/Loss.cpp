@@ -270,9 +270,15 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool
               "kl_div: Integral inputs not supported.");
   Tensor output;
   if (log_target) {
-    output = at::exp(target) * (target - input);
+    auto target_exp = at::exp(target);
+    auto nonzero_target = target_exp != 0;
+    auto safe_target = at::where(nonzero_target, target, at::zeros_like(target));
+    auto safe_input = at::where(nonzero_target, input, at::zeros_like(input));
+    output = target_exp * (safe_target - safe_input);
   } else {
-    output = at::xlogy(target, target) - target * input;
+    auto nonzero_target = target != 0;
+    auto safe_input = at::where(nonzero_target, input, at::zeros_like(input));
+    output = at::xlogy(target, target) - target * safe_input;
   }
   return apply_loss_reduction(output, reduction);
 }
