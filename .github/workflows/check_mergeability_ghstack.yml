@@ -57,7 +57,7 @@ jobs:
             exit 1
           fi
           if [ $IN_SYNC -eq 0 ]; then
-            echo "${ORIG} still doesn't match after ${WAIT_SECONDS} seconds; letting trymerge report it."
+            echo "${ORIG} still does not match after ${WAIT_SECONDS} seconds; letting trymerge report it."
           fi
 
           # ghstack pushes every orig branch of a stack in one push, after all head
