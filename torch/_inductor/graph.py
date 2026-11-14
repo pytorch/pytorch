@@ -343,6 +343,8 @@ def mark_nodes_dislike_padding(
             # step (e.g. is_contiguous_storage_and_layout) already mutated
             # the input layout to padded strides.
             if op not in ops_like_padding:
+                if not cur.meta.get("dislike_padding", False):
+                    cur.meta["dislike_padding_only_for_output"] = True
                 cur.meta["dislike_padding"] = True
 
 

@@ -7758,7 +7758,7 @@ class ExternKernel(InputsKernel):
             raise AssertionError("Expected buf is not None")
         x_unwrap_view_fx_node = buf.get_origin_node()
         # Prefer channels last format according to how the format is set from eager.
-        if (
+        prefer_channels_last = (
             x_unwrap_view_fx_node is not None
             and "val" in x_unwrap_view_fx_node.meta
             and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
@@ -7773,12 +7773,40 @@ class ExternKernel(InputsKernel):
                     memory_format=torch.channels_last_3d,
                 )
             )
-        ):
-            x_unwrap_view.freeze_layout_with_same_order(
-                make_channels_last_strides_for(x_unwrap_view.get_size())
+        )
+        consumer = V.get_current_node()
+
+        def exclusively_used_by_consumer(node: torch.fx.Node) -> bool:
+            while node is not consumer:
+                if len(node.users) != 1:
+                    return False
+                node = next(iter(node.users))
+            return True
+
+        padding_fx_node = consumer
+        # An output-only restriction need not protect a private input buffer.
+        # Check stable origins too: no-op views can overwrite origin_node.
+        # Alias-returning consumers may expose the input even without a fork.
+        if (
+            x_unwrap_view_fx_node is not None
+            and isinstance(consumer, torch.fx.Node)
+            and consumer.meta.get("dislike_padding_only_for_output", False)
+            and isinstance(consumer.target, torch._ops.OpOverload)
+            and not any(r.alias_info for r in consumer.target._schema.returns)
+            and buf.origins
+            and all(
+                isinstance(node, torch.fx.Node) and exclusively_used_by_consumer(node)
+                for node in (x_unwrap_view_fx_node, *buf.origins)
             )
-        else:
-            x_unwrap_view.freeze_layout()
+        ):
+            padding_fx_node = x_unwrap_view_fx_node
+        with V.set_current_node(padding_fx_node):
+            if prefer_channels_last:
+                x_unwrap_view.freeze_layout_with_same_order(
+                    make_channels_last_strides_for(x_unwrap_view.get_size())
+                )
+            else:
+                x_unwrap_view.freeze_layout()
 
         index_args, var_ranges = dependencies.index_vars_squeeze(
             x.get_size(), prefix="r"
