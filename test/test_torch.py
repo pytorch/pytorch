@@ -8349,6 +8349,22 @@ class TestTorch(TestCase):
             with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
 
+    def test_from_file_shared_grow_preserves_contents(self):
+        # https://github.com/pytorch/pytorch/issues/204636
+        original = [7, 8, 9, 10]
+        expected = original + [0, 0, 0, 0]
+        from_file_fns = [
+            lambda f: torch.from_file(f, shared=True, size=8, dtype=torch.uint8).tolist(),
+            lambda f: torch.UntypedStorage.from_file(f, True, 8).tolist(),
+        ]
+        for from_file in from_file_fns:
+            with TemporaryFileName() as fname:
+                with open(fname, "wb") as f:
+                    f.write(bytes(original))
+                self.assertEqual(from_file(fname), expected)
+                with open(fname, "rb") as f:
+                    self.assertEqual(list(f.read()), expected)
+
     def test_print(self):
         default_type = torch.tensor([]).type()
         for t in torch._tensor_classes:
