@@ -1,7 +1,7 @@
 """Synthetic PyTorch workload for LLVM BOLT profile collection.
 
 Each variant exercises a slice of the libtorch call tree (dispatch, autograd, cuBLAS,
-cuDNN, NCCL, TorchScript, Dynamo, model blocks). Run on BOLT-instrumented libraries
+cuDNN, NCCL, Dynamo, model blocks). Run on BOLT-instrumented libraries
 from tools/bolt/collect_profiles.sh, which collects their profiles at normal exit.
 """
 
@@ -175,7 +175,7 @@ def _eager_variant(device: torch.device, dtype: torch.dtype):
         _ = big.type()
         if i % 32 == 0:
             torch.save(ckpt_state, io.BytesIO())
-        # Eager decoder ops under autocast: TorchScript bypasses both wrappers.
+        # Attention decoder ops under autocast.
         for _ in range(4):
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 scores = torch.matmul(dec_q, dec_k.transpose(1, 2))
@@ -521,97 +521,6 @@ def _distributed_variant(device: torch.device, dtype: torch.dtype):
     return step
 
 
-class _AttentionDecoderStep(nn.Module):
-    """One step of a seq2seq attention decoder, run through torch.jit.script."""
-
-    def __init__(self, dim: int):
-        super().__init__()
-        self.prenet = nn.Linear(dim, dim)
-        self.query = nn.Linear(dim, dim, bias=False)
-        self.memory = nn.Linear(dim, dim, bias=False)
-        self.score = nn.Linear(dim, 1, bias=False)
-
-    def forward(
-        self, x: torch.Tensor, memory: torch.Tensor, mask: torch.Tensor, gate: float
-    ) -> tuple[torch.Tensor, bool]:
-        h = F.dropout(F.relu(self.prenet(x)), p=0.5, training=True)
-        energies = self.score(
-            torch.tanh(self.query(h).unsqueeze(1) + self.memory(memory))
-        ).squeeze(-1)
-        energies = energies.masked_fill(mask == 0, -1e4)
-        align = F.softmax(energies, dim=1)
-        ctx = torch.bmm(align.unsqueeze(1), memory).squeeze(1)
-        done = bool(torch.sigmoid(ctx.mean()) > gate)
-        if not done:
-            ctx = ctx + h
-        return ctx, done
-
-
-def _torchscript_variant(device: torch.device, dtype: torch.dtype):
-    """TorchScript interpreter and NNC fuser, pinned to fp16 like JIT inference."""
-    del dtype
-    fp16 = torch.float16
-
-    @torch.jit.script
-    def fused_chain(x: torch.Tensor, scale: float) -> torch.Tensor:
-        y = x * scale
-        y = y + 1.0
-        y = torch.tanh(y)
-        y = y * x
-        y = y + scale
-        y = torch.relu(y)
-        return y
-
-    # Unlike fused_chain, these list ops stay in the interpreter.
-    @torch.jit.script
-    def interp_step(
-        x: torch.Tensor,
-        h: torch.Tensor,
-        w: torch.Tensor,
-        ranks: list[int],
-        ln_w: torch.Tensor | None,
-    ) -> torch.Tensor:
-        parts = [x, h]
-        y = torch.cat(parts, dim=1)
-        for t in parts:
-            if t.dim() in ranks:
-                y = y + 0.0
-        y = torch.matmul(y, w)
-        y = F.layer_norm(y, [y.size(1)], ln_w, None)
-        return y.reshape(y.size(0), -1)
-
-    interp_x = torch.randn(8, 512, device=device, dtype=fp16)
-    interp_h = torch.randn(8, 512, device=device, dtype=fp16)
-    interp_w = torch.randn(1024, 1024, device=device, dtype=fp16)
-    interp_ln_w = torch.ones(1024, device=device, dtype=fp16)
-    interp_ranks = [2, 3]
-    decoder = torch.jit.script(_AttentionDecoderStep(256).to(device=device, dtype=fp16))
-    dec_memory = torch.randn(4, 64, 256, device=device, dtype=fp16)
-    dec_mask = torch.ones(4, 64, device=device, dtype=torch.int32)
-    dec_mask[:, 48:] = 0
-    dec_x0 = torch.randn(4, 256, device=device, dtype=fp16)
-    # Rotating batch sizes make the JIT re-infer shapes every few calls.
-    jit_xs = [torch.randn(n, 1024, device=device, dtype=fp16) for n in (64, 48, 80, 96)]
-    jit_rotate = [0]
-
-    def step():
-        with torch.no_grad():
-            j = jit_rotate[0]
-            x_in = jit_xs[j % len(jit_xs)]
-            for _ in range(8):
-                _ = fused_chain(x_in, 0.5)
-                _ = fused_chain(x_in, 0.25)
-            jit_rotate[0] = j + 1
-            for _ in range(8):
-                _ = interp_step(interp_x, interp_h, interp_w, interp_ranks, interp_ln_w)
-            dec_x = dec_x0
-            for _ in range(8):
-                dec_x, _ = decoder(dec_x, dec_memory, dec_mask, 0.5)
-        torch.cuda.synchronize()
-
-    return step
-
-
 def _rnn_variant(device: torch.device, dtype: torch.dtype):
     """fp16 RNN inference: native LSTMCell kernels and cuDNN LSTM / GRU."""
     del dtype
@@ -775,7 +684,6 @@ VARIANTS: dict[str, Callable[[torch.device, torch.dtype], Callable[[], object]]]
     "attention": _attention_variant,
     "training": _training_variant,
     "distributed": _distributed_variant,
-    "torchscript": _torchscript_variant,
     "rnn": _rnn_variant,
     "activations": _activations_variant,
     "transformer": _transformer_variant,
