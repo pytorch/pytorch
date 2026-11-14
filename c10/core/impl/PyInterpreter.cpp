@@ -164,6 +164,12 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       const override {
     PANIC(raise_python_error);
   }
+  void invalidate_written_to_constants(
+      const c10::OperatorHandle& /*op*/,
+      const torch::jit::Stack& /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/) const override {
+    PANIC(invalidate_written_to_constants);
+  }
   bool fake_try_decomp(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
