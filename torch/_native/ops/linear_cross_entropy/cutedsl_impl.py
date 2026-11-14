@@ -36,6 +36,7 @@ def _no_reduction_impl(
     batch_chunk_size: int,
     acc_policy: str,
     acc_dtype: torch.dtype,
+    logit_softcap: float | None = None,
 ) -> torch.Tensor:
     # The op's body: the accumulator's loss-only branch. It needs no checks --
     # the op takes no compute_*_grad flags, and its probability-target guard is
@@ -61,6 +62,7 @@ def _no_reduction_impl(
         compute_input_grad=False,
         compute_linear_weight_grad=False,
         compute_linear_bias_grad=False,
+        logit_softcap=logit_softcap,
     )[0]
 
 
@@ -92,6 +94,7 @@ def _kernel_eligible(
     compute_input_grad: bool,
     compute_linear_weight_grad: bool,
     compute_linear_bias_grad: bool,
+    logit_softcap: float | None = None,
 ) -> bool:
     """What the kernel implements. Shapes, dtypes and device only -- no data
     reads, so this is safe under FakeTensor tracing. An ineligible input never
@@ -118,6 +121,7 @@ def _kernel_eligible(
         and target.dim() == 1
         and reduction in ("mean", "sum")
         and label_smoothing == 0.0
+        and logit_softcap is None
         and input.dim() == 2
         and linear_weight.dim() == 2
         # Both ends of the class count. With zero classes every target is out
@@ -145,6 +149,7 @@ def _batch_chunked_kernel(
     compute_input_grad: bool,
     compute_linear_weight_grad: bool,
     compute_linear_bias_grad: bool,
+    logit_softcap: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Chunked loss and gradients with the softmax-gradient transform fused.
 

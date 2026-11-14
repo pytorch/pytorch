@@ -501,6 +501,45 @@ torch.cuda.synchronize()
         self.assertEqual(asked, reference, atol=0, rtol=0)
 
     @_needs_kernel
+    @parametrize("reduction", ["mean", "sum"])
+    def test_logit_softcap_falls_back_to_eager(self, reduction):
+        """The kernel does not softcap, so the gate declines `logit_softcap` and
+        the eager chunked loop runs. The same call without the cap reaches the
+        kernel, so the fallback is due to the cap alone.
+        """
+        import torch.nn.modules.linear_cross_entropy as lce_module
+
+        num_batches, in_features, num_classes = 64, 32, 256
+        input, linear_weight, linear_bias, target = _problem(
+            num_batches, in_features, num_classes
+        )
+        # Logits beyond the cap, so ignoring it would change every output.
+        linear_weight = linear_weight * 8
+        options = _compact_options(batch_chunk_size=16)
+        kwargs = {"linear_bias": linear_bias, "reduction": reduction}
+        with self._assert_kernel_path():
+            _loss_and_grads(input, linear_weight, target, options=options, **kwargs)
+        with unittest.mock.patch.object(
+            lce_module,
+            "_linear_cross_entropy_batch_chunked_accumulator",
+            wraps=lce_module._linear_cross_entropy_batch_chunked_accumulator,
+        ) as accumulator:
+            got = _loss_and_grads(
+                input,
+                linear_weight,
+                target,
+                logit_softcap=2.0,
+                options=options,
+                **kwargs,
+            )
+        self.assertEqual(accumulator.call_count, 1)
+        want = _loss_and_grads(
+            input, linear_weight, target, logit_softcap=2.0, **kwargs
+        )
+        atol = 1e-3 if reduction == "mean" else 1e-3 * num_batches
+        self._assert_matches(got, want, torch.bfloat16, atol)
+
+    @_needs_kernel
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("requires_grad", [True, False])
     def test_forward_only_loss_matches_the_reference(self, dtype, requires_grad):
