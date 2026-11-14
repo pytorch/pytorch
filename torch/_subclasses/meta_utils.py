@@ -1605,7 +1605,6 @@ class MetaConverter(Generic[_TensorT]):
                             is_coalesced=t.is_coalesced,
                         )
                     )
-                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         # Pray that sparse clone doesn't lose information
                         if t.data is None:
@@ -1681,7 +1680,6 @@ class MetaConverter(Generic[_TensorT]):
                             device="meta",
                         )
                     )
-                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         # Pray sparse clone doesn't lose information
                         if t.data is None:
