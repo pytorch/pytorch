@@ -50,6 +50,55 @@ def set_device(device) -> None:
 # LITERALINCLUDE END: PYTHON SET DEVICE FUNCTION
 
 
+def current_stream(device=None):
+    """Return the current stream for the device.
+
+    Under torch.compile this is traced from Dynamo's symbolic stream state;
+    this implementation is used in eager mode.
+    """
+    return torch.accelerator.current_stream(device)
+
+
+def synchronize(device=None):
+    """Wait for all kernels on the device to complete.
+
+    Under torch.compile this is traced as torch.ops.streams.synchronize_device;
+    this implementation is used in eager mode.
+    """
+    return torch.accelerator.synchronize(device)
+
+
+def _exchange_device(device_index):
+    # Mirror torch.cuda: a negative index reports no exchange via the -1
+    # convention; an out-of-range index raises, like torch.cuda's
+    # cudaSetDevice does (and unlike the C++ ExchangeDevice, which would
+    # silently set the tracked device to the invalid index).
+    if device_index < 0:
+        return -1
+    count = device_count()
+    if device_index >= count:
+        raise RuntimeError(
+            "The device index is out of range. It must be in [0, "
+            f"{count}), but got {device_index}."
+        )
+    return torch_openreg._C._exchangeDevice(device_index)
+
+
+def _maybe_exchange_device(device_index):
+    # Mirror torch.cuda's _maybe_exchange_device: a negative index reports no
+    # exchange via the -1 convention; an out-of-range index is treated as an
+    # unusable target and the current device is returned without switching
+    # (torch.cuda defers the switch when the target has no primary context).
+    # Unlike _exchange_device, never raise here: the "maybe" contract treats
+    # an unusable target as "no exchange".
+    if device_index < 0:
+        return -1
+    count = device_count()
+    if device_index >= count:
+        return current_device()
+    return torch_openreg._C._exchangeDevice(device_index)
+
+
 def init():
     _lazy_init()
 
@@ -78,7 +127,9 @@ __all__ = [
     "device",
     "device_count",
     "current_device",
+    "current_stream",
     "set_device",
+    "synchronize",
     "initial_seed",
     "is_available",
     "init",
