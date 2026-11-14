@@ -422,7 +422,7 @@ void fakeFallback(
         }
         const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
         const auto raise = [&](std::string_view what) {
-          interpreter->fake_raise_python_error(
+          interpreter->raise_python_error(
               c10::impl::FakePythonError::AssertionError,
               c10::str(what, ". Found in ", op.operator_name()));
         };
@@ -851,7 +851,7 @@ void fakeFallback(
       if (!should_allow_numbers_as_tensors()) {
         auto name = schema.name();
         name.replace(name.find("::"), 2, ".");
-        interpreter->fake_raise_python_error(
+        interpreter->raise_python_error(
             c10::impl::FakePythonError::AssertionError,
             c10::str(
                 "Could not find common device for ",
