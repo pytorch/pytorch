@@ -790,6 +790,9 @@ class AOTInductorTestsTemplate:
             "AOTI_LOG_LOADING": "1",
         },
     )
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
     def test_constants_pinned_async_parallel_copy_tasks(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -819,7 +822,36 @@ class AOTInductorTestsTemplate:
         ):
             package_path = AOTIRunnerUtil.compile(model, example_inputs)
 
-        optimized, loading_log = _load_package_capturing_stderr(package_path)
+        # Inline runtime functions can cache environment settings across model DSOs.
+        # Load in a fresh process so earlier tests cannot initialize those settings.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inputs_path = pathlib.Path(tmpdir) / "inputs.pt"
+            outputs_path = pathlib.Path(tmpdir) / "outputs.pt"
+            torch.save(example_inputs, inputs_path)
+            script = """
+import sys
+import torch
+
+inputs = torch.load(sys.argv[2])
+optimized = torch._inductor.aoti_load_package(sys.argv[1])
+torch.save(optimized(*inputs), sys.argv[3])
+"""
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    script,
+                    str(package_path),
+                    str(inputs_path),
+                    str(outputs_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            loading_log = result.stderr
+            optimized_output = torch.load(outputs_path)
 
         # Only ROCm copies on libtorch's stream; CUDA keeps one per model .so.
         self.assertIn("created shared H2D stream", loading_log)
@@ -838,7 +870,7 @@ class AOTInductorTestsTemplate:
         # threshold regardless of constant emission order.
         self.assertGreaterEqual(parallel_windows, 1)
         self.assertGreater(task_count, parallel_windows)
-        self.assertEqual(optimized(*example_inputs), model(*example_inputs))
+        self.assertEqual(optimized_output, model(*example_inputs))
 
     @unittest.skipIf(
         not TEST_WITH_ROCM, "Pinned async constant copy is default-on only on ROCm"
