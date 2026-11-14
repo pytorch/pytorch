@@ -12983,7 +12983,7 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor(offsets, device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs)
 
-    @onlyOn(("cuda", "mps"))
+    @onlyOn(["cuda", "mps", "xpu"])
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @dtypes(torch.bfloat16)
     def test_grouped_mm_large_stride_fallback(self, device, dtype):
@@ -13002,7 +13002,7 @@ class TestGroupedMM(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same dtype"):
             F.grouped_mm(a, b, offs=offs)
 
-    @onlyOn(("cuda", "mps"))
+    @onlyOn(["cuda", "mps", "xpu"])
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @serialTest()
     @largeTensorTest("6GB")
@@ -13028,7 +13028,7 @@ instantiate_device_type_tests(TestLinalg, globals())
 instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True)
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestLinalgCpuOnly, globals(), only_for=("cpu",))
-instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
+instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True, allow_xpu=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

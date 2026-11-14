@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/strides.h>
 
@@ -48,12 +49,25 @@ inline bool check_valid_strides_and_return_transposed(const Tensor& mat) {
   }
 }
 
+// Whether the grouped-gemm output has its last-dim stride padded to 16 bytes.
+// CUDA needs this for TMA stores; the CPU fallback and MPS share the layout so
+// eager / meta / inductor agree within one build. Backends whose kernels take
+// plain contiguous outputs (ROCm CK, XPU oneDNN) opt out. Deliberately a
+// runtime query rather than USE_ROCM/USE_CUDA: this header is compiled into
+// both torch_cpu (which hosts the structured meta and the CompositeExplicit
+// fallback) and the backend libraries, so a compile-time macro would give them
+// conflicting answers for the same tensor.
+inline bool grouped_mm_output_is_tma_padded(const Tensor& mat) {
+  return !mat.is_xpu() && !at::Context::hasROCM();
+}
+
 // Compute the size and stride of a grouped-gemm output. Strides match the
-// layout `create_grouped_gemm_output_tensor` allocates: on CUDA the last dim
-// is padded to a 16-byte-aligned stride for TMA transfers; on ROCm the
-// returned stride vector is empty, denoting default contiguous strides (the
-// allocator uses at::empty/at::zeros there). Shared by the eager allocator and
-// the structured TORCH_META_FUNC so the shape/stride math stays single-sourced.
+// layout `create_grouped_gemm_output_tensor` allocates: when
+// `grouped_mm_output_is_tma_padded`, the last dim is padded to a 16-byte-aligned
+// stride; otherwise the returned stride vector is empty, denoting default
+// contiguous strides (the allocator uses at::empty/at::zeros there). Shared by
+// the eager allocator and the structured TORCH_META_FUNC so the shape/stride
+// math stays single-sourced.
 inline std::pair<c10::SmallVector<int64_t, 3>, std::vector<int64_t>>
 compute_grouped_gemm_output_size_stride(const Tensor& mat_a,
 const Tensor& mat_b,
@@ -82,17 +96,16 @@ c10::ScalarType out_dtype
   }
 
   std::vector<int64_t> out_stride;
-  #ifndef USE_ROCM
-  // For TMA transfers, strides of output tensor have to be either 1, or aligned
-  // to 16 bytes. Pad the last dim up to that alignment and take the contiguous
-  // strides of the padded shape (so the second-to-last stride picks up the pad).
-  const auto last_dim = out_size.size() - 1;
-  const auto alignment = 16 / c10::elementSize(out_dtype);
-  auto padded_size = out_size;
-  padded_size[last_dim] = (out_size[last_dim] + alignment - 1) / alignment * alignment;
-  const auto strides = c10::contiguous_strides(padded_size);
-  out_stride.assign(strides.begin(), strides.end());
-  #endif
+  if (grouped_mm_output_is_tma_padded(mat_a)) {
+    // Pad the last dim up to 16-byte alignment and take the contiguous strides
+    // of the padded shape (so the second-to-last stride picks up the pad).
+    const auto last_dim = out_size.size() - 1;
+    const auto alignment = static_cast<int64_t>(16 / c10::elementSize(out_dtype));
+    auto padded_size = out_size;
+    padded_size[last_dim] = (out_size[last_dim] + alignment - 1) / alignment * alignment;
+    const auto strides = c10::contiguous_strides(padded_size);
+    out_stride.assign(strides.begin(), strides.end());
+  }
   return {out_size, out_stride};
 }
 
@@ -103,18 +116,18 @@ c10::ScalarType out_dtype
 ) {
   auto [out_size, out_stride] =
       compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype);
+  const auto options = mat_a.options().dtype(out_dtype);
 
-  #ifndef USE_ROCM
-  return at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype));
-  #else
-  // For ROCm 2D-2D case (output is 3D), zero-initialize to handle K=0 or small K
-  // groups correctly. When K=0, the mathematically correct result is zeros,
-  // but CK kernel may not write to the output region.
-  if (mat_a.dim() == 2 && mat_b.dim() == 2) {
-    return at::zeros(out_size, mat_a.options().dtype(out_dtype));
+  if (!out_stride.empty()) {
+    return at::empty_strided(out_size, out_stride, options);
   }
-  return at::empty(out_size, mat_a.options().dtype(out_dtype));
-  #endif
+  // For the ROCm 2D-2D case (output is 3D), zero-initialize to handle K=0 or
+  // small K groups correctly. When K=0, the mathematically correct result is
+  // zeros, but the CK kernel may not write to the output region.
+  if (at::Context::hasROCM() && mat_a.dim() == 2 && mat_b.dim() == 2) {
+    return at::zeros(out_size, options);
+  }
+  return at::empty(out_size, options);
 }
 
 inline void _grouped_mm_validate_inputs(const Tensor& mat_a, const Tensor& mat_b,
