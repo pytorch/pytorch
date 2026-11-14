@@ -129,7 +129,6 @@
   "test/distributed/fsdp/test_fsdp_use_orig_params.py",
   "test/distributed/fsdp/test_hsdp_dtensor_state_dict.py",
   "test/distributed/fsdp/test_shard_utils.py",
-  "test/distributed/fsdp/test_utils.py",
   "test/distributed/fsdp/test_wrap.py",
   "test/distributed/launcher/test_run.py",
   "test/distributed/optim/test_zero_redundancy_optimizer.py",
