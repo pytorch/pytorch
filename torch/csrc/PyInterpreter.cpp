@@ -1538,12 +1538,12 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::
       return nullptr;
     }
     // Check before cloning: a clone can erase the original Python type.
-    // Keep the check, clone and conversion in the same GIL scope.
     c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
         {c10::DispatchKey::Python,
          c10::DispatchKey::PreDispatch,
          c10::DispatchKey::Fake,
          c10::DispatchKey::PythonTLSSnapshot}));
+    py::gil_scoped_release no_gil;
     real = real.clone();
   }
   const bool make_constant = conversion == FakeTensorConversion::Constant ||
@@ -1621,6 +1621,7 @@ bool ConcretePyInterpreterVTable::fake_try_initial_constant(
       auto tls = c10::impl::tls_local_dispatch_key_set();
       tls.excluded_ = tls.excluded_.remove(c10::DispatchKey::Fake);
       c10::impl::ForceDispatchKeyGuard guard(tls);
+      py::gil_scoped_release no_gil;
       op.callBoxed(outputs);
     }
     if (outputs.size() == 1 && outputs[0].isTensor() &&
