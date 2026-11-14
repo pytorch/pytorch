@@ -327,6 +327,12 @@ struct C10_API PyInterpreterVTable {
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
+  // Checks the live custom-op profile before registered fake and Meta kernels.
+  // The mode stays uninstalled; selected profiles finalize their own outputs.
+  virtual bool fake_try_custom_op_profile(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
   // has_python_cia is set if op has a Python CIA override, even when this
   // returns false.
   virtual bool fake_try_decomp(

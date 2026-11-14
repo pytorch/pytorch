@@ -180,6 +180,10 @@ struct ConcretePyInterpreterVTable final
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
+  bool fake_try_custom_op_profile(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
   bool fake_try_decomp(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
@@ -1101,6 +1105,10 @@ DEFINE_CACHED_PYTHON_IMPORT(
     py::module::import("torch._subclasses.fake_tensor")
         .attr("FakeTensorDeviceMismatchError"))
 
+DEFINE_CACHED_PYTHON_IMPORT(
+    get_dynamo_config,
+    py::module::import("torch._dynamo.config"))
+
 #undef DEFINE_CACHED_PYTHON_IMPORT
 
 // Note [C++ fake op_impl outputs]
@@ -1342,6 +1350,37 @@ bool ConcretePyInterpreterVTable::fake_try_fast_impl(
       },
       /*convert=*/{},
       "fast implementation");
+}
+
+bool ConcretePyInterpreterVTable::fake_try_custom_op_profile(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) const {
+  py::gil_scoped_acquire gil;
+  py::object profiles = get_dynamo_config().attr("_custom_ops_profile");
+  if (profiles.is_none()) {
+    return false;
+  }
+  py::handle py_op = getTorchApiFunction(op);
+  if (!profiles.attr("data").contains(py_op)) {
+    return false;
+  }
+  py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
+  return run_fake_python_callback(
+      op,
+      stack,
+      [&](const py::object& args, const py::dict& kwargs) {
+        py::object out = profiles.attr("generic_fake_kernel")(
+            py_op, py_mode, *args, **kwargs);
+        TORCH_CHECK(
+            !out.is(py::handle(Py_NotImplemented)),
+            "custom-op profile for ",
+            op.operator_name(),
+            " returned NotImplemented");
+        return out;
+      },
+      /*convert=*/{},
+      "custom-op profile");
 }
 
 // Try a registered Python decomposition for op.
