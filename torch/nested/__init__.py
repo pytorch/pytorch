@@ -23,8 +23,11 @@ def as_nested_tensor(
     dtype: DType | None = None,
     device: Device | None = None,
     layout=None,
+    *,
+    jagged_dim: int | None = None,
 ) -> Tensor:
-    r"""
+    r"""as_nested_tensor(ts, dtype=None, device=None, layout=None, *, jagged_dim=None) -> Tensor
+
     Constructs a nested tensor preserving autograd history from a tensor or a list / tuple of
     tensors.
 
@@ -50,6 +53,13 @@ def as_nested_tensor(
             Default: if None, same :class:`torch.device` as leftmost tensor in the list
         layout (:class:`torch.layout`, optional): the desired layout of returned nested tensor.
             Only strided and jagged layouts are supported. Default: if None, the strided layout.
+        jagged_dim (int, optional): the jagged dimension in the output, including the batch
+            dimension, as in :func:`nested_tensor_from_jagged`. Must be between 1 and the
+            dimensionality of the input tensors, inclusive.
+            Only supported for a list / tuple of tensors with ``layout=torch.jagged``.
+            All other dimensions must have the same size across the input tensors.
+            Default: ``None``, which infers the dimension from differing input sizes, or uses
+            dimension 1 if all input shapes are equal.
 
     Example::
 
@@ -67,6 +77,11 @@ def as_nested_tensor(
         tensor([0., 0., 0., 0., 0.])
         >>> c = torch.randn(3, 5, requires_grad=True)
         >>> nt2 = torch.nested.as_nested_tensor(c, layout=torch.jagged)
+        >>> nt3 = torch.nested.as_nested_tensor(
+        ...     [torch.randn(4, 7), torch.randn(4, 7)], layout=torch.jagged, jagged_dim=2
+        ... )
+        >>> nt3.shape  # xdoctest: +ELLIPSIS
+        torch.Size([2, 4, j...])
     """
     is_tensor_list = isinstance(ts, (list, tuple)) and all(
         isinstance(t, Tensor) for t in ts
@@ -74,6 +89,11 @@ def as_nested_tensor(
     if not isinstance(ts, Tensor) and not is_tensor_list:
         raise TypeError(
             "as_nested_tensor(): Expected first argument to be a tensor or a list / tuple of tensors "
+        )
+    if jagged_dim is not None and (not is_tensor_list or layout != torch.jagged):
+        raise ValueError(
+            "as_nested_tensor(): jagged_dim is only supported for a list / tuple of tensors "
+            "with layout=torch.jagged"
         )
     # convert tuple -> list if needed
     if is_tensor_list and not isinstance(ts, list):
@@ -139,7 +159,9 @@ def as_nested_tensor(
                 raise AssertionError(
                     f"Expected ts to be a list, but got {type(ts).__name__}"
                 )
-            nt, _ = jagged_from_list(ts, offsets=None, device=device, dtype=dtype)
+            nt, _ = jagged_from_list(
+                ts, offsets=None, device=device, dtype=dtype, jagged_dim=jagged_dim
+            )
             return nt
     else:
         raise RuntimeError(
