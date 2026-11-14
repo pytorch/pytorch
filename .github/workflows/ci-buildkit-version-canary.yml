@@ -177,8 +177,6 @@ jobs:
 
               def handler(self, _signum, _frame):
                   self.pending = True
-                  signal.signal(signal.SIGTERM, signal.SIG_IGN)
-                  signal.signal(signal.SIGINT, signal.SIG_IGN)
                   if not self.deferred:
                       raise InterruptedError()
 
@@ -366,6 +364,16 @@ jobs:
 
 
           def read_child(argv, environment, result, timeout=30):
+              # Protect the complete owned lifetime, including transitions into finally.
+              CANCELLATION.deferred += 1
+              try:
+                  return _read_child(argv, environment, result, timeout)
+              finally:
+                  CANCELLATION.deferred -= 1
+                  CANCELLATION.check()
+
+
+          def _read_child(argv, environment, result, timeout):
               process = None
               data = bytearray()
               try:
@@ -431,6 +439,16 @@ jobs:
 
 
           def run_probe(result):
+              # Nested child cleanup may raise, but cannot interrupt this outer cleanup.
+              CANCELLATION.deferred += 1
+              try:
+                  return _run_probe(result)
+              finally:
+                  CANCELLATION.deferred -= 1
+                  CANCELLATION.check()
+
+
+          def _run_probe(result):
               if not context_matches():
                   result["cleanup_confirmed"] = True
                   return
