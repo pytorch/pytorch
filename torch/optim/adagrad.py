@@ -5,11 +5,13 @@ import torch
 from torch import Tensor
 
 from .optimizer import (
+    _capturable_doc,
     _default_to_fused_or_foreach,
     _device_dtype_check_for_fused,
     _differentiable_doc,
     _foreach_doc,
     _functional_api_doc,
+    _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
@@ -38,6 +40,7 @@ class Adagrad(Optimizer):
         foreach: bool | None = None,
         *,
         maximize: bool = False,
+        capturable: bool = False,
         differentiable: bool = False,
         fused: bool | None = None,
     ) -> None:
@@ -64,6 +67,7 @@ class Adagrad(Optimizer):
             "initial_accumulator_value": initial_accumulator_value,
             "foreach": foreach,
             "maximize": maximize,
+            "capturable": capturable,
             "differentiable": differentiable,
             "fused": fused,
         }
@@ -77,7 +81,16 @@ class Adagrad(Optimizer):
             self._need_device_dtype_check_for_fused = True
             self._step_supports_amp_scaling = True
 
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
         for group in self.param_groups:
+            if group["capturable"] and not all(
+                p.device.type in capturable_supported_devices for p in group["params"]
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params must be on supported devices: {capturable_supported_devices}."
+                )
             for p in group["params"]:
                 state = self.state[p]
                 state["step"] = (
@@ -86,7 +99,7 @@ class Adagrad(Optimizer):
                         dtype=_get_scalar_dtype(is_fused=group["fused"]),
                         device=p.device,
                     )
-                    if group["fused"]
+                    if group["capturable"] or group["fused"]
                     else torch.tensor(0.0, dtype=_get_scalar_dtype())
                 )
                 init_value = (
@@ -107,6 +120,7 @@ class Adagrad(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
+            group.setdefault("capturable", False)
             fused = group.setdefault("fused", None)
 
             for p in group["params"]:
@@ -119,7 +133,7 @@ class Adagrad(Optimizer):
                             dtype=_get_scalar_dtype(is_fused=fused),
                             device=p.device,
                         )
-                        if group["fused"]
+                        if group["capturable"] or group["fused"]
                         else torch.tensor(step_val, dtype=_get_scalar_dtype())
                     )
 
@@ -166,7 +180,7 @@ class Adagrad(Optimizer):
                             dtype=_get_scalar_dtype(is_fused=group["fused"]),
                             device=p.device,
                         )
-                        if group["fused"]
+                        if group["capturable"] or group["fused"]
                         else torch.tensor(0.0, dtype=_get_scalar_dtype())
                     )
 
@@ -194,6 +208,11 @@ class Adagrad(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        if not all(
+            group["capturable"] or group["fused"] for group in self.param_groups
+        ) or all(group["capturable"] for group in self.param_groups):
+            self._accelerator_graph_capture_health_check()
+
         loss = None
 
         if closure is not None:
@@ -222,6 +241,7 @@ class Adagrad(Optimizer):
                 has_sparse_grad=has_sparse_grad,
                 foreach=group["foreach"],
                 maximize=group["maximize"],
+                capturable=group["capturable"],
                 differentiable=group["differentiable"],
                 has_complex=has_complex,
                 fused=group["fused"],
@@ -271,6 +291,7 @@ Adagrad.__doc__ = (
             numerical stability (default: 1e-10)
         {_foreach_doc}
         {_maximize_doc}
+        {_capturable_doc}
         {_differentiable_doc}
         fused (bool, optional): whether the fused implementation (CPU and CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
@@ -295,6 +316,7 @@ def adagrad(
     # setting these as kwargs for now as functional API is compiled by torch/distributed/optim
     has_sparse_grad: bool = False,
     foreach: bool | None = None,
+    capturable: bool = False,
     differentiable: bool = False,
     has_complex: bool = False,
     *,
@@ -346,6 +368,7 @@ def adagrad(
         eps=eps,
         has_sparse_grad=has_sparse_grad,
         maximize=maximize,
+        capturable=capturable,
         differentiable=differentiable,
         has_complex=has_complex,
         grad_scale=grad_scale,
@@ -375,11 +398,20 @@ def _single_tensor_adagrad(
     eps: float,
     has_sparse_grad: bool,
     maximize: bool,
+    capturable: bool,
     differentiable: bool,
     has_complex: bool,
 ) -> None:
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Expected grad_scale and found_inf to be None")
+
+    if capturable and not all(
+        p.device.type == step.device.type
+        for p, step in zip(params, state_steps, strict=True)
+    ):
+        raise AssertionError(
+            "If capturable=True, params and state_steps must be on the same device."
+        )
 
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
@@ -389,7 +421,7 @@ def _single_tensor_adagrad(
     ):
         # update step
         step_t += 1
-        step = _get_value(step_t)
+        step = step_t if capturable else _get_value(step_t)
         grad = grad if not maximize else -grad
 
         if weight_decay != 0:
@@ -409,10 +441,15 @@ def _single_tensor_adagrad(
             state_sum.add_(_make_sparse(grad, grad_indices, grad_values.pow(2)))
             std = state_sum.sparse_mask(grad)
             std_values = std._values().sqrt_().add_(eps)
-            param.add_(
-                _make_sparse(grad, grad_indices, grad_values / std_values),
-                alpha=-clr,  # type: ignore[arg-type]
-            )
+            update = grad_values / std_values
+            if capturable:
+                update.mul_(-clr)
+                param.add_(_make_sparse(grad, grad_indices, update))
+            else:
+                param.add_(
+                    _make_sparse(grad, grad_indices, update),
+                    alpha=-clr,  # type: ignore[arg-type]
+                )
         else:
             is_complex = torch.is_complex(param)
             if is_complex:
@@ -424,7 +461,10 @@ def _single_tensor_adagrad(
                 std = state_sum.sqrt() + eps
             else:
                 std = state_sum.sqrt().add_(eps)
-            param.addcdiv_(grad, std, value=-clr)  # type: ignore[arg-type]
+            if capturable:
+                param.addcdiv_(grad, std / -clr)
+            else:
+                param.addcdiv_(grad, std, value=-clr)  # type: ignore[arg-type]
             if is_complex:
                 param = torch.view_as_complex(param)
                 state_sum = torch.view_as_complex(state_sum)
@@ -444,6 +484,7 @@ def _multi_tensor_adagrad(
     eps: float,
     has_sparse_grad: bool,
     maximize: bool,
+    capturable: bool,
     differentiable: bool,
     has_complex: bool,
 ) -> None:
@@ -451,6 +492,14 @@ def _multi_tensor_adagrad(
         raise AssertionError("_foreach ops don't support autograd")
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Expected grad_scale and found_inf to be None")
+
+    if capturable and not all(
+        p.device.type == step.device.type
+        for p, step in zip(params, state_steps, strict=True)
+    ):
+        raise AssertionError(
+            "If capturable=True, params and state_steps must be on the same device."
+        )
 
     # Foreach functions will throw errors if given empty lists
     if len(params) == 0:
@@ -489,6 +538,7 @@ def _multi_tensor_adagrad(
                 has_sparse_grad=True,
                 maximize=maximize,
                 differentiable=differentiable,
+                capturable=capturable,
                 has_complex=has_complex,
                 grad_scale=grad_scale,
                 found_inf=found_inf,
@@ -522,9 +572,17 @@ def _multi_tensor_adagrad(
                     device_grads, device_params, alpha=weight_decay
                 )
 
-        minus_clr = [
-            -lr / (1 + (_get_value(step) - 1) * lr_decay) for step in device_state_steps
-        ]
+        if capturable:
+            minus_clr = torch._foreach_sub(device_state_steps, 1)
+            torch._foreach_mul_(minus_clr, lr_decay)
+            torch._foreach_add_(minus_clr, 1)
+            torch._foreach_reciprocal_(minus_clr)
+            torch._foreach_mul_(minus_clr, -lr)
+        else:
+            minus_clr = [
+                -lr / (1 + (_get_value(step) - 1) * lr_decay)
+                for step in device_state_steps
+            ]
 
         torch._foreach_addcmul_(device_state_sums, device_grads, device_grads, value=1)
 
@@ -554,6 +612,7 @@ def _fused_adagrad(
     lr_decay: float,
     eps: float,
     has_sparse_grad: bool,
+    capturable: bool,
     maximize: bool,
     differentiable: bool,
     has_complex: bool,
