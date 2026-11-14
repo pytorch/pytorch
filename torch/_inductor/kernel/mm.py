@@ -4,6 +4,8 @@ import logging
 from collections.abc import Sequence
 from typing import Any, cast, Literal
 
+import sympy
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -20,8 +22,10 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.functional import ScalingType, SwizzleType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Min
 
 from .. import config as inductor_config, distributed_autotune, lowering as L
+from ..codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
@@ -62,6 +66,7 @@ from ..utils import (
     _use_cutlass_for_op,
     ceildiv,
     FOLDED_SCALED_MM_OUTPUT_SCALE,
+    get_num_sms,
     GPU_ALIGN_BYTES,
     is_bf16x9_matmul,
     use_aten_gemm_kernels,
@@ -162,6 +167,21 @@ scaled_mm_device_tma_main_loop_scaling_template = TritonTemplate(
 flydsl_mm_template = FlyDSLTemplate(
     name="mm_flydsl",
     source=load_kernel_template("flydsl_mm"),
+)
+
+blackwell_ws_persistent_tma_main_loop_scaling_template = TritonTemplate(
+    name="blackwell_ws_persistent_tma_main_loop_scaling",
+    grid=persistent_mm_grid,
+    source=load_kernel_template(
+        "triton_blackwell_ws_persistent_tma_main_loop_scaled_mm"
+    )
+    + load_kernel_template("triton_gemm_helpers"),
+)
+
+main_loop_sw_scaled_mm_template = TritonTemplate(
+    name="main_loop_sw_scaled_mm",
+    grid=mm_grid,
+    source=load_kernel_template("triton_main_loop_sw_scaled_mm"),
 )
 
 blackwell_ws_persistent_tma_mm_template = TritonTemplate(
@@ -1308,6 +1328,38 @@ def _scale_is_transposed(
     return _uses_cublas_blockwise128x128_layout(scale, mat, scale_option, transpose)
 
 
+def _k128_ue8m0_scale_mx_layout(
+    scale: IRNode, outer_size: _IntLike, k_blocks: _IntLike
+) -> IRNode:
+    """
+    Re-lay out packed MN x K4 UE8M0 scales into the K32-replicated 32x4x4
+    swizzled layout that tcgen05.cp consumes, viewed as
+    [1, ceil(MN / 128), K blocks, 2, 256] bytes. Block-scaled MMA takes one
+    UE8M0 per K32, so every K128 scale is repeated for its four K32 chunks.
+    """
+    aten = torch.ops.aten
+    mn_blocks = ceildiv(outer_size, 128)
+    padded_rows = 4 * ceildiv(outer_size, 4)
+    k_groups = ceildiv(k_blocks, 4)
+    x = lowerings[aten.view.dtype](scale, torch.uint8)
+    # packed[kg, row, kb % 4] -> rows[row, kb]; drop the packing's padding,
+    # since padded K blocks would scale TMA's zero fill and could be NaN
+    x = lowerings[aten.view](x, [k_groups, padded_rows, 4])
+    x = lowerings[aten.permute](x, [1, 0, 2])
+    x = lowerings[aten.view](x, [padded_rows, k_groups * 4])
+    x = lowerings[aten.slice](x, 0, 0, outer_size)
+    x = lowerings[aten.slice](x, 1, 0, k_blocks)
+    x = lowerings[aten.constant_pad_nd](x, [0, 0, 0, mn_blocks * 128 - outer_size], 127)
+    # rows[128 * mb + 32 * jj + i, kb] -> mx[mb, kb, i, jj, k32]
+    x = lowerings[aten.view](x, [mn_blocks, 4, 32, k_blocks])
+    x = lowerings[aten.permute](x, [0, 3, 2, 1])
+    x = lowerings[aten.unsqueeze](x, -1)
+    x = lowerings[aten.expand](x, [mn_blocks, k_blocks, 32, 4, 4])
+    x = lowerings[aten.clone](x)
+    x = lowerings[aten.view](x, [1, mn_blocks, k_blocks, 2, 256])
+    return realize_inputs(x)
+
+
 def is_desired_scaling(
     t: IRNode,
     scale_size: Sequence[_IntLike],
@@ -1576,6 +1628,117 @@ scaled_mm_v2_fallback = fallback_handler(
 )
 
 
+def _is_blackwell_main_loop_scaled_mm(
+    mat_a, mat_b, scale_a, recipe_a, swizzle_a, scale_b, recipe_b, swizzle_b
+) -> bool:
+    # BlockWise1x128 with UE8M0 scales in cuBLASLt's packed MN x K4 layout, the
+    # eager contract on Blackwell, maps onto tcgen05 block-scaled MMA.
+    return (
+        len(recipe_a) == len(recipe_b) == 1
+        and recipe_a[0] == recipe_b[0] == ScalingType.BlockWise1x128.value
+        and len(swizzle_a) == len(swizzle_b) == 1
+        and swizzle_a[0] == swizzle_b[0] == SwizzleType.SWIZZLE_MN_K4.value
+        and len(scale_a) == len(scale_b) == 1
+        and scale_a[0].dtype == scale_b[0].dtype == torch.float8_e8m0fnu
+        and mat_a.get_dtype() == mat_b.get_dtype() == torch.float8_e4m3fn
+    )
+
+
+def _tuned_blackwell_main_loop_scaled_mm(
+    mat_a,
+    mat_b,
+    scale_a,
+    scale_b,
+    bias,
+    out_dtype,
+    use_fast_accum,
+    layout,
+):
+    """SM100 Triton-only lowering for BlockWise1x128 UE8M0 scales in the packed
+    MN x K4 layout. Returns None when no template applies so the caller falls
+    back to eager."""
+    m, n, k, layout, mat_a, mat_b = mm_args(
+        mat_a, mat_b, layout=layout, out_dtype=out_dtype
+    )
+    _, is_nonzero = _is_static_problem(layout)
+    k_blocks = ceildiv(k, 128)
+    # MN x K4 pads rows to a multiple of 4 and stores one 4-byte word of scales
+    # per (row, four K128 blocks), rows fastest. Mismatched sizes go to eager,
+    # which reports them.
+    scales_match = all(
+        V.graph.sizevars.guard_or_false(
+            sympy.Eq(scale.get_numel(), 16 * ceildiv(outer, 4) * ceildiv(k_blocks, 4))
+        )
+        for scale, outer in ((scale_a, m), (scale_b, n))
+    )
+    # Without enable_float8, use_triton_template limits the output to
+    # bf16/fp16/fp32, which both templates accumulate in fp32. Like other GEMM
+    # templates, these only produce configs under max-autotune.
+    if (
+        bias
+        or use_fast_accum
+        or not is_nonzero
+        or not scales_match
+        or not is_datacenter_blackwell_arch()
+        or not use_triton_template(layout)
+    ):
+        return None
+    counters["aten_mm_info"][f"aten._scaled_mm_v2.default_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten._scaled_mm_v2.default: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat_a.get_dtype(),
+        mat_b.get_dtype(),
+        layout,
+    )
+    name = "scaled_mm"
+    check_supported_striding(mat_a, mat_b)
+    # the software template indexes the packed scales directly
+    scale_a, scale_b = (ExternKernel.require_contiguous(s) for s in (scale_a, scale_b))
+    # The native template scales in the tensor core (tcgen05 block-scaled MMA)
+    # but pays a fixed cost per launch: 128-row tiles (rows past M are wasted
+    # MMA work), a prologue that re-lays out the scales for tcgen05.cp, and
+    # four TMA descriptors, which are cheaper when built host-side. The
+    # software template pays per K step instead, rescaling the partial product
+    # in registers, and needs no prologue. So native wins only when the 128x128
+    # output grid fills the SMs and every CTA runs enough useful K steps to
+    # amortize the setup. The two are exclusive because autotuning times only
+    # the GEMM kernel and cannot see the prologue. The software template needs
+    # no TMA, so it also covers operands or configs the native one cannot take.
+    num_sms = get_num_sms()
+    native_tiles = ceildiv(m, 128) * ceildiv(n, 128)
+    k_steps_per_cta = ceildiv(native_tiles, num_sms) * ceildiv(k, 128)
+    min_k_steps = 16 if inductor_config.triton.enable_host_side_tma else 32
+    use_native = (
+        use_triton_blackwell_tma_template(
+            mat_a, mat_b, output_layout=layout, add_guards=True
+        )
+        and V.graph.sizevars.guard_or_true(sympy.Ge(native_tiles, num_sms // 2))
+        and V.graph.sizevars.guard_or_true(
+            sympy.Ge(k_steps_per_cta * Min(m, 128), min_k_steps * 128)
+        )
+    )
+    if use_native:
+        template = blackwell_ws_persistent_tma_main_loop_scaling_template
+        input_nodes = [
+            mat_a,
+            mat_b,
+            _k128_ue8m0_scale_mx_layout(scale_a, m, k_blocks),
+            _k128_ue8m0_scale_mx_layout(scale_b, n, k_blocks),
+        ]
+    else:
+        template = main_loop_sw_scaled_mm_template
+        input_nodes = [mat_a, mat_b, scale_a, scale_b]
+    kernel_inputs = MMKernelInputs(
+        input_nodes, mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
+    )
+    choices = V.choices.get_template_configs(kernel_inputs, [template], name)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
+
+
 @register_lowering(aten._scaled_mm_v2.default, type_promotion_kind=None)
 def tuned_scaled_mm_v2(
     mat_a,
@@ -1686,6 +1849,8 @@ def tuned_scaled_mm_v2(
     #     expresses MX/NVFP4, with NO_SWIZZLE)
     #   - multi-level scales (two-level NVFP4)
     #   - any non-fp32 block scale
+    # The exception is SM100 BlockWise1x128 with packed MN x K4 UE8M0 scales,
+    # which _tuned_blackwell_main_loop_scaled_mm handles when a template applies.
     # Call the eager v2 op directly to preserve its recipes and scale conventions.
     def fallback():
         # contraction_dim is a non-optional int[] in the schema (default []);
@@ -1714,6 +1879,28 @@ def tuned_scaled_mm_v2(
     supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
         recipe_b
     )
+    if _is_blackwell_main_loop_scaled_mm(
+        mat_a, mat_b, scale_a, recipe_a, swizzle_a, scale_b, recipe_b, swizzle_b
+    ) and (
+        not contraction_dim
+        or (
+            len(contraction_dim) == 2
+            and contraction_dim[0] in (1, -1)
+            and contraction_dim[1] in (0, -2)
+        )
+    ):
+        node = _tuned_blackwell_main_loop_scaled_mm(
+            mat_a,
+            mat_b,
+            scale_a[0],
+            scale_b[0],
+            bias,
+            out_dtype,
+            use_fast_accum,
+            layout,
+        )
+        if node is not None:
+            return node
     if (
         any(s != 0 for s in swizzle_a)
         or any(s != 0 for s in swizzle_b)
