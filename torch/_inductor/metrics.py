@@ -51,6 +51,7 @@ cpp_outer_loop_fused_inner_counts: list[CppOuterLoopFusedCount] = []
 
 num_comprehensive_padding = 0
 num_matches_for_scatter_upon_const_tensor = 0
+num_matches_for_one_hot_sum: int = 0
 
 num_loop_reordering = 0
 num_auto_chunking: int = 0
@@ -73,6 +74,7 @@ def reset() -> None:
     global cpp_outer_loop_fused_inner_counts
     global num_comprehensive_padding
     global num_matches_for_scatter_upon_const_tensor
+    global num_matches_for_one_hot_sum
     global num_loop_reordering
     global parallel_reduction_count
     global codegen_mix_order_reduction
@@ -90,6 +92,7 @@ def reset() -> None:
     cpp_outer_loop_fused_inner_counts.clear()
     num_comprehensive_padding = 0
     num_matches_for_scatter_upon_const_tensor = 0
+    num_matches_for_one_hot_sum = 0
     num_loop_reordering = 0
     parallel_reduction_count = 0
     codegen_mix_order_reduction = 0
@@ -111,6 +114,7 @@ class CachedMetricsDeltas:
     cpp_to_dtype_count: int
     num_bytes_accessed: int
     num_matches_for_scatter_upon_const_tensor: int
+    num_matches_for_one_hot_sum: int
 
 
 def get_metric_fields() -> list[str]:
