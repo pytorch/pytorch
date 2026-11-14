@@ -1,6 +1,35 @@
 if(NOT __NCCL_EP_INCLUDED)
   set(__NCCL_EP_INCLUDED TRUE)
 
+  # Build nccl_ep for the same CUDA archs as the rest of PyTorch, dropping
+  # anything below sm_90 since nccl_ep requires Hopper+. PyTorch disables
+  # CMAKE_CUDA_ARCHITECTURES in favor of TORCH_CUDA_ARCH_LIST, so derive the arch
+  # list from there. Disable EP if no requested architecture supports it.
+  if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
+    # Usually only set in the environment (e.g. by setup.py), not as a cache var.
+    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
+  endif()
+  # TORCH_CUDA_ARCH_LIST may be space- or ;-separated; normalize to a CMake list.
+  string(REPLACE " " ";" __nccl_ep_archs "${TORCH_CUDA_ARCH_LIST}")
+  # Reduce each entry to its compact sm number, dropping any decoration:
+  # "9.0" / "9.0a" / "10.0+PTX" -> "90" / "90" / "100".
+  list(TRANSFORM __nccl_ep_archs REPLACE "^([0-9]+)\\.([0-9]+).*$" "\\1\\2")
+  # Drop anything that wasn't a numeric arch spec (e.g. "Common", "All", "").
+  list(FILTER __nccl_ep_archs INCLUDE REGEX "^[0-9]+$")
+  set(__NCCL_EP_ARCHS "")
+  foreach(__arch IN LISTS __nccl_ep_archs)
+    if(__arch GREATER_EQUAL 90)  # nccl_ep is Hopper+ only
+      list(APPEND __NCCL_EP_ARCHS "${__arch}")
+    endif()
+  endforeach()
+  if(NOT __NCCL_EP_ARCHS)
+    message(STATUS "NCCL EP requires an sm_90 or newer target in TORCH_CUDA_ARCH_LIST. Disabling USE_NCCL_EP.")
+    caffe2_update_option(USE_NCCL_EP OFF)
+    return()
+  endif()
+  list(REMOVE_DUPLICATES __NCCL_EP_ARCHS)
+  set(__NCCL_EP_ARCH_ARG "-DCMAKE_CUDA_ARCHITECTURES=${__NCCL_EP_ARCHS}")
+
   # EP sources are needed with both source and system NCCL.
   set(__NCCL_EP_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/nccl-extensions")
   if(NOT EXISTS "${__NCCL_EP_SOURCE_DIR}")
@@ -21,39 +50,7 @@ if(NOT __NCCL_EP_INCLUDED)
   # NCCL is built (Makefile) into this tree by cmake/External/nccl.cmake.
   set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
 
-  # Build NCCL EP as its own CMake project against that prebuilt NCCL
-  # (headers + libnccl in __NCCL_BUILD_DIR). NCCL_EP_BUILDDIR == NCCL_HOME so
-  # nccl_ep's artifacts (libnccl_ep.a, headers) land in the same tree, leaving
-  # the core NCCL build untouched.
-  # Build nccl_ep for the same CUDA archs as the rest of PyTorch, dropping
-  # anything below sm_90 since nccl_ep requires Hopper+. PyTorch disables
-  # CMAKE_CUDA_ARCHITECTURES in favor of TORCH_CUDA_ARCH_LIST, so derive the arch
-  # list from there. If nothing qualifies (list unset, or a symbolic value like
-  # "Common"/"All"), pass no flag and let nccl_ep's CMakeLists pick its own
-  # CUDA-version default.
-  if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
-    # Usually only set in the environment (e.g. by setup.py), not as a cache var.
-    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
-  endif()
-  # TORCH_CUDA_ARCH_LIST may be space- or ;-separated; normalize to a CMake list.
-  string(REPLACE " " ";" __nccl_ep_archs "${TORCH_CUDA_ARCH_LIST}")
-  # Reduce each entry to its compact sm number, dropping any decoration:
-  # "9.0" / "9.0a" / "10.0+PTX" -> "90" / "90" / "100".
-  list(TRANSFORM __nccl_ep_archs REPLACE "^([0-9]+)\\.([0-9]+).*$" "\\1\\2")
-  # Drop anything that wasn't a numeric arch spec (e.g. "Common", "All", "").
-  list(FILTER __nccl_ep_archs INCLUDE REGEX "^[0-9]+$")
-  set(__NCCL_EP_ARCHS "")
-  foreach(__arch IN LISTS __nccl_ep_archs)
-    if(__arch GREATER_EQUAL 90)  # nccl_ep is Hopper+ only
-      list(APPEND __NCCL_EP_ARCHS "${__arch}")
-    endif()
-  endforeach()
-  set(__NCCL_EP_ARCH_ARG "")
-  if(__NCCL_EP_ARCHS)
-    list(REMOVE_DUPLICATES __NCCL_EP_ARCHS)
-    set(__NCCL_EP_ARCH_ARG "-DCMAKE_CUDA_ARCHITECTURES=${__NCCL_EP_ARCHS}")
-  endif()
-
+  # Build EP against prebuilt NCCL, with both libraries in the same build tree.
   # Branch on how torch links NCCL (USE_NCCL_EP supports both):
   #  - USE_SYSTEM_NCCL=OFF (source/dev): torch statically embeds the submodule
   #    NCCL, so build libnccl_ep.a against it and have the extension statically
