@@ -382,7 +382,7 @@ struct C10_API PyInterpreterVTable {
       bool has_symbolic_sizes,
       std::exception_ptr error) const = 0;
   // Validates real input subclasses, then optionally tries initial constant
-  // computation or a plain lift, all under one GIL acquisition. Replaces the
+  // computation or a plain lift while holding the GIL. Replaces the
   // arguments with the converted output on success; otherwise leaves them
   // intact.
   virtual bool fake_try_initial_constant(
