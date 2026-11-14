@@ -624,9 +624,18 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
             set_output_super = ""
 
         def gen_set_output_function(name: str, maybe_create_proxy: bool) -> str:
+            maybe_unused = (
+                " [[maybe_unused]]"
+                if (
+                    k is SchemaKind.inplace
+                    and not maybe_create_proxy
+                    and not generate_super
+                )
+                else ""
+            )
             return f"""
 void set_output_{name}(
-    int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
+    int64_t output_idx, IntArrayRef sizes, IntArrayRef strides{maybe_unused},
     TensorOptions options
 ) override {{
 {textwrap.indent(self.gen_class_set_output_body(k, maybe_create_proxy), "    ")}
