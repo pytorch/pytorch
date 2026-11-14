@@ -12212,9 +12212,13 @@ class Scheduler:
     def _subgraph_cudagraph_skip_reason(self, subgraph: ir.Subgraph) -> str | None:
         if (graph := subgraph.graph) is None:
             return None
+        patches = subgraph.inductor_config_patches
+        # Read the override itself: the ambient triton.cudagraphs also carries
+        # the enclosing graph's setting.
+        if patches and not patches.get("triton.cudagraphs", True):
+            return "invoke_subgraph body: opts out of cudagraphs"
         cache = self._invoke_subgraph_body_skip_reason_cache
         if graph.name not in cache:
-            patches = subgraph.inductor_config_patches
             with config.patch(patches) if patches else contextlib.nullcontext():
                 cache[graph.name] = self._compute_subgraph_cudagraph_skip_reason(graph)
         return cache[graph.name]
@@ -12309,18 +12313,23 @@ class Scheduler:
         or None if the node is cudagraphable.
         """
         region = self._get_invoke_subgraph_region(node)
-        if (
-            region is not None
-            and V.graph.cudagraphs_per_partition
-            and config.triton.cudagraphs
-        ):
-            # invoke_subgraph is opaque to the outer scheduler, so the cudagraph
-            # checks have to run over the region body rather than the call node.
+        if region is not None:
             if region.subgraph is None:
                 raise AssertionError("expected invoke_subgraph to have a subgraph")
-            if reason := self._subgraph_cudagraph_skip_reason(region.subgraph):
-                return reason
-            return self._invoke_subgraph_family_cudagraph_skip_reason(node, region)
+            patches = region.subgraph.inductor_config_patches
+            cudagraphs_override = (
+                bool(patches["triton.cudagraphs"])
+                if patches is not None and "triton.cudagraphs" in patches
+                else None
+            )
+            if cudagraphs_override is False:
+                return "invoke_subgraph opts out of cudagraphs"
+            if V.graph.cudagraphs_top_level:
+                # invoke_subgraph is opaque to the outer scheduler, so the
+                # cudagraph checks run over the body, not the call node.
+                if reason := self._subgraph_cudagraph_skip_reason(region.subgraph):
+                    return reason
+                return self._invoke_subgraph_family_cudagraph_skip_reason(node, region)
 
         # When the partitions are not for CUDA Graphs, keep kernels in call();
         # the whole callable may still be captured by post_compile.
