@@ -168,7 +168,7 @@ struct ConcretePyInterpreterVTable final
       const c10::OperatorHandle& op,
       c10::Device common_device,
       c10::Device device) const override;
-  void fake_raise_python_error(
+  void raise_python_error(
       c10::impl::FakePythonError kind,
       const std::string& msg) const override;
   bool fake_try_decomp(
@@ -1255,7 +1255,7 @@ void ConcretePyInterpreterVTable::fake_raise_device_mismatch(
   throw py::error_already_set();
 }
 
-void ConcretePyInterpreterVTable::fake_raise_python_error(
+void ConcretePyInterpreterVTable::raise_python_error(
     c10::impl::FakePythonError kind,
     const std::string& msg) const {
   py::gil_scoped_acquire gil;
