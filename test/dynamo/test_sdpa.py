@@ -4,9 +4,54 @@ import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
 from torch.backends.cuda import can_use_flash_attention, SDPAParams
 from torch.nn.attention import _cur_sdpa_kernel_backends, sdpa_kernel, SDPBackend
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestSDPA(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_sdpa_c_functions_no_graph_break(self):
+        counter = CompileCounter()
+
+        @torch.compile(fullgraph=True, backend=counter)
+        def test_cur_sdpa_kernel_backends():
+            return _cur_sdpa_kernel_backends()
+
+        result = test_cur_sdpa_kernel_backends()
+
+        self.assertIsInstance(result, list)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_sdpa_kernel_decorator_with_compile(self):
+        SDPA_BACKEND_PRIORITY = [
+            SDPBackend.MATH,
+            SDPBackend.EFFICIENT_ATTENTION,
+            SDPBackend.FLASH_ATTENTION,
+        ]
+
+        @sdpa_kernel(backends=SDPA_BACKEND_PRIORITY, set_priority=True)
+        def scaled_dot_product_attention(q, k, v, *args, **kwargs):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, *args, **kwargs
+            )
+
+        counter = CompileCounter()
+
+        @torch.compile(fullgraph=True, backend=counter)
+        def f(x):
+            return scaled_dot_product_attention(x, x, x)
+
+        x = torch.rand(128, 64, 64, 256, dtype=torch.float16)
+        result = f(x)
+
+        self.assertEqual(result.shape, x.shape)
+        self.assertEqual(counter.frame_count, 1)
+
+
+class TestSDPACUDA(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def assert_ref_equals_params(self, actual, expected):
         self.assertIs(actual.query, expected.query)
         self.assertIs(actual.key, expected.key)
@@ -95,42 +140,8 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(q, q, q), expected)
         self.assertEqual(counter.frame_count, 1)
 
-    def test_sdpa_c_functions_no_graph_break(self):
-        counter = CompileCounter()
 
-        @torch.compile(fullgraph=True, backend=counter)
-        def test_cur_sdpa_kernel_backends():
-            return _cur_sdpa_kernel_backends()
-
-        result = test_cur_sdpa_kernel_backends()
-
-        self.assertIsInstance(result, list)
-        self.assertEqual(counter.frame_count, 1)
-
-    def test_sdpa_kernel_decorator_with_compile(self):
-        SDPA_BACKEND_PRIORITY = [
-            SDPBackend.MATH,
-            SDPBackend.EFFICIENT_ATTENTION,
-            SDPBackend.FLASH_ATTENTION,
-        ]
-
-        @sdpa_kernel(backends=SDPA_BACKEND_PRIORITY, set_priority=True)
-        def scaled_dot_product_attention(q, k, v, *args, **kwargs):
-            return torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, *args, **kwargs
-            )
-
-        counter = CompileCounter()
-
-        @torch.compile(fullgraph=True, backend=counter)
-        def f(x):
-            return scaled_dot_product_attention(x, x, x)
-
-        x = torch.rand(128, 64, 64, 256, dtype=torch.float16)
-        result = f(x)
-
-        self.assertEqual(result.shape, x.shape)
-        self.assertEqual(counter.frame_count, 1)
+instantiate_device_type_tests(TestSDPACUDA, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
