@@ -248,6 +248,97 @@ def _load_pybind11_enum_mod(*, load_inline):
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    def test_new_class_attribute_writes(self):
+        def fn(x):
+            cls = type("A", (), {})
+            cls.answer = 42
+            cls.__doc__ = "updated"
+            return x + cls.answer, cls.__doc__, cls
+
+        cnt = CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.ones(2)
+        first = compiled(x)
+        second = compiled(x)
+        self.assertEqual(first[:2], fn(x)[:2])
+        self.assertEqual(second[:2], first[:2])
+        self.assertEqual(first[2].answer, 42)
+        self.assertEqual(first[2].__doc__, "updated")
+        self.assertIsNot(first[2], second[2])
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_new_class_attribute_list_alias(self):
+        def fn(x):
+            cls = type("A", (), {})
+            items = [1]
+            cls.items = items
+            items.append(2)
+            cls.items.append(3)
+            return x + len(cls.items), cls, items, cls.items is items
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            result, cls, items, aliased = compiled(x)
+            self.assertEqual(result, fn(x)[0])
+            self.assertEqual(items, [1, 2, 3])
+            self.assertTrue(aliased)
+            self.assertIs(cls.items, items)
+
+    def test_new_class_attribute_graph_break(self):
+        def fn(x):
+            cls = type("A", (), {})
+            cls.__doc__ = "before"
+            cls.items = [1]
+            x = x + 1
+            torch._dynamo.graph_break()
+            cls.items.append(2)
+            cls.__doc__ = "after"
+            return x + len(cls.items), cls
+
+        compiled = torch.compile(fn, backend="eager")
+        x = torch.ones(2)
+        for _ in range(2):
+            result, cls = compiled(x)
+            expected, eager_cls = fn(x)
+            self.assertEqual(result, expected)
+            self.assertEqual(cls.__doc__, eager_cls.__doc__)
+            self.assertEqual(cls.items, eager_cls.items)
+
+    def test_existing_class_descriptor_owner_mutation(self):
+        class Descriptor:
+            def __get__(self, obj, owner):
+                owner.counter += 1
+                return owner.counter
+
+        class Existing:
+            counter = 0
+            value = Descriptor()
+
+        def fn(x):
+            return x + Existing.value
+
+        compiled = torch.compile(fn, backend="eager")
+        x = torch.ones(2)
+        for expected in (1, 2, 3):
+            self.assertEqual(compiled(x), x + expected)
+            self.assertEqual(Existing.counter, expected)
+
+    def test_existing_class_base_mutation(self):
+        class Base:
+            counter = 0
+
+        def fn(x):
+            cls = type("A", (Base,), {})
+            cls.__base__.counter += 1
+            return x + cls.__base__.counter
+
+        compiled = torch.compile(fn, backend="eager")
+        x = torch.ones(2)
+        for expected in (1, 2, 3):
+            self.assertEqual(compiled(x), x + expected)
+            self.assertEqual(Base.counter, expected)
+
     def test_storage_offset_scalar_output(self):
         def fn(x):
             return x.storage_offset()
