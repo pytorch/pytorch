@@ -24076,6 +24076,22 @@ if RUN_GPU:
                 )
                 torch.testing.assert_close(result, fn(inp))
 
+        @parametrize("persistent", [False, True])
+        @parametrize("cpp_wrapper", [False, True])
+        def test_argmax_gather_epilogue(self, persistent, cpp_wrapper):
+            def fn(x, table):
+                index = x.argmax(dim=1, keepdim=True)
+                return table.gather(1, index)
+
+            x = torch.randn(8, 100, device=GPU_TYPE)
+            table = torch.randn_like(x)
+            with config.patch(
+                {"triton.persistent_reductions": persistent, "cpp_wrapper": cpp_wrapper}
+            ):
+                actual = torch.compile(fn)(x, table)
+            self.assertEqual(actual, fn(x, table))
+            assertGeneratedKernelCountEqual(self, 1)
+
         @config.patch({"triton.decompose_sort_ops": True})
         def test_mode_decompose_sort_ops(self):
             def fn(a):
