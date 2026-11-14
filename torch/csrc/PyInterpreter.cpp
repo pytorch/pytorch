@@ -204,6 +204,12 @@ struct ConcretePyInterpreterVTable final
       torch::jit::Stack* stack,
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       PyObject* real) const override;
+  void maybe_run_unsafe_fallback(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
+      bool has_symbolic_sizes,
+      std::exception_ptr error) const override;
   bool fake_try_initial_constant(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
@@ -1562,6 +1568,40 @@ bool ConcretePyInterpreterVTable::fake_infer_from_real_out(
       },
       /*convert=*/{},
       "infer_fake_from_real_out");
+}
+
+void ConcretePyInterpreterVTable::maybe_run_unsafe_fallback(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    const std::shared_ptr<c10::FakeTensorMode>& mode,
+    bool has_symbolic_sizes,
+    std::exception_ptr error) const {
+  py::gil_scoped_acquire gil;
+  py::object py_error = py::none();
+  if (error) {
+    torch::translate_exception_to_python(error);
+    py::error_already_set translated;
+    if (!translated.matches(PyExc_NotImplementedError)) {
+      // Translation has consumed the original Python exception's error state.
+      translated.restore();
+      torch::throw_python_error();
+    }
+    py_error = translated.value();
+  }
+  auto py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
+  run_fake_python_callback(
+      op,
+      stack,
+      [&](const py::object& args, const py::dict& kwargs) {
+        return py_mode.attr("maybe_run_unsafe_fallback")(
+            getTorchApiFunction(op),
+            args,
+            kwargs,
+            has_symbolic_sizes,
+            py_error);
+      },
+      /*convert=*/{},
+      "maybe_run_unsafe_fallback");
 }
 
 c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::

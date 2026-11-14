@@ -65,13 +65,6 @@
 //  - ops run under the Python dispatcher, whose Python-dispatcher-only Meta
 //    registrations do not run here;
 //  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors), or Any;
-//  - sparse inputs to ops without a sparse Meta kernel; unlike Meta, the sparse
-//    Meta keys have no backend fallback;
-//  - ops whose Meta kernel raises c10::NotImplementedError (as the Meta
-//    backend fallback does for an op without one), which Python then runs
-//    through maybe_run_unsafe_fallback (a Python Meta kernel's
-//    NotImplementedError is not caught here, so it propagates as is, without
-//    the message callers match below);
 //  - and the input checks below.
 // Callers that need to tell these apart from other NotImplementedErrors match
 // the message unsupported() raises.
@@ -749,11 +742,11 @@ void fakeFallback(
       return;
     }
   }
-  if (has_sparse_inputs &&
-      !op.hasComputedKernelForDispatchKey(
-          meta_keyset.highestPriorityTypeId())) {
-    // Give a clearer error without constructing the dispatcher's kernel table.
-    unsupported(op, "sparse inputs to ops without a sparse Meta kernel");
+  if (!op.hasComputedKernelForDispatchKey(c10::DispatchKey::Meta)) {
+    (*interpreter)->maybe_run_unsafe_fallback(
+        op, stack, mode, symbolic_sizes, nullptr);
+    maybe_propagate_real_tensors();
+    return;
   }
   meta_keyset = meta_keyset.add(c10::DispatchKey::Meta);
 
@@ -775,10 +768,13 @@ void fakeFallback(
     }
   }
 
+  // Boxed kernels may consume their arguments even when they throw.
+  auto arguments = torch::jit::last(*stack, num_arguments);
+  c10::SmallVector<c10::IValue, 8> saved_args(arguments.begin(), arguments.end());
   // Run the (sparse) Meta kernel with the inputs reporting the meta device (see
   // Note [C++ in_kernel_invocation]), as Python's in_kernel_invocation_manager
   // does. Match _DisableTorchDispatch so nested ops bypass dispatch modes.
-  {
+  try {
     c10::impl::ExcludeDispatchKeyGuard exclude_dispatch(c10::DispatchKeySet(
         {c10::DispatchKey::Fake,
          c10::DispatchKey::Python,
@@ -797,13 +793,15 @@ void fakeFallback(
     if (suppress_invariants) {
       at::globalContext().setCheckSparseTensorInvariants(false);
     }
-    try {
-      op.redispatchBoxed(meta_keyset, stack);
-    } catch (const c10::NotImplementedError& e) {
-      // Python runs these through maybe_run_unsafe_fallback
-      unsupported(
-          op, "ops without a working Meta kernel", e.what_without_backtrace());
-    }
+    op.redispatchBoxed(meta_keyset, stack);
+  } catch (...) {
+    auto error = std::current_exception();
+    stack->resize(arguments_begin);
+    stack->insert(stack->end(), saved_args.begin(), saved_args.end());
+    (*interpreter)->maybe_run_unsafe_fallback(
+        op, stack, mode, symbolic_sizes, error);
+    // Python's NotImplementedError path returns the fallback directly.
+    return;
   }
 
   // Note [In-place conversion of Meta outputs]

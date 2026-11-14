@@ -62,6 +62,8 @@ struct C10_API FakeTensorMode {
   // Temporary scalar-output override, as in Python's FakeTensorMode.
   bool allow_scalar_outputs_ = false;
 
+  bool allow_fallback_kernels_ = true;
+
   // Default used by from_tensor when its static_shapes argument is None.
   bool static_shapes_ = shape_env_ == nullptr;
 

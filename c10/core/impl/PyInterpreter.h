@@ -1,5 +1,7 @@
 #pragma once
 
+#include <exception>
+
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/Layout.h>
@@ -367,6 +369,17 @@ struct C10_API PyInterpreterVTable {
       torch::jit::Stack* stack,
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       PyObject* real) const = 0;
+  // Runs Python's trivial fake or permitted real-kernel fallback on the
+  // restored arguments, with mode uninstalled and outside Meta invocation.
+  // A non-null error must be NotImplementedError (native or Python), otherwise
+  // it is rethrown. It is passed to run_fallback_kernel for alias/inplace-view
+  // failures. Replaces arguments with outputs on success, leaves them on error.
+  virtual void maybe_run_unsafe_fallback(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
+      bool has_symbolic_sizes,
+      std::exception_ptr error) const = 0;
   // Validates real input subclasses, then optionally tries initial constant
   // computation or a plain lift while holding the GIL. Replaces the
   // arguments with the converted output on success; otherwise leaves them
