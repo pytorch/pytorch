@@ -458,6 +458,15 @@ class _FxNodeHash:
     kwarg_hashes: tuple[int, ...]
 
 
+def _is_unsupported_inductor_lowering(target: object) -> bool:
+    """Whether target is a lowering with no FakeTensor metadata provider."""
+    return (
+        hasattr(target, "_inductor_lowering_function")
+        and getattr(target, "_inductor_lowering_output_metadata_fn", None) is None
+        and getattr(target, "_inductor_lowering_output_metadata_is_input", None) is None
+    )
+
+
 class FakeTensorUpdater:
     """
     The main idea here is that it's difficult to maintain accurate fake
@@ -524,6 +533,23 @@ class FakeTensorUpdater:
             node.target,
             get_hash_or_ids(node.args),
             get_hash_or_ids(chain.from_iterable(node.kwargs.items())),
+        )
+
+    def _node_invokes_subgraph(
+        self, node: torch.fx.Node, *args: Any, **kwargs: Any
+    ) -> bool:
+        return (
+            node.op == "call_function"
+            and node.target
+            not in (
+                torch.ops.higher_order.auto_functionalized,
+                torch.ops.higher_order.auto_functionalized_v2,
+            )
+            and pytree.tree_any_only(
+                torch.fx.GraphModule,
+                lambda subgraph: subgraph in self.subgraph_updaters,
+                (args, kwargs),
+            )
         )
 
     @staticmethod
@@ -677,26 +703,6 @@ class FakeTensorUpdater:
                 and not hasattr(node.target, "_inductor_lowering_function")
             )
 
-        def node_invokes_subgraph(
-            node: torch.fx.Node, *args: Any, **kwargs: Any
-        ) -> bool:
-            return (
-                node.op == "call_function"
-                and node.target
-                not in (
-                    # auto_functionalized doesn't call a subgraph, but the pytree call
-                    # below can return subgraphs if the functionalized call itself
-                    # invokes a subgraph.
-                    torch.ops.higher_order.auto_functionalized,
-                    torch.ops.higher_order.auto_functionalized_v2,
-                )
-                and pytree.tree_any_only(
-                    torch.fx.GraphModule,
-                    lambda s: s in self.subgraph_updaters,
-                    (args, kwargs),
-                )
-            )
-
         def update_node_fake_tensor(node: torch.fx.Node, new_fake_tensor: Any) -> bool:
             if "val" in node.meta and _is_fake_tensor_same(
                 new_fake_tensor, node.meta["val"], existing_storages, node=node
@@ -837,7 +843,11 @@ class FakeTensorUpdater:
             # silent incorrectness.
             if (
                 # Always run updates on nodes that invoke subgraphs
-                not (invokes_subgraph := node_invokes_subgraph(node, *args, **kwargs))
+                not (
+                    invokes_subgraph := self._node_invokes_subgraph(
+                        node, *args, **kwargs
+                    )
+                )
                 and self.processed_hashes.get(node) == node_hash
                 and id(node) not in to_process
             ):
@@ -943,9 +953,11 @@ class FakeTensorUpdater:
     ) -> OrderedSet[torch.fx.Node]:
         """Refresh changed nodes and propagate metadata changes through their users.
 
-        Propagation stops when users' metadata and tensor aliases do not change. In
-        most cases, this updates nodes without traversing the whole graph. Callers must
-        include every edited or newly inserted callable node and every rewired user.
+        Propagation stops when users' metadata and tensor aliases do not change. If it
+        reaches a subgraph invocation or Inductor lowering, this falls back to the full
+        updater and returns every graph node; otherwise it returns only reevaluated
+        nodes. Callers must set ``V.fake_mode`` and include every edited or newly
+        inserted callable node and every rewired user.
         """
         roots = OrderedSet(changed_nodes)
         if not roots:
@@ -966,30 +978,19 @@ class FakeTensorUpdater:
                 f"owning graph. Encountered node: {invalid.format_node()}"
             )
 
-        def full_fallback() -> OrderedSet[torch.fx.Node]:
-            for root in roots:
-                self.processed_hashes.pop(root, None)
-            self.incremental_update()
-            return OrderedSet(self.gm.graph.nodes)
-
-        if self.subgraph_updaters:
-            return full_fallback()
-
-        preflight = list(roots)
-        preflight_seen = OrderedSet[torch.fx.Node]()
-        while preflight:
-            current = preflight.pop()
-            if current in preflight_seen:
-                continue
-            preflight_seen.add(current)
-            if hasattr(current.target, "_inductor_lowering_function"):
-                return full_fallback()
-            preflight.extend(current.users)
-
         pending: list[torch.fx.Node] = []
         scheduled = OrderedSet[torch.fx.Node]()
         reevaluated = OrderedSet[torch.fx.Node]()
         old_values: dict[torch.fx.Node, Any] = {}
+
+        def full_fallback() -> OrderedSet[torch.fx.Node]:
+            # Some scheduled nodes may already have fresh metadata. Force the full
+            # updater to visit the entire affected frontier rather than stopping at
+            # those nodes because their metadata now appears unchanged.
+            for scheduled_node in scheduled:
+                self.processed_hashes.pop(scheduled_node, None)
+            self.incremental_update()
+            return OrderedSet(self.gm.graph.nodes)
 
         def get_old_fake(value: Any) -> Any:
             if isinstance(value, torch.fx.Node) and value in old_values:
@@ -1043,6 +1044,11 @@ class FakeTensorUpdater:
             is_valid, args, kwargs = get_fake_args_kwargs(current, self.gm)
             if not is_valid or not callable(current.target):
                 continue
+            if hasattr(current.target, "_inductor_lowering_function") or (
+                self.subgraph_updaters
+                and self._node_invokes_subgraph(current, *args, **kwargs)
+            ):
+                return full_fallback()
             old_args, old_kwargs = tree_map(
                 get_old_fake, (current.args, current.kwargs)
             )
