@@ -701,6 +701,8 @@ class TestBenchmarker(TestCase):
                     return_value=FakeDeviceInterface(),
                 ),
                 patch.object(_bench.torch, "empty", return_value=FakeBuffer()),
+                patch.object(_bench, "_rocm_mall_size", return_value=0),
+                patch.object(_bench, "_rocm_read_flush", return_value=lambda: None),
                 patch.object(
                     _bench.inductor_config, "autotune_cudagraph_benchmarking", True
                 ),
@@ -769,6 +771,180 @@ class TestBenchmarker(TestCase):
         self.assertGreater(len(captured_buffer_lengths), 0)
         self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
         self.assertEqual(captured_buffer_devices[0], device)
+
+    def test_inductor_benchmarker_flush_size_adds_rocm_mall(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        MiB = 1024 * 1024
+        benchmarker = InductorBenchmarker()
+        benchmarker.__dict__["L2_cache_size"] = 4 * MiB
+        with patch.object(torch.version, "hip", None):
+            self.assertEqual(benchmarker.get_flush_size("cuda"), 4 * MiB)
+        # HSA's size wins; the gfx table is only a fallback; unknown archs get L2 only.
+        for arch, hsa_size, mall in (
+            ("gfx950:sramecc+:xnack-", 256 * MiB, 256),
+            ("gfx1201", 32 * MiB, 32),
+            ("gfx942", 0, 0),
+            ("gfx950:sramecc+:xnack-", None, 256),
+            ("gfx942", None, 256),
+            ("gfx90a", None, 0),
+            ("gfx1100", None, 96),
+            ("gfx1201", None, 64),
+            ("gfx9999", None, 0),
+        ):
+            props = unittest.mock.Mock(gcnArchName=arch)
+            props.uuid.bytes = b"0123456789abcdef"
+            _bench._rocm_mall_size.cache_clear()
+            try:
+                with (
+                    patch.object(torch.version, "hip", "mock-hip"),
+                    patch.object(_bench.torch.cuda, "current_device", return_value=0),
+                    patch.object(
+                        _bench.torch.cuda, "get_device_properties", return_value=props
+                    ),
+                    patch.object(
+                        _bench, "_hsa_cache_beyond_l2", return_value=hsa_size
+                    ) as hsa,
+                ):
+                    self.assertEqual(
+                        benchmarker.get_flush_size("cuda"), (4 + mall) * MiB
+                    )
+                    hsa.assert_called_once_with(b"0123456789abcdef")
+            finally:
+                _bench._rocm_mall_size.cache_clear()
+
+    def test_rocm_mall_size_is_cached_per_device(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        # malformed or all-zero UUIDs never reach HSA
+        for bad in (b"", b"0123", b"0" * 16):
+            self.assertIsNone(_bench._hsa_cache_beyond_l2(bad))
+        sizes = {b"0" * 15 + b"1": 64, b"0" * 15 + b"2": 256}
+        props = {}
+        for i, uuid in enumerate(sizes, start=1):
+            props[i] = unittest.mock.Mock(gcnArchName="gfx950")
+            props[i].uuid.bytes = uuid
+        _bench._rocm_mall_size.cache_clear()
+        try:
+            with (
+                patch.object(
+                    _bench.torch.cuda, "get_device_properties", side_effect=props.get
+                ),
+                patch.object(
+                    _bench, "_hsa_cache_beyond_l2", side_effect=sizes.get
+                ) as hsa,
+            ):
+                self.assertEqual(
+                    [_bench._rocm_mall_size(d) for d in (1, 2, 1, 2)], [64, 256] * 2
+                )
+                self.assertEqual(hsa.call_count, 2)
+        finally:
+            _bench._rocm_mall_size.cache_clear()
+
+    @unittest.skipIf(not torch.version.hip, "ROCm only")
+    @unittest.skipIf(not torch.cuda.is_available(), "needs a GPU")
+    def test_rocm_mall_size_queries_hsa(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        arch = torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+        _bench._rocm_mall_size.cache_clear()
+        try:
+            if arch in ("gfx942", "gfx950"):
+                self.assertEqual(_bench._rocm_mall_size(0), 256 * 1024 * 1024)
+        finally:
+            _bench._rocm_mall_size.cache_clear()
+        # no agent has this UUID
+        self.assertIsNone(_bench._hsa_cache_beyond_l2(b"f" * 16))
+
+    @parametrize(
+        "hip_value,triton", ((None, True), ("mock-hip", True), ("mock-hip", False))
+    )
+    def test_inductor_benchmarker_flush_reads_on_rocm(self, hip_value, triton):
+        # ROCm flushes by reading a float32 buffer twice with a Triton kernel (zero_()
+        # leaves dirty lines whose write-back the timed call pays, and ATen's loads
+        # skip the Infinity Cache on MI300); CUDA keeps the int32 zero_() flush.
+        from torch._inductor.runtime import benchmarking as _bench
+
+        calls = []
+
+        class FakeBuffer:
+            def zero_(self):
+                calls.append("zero_")
+
+        class FakeDeviceInterface:
+            def synchronize(self):
+                pass
+
+        class FakeEvent:
+            def record(self):
+                pass
+
+            def elapsed_time(self, other):
+                return 1.0
+
+        class FakeInductorBenchmarker(InductorBenchmarker):
+            def get_device_cache_size(self, device_type=None):
+                return 4
+
+            def get_event_pairs(self, iters, device_type=None):
+                return [(FakeEvent(), FakeEvent()) for _ in range(iters)]
+
+        empty_calls = []
+
+        def fake_empty(*args, **kwargs):
+            empty_calls.append((args, kwargs))
+            return FakeBuffer()
+
+        flush_passes = []
+
+        def fake_read_flush(buffer, passes):
+            flush_passes.append(passes)
+            return lambda: calls.append("read")
+
+        with (
+            patch.object(
+                _bench, "get_interface_for_device", return_value=FakeDeviceInterface()
+            ),
+            patch.object(_bench.torch, "empty", side_effect=fake_empty),
+            patch.object(_bench, "_rocm_mall_size", return_value=256),
+            patch.object(_bench, "_rocm_read_flush", side_effect=fake_read_flush),
+            patch.object(
+                _bench.inductor_config, "autotune_cudagraph_benchmarking", False
+            ),
+            patch.object(torch.version, "hip", hip_value),
+            patch.object(_bench, "has_triton", return_value=triton),
+        ):
+            FakeInductorBenchmarker().benchmark_gpu(
+                lambda: calls.append("call"),
+                estimation_iters=2,
+                memory_warmup_iters=3,
+                benchmark_iters=4,
+                is_vetted_benchmarking=True,
+                device_type="cuda",
+            )
+
+        (size,), kwargs = empty_calls[0]
+        if hip_value and not triton:
+            # no Triton: same size, but the CUDA zero_() flush
+            self.assertEqual((size, kwargs["dtype"]), ((4 + 256) // 4, torch.int))
+            self.assertEqual(flush_passes, [])
+            flush, warmup_flushes = "zero_", 3
+        elif hip_value:
+            self.assertEqual((size, kwargs["dtype"]), ((4 + 256) // 4, torch.float32))
+            # two read passes per flush; the warmup runs half as many flushes,
+            # rounded up
+            self.assertEqual(flush_passes, [2])
+            flush, warmup_flushes = "read", 2
+        else:
+            self.assertEqual((size, kwargs["dtype"]), (4 // 4, torch.int))
+            flush, warmup_flushes = "zero_", 3
+        self.assertEqual(
+            calls,
+            ["call", "zero_"]
+            + [flush, "call"] * 2
+            + [flush] * warmup_flushes
+            + [flush, "call"] * 4,
+        )
 
 
 class TestGpuBenchmarkDeviceTypes(TestCase):
