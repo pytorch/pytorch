@@ -42,17 +42,39 @@ def _get_request_headers() -> dict[str, str]:
     }
 
 
+# Quota waits must end by this: GitHub's window is an hour, so a later reset time
+# is bogus, and however many requests hit the limit the script waits an hour at most.
+_QUOTA_WAIT_DEADLINE = time.time() + 3600
+
+
+def _github_get(url: str) -> requests.Response:
+    # The GITHUB_TOKEN quota is shared by every job in the repository and runs out
+    # at peak hours. This runs after the workflow, and ROCm jobs leave their test
+    # reports only in GitHub artifacts, so wait for the quota to reset rather than
+    # lose them.
+    response = requests.get(url, headers=_get_request_headers())
+    reset = response.headers.get("X-RateLimit-Reset", "")
+    if (
+        response.status_code in (403, 429)
+        and response.headers.get("X-RateLimit-Remaining") == "0"
+        and reset.isdecimal()
+        and int(reset) + 5 <= _QUOTA_WAIT_DEADLINE
+    ):
+        wait = max(int(reset) - time.time(), 0) + 5
+        print(f"GitHub API quota used up, waiting {wait:.0f}s for it to reset")
+        time.sleep(wait)
+        response = requests.get(url, headers=_get_request_headers())
+    return response
+
+
 def _get_artifact_urls(prefix: str, workflow_run_id: int) -> dict[Path, str]:
     """Get all workflow artifacts with 'test-report' in the name."""
-    response = requests.get(
-        f"{PYTORCH_REPO}/actions/runs/{workflow_run_id}/artifacts?per_page=100",
-        headers=_get_request_headers(),
+    response = _github_get(
+        f"{PYTORCH_REPO}/actions/runs/{workflow_run_id}/artifacts?per_page=100"
     )
     artifacts = response.json()["artifacts"]
     while "next" in response.links:
-        response = requests.get(
-            response.links["next"]["url"], headers=_get_request_headers()
-        )
+        response = _github_get(response.links["next"]["url"])
         artifacts.extend(response.json()["artifacts"])
 
     artifact_urls = {}
@@ -84,7 +106,7 @@ def _download_artifact(
 
     print(f"Downloading {artifact_name}")
 
-    response = requests.get(artifact_url, headers=_get_request_headers())
+    response = _github_get(artifact_url)
     with open(artifact_name, "wb") as f:
         f.write(response.content)
     return artifact_name
