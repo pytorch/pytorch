@@ -101,11 +101,18 @@ def _register_single_dim_pointwise(
     op: OpOverload,
     partial_extra_rules: list[list[Placement]] | None = None,
     static_argnum: int = 0,
+    *,
+    partial_rules_if: Callable[[ArgsType], bool] | None = None,
 ) -> None:
     if partial_extra_rules is not None:
         _specially_registered_ops.add(op)
-    inner_fn = _common_pointwise_single_dim_strategy(
+    with_rules = _common_pointwise_single_dim_strategy(
         partial_extra_rules=partial_extra_rules  # pyrefly: ignore[bad-argument-type]
+    )
+    without_rules = (
+        _common_pointwise_single_dim_strategy()
+        if partial_rules_if is not None
+        else with_rules
     )
 
     # Wrap to append tensor kwarg placements in schema declaration order.
@@ -115,9 +122,9 @@ def _register_single_dim_pointwise(
         op: OpOverload,
         args: ArgsType,
         kwargs: KwargsType,
-        _fn: Callable = inner_fn,
     ) -> list[list[Placement | _ShardingPlaceholder]]:
-        strategies = _fn(op, args, kwargs)
+        use_rules = partial_rules_if is None or partial_rules_if(args)
+        strategies = (with_rules if use_rules else without_rules)(op, args, kwargs)
         kw_names = [k for k, v in kwargs.items() if isinstance(v, TensorMeta)]
         if not kw_names:
             return strategies
@@ -247,6 +254,7 @@ for op in scalar_linear_ops:
 # Only ops that are non-decreasing on their ENTIRE domain belong here.
 # Ops with restricted domains (e.g. log on (0,∞), asin on [-1,1]) do NOT qualify
 # because P(max) offsets can push inputs outside the valid domain.
+# sign and sgn need separate dtype-dependent rules because they map NaN to zero.
 non_decreasing_unary_ops = [
     aten.asinh.default,
     aten.asinh_.default,
@@ -286,15 +294,9 @@ non_decreasing_unary_ops = [
     aten.round_.default,
     aten.round.decimals_out,
     aten.round.out,
-    aten.sgn.default,
-    aten.sgn_.default,
-    aten.sgn.out,
     aten.sigmoid.default,
     aten.sigmoid_.default,
     aten.sigmoid.out,
-    aten.sign.default,
-    aten.sign_.default,
-    aten.sign.out,
     aten.sinh.default,
     aten.sinh_.default,
     aten.sinh.out,
@@ -330,6 +332,26 @@ _NON_DECREASING_RULES: list[list[Placement]] = [
 
 for op in non_decreasing_unary_ops:
     _register_single_dim_pointwise(op, _NON_DECREASING_RULES)
+
+
+def _cannot_be_nan(args: ArgsType) -> bool:
+    return isinstance(args[0], TensorMeta) and not (
+        args[0].dtype.is_floating_point or args[0].dtype.is_complex
+    )
+
+
+# Integral inputs cannot contain NaN, so sign/sgn preserve max/min for them.
+for op in (
+    aten.sign.default,
+    aten.sign_.default,
+    aten.sign.out,
+    aten.sgn.default,
+    aten.sgn_.default,
+    aten.sgn.out,
+):
+    _register_single_dim_pointwise(
+        op, _NON_DECREASING_RULES, partial_rules_if=_cannot_be_nan
+    )
 
 # Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
 # Note: acos excluded due to domain constraints [-1,1] causing validation failures
