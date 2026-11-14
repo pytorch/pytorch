@@ -400,6 +400,21 @@ TEST(TestNative, FakeTensorData) {
   for (bool inference : {false, true}) {
     c10::InferenceMode guard(inference);
     for (bool share_version : {false, true}) {
+      auto no_mode = at::empty({1}, at::device(at::kMeta));
+      no_mode.set_requires_grad(true);
+      at::set_and_normalize_fake_device(
+          no_mode.unsafeGetTensorImpl(), c10::Device(c10::kCPU));
+      ASSERT_EQ(no_mode.unsafeGetTensorImpl()->fake_tensor_mode(), nullptr);
+      auto no_mode_data = Tensor(
+          share_version ? no_mode.tensor_data() : no_mode.variable_data());
+      EXPECT_TRUE(no_mode_data.is_fake());
+      EXPECT_TRUE(no_mode_data.is_alias_of(no_mode));
+      EXPECT_EQ(no_mode_data.unsafeGetTensorImpl()->fake_tensor_mode(), nullptr);
+      EXPECT_EQ(no_mode_data.device(), no_mode.device());
+      EXPECT_EQ(no_mode_data.sizes(), no_mode.sizes());
+      EXPECT_FALSE(no_mode_data.requires_grad());
+      EXPECT_EQ(no_mode_data.is_inference(), inference);
+
       auto mode = make_cpp_fake_mode();
       auto input = at::empty({1}, at::device(at::kMeta));
       input.set_requires_grad(true);
