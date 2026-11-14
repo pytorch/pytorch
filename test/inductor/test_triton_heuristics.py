@@ -1202,8 +1202,9 @@ class TestTritonHeuristics(TestCase):
 
     @runOnRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    @config.patch({"max_autotune": False})
     def test_flex_default_configs_gated_on_arch_name(self):
-        """A gfx target gets tuned flex defaults only if registered for them.
+        """A gfx target gets only flex defaults measured for that target.
 
         get_device_capability() on ROCm reports the gfx major/minor, which
         neither orders by capability nor identifies the product line, so gating
@@ -1211,7 +1212,9 @@ class TestTritonHeuristics(TestCase):
         hands them tables measured on gfx950.
         """
         from torch._inductor.heuristics.template.triton import ROCmConfigHeuristic
+        from torch._inductor.sizevars import SizeVarAllocator
         from torch._inductor.utils import rocm_gfx_arch
+        from torch._inductor.virtualized import V
 
         heuristic = ROCmConfigHeuristic()
         dtype, head_dim = torch.float16, 128
@@ -1240,9 +1243,11 @@ class TestTritonHeuristics(TestCase):
                     "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
                     lambda: False,
                 ),
+                V.set_graph_handler(types.SimpleNamespace(sizevars=SizeVarAllocator())),
             ):
                 return get_configs()
 
+        # Q=1024 is outside the length-dependent gfx1250 prefill defaults.
         paths = (
             (
                 "forward",
@@ -1270,6 +1275,75 @@ class TestTritonHeuristics(TestCase):
                     else:
                         self.assertEqual(configs, [tuned], msg=arch)
                         self.assertNotEqual(configs, fallback, msg=arch)
+
+    @runOnRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    @config.patch({"max_autotune": False})
+    @parametrize(
+        "arch,dtype,head_dim,v_head_dim,seq_len,tuned",
+        [
+            ("gfx1250", torch.float16, 128, None, 2048, True),
+            ("gfx1250", torch.bfloat16, 128, 128, 8192, True),
+            ("gfx1250", torch.float16, 256, 256, 8192, False),
+            ("gfx1250", torch.bfloat16, 256, None, 2048, False),
+            ("gfx1250", torch.float16, 128, 128, 2047, False),
+            ("gfx1250", torch.bfloat16, 128, 128, 8193, False),
+            ("gfx1250", torch.float16, 64, 64, 2048, False),
+            ("gfx1250", torch.float32, 128, 128, 2048, False),
+            ("gfx1250", torch.float16, 128, 256, 2048, False),
+            ("gfx1250", torch.bfloat16, 256, 128, 2048, False),
+            ("gfx1251", torch.float16, 128, 128, 2048, False),
+            ("gfx1250", torch.float16, 128, 128, "unknown", False),
+            ("gfx1250", torch.float16, 128, 128, "bounded", True),
+            ("gfx1250", torch.float16, 128, 128, "wide", False),
+        ],
+    )
+    def test_gfx1250_prefill_default(
+        self, arch, dtype, head_dim, v_head_dim, seq_len, tuned
+    ):
+        from torch._inductor.heuristics.template.triton import ROCmConfigHeuristic
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        if isinstance(seq_len, str):
+            kind = seq_len
+            seq_len = shape_env.create_unbacked_symint().node.expr
+            if kind in ("bounded", "wide"):
+                lower, upper = (2048, 8192) if kind == "bounded" else (1024, 16384)
+                shape_env.constrain_symbol_range(seq_len, lower, upper)
+        else:
+            seq_len = sympy.Integer(seq_len)
+        heuristic = ROCmConfigHeuristic()
+        with (
+            patch(
+                "torch._inductor.heuristics.template.triton.rocm_gfx_arch", lambda: arch
+            ),
+            patch(
+                "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
+                lambda: False,
+            ),
+            V.set_graph_handler(
+                types.SimpleNamespace(sizevars=SizeVarAllocator(shape_env))
+            ),
+        ):
+            configs = heuristic.get_flex_attn_fwd_configs(
+                head_dim, seq_len, dtype, v_head_dim
+            )
+        expected = (
+            (64, 64, 2, 2)
+            if tuned
+            else (64, 64, 1, 4)
+            if dtype == torch.float32
+            else (128, 64, 1, 4)
+        )
+        self.assertEqual(
+            [(c.block_m, c.block_n, c.num_stages, c.num_warps) for c in configs],
+            [expected],
+        )
+        self.assertEqual(shape_env.guards, [])
+        self.assertEqual(shape_env.deferred_runtime_asserts, {})
 
     @unittest.skipIf(not torch.version.hip, "ROCm-specific MFMA config pruning")
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
