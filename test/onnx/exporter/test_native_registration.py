@@ -63,6 +63,32 @@ class TestNativeRegistration(TestCase):
             onnx.checker.check_model(program.model_proto, full_check=True)
         self.assertIsNot(values[0], values[1])
 
+    def test_dynamic_repeat(self):
+        class Repeat(torch.nn.Module):
+            def forward(self, x, y):
+                return x.repeat(y.shape[0], 1)
+
+        model = Repeat()
+        inputs = (torch.ones(1, 3), torch.ones(2))
+        program = torch.onnx.export(
+            model,
+            inputs,
+            dynamic_shapes={"x": {}, "y": {0: torch.export.Dim("n")}},
+            opset_version=18,
+            optimize=False,
+            verbose=False,
+        )
+        proto = program.model_proto
+        onnx.checker.check_model(proto, full_check=True)
+        feed = {
+            value.name: tensor.numpy()
+            for value, tensor in zip(
+                program.model.graph.inputs, (inputs[0], torch.ones(4))
+            )
+        }
+        result = ReferenceEvaluator(proto).run(None, feed)[0]
+        self.assertEqual(torch.from_numpy(result), model(inputs[0], torch.ones(4)))
+
     def test_decorator_returns_plain_function(self):
         size = len(_torchlib_registry._registry)
         self.addCleanup(
