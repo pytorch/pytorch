@@ -335,6 +335,16 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, [x])
 
+    class StorageOffsetOutput(torch.nn.Module):
+        def forward(self, p, a, b):
+            def true_fn(x, y):
+                return torch.tanh(x + y)[2:]
+
+            def false_fn(x, y):
+                return torch.sigmoid(x + y)[2:]
+
+            return torch.cond(p, true_fn, false_fn, [a, b]) * 2
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -978,6 +988,24 @@ class CondTests(TestCase):
             dynamic=True,
         )
 
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @parametrize("aligned", [False, True])
+    def test_cond_output_with_storage_offset(self, device, dynamic, aligned):
+        # With 5 columns, the storage offset of the branch outputs is not
+        # GPU-aligned.
+        cols = 20 if aligned else 5
+        self._run_test(
+            model=CondModels.StorageOffsetOutput(),
+            inputs=(
+                torch.randn(10, cols),
+                torch.randn(10, cols),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
 
 class WhileLoopModels:
     class Simple(torch.nn.Module):
@@ -1330,6 +1358,18 @@ class WhileLoopModels:
             init = torch.tensor(0, device=x.device)
             _, result = torch.while_loop(cond_fn, body_fn, (init, x))
             return result.sum()
+
+    class StorageOffsetCarry(torch.nn.Module):
+        def forward(self, ci, a):
+            def cond_fn(i, x):
+                return i > 0
+
+            def body_fn(i, x):
+                # The new carry is a view that starts partway into its buffer.
+                return i - 1, torch.cat([x + 1, x * 0.5])[x.size(0) :]
+
+            _, out = torch._higher_order_ops.while_loop(cond_fn, body_fn, [ci, a])
+            return out * 2
 
 
 class WhileLoopTests(TestCase):
@@ -1773,6 +1813,21 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
             num_counters=0,
             autograd=True,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @parametrize("aligned", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_while_loop_carry_with_storage_offset(self, device, dynamic, aligned):
+        # With 5 columns, the carry's storage offset is not GPU-aligned.
+        cols = 20 if aligned else 5
+        self._run_test(
+            model=WhileLoopModels.StorageOffsetCarry(),
+            inputs=(torch.randn(10, cols),),
+            device=device,
+            dynamic=dynamic,
         )
 
 
