@@ -659,13 +659,12 @@ class TestAOTCompileToPython(TestCase):
         # sink isolation it relies on is pinned by test_capture_sink_is_thread_local.
         #
         # Only compile_to_python runs concurrently. The graphs are captured SERIALLY up
-        # front because make_fx (fx symbolic tracing) is NOT thread-safe: it mutates
-        # process-global tracing state -- the CURRENT_PATCHER global in
-        # torch.fx._symbolic_trace and the fx.traceback node-meta globals. Capturing inside
-        # the worker threads would race that state against the make_fx run nested inside the
-        # OTHER thread's compile_to_python (which _COMPILE_LOCK covers, but capture is not
-        # the serialized entry point), intermittently raising "CURRENT_PATCHER is None in
-        # finally block" -- a make_fx concurrency artifact unrelated to the lock under test.
+        # front because make_fx is still not fully thread-safe: the fx.traceback node-meta
+        # globals and _CURRENT_MAKE_FX_TRACER in torch.fx.experimental.proxy_tensor are
+        # process-global. Capturing inside the worker threads would race that state against
+        # the make_fx run nested inside the OTHER thread's compile_to_python (which
+        # _COMPILE_LOCK covers, but capture is not the serialized entry point) -- a make_fx
+        # concurrency artifact unrelated to the lock under test.
         import threading
         import traceback
 
