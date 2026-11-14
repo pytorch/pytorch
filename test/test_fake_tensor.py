@@ -3488,15 +3488,42 @@ class TestFakeTensorConstHandling(TestCase):
             self.assertConst(x, y)
 
     @fake_tensor_modes
-    def test_shared_storages(self, mode_cls):
-        with mode_cls():
-            x = torch.tensor([4.0])
-            y = x[:]
-
+    @parametrize("alias", ["view", "detach", "data"])
+    @parametrize("active", [False, True])
+    @parametrize("inference", [False, True])
+    @parametrize("write", ["add", "fill", "copy"])
+    def test_shared_storages(self, mode_cls, alias, active, inference, write):
+        mode = mode_cls()
+        with torch.inference_mode(inference), mode:
+            x = torch.tensor([4.0], requires_grad=alias != "view")
+            other = torch.tensor([5.0])
+        with (
+            torch.inference_mode(inference),
+            mode if active else contextlib.nullcontext(),
+        ):
+            y = x[:] if alias == "view" else getattr(x, alias)
+            if alias == "detach":
+                y = y()
             self.assertEqual(x.storage()._cdata, y.storage()._cdata)
             xc, yc = maybe_get_fake_constant(x), maybe_get_fake_constant(y)
             self.assertConst(x, y)
             self.assertEqual(xc.storage()._cdata, yc.storage()._cdata)
+            self.assertFalse(y.requires_grad)
+            if not inference:
+                version = x._version
+            if write == "add":
+                result = y.add_(1)
+            elif write == "fill":
+                result = y.fill_(5)
+            else:
+                result = y.copy_(other)
+            self.assertIs(result, y)
+            self.assertConst(x, y)
+            self.assertEqual(x.item(), 5.0)
+            self.assertEqual(y.item(), 5.0)
+            if not inference:
+                self.assertEqual(x._version, version + (alias != "data"))
+                self.assertEqual(y._version, 1)
 
     @fake_tensor_modes
     def test_constant_invalidation(self, mode_cls):
@@ -3553,21 +3580,28 @@ class TestFakeTensorConstHandling(TestCase):
             out = m(torch.randn([2, 10, 8, 8]))
 
     @fake_tensor_modes
+    @parametrize("alias", ["view", "detach", "data"])
+    @parametrize("active", [False, True])
     @parametrize(
         "op",
         [
-            subtest(lambda x: x.add_(torch.rand([1])), name="add"),
-            subtest(lambda x: x.random_(), name="random"),
-            subtest(lambda x: torch.add(torch.rand([1]), 1, out=x), name="out"),
+            subtest(lambda x, other: x.add_(other), name="add"),
+            subtest(lambda x, other: x.random_(), name="random"),
+            subtest(lambda x, other: torch.add(other, 1, out=x), name="out"),
         ],
     )
-    def test_shared_storage_invalidation(self, mode_cls, op):
-        with mode_cls():
+    def test_shared_storage_invalidation(self, mode_cls, op, alias, active):
+        mode = mode_cls()
+        with mode:
             x = torch.tensor([1.0])
-            y = x[:]
             unrelated = torch.tensor([2.0])
+            other = torch.rand([1])
+        with mode if active else contextlib.nullcontext():
+            y = x[:] if alias == "view" else getattr(x, alias)
+            if alias == "detach":
+                y = y()
             self.assertConst(x, y)
-            op(y)
+            op(y, other)
             self.assertNotConst(x, y)
             self.assertConst(unrelated)
 
@@ -7173,7 +7207,8 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertEqual(cuda.device, torch.device("cuda:0"))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    def test_fake_fallback_clears_inherited_dispatch_keys(self):
+    @parametrize("alias", ["detach", "data"])
+    def test_fake_fallback_clears_inherited_dispatch_keys(self, alias):
         mode = CppFakeTensorMode()
         real = torch.randn(2, 3)
         fake = mode.from_tensor(real)
@@ -7181,7 +7216,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         torch._C._set_fake_dispatch_keys(fake, keys)
 
         def meta_impl(x):
-            result = x.detach()
+            result = x.detach() if alias == "detach" else x.data
             self.assertTrue(result.is_meta)
             self.assertFalse(is_fake_tensor(result))
             self.assertIsNone(maybe_get_fake_dispatch_keys(result))
