@@ -262,6 +262,12 @@ struct C10_API PyInterpreterVTable {
   // GIL.
   virtual void raise_python_error(FakePythonError kind, const std::string& msg)
       const = 0;
+  // Matches FakeTensorMode.invalidate_written_to_constants, including
+  // SchemaInfo's training-op mutability rules. Acquires the GIL.
+  virtual void invalidate_written_to_constants(
+      const c10::OperatorHandle& op,
+      const torch::jit::Stack& stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
 
   // Note [C++ FakeTensor dispatch]
   // A fake tensor models a tensor on a logical device without allocating its
