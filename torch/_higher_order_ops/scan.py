@@ -23,6 +23,7 @@ from torch._higher_order_ops.partitioner import (
 )
 from torch._higher_order_ops.utils import (
     _batch_dims_as_last_for_scan,
+    _fake_mode_handler,
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     _move_batch_dims_to_last_for_scan,
@@ -1126,6 +1127,9 @@ def scan_fake_tensor_mode(
             ),
         )
         return out
+
+
+scan_op.py_impl(DispatchKey.Fake)(_fake_mode_handler(scan_fake_tensor_mode))
 
 
 @scan_op.py_functionalize_impl

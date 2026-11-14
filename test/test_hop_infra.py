@@ -1,13 +1,16 @@
 # Owner(s): ["module: higher order operators"]
+import contextlib
 import copy
 import importlib
 import pkgutil
+from unittest.mock import patch
 
 import torch
 from torch.testing._internal.common_utils import (
     fake_tensor_modes,
     HardwareClassification,
     instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -178,6 +181,55 @@ class TestHOPInfra(TestCase):
         )
 
         self.assertIsNone(out)
+
+    @fake_tensor_modes
+    @parametrize("active", [False, True])
+    @parametrize("raises", [False, True])
+    def test_fake_handler_mode_state(self, mode_cls, active, raises):
+        from torch._higher_order_ops.utils import _fake_mode_handler
+        from torch._ops import HigherOrderOperator
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.utils._python_dispatch import is_in_torch_dispatch_mode
+
+        class TestHOP(HigherOrderOperator):
+            def __init__(self):
+                super().__init__("_test_fake_handler_mode_state")
+
+            def __call__(self, x):
+                with torch._C._AutoDispatchBelowAutograd():
+                    return super().__call__(x)
+
+        def state():
+            return (
+                torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
+                is_in_torch_dispatch_mode(),
+                torch._C._only_lift_cpu_tensors(),
+            )
+
+        seen = []
+        mode = mode_cls()
+        fake = mode.from_tensor(torch.empty(2))
+        with patch.dict(torch._ops._higher_order_ops):
+            hop = TestHOP()
+
+            @hop.py_impl(FakeTensorMode)
+            def fake_handler(fake_mode, x):
+                self.assertIs(fake_mode, mode)
+                seen.append(state())
+                if raises:
+                    raise RuntimeError("fake handler failure")
+                return x
+
+            hop.py_impl(torch._C.DispatchKey.Fake)(_fake_mode_handler(fake_handler))
+            with mode if active else contextlib.nullcontext():
+                before = state()
+                if raises:
+                    with self.assertRaisesRegex(RuntimeError, "fake handler failure"):
+                        hop(fake)
+                else:
+                    self.assertIs(hop(fake), fake)
+                self.assertEqual(seen, [(None, *before[1:])])
+                self.assertEqual(state(), before)
 
     def test_kernel_side_table_instances_are_independent(self):
         # Each user-kernel DSL owns a KernelSideTable; their index spaces and
