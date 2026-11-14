@@ -4,7 +4,7 @@
     This is an experiment and a temporary API. Everything about it may change.
 
 ``torch.cfg_compile(fn)`` turns the bytecode of ``fn`` into one control-flow
-graph in SSA form, branches and loops included::
+graph in SSA form, branches and loops included, and runs it in a small VM::
 
     @torch.cfg_compile
     def f(x, y):
@@ -13,9 +13,8 @@ graph in SSA form, branches and loops included::
         return x
 
 
+    f(torch.ones(3), torch.ones(3))
     print(f.dump())  # the SSA graph
-
-Nothing executes the graph yet: calling ``f`` runs the original function.
 """
 
 import functools
@@ -65,7 +64,7 @@ def is_available() -> bool:
 
 
 def cfg_compile(fn: Any = None, *, fallback: bool = True) -> Any:
-    """Compiles ``fn`` to an SSA control-flow graph.
+    """Compiles ``fn`` to an SSA control-flow graph that runs in the cfg VM.
 
     Args:
         fn: a Python function, a bound method, or an ``nn.Module`` (whose
