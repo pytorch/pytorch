@@ -9627,6 +9627,73 @@ class TestNNDeviceType(NNTestCase):
         expected = torch._C._nn.upsample_bilinear2d(x.cpu().double(), [oh, ow], align_corners, scale, scale)
         self.assertEqual(out.cpu(), expected.to(dtype))
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @toleranceOverride({
+        torch.float: tol(atol=1e-5, rtol=1e-5),
+        torch.double: tol(atol=1e-7, rtol=1e-7),
+        torch.half: tol(atol=1e-2, rtol=1e-2),
+        torch.bfloat16: tol(atol=5e-2, rtol=5e-2),
+    })
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("align_corners", [True, False])
+    # (ih, iw), (oh, ow), (scales_h, scales_w), channels.
+    # scales None => size-based scale. Ratio is 4 * o_numel / i_numel.
+    @parametrize_test("input_hw, output_hw, scales, channels", [
+        subtest(((6, 8), (24, 32), (None, None), 16), name="upsample"),  # ratio 64
+        # 5.06: scatter on gfx950 (cut 6), gather on gfx942 (4) and gfx1250 (2).
+        subtest(((8, 8), (9, 9), (None, None), 16), name="near_cut"),
+        subtest(((24, 32), (12, 16), (None, None), 16), name="downsample"),  # ratio 1.0
+        subtest(((13, 11), (7, 5), (None, None), 16), name="mild_downsample"),  # ratio 0.98
+        subtest(((9, 10), (9, 31), (None, None), 16), name="anisotropic"),  # ratio 12.4
+        # scales are forward scale_factors; 2.0 matches the 8->16 size-based scale.
+        subtest(((8, 8), (16, 16), (2.0, 2.0), 16), name="explicit_scales"),  # ratio 16
+        # C=6 is not a multiple of the fp16/fp32 vector width, so the gather
+        # runs with vec_size 1.
+        subtest(((6, 8), (24, 32), (None, None), 6), name="odd_channels"),
+        # ratio 4096, above the bf16/fp32 cap: those dtypes scatter, fp16 gathers.
+        subtest(((2, 2), (64, 64), (None, None), 16), name="high_ratio"),
+    ])
+    def test_upsamplingBilinear2d_backward_many_channels(
+        self, device, dtype, memory_format, align_corners, input_hw, output_hw, scales, channels
+    ):
+        # channels >= 4 so channels_last takes the NHWC backward. Cuts are per
+        # architecture (gfx950 6, gfx942 4, gfx1250 2). bf16, fp32 and double
+        # also fall back to scatter above the ratio cap; fp16 does not.
+        # NaN-prefilled grad_input checks every element is written (gather) or
+        # correctly zeroed then scattered.
+        n, c = 2, channels
+        input_size = [n, c, *input_hw]
+        output_size = list(output_hw)
+        scales_h, scales_w = scales
+        go = make_tensor((n, c, *output_hw), device=device, dtype=dtype, low=-1, high=1)
+        go = go.contiguous(memory_format=memory_format)
+        # NaN prefill exposes any unwritten grad_input element.
+        gi = torch.full(input_size, float("nan"), device=device, dtype=dtype)
+        gi = gi.contiguous(memory_format=memory_format)
+
+        torch.ops.aten.upsample_bilinear2d_backward.grad_input(
+            go, output_size, input_size, align_corners,
+            scales_h, scales_w, grad_input=gi,
+        )
+
+        self.assertTrue(gi.is_contiguous(memory_format=memory_format))
+        self.assertFalse(gi.isnan().any())
+
+        ref = torch.ops.aten.upsample_bilinear2d_backward(
+            go.cpu().double(), output_size, input_size, align_corners, scales_h, scales_w,
+        ).to(dtype=dtype)
+        # high_ratio is above the bf16/fp32 cap, so those dtypes take the stock
+        # NHWC atomic scatter. At ratio 4096 that scatter does not match the
+        # fp64 reference within the tolerances that cover ratios up to 64.
+        if input_hw == (2, 2) and output_hw == (64, 64) and dtype in (
+            torch.bfloat16, torch.float32,
+        ):
+            atol = 8.0 if dtype is torch.bfloat16 else 2e-4
+            self.assertEqual(gi, ref, atol=atol, rtol=0)
+        else:
+            self.assertEqual(gi, ref)
+
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["nearest", "nearest-exact"])
