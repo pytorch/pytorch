@@ -34,7 +34,7 @@ from torch._logging import warning_once
 
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
-from ..exc import unimplemented
+from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from ..utils import (
@@ -1156,16 +1156,36 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(
+        tx: "InstructionTranslatorBase",
         func: torch.amp.autocast_mode.autocast,
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> "AutocastModeVariable":
+        if not (
+            isinstance(func, type)
+            and issubclass(func, torch.amp.autocast_mode.autocast)
+        ):
+            raise AssertionError(f"unexpected autocast function: {func}")
         if func not in [
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
         ]:
-            raise AssertionError(f"unexpected autocast function: {func}")
+            try:
+                bound_args = inspect.signature(func).bind(*args, **kwargs)
+            except TypeError as e:
+                raise_observed_exception(TypeError, tx, args=list(e.args))
+            bound_args.apply_defaults()
+            arguments = dict(bound_args.arguments)
+            arguments["device_type"] = torch._C._get_privateuse1_backend_name()
+            target_values = []
+            for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
+                arg = arguments[key]
+                if isinstance(arg, VariableTracker):
+                    target_values.append(arg.as_python_constant())
+                else:
+                    target_values.append(arg)
+            return AutocastModeVariable(target_values, initial_values=None)
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
@@ -1173,7 +1193,6 @@ class AutocastModeVariable(ContextWrappingVariable):
         bound_args = inspect.signature(func).bind(*args, **kwargs)
         bound_args.apply_defaults()
         target_values = []
-        kwargs.clear()
 
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
             if key == "device_type" and func in [
@@ -1189,7 +1208,7 @@ class AutocastModeVariable(ContextWrappingVariable):
             else:
                 target_values.append(arg)
 
-        var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
+        var = AutocastModeVariable(target_values, initial_values=None)
         return var
 
     def __init__(
