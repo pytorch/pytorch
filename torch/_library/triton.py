@@ -544,7 +544,17 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
     The ``wrap_triton`` API wraps a triton kernel into a callable that
     can actually be traced into a graph.
 
-    Please use this API together with :func:`torch.library.triton_op`.
+    Wrap raw triton kernel calls in ``wrap_triton`` to make them traceable
+    by ``make_fx`` or non-strict ``torch.export``. Standalone
+    ``wrap_triton`` is supported. Use it inside
+    :func:`torch.library.triton_op` when defining a custom operator,
+    for example so an exported program retains a serializable custom-op
+    node instead of a triton higher-order operator. Inside ``triton_op``,
+    eager calls avoid the dispatch overhead of standalone ``wrap_triton``.
+    For eager execution or ``torch.compile`` without custom operator
+    semantics, call the triton kernel directly.
+
+    See :func:`torch.library.triton_op` for a custom operator example.
 
     Examples:
 
@@ -586,15 +596,8 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
         >>> y = torch.randn(3, device="cuda")
         >>> gm = make_fx(add)(x, y)
         >>> print(gm.code)
-        >>> # def forward(self, x_1, y_1):
-        >>> #     empty_like = torch.ops.aten.empty_like.default(x_1, pin_memory = False)
-        >>> #     triton_kernel_wrapper_mutation_proxy = triton_kernel_wrapper_mutation(
-        >>> #         kernel_idx = 0, constant_args_idx = 0,
-        >>> #         grid = [(1, 1, 1)], kwargs = {
-        >>> #             'in_ptr0': x_1, 'in_ptr1': y_1, 'out_ptr': empty_like,
-        >>> #             'n_elements': 3, 'BLOCK_SIZE': 16
-        >>> #         })
-        >>> #     return empty_like
+        >>> assert "triton_kernel_wrapper_mutation" in gm.code
+        >>> assert torch.allclose(gm(x, y), x + y)
 
     """
     from triton.runtime.autotuner import Autotuner
