@@ -1360,7 +1360,7 @@ def get_gencode_flags() -> str:
     arch_list_ = [arch.split("_") for arch in arch_list]
     return " ".join(
         [
-            f"-gencode compute=compute_{arch},code={kind}_{arch}"
+            f"-gencode arch=compute_{arch},code={kind}_{arch}"
             for (kind, arch) in arch_list_
         ]
     )
