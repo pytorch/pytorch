@@ -126,6 +126,11 @@ struct C10_API PyInterpreter;
 // still fit inside three eight word cache lines.  If you need to penny pinch
 // another word consider doing this!
 
+// The Python exception types PyInterpreterVTable::raise_python_error
+// raises, for those the C++ fake fallback raises where FakeTensorMode does and
+// no c10 error type becomes
+enum class FakePythonError { AssertionError };
+
 struct C10_API PyInterpreterVTable {
   virtual ~PyInterpreterVTable() = default;
 
@@ -245,6 +250,11 @@ struct C10_API PyInterpreterVTable {
       const c10::OperatorHandle& op,
       c10::Device common_device,
       c10::Device device) const = 0;
+  // Raises a Python exception of type kind with message msg, for errors the
+  // C++ fake fallback raises where FakeTensorMode raises them. Acquires the
+  // GIL.
+  virtual void raise_python_error(FakePythonError kind, const std::string& msg)
+      const = 0;
 
   // Note [C++ FakeTensor dispatch]
   // A fake tensor models a tensor on a logical device without allocating its
@@ -336,13 +346,15 @@ struct C10_API PyInterpreterVTable {
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       PyObject* real) const = 0;
-  // Needs an active mode. Converts real to a fake tensor through the mode's
-  // fake tensor converter.
-  virtual c10::intrusive_ptr<TensorImpl> to_meta_tensor(
+  // Converts real to a fake tensor of mode through mode's fake tensor
+  // converter.
+  virtual c10::intrusive_ptr<TensorImpl> from_real_tensor(
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
       const c10::intrusive_ptr<TensorImpl>& real) const = 0;
   // Whether real tensor inputs are allowed: fake_tensor_tls's override if set,
-  // else the active mode's allow_non_fake_inputs_ (needs an active mode).
-  virtual bool allow_non_fake_inputs() const = 0;
+  // else mode's allow_non_fake_inputs_.
+  virtual bool allow_non_fake_inputs(
+      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
   // Needs an active mode. Runs op on the reals behind fake_args and returns the
   // RealOpResult as a new reference, or nullptr if an arg has no real tensor
   // or the real op raises ZeroDivisionError.

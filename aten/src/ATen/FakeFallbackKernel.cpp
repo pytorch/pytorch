@@ -31,6 +31,8 @@
 // kernel for sparse inputs), and the new outputs become fakes of that mode on
 // the device argument or the inputs' common device, as Python's
 // wrap_meta_outputs_with_default_device_logic does.
+// Non-fake inputs are converted through the mode's converter when allowed;
+// metadata-mutating operations always require inputs owned by the mode.
 // Python Meta registrations
 // that torch._meta_registrations installs as Meta kernels run here like C++
 // ones.
@@ -117,6 +119,40 @@ void for_each_tensor(
         if (element.isTensor()) {
           fn(element.toTensor());
         }
+      }
+    }
+  }
+}
+
+// Copy tensor lists before replacing elements so caller-owned lists stay intact.
+template <typename Fn>
+void replace_each_tensor(
+    torch::jit::Stack* stack,
+    size_t begin,
+    size_t count,
+    const Fn& fn) {
+  for (const auto idx : c10::irange(count)) {
+    auto& ivalue = (*stack)[begin + idx];
+    if (ivalue.isTensor()) {
+      if (auto out = fn(ivalue.toTensor())) {
+        ivalue = std::move(*out);
+      }
+    } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
+      std::optional<c10::List<c10::IValue>> copy;
+      const auto elements = ivalue.toListRef();
+      for (const auto i : c10::irange(elements.size())) {
+        if (!elements[i].isTensor()) {
+          continue;
+        }
+        if (auto out = fn(elements[i].toTensor())) {
+          if (!copy.has_value()) {
+            copy = ivalue.toList().copy();
+          }
+          copy->set(i, std::move(*out));
+        }
+      }
+      if (copy.has_value()) {
+        ivalue = std::move(*copy);
       }
     }
   }
@@ -235,7 +271,7 @@ bool cpp_meta_supports_symint(
 
 void fakeFallback(
     const c10::OperatorHandle& op,
-    c10::DispatchKeySet /*dispatchKeySet*/,
+    c10::DispatchKeySet dispatchKeySet,
     torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
@@ -275,6 +311,25 @@ void fakeFallback(
       c10::autocast_dispatch_keyset |
       c10::autograd_dispatch_keyset_with_ADInplaceOrView);
 
+  // Python's _DISPATCH_HANDLE_DIRECTLY bypasses input conversion.
+  if ((schema.overload_name().empty() &&
+       (schema.name() == "aten::is_coalesced" ||
+        schema.name() == "aten::dense_dim" ||
+        schema.name() == "aten::sparse_dim")) ||
+      (schema.name() == "profiler::_record_function_exit" &&
+       schema.overload_name() == "_RecordFunction")) {
+    c10::impl::ExcludeDispatchKeyGuard exclude_fake(c10::DispatchKey::Fake);
+    c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
+    c10::impl::InKernelInvocationGuard in_kernel;
+    op.redispatchBoxed(
+        (dispatchKeySet &
+         c10::DispatchKeySet(
+             c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Fake))
+            .add(c10::DispatchKey::Meta),
+        stack);
+    return;
+  }
+
   for (const auto idx : c10::irange(num_arguments)) {
     const auto& ivalue = (*stack)[arguments_begin + idx];
     if (is_symbolic(ivalue)) {
@@ -288,6 +343,54 @@ void fakeFallback(
       }
     }
   }
+
+  // Lifts and scalar-only calls are handled before validation in Python;
+  // those paths are added separately.
+  bool has_mode_fakes = false;
+  for_each_tensor(
+      stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
+        has_mode_fakes = has_mode_fakes ||
+            (t.defined() && t.is_fake() &&
+             t.unsafeGetTensorImpl()->fake_tensor_mode() == mode);
+      });
+  if (!has_mode_fakes && !is_tensor_constructor(schema)) {
+    unsupported(op, "ops without fake tensor inputs");
+  }
+  replace_each_tensor(
+      stack,
+      arguments_begin,
+      num_arguments,
+      [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+        if (!t.defined()) {
+          return std::nullopt;
+        }
+        auto* impl = t.unsafeGetTensorImpl();
+        if (impl->is_wrapped_number()) {
+          return std::nullopt;
+        }
+        const auto input_mode = impl->fake_tensor_mode();
+        if (t.is_fake() && (input_mode == mode || input_mode == nullptr)) {
+          return std::nullopt;
+        }
+        const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
+        const auto raise = [&](std::string_view what) {
+          interpreter->raise_python_error(
+              c10::impl::FakePythonError::AssertionError,
+              c10::str(what, ". Found in ", op.operator_name()));
+        };
+        if (op.hasTag(at::Tag::inplace_view)) {
+          raise("Can't call metadata mutating ops on non-Fake Tensor inputs");
+        }
+        if (!interpreter->allow_non_fake_inputs(mode)) {
+          raise(
+              t.is_fake() ? "Mixing fake modes NYI"
+                          : "Please convert all Tensors to FakeTensors first or "
+                            "instantiate FakeTensorMode with "
+                            "'allow_non_fake_inputs'");
+        }
+        return at::Tensor(
+            interpreter->from_real_tensor(mode, t.getIntrusivePtr()));
+      });
 
   // Input devices in argument order, paired with whether each is a CPU scalar.
   c10::SmallVector<std::pair<c10::Device, bool>, 4> input_devices;
@@ -307,9 +410,6 @@ void fakeFallback(
           }
           return;
         }
-        if (!t.is_fake()) {
-          unsupported(op, "non-fake tensor inputs");
-        }
         // Their Meta kernels would make tensors of the wrong TensorImpl type
         if (impl->is_quantized() || impl->is_nested() || impl->is_mkldnn()) {
           unsupported(op, "quantized, nested or mkldnn inputs");
@@ -320,9 +420,6 @@ void fakeFallback(
         const auto input_mode = impl->fake_tensor_mode();
         if (input_mode == nullptr) {
           unsupported(op, "fake tensors without a mode");
-        }
-        if (input_mode != mode) {
-          unsupported(op, "fake tensors of another mode");
         }
         if (impl->real_tensor() != nullptr) {
           unsupported(op, "propagate_real_tensors");
@@ -343,9 +440,6 @@ void fakeFallback(
   const bool has_sparse_inputs =
       meta_keyset.has(c10::DispatchKey::SparseMeta) ||
       meta_keyset.has(c10::DispatchKey::SparseCsrMeta);
-  if (input_devices.empty() && !is_tensor_constructor(schema)) {
-    unsupported(op, "ops without fake tensor inputs");
-  }
   if (metadata_copy) {
     // These kernels only copy metadata. Run them on the fakes directly so
     // shallow_copy_data_ never replaces an existing fake inside a Meta kernel.
