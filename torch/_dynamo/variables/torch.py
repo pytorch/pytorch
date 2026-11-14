@@ -2051,7 +2051,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_device_interface_stream(
             self, tx: "InstructionTranslatorBase", stream: "StreamVariable"
         ) -> StreamContextVariable:
-            return StreamContextVariable.create(tx, stream)
+            ctx_type = None
+            for _, device_interface in get_registered_device_interfaces():
+                if device_interface.stream is self.value:
+                    if (
+                        device_interface.StreamContext
+                        is not DeviceInterface.StreamContext
+                    ):
+                        ctx_type = device_interface.StreamContext
+                    break
+            return StreamContextVariable.create(
+                tx, stream, stream_context_type=ctx_type
+            )
 
         @register(torch.from_numpy)
         def handle_from_numpy(
