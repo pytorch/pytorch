@@ -569,6 +569,70 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
+    @parametrize("reverse", (False, True))
+    def test_max_autotune_persistent_tma_epilogue_load_base_offsets(self, reverse):
+        # Regression for #204237: scale and bias share a pointer but need
+        # different descriptors because their base offsets differ.
+        def fn(x, weight, packed):
+            scale = packed[:, 1 if reverse else 0, :]
+            bias = packed[:, 0 if reverse else 1, :]
+            return torch.mm(x, weight.T) * scale + bias
+
+        m, n, k = 512, 256, 256
+        x = torch.full((m, k), 0.5, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.full((n, k), 0.5, device=GPU_TYPE, dtype=torch.bfloat16)
+        packed = torch.stack(
+            (
+                torch.ones((m, n), device=GPU_TYPE, dtype=torch.bfloat16),
+                torch.full((m, n), 3, device=GPU_TYPE, dtype=torch.bfloat16),
+            ),
+            dim=1,
+        )
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "epilogue_fusion": True,
+                "benchmark_epilogue_fusion": False,
+                "force_disable_caches": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_tma_load_for_template_epilogue": True,
+                "triton.native_matmul": False,
+                "triton.tlx_mode": None,
+                "test_configs.autotune_choice_name_regex": "persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(fn), x, weight, packed)
+
+        self.assertEqual(
+            actual,
+            fn(x, weight, packed),
+            atol=0,
+            rtol=0,
+            msg="Packed epilogue slices must read distinct base offsets",
+        )
+        source = "\n".join(code)
+        self.assertIn("triton_tem_fused", source)
+        descriptors = re.findall(
+            r"(tma_descriptor\d+) = tl\.make_tensor_descriptor\("
+            r"(in_ptr\d+)(?: \+ \((\d+)\))?, shape=\[512, 256\], "
+            r"strides=\[512, 1\], block_shape=\[[^\]\n]+\]\)",
+            source,
+        )
+        matching_pairs = [
+            (first, second)
+            for i, first in enumerate(descriptors)
+            for second in descriptors[i + 1 :]
+            if first[1] == second[1]
+            and {int(first[2] or 0), int(second[2] or 0)} == {0, n}
+        ]
+        self.assertTrue(matching_pairs, source)
+        for descriptor, _, _ in matching_pairs[0]:
+            self.assertIn(f"{descriptor}.load(", source)
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
     @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
     @parametrize("concat", (False, True))
     def test_max_autotune_persistent_tma_epilogue_load_guards_alignment(self, concat):
@@ -8099,6 +8163,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
         "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
+        "test_max_autotune_persistent_tma_epilogue_load_base_offsets": "Epilogue fusion disabled in async pipelining",
         "test_max_autotune_mm_rebased_storage_offset_input": "get_inputs is not called on the pipelined path, so the benchmark inputs this test inspects are never built here",
         "test_max_autotune_negative_offset_layout": "test-only lowering patch, drops the benchmark inputs the pipelined path needs",
         # grouped_mm's input_gen_fns forces
