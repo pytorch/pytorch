@@ -370,7 +370,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   auto dilates = dilation.vec();
   auto op_attr = ideep::attr_t();
   std::vector<int32_t> wgt_zero_points;
-  ideep::scale_t wgt_scales;
+  std::vector<float> wgt_scales;
   const int output_channels = transpose ? weight.size(1) * groups
                                         : weight.size(0);
   const auto qtype = weight.qscheme();
@@ -381,9 +381,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         " whose zero point must be 0.");
     wgt_zero_points = std::vector<int32_t>(1, weight.q_zero_point());
 #if IDEEP_PREREQ(3, 1, 0, 1)
-    wgt_scales = ideep::scale_t(1, weight.q_scale());
+    wgt_scales = std::vector<float>(1, weight.q_scale());
 #elif IDEEP_PREREQ(3, 1, 0, 0)
-    wgt_scales = ideep::scale_t(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
+    wgt_scales = std::vector<float>(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
 #else
     TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
 #endif
@@ -415,8 +415,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   op_attr.set_zero_points_mask(DNNL_ARG_SRC, /* zero_points_mask= */0);
   at::Tensor weight_copy;
   ideep::tensor::desc w_desc;
-  ideep::dims dims_iohw, dims_giohw;
-  ideep::tag w_tag = ideep::tag::any;
+  dnnl::memory::dims dims_iohw, dims_giohw;
+  dnnl::memory::format_tag w_tag = dnnl::memory::format_tag::any;
   const bool with_groups = groups > 1;
   if (transpose) {
     // template args: <(src/dst) is_channels_last, transposed>
@@ -424,7 +424,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         dims, dnnl::memory::data_type::s8,
         strides, padding_l, padding_r, dilates, groups,
         dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
-        ideep::dims(), op_attr);
+        dnnl::memory::dims(), op_attr);
     // convolution_transpose_forward::expected_weights_desc() gives format [i, o, ...],
     // but ONEDNN requires [o, i, ...] for computation
     dims_iohw = w_desc.get_dims();
@@ -438,15 +438,15 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         dims, dnnl::memory::data_type::s8,
         strides, padding_l, padding_r, dilates, groups,
         dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
-        dnnl::memory::data_type::u8, ideep::dims(), op_attr, /*is_channels_last=*/true);
+        dnnl::memory::data_type::u8, dnnl::memory::dims(), op_attr, /*is_channels_last=*/true);
     weight_copy = weight.clone();
   }
   if (with_groups) {
-    w_tag = kSpatialDim == 2 ? ideep::tag::goihw : ideep::tag::goidhw;
+    w_tag = kSpatialDim == 2 ? dnnl::memory::format_tag::goihw : dnnl::memory::format_tag::goidhw;
   } else {
-    w_tag = kSpatialDim == 2 ? ideep::tag::oihw : ideep::tag::oidhw;
+    w_tag = kSpatialDim == 2 ? dnnl::memory::format_tag::oihw : dnnl::memory::format_tag::oidhw;
   }
-  ideep::dims w_dims = with_groups ? ideep::utils::group_dims(w_desc.get_dims(), groups)
+  dnnl::memory::dims w_dims = with_groups ? ideep::utils::group_dims(w_desc.get_dims(), groups)
                                    : w_desc.get_dims();
   ideep::tensor wgt = ideep::tensor(
       ideep::tensor::desc({w_dims, dnnl::memory::data_type::s8, w_tag}, groups),
@@ -525,7 +525,7 @@ at::Tensor _qconv_prepack_onednn(
   bool is_fp8 = weight.scalar_type() == at::kFloat8_e4m3fn;
 
   bool is_1d = (1 == kSpatialDim);
-  auto x_dims = input_shape.has_value()?input_shape.value().vec():ideep::dims();
+  auto x_dims = input_shape.has_value()?input_shape.value().vec():dnnl::memory::dims();
   if (is_1d) {
     if (input_shape.has_value()) {
       // N, C, L -> N, C, 1, L
@@ -556,7 +556,7 @@ at::Tensor _qconv_prepack_onednn(
   auto dilates = dilation.vec();
   auto op_attr = ideep::attr_t();
 
-  ideep::scale_t weights_scales(weight_scales.numel());
+  std::vector<float> weights_scales(weight_scales.numel());
 
   if (weight_scales.ndimension() == 0) {
     // Weight is quant per tensor, then weight_scales will be a scalar Tensor
@@ -592,8 +592,8 @@ at::Tensor _qconv_prepack_onednn(
 
   at::Tensor weight_copy;
   ideep::tensor::desc w_desc;
-  ideep::dims dims_iohw, dims_giohw;
-  ideep::tag w_tag = ideep::tag::any;
+  dnnl::memory::dims dims_iohw, dims_giohw;
+  dnnl::memory::format_tag w_tag = dnnl::memory::format_tag::any;
   const bool with_groups = groups > 1;
   auto w_dnnl_dtype = at::native::get_mkldnn_dtype(weight.scalar_type());
   auto x_dnnl_dtype = is_fp8 ? dnnl::memory::data_type::f8_e4m3 : dnnl::memory::data_type::u8;
@@ -607,11 +607,11 @@ at::Tensor _qconv_prepack_onednn(
   weight_copy = weight.clone(c10::MemoryFormat::Contiguous);
 
   if (with_groups) {
-    w_tag = kSpatialDim == 2 ? ideep::tag::goihw : ideep::tag::goidhw;
+    w_tag = kSpatialDim == 2 ? dnnl::memory::format_tag::goihw : dnnl::memory::format_tag::goidhw;
   } else {
-    w_tag = kSpatialDim == 2 ? ideep::tag::oihw : ideep::tag::oidhw;
+    w_tag = kSpatialDim == 2 ? dnnl::memory::format_tag::oihw : dnnl::memory::format_tag::oidhw;
   }
-  ideep::dims wei_dims = with_groups ? ideep::utils::group_dims(w_desc.get_dims(), groups)
+  dnnl::memory::dims wei_dims = with_groups ? ideep::utils::group_dims(w_desc.get_dims(), groups)
                                   : w_desc.get_dims();
   ideep::tensor wgt = ideep::tensor(
       ideep::tensor::desc({wei_dims, w_dnnl_dtype, w_tag}, groups),
