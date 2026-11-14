@@ -127,7 +127,10 @@ static int cpp_fake_tensor_mode_init(
       std::make_shared<c10::SafePyObject>(
           Py_NewRef(converter), getPyInterpreter()),
       config.attr("fake_tensor_allow_meta").cast<bool>(),
-      config.attr("fake_tensor_allow_unsafe_data_ptr_access").cast<bool>());
+      config.attr("fake_tensor_allow_unsafe_data_ptr_access").cast<bool>(),
+      config.attr("fake_tensor_propagate_real_tensors").cast<bool>());
+  mode->prefer_device_type_ = config.attr("fake_tensor_prefer_device_type")
+                                  .cast<std::optional<std::string>>();
   if (creation_traceback != Py_None) {
     mode->creation_traceback_ = std::make_shared<c10::SafePyObject>(
         Py_NewRef(creation_traceback), getPyInterpreter());

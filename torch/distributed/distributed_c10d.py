@@ -298,6 +298,8 @@ def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
     """Convert ProcessGroupNCCL.Options to a torchcomms hints dict."""
     if pg_options is None:
         return None
+    if getattr(pg_options, "encryption_psk", None) is not None:
+        raise ValueError("encryption_psk is not supported with torchcomms")
 
     hints: dict[str, str] = {}
 
@@ -313,7 +315,7 @@ def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
                     pass
 
     for attr in dir(pg_options):
-        if not attr.startswith("_") and attr != "config":
+        if not attr.startswith("_") and attr not in ("config", "encryption_psk"):
             try:
                 value = getattr(pg_options, attr)
                 if not callable(value):
@@ -7116,6 +7118,13 @@ def split_group(
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+    psk = getattr(pg_options, "encryption_psk", None)
+    if (
+        psk is not None
+        and _use_torchcomms_enabled()
+        and isinstance(parent_backend, _BackendWrapper)
+    ):
+        raise ValueError("encryption_psk is not supported with torchcomms")
 
     device_id = parent_pg.bound_device_id
 

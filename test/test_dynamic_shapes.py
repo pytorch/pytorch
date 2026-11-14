@@ -74,12 +74,15 @@ from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._sympy.functions import (
     CleanDiv,
+    FloatTrueDiv,
     FloorDiv,
     IsNonOverlappingAndDenseIndicator,
     Max,
     Min,
     Mod,
+    OpaqueUnaryFn_sqrt,
     PythonMod,
+    ToFloat,
 )
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -639,6 +642,40 @@ class TestPySymInt(TestCase):
         self.assertExpectedInline(
             str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(ToFloat(s97)), 2.0)"""
         )
+
+    def test_evaluate_expr_float_without_hint(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 64).node.expr
+        scale = FloatTrueDiv(1.0, OpaqueUnaryFn_sqrt(ToFloat(s0)))
+        self.assertEqual(shape_env.guarding_hint_or_throw(scale), 0.125)
+        self.assertEqual(shape_env.evaluate_expr(scale), 0.125)
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]),
+            """Eq(FloatTrueDiv(1.0, OpaqueUnaryFn_sqrt(ToFloat(s97))), 0.125)""",
+        )
+
+    @parametrize("hint", (None, 0.125))
+    def test_guarding_hint_or_throw_float(self, hint):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 64).node.expr
+        expr = FloatTrueDiv(1.0, OpaqueUnaryFn_sqrt(ToFloat(s0)))
+        value = SymFloat(SymNode(expr, shape_env, float, hint=hint))
+        self.assertEqual(guarding_hint_or_throw(value), 0.125)
+        self.assertEqual(guarding_hint_or_throw(value.node), 0.125)
+        self.assertEqual(guarding_hint_or_throw(0.125), 0.125)
+
+    @parametrize("numerator", (1.0, 64.0))
+    def test_guarding_hint_or_throw_float_does_not_cache_hint(self, numerator):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 64).node.expr
+        expr = FloatTrueDiv(numerator, OpaqueUnaryFn_sqrt(ToFloat(s0)))
+        node = SymNode(expr, shape_env, float, hint=sym_node._NO_HINT)
+        self.assertIsNone(node.hint)
+        for value in (SymFloat(node), node):
+            hint = guarding_hint_or_throw(value)
+            self.assertEqual(hint, numerator / 8.0)
+            self.assertIsInstance(hint, float)
+            self.assertIsNone(node.hint)
 
     def test_sym_floor(self):
         shape_env = ShapeEnv()
@@ -2278,6 +2315,9 @@ class f(torch.nn.Module):
                 (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
             )
             torch.ops.aten.replication_pad3d(x, [1, 1, 1, 1, 1, 1])
+
+
+instantiate_parametrized_tests(TestPySymInt)
 
 
 @skipIfTorchDynamo(
@@ -7711,6 +7751,8 @@ instantiate_parametrized_tests(ShapeEnvReplacementCacheTest)
 
 
 class TestSingletonIntStaticEval(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_singleton_int_only_expr_can_be_statically_evaluated(self):
         from torch.utils._sympy.singleton_int import SingletonInt
 
@@ -8474,7 +8516,6 @@ class TestTransferSymbolsFromForeignShapeEnvDevice(TestCase):
 instantiate_device_type_tests(
     TestTransferSymbolsFromForeignShapeEnvDevice,
     globals(),
-    only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 

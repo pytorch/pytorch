@@ -1668,7 +1668,7 @@ def require_python_fake_mode(
     Returns mode unchanged if it is a FakeTensorMode or None.
 
     Use it on a fake mode that must be a Python FakeTensorMode, for example to
-    call from_tensor or is_our_fake on it or to pass it on to code typed for
+    get Python FakeTensors from it or to pass it on to code typed for
     FakeTensorMode: a result of detect_fake_mode, active_fake_mode or
     maybe_get_fake_mode, or a mode the caller was given. Callers narrow the
     lookups with it so that they keep getting a Python FakeTensorMode when a

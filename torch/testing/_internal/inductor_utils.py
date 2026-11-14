@@ -5,8 +5,10 @@ import functools
 import logging
 import os
 import re
+import string
 import sys
 import unittest
+import unittest.mock
 from subprocess import CalledProcessError
 
 import torch
@@ -14,6 +16,7 @@ import torch._inductor.config as config
 
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import compile_fx  # noqa: F401
+from torch._inductor import ir
 from torch._inductor.utils import (
     _device_is_available,
     get_gpu_shared_memory,
@@ -449,6 +452,50 @@ class MockGraphHandler:
     def get_dtype(self, buffer_name: str) -> torch.dtype:
         """Return default dtype for any buffer (for testing)."""
         return torch.float32
+
+
+@contextlib.contextmanager
+def patch_lowering(lowering_overrides):
+    """
+    Temporarily register lowerings, given as
+    {op: (lowering_fn, broadcast, type_promotion_kind, convert_input_to_bool)}.
+    """
+    import torch._inductor.lowering as inductor_lowering
+
+    with unittest.mock.patch.dict(inductor_lowering.lowerings):
+        for op, (fn, broadcast, type_promotion_kind, convert_input_to_bool) in lowering_overrides.items():
+            inductor_lowering._register_lowering(
+                op,
+                fn,
+                broadcast=broadcast,
+                type_promotion_kind=type_promotion_kind,
+                convert_input_to_bool=convert_input_to_bool,
+                lowering_dict=inductor_lowering.lowerings,
+            )
+        yield
+
+
+class MockExternalTemplateBuffer(ir.TemplateBuffer):
+    """
+    A TemplateBuffer whose kernel is an ExternalTritonTemplateKernel that renders
+    its own Python source, as Helion does. render_fn(buf, kernel) sets
+    kernel._call_args and returns the PartialRender. Inputs are named A, B, ...
+    in order.
+    """
+
+    def __init__(self, layout, inputs, render_fn):
+        from torch._inductor.select_algorithm import ExternalTritonTemplateKernel
+
+        def make_kernel_render(out_node, hint_override=None):
+            kernel = ExternalTritonTemplateKernel(self)
+            return kernel, lambda: render_fn(self, kernel)
+
+        super().__init__(
+            layout,
+            inputs,
+            make_kernel_render,
+            named_inputs=dict(zip(string.ascii_uppercase, inputs)),
+        )
 
 
 def has_cpp_wrapper_for_device(device: str) -> bool:

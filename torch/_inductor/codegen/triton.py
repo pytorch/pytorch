@@ -8053,6 +8053,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
+        if (
+            config.triton.sm100_outer_reduction_r0_block_8
+            and self._get_heuristic() == "reduction"
+        ):
+            device = V.graph.get_current_device_or_throw()
+            if triton_meta_device_props(device).cc == 100:
+                out["sm100_outer_reduction_r0_block_8"] = True
         if config.deterministic or config.test_configs.force_filter_reduction_configs:
             out["has_loadstore_with_contiguous_rdim"] = (
                 self.has_load_with_contiguous_rdim

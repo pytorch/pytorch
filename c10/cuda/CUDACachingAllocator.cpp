@@ -3486,11 +3486,12 @@ class DeviceCachingAllocator {
     return is_capture_context();
   }
 
-  // Called by CUDAGraph::reset and MemPool::~MemPool()
+  // Called by CUDAGraph::reset, MemPool::~MemPool(), and by CUDAGraph during
+  // capture to drop the extra reference a conditional node's re-routing takes.
   void releasePool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    // The instantiated cudaGraphExec_t has been destroyed. We can't blindly
-    // delete and cudaFree the mempool its capture used, because
+    // When a graph releases its pool, we can't blindly delete and cudaFree
+    // the mempool its capture used, because
     //  1. other graph(s) might share the same pool
     //  2. the user might still hold references to output tensors allocated
     //  during capture.

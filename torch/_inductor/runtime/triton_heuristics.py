@@ -2977,42 +2977,39 @@ class CachingAutotuner(KernelInterface):
             log.warning("Unexpected error building fast launcher", exc_info=True)
             return None
 
+    def _launcher_arg_names(self, cfg: Config) -> list[str]:
+        """Names of the signature args the launcher is called with, in order."""
+        if not triton_version_uses_attrs_dict():
+            return list(self.triton_meta["signature"].keys())
+
+        # constexprs are not passed in as args
+        new_signature: list[str] = []
+        from triton.runtime.interpreter import InterpretedFunction
+
+        for i, x in enumerate(self.triton_meta["signature"].keys()):
+            if isinstance(self.fn, InterpretedFunction):
+                # These are torch compiled triton kernels that definitely
+                # have block size configs. Dynamo does not currently
+                # trace user defined triton kernels when TRITON_INTERPRET=1
+                if x not in cfg.kwargs:
+                    new_signature.append(x)
+            elif i not in get_constexprs(self.fn):
+                # use constexprs rather than just configs since user
+                # defined triton kernels may not have any configs
+                new_signature.append(x)
+
+        return new_signature
+
     def _interpret_args_grid(
         self, args: tuple[Any, ...], cfg: Config
     ) -> tuple[tuple[Any, ...], tuple[int, int, int]]:
-        if triton_version_uses_attrs_dict():
-
-            def filtered_signature() -> list[str]:
-                # constexprs are not passed in as args
-                new_signature: list[str] = []
-                from triton.runtime.interpreter import InterpretedFunction
-
-                for i, x in enumerate(self.triton_meta["signature"].keys()):
-                    if isinstance(self.fn, InterpretedFunction):
-                        # These are torch compiled triton kernels that definitely
-                        # have block size configs. Dynamo does not currently
-                        # trace user defined triton kernels when TRITON_INTERPRET=1
-                        if x not in cfg.kwargs:
-                            new_signature.append(x)
-                    elif i not in get_constexprs(self.fn):
-                        # use constexprs rather than just configs since user
-                        # defined triton kernels may not have any configs
-                        new_signature.append(x)
-
-                return new_signature
-
-        else:
-
-            def filtered_signature() -> list[str]:
-                return list(self.triton_meta["signature"].keys())
-
         grid = GridExpr.from_meta(
             self.inductor_meta, cfg, mode=self.grid_mode
         ).eval_slow(
             dict(
                 zip(
                     [
-                        *filtered_signature(),
+                        *self._launcher_arg_names(cfg),
                         *self.inductor_meta.get("extra_launcher_args", ()),
                     ],
                     args,

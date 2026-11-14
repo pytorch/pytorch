@@ -202,6 +202,9 @@ class FakeTensorDeviceMismatchError(RuntimeError):
 def _resolve_device_conflict(
     func: OpOverload, common_device: torch.device, device: torch.device, /
 ) -> torch.device:
+    # Keep in sync with ConcretePyInterpreterVTable::_resolve_device_conflict
+    # in torch/csrc/PyInterpreter.cpp.
+
     # if prefer_device_type is set, prefer that device type over others
     prefer_device_type = torch._functorch.config.fake_tensor_prefer_device_type
     if prefer_device_type is not None:
@@ -367,8 +370,8 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 # its interface yet. Its from_tensor raises UnsupportedFakeTensorException for
 # views, sparse and mkldnn tensors and tensors with nested ints, its
 # converter's from_real_tensor also for constants that are fakes or not plain
-# tensors, and its converter's from_meta_and_device, which makes Python
-# FakeTensors, raises AssertionError. So a caller that needs a Python
+# tensors, and its converter's from_meta_and_device raises NotImplementedError
+# for a pytype other than Tensor. So a caller that needs a Python
 # FakeTensorMode narrows the result with
 # torch._guards.require_python_fake_mode, which raises RuntimeError for a C++
 # mode.
@@ -447,9 +450,8 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         # Like SymNumberMemoDescriptor, a backed SymFloat survives an epoch
         # change. The descriptor checks the hint on every read, but a SymNode's
-        # hint is computed when it is created, and the only later write
-        # (guarding_hint_or_throw) rejects SymFloats, so a SymFloat's hint
-        # cannot change after this and checking it once here is equivalent.
+        # hint is computed when it is created, and guarding_hint_or_throw never
+        # caches SymFloat hints, so checking it once here is equivalent.
         backed = isinstance(memo, SymFloat) and memo.node.hint is not None
         torch._C._set_fake_item_memo(x, memo, keep_across_epochs=backed)
 
@@ -1085,6 +1087,9 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
             trace=trace,
         )
 
+    def is_our_fake(self, t: object) -> TypeGuard[Tensor]:
+        return isinstance(t, Tensor) and torch._C._maybe_get_fake_mode(t) is self
+
     @property
     def avoid_device_init(self) -> bool:
         return _avoid_device_init()
@@ -1124,6 +1129,11 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
             raise RuntimeError(
                 "Attempted to unset FakeTensorMode, but there wasn't one active."
             )
+
+
+# Why the dispatch cache bypasses each op outside the builtin namespaces it has
+# seen (see _cached_dispatch_impl).
+_non_builtin_bypass_reasons: dict[OpOverload, str] = {}
 
 
 @functools.cache
@@ -1245,6 +1255,16 @@ class FakeTensorConverter:
             else:
                 self.invalidate_constant_aliases(constant)
 
+    def _check_mode_kind(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
+        # A converter makes one kind of fake, which the casts to FakeTensor in
+        # this class rely on
+        if isinstance(fake_mode, CppFakeTensorMode) != self.meta_converter.cpp_fakes:
+            kind = type(fake_mode).__name__
+            raise AssertionError(
+                f"this converter's cpp_fakes does not match the {kind}; use the "
+                "mode's own fake_tensor_converter"
+            )
+
     def _get_memo(self, t: Tensor) -> Tensor | None:
         tid = self.meta_converter.describer.lookup_tensor.get(t)
         if tid is None:
@@ -1256,8 +1276,7 @@ class FakeTensorConverter:
         self.meta_converter.tensor_memo[tid] = v
 
     # You can have a real tensor that you need to convert into a fake tensor.
-    # If you have a meta tensor already, call from_meta_and_device (or, for a
-    # C++ fake, torch._C._from_meta_and_device).
+    # If you have a meta tensor already, call from_meta_and_device.
     #
     # You're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
@@ -1299,15 +1318,8 @@ class FakeTensorConverter:
         symbolic_context: SymbolicContext | None = None,
         trace: bool = True,
     ) -> Tensor:
-        # A converter makes one kind of fake, which the casts to FakeTensor in
-        # this class rely on
+        self._check_mode_kind(fake_mode)
         cpp_fakes = self.meta_converter.cpp_fakes
-        if isinstance(fake_mode, CppFakeTensorMode) != cpp_fakes:
-            kind = type(fake_mode).__name__
-            raise AssertionError(
-                f"this converter's cpp_fakes does not match the {kind}; use the "
-                "mode's own fake_tensor_converter"
-            )
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
             if tracing_context := torch._guards.TracingContext.try_get():
@@ -1522,6 +1534,7 @@ class FakeTensorConverter:
         return out
 
     # If you specify the device, it MUST be a meta tensor that is not fake.
+    @overload
     def from_meta_and_device(
         self,
         fake_mode: FakeTensorMode,
@@ -1529,13 +1542,27 @@ class FakeTensorConverter:
         device: torch.device,
         pytype: type[torch.Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
-    ) -> FakeTensor:
-        # This builds FakeTensors, so the memo holds only those
-        if self.meta_converter.cpp_fakes:
-            raise AssertionError(
-                "from_meta_and_device makes FakeTensors, but this converter's "
-                "cpp_fakes is set"
-            )
+    ) -> FakeTensor: ...
+
+    @overload
+    def from_meta_and_device(
+        self,
+        fake_mode: CppFakeTensorMode,
+        t: Tensor,
+        device: torch.device,
+        pytype: type[torch.Tensor] | None = None,
+        dispatch_keys: torch.DispatchKeySet | None = None,
+    ) -> Tensor: ...
+
+    def from_meta_and_device(
+        self,
+        fake_mode: FakeTensorMode | CppFakeTensorMode,
+        t: Tensor,
+        device: torch.device,
+        pytype: type[torch.Tensor] | None = None,
+        dispatch_keys: torch.DispatchKeySet | None = None,
+    ) -> Tensor:
+        self._check_mode_kind(fake_mode)
         if t.device.type != "meta":
             raise AssertionError(
                 f"tensor's device must be `meta`, got {t.device.type} instead"
@@ -1551,10 +1578,19 @@ class FakeTensorConverter:
         # the meta tensor should be fresh so there's no way to get it wrong
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
-            return cast(FakeTensor, maybe_memo)
-        out = FakeTensor(
-            fake_mode, t, device, pytype=pytype, dispatch_keys=dispatch_keys
-        )
+            return maybe_memo
+        if isinstance(fake_mode, CppFakeTensorMode):
+            if pytype not in (None, torch.Tensor):
+                raise NotImplementedError(
+                    f"C++ fake tensors of type {pytype} are not supported yet"
+                )
+            out = torch._C._from_meta_and_device(t, torch.device(device), fake_mode)
+            if dispatch_keys is not None:
+                torch._C._set_fake_dispatch_keys(out, dispatch_keys)
+        else:
+            out = FakeTensor(
+                fake_mode, t, device, pytype=pytype, dispatch_keys=dispatch_keys
+            )
         self.set_tensor_memo(t, out)
         return out
 
@@ -2073,6 +2109,9 @@ class FakeTensor(Tensor):
         common_device = None
         has_scalar_only_inputs = False
         is_cpu_zero_dim = None
+
+        # find_common_device in aten/src/ATen/FakeFallbackKernel.cpp hardcodes
+        # the ops of these three sets for the C++ fake fallback; keep them in sync
 
         # list of ops which can have args(tensor/tensorList) in mixed device
         mixed_device_fns = ordered_set(
@@ -2636,6 +2675,25 @@ class FakeTensorMode(TorchDispatchMode):
         Lookup a cache entry for the given arguments. If none exists, dispatch
         and cache the result (if the result is eligible for caching).
         """
+        # Whether a non-builtin op can be cached doesn't depend on its arguments,
+        # so check that before building a key that would only be thrown away.
+        # The reason doesn't depend on them either, so it is worked out once per
+        # op; later calls bypass the cache without raising.
+        is_op_overload = isinstance(func, torch._ops.OpOverload)
+        if is_op_overload and not library_utils.is_builtin(func):
+            reason = _non_builtin_bypass_reasons.get(func)
+            if reason is None:
+                try:
+                    self._validate_cache_key(func, args, kwargs)
+                except _BypassDispatchCache as e:
+                    reason = _non_builtin_bypass_reasons[func] = e.reason
+                else:
+                    raise AssertionError(
+                        f"_validate_cache_key accepted non-builtin op {func}"
+                    )
+            FakeTensorMode.cache_bypasses[reason] += 1
+            return self._dispatch_impl(func, types, args, kwargs)
+
         state = None
         key = None
         try:
@@ -3797,6 +3855,8 @@ class FakeTensorMode(TorchDispatchMode):
             log.exception("failed while attempting to run meta for %s", func)
             raise
 
+        # The C++ fake fallback's device_argument (FakeFallbackKernel.cpp)
+        # follows this kwargs.get("device"); keep them in sync
         return maybe_propagate_real_tensors(
             self.wrap_meta_outputs_with_default_device_logic(
                 r, func, flat_args, device=kwargs.get("device")

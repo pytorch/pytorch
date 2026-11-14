@@ -3850,11 +3850,6 @@ def _runnable_from_pair(
     that self-load, where the source was just produced in-process, to suppress the
     exec warning.
     """
-    # Unpickling the cache references classes in AOTAutograd's runtime; import
-    # dynamo first so that import completes in a non-circular order (otherwise
-    # a cold load can hit a runtime_wrappers <-> _dynamo circular import).
-    import torch._dynamo
-
     # The whole calling convention (MODULE_POSITIONS, OUT_SPEC, USER_INPUT_*, PARAM_*,
     # BUFFER_*, IN_SPEC, ...) is consumed by the driver INLINED in python_code
     # (emitted from torch._precompile_driver), so the loaded object needs none of it.

@@ -3582,6 +3582,8 @@ MOD_INLINELIST = [
     "torch.return_types",
     "torch.sparse",
     "torch.testing",
+    "torch.testing._creation",
+    "torch.testing._internal.common_utils",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._cxx_pytree",
@@ -3603,7 +3605,10 @@ if torch.distributed.is_available():
 # Modules in MOD_INLINELIST where nested graph breaks should be suppressed.
 # These are large internal modules that are inlined for correctness but whose
 # internal operations are not worth compiling as separate NGB subgraphs.
-NGB_SUPPRESS_INLINELIST: set[str] = set()
+NGB_SUPPRESS_INLINELIST: set[str] = {
+    "torch.testing._creation",
+    "torch.testing._internal.common_utils",
+}
 
 if torch.distributed.is_available():
     NGB_SUPPRESS_INLINELIST.add("torch.distributed")
