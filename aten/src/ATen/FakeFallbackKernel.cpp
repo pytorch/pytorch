@@ -45,6 +45,8 @@
 // its key on Meta redispatch so it also selects Python-only overrides, including
 // sparse overrides. Without that key, redispatch uses the native dispatch table
 // without consulting Python-only overrides.
+// Mode-specific py_impl(FakeTensorMode) overrides run in the Python dispatcher
+// at the Fake key before reaching this fallback.
 //
 // Sparse invariant checks read index data that Meta tensors do not have. Like
 // Python, this fallback disables the process-wide Context setting around sparse
