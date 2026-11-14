@@ -10,14 +10,12 @@ import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._flex_shard.param_homing import param_owners
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_managed_modules,
     _get_managed_states,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ParamModuleInfo
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
-    _get_param_module_infos,
-)
 from torch.distributed.fsdp._fully_shard._fully_shard import FSDPModule
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
@@ -343,6 +341,18 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         self.assertEqual(set(managed_buffers), set(expected_managed_buffers))
 
 
+def _get_param_module_infos(params, modules):
+    return [
+        ParamModuleInfo(
+            owner.module,
+            owner.param_name,
+            [shared.module for shared in shared_owners],
+            [shared.param_name for shared in shared_owners],
+        )
+        for owner, shared_owners in param_owners(params, modules)
+    ]
+
+
 class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
@@ -568,9 +578,9 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         root_state = fully_shard.state(model)
         root_state._lazy_init()
 
-        root_param_group = root_state._fsdp_param_group
+        root_param_group = root_state._fsdp_param_groups[0]
         self.assertIsNotNone(root_param_group)
-        self.assertEqual(root_param_group._module_fqn, "")
+        self.assertEqual(root_param_group.module_fqn, "")
         root_param_fqns = {
             fsdp_param._param_fqn for fsdp_param in root_param_group.fsdp_params
         }
@@ -585,9 +595,9 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         )
 
         model0_in_proj_state = fully_shard.state(model[0].in_proj)
-        model0_in_proj_param_group = model0_in_proj_state._fsdp_param_group
+        model0_in_proj_param_group = model0_in_proj_state._fsdp_param_groups[0]
         self.assertIsNotNone(model0_in_proj_param_group)
-        self.assertEqual(model0_in_proj_param_group._module_fqn, "0.in_proj")
+        self.assertEqual(model0_in_proj_param_group.module_fqn, "0.in_proj")
         model0_in_proj_param_fqns = {
             fsdp_param._param_fqn
             for fsdp_param in model0_in_proj_param_group.fsdp_params
@@ -597,9 +607,9 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         )
 
         model0_out_proj_state = fully_shard.state(model[0].out_proj)
-        model0_out_proj_param_group = model0_out_proj_state._fsdp_param_group
+        model0_out_proj_param_group = model0_out_proj_state._fsdp_param_groups[0]
         self.assertIsNotNone(model0_out_proj_param_group)
-        self.assertEqual(model0_out_proj_param_group._module_fqn, "0.out_proj")
+        self.assertEqual(model0_out_proj_param_group.module_fqn, "0.out_proj")
         model0_out_proj_param_fqns = {
             fsdp_param._param_fqn
             for fsdp_param in model0_out_proj_param_group.fsdp_params
@@ -1030,16 +1040,12 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         for module in model.modules():
             if isinstance(module, FSDPModule):
                 for param_group in module._get_fsdp_state()._fsdp_param_groups:
-                    self.assertIsNotNone(
-                        param_group.mesh_info.reduce_scatter_process_group
-                    )
+                    self.assertIsNotNone(param_group.storage._reduce_mesh)
+                    reduce_group = param_group.storage.reduce_mesh.get_group()
                     self.assertIsNot(
-                        param_group._reduce_scatter_process_group,
-                        param_group.mesh_info.shard_process_group,
+                        reduce_group, param_group.mesh_info.shard_process_group
                     )
-                    rs_process_groups.add(
-                        id(param_group.mesh_info.reduce_scatter_process_group)
-                    )
+                    rs_process_groups.add(id(reduce_group))
         self.assertEqual(len(rs_process_groups), 1)
 
 

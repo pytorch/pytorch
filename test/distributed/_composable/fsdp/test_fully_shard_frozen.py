@@ -10,9 +10,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed.fsdp import fully_shard
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
-    RegisterPostBackwardFunction,
-)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -21,6 +18,7 @@ from torch.testing._internal.common_fsdp import (
     MLP,
     patch_reduce_scatter,
     patch_register_post_backward_hook_backward,
+    post_backward_trigger_cls,
     reduce_scatter_with_assert,
 )
 from torch.testing._internal.common_utils import (
@@ -127,7 +125,7 @@ class TestFullyShardFrozen(FSDPTest):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
-        orig_backward = RegisterPostBackwardFunction.backward
+        orig_backward = post_backward_trigger_cls().backward
         backward_count = 0
 
         def backward_with_count(*args, **kwargs):
@@ -192,7 +190,7 @@ class TestFullyShardFrozen(FSDPTest):
                 fully_shard(module, reshard_after_forward=reshard_after_forward)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        orig_backward = RegisterPostBackwardFunction.backward
+        orig_backward = post_backward_trigger_cls().backward
         backward_count = 0
 
         def _set_requires_grad(seq: nn.Module, requires_grad: bool):
