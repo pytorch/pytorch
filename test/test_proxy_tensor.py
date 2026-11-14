@@ -40,6 +40,24 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
+# Under the C++ fake configuration, explicit FakeTensorMode() calls in this
+# module construct a CppFakeTensorMode.
+if torch._dynamo.config.use_cpp_fake_tensor:
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+    def FakeTensorMode(
+        *,
+        shape_env=None,
+        allow_fallback_kernels=True,
+        allow_non_fake_inputs=False,
+        **kwargs,
+    ):
+        if not allow_fallback_kernels or kwargs:
+            raise NotImplementedError("CppFakeTensorMode has no such options yet")
+        return CppFakeTensorMode(
+            shape_env=shape_env, allow_non_fake_inputs=allow_non_fake_inputs
+        )
+
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
