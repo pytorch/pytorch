@@ -643,6 +643,8 @@ class SubprocMain:
         self.nprocs = nprocs
         self.pool: ProcessPoolExecutor | None = None
         self.pool_finalizer: Any | None = None
+        # Manager threads of quiesced pools; _start_pool joins them before forking.
+        self._quiesced_manager_threads: list[threading.Thread] = []
         self.running = True
         # job_id -> monotonic submit time; scanned by the watchdog thread.
         self._inflight: dict[int, float] = {}
@@ -698,6 +700,13 @@ class SubprocMain:
             # interpreter finalization wait for running compiler workers.
             _terminate_process_pool(pool)
         else:
+            # shutdown() forgets the pool's executor manager thread, so keep it
+            # for _start_pool to join before it forks: up to CPython 3.12, a
+            # worker forked while that thread holds the pool's _shutdown_lock
+            # inherits the lock held and can hang on it, losing its job. See
+            # https://github.com/pytorch/pytorch/issues/200848
+            if (thread := getattr(pool, "_executor_manager_thread", None)) is not None:
+                self._quiesced_manager_threads.append(thread)
             pool.shutdown(wait=False)
 
     def submit(self, job_id: int, data: bytes) -> None:
@@ -831,6 +840,10 @@ class SubprocMain:
     def _start_pool(self) -> None:
         if self.pool is not None:
             return
+
+        # Never fork while a quiesced pool's manager thread runs (see _shutdown_pool).
+        while self._quiesced_manager_threads:
+            self._quiesced_manager_threads.pop().join()
 
         # Recycle heartbeat slots before the new worker generation forks.
         watchdog.reset()
