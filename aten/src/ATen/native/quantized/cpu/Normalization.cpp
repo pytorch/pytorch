@@ -69,8 +69,12 @@ Tensor q_batch_norm1d_impl(
   const auto& bias = *mb_bias;
 
   if (qx.numel() == 0) {
-    auto out = qx.clone();
-    return out;
+    return at::_empty_affine_quantized(
+        qx.sizes(),
+        qx.options().memory_format(qx.suggest_memory_format()),
+        output_scale,
+        output_zero_point,
+        std::nullopt);
   }
   int64_t ndim = qx.dim();
   TORCH_CHECK(ndim == 2 || ndim == 3, "Expecting the input tensor of rank 2 or 3.");
@@ -177,8 +181,12 @@ Tensor q_batch_norm2d_impl(
   const auto& bias = *mb_bias;
 
   if (qx.numel() == 0) {
-    auto out = qx.clone();
-    return out;
+    return at::_empty_affine_quantized(
+        qx.sizes(),
+        qx.options().memory_format(qx.suggest_memory_format()),
+        output_scale,
+        output_zero_point,
+        std::nullopt);
   }
   int64_t ndim = qx.dim();
   TORCH_CHECK(ndim == 4, "Expecting the input tensor of rank 4.");
@@ -272,8 +280,12 @@ Tensor q_batch_norm3d_impl(
   const auto& bias = *mb_bias;
 
   if (qx.numel() == 0) {
-    auto out = qx.clone();
-    return out;
+    return at::_empty_affine_quantized(
+        qx.sizes(),
+        qx.options().memory_format(qx.suggest_memory_format()),
+        output_scale,
+        output_zero_point,
+        std::nullopt);
   }
   int64_t ndim = qx.dim();
   TORCH_CHECK(ndim == 5, "Expecting the input tensor of rank 5.");
@@ -390,15 +402,16 @@ Tensor int8_batch_norm2d_cpu_impl(
     double output_scale,
     int64_t output_zero_point,
     c10::ScalarType output_dtype) {
-  if (qx.numel() == 0) {
-    auto out = qx.clone();
-    return out;
-  }
   if (output_dtype != at::kByte) {
     TORCH_CHECK(output_scale == 1.0 && output_zero_point == 0,
                 "Quantized batch_norm_2d output scale and zero point should be 1 and 0 for "
                 "output_dtype ", output_dtype, ", but got scale = ",
                 output_scale, " and zero point = ", output_zero_point);
+  }
+  if (qx.numel() == 0) {
+    return at::empty(
+        qx.sizes(),
+        qx.options().dtype(output_dtype).memory_format(MemoryFormat::ChannelsLast));
   }
   int64_t ndim = qx.dim();
   TORCH_CHECK(ndim == 4, "Int8 batch_norm2d: Expecting the input tensor of rank 4.");
