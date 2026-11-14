@@ -51,10 +51,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
-from torch.testing._internal.common_dtype import (
-    highest_precision_complex,
-    highest_precision_float,
-)
+from torch.testing._internal.common_dtype import highest_precision_float
 
 
 # Experimental module containing prototype Python references for existing
@@ -5760,30 +5757,21 @@ def linspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    if isinstance(start, TensorLikeType):
+    def upcast(x: NumberType | TensorLikeType) -> NumberType | TensorLikeType:
+        if not isinstance(x, TensorLikeType):
+            return x
         torch._check(
-            start.dim() == 0,
+            x.dim() == 0,
             lambda: "linspace only supports 0-dimensional start and end tensors",
         )
-        if utils.is_complex_dtype(start.dtype):
-            start = _maybe_convert_to_dtype(start, highest_precision_complex(device))
-        else:
-            start = _maybe_convert_to_dtype(start, highest_precision_float(device))
-    if isinstance(end, TensorLikeType):
-        torch._check(
-            end.dim() == 0,
-            lambda: "linspace only supports 0-dimensional start and end tensors",
-        )
-        if utils.is_complex_dtype(end.dtype):
-            end = _maybe_convert_to_dtype(end, highest_precision_complex(device))
-        else:
-            end = _maybe_convert_to_dtype(end, highest_precision_float(device))
+        upcast_dtype = highest_precision_float(device)
+        if utils.is_complex_dtype(x.dtype):
+            upcast_dtype = utils.corresponding_complex_dtype(upcast_dtype)
+        return _maybe_convert_to_dtype(x, upcast_dtype)
 
-    if builtins.any(
-        isinstance(arg, complex)
-        or (isinstance(arg, TensorLikeType) and utils.is_complex_dtype(arg.dtype))
-        for arg in (start, end, steps)
-    ):
+    start, end = upcast(start), upcast(end)
+
+    if builtins.any(map(utils.is_complex_number_or_tensor, (start, end, steps))):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
         )
