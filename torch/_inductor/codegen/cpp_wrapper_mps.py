@@ -5,12 +5,11 @@ import sympy
 import torch
 from torch.utils._ordered_set import OrderedSet
 
-from ..ir import GraphPartitionSignature
 from ..runtime.hints import TritonMeta
 from ..virtualized import V
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .cpp_wrapper_gpu import CppWrapperGpu
-from .wrapper import KernelCallLine, PythonWrapperCodegen
+from .wrapper import KernelCallLine
 
 
 class CppWrapperMps(CppWrapperGpu):
@@ -18,19 +17,18 @@ class CppWrapperMps(CppWrapperGpu):
     Generates cpp wrapper for running on MPS and calls metal kernels
     """
 
+    # The device this wrapper targets. CppWrapperGpu keeps a ``device`` set by a
+    # subclass (the CppWrapperCpu hasattr pattern), so it drives everything that
+    # reads ``self.device`` or ``device_codegen`` (including the per-device
+    # kernel-driver header). A retargeting subclass must still override
+    # ``get_device_include_path_aot`` and the aoti_torch_mps_*/AOTIMetal* emission,
+    # and match ``MetalKernel.device_type`` in codegen/mps.py.
+    device = "mps"
+
     def __init__(self) -> None:
         super().__init__()
         self._used_kernel_names: OrderedSet[str] = OrderedSet()
         self._lambda_counter: int = 0
-
-    @staticmethod
-    def create(
-        is_subgraph: bool,
-        subgraph_name: str | None,
-        parent_wrapper: PythonWrapperCodegen | None,
-        partition_signatures: GraphPartitionSignature | None = None,
-    ) -> "CppWrapperMps":
-        return CppWrapperMps()
 
     def _codegen_jit_stream_declarations(self) -> None:
         # Metal kernels are dispatched through aoti_torch_mps_run_command_block
@@ -85,8 +83,10 @@ class CppWrapperMps(CppWrapperGpu):
                 inductor_meta=inductor_meta,
             )
 
-        if device.type != "mps":
-            raise AssertionError(f"expected device.type == 'mps', got {device.type}")
+        if device.type != self.device:
+            raise AssertionError(
+                f"expected device.type == '{self.device}', got {device.type}"
+            )
 
         if arg_types is None:
             raise AssertionError("expected arg_types to not be None")
@@ -274,7 +274,7 @@ class CppWrapperMps(CppWrapperGpu):
         for line in self.lines:
             if not isinstance(line, KernelCallLine):
                 continue
-            if line.device.type != "mps":
+            if line.device.type != self.device:
                 continue
 
             # Extract library name from kernel name (e.g., "mps_lib_0" from kernel calls)

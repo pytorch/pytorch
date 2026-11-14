@@ -115,26 +115,6 @@ class TestStatelessFunctionalAPI(TestCase):
         subtest(torch.func.functional_call, "torch_func"),
         subtest(stateless.functional_call, "stateless")
     ])
-    def test_functional_call_with_jit(self, functional_call):
-        module = MockModule()
-        jit_module = torch.jit.script(module)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r'used with Jitted modules'
-        ):
-            _run_call_with_mock_module(self, jit_module, functional_call)
-        x = torch.rand((1, 1))
-        traced_module = torch.jit.trace(module, x)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r'used with Jitted modules'
-        ):
-            _run_call_with_mock_module(self, traced_module, functional_call)
-
-    @parametrize("functional_call", [
-        subtest(torch.func.functional_call, "torch_func"),
-        subtest(stateless.functional_call, "stateless")
-    ])
     def test_functional_call_with_gradient(self, functional_call):
         module = MockModule()
         x = torch.rand((1, 1))

@@ -76,6 +76,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import (
+    decorateIf,
     disable_gc,
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -9378,6 +9379,11 @@ from user code:
         )
         _run_in_subprocess(functools.partial(_subprocess_load_then_compile, path))
 
+    @decorateIf(
+        unittest.skip("inlined comprehensions are 3.12+"),
+        lambda params: params["mint_site"] == "comprehension"
+        and sys.version_info < (3, 12),
+    )
     @parametrize("mint_site", ("install_global", "resume_function", "comprehension"))
     def test_mint_skips_a_name_baked_in_by_another_process(self, mint_site):
         # A load in a fresh process binds names its own counter is still behind:
@@ -11025,28 +11031,102 @@ from user code:
 
     def test_a_recorded_gpu_device_type_arms_the_load_check(self):
         # What the flip from "cpu" to an accelerator buys, and what it costs: a
-        # recorded "cuda" is what makes check_compatibility compare the GPU
-        # name, so an artifact saved on one GPU is now refused on another, and
-        # the AOT load path calls this unguarded. Both names are fabricated --
-        # SystemInfo.current().gpu_name is None on a host without a GPU, which
-        # is a mismatch on one side of the check only -- and is_available is
-        # patched so the refusal under test is the GPU-name one there too.
-        here = dataclasses.replace(SystemInfo.current(), gpu_name="This GPU")
-        saved = dataclasses.replace(here, gpu_name="Some Other GPU")
+        # recorded "cuda" is what makes check_compatibility compare the GPU, so
+        # an artifact saved on one arch is now refused on another, and the AOT
+        # load path calls this unguarded. Both archs are fabricated, and
+        # is_available is patched so the refusal under test is the GPU one on a
+        # host without a GPU too.
+        saved = dataclasses.replace(
+            SystemInfo.current(), gpu_name="Saved GPU", gpu_arch=100, gpu_sm_count=132
+        )
+        here = dataclasses.replace(saved, gpu_name="This GPU", gpu_arch=90)
         with patch.object(torch.cuda, "is_available", return_value=True):
-            here.check_compatibility(saved, "cpu")
-            with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
-                here.check_compatibility(saved, "cuda")
-            # The two load paths pass the saved info in opposite positions (AOT
-            # as other, caching precompile as self). With both names known they
-            # agree; only the side passed as other is required to be known, so
-            # an unknown name splits them.
+            saved.check_compatibility(here, "cpu")
+            with self.assertRaisesRegex(RuntimeError, "created for a different GPU"):
+                saved.check_compatibility(here, "cuda")
+
+    def test_gpus_of_one_arch_and_sm_count_share_an_artifact(self):
+        saved = dataclasses.replace(
+            SystemInfo.current(),
+            gpu_name="NVIDIA GB300",
+            gpu_arch=103,
+            gpu_sm_count=148,
+        )
+        here = dataclasses.replace(saved, gpu_name="NVIDIA GB300 Max-Q")
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            saved.check_compatibility(here, "cuda")
+
+    def test_a_gpu_with_another_sm_count_refuses_the_artifact(self):
+        # A cooperative reduction sizes its grid from the SM count it was
+        # compiled for, and every block must be resident at once, so an H100
+        # artifact cannot launch on an H20 although both are sm_90.
+        saved = dataclasses.replace(
+            SystemInfo.current(),
+            gpu_name="NVIDIA H100",
+            gpu_arch=90,
+            gpu_sm_count=132,
+        )
+        here = dataclasses.replace(saved, gpu_name="NVIDIA H20", gpu_sm_count=78)
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            with self.assertRaisesRegex(RuntimeError, "132 SMs.*78 SMs"):
+                saved.check_compatibility(here, "cuda")
+
+    def test_an_unrecorded_gpu_arch_falls_back_to_the_gpu_name(self):
+        # A package written before the arch was recorded, or on XPU, which
+        # records none; a GPU name the package did not record is not compared.
+        saved = dataclasses.replace(
+            SystemInfo.current(), gpu_name="Saved GPU", gpu_arch=None
+        )
+        here = dataclasses.replace(saved, gpu_name="This GPU", gpu_arch=90)
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            saved.check_compatibility(
+                dataclasses.replace(here, gpu_name="Saved GPU"), "cuda"
+            )
             with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
                 saved.check_compatibility(here, "cuda")
-            unknown = dataclasses.replace(here, gpu_name=None)
+            dataclasses.replace(saved, gpu_name=None).check_compatibility(here, "cuda")
+            # A host whose device info could not be read records no name.
+            unread = dataclasses.replace(here, gpu_name=None, gpu_arch=None)
             with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
-                unknown.check_compatibility(saved, "cuda")
-            saved.check_compatibility(unknown, "cuda")
+                saved.check_compatibility(unread, "cuda")
+
+    def test_the_aot_load_check_names_the_saved_gpu_as_cached(self):
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        artifacts = compiled_fn.aot_compile(((torch.randn(3),), {}))._artifacts
+        current = dataclasses.replace(
+            artifacts.system_info, gpu_name="This GPU", gpu_arch=90, gpu_sm_count=132
+        )
+        saved = dataclasses.replace(current, gpu_name="Saved GPU", gpu_arch=100)
+        artifacts = dataclasses.replace(
+            artifacts, device_type="cuda", system_info=saved
+        )
+        with (
+            patch.object(torch.cuda, "is_available", return_value=True),
+            patch.object(SystemInfo, "current", return_value=current),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "cached=Saved GPU .*current=This GPU "
+            ):
+                AOTCompiledFunction(artifacts)
+
+    def test_a_python_patch_release_shares_an_artifact(self):
+        saved = dataclasses.replace(SystemInfo.current(), python_version="3.12.4")
+        saved.check_compatibility(dataclasses.replace(saved, python_version="3.12.9"))
+        alpha = dataclasses.replace(saved, python_version="3.14.0a3")
+        alpha.check_compatibility(alpha)
+        for package, other in [
+            (saved, "3.13.4"),
+            (saved, "3.12.0rc1"),
+            (alpha, "3.14.0b1"),
+        ]:
+            with self.subTest(other=other):
+                with self.assertRaisesRegex(RuntimeError, "different Python version"):
+                    package.check_compatibility(
+                        dataclasses.replace(package, python_version=other)
+                    )
 
     def test_a_recorded_device_the_host_lacks_refuses_the_compile(self):
         # __post_init__ runs at the end of a compile as well as on load, so the

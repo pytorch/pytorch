@@ -25,6 +25,9 @@ __all__: list[str] = [
     "list_flash_attention_impls",
     "current_flash_attention_impl",
     "restore_flash_attention_impl",
+    "enable_cudnn_sdp_python",
+    "cudnn_sdp_python_enabled",
+    "is_cudnn_sdp_python_available",
 ]
 
 
@@ -192,4 +195,57 @@ current_flash_attention_impl.__module__ = __name__
 restore_flash_attention_impl.__module__ = __name__
 
 # Import built-in implementations to trigger self-registration
-from . import _fa3, _fa4
+from . import _cudnn, _fa3, _fa4
+
+
+def is_cudnn_sdp_python_available() -> bool:
+    r"""
+    .. warning:: This API is beta and subject to change.
+
+    Returns whether ``nvidia-cudnn-frontend``'s ``cudnn.torch`` module can be
+    found. It imports the ``cudnn`` package to look, but not ``cudnn.torch``,
+    and does not check the version: :func:`enable_cudnn_sdp_python` still
+    raises if the installed package is older than it requires.
+    """
+    return _cudnn.is_available()
+
+
+def cudnn_sdp_python_enabled() -> bool:
+    r"""
+    .. warning:: This API is beta and subject to change.
+
+    Returns whether cuDNN scaled dot product attention is currently served by
+    the cuDNN frontend Python API rather than the built-in C++ implementation.
+    """
+    return _cudnn.is_enabled()
+
+
+def enable_cudnn_sdp_python(enabled: bool) -> None:
+    r"""
+    .. warning:: This API is beta and subject to change.
+
+    Selects which implementation backs cuDNN scaled dot product attention: the
+    cuDNN frontend Python API when True, or the built-in C++ implementation
+    when False. Enabling requires ``nvidia-cudnn-frontend>=1.32.3``, which is
+    imported on the first enable and not before.
+
+    This chooses an *implementation*, so it is orthogonal to
+    :func:`torch.backends.cuda.enable_cudnn_sdp`, which chooses whether the
+    cuDNN *backend* is eligible for selection at all: with that off, neither
+    implementation runs.
+
+    It replaces the CUDA kernels of ``_scaled_dot_product_cudnn_attention``, its
+    backward, and the :func:`~torch.nn.attention.varlen.varlen_attn` ops. The
+    varlen ops are shared with flash attention, so with this on every varlen
+    call reaches the frontend first; it serves the calls that selected cuDNN
+    and passes the rest to PyTorch's own kernels, so the active flash attention
+    implementation is unaffected. Nested-tensor inputs, and code that calls
+    the CUDA kernels without going through the dispatcher (such as
+    AOTInductor's C++ shims), keep the built-in implementation.
+    """
+    if not isinstance(enabled, bool):
+        raise TypeError(f"enabled must be a bool, got {type(enabled).__name__}")
+    if enabled:
+        _cudnn.enable()
+    else:
+        _cudnn.disable()

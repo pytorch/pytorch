@@ -3113,7 +3113,9 @@ class _MakefxTracer:
             if self.tracing_mode == "fake":
                 import torch._dynamo
 
-                fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+                fake_tensor_mode = torch._guards.require_python_fake_mode(
+                    torch._dynamo.utils.detect_fake_mode(args)
+                )
                 if fake_tensor_mode is None:
                     import torch._functorch.config as _config
 
@@ -3141,7 +3143,9 @@ class _MakefxTracer:
             elif self.tracing_mode == "symbolic":
                 import torch._dynamo
 
-                fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+                fake_tensor_mode = torch._guards.require_python_fake_mode(
+                    torch._dynamo.utils.detect_fake_mode(args)
+                )
                 if fake_tensor_mode is None:
                     shape_env = ShapeEnv()
                     import torch._functorch.config as _config

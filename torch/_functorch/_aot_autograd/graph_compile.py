@@ -33,7 +33,7 @@ from torch._dynamo.utils import (
     dynamo_timed,
     lazy_format_graph_code,
 )
-from torch._guards import CompileContext, TracingContext
+from torch._guards import CompileContext, require_python_fake_mode, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger, trace_structured
@@ -330,7 +330,7 @@ def _apply_tensorify_python_scalars(module: torch.fx.GraphModule) -> None:
     Util to apply tensorify_python_scalars.
     """
     # TODO(anijain2305) - Add tensorify_python_scalars to the HOP graph passes.
-    fake_mode = detect_fake_mode()
+    fake_mode = require_python_fake_mode(detect_fake_mode())
     if fake_mode is not None and fake_mode.shape_env is not None:
         tensorify_python_scalars(module, fake_mode.shape_env, fake_mode)
 

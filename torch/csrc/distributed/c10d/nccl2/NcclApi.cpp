@@ -636,6 +636,22 @@ ncclResult_t DefaultNcclApi::memFree(void* buff) {
 #endif
 }
 
+ncclResult_t DefaultNcclApi::setEncryptionPsk(const char* psk) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 32, 3) && !defined(USE_ROCM)
+  ncclEncryptionConfig_t config = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
+  if (psk != nullptr) {
+    config.mode = NCCL_ENCRYPTION_MODE_PSK;
+    config.psk = psk;
+  }
+  return ncclSetEncryption(&config);
+#else
+  std::ignore = psk;
+  TC_LOG(ERROR) << "NCCL version " << NCCL_VERSION_CODE
+                << " does not support ncclSetEncryption API";
+  return ncclInvalidUsage;
+#endif
+}
+
 ncclResult_t DefaultNcclApi::commSuspend(ncclComm_t comm, int flags) {
   std::lock_guard<std::mutex> lock(api_mutex_);
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)

@@ -9,6 +9,11 @@ variable, so it is one line of compact JSON capped at ``MAX_TOTAL_BYTES``.
 ``labels`` are the names of the labels on the PR when the file was made, at most
 ``MAX_LABELS`` of them; ``labels_truncated`` is set when there were more.
 
+``pr_author_is_maintainer`` is whether the PR author has triage access or above.
+The author's items and reactions keep the role ``author``; this says whether
+their thumbs-down on an earlier finding counts as a maintainer's. A failed check
+leaves it false and logs a workflow warning.
+
 Kept: issue comments, reviews and inline review comments written by the PR
 author or by a user with triage access or above, and this workflow's own
 earlier findings (role ``automated_review``): its inline findings still on the
@@ -189,6 +194,16 @@ def is_maintainer(api: Api, repo: str, login: str) -> bool:
     return any(perms.get(p) is True for p in MAINTAINER_PERMISSIONS)
 
 
+def author_is_maintainer(api: Api, repo: str, author: str | None) -> bool:
+    if author is None:
+        return False
+    try:
+        return is_maintainer(api, repo, author)
+    except (RuntimeError, ValueError) as e:
+        warn(f"could not check the PR author's access: {e}")
+        return False
+
+
 def cap(text: str | None, limit: int) -> str:
     text = text or ""
     return text if len(text) <= limit else text[:limit] + " [truncated]"
@@ -259,6 +274,7 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
     labels = [cap_encoded(name, MAX_LABEL_BYTES) for name in names[:MAX_LABELS]]
     head = {
         "pr_author": author,
+        "pr_author_is_maintainer": author_is_maintainer(api, repo, author),
         "head_sha": head_sha,
         "title": pull.get("title") or "",
         "labels": labels,

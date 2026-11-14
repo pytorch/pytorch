@@ -125,6 +125,7 @@ def _make_conv(dtype=None):
 @instantiate_parametrized_tests
 class CudaReproTests(TestCase):
     device = device_type
+    _device_at_collection = device_type
     common = check_model_cuda
 
     def test_mm_out_dtype_compile(self):
@@ -2191,9 +2192,9 @@ class CudaReproTests(TestCase):
         emulate_precision_casts=False,
         emulate_precision_casts_on_saved_tensors=True,
     )
-    # With TF32 convs, the compiled and eager input grads differ by ~1e-3 on
-    # some GPUs (an A100 MIG slice), far outside the 1e-5 tolerance this fp32
-    # numerics check needs.
+    # With TF32 convs on CUDA, the compiled and eager input grads differ
+    # by ~1e-3 on some GPUs (an A100 MIG slice), far outside the 1e-5
+    # tolerances used for CUDA in this fp32 numerics check.
     @with_tf32_off
     def test_conv_bias_no_extra_cast_for_fp32(self):
         # fp32 conv output is not low precision: no cast, unchanged numerics.
@@ -2218,8 +2219,19 @@ class CudaReproTests(TestCase):
 
         f1_out, f1_grad = run(f, True)
         eager_out, eager_grad = run(f, False)
-        self.assertEqual(f1_out, eager_out, atol=1e-5, rtol=1e-5)
-        self.assertEqual(f1_grad, eager_grad, atol=1e-5, rtol=1e-5)
+        out_tol = grad_tol = {"atol": 1e-5, "rtol": 1e-5}
+        if device_type == "xpu":
+            # Eager oneDNN fuses the bias add; Inductor adds bias separately.
+            # With bias -1000, rounding differences affect log_softmax and its
+            # backward. On BMG / Data Center GPU with oneDNN 3.13.3, the max
+            # absolute differences were 1.831e-4 / 1.259e-4 for the log_softmax
+            # output and 7.337e-5 / 6.175e-5 for the input gradient.
+            # The atols leave about 2.2x output and 2.7x gradient headroom over
+            # the measured maxima to allow for variation across XPU devices.
+            out_tol = {"atol": 4e-4, "rtol": 1e-5}
+            grad_tol = {"atol": 2e-4, "rtol": 1e-5}
+        self.assertEqual(f1_out, eager_out, **out_tol)
+        self.assertEqual(f1_grad, eager_grad, **grad_tol)
 
         opt_fn = torch.compile(f, backend="inductor", fullgraph=True)
         _, codes = run_and_get_code(opt_fn, x.clone().requires_grad_())
@@ -3542,7 +3554,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         opt_fn = torch.compile(functools.partial(torch.add))
         result, (code,) = run_and_get_code(opt_fn, a, b)
         self.assertEqual(result, a + b)
-        self.assertIn("znumel", code)
+        self.assertIn("z0_numel", code)
 
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
