@@ -24,6 +24,76 @@ def synchronize() -> None:
     pass
 
 
+def _is_device_process_label(labels: str) -> bool:
+    if "GPU" in labels:
+        return True
+    acc = torch.accelerator.current_accelerator()
+    return acc is not None and acc.type.upper() in labels
+
+
+def _device_profiler_activity() -> ProfilerActivity:
+    if not torch.accelerator.is_available():
+        return ProfilerActivity.CUDA
+    acc = torch.accelerator.current_accelerator()
+    if acc is None or acc.type == "cuda":
+        return ProfilerActivity.CUDA
+    activity_name = acc.type.upper()
+    activity = getattr(ProfilerActivity, activity_name, None)
+    if activity is not None:
+        return activity
+    privateuse1_name = torch._C._get_privateuse1_backend_name()
+    if acc.type == privateuse1_name:
+        return ProfilerActivity.PrivateUse1
+    raise RuntimeError(
+        f"Profiler activity is not supported for accelerator {acc.type!r}"
+    )
+
+
+def _synchronize_for_devices(devices: list[str] | None) -> None:
+    """Synchronize devices for a benchmark timing window.
+
+    ``None`` is the only default: synchronize the current accelerator when one
+    exists. An explicit list is parsed with ``torch.device``. CPU entries,
+    including ``cpu:0``, are skipped. Any other entry must match the current
+    accelerator type.
+    """
+    if devices is None:
+        if not torch.accelerator.is_available():
+            return
+        if torch.accelerator.current_accelerator() is None:
+            return
+        torch.accelerator.synchronize()
+        return
+    if len(devices) == 0:
+        raise ValueError("devices must not be empty")
+    parsed: list[tuple[str, torch.device]] = []
+    for spec in devices:
+        try:
+            dev = torch.device(spec)
+        except (RuntimeError, ValueError, TypeError) as exc:
+            raise ValueError(f"Invalid device entry in devices: {spec!r}") from exc
+        parsed.append((spec, dev))
+    targets = [(spec, dev) for spec, dev in parsed if dev.type != "cpu"]
+    if not targets:
+        return
+    if not torch.accelerator.is_available():
+        raise ValueError(
+            f"Accelerator is not available but devices {devices!r} includes accelerator entries"
+        )
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
+        raise ValueError(
+            f"No current accelerator but devices {devices!r} includes accelerator entries"
+        )
+    mismatched = [spec for spec, dev in targets if dev.type != acc.type]
+    if mismatched:
+        raise ValueError(
+            f"devices {mismatched!r} do not match current accelerator {acc.type!r}"
+        )
+    for _, dev in targets:
+        torch.accelerator.synchronize(dev)
+
+
 def dump_chrome_trace(
     f: Callable[[tuple[Any, ...]], _R],
     input_: tuple[Any, ...],
@@ -43,14 +113,14 @@ def dump_chrome_trace(
     Return total runtime without the profiler
 
     Outputs to trace_filename
+
+    ``devices=None`` synchronizes the current accelerator. Explicit device
+    strings are parsed with ``torch.device`` and must match that accelerator.
+    CPU devices, including ``cpu:0``, skip accelerator sync. ``[]`` is invalid.
     """
 
-    if devices is None:
-        devices = ["cuda"]
-
-    global synchronize
-    if devices != ["cpu"] and torch.accelerator.is_available():
-        synchronize = torch.accelerator.synchronize
+    def _sync() -> None:
+        _synchronize_for_devices(devices)
 
     if kwargs_for_f is None:
         kwargs_for_f = {}
@@ -61,22 +131,22 @@ def dump_chrome_trace(
         torch.manual_seed(1337)
         for _ in range(5):  # warmup runs
             f(input_, **kwargs_for_f)
-            synchronize()
+            _sync()
         torch.manual_seed(1337)
         t0 = time.perf_counter()
         for _ in range(num_runs):
             f(input_, **kwargs_for_f)
-            synchronize()
+            _sync()
         t1 = time.perf_counter()
     timing = t1 - t0
 
     with profile(activities=activities, **kwargs_for_profiler) as prof:
         with optimize_ctx:
-            synchronize()
+            _sync()
             torch.manual_seed(1337)
             for _ in range(num_runs):
                 f(input_, **kwargs_for_f)
-                synchronize()
+                _sync()
     prof.export_chrome_trace(trace_filename)
 
     return timing
@@ -164,7 +234,9 @@ def compute_utilization(filename: str, total_length: float) -> tuple[float, floa
     for event in events:
         if "name" not in event:
             continue
-        if event["name"] == "process_labels" and "GPU" in event["args"]["labels"]:
+        if event["name"] == "process_labels" and _is_device_process_label(
+            event["args"]["labels"]
+        ):
             gpu_pids.append(event["pid"])
 
     total_length = total_length * 1e6
@@ -234,9 +306,9 @@ def benchmark_utilization(
         input_,
         chrome_trace_file_name,
         optimize_ctx,
-        [ProfilerActivity.CUDA],
+        [_device_profiler_activity()],
         num_runs=num_runs,
-        devices=["cuda"],
+        devices=None,
     )
     utilization, mm_conv_utilization = compute_utilization(
         chrome_trace_file_name, total_length
