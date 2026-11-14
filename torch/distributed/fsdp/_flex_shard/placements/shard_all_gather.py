@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..bucket_runtime import ParamRepresentation
+    from ..param_homing import ParamHoming
 
 
 class _AllGatherOutputLayout(NamedTuple):
@@ -292,13 +293,20 @@ class ParamAllGather:
 
 
 class ShardAllGather:
-    """A ``Shard`` bucket's all-gather: its parameters' outputs, the
-    representation that may define their inputs and unsharded tensors, its
+    """A ``Shard`` bucket's all-gather: its parameters' outputs, its
     ``AllGatherLayout``, and the persistent buffers that a custom layout
-    chose."""
+    chose. ``homing``, the bucket's parameter storage, may let parameters
+    define their inputs and unsharded tensors (all-gather extensions, tensor
+    subclasses); ``representation`` exposes the unsharded tensors."""
 
-    def __init__(self, representation: ParamRepresentation, num_params: int) -> None:
+    def __init__(
+        self,
+        representation: ParamRepresentation,
+        homing: ParamHoming | None,
+        num_params: int,
+    ) -> None:
         self.representation = representation
+        self.homing = homing
         self.params = [ParamAllGather() for _ in range(num_params)]
         self.layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT
         self.layout_buffers: _PersistentBuffers | None = None
