@@ -32,6 +32,7 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
+from torch.distributed.fsdp._fully_shard import _fsdp_collectives
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
@@ -630,6 +631,13 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
             )
             self.assertEqual(out, expected, atol=0, rtol=0)
             self.assertGreater(out._version, version)
+        # An empty input with leading dims fills no columns
+        tensors = [torch.randn(5, 3, device=device), torch.ones(0, 8, 3, device=device)]
+        out = torch.empty(4, 6, device=device)
+        torch.ops.fsdp.chunk_cat_mixed_dtype(
+            tensors, 0, 4, out=out, num_leading_dims=[0, 1]
+        )
+        self.assertEqual(out, torch._chunk_cat(tensors[:1], 0, 4), atol=0, rtol=0)
 
     @onlyCUDA
     def test_kernels(self, device):
@@ -748,6 +756,18 @@ class TestFullyShardPythonCustomOpRegistrations(TestCase):
             )
         )
 
+    def test_all_gather_copy_in_casts_inputs(self):
+        # Inputs of several dtypes, e.g. sharded fp32 parameters next to bf16
+        # payloads, are cast into the all-gather input
+        inputs = [torch.randn(3), torch.randn(2).bfloat16(), torch.randn(4)]
+        output = torch.full((18,), -1.0, dtype=torch.bfloat16)
+        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+            inputs, output, [3, 2, 4], 9, 1
+        )
+        expected = torch.cat([t.bfloat16() for t in inputs])
+        self.assertEqual(all_gather_input, expected, atol=0, rtol=0)
+        self.assertEqual(all_gather_output[:9], torch.full((9,), -1.0).bfloat16())
+
     def test_all_gather_copy_in_meta_skips_copy(self):
         # Inputs that don't match inp_split_sizes: only the copy would notice
         def call(device):
@@ -785,7 +805,8 @@ class TestFullyShardDefaultAllGatherOutputFn(TestCase):
         expected = torch.tensor([0.0, 1, 2, 3] + [-1] * 12, device=device)
         self.assertEqual(output, expected.to(dtype))
 
-    def test_byte_buffer_reassembles_typed_rows(self, device):
+    @parametrize("native_copy", [False, True])
+    def test_byte_buffer_reassembles_typed_rows(self, device, native_copy: bool):
         # Mixed dtypes gather bytes: per rank, a (2, 2) chunk of a parameter
         # gathered along dim 1, then two bf16 tags
         base = torch.arange(4.0, device=device).view(2, 2)
@@ -795,16 +816,26 @@ class TestFullyShardDefaultAllGatherOutputFn(TestCase):
             [t.view(torch.uint8).view(-1) for pair in zip(chunks, tags) for t in pair]
         )
         outputs = [torch.empty(8, device=device), torch.empty_like(tags[0]).repeat(2)]
-        cat_dtypes: list[torch.dtype] = []
+        copy_ops: list[tuple[torch._ops.OpOverload, torch.dtype]] = []
 
-        class RecordCatDtypes(TorchDispatchMode):
+        class RecordCopies(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 kwargs = kwargs or {}
                 if func == torch.ops.aten.cat.out:
-                    cat_dtypes.append(kwargs["out"].dtype)
+                    copy_ops.append((func, kwargs["out"].dtype))
+                elif func == torch.ops.fsdp._all_gather_copy_out_.default:
+                    copy_ops.append((func, args[1].dtype))
                 return func(*args, **kwargs)
 
-        with RecordCatDtypes(), warnings.catch_warnings():
+        # Copied through rank-major buffers if 2 rows are too many to copy natively
+        max_native_rows = 2 if native_copy else 1
+        with (
+            RecordCopies(),
+            warnings.catch_warnings(),
+            patch.object(
+                _fsdp_collectives, "_MAX_NATIVE_COPY_OUTER_SIZE", max_native_rows
+            ),
+        ):
             warnings.simplefilter("error")
             _default_all_gather_output_fn(
                 all_gather_output,
@@ -815,8 +846,13 @@ class TestFullyShardDefaultAllGatherOutputFn(TestCase):
             )
         self.assertEqual(outputs[0].view(2, 4), torch.cat(chunks, dim=1))
         self.assertEqual(outputs[1], torch.cat(tags))
-        # Typed rows get vectorized cat kernels that bytes may not
-        self.assertEqual(cat_dtypes, [torch.float32])
+        if native_copy:
+            # One native copy moves bytes
+            expected = [(torch.ops.fsdp._all_gather_copy_out_.default, torch.uint8)]
+        else:
+            # Typed rows get vectorized cat kernels that bytes may not
+            expected = [(torch.ops.aten.cat.out, torch.float32)]
+        self.assertEqual(copy_ops, expected)
 
 
 instantiate_device_type_tests(
@@ -826,7 +862,7 @@ instantiate_device_type_tests(
 
 class TestFullyShardNativeReduceScatterInputFn(TestCase):
     def test_noncontiguous_grads_match_default(self, device):
-        # Noncontiguous gradients sharded on a nonzero dim take the default reorder
+        # The native copy-in reorders noncontiguous gradients sharded on a nonzero dim
         grads = [torch.randn(8, 4, device=device).t(), torch.randn(4, 6, device=device)]
         outputs = []
         for input_fn in (
@@ -838,6 +874,32 @@ class TestFullyShardNativeReduceScatterInputFn(TestCase):
             input_fn(unsharded_grads, shard_dims=[1, 1], world_size=2)(output)
             outputs.append(output)
         self.assertEqual(outputs[0], outputs[1])
+
+    def test_default_chunks_few_rows_in_place(self, device):
+        # The default copy-in chunks gradients along their nonzero shard dims in
+        # place if they have few rows (here at most 2) and reorders the others
+        grads = [torch.randn(2, 8, device=device), torch.randn(4, 8, device=device)]
+        copy_in_leading_dims: list[list[int]] = []
+
+        class RecordCopyIns(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func == torch.ops.fsdp.chunk_cat_mixed_dtype.default:
+                    copy_in_leading_dims.append(kwargs["num_leading_dims"])
+                return func(*args, **kwargs)
+
+        output = torch.empty(48, device=device)
+        with (
+            RecordCopyIns(),
+            patch.object(_fsdp_collectives, "_MAX_NATIVE_COPY_OUTER_SIZE", 2),
+        ):
+            _default_reduce_scatter_input_fn(
+                [grad.clone() for grad in grads], shard_dims=[1, 1], world_size=2
+            )(output)
+        self.assertEqual(copy_in_leading_dims, [[1, 0]])
+        reordered = [torch.cat(torch.chunk(grad, 2, dim=1)) for grad in grads]
+        expected = torch._chunk_cat(reordered, 0, 2)
+        self.assertEqual(output.view(2, -1), expected, atol=0, rtol=0)
 
     def test_uneven_grads_raise(self, device):
         # 5 columns over 4 ranks need padding, which the native copy-in doesn't
@@ -892,6 +954,40 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         with torch.inference_mode():
             for _ in range(2):
                 self.assertEqual(model(inp), ref_model(inp))
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_copy_in_casts_shards(self):
+        # The copy-in casts the sharded parameters to param_dtype as it copies
+        # them, unless the group gathers bytes, which takes a cast first
+        bf16, fp32 = torch.bfloat16, torch.float32
+        copies: list[tuple[str, list[torch.dtype]]] = []
+
+        class RecordCopies(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func == torch.ops.fsdp.all_gather_copy_in.default:
+                    copies.append(("copy-in", [t.dtype for t in args[0]]))
+                elif func == torch.ops.aten._foreach_copy_.default:
+                    copies.append(("cast", [t.dtype for t in args[1]]))
+                return func(*args, **(kwargs or {}))
+
+        for override_fn, expected in (
+            (None, [("copy-in", [fp32, fp32])]),
+            # An fp32 bias next to the bf16 weight makes the group gather bytes
+            (
+                lambda param: fp32 if param.ndim == 1 else None,
+                [("cast", [fp32]), ("copy-in", [torch.uint8] * 2)],
+            ),
+        ):
+            model = nn.Linear(8, 8, device=device)
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=bf16, param_dtype_override_fn=override_fn
+            )
+            fully_shard(model, mp_policy=mp_policy)
+            copies.clear()
+            with RecordCopies():
+                model.unshard()
+            self.assertEqual(copies, expected)
+            self.assertEqual(model.weight.dtype, bf16)
 
     @skip_if_lt_x_gpu(1)
     def test_copy_fns(self):
@@ -1067,15 +1163,12 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_reduce_scatter_input_fn_setter(self):
-        # The native copy-in passes num_leading_dims and the default one does not
-        num_leading_dims: list[list[int] | None] = []
+        input_fn_calls = 0
 
-        class RecordCopyIns(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                kwargs = kwargs or {}
-                if func == torch.ops.fsdp.chunk_cat_mixed_dtype.default:
-                    num_leading_dims.append(kwargs.get("num_leading_dims"))
-                return func(*args, **kwargs)
+        def input_fn(unsharded_grads, **kwargs):
+            nonlocal input_fn_calls
+            input_fn_calls += 1
+            return reduce_scatter_input_fn_with_native_copy(unsharded_grads, **kwargs)
 
         model = nn.Sequential(
             nn.Linear(8, 8, bias=False, device=device),
@@ -1085,20 +1178,18 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
             fully_shard(module, shard_placement_fn=lambda param: Shard(1))
         inp = torch.randn((2, 8), device=device)
 
-        def record_copy_ins():
-            num_leading_dims.clear()
-            loss = model(inp).sum()
-            with RecordCopyIns():
-                loss.backward()
-            return num_leading_dims
+        def count_input_fn_calls():
+            nonlocal input_fn_calls
+            input_fn_calls = 0
+            model(inp).sum().backward()
+            return input_fn_calls
 
-        # Backward reduce-scatters the root's weight before model[0]'s
-        model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
-        self.assertEqual(record_copy_ins(), [[1], [1]])
+        model.set_reduce_scatter_input_fn(input_fn)
+        self.assertEqual(count_input_fn_calls(), 2)
         model.set_reduce_scatter_input_fn(None, recurse=False)
-        self.assertEqual(record_copy_ins(), [None, [1]])
+        self.assertEqual(count_input_fn_calls(), 1)
         model.set_reduce_scatter_input_fn(None)
-        self.assertEqual(record_copy_ins(), [None, None])
+        self.assertEqual(count_input_fn_calls(), 0)
 
 
 class TestFullyShardCustomAllocation(FSDPTestMultiThread):
@@ -1172,13 +1263,11 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
         class RecordCopies(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 kwargs = kwargs or {}
-                # The default copy-in calls chunk_cat_mixed_dtype without
-                # num_leading_dims
-                is_default_copy_in = (
-                    func == native_ops["reduce_scatter"]
-                    and kwargs.get("num_leading_dims") is None
+                # The copy-in only copies natively with nonzero num_leading_dims
+                is_native_copy_in = func != native_ops["reduce_scatter"] or any(
+                    kwargs.get("num_leading_dims") or ()
                 )
-                if func in native_counts and not is_default_copy_in:
+                if func in native_counts and is_native_copy_in:
                     native_counts[func] += 1
                 return func(*args, **kwargs)
 
@@ -1194,9 +1283,13 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
                 actual = model(inp)
                 actual.sum().backward()
             self.assertEqual(actual, expected)
+            # The defaults copy Shard(1) parameters natively, while the native
+            # copy-out also takes Shard(0) ones
             for direction, op in native_ops.items():
                 self.assertEqual(
-                    native_counts[op] > 0, native_copy and direction == collective
+                    native_counts[op] > 0,
+                    shard_dim == 1
+                    or (native_copy and direction == collective == "all_gather"),
                 )
             dist.all_reduce(reference.weight.grad)
             reference.weight.grad.div_(self.world_size)
