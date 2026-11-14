@@ -1664,6 +1664,7 @@ class GuardBuilder(GuardBuilderBase):
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
+        self._cached_not_aliasing_guards: set[frozenset[str]] = set()
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
@@ -3745,29 +3746,31 @@ class GuardBuilder(GuardBuilderBase):
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    # Multi-source guard (two inputs aliasing) — not expressible as a
-    # single source → value check.
-    # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
-    @skip_guard_check_spec
-    def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
-        if is_from_skip_guard_source(
-            guard.originating_source
-        ) or is_from_skip_guard_source(source_b):
-            return
-
+    def _relation_guard_refs(
+        self, guard: Guard, source_b: Source
+    ) -> tuple[str, str] | None:
+        # Shared start of the two-source guards; None means install nothing.
+        sources = (guard.originating_source, source_b)
+        if any(is_from_skip_guard_source(s) for s in sources):
+            return None
         if self.save_guards:
             if name := get_local_source_name(source_b):
                 self.check_fn_manager.additional_used_local_vars.add(name)
             if name := get_global_source_name(source_b):
                 self.check_fn_manager.additional_used_global_vars.add(name)
+        refs = (self.arg_ref(guard), self.arg_ref(source_b.name))
+        if any(is_from_optimizer_source(s) for s in sources):
+            return None
+        return refs
 
-        ref_a = self.arg_ref(guard)
-        ref_b = self.arg_ref(source_b.name)
-
-        if is_from_optimizer_source(
-            guard.originating_source
-        ) or is_from_optimizer_source(source_b):
+    # Multi-source guard (two inputs aliasing) — not expressible as a
+    # single source → value check.
+    # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
+    @skip_guard_check_spec
+    def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
+        if (refs := self._relation_guard_refs(guard, source_b)) is None:
             return
+        ref_a, ref_b = refs
 
         # Check that the guard has not been inserted already
         key = (ref_a, ref_b)
@@ -3794,6 +3797,23 @@ class GuardBuilder(GuardBuilderBase):
                 get_verbose_code_parts(code, guard),
                 guard.user_stack,
             )
+
+    # Multi-source guard `source_b is not source_a`, from a constant-folded `is`
+    # that was False. A True fold gets DUPLICATE_INPUT. There is no C++ leaf for
+    # `is not`, so this is always an epilogue lambda.
+    @skip_guard_check_spec
+    def NOT_ALIASING(self, guard: Guard, source_b: Source) -> None:
+        if (refs := self._relation_guard_refs(guard, source_b)) is None:
+            return
+        ref_a, ref_b = refs
+        key = frozenset(refs)
+        if key in self._cached_not_aliasing_guards:
+            return
+        self._cached_not_aliasing_guards.add(key)
+        code_part = f"{ref_b} is not {ref_a}"
+        self._set_guard_export_info(guard, [code_part])
+        verbose_code_part = get_verbose_code_parts(code_part, guard)[0]
+        self.object_aliasing_guard_codes.append((code_part, verbose_code_part))
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: None,
@@ -5976,7 +5996,11 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         except:  # noqa: E722
             value = MISSING
             has_value = False
-    is_global = get_global_source_name(guard.originating_source) is not None
+    # Relation guards (DUPLICATE_INPUT, NOT_ALIASING) also read source_b.
+    sources = [guard.originating_source]
+    if isinstance(guard.create_fn, functools.partial):
+        sources.append(guard.create_fn.keywords.get("source_b"))
+    is_global = any(get_global_source_name(s) is not None for s in sources)
     return GuardFilterEntry(
         name=name,
         has_value=has_value,
@@ -6665,10 +6689,9 @@ class CheckFunctionManager:
         # This repeats the access in Python—adding a bit of work—but the
         # overhead is outweighed by the gains from enabling recursive-dict guard
         # optimization.
-        if (
-            config.use_lamba_guard_for_object_aliasing
-            and builder.object_aliasing_guard_codes
-        ):
+        # DUPLICATE_INPUT lands here only under use_lamba_guard_for_object_aliasing;
+        # NOT_ALIASING, from a constant-folded `is`, always does.
+        if builder.object_aliasing_guard_codes:
             aliasing_code_parts, aliasing_verbose_code_parts = map(
                 list, zip(*builder.object_aliasing_guard_codes)
             )
@@ -7437,6 +7460,10 @@ def make_dupe_guard(
         # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
         # so maybe we should do this refactor before we land this...
         # TODO(voz): Combine local and global guard builders.
+        # Until then, a folded `is` (BuiltinVariable's handle_is) and a tracker
+        # reused across scopes (VariableBuilder._reuse_tracked_variable) install
+        # DUPLICATE_INPUT across scopes themselves; its C++ aliasing leaf relates
+        # a local to a global.
         if ser_source_is_local == source_is_local:
             # Note - this is a little aggressive - these being duplicate input does not always matter.
             # However, this should always be a sound guard to add here.

@@ -24,6 +24,7 @@ import ast
 import builtins
 import contextlib
 import functools
+import os
 import inspect
 import itertools
 import logging
@@ -57,6 +58,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    ContextVarGetSource,
     DictGetItemSource,
     GetItemSource,
     GlobalSource,
@@ -172,6 +174,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 log = logging.getLogger(__name__)
+guards_log = torch._logging.getArtifactLogger(__name__, "guards")
 
 
 IN_PLACE_DESUGARING_MAP = {
@@ -355,6 +358,105 @@ def _try_computed_lazy_constant(
     if not any_unrealized:
         return None
     return ComputedLazyConstantVariable.create(fn, args)
+
+
+def _fold_disagrees_with_frame(
+    tx: "InstructionTranslatorBase", a: Source, b: Source, is_same: bool
+) -> bool:
+    # Some VTs (tuples, partials, slices, ...) rebuild their backed value, so
+    # the fold can disagree with the frame, and a guard on it would fail on the
+    # frame that created it (CheckFunctionManager raises on that). Only the guard
+    # is skipped; the fold itself is unchanged. A source that cannot be resolved
+    # here is guarded unverified, which is only a problem if the fold also
+    # disagrees with the frame.
+    resolve = tx.output.resolve_source_value
+    try:
+        frame_is_same = resolve(a) is resolve(b)
+    except Exception as e:
+        guards_log.debug("guarding `%s is %s` unverified: %r", a.name, b.name, e)
+        return False
+    if frame_is_same != is_same:
+        guards_log.debug(
+            "not guarding `%s is %s`: fold disagrees with the frame", a.name, b.name
+        )
+        return True
+    return False
+
+
+_IDENTITY_GUARDS = frozenset(
+    ("ID_MATCH", "CLASS_MATCH", "MODULE_MATCH", "BUILTIN_MATCH", "FUNCTION_MATCH")
+)
+
+
+@functools.cache
+def _polyfills_dir() -> str:
+    from .. import polyfills
+
+    return os.path.dirname(polyfills.__file__)
+
+
+def _reads_context_var(source: Source) -> bool:
+    # A ContextVar value depends on the context the code runs in, so it can
+    # differ between tracing and guard evaluation.
+    while source is not None:
+        if isinstance(source, ContextVarGetSource):
+            return True
+        source = getattr(source, "base", None)
+    return False
+
+
+def _guard_identity_fold(
+    tx: "InstructionTranslatorBase",
+    a: VariableTracker,
+    b: VariableTracker,
+    is_same: bool,
+) -> None:
+    # Constants are already guarded by value, and an unbacked VT has no object.
+    if (
+        a is b
+        or not (a.source and b.source)
+        or is_constant_source(a.source)
+        or is_constant_source(b.source)
+        or isinstance(a, ConstantVariable)
+        or isinstance(b, ConstantVariable)
+        or a.get_real_python_backed_value() is NO_SUCH_SUBOBJ
+        or b.get_real_python_backed_value() is NO_SUCH_SUBOBJ
+    ):
+        return
+    # Polyfills such as list.index, operator.countOf and dict.__eq__ compare
+    # elements with `is`; like `in`, they add no relation guard.
+    if tx.f_code.co_filename.startswith(_polyfills_dir()):
+        return
+    if _reads_context_var(a.source) or _reads_context_var(b.source):
+        return
+    if _fold_disagrees_with_frame(tx, a.source, b.source, is_same):
+        return
+    by_source = tx.output.guards.source_to_guards
+    if all(
+        any(g.create_fn_name() in _IDENTITY_GUARDS for g in by_source.get(s, ()))
+        for s in (a.source, b.source)
+    ):
+        # Both objects are already pinned, which settles the relation.
+        return
+    if isinstance(a.source, TypeSource) or isinstance(b.source, TypeSource):
+        # `type(x) is C`: ID_MATCH on a TypeSource is TYPE_MATCH on x, so
+        # pinning both sides settles the relation in C++ without recompiles.
+        install_guard(
+            a.source.make_guard(GuardBuilder.ID_MATCH),
+            b.source.make_guard(GuardBuilder.ID_MATCH),
+        )
+    elif is_same:
+        # Not make_dupe_guard: it leaves out a local against a global, which
+        # DUPLICATE_INPUT's C++ aliasing leaf relates too.
+        if a.source != b.source:
+            dupe = functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=b.source)
+            install_guard(a.source.make_guard(dupe))
+    else:
+        install_guard(
+            a.source.make_guard(
+                functools.partial(GuardBuilder.NOT_ALIASING, source_b=b.source)
+            )
+        )
 
 
 def populate_builtin_to_tensor_fn_map() -> None:
@@ -1163,6 +1265,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                     if result is None:
                         return None
                     is_same = result.as_python_constant()
+                    # The answer is baked into the graph, so guard the
+                    # relation behind it.
+                    _guard_identity_fold(tx, left.realize(), right.realize(), is_same)
                     return VariableTracker.build(
                         tx, is_same if op.__name__ == "is_" else not is_same
                     )

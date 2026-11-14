@@ -1199,6 +1199,19 @@ class VariableBuilder:
                     self.source.make_guard(GuardBuilder.ID_MATCH),
                     result.source.make_guard(GuardBuilder.ID_MATCH),
                 )
+            elif result.source is not None and not (
+                is_constant_source(self.source) or is_constant_source(result.source)
+            ):
+                # A local aliasing a global, which make_dupe_guard leaves out.
+                # Guard the relation, not each object: an alias rebound on every
+                # call must not recompile every call.
+                install_guard(
+                    self.source.make_guard(
+                        functools.partial(
+                            GuardBuilder.DUPLICATE_INPUT, source_b=result.source
+                        )
+                    )
+                )
 
         if (
             isinstance(value, torch.nn.Module)

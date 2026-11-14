@@ -128,7 +128,7 @@ from .graph_id_filter import (
     get_inductor_config_override_for_compile_id,
 )
 from .graph_region_tracker import GraphRegionTracker
-from .guards import GuardBuilder, install_guard
+from .guards import _get_closure_vars, GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import (
     AttributeMutationExisting,
@@ -1800,11 +1800,13 @@ class OutputGraph(OutputGraphCommon):
         Useful to inspect the python object associated with the source during
         debugging. Will also be used by invoke subgraph caching later on.
         """
-        return source.get_value(
-            {"G": self.root_tx.f_globals, "L": self.root_tx.f_locals},
-            {},
-            {},  # type: ignore[arg-type]
-        )
+        # Some source names call guard helpers (___tuple_iterator_getitem, ...).
+        scope = {
+            **_get_closure_vars(),
+            "G": self.root_tx.f_globals,
+            "L": self.root_tx.f_locals,
+        }
+        return source.get_value(scope, {}, {})  # type: ignore[arg-type]
 
     def count_calls(self) -> int:
         return count_calls(self.graph)

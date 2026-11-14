@@ -158,6 +158,9 @@ class SingleCondModel(torch.nn.Module):
         return self.fc2(x)
 
 
+_IS_TEST_SENTINEL = object()
+
+
 class MooType:
     def __init__(self, x):
         self.x = x
@@ -1620,6 +1623,24 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
                 compiled_fn = torch.compiler.load_compiled_function(f)
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
+
+    def test_aot_compile_reloads_a_folded_is_against_a_global(self):
+        # The guard on the folded `opt is _IS_TEST_SENTINEL` reads a global, so
+        # the default filter, which drops global guards, must drop it too: a
+        # reloaded process has its own sentinel object.
+        def fn(x, opt):
+            return x + 1 if opt is _IS_TEST_SENTINEL else x - 1
+
+        x = torch.randn(3)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((x, object()), {})
+        )
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            self.assertEqual(compiled_fn(x, object()), fn(x, object()))
 
     def test_aot_compile_reloads_a_runtime_env_helper_faithfully(self):
         # A nested helper the compiled function closes over travels in the
