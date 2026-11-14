@@ -22,6 +22,7 @@ DECLARE_DISPATCH(bf16_dot_fn, bf16_dot_stub)
 inline namespace CPU_CAPABILITY {
 float fp16_dot_with_fp32_arith(const Half* vec1, const Half* vec2, int64_t len);
 float bf16_dot_with_fp32_arith(const BFloat16* vec1, const BFloat16* vec2, int64_t len);
+float fp32_dot_with_fp32_arith(const float* vec1, const float* vec2, int64_t len);
 } // inline namespace CPU_CAPABILITY
 #endif // !defined(C10_MOBILE)
 } // namespace at::native
