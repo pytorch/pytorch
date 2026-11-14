@@ -1932,6 +1932,7 @@ def _dispatch_get_registrations_for_dispatch_key(
 def _are_functorch_transforms_active() -> _bool: ...
 
 # Defined in torch/csrc/cfg/cfg.cpp
+def _cfg_c_api() -> Any: ...
 @overload
 def _cfg_dispatch_trace(
     fn: Callable[[], Any],
@@ -1950,11 +1951,17 @@ def _cfg_dispatch_trace(
 
 class _CfgSite:
     def info(self) -> dict[str, Any]: ...
+    def call(self, *operands: Any) -> Any: ...
 
 def _cfg_make_site(
     kind: str,
     run: Callable[[], Any],
     operands: tuple[Any, ...],
+    *,
+    callee: Any = None,
+    kwnames: tuple[str, ...] | None = None,
+    constants: Sequence[_bool] | None = None,
+    skip_autograd: _bool = False,
 ) -> tuple[Any, _CfgSite | None, str]: ...
 
 # Define in torch/csrc/autograd/init.cpp
