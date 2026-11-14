@@ -3744,24 +3744,16 @@ class TestFakeTensorOperatorInvariants(TestCase):
             y = m.from_tensor(x)
             self.assertExpectedInline(
                 str(x.storage()),
-                """\
- 0.0
- 0.0
- 0.0
-[torch.storage.TypedStorage(dtype=torch.float32, device=cpu) of size 3]""",
+                """[torch.storage.TypedStorage(dtype=torch.float32, device=cpu) of size 3]""",
             )
             self.assertExpectedInline(
                 str(y.storage()),
-                """\
-...
-[torch.storage.TypedStorage(dtype=torch.float32, device=meta) of size 3]""",
+                """[torch.storage.TypedStorage(dtype=torch.float32, device=meta) of size 3]""",
             )
 
         self.assertExpectedInline(
             str(y.storage()),
-            """\
-...
-[torch.storage.TypedStorage(dtype=torch.float32, device=meta) of size 3]""",
+            """[torch.storage.TypedStorage(dtype=torch.float32, device=meta) of size 3]""",
         )
 
     # at::_embedding_bag has no op info,
