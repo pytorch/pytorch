@@ -1175,6 +1175,7 @@ class CacheableAOTConfig:
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source: list[Source] | None = None
     static_input_indices: list[int] | None = None
+    saved_tensors_hooks_input_indices: list[int] | None = None
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
@@ -1203,6 +1204,7 @@ class AOTConfig:
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source: list[Source] | None = None
     static_input_indices: list[int] | None = None
+    saved_tensors_hooks_input_indices: list[int] | None = None
     inference_compiler: Callable[..., Any] | None = None
     enable_log: bool = True
     # this is always false outside of export.
@@ -1235,6 +1237,7 @@ class AOTConfig:
             dynamic_shapes=self.dynamic_shapes,
             aot_autograd_arg_pos_to_source=self.aot_autograd_arg_pos_to_source,
             static_input_indices=self.static_input_indices,
+            saved_tensors_hooks_input_indices=self.saved_tensors_hooks_input_indices,
             enable_log=self.enable_log,
             pre_dispatch=self.pre_dispatch,
             precompile_backend_id=self.precompile_backend_id,

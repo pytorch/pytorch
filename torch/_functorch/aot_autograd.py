@@ -1001,6 +1001,7 @@ def prepare_aot_config(
     (
         aot_autograd_arg_pos_to_source,
         static_input_indices,
+        saved_tensors_hooks_input_indices,
     ) = _try_get_metadata_from_dynamo(
         mod, params_buffers.keys(), len(full_args), full_args_descs
     )
@@ -1025,6 +1026,7 @@ def prepare_aot_config(
         # pyrefly: ignore[bad-argument-type]
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
         static_input_indices=static_input_indices,
+        saved_tensors_hooks_input_indices=saved_tensors_hooks_input_indices,
         is_export=False,
         no_tangents=False,
         cache_info=None,

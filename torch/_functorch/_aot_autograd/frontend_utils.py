@@ -240,7 +240,7 @@ def _try_get_metadata_from_dynamo(
     param_keys: KeysView[str],
     full_args_num: int,
     full_args_descs: list[DifferentiableAOTInput],
-) -> tuple[list[torch._guards.Source | None] | None, list[int]]:
+) -> tuple[list[torch._guards.Source | None] | None, list[int], list[int]]:
     """
     Metadata is forwarded from Dynamo to AOTDispatch via special fields on GraphModule.
     We first verify that `mod` does come from Dynamo, then we handle cases where
@@ -249,6 +249,9 @@ def _try_get_metadata_from_dynamo(
     Returns:
         aot_autograd_arg_pos_to_source: used to dedup params and their guards
         static_input_indices: used to identify static inputs for cudagraphs
+        saved_tensors_hooks_input_indices: positions of the user inputs marked
+            `_saved_tensors_hooks_input`, which inlined saved tensors hooks see
+            in every filtering mode
     """
     # Note [Assumption on Dynamo Metadata]
     # This function assumes a graph module from dynamo provides `dynamo_compiled_id`,
@@ -258,7 +261,7 @@ def _try_get_metadata_from_dynamo(
 
     if not (isinstance(mod, torch.fx.GraphModule) and "dynamo_compile_id" in mod.meta):
         # graph was not captured by dynamo
-        return None, []
+        return None, [], []
 
     if not hasattr(mod, "_param_name_to_source"):
         # is from export
@@ -267,7 +270,7 @@ def _try_get_metadata_from_dynamo(
             for i, node in enumerate(full_args_descs)
             if isinstance(node, (ParamAOTInput, BufferAOTInput))
         ]
-        return None, static_input_indices
+        return None, static_input_indices, []
 
     # We now know this came from dynamo, and (1) we care about guards,
     # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
@@ -280,6 +283,7 @@ def _try_get_metadata_from_dynamo(
 
     aot_autograd_arg_pos_to_source: list[torch._guards.Source | None] = []
     static_input_indices = []
+    saved_tensors_hooks_input_indices = []
     # Collect the new inputs lifted by aotdispatch
     for i, name in enumerate(param_keys):
         if name not in param_name_to_source:
@@ -327,12 +331,18 @@ def _try_get_metadata_from_dynamo(
             static_inputs_log.debug(
                 "Non-static input pos %s for source %s", actual_pos, source_name
             )
+        if node.meta.get("tensor_dict", {}).get("_saved_tensors_hooks_input"):
+            saved_tensors_hooks_input_indices.append(pos)
 
     if full_args_num != len(aot_autograd_arg_pos_to_source):
         raise AssertionError(
             f"full_args_num={full_args_num} != len(aot_autograd_arg_pos_to_source)={len(aot_autograd_arg_pos_to_source)}"
         )
-    return aot_autograd_arg_pos_to_source, static_input_indices
+    return (
+        aot_autograd_arg_pos_to_source,
+        static_input_indices,
+        saved_tensors_hooks_input_indices,
+    )
 
 
 @contextmanager
