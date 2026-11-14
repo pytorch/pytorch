@@ -7753,20 +7753,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(arg, int):
                     args.append(str(arg))
                 elif isinstance(arg, SymbolicCallArg):
-                    hint = V.graph.sizevars.optimization_hint_with_override(
-                        arg.inner_expr,
-                        hint_override=self.hint_override,
-                    )
-                    args.append(str(hint))
+                    args.append(str(self._hint_with_override(arg.inner_expr)))
                 elif isinstance(arg, sympy.Expr):
-                    hint = V.graph.sizevars.optimization_hint_with_override(
-                        arg,
-                        hint_override=self.hint_override,
-                    )
-                    args.append(str(hint))
+                    args.append(str(self._hint_with_override(arg)))
                 else:
                     raise ValueError(f"Unsupported numel argument type: {type(arg)}")
         return args
+
+    def _hint_with_override(self, expr: sympy.Expr) -> int:
+        """Hint for ``expr`` with every symbol in it at ``hint_override``."""
+        if self.hint_override is not None:
+            expr = sympy_subs(
+                expr, dict.fromkeys(expr.free_symbols, self.hint_override)
+            )
+        return V.graph.sizevars.optimization_hint(expr)
 
     def codegen_kernel_benchmark(self, num_gb: float | None) -> IndentedBuffer:
         """
@@ -8244,9 +8244,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if prefix_is_reduction(prefix) and not self.inside_reduction:
                 continue
 
-            numel_hint = V.graph.sizevars.optimization_hint(numel)
-            size_hint = next_power_of_2(int(numel_hint))
-            size_hints[prefix] = size_hint
+            size_hints[prefix] = next_power_of_2(self._hint_with_override(numel))
 
         if name is None:
             code.splice(self.gen_common_triton_imports())
@@ -9137,6 +9135,7 @@ class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
     supports_sub_parent_epilogue = True
+    supports_multi_kernel_hints = True
     kernel_type: type[Any] = TritonKernel
     backend_features = OrderedSet(
         [

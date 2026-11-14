@@ -15,7 +15,7 @@ from torch._inductor.runtime.benchmarking import set_gpu_benchmark_lock_context
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
-from torch.testing import make_tensor
+from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -317,6 +317,30 @@ class MultiKernelTest(TestCase):
         rocm_tol = {"atol": 2e-3, "rtol": 1e-3} if TEST_WITH_ROCM else {}
         self.assertEqual(ref, act, **rocm_tol)
         self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
+
+    @requires_triton()
+    @config.patch("triton.multi_kernel", 0)
+    @parametrize("reduction", (False, True))
+    def test_size_hint_multi_kernel_pointwise_reduction(self, reduction):
+        def f(x):
+            y = x.relu() + 1
+            return y.sum(-1) if reduction else y
+
+        compiled_fn = torch.compile(f)
+        x = torch.randn(4096, 1024, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+        act, (wrapper_code,) = run_and_get_code(compiled_fn, x)
+        self.assertEqual(f(x), act)
+        small = torch.randn(64, 1024, device=GPU_TYPE)
+        self.assertEqual(f(small), compiled_fn(small))
+
+        self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
+        # One kernel per multi_kernel_hints entry, with size_hints at that row count.
+        check = FileCheck()
+        for hint in config.multi_kernel_hints:
+            size_hints = {"x": hint, "r0_": 1024} if reduction else {"x": hint * 1024}
+            check.check(f"size_hints={size_hints!r}")
+        check.run(wrapper_code)
 
     @parametrize("force_kernel", (0, 1))
     @unittest.mock.patch.dict(
