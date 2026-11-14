@@ -15,6 +15,7 @@ import torch
 import torch._inductor.config as config
 
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor import ir
 from torch._inductor.utils import (
@@ -32,6 +33,7 @@ from torch.utils._triton import (
     has_triton,
     has_triton_block_ptr,
     has_triton_cpu_backend,
+    has_triton_package,
 )
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
@@ -77,11 +79,35 @@ HAS_PALLAS = LazyVal(has_pallas_package)
 
 HAS_HELION = has_helion()
 
-HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
-HAS_MTIA_AND_TRITON = torch.mtia.is_available() and HAS_TRITON
+def missing_triton_backend(device_type: str) -> str | None:
+    iface = get_interface_for_device(device_type)
+    if not (iface.is_available() and iface.is_triton_capable()):
+        return None
+    if not has_triton_package():
+        return "triton is not installed"
+    try:
+        iface.raise_if_triton_unavailable()
+    except TritonUnavailableError as e:
+        return str(e)
+    return None
 
-HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
+
+def _has_device_and_triton(device_type: str) -> bool:
+    iface = get_interface_for_device(device_type)
+    return (
+        HAS_TRITON
+        and iface.is_available()
+        and iface.is_triton_capable()
+        and missing_triton_backend(device_type) is None
+    )
+
+
+HAS_CUDA_AND_TRITON = _has_device_and_triton("cuda")
+
+HAS_MTIA_AND_TRITON = _has_device_and_triton("mtia")
+
+HAS_XPU_AND_TRITON = _has_device_and_triton("xpu")
 
 HAS_MPS = torch.mps.is_available()
 
