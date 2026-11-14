@@ -1902,6 +1902,7 @@ def as_strided(
     *,
     storage_offset_relative_to_input_storage=True,
 ):
+    """Lower aten.as_strided to a ReinterpretView of ``x``'s underlying storage."""
     explicit_storage_offset = (
         storage_offset is not None and storage_offset_relative_to_input_storage
     )
