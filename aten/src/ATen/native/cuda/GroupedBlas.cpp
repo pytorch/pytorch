@@ -27,6 +27,7 @@
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_group_gemm.h>
 #include <ATen/native/hip/ck_tile_group_gemm.h>
+#include <ATen/native/hip/ck_tile_group_gemm/device_info.h>
 #endif
 #include <ATen/ceil_div.h>
 
@@ -1098,6 +1099,28 @@ static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_
   const int64_t vector_elems = 16 / mat_a.element_size();
   return (a_row_major ? K : M) % vector_elems == 0 && (b_row_major ? N : K) % vector_elems == 0;
 }
+
+// hipBLASLt runs one GEMM per expert, each with a fixed cost, but beats ck_tile's single persistent kernel once each
+// expert's GEMM is long: its compute time at the datasheet peak plus 5x its output write time at DRAM bandwidth (ck_tile's
+// per-tile epilogue cost) above 30.55 us. Fitted on the op benchmark's MoE shapes on MI300X and MI355X; GPUs without
+// datasheet numbers stay on hipBLASLt.
+static bool should_use_ck_tile_group_gemm(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  // In the 2D cases one of M, N and K is the jagged total over all groups.
+  const int64_t groups = a_is_2d && b_is_2d ? offs->size(0) : (a_is_2d ? mat_b.size(0) : (b_is_2d ? mat_a.size(0) : 1));
+  const double experts = groups > 0 ? groups : 1;
+  const double m = mat_a.size(-2) / (a_is_2d && !b_is_2d ? experts : 1);
+  const double n = mat_b.size(-1) / (b_is_2d && !a_is_2d ? experts : 1);
+  const double k = mat_a.size(-1) / (a_is_2d && b_is_2d ? experts : 1);
+  const auto dtype = mat_a.scalar_type();
+  const auto seconds = at::hip::detail::ck_tile_group_gemm::with_device_info(at::cuda::getCurrentDeviceProperties()->name, [&](auto info) {
+    using Info = decltype(info);
+    const double tflops = dtype == at::kFloat ? Info::fp32_tflops : (dtype == at::kHalf ? Info::fp16_tflops : Info::bf16_tflops);
+    return 2 * m * n * k / (tflops * 1e12) + 5 * m * n * mat_a.element_size() / (Info::dram_bw_gbs * 1e9);
+  });
+  return seconds && *seconds <= 30.55e-6;
+}
 #endif
 
 Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
@@ -1137,7 +1160,8 @@ std::optional<c10::ScalarType> out_dtype) {
   const bool supported_ck_tile_arch = at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"});
 
   const bool use_ck_tile = at::globalContext().rocmAllowGroupGemmCkTile() &&
-      supported_ck_tile_arch && ck_tile_group_gemm_supported(mat_a, mat_b, offs);
+      supported_ck_tile_arch && ck_tile_group_gemm_supported(mat_a, mat_b, offs) &&
+      should_use_ck_tile_group_gemm(mat_a, mat_b, offs);
   // ck_tile zeroes the 2D x 2D groups with K == 0 itself, so it skips the zero-filled allocation the other paths need.
   Tensor out = use_ck_tile
       ? at::empty(compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype_).first, mat_a.options().dtype(out_dtype_))

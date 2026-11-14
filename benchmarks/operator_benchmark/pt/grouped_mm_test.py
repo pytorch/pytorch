@@ -18,8 +18,8 @@ times backward through both inputs (dX and dW).
 
 The long tag runs bf16 and fp16 everywhere, and fp32 only on ROCm.
 
-On ROCm, the CK-Tile numbers need ROCM_ALLOW_GROUP_GEMM_CK_TILE=1; without it grouped_mm
-runs hipBLASLt.
+On ROCm, grouped_mm picks CK-Tile or hipBLASLt per call; ROCM_ALLOW_GROUP_GEMM_CK_TILE=0
+forces hipBLASLt.
 """
 
 # (n_routed_experts, moe_intermediate_size, hidden_size), in Primus-Turbo's order

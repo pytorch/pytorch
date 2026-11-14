@@ -1467,7 +1467,7 @@ class TestMatmulCuda(InductorTestCase):
                 kernels.add(evt.key)
             return kernels
 
-        with rocm_group_gemm_ck_env(None, var=env_var):
+        with rocm_group_gemm_ck_env("0", var=env_var):
             self.assertTrue(uses_hipblaslt(collect_kernel_names(equal_k=True)))
         with rocm_group_gemm_ck_env("1", var=env_var):
             ck_equal_kernels = collect_kernel_names(equal_k=True)
