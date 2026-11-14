@@ -20,6 +20,11 @@ from torch._inductor.compile_fx import (
     FxCompileMode,
     get_patched_config_dict,
 )
+from torch._inductor.fx_passes import quantization
+from torch._inductor.fx_passes.quantization import (
+    register_woq_int8pack_fusion_device,
+    unregister_woq_int8pack_fusion_device,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal import fake_config_module, fake_config_module2
 from torch.utils._import_utils import import_dill
@@ -321,6 +326,58 @@ class TestCompileOptions(TestCase):
         self.assertIn("e_string", applied[0])
         self.assertIs(applied[0]["e_bool"], False)
         self.assertTrue(fake_config_module.e_bool)
+
+    def test_compile_fx_ext_propagates_woq_allowlist(self):
+        # The parent's allowlist must reach the child (the same wire path a
+        # subprocess worker takes) so its pattern matching follows the
+        # parent's cache key.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(x * 2)
+
+        gm = fx.symbolic_trace(M())
+        x = torch.randn(4)
+        real_serialize = compile_fx_ext._WireProtocolInput.serialize
+        real_patch = quantization._patch_woq_int8pack_fusion_devices
+        seen = []
+        applied = []
+
+        def serialize_spy(self):
+            seen.append(self.woq_int8pack_fusion_devices)
+            return real_serialize(self)
+
+        def patch_spy(devices):
+            applied.append(tuple(devices))
+            return real_patch(devices)
+
+        # Exercise both directions of registry drift: removal of a default
+        # entry and registration of a third-party device type.
+        unregister_woq_int8pack_fusion_device("cpu")
+        self.addCleanup(register_woq_int8pack_fusion_device, "cpu")
+        register_woq_int8pack_fusion_device("mtia")
+        self.addCleanup(unregister_woq_int8pack_fusion_device, "mtia")
+
+        with (
+            mock.patch(
+                "torch._inductor.compile_fx.fx_compile_mode",
+                FxCompileMode.SERIALIZE,
+            ),
+            mock.patch.object(
+                compile_fx_ext._WireProtocolInput, "serialize", serialize_spy
+            ),
+            mock.patch.object(
+                quantization, "_patch_woq_int8pack_fusion_devices", patch_spy
+            ),
+        ):
+            compiled = compile_fx(gm, [x])
+            compiled(x)
+
+        # the wire carried the parent's allowlist snapshot (cpu removed,
+        # mtia registered), sorted for determinism
+        self.assertEqual(seen, [("cuda", "mtia", "xpu")])
+        # and the child applied exactly that snapshot instead of reading its
+        # own module-level default (cpu/cuda/xpu)
+        self.assertEqual(applied, [("cuda", "mtia", "xpu")])
 
     def test_get_patched_config_dict_routed(self):
         with fake_backend_routes():
