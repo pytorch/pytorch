@@ -21,7 +21,6 @@
   "test/distributed/_composable/fsdp/test_fully_shard_extensions.py",
   "test/distributed/_composable/fsdp/test_fully_shard_frozen.py",
   "test/distributed/_composable/fsdp/test_fully_shard_grad_scaler.py",
-  "test/distributed/_composable/fsdp/test_fully_shard_ignore_params.py",
   "test/distributed/_composable/fsdp/test_fully_shard_init.py",
   "test/distributed/_composable/fsdp/test_fully_shard_logging.py",
   "test/distributed/_composable/fsdp/test_fully_shard_memory.py",
