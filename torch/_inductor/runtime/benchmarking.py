@@ -700,7 +700,8 @@ def _rocm_mall_size(device: int) -> int:
     looked up by gfx target, else 0."""
     props = torch.cuda.get_device_properties(device)
     try:
-        size = _hsa_cache_beyond_l2(bytes(props.uuid.bytes))
+        # torch's stub types uuid as str, but on ROCm it is a _CUuuid with .bytes
+        size = _hsa_cache_beyond_l2(bytes(getattr(props.uuid, "bytes", b"")))
     except Exception:
         log.debug("HSA cache-size query failed", exc_info=True)
         size = None
