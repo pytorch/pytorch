@@ -799,6 +799,13 @@ constexpr int64_t kMinTilesPerChunk = 2;
 // costs more than the halved serial chain saves, so such rows get one block each.
 constexpr int64_t kMinChunks = 3;
 constexpr int64_t kMaxChunks = 1024;
+// hipCUB is as fast or faster on 1-D scans of a cheap op with at least kMinCubLine and fewer than
+// kMaxCubLine elements, and of a compute-bound op (logcumsumexp) with more than kMaxNonCheapLine,
+// to which chunking applies binary_op about twice per element and hipCUB's single pass once. Not on
+// gfx1250 (outer_scan::has_tdm()), where the chunked scan is faster at every length.
+constexpr int64_t kMinCubLine = 8192;
+constexpr int64_t kMaxCubLine = int64_t{1} << 20;
+constexpr int64_t kMaxNonCheapLine = 4096;
 
 inline Plan make_plan(int64_t num_rows, int64_t row_size, int64_t num_sms, int64_t items) {
   if (row_size <= kLogicalWarp * items) {
@@ -928,8 +935,10 @@ constexpr int kStages = 4;
 // Most chunk totals one lane of scan_partials folds; bounds the chunk count to kWarp times this.
 constexpr int kPartialsPerLane = 32;
 constexpr int64_t kMaxChunks = int64_t{kWarp} * kPartialsPerLane;
-// Below this many rows the one-thread-per-column kernel is as fast.
-constexpr int64_t kMinRows = 16;
+// Below this many rows the one-thread-per-column kernel is as fast (kMinRowsTdm with the Tensor
+// Data Mover, which hides the latency of short columns' few tile copies).
+constexpr int64_t kMinRows = 32;
+constexpr int64_t kMinRowsTdm = 16;
 // Split columns into chunks only if there are fewer (orow, strip) groups than SMs * this...
 constexpr int64_t kChunkBlocksPerSM = 4;
 // ...and each group has at least this many tiles; shorter columns don't repay the extra launches.
@@ -942,6 +951,11 @@ constexpr int64_t kMinChunks = 3;
 // for only a block or two per CU. Once a row of the tensor holds this many bytes per SM (128 f32
 // columns), the one-thread-per-column kernel already keeps the memory system busy and is faster.
 constexpr int64_t kStockRowBytesPerSM = 512;
+// Also without it, rows of 1- and 2-byte elements that are not a whole number of vectors are
+// copied an element at a time, which loses to the one-thread-per-column kernel on columns shorter
+// than this once there are kScalarCopyMinColumns columns.
+constexpr int64_t kScalarCopyMaxRows = 512;
+constexpr int64_t kScalarCopyMinColumns = 64;
 
 template <typename T>
 struct Traits {
@@ -1434,11 +1448,15 @@ inline bool has_tdm() {
 
 template <typename T>
 bool should_use(int64_t num_orows, int64_t row_size, int64_t num_irows) {
-  if (num_orows <= 0 || num_irows <= 0 || row_size < kMinRows) {
+  if (num_orows <= 0 || num_irows <= 0 || row_size < (has_tdm() ? kMinRowsTdm : kMinRows)) {
     return false;
   }
   if (has_tdm()) {
     return true;
+  }
+  if (sizeof(T) <= 2 && num_irows % Traits<T>::kVec != 0 && row_size < kScalarCopyMaxRows &&
+      num_orows * num_irows >= kScalarCopyMinColumns) {
+    return false;
   }
   const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   return num_orows * num_irows * static_cast<int64_t>(sizeof(T)) < num_sms * kStockRowBytesPerSM;
@@ -1605,8 +1623,13 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
 
   if (self.numel() == self.size(dim)) {
 #if defined(USE_ROCM)
-    // The chunked row scan is faster than hipCUB here and deterministic.
-    if (self.numel() <= std::numeric_limits<uint32_t>::max()) {
+    // Elsewhere the chunked row scan is faster than hipCUB, and deterministic.
+    const int64_t n = self.numel();
+    const bool cub_faster = !outer_scan::has_tdm() &&
+        (inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp
+             ? n >= inner_scan::kMinCubLine && n < inner_scan::kMaxCubLine
+             : n > inner_scan::kMaxNonCheapLine);
+    if (!cub_faster && n <= std::numeric_limits<uint32_t>::max()) {
       inner_scan::launch<scalar_t>(
           result.mutable_data_ptr<scalar_t>(), self_->const_data_ptr<scalar_t>(),
           1, self.numel(), init, binary_op);
