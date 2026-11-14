@@ -56,6 +56,7 @@ fn shift_consts(op: &mut Op, offset: u32) {
     };
     match op {
         Op::Const(c)
+        | Op::FrameEnter(c)
         | Op::LoadGlobal(c)
         | Op::LoadAttr(_, c)
         | Op::StoreGlobal(c, _)
@@ -210,6 +211,20 @@ impl Inliner<'_, '_> {
                 }
             }
             self.added_insts += insts.len();
+            // The inlined function has a frame of its own while it runs.
+            if j == 0 {
+                let enter = Inst {
+                    dst: NONE,
+                    op: Op::FrameEnter(func_const),
+                    bc: tag(block.bc_start),
+                    kills: Vec::new(),
+                };
+                insts.insert(0, enter);
+            }
+            if matches!(block.term, Term::Return(_)) {
+                let bc = insts.last().map_or(tag(block.bc_start), |inst| inst.bc);
+                insts.push(Inst { dst: NONE, op: Op::FrameLeave, bc, kills: Vec::new() });
+            }
             let mut term = block.term;
             let _ = rewrite_term_uses(&mut term, &mut |v| Ok(map(v)));
             let term = match term {
