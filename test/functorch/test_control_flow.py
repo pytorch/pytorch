@@ -11005,6 +11005,45 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
                 self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
 
     @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_joint_graph_keeps_node_meta_under_vmap(self):
+        # Under vmap, scan's batch rule hands the joint-graph builder a
+        # wrapper around the body graph, not the graph itself. The annotate()
+        # region must still reach the joint graph.
+        from torch.fx.traceback import annotate
+
+        def body(carry, x):
+            with annotate({"region": "keep"}):
+                y = carry.sin()
+            return y * x, y.new_zeros(())
+
+        def f(init, xs):
+            return torch.func.vmap(lambda i, x: scan(body, i, x)[0], in_dims=(1, 2))(
+                init, xs
+            )
+
+        init = torch.randn(4, 2, requires_grad=True)
+        xs = torch.randn(3, 4, 2, requires_grad=True)
+        backend = AotEagerAndRecordGraphs()
+        out = torch.compile(f, backend=backend, fullgraph=True)(init, xs)
+        self.assertEqual(out, f(init, xs))
+        out.sum().backward()
+
+        # Min-cut saves the sin here rather than recompute it, so only the
+        # forward body is sure to hold one. Every copy must keep the region.
+        sins = []
+        for gm in (*backend.fw_graphs, *backend.bw_graphs):
+            (scan_node,) = gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(gm, scan_node.args[0].target)
+            sins += body_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.sin.default
+            )
+        self.assertGreater(len(sins), 0)
+        for sin in sins:
+            self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
+
+    @skipIfTorchDynamo("don't test compile on compile")
     def test_hop_joint_graph_keeps_node_meta_of_plain_fn(self):
         # A plain-function body is re-run, not interpreted, by the first
         # re-trace. Its annotate() region must still survive functionalization.

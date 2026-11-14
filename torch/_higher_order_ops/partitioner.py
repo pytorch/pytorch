@@ -369,8 +369,9 @@ def create_hop_joint_graph(
     example_grads = tuple(torch.zeros_like(val) for val in fw_gm_output_vals)
 
     # Interpret graph modules so re-traced nodes keep their meta (e.g. recompute
-    # tags). A plain fw_fn sets its meta again when re-run. fw_gm can't replace
-    # fw_fn: it dropped the body's no_grad regions.
+    # tags). A plain function sets its meta again when re-run. A wrapper that
+    # holds a graph module (e.g. _VmapCombineFnWrapper) must interpret it
+    # itself. fw_gm can't replace fw_fn: it dropped the body's no_grad regions.
     joint_fn = create_bw_fn(
         _maybe_run_with_interpreter(fw_fn), fw_args, return_fw_outputs=True
     )
