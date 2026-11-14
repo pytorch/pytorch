@@ -6681,17 +6681,23 @@ class TestCppFakeTensorModeBindings(TestCase):
     @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     @parametrize("active", [False, True])
     @parametrize("output_device", ["cpu", "meta"])
+    @parametrize("implementation", ["meta", "custom"])
     @fake_tensor_modes
-    def test_fake_fallback_existing_fake_output(self, active, output_device, mode_cls):
+    def test_fake_fallback_existing_fake_output(
+        self, active, output_device, implementation, mode_cls
+    ):
         mode = mode_cls()
         fake = mode.from_tensor(torch.empty(2))
         retained = mode.from_tensor(torch.empty(2, device=output_device))
         with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
             lib.define("retained(Tensor x) -> Tensor")
-            lib.impl("retained", lambda x: retained, "Meta")
             op = torch.ops._test_fake_fallback.retained.default
+            if implementation == "custom":
+                torch.library.register_fake(op, lambda x: retained, lib=lib)
+            else:
+                lib.impl("retained", lambda x: retained, "Meta")
             with mode if active else contextlib.nullcontext():
-                if output_device == "cpu":
+                if implementation == "custom" or output_device == "cpu":
                     self.assertIs(op(fake), retained)
                 else:
                     msg = "FakeTensor is wrapped to wrong device, found meta, expected cpu"
@@ -6824,7 +6830,13 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     @parametrize(
         "callback,propagate_real_tensors",
-        [(None, False), ("cia", False), ("op_impl", False), (None, True)],
+        [
+            (None, False),
+            ("cia", False),
+            ("op_impl", False),
+            ("custom", False),
+            (None, True),
+        ],
     )
     def test_cpp_fake_tensor_mode_rebuild(self, callback, propagate_real_tensors):
         from torch._subclasses.fake_tensor import CppFakeTensorMode
@@ -6890,6 +6902,8 @@ class TestCppFakeTensorModeBindings(TestCase):
                 op = torch.ops._test_fake_rebuilt_mode.probe.default
                 if callback == "cia":
                     lib.impl("probe", kernel, "CompositeImplicitAutograd")
+                elif callback == "custom":
+                    torch.library.register_fake(op, kernel, lib=lib)
                 else:
                     from torch._subclasses.fake_impls import (
                         _deregister_op_impl,
