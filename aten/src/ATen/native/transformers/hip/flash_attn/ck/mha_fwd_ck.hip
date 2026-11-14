@@ -253,7 +253,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
            int window_size_right,
            const bool return_dropout_randval,
            std::optional<at::Generator> gen_,
-           const std::optional<at::Tensor>& attn_bias_) // batch_size x nheads x seqlen_q x seqlen_k
+           const std::optional<at::Tensor>& attn_bias_, // batch_size x nheads x seqlen_q x seqlen_k
+           const bool causal_top_left)
 {
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -284,14 +285,14 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     if (window_size_left >= seqlen_k) { window_size_left = -1; }
     if (window_size_right >= seqlen_k) { window_size_right = -1; }
 
-    // causal=true is the same as causal=false in this case
-    if (seqlen_q == 1 && !attn_bias_.has_value()) { is_causal = false; }
+    // causal=true is the same as causal=false in this case (bottom-right only)
+    if (seqlen_q == 1 && !attn_bias_.has_value() && !causal_top_left) { is_causal = false; }
 
     mask_info mask;
     if (is_causal) {
         // Causal is the special case where window_size_right == 0 and window_size_left < 0.
         window_size_right = 0;
-        std::string mask_identify = "b:" + std::to_string(window_size_left) + "," + "0";
+        std::string mask_identify = (causal_top_left ? "t:" : "b:") + std::to_string(window_size_left) + "," + "0";
         mask = mask_info::decode(mask_identify, seqlen_q, seqlen_k); // casual
     }
     else if (window_size_left == -1 && window_size_right == -1) {

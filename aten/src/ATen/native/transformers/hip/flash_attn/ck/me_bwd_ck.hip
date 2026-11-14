@@ -28,6 +28,7 @@ mem_eff_backward_ck(
     float p_dropout,
     float scale,
     bool is_causal,
+    bool causal_top_left,
     bool deterministic,
     bool zero_tensors,
     at::Tensor philox_seed,
@@ -69,7 +70,8 @@ mem_eff_backward_ck(
           non_null_window_right,
           deterministic,
           philox_seed,
-          philox_offset);
+          philox_offset,
+          causal_top_left);
     return std::make_tuple(std::move(dQ), std::move(dK), std::move(dV), std::move(dBias));
 
   } else {
