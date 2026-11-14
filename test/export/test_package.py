@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from torch._inductor.package import load_package
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
 from torch.export.pt2_archive._package import _load_aoti
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
@@ -158,19 +160,22 @@ class TestAOTIPackageStreamAffinity(TestCase):
 
 
 class TestAOTIPackageDeviceValidation(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_aoti_load_uses_cpp_device_validation_before_device_info(self):
+    def test_aoti_load_uses_cpp_device_validation_before_device_info(self, device):
+        device_type = self.device_type
+        unavailable_msg = (
+            f"Cannot load AOTInductor package for device '{device_type}' because "
+            f"{device_type.upper()} is not available in this process."
+        )
+
         class FakeAOTIModelPackageLoader:
             @staticmethod
             def load_metadata_from_package(file, model_name):
-                return {"AOTI_DEVICE_KEY": "cuda"}
+                return {"AOTI_DEVICE_KEY": device_type}
 
             def __init__(self, *args, **kwargs):
-                raise RuntimeError(
-                    "Cannot load AOTInductor package for device 'cuda' because "
-                    "CUDA is not available in this process."
-                )
+                raise RuntimeError(unavailable_msg)
 
         with (
             mock.patch.object(
@@ -178,15 +183,18 @@ class TestAOTIPackageDeviceValidation(TestCase):
             ),
             mock.patch("torch._inductor.codecache.get_device_information") as get_info,
         ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Cannot load AOTInductor package.*CUDA is not available",
-            ):
+            with self.assertRaisesRegex(RuntimeError, re.escape(unavailable_msg)):
                 _load_aoti("model.pt2", "model", False, 1, -1)
 
             get_info.assert_not_called()
 
-    def test_load_package_does_not_fallback_on_device_validation_error(self):
+    def test_load_package_does_not_fallback_on_device_validation_error(self, device):
+        device_type = self.device_type
+        unavailable_msg = (
+            f"Cannot load AOTInductor package for device '{device_type}' because "
+            f"{device_type.upper()} is not available in this process."
+        )
+
         class FakeAOTIModelPackageLoader:
             def __init__(self, *args, **kwargs):
                 raise AssertionError("AOTI fallback loader should not be constructed")
@@ -194,20 +202,18 @@ class TestAOTIPackageDeviceValidation(TestCase):
         with (
             mock.patch(
                 "torch._inductor.package.package.load_pt2",
-                side_effect=RuntimeError(
-                    "Cannot load AOTInductor package for device 'cuda' because "
-                    "CUDA is not available in this process."
-                ),
+                side_effect=RuntimeError(unavailable_msg),
             ),
             mock.patch.object(
                 torch._C._aoti, "AOTIModelPackageLoader", FakeAOTIModelPackageLoader
             ),
         ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Cannot load AOTInductor package.*CUDA is not available",
-            ):
+            with self.assertRaisesRegex(RuntimeError, re.escape(unavailable_msg)):
                 load_package("model.pt2")
+
+
+class TestAOTIPackageAvailability(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize("device_type", ["cuda", "xpu"])
     @decorateIf(
@@ -236,7 +242,10 @@ class TestAOTIPackageDeviceValidation(TestCase):
                 torch._C._aoti.AOTIModelPackageLoader(str(tmp), "model", False, 1, -1)
 
 
-instantiate_parametrized_tests(TestAOTIPackageDeviceValidation)
+instantiate_device_type_tests(
+    TestAOTIPackageDeviceValidation, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_parametrized_tests(TestAOTIPackageAvailability)
 
 
 if __name__ == "__main__":
