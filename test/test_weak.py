@@ -593,13 +593,16 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
             x[key] = value
         return x
 
-    def __init__(self, *args, **kw):
-        unittest.TestCase.__init__(self, *args, **kw)
-        try:
-            load_torchbind_test_lib()
-        except unittest.SkipTest:
-            return
+    def setUp(self):
+        super().setUp()
+        # Raises SkipTest when the torchbind test library is absent.
+        load_torchbind_test_lib()
+        self._build_fixtures()
 
+    # Constructing _TorchScriptTesting._Foo under PYTORCH_TEST_WITH_DYNAMO
+    # fails with "haven't registered a fake class".
+    @torch._dynamo.disable
+    def _build_fixtures(self):
         self.reference = self._reference().copy()
 
         # A (key, value) pair not in the mapping
