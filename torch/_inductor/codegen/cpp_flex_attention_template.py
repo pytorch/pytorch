@@ -780,45 +780,44 @@ FLEX_ATTENTION_TEMPLATE = r"""
           if (!need_pack) {
             auto v_addr =
                 v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
-            // Fallback Half brgemm is slower than micro gemm
-            if (!std::is_same_v<scalar_t, at::Half>) {
-              at::native::cpublas::brgemm(
-                    cur_qSplitSize,
-                    headSize_v,
-                    cur_ekvSplitSize,
-                    cur_ekvSplitSize,
-                    vStrideN,
-                    headSize_v,
-                    n_idx > 0,
-                    {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
-                    v_addr,
-                    dst_data,
-                    need_pack);
+{%- if use_pv_micro_gemm %}
+            if (n_idx > 0) {
+              {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
+                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
+                v_addr,
+                dst_data,
+                cur_qSplitSize,
+                headSize_v,
+                cur_ekvSplitSize,
+                cur_ekvSplitSize,
+                vStrideN,
+                headSize_v);
             } else {
-              if (n_idx > 0) {
-                {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
-                  {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
-                  v_addr,
-                  dst_data,
-                  cur_qSplitSize,
-                  headSize_v,
-                  cur_ekvSplitSize,
-                  cur_ekvSplitSize,
-                  vStrideN,
-                  headSize_v);
-              } else {
-                {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
-                  {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
-                  v_addr,
-                  dst_data,
-                  cur_qSplitSize,
-                  headSize_v,
-                  cur_ekvSplitSize,
-                  cur_ekvSplitSize,
-                  vStrideN,
-                  headSize_v);
-              }
+              {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
+                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
+                v_addr,
+                dst_data,
+                cur_qSplitSize,
+                headSize_v,
+                cur_ekvSplitSize,
+                cur_ekvSplitSize,
+                vStrideN,
+                headSize_v);
             }
+{%- else %}
+            at::native::cpublas::brgemm(
+                  cur_qSplitSize,
+                  headSize_v,
+                  cur_ekvSplitSize,
+                  cur_ekvSplitSize,
+                  vStrideN,
+                  headSize_v,
+                  n_idx > 0,
+                  {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
+                  v_addr,
+                  dst_data,
+                  need_pack);
+{%- endif %}
           } else {
             int64_t psize = n / kvSplitSize * ekvSplitSize;
             at::native::cpublas::brgemm(
@@ -1120,46 +1119,44 @@ FLEX_DECODING_TEMPLATE = r"""
 
         auto v_addr =
             v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
-        // Fallback Half brgemm is slower than micro gemm
-
-        if constexpr (!std::is_same_v<scalar_t, at::Half>) {
-          at::native::cpublas::brgemm(
-                cur_qSplitSize,
-                headSize_v,
-                cur_kvSplitSize,
-                cur_kvSplitSize,
-                vStrideN,
-                headSize_v,
-                token_num > 0,
-                {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
-                v_addr,
-                tmp_out,
-                false);
+{%- if use_pv_micro_gemm %}
+        if (token_num > 0) {
+          {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
+            {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
+            v_addr,
+            tmp_out,
+            cur_qSplitSize,
+            headSize_v,
+            cur_kvSplitSize,
+            cur_kvSplitSize,
+            vStrideN,
+            headSize_v);
         } else {
-          if (token_num > 0) {
-            {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
-              {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
-              v_addr,
-              tmp_out,
-              cur_qSplitSize,
-              headSize_v,
-              cur_kvSplitSize,
-              cur_kvSplitSize,
-              vStrideN,
-              headSize_v);
-          } else {
-            {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
-              {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
-              v_addr,
-              tmp_out,
-              cur_qSplitSize,
-              headSize_v,
-              cur_kvSplitSize,
-              cur_kvSplitSize,
-              vStrideN,
-              headSize_v);
-          }
+          {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
+            {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
+            v_addr,
+            tmp_out,
+            cur_qSplitSize,
+            headSize_v,
+            cur_kvSplitSize,
+            cur_kvSplitSize,
+            vStrideN,
+            headSize_v);
         }
+{%- else %}
+        at::native::cpublas::brgemm(
+              cur_qSplitSize,
+              headSize_v,
+              cur_kvSplitSize,
+              cur_kvSplitSize,
+              vStrideN,
+              headSize_v,
+              token_num > 0,
+              {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
+              v_addr,
+              tmp_out,
+              false);
+{%- endif %}
         token_num += cur_kvSplitSize;
       }
       if (skipped_partition) {
@@ -1171,9 +1168,9 @@ FLEX_DECODING_TEMPLATE = r"""
       at::native::data_index_step(i, batchSize, j, num_head, partition_id, num_partitions);
     }
 
-    if constexpr (!std::is_same_v<scalar_t, at::Half>) {
-      at::native::cpublas::brgemm_release();
-    }
+{%- if not use_pv_micro_gemm %}
+    at::native::cpublas::brgemm_release();
+{%- endif %}
   });
 
 
@@ -1306,6 +1303,10 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.kv_block_size = kv_block_size
         self.q_block_size = q_block_size
         self.partition_size = partition_size
+        self.head_size_v = 0
+        self.q_seq_len = 0
+        self.is_decoding = False
+        self.use_pv_micro_gemm = False
         self.has_other_buffer = has_other_buffer
         self.no_full_kv_block = no_full_kv_block
         self.other_buffer_input_offset = 2
@@ -1599,6 +1600,10 @@ class CppFlexAttentionTemplate(CppTemplate):
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
         self.accumulate_dtype = torch.float
         self.input_dtype = query.layout.dtype
+        # softmax(q @ k.T) @ v uses the micro gemm only for fp16, whose brgemm fallback is slower.
+        self.use_pv_micro_gemm = self.input_dtype == torch.float16
+        self.head_size_v = value.layout.size[3]
+        self.q_seq_len = query.layout.size[1]
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
@@ -1622,6 +1627,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             has_full_kv_block=not self.no_full_kv_block,
             accumulate_dtype=self.accumulate_dtype,
             query_dtype=self.input_dtype,
+            use_pv_micro_gemm=self.use_pv_micro_gemm,
             kvBlockSize=self.kv_block_size,
             qBlockSize=self.q_block_size,
             template=self,
@@ -1645,6 +1651,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             FLEX_TEMPLATE = self.choose_flex_template(
                 self.input_nodes[0], self.input_nodes[1], num_threads
             )
+            self.is_decoding = FLEX_TEMPLATE is FLEX_DECODING_TEMPLATE
             return self._template_from_string(INIT_PARAMS + FLEX_TEMPLATE).render(
                 **options
             )
@@ -1678,6 +1685,15 @@ class CppFlexAttentionTemplate(CppTemplate):
             )
         )
 
+    def gemm_blocking(self, n_dim) -> GemmBlocking:
+        if self.is_decoding:
+            return GemmBlocking(1, 16, 1)
+        n = sympy.sympify(n_dim)
+        block_n = 16
+        if n.is_number:
+            block_n = next((bn for bn in (64, 32, 16) if int(n) % bn == 0), 16)
+        return GemmBlocking(8, block_n, 1)
+
     def micro_gemm_define(self, kernel_name: str):
         from torch._inductor.codegen.cpp_gemm_template import (
             CppTemplateKernel,
@@ -1686,16 +1702,24 @@ class CppFlexAttentionTemplate(CppTemplate):
         from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
         from torch._inductor.virtualized import V
 
+        # fp32 with fewer rows per head is measured slower with large blocking
+        q_len = sympy.sympify(self.q_seq_len)
+        small_q = q_len.is_number and int(q_len) < 16
+        qk_blocked = not (self.input_dtype == torch.float32 and small_q)
+        qk_blocking = GemmBlocking(1, 16, 1)
+        if qk_blocked:
+            qk_blocking = self.gemm_blocking(self.kv_block_size)
         micro_gemm_trans = CppMicroGemmFP32Vec(
             kernel_name + "_kernel_micro_gemm_transpose_b",
             self.input_dtype,
             self.input_dtype,
             self.accumulate_dtype,
             self.accumulate_dtype,
-            GemmBlocking(1, 16, 1),
+            qk_blocking,
             1,
             True,
             True,
+            pow2_m_tails=qk_blocked,
         )
 
         micro_gemm = CppMicroGemmFP32Vec(
@@ -1704,16 +1728,17 @@ class CppFlexAttentionTemplate(CppTemplate):
             self.input_dtype,
             self.accumulate_dtype,
             self.accumulate_dtype,
-            GemmBlocking(1, 16, 1),
+            self.gemm_blocking(self.head_size_v),
             1,
             True,
             False,
+            pow2_m_tails=True,
         )
 
         with V.set_graph_handler(V.graph):
             kernel = CppTemplateKernel("cpp_micro_gemm", parallel_num_threads())
             code_trans = micro_gemm_trans.codegen_define(kernel)
-            code = micro_gemm.codegen_define(kernel)
+            code = micro_gemm.codegen_define(kernel) if self.use_pv_micro_gemm else ""
         return code + code_trans
 
     def codegen_micro_gemm(self, kernel_name: str):
