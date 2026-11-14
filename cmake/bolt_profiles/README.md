@@ -40,6 +40,14 @@ will eventually store the bolt profiles you collect. Building pytorch now
 will produce "bolt optimizable" binaries. Use these to collect bolt profiles
 on your workloads. Put those profiles in $LLVM_BOLT_PROFILES_DIR and rebuild.
 
+The aarch64 CUDA nightly builds upload these unoptimized libraries, with a
+`libtorch_python.so` per Python version, as the `prebolt-cuda-aarch64-<cuda>`
+artifact. The "BOLT profile collection (GB300)" workflow
+(`.github/workflows/bolt-profile-gb300.yml`) profiles them on GB300 with
+`tools/bolt/collect_profiles.sh` and the nightly wheel of Python 3.12 (and of
+further versions for version specific `torch_python` profiles), and uploads a
+`torch.tar.zst` in the layout above.
+
 ## How profiles are consumed
 
 Optimization happens at build time, in `torch_optimize_layout_if_enabled`
