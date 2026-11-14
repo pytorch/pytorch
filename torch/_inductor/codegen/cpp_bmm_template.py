@@ -41,7 +41,7 @@ BMM_TEMPLATE = r"""
 {{ template.codegen_single_thread_gemm() }}
 {{ template.codegen_multi_thread_gemm() }}
 
-extern "C"
+extern "C" {{export_declaration}}
 {{kernel.def_kernel(inputs={"X": BX, "W": BW}, outputs={"Y": BY}, aliases=aliases)}}
 {
     const int64_t B = {{kernel.size(BY_2d, 0)}};
