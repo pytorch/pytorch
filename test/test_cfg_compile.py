@@ -1930,5 +1930,85 @@ class TestCfgExceptions(TestCase):
         self.assertSameOutcome(f, (-1,))
 
 
+class ExcManager:
+    def __init__(self, log, suppress=False):
+        self.log, self.suppress = log, suppress
+
+    def __enter__(self):
+        self.log.append("enter")
+        return 7
+
+    def __exit__(self, kind, value, tb):
+        self.log.append(("exit", kind.__name__ if kind else None))
+        return self.suppress
+
+
+@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
+class TestCfgWith(TestCase):
+    """with statements inside compiled functions."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_with_calls_enter_and_exit(self):
+        def f(x, log, suppress):
+            y = 0
+            with ExcManager(log, suppress) as m:
+                y = m + exc_double(x)
+            return y
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        for x in (3, -3):
+            for suppress in (False, True):
+                outcomes = []
+                for fn in (f, compiled):
+                    log = []
+                    try:
+                        outcomes.append((fn(x, log, suppress), log))
+                    except ValueError as e:
+                        outcomes.append((str(e), log))
+                self.assertEqual(outcomes[0], outcomes[1])
+
+    def test_no_grad_block(self):
+        def f(x):
+            with torch.no_grad():
+                y = x * 2
+                z = y + 1
+            return z, z.requires_grad, x * 2
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        x = torch.ones(2, requires_grad=True)
+        for _ in range(3):
+            z, requires_grad, outside = compiled(x)
+            self.assertEqual(z, torch.full((2,), 3.0))
+            self.assertFalse(requires_grad)
+            self.assertTrue(outside.requires_grad)
+            self.assertTrue(torch.is_grad_enabled())
+
+    def test_object_without_the_protocol(self):
+        def f(x):
+            with x:
+                return 1
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        with self.assertRaisesRegex(
+            TypeError, "does not support the context manager protocol"
+        ):
+            compiled(3)
+
+    def test_module_calls_are_compiled_all_the_way_down(self):
+        def run(module, x):
+            return module(x) + 1
+
+        linear = torch.nn.Linear(3, 2)
+        compiled = torch.cfg_compile(run, fallback=False)
+        x = torch.randn(4, 3)
+        for _ in range(3):
+            self.assertEqual(compiled(linear, x), run(linear, x))
+        stats = compiled.stats()
+        self.assertEqual(stats["interpreted_callees"], [])
+        self.assertIn("Module._call_impl", stats["compiled_callees"])
+        self.assertIn("Linear.forward", stats["compiled_callees"])
+
+
 if __name__ == "__main__":
     run_tests()
