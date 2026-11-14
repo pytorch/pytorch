@@ -450,6 +450,8 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
     It supports input types of torch.float, torch.bfloat16, and torch.half with fp32 output.
     The output of the microkernel is in FP32, but it would be converted to BF16/FP16 in the template,
     if the desired output is BF16/FP16.
+    B may also be float8_e4m3fn/float8_e5m2 (converted to fp32 on load); no gemm config
+    registers this, it is only instantiated directly by the CPP flex attention template.
     """
 
     TEMPLATE_ENTRY = r"""
@@ -550,6 +552,11 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 """
 
     TEMPLATE_KERNEL = r"""
+{%- set fp8_b = input2_dtype in [torch.float8_e4m3fn, torch.float8_e5m2] %}
+{#- two_vec: each K step of a 16-bit A is converted to two fp32 vectors #}
+{%- set two_vec = input2_dtype in [torch.bfloat16, torch.float16]
+    or (fp8_b and input_dtype in [torch.bfloat16, torch.float16]) %}
+{%- set vec_b = "VectorizedB" if fp8_b else "VectorizedIn" %}
 
 template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum, bool prefetch=false>
 {%- if not trans_b %}
@@ -577,8 +584,11 @@ inline void {{kernel_name}}_transpose_b_kernel(
     int64_t ldc
 ) {
     using Vectorized = at::vec::Vectorized<{{compute_t}}>;
-{%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+{%- if two_vec %}
     using VectorizedIn = at::vec::Vectorized<{{input_t}}>;
+{%- endif %}
+{%- if fp8_b %}
+    using VectorizedB = at::vec::Vectorized<{{input2_t}}>;
 {%- endif %}
 
 {%- if not trans_b %}
@@ -629,8 +639,8 @@ inline void {{kernel_name}}_transpose_b_kernel(
         if constexpr (row == 0) {
     {%- if tail_n %}
             if (col < rCOLS) {
-        {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
-                auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, load_size);
+        {%- if input2_dtype in [torch.bfloat16, torch.float16] or fp8_b %}
+                auto b = {{vec_b}}::loadu(B + k * ldb + col * VLEN, load_size);
                 vb[col] = at::vec::convert<{{compute_t}}>(b);
         {%- elif input2_dtype == torch.int8 %}
             // Convert VLEN int8 elements to int32, and then fp32
@@ -645,8 +655,8 @@ inline void {{kernel_name}}_transpose_b_kernel(
 
     {%- else %}
 
-        {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
-            auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
+        {%- if input2_dtype in [torch.bfloat16, torch.float16] or fp8_b %}
+            auto b = {{vec_b}}::loadu(B + k * ldb + col * VLEN, VLEN);
             vb[col] = at::vec::convert<{{compute_t}}>(b);
         {%- elif input2_dtype == torch.int8 %}
             // Convert VLEN int8 elements to int32, and then fp32
@@ -724,8 +734,8 @@ inline void {{kernel_name}}_transpose_b_kernel(
         };
         c10::ForcedUnroll<ROWS * COLS>{}(loadc);
         auto unroll_loadB = [&](auto i, const {{input2_t}}* {{restrict_keyword}} src_ptr) {
-    {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
-            auto b = VectorizedIn::loadu(src_ptr + i * ldb, VLEN);
+    {%- if input2_dtype in [torch.bfloat16, torch.float16] or fp8_b %}
+            auto b = {{vec_b}}::loadu(src_ptr + i * ldb, VLEN);
             vb[i] = at::vec::convert<{{compute_t}}>(b);
     {%- elif input2_dtype == torch.int8 %}
             auto b32 = at::vec::convert_to_int32<int8_t>(src_ptr + i * ldb, VLEN);
@@ -766,7 +776,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
         c10::ForcedUnroll<ROWS * COLS>{}(storec);
     } else {
         // Second implementation
-    {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+    {%- if two_vec %}
         constexpr auto VLEN = VectorizedIn::size();
     {%- else %}
         constexpr auto VLEN = Vectorized::size();
@@ -782,7 +792,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
     {%- endif %}
         constexpr int bM = (BLOCK_M + sM - 1) / sM;
 
-    {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+    {%- if two_vec %}
         at::vec::VectorizedN<{{compute_t}}, 2> va;
         at::vec::VectorizedN<{{compute_t}}, 2 * sN> vb;
     {%- else %}
@@ -812,6 +822,18 @@ inline void {{kernel_name}}_transpose_b_kernel(
     {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
                 auto b = VectorizedIn::loadu(B + (sN * n + i) * ldb + k * VLEN, e_k);
                 std::tie(vb[2 * i], vb[2 * i + 1]) = at::vec::convert_to_float<{{input_t}}>(b);
+    {%- elif fp8_b and two_vec %}
+                // Load the two halves separately: loadu of exactly one fp32 vector's worth
+                // of fp8 leaves the remaining lanes undefined.
+                auto b_ptr = B + (sN * n + i) * ldb + k * VLEN;
+                constexpr int fVLEN = Vectorized::size();
+                auto b0 = VectorizedB::loadu(b_ptr, std::min(e_k, fVLEN));
+                auto b1 = VectorizedB::loadu(b_ptr + fVLEN, std::max(e_k - fVLEN, 0));
+                vb[2 * i] = at::vec::convert<{{compute_t}}>(b0);
+                vb[2 * i + 1] = at::vec::convert<{{compute_t}}>(b1);
+    {%- elif fp8_b %}
+                auto b = VectorizedB::loadu(B + (sN * n + i) * ldb + k * VLEN, e_k);
+                vb[i] = at::vec::convert<{{compute_t}}>(b);
     {%- elif input2_dtype == torch.int8 %}
                 auto b32 = at::vec::convert_to_int32<int8_t>(B + (sN * n + i) * ldb + k * VLEN, e_k);
                 vb[i] = at::vec::convert<float>(b32);
@@ -822,7 +844,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
 
             {{kernel.unroll_pragma(sub_block_m)}}
             for (int s = 0; s < e_m; s++) {
-    {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+    {%- if two_vec %}
                 auto a = VectorizedIn::loadu(A + (sM * m + s) * lda + k * VLEN, e_k);
                 std::tie(va[0], va[1]) = at::vec::convert_to_float<{{input_t}}>(a);
     {%- elif input2_dtype == torch.int8 %}
@@ -838,7 +860,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
                 if (k == 0) {
                     {{kernel.unroll_pragma(sub_block_n)}}
                     for (int i = 0; i < e_n; i++) {
-    {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+    {%- if two_vec %}
                         vmid[sN * s + i] = at::vec::fmadd(va[0], vb[2 * i], Vectorized(0.0f));
                         vmid[sN * s + i] = at::vec::fmadd(va[1], vb[2 * i + 1], vmid[sN * s + i]);
     {%- else %}
@@ -848,7 +870,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
                 } else {
                     {{kernel.unroll_pragma(sub_block_n)}}
                     for (int i = 0; i < e_n; i++) {
-    {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+    {%- if two_vec %}
                         vmid[sN * s + i] = at::vec::fmadd(va[0], vb[2 * i], vmid[sN * s + i]);
                         vmid[sN * s + i] = at::vec::fmadd(va[1], vb[2 * i + 1], vmid[sN * s + i]);
     {%- else %}
