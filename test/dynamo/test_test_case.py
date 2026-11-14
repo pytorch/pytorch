@@ -3,6 +3,7 @@ from unittest import mock
 
 import torch
 import torch._dynamo.test_case
+from torch.amp.autocast_mode import _get_autocast_nesting, _snapshot_autocast_state
 
 
 class TestCaseTests(torch._dynamo.test_case.TestCase):
@@ -14,10 +15,10 @@ class TestCaseTests(torch._dynamo.test_case.TestCase):
         finally:
             probe.tearDown()
 
-        return torch._dynamo.test_case._snapshot_autocast_state()
+        return _snapshot_autocast_state()
 
     def test_teardown_restores_autocast_enabled(self):
-        baseline = torch._dynamo.test_case._snapshot_autocast_state()
+        baseline = _snapshot_autocast_state()
 
         def leak():
             for device in torch._C._autocast_supported_devices():
@@ -28,7 +29,7 @@ class TestCaseTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(self._run_leaking_pair(leak), baseline)
 
     def test_teardown_restores_autocast_dtype(self):
-        baseline = torch._dynamo.test_case._snapshot_autocast_state()
+        baseline = _snapshot_autocast_state()
 
         def leak():
             for device in torch._C._autocast_supported_devices():
@@ -39,7 +40,7 @@ class TestCaseTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(self._run_leaking_pair(leak), baseline)
 
     def test_teardown_restores_autocast_cache_enabled(self):
-        baseline = torch._dynamo.test_case._snapshot_autocast_state()
+        baseline = _snapshot_autocast_state()
 
         def leak():
             torch.set_autocast_cache_enabled(not torch.is_autocast_cache_enabled())
@@ -47,15 +48,13 @@ class TestCaseTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(self._run_leaking_pair(leak), baseline)
 
     def test_teardown_restores_autocast_nesting_after_increment(self):
-        baseline = torch._dynamo.test_case._snapshot_autocast_state()
-        baseline_nesting = torch._dynamo.test_case._autocast_nesting()
+        baseline = _snapshot_autocast_state()
+        baseline_nesting = _get_autocast_nesting()
         self.assertEqual(baseline_nesting, 0)
 
         def leak():
             torch.autocast_increment_nesting()
-            self.assertEqual(
-                torch._dynamo.test_case._autocast_nesting(), baseline_nesting + 1
-            )
+            self.assertEqual(_get_autocast_nesting(), baseline_nesting + 1)
 
         with mock.patch.object(
             torch, "clear_autocast_cache", wraps=torch.clear_autocast_cache
@@ -64,19 +63,17 @@ class TestCaseTests(torch._dynamo.test_case.TestCase):
         clear_cache.assert_called_once_with()
 
     def test_teardown_restores_autocast_nesting_after_decrement(self):
-        baseline = torch._dynamo.test_case._snapshot_autocast_state()
-        baseline_nesting = torch._dynamo.test_case._autocast_nesting()
+        baseline = _snapshot_autocast_state()
+        baseline_nesting = _get_autocast_nesting()
 
         def leak():
             torch.autocast_decrement_nesting()
-            self.assertEqual(
-                torch._dynamo.test_case._autocast_nesting(), baseline_nesting - 1
-            )
+            self.assertEqual(_get_autocast_nesting(), baseline_nesting - 1)
 
         self.assertEqual(self._run_leaking_pair(leak), baseline)
 
     def test_teardown_restores_autocast_after_super_teardown_error(self):
-        baseline = torch._dynamo.test_case._snapshot_autocast_state()
+        baseline = _snapshot_autocast_state()
         default_dtype = torch.get_default_dtype()
         grad_enabled = torch.is_grad_enabled()
         cpu_enabled = torch.is_autocast_enabled("cpu")
@@ -91,7 +88,7 @@ class TestCaseTests(torch._dynamo.test_case.TestCase):
                 probe.tearDown()
         finally:
             torch.set_default_dtype(default_dtype)
-        self.assertEqual(torch._dynamo.test_case._snapshot_autocast_state(), baseline)
+        self.assertEqual(_snapshot_autocast_state(), baseline)
         self.assertEqual(torch.is_grad_enabled(), grad_enabled)
 
 
