@@ -5,9 +5,8 @@ Global kernel cache for NVIDIA Universal GEMM.
 This module provides a lazy-initialized cache for cutlass.operators kernels,
 avoiding expensive manifest scans on every kernel lookup.
 
-The first call to get_kernel_by_name() loads all kernels from cutlass.operators
-(~10 seconds) and builds a name->kernel dict. Subsequent calls use the
-dict for O(1) lookup (~0.1 μs).
+Dense and grouped GEMM discover compatible operators from their arguments.
+The full manifest remains a fallback for unresolved kernel-name lookups.
 """
 
 import dataclasses
@@ -207,9 +206,8 @@ _partition_cache: dict[tuple, list[list[Any]]] = {}
 def _args_query_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     """Compatible operators via an args-filtered get_operators query (~0.05s).
 
-    cutlass prunes by supports(args) and the device target internally. Only
-    valid for the dense GEMM path: for that path this returns the identical set
-    as the full-manifest scan (verified), avoiding the ~14s manifest build.
+    cutlass prunes dense and grouped operators by supports(args) and the device
+    target internally, avoiding the full manifest build.
     """
     import cutlass.operators
 
@@ -497,9 +495,9 @@ def partition_compatible_kernels(
     `classifier(metadata)` returns a bucket index in [0, num_buckets-1] or -1 to
     drop the kernel. `candidate_source` selects how the compatible set is found,
     all of which avoid the ~14s full manifest except "manifest":
-      - "args"     dense GEMM: cheap args-filtered get_operators query
+      - "args"     dense/grouped GEMM: args-filtered get_operators query
       - "scaled"   scaled GEMM: direct block-scaled sub-provider enumeration
-      - "manifest" fallback (e.g. grouped GEMM): full-manifest scan
+      - "manifest" explicit fallback: full-manifest scan
     `efc_only` restricts to epilogue-fusion-capable kernels (the addmm/bias
     path). Results are memoized per shape and selection policy. Scaled GEMM
     entries also include the generation policy because it changes the operator
