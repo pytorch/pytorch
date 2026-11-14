@@ -3,6 +3,7 @@
 import gc
 import os
 import sys
+import tempfile
 import time
 import weakref
 from collections.abc import Callable
@@ -2520,6 +2521,144 @@ class NCCLSymmetricMemoryRestartTest(MultiProcContinuousTest):
         buf = all_to_all_nd_roundtrip(successor_group_name)
         del buf, tensor, handle
         torch.cuda.synchronize(self.device)
+
+
+@requires_cuda_p2p_access()
+@skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "CUDA NCCL teardown coverage")
+class NCCLSymmetricMemoryCommLifetimeTest(MultiProcessTestCase):
+    def _check_return_codes(self, fn, elapsed_time) -> None:
+        exit_codes = [process.exitcode for process in self.processes]
+        for rank, process in enumerate(self.processes):
+            print(
+                f"LIFETIME_WORKER_EXIT rank={rank} pid={process.pid} "
+                f"exitcode={process.exitcode}",
+                file=sys.stderr,
+                flush=True,
+            )
+        self.assertEqual(len(exit_codes), self.world_size)
+        # Let the base class retrieve Python exception tracebacks from pipes.
+        if self.TEST_ERROR_EXIT_CODE not in exit_codes:
+            self.assertIsNotNone(exit_codes[0], "Worker has no final exit code")
+            self.assertEqual(
+                exit_codes,
+                [exit_codes[0]] * self.world_size,
+                f"Worker exit codes differ: {exit_codes}",
+            )
+        super()._check_return_codes(fn, elapsed_time)
+
+    def setUp(self) -> None:
+        super().setUp()
+        patch_env(
+            self,
+            TORCH_SYMMMEM_IMPLICIT_POOL="0",
+            TORCH_CPP_LOG_LEVEL="INFO",
+            TORCH_DISTRIBUTED_DEBUG="OFF",
+            TORCH_NCCL_ASYNC_ERROR_HANDLING="0",
+        )
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @requires_nccl()
+    @requires_nccl_version((2, 29), "NCCL symmetric window support")
+    @skip_if_lt_x_gpu(2)
+    @parametrize("backend_name", ["nccl2", "nccl-legacy"])
+    @parametrize("windowed", [False, True])
+    @parametrize("destroy_first", [False, True])
+    @parametrize("retirement", ["destroy", "abort"])
+    def test_release_after_comm_retirement(
+        self,
+        backend_name: str,
+        windowed: bool,
+        destroy_first: bool,
+        retirement: str,
+    ) -> None:
+        if not PLATFORM_SUPPORTS_SYMM_MEM:
+            raise SkipTest("Test requires SymmMem support")
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        symm_mem.set_backend("NCCL")
+        c10d.init_process_group(
+            backend="gloo",
+            store=c10d.FileStore(self.file_name, self.world_size),
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=60),
+        )
+        try:
+            pg = c10d.new_group(
+                ranks=list(range(self.world_size)),
+                backend=backend_name,
+                timeout=timedelta(seconds=60),
+                device_id=device,
+            )
+            expected_type = (
+                c10d.ProcessGroupNCCL2
+                if backend_name == "nccl2"
+                else c10d.ProcessGroupNCCL
+            )
+            self.assertIsInstance(pg._get_backend(device), expected_type)
+            group_name = pg.group_name
+            probe = torch.ones(1, device=device)
+            c10d.all_reduce(probe, group=pg)
+            self.assertEqual(probe, torch.full_like(probe, self.world_size))
+            tensor = symm_mem.empty(4096, dtype=torch.float32, device=device)
+            handle = symm_mem.rendezvous(tensor, group=pg) if windowed else None
+            if windowed:
+                self.assertIsNotNone(handle)
+            torch.cuda.synchronize(device)
+            c10d.barrier()
+            if destroy_first:
+                # Keep pg itself alive: retirement must not wait for its destructor.
+                if retirement == "abort":
+                    c10d.distributed_c10d._abort_process_group(pg)
+                else:
+                    c10d.destroy_process_group(pg)
+            c10d.barrier()
+            previous_debug_level = c10d.get_debug_level()
+            with tempfile.TemporaryFile() as diagnostics:
+                witness = weakref.ref(tensor)
+                original_stderr = os.dup(2)
+                try:
+                    os.dup2(diagnostics.fileno(), 2)
+                    c10d.set_debug_level(c10d.DebugLevel.INFO)
+                    del handle, tensor
+                    gc.collect()
+                    torch.cuda.synchronize(device)
+                    self.assertIsNone(witness())
+                finally:
+                    c10d.set_debug_level(previous_debug_level)
+                    os.dup2(original_stderr, 2)
+                    os.close(original_stderr)
+                diagnostics.seek(0)
+                messages = diagnostics.read().decode("utf-8", errors="replace")
+                self.assertNotIn(
+                    "ncclCommWindowDeregister failed:",
+                    messages,
+                )
+                marker = f"NCCL symmetric-memory window cleanup: group={group_name}, "
+                cleanup = [line for line in messages.splitlines() if marker in line]
+                self.assertEqual(len(cleanup), int(windowed), messages)
+                if windowed:
+                    expected = (
+                        "action=skip-retired"
+                        if destroy_first
+                        else "action=deregister, result=0"
+                    )
+                    self.assertIn(marker + expected, cleanup[0])
+            c10d.barrier()
+            if not destroy_first:
+                if retirement == "abort":
+                    c10d.distributed_c10d._abort_process_group(pg)
+                else:
+                    c10d.destroy_process_group(pg)
+        finally:
+            c10d.destroy_process_group()
+
+
+instantiate_parametrized_tests(NCCLSymmetricMemoryCommLifetimeTest)
 
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")
