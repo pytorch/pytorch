@@ -2486,6 +2486,22 @@ def forward(self, primals_1):
     return (view, transpose, transpose_1, mul)""",
         )
 
+    def test_output_input_view_created_under_no_grad(self):
+        def f(x):
+            with torch.no_grad():
+                view = x[1:]
+            return view, x[1:], x * 2
+
+        x = torch.arange(1.0, 5.0, requires_grad=True)
+        view, grad_view, y = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+        self.assertTrue(view.requires_grad)
+        self.assertTrue(view.is_leaf)
+        self.assertIsNone(view.grad_fn)
+        self.assertIs(view._base, x)
+
+        (view.sum() + grad_view.sum() + y.sum()).backward()
+        self.assertEqual(x.grad, torch.tensor([2.0, 3.0, 3.0, 3.0]))
+
     def test_output_all_alias_types(self):
         # There are 3 types of aliasing that require us to return metadata in the compiled fw:
         # (1) outputs that are views of inputs
