@@ -1150,6 +1150,92 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             (bytearray(b"zb"), bytearray(b"a")),
         )
 
+    @make_dynamo_test
+    def test_center(self):
+        b = self.type2test(b"abc")
+        for fill_type in (bytes, bytearray):
+            self.assertEqual(b.center(7, fill_type(b"-")), b"--abc--")
+        self.assertEqual(b.center(6), b" abc  ")
+        self.assertEqual(b.center(2), b"abc")
+        self.assertEqual(b, b"abc")
+        self.assertIsInstance(b.center(7), self.type2test)
+
+    @make_dynamo_test
+    def test_ljust(self):
+        b = self.type2test(b"abc")
+        for fill_type in (bytes, bytearray):
+            self.assertEqual(b.ljust(7, fill_type(b"-")), b"abc----")
+        self.assertEqual(b.ljust(6), b"abc   ")
+        self.assertEqual(b.ljust(2), b"abc")
+        self.assertEqual(b, b"abc")
+        self.assertIsInstance(b.ljust(7), self.type2test)
+
+    @make_dynamo_test
+    def test_rjust(self):
+        b = self.type2test(b"abc")
+        for fill_type in (bytes, bytearray):
+            self.assertEqual(b.rjust(7, fill_type(b"-")), b"----abc")
+        self.assertEqual(b.rjust(6), b"   abc")
+        self.assertEqual(b.rjust(2), b"abc")
+        self.assertEqual(b, b"abc")
+        self.assertIsInstance(b.rjust(7), self.type2test)
+
+    @make_dynamo_test
+    def test_xjust_errors(self):
+        b = self.type2test(b"abc")
+        with self.assertRaisesRegex(TypeError, "must be a byte string of length 1"):
+            b.center(7, 32)
+        with self.assertRaisesRegex(TypeError, "must be a byte string of length 1"):
+            b.ljust(7, 32)
+        with self.assertRaisesRegex(TypeError, "must be a byte string of length 1"):
+            b.rjust(7, 32)
+        with self.assertRaisesRegex(TypeError, "must be a byte string of length 1"):
+            b.center(7, b"--")
+        with self.assertRaisesRegex(TypeError, "cannot be interpreted as an integer"):
+            b.ljust("7")
+        with self.assertRaisesRegex(TypeError, "expected at least 1 argument, got 0"):
+            b.rjust()
+
+    def test_xjust_returns_new_bytearrays(self):
+        def f(ba, x):
+            return ba.center(2), ba.ljust(2), ba.rjust(2), x + 1
+
+        ba = bytearray(b"abc")
+        result = torch.compile(f, backend="eager", fullgraph=True)(ba, torch.ones(1))
+        self.assertEqual(result, f(bytearray(b"abc"), torch.ones(1)))
+        padded = result[:3]
+        for i, p in enumerate(padded):
+            self.assertIsNot(p, ba)
+            p[0] = ord("x") + i
+        self.assertEqual(padded, (b"xbc", b"ybc", b"zbc"))
+        self.assertEqual(ba, b"abc")
+
+    @parametrize("method", ["center", "ljust", "rjust"])
+    def test_xjust_nonconstant_fill_graph_break(self, method):
+        class BytesSubclass(bytes):
+            pass
+
+        def fn(ba, fill):
+            return getattr(ba, method)(7, fill)
+
+        args = bytearray(b"abc"), BytesSubclass(b"-")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            f"Dynamo does not know how to trace method `{method}` of class `bytearray`",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(torch.compile(fn, backend="eager")(*args), fn(*args))
+
+    def test_input_bytearray_center_ljust_rjust(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba, fill):
+            return ba.center(5, fill), ba.ljust(5, fill), ba.rjust(5, fill)
+
+        self.assertEqual(
+            fn(bytearray(b"abc"), bytearray(b"*")),
+            (bytearray(b"*abc*"), bytearray(b"abc**"), bytearray(b"**abc")),
+        )
+
     def test_append_extend_arg_mutation(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(ba, x):
