@@ -4605,10 +4605,6 @@ class TestTorchDeviceType(TestCase):
     # bitwise regardless of summation order. See #128791.
     @onlyAccelerator
     @largeTensorTest('32GB')
-    # XPU cdist backward kernel overflows int32 in the per-batch buffer offset,
-    # causing an out-of-bounds GPU write that aborts the process (not a catchable
-    # failure), so skip instead of xfail. https://github.com/intel/torch-xpu-ops/issues/5660
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5660")
     @parametrize("b, r, m", [(2, 1024, 2048), (32, 8192, 1)])
     def test_cdist_backward_large_index(self, device, b, r, m):
         x1 = torch.randn(b, r, m, device=device, requires_grad=True)
