@@ -12021,7 +12021,7 @@ class GradsNoForceContiguousContextManager(ContextDecorator):
         def log_tangents_memory_format_log_meta(a):
             return a.clone()
 
-        for backend in ["CPU", "CUDA"]:
+        for backend in ["CPU", "CUDA", "XPU"]:
             self.lib.impl(
                 "log_tangents_memory_format", log_tangents_memory_format_impl, backend
             )
@@ -12075,6 +12075,8 @@ class GradsNoForceContiguousContextManager(ContextDecorator):
 
 
 class TestAOTModuleSimplified(AOTTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -12637,17 +12639,6 @@ Expected a .* tangent but got a plain Tensor.""",
         aot_eager = torch.compile(backend="aot_eager")(fn)(x)
         self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_rms_norm(self):
-        # Only CUDA rms norm fails to be decomposed
-        def fn(x):
-            return F.rms_norm(x, normalized_shape=(8,))
-
-        x = torch.randn(2, 4, 8, device="cuda")
-        eager = fn(x)
-        aot_eager = torch.compile(backend="aot_eager")(fn)(x)
-        self.assertEqual(eager, aot_eager, atol=0, rtol=0)
-
     def test_subclass_parameters(self):
         class _M(torch.nn.Module):
             def __init__(self):
@@ -12812,13 +12803,126 @@ Expected a .* tangent but got a plain Tensor.""",
         y.backward(grad)
         self.assertEqual(ref_x.grad, x.grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @parametrize("freed_hook", ["pack", "unpack"])
+    def test_saved_tensors_hooks_freed_invalidates_cache_entry(self, freed_hook):
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+        from torch._dynamo.testing import CompileCounter
+
+        def pack(x):
+            return x * 2
+
+        def unpack(x):
+            return x / 2
+
+        def make_hooks():
+            return list(
+                saved_tensors_hooks_to_gm(pack, unpack, "pack_hash", "unpack_hash")
+            )
+
+        def fn(x):
+            return x.sin()
+
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3, requires_grad=True)
+        hooks = make_hooks()
+        for _ in range(2):
+            with torch.autograd.graph.saved_tensors_hooks(*hooks):
+                opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        annotations = [e.trace_annotation for e in _debug_get_cache_entry_list(fn)]
+        self.assertEqual(len(annotations), 1)
+        self.assertNotEqual(annotations[0], "Invalidated")
+
+        # New hooks can be allocated at a freed hook's address, so freeing
+        # either hook must invalidate the entry instead of leaving it reachable.
+        i = ("pack", "unpack").index(freed_hook)
+        hooks[i] = None
+        gc.collect()
+        self.assertEqual(
+            [e.trace_annotation for e in _debug_get_cache_entry_list(fn)],
+            ["Invalidated"],
+        )
+
+        # Replace only the freed hook: if the new one reused the freed address,
+        # the stale entry's guard would still pass.
+        hooks[i] = make_hooks()[i]
+        with torch.autograd.graph.saved_tensors_hooks(*hooks):
+            opt_fn(x)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @torch._functorch.config.patch(donated_buffer=True)
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
+    def test_saved_tensors_hooks_donated_buffers(self):
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack_fp8,
+            unpack_fp8,
+            "pack_hash",
+            "unpack_hash",
+        )
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
+
+        class SAF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                (saved_x,) = ctx.saved_tensors
+                return gx + saved_x
+
+        def fn(x):
+            x0 = x
+            x = SAF.apply(x)
+            return x0, torch.nn.functional.relu(x)
+
+        inp = torch.rand([3, 3], requires_grad=True)
+        # 1. No donated buffers without hooks, as relu saves input which is also user output.
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            out = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=False)(
+                inp
+            )
+            out[1].sum().backward()
+            expected_msg = "bw_donated_idxs=[]"
+
+        FileCheck().check(expected_msg).run("\n".join(captured.output))
+
+        # 2. Hooks applied for all saved, as we set saved_tensors_hooks_no_filtering=True
+        # Results of the hooks become donated buffers.
+        inp = torch.rand([3, 3], requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
+            with self.assertLogs(logger_name, level="INFO") as captured:
+                out = torch.compile(
+                    fn, backend="aot_eager", fullgraph=True, dynamic=False
+                )(inp)
+                out[1].sum().backward()
+                expected_msg = "bw_donated_idxs=[0, 1]"
+
+        FileCheck().check(expected_msg).run("\n".join(captured.output))
+
+
+class TestAOTModuleSimplifiedDevice(AOTTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_rms_norm(self, device):
+        # Only CUDA rms norm fails to be decomposed
+        def fn(x):
+            return F.rms_norm(x, normalized_shape=(8,))
+
+        x = torch.randn(2, 4, 8, device=device)
+        eager = fn(x)
+        aot_eager = torch.compile(backend="aot_eager")(fn)(x)
+        self.assertEqual(eager, aot_eager, atol=0, rtol=0)
+
     @parametrize("dynamic_shapes", [True, False])
     @parametrize("test_subclasses", [True, False])
-    @parametrize("device", ["cuda", "cpu"])
     @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     def test_noncontig_nonmemformat_tangents(
-        self, dynamic_shapes, test_subclasses, device
+        self, device, dynamic_shapes, test_subclasses
     ):
         B = 2
         T = 4
@@ -12882,9 +12986,9 @@ Expected a .* tangent but got a plain Tensor.""",
 
             self.assertEqual(ref_x.grad, x.grad)
 
+    @onlyAccelerator
     @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_flex_attn_noncontiguous_tangents(self):
+    def test_flex_attn_noncontiguous_tangents(self, device):
         with GradsNoForceContiguousContextManager() as ctx:
             E = 16  # embedding dim
             H = 4  # number of heads
@@ -12911,12 +13015,12 @@ Expected a .* tangent but got a plain Tensor.""",
 
                     return y.transpose(1, 2).contiguous().view(B, T, E)
 
-            m = M().cuda()
+            m = M().to(device)
             B = 1
             T = 8
 
             def _inp():
-                return torch.randn(B, T, E, requires_grad=True, device="cuda")
+                return torch.randn(B, T, E, requires_grad=True, device=device)
 
             x = _inp()
             y = m(x)
@@ -12988,10 +13092,10 @@ Expected a .* tangent but got a plain Tensor.""",
             x_grad = pytree.tree_map_only(torch.Tensor, lambda t: t.grad, x)
             self.assertEqual(ref_x_grad, x_grad, atol=1e-2, rtol=1e-2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
+    @onlyAccelerator
+    @skipCUDAIf(not SM80OrLater, "bfloat16, float8")
     @parametrize("saved_tensors_hooks_filtering_mode", ["donated", "no_static", "all"])
-    def test_saved_tensors_hooks_base(self, saved_tensors_hooks_filtering_mode):
+    def test_saved_tensors_hooks_base(self, device, saved_tensors_hooks_filtering_mode):
         with patch(
             "torch._functorch.config.saved_tensors_hooks_filtering_mode",
             saved_tensors_hooks_filtering_mode,
@@ -13037,8 +13141,6 @@ Expected a .* tangent but got a plain Tensor.""",
                 x = x.t()
                 x = SAF.apply(x, y)
                 return x
-
-            device = torch.device("cuda:0")
 
             def inp_fn():
                 x = torch.ones(2, 2, device=device, requires_grad=True)
@@ -13139,9 +13241,9 @@ Expected a .* tangent but got a plain Tensor.""",
                 #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
                 # )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
-    def test_saved_tensors_hooks_params(self):
+    @onlyAccelerator
+    @skipCUDAIf(not SM80OrLater, "bfloat16, float8")
+    def test_saved_tensors_hooks_params(self, device):
         with torch.library._scoped_library("_test_aotdispatch_lib", "FRAGMENT") as lib:
             logged_shapes = []
             logged_dtypes = []
@@ -13155,7 +13257,7 @@ Expected a .* tangent but got a plain Tensor.""",
             def log_meta(x):
                 return x.clone()
 
-            for backend in ["CPU", "CUDA"]:
+            for backend in ["CPU", "CUDA", "XPU"]:
                 lib.impl(
                     "log",
                     log_impl,
@@ -13208,7 +13310,6 @@ Expected a .* tangent but got a plain Tensor.""",
                 logged_shapes.clear()
                 logged_dtypes.clear()
 
-            device = torch.device("cuda:0")
             m = M().to(device=device)
 
             def _test_m():
@@ -13262,10 +13363,10 @@ Expected a .* tangent but got a plain Tensor.""",
                 self.assertTrue([2, 2, 2] in logged_shapes)
                 self.assertTrue(torch.float64 in logged_dtypes)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
+    @onlyAccelerator
+    @skipCUDAIf(not SM80OrLater, "bfloat16, float8")
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")
-    def test_saved_tensors_hooks_recompile(self):
+    def test_saved_tensors_hooks_recompile(self, device):
         ctx = torch.autograd.graph.saved_tensors_hooks
 
         def pack_bf16(x):
@@ -13312,8 +13413,6 @@ Expected a .* tangent but got a plain Tensor.""",
                 x = AF.apply(x)
                 return x
 
-            device = torch.device("cuda:0")
-
             def inp_fn():
                 x = torch.ones(2, 3, device=device, requires_grad=True)
                 torch._dynamo.mark_dynamic(x, 0)
@@ -13359,106 +13458,6 @@ Expected a .* tangent but got a plain Tensor.""",
             inline=True,
             expected_compile_count=3,
         )
-
-    @parametrize("freed_hook", ["pack", "unpack"])
-    def test_saved_tensors_hooks_freed_invalidates_cache_entry(self, freed_hook):
-        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
-        from torch._dynamo.testing import CompileCounter
-
-        def pack(x):
-            return x * 2
-
-        def unpack(x):
-            return x / 2
-
-        def make_hooks():
-            return list(
-                saved_tensors_hooks_to_gm(pack, unpack, "pack_hash", "unpack_hash")
-            )
-
-        def fn(x):
-            return x.sin()
-
-        torch._dynamo.reset()
-        cnt = CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
-        x = torch.randn(3, requires_grad=True)
-        hooks = make_hooks()
-        for _ in range(2):
-            with torch.autograd.graph.saved_tensors_hooks(*hooks):
-                opt_fn(x)
-        self.assertEqual(cnt.frame_count, 1)
-        annotations = [e.trace_annotation for e in _debug_get_cache_entry_list(fn)]
-        self.assertEqual(len(annotations), 1)
-        self.assertNotEqual(annotations[0], "Invalidated")
-
-        # New hooks can be allocated at a freed hook's address, so freeing
-        # either hook must invalidate the entry instead of leaving it reachable.
-        i = ("pack", "unpack").index(freed_hook)
-        hooks[i] = None
-        gc.collect()
-        self.assertEqual(
-            [e.trace_annotation for e in _debug_get_cache_entry_list(fn)],
-            ["Invalidated"],
-        )
-
-        # Replace only the freed hook: if the new one reused the freed address,
-        # the stale entry's guard would still pass.
-        hooks[i] = make_hooks()[i]
-        with torch.autograd.graph.saved_tensors_hooks(*hooks):
-            opt_fn(x)
-        self.assertEqual(cnt.frame_count, 2)
-
-    @torch._functorch.config.patch(donated_buffer=True)
-    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
-    def test_saved_tensors_hooks_donated_buffers(self):
-        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
-            pack_fp8,
-            unpack_fp8,
-            "pack_hash",
-            "unpack_hash",
-        )
-        logger_name = "torch._functorch._aot_autograd.graph_compile"
-
-        class SAF(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                ctx.save_for_backward(x)
-                return x
-
-            @staticmethod
-            def backward(ctx, gx):
-                (saved_x,) = ctx.saved_tensors
-                return gx + saved_x
-
-        def fn(x):
-            x0 = x
-            x = SAF.apply(x)
-            return x0, torch.nn.functional.relu(x)
-
-        inp = torch.rand([3, 3], requires_grad=True)
-        # 1. No donated buffers without hooks, as relu saves input which is also user output.
-        with self.assertLogs(logger_name, level="INFO") as captured:
-            out = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=False)(
-                inp
-            )
-            out[1].sum().backward()
-            expected_msg = "bw_donated_idxs=[]"
-
-        FileCheck().check(expected_msg).run("\n".join(captured.output))
-
-        # 2. Hooks applied for all saved, as we set saved_tensors_hooks_no_filtering=True
-        # Results of the hooks become donated buffers.
-        inp = torch.rand([3, 3], requires_grad=True)
-        with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
-            with self.assertLogs(logger_name, level="INFO") as captured:
-                out = torch.compile(
-                    fn, backend="aot_eager", fullgraph=True, dynamic=False
-                )(inp)
-                out[1].sum().backward()
-                expected_msg = "bw_donated_idxs=[0, 1]"
-
-        FileCheck().check(expected_msg).run("\n".join(captured.output))
 
 
 # entries in here don't work and need to be fixed.
@@ -14250,6 +14249,13 @@ instantiate_parametrized_tests(TestPartitioning)
 instantiate_device_type_tests(TestPartitioningDevice, globals(), allow_xpu=True)
 
 instantiate_parametrized_tests(TestAOTModuleSimplified)
+instantiate_device_type_tests(
+    TestAOTModuleSimplifiedDevice,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
+
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
 
