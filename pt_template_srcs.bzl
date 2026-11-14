@@ -87,22 +87,6 @@ METAL_MASKRCNN_SOURCE_LIST = [
     "maskrcnn/srcs/RoIAlign.mm",
 ]
 
-# The get_template_source_dict() returns a dict containing a path prefix
-# and a list of .cpp source files containing operator definitions and
-# registrations that should get selected via templated selective build.
-# The file selected_mobile_ops.h has the list of selected top level
-# operators.
-# NB: doesn't include generated files; copy_template_registration_files
-# handles those specially
-def get_template_source_dict():
-    ret = {}
-    for file_path in TEMPLATE_SOURCE_LIST:
-        path_prefix = paths.dirname(file_path)
-        if path_prefix not in ret:
-            ret[path_prefix] = []
-        ret[path_prefix].append(file_path)
-    return ret
-
 def get_gen_oplist_outs():
     return {
         "SupportedMobileModelsRegistration.cpp": [
@@ -185,9 +169,6 @@ def get_template_registration_files_outs(is_oss = False):
         for file_path in TEMPLATE_BATCH_BOX_COX_SOURCE_LIST:
             outs[file_path] = [file_path]
 
-    for file_path in TEMPLATE_SOURCE_LIST:
-        outs[file_path] = [file_path]
-
     for base_name in aten_ufunc_generated_all_cpu_sources():
         file_path = "aten/src/ATen/{}".format(base_name)
         outs[file_path] = [file_path]
@@ -196,8 +177,9 @@ def get_template_registration_files_outs(is_oss = False):
 
 def get_template_registration_file_rules(rule_name, is_oss = False):
     rules = []
-    for file_path in TEMPLATE_SOURCE_LIST if is_oss else (TEMPLATE_SOURCE_LIST + TEMPLATE_MASKRCNN_SOURCE_LIST + TEMPLATE_BATCH_BOX_COX_SOURCE_LIST):
-        rules.append(":{}[{}]".format(rule_name, file_path))
+    if not is_oss:
+        for file_path in TEMPLATE_MASKRCNN_SOURCE_LIST + TEMPLATE_BATCH_BOX_COX_SOURCE_LIST:
+            rules.append(":{}[{}]".format(rule_name, file_path))
     for file_path in aten_ufunc_generated_all_cpu_sources():
         rules.append(":{}[aten/src/ATen/{}]".format(rule_name, file_path))
 
