@@ -7341,7 +7341,8 @@ class TestCppFakeTensorModeBindings(TestCase):
     @parametrize("active", [False, True])
     @parametrize("python_dispatcher", [False, True])
     @parametrize(
-        "implementation", ["meta", "python_meta", "python_cia", "declining_python_cia"]
+        "implementation",
+        ["meta", "python_meta", "python_fake", "python_cia", "declining_python_cia"],
     )
     @fake_tensor_modes
     def test_fake_fallback_unsets_mode_in_meta_kernel(
@@ -7369,22 +7370,29 @@ class TestCppFakeTensorModeBindings(TestCase):
             seen.append(("python_meta", x.is_meta, torch._guards.active_fake_mode()))
             return x.new_empty(x.shape)
 
+        def python_fake_impl(fake_mode, x):
+            self.assertIs(fake_mode, mode)
+            seen.append(("python_fake", x.is_meta, torch._guards.active_fake_mode()))
+            return x.new_empty(x.shape)
+
         with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
             lib.define("probe(Tensor x) -> Tensor")
             lib.impl(
                 "probe",
                 meta_impl,
                 "Meta"
-                if implementation in ("meta", "python_meta")
+                if implementation in ("meta", "python_meta", "python_fake")
                 else "CompositeImplicitAutograd",
             )
             op = torch.ops._test_fake_fallback.probe.default
             if implementation == "python_meta":
                 op.py_impl(torch._C.DispatchKey.Meta)(python_meta_impl)
+            elif implementation == "python_fake":
+                op.py_impl(FakeTensorMode)(python_fake_impl)
             # Export writes py_kernels directly, bypassing the PythonCIA table.
             overrides = (
                 {}
-                if implementation in ("meta", "python_meta")
+                if implementation in ("meta", "python_meta", "python_fake")
                 else {torch._C.DispatchKey.CompositeImplicitAutograd: python_impl}
             )
             with (
@@ -7407,11 +7415,13 @@ class TestCppFakeTensorModeBindings(TestCase):
                 self.assertEqual(self._installed(), before)
         expected = (
             []
-            if implementation in ("meta", "python_meta")
+            if implementation in ("meta", "python_meta", "python_fake")
             else [("python", False, mode)]
         )
         if declines_in_meta:
             expected.append(("python", True, None))
+        elif implementation == "python_fake" and python_dispatcher:
+            expected.append(("python_fake", False, None))
         elif implementation != "python_cia":
             selected_meta = (
                 "python_meta"
