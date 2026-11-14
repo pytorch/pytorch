@@ -3962,9 +3962,8 @@ class FakeTensorMode(TorchDispatchMode):
                     else fake_tensor_tls.allow_non_fake_inputs_override
                 )
                 if not allow_non_fake_inputs:
-                    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-                        # pyrefly: ignore [missing-attribute]
-                        x_fake_mode = x.fake_mode
+                    if is_fake_tensor(x):
+                        x_fake_mode = maybe_get_fake_mode(x)
                         if x_fake_mode is not self:
                             raise AssertionError(
                                 f"Mixing fake modes NYI x.fake_mode={x_fake_mode} vs self={self}"
