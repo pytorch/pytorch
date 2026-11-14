@@ -549,18 +549,28 @@ class RegionDiscoveryTest(TestCase):
             regional_aoti._find_marked_regions(root)
 
     def test_discovery_skips_and_marking_rejects_jit_modules(self):
+        class ScriptModuleSubclass(torch.jit.ScriptModule):
+            pass
+
         example = torch.randn(1, 8)
         model = nn.Module()
-        model.scripted = torch.jit.script(nn.Linear(8, 8))
-        model.traced = torch.jit.trace(nn.Linear(8, 8), example)
-        model.copied = copy.deepcopy(torch.jit.script(nn.Linear(8, 8)))
+        # Scripted and traced modules share the ScriptModule subclass guard.
+        # Exercise it with retained public construction, not retired compilers.
+        model.scripted = torch.jit.ScriptModule()
+        model.subclassed = ScriptModuleSubclass()
+        for target in (model.scripted, model.subclassed):
+            target.define("def forward(self, x: Tensor) -> Tensor:\n    return x\n")
+        model.copied = copy.deepcopy(model.scripted)
+        for target in (model.scripted, model.subclassed, model.copied):
+            self.assertEqual(target(example), example)
         self.assertEqual(regional_aoti._find_marked_regions(model), [])
 
         for target in (
             model.scripted,
-            model.traced,
+            model.subclassed,
             model.copied,
             torch.jit.ScriptModule,
+            ScriptModuleSubclass,
         ):
             with self.subTest(target=target):
                 with self.assertRaisesRegex(TypeError, "TorchScript"):
