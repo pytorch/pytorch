@@ -2561,6 +2561,28 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @fake_tensor_modes
+    @parametrize("op", ["detach", "shallow_copy_data"])
+    @parametrize("symbolic", [False, True])
+    def test_metadata_copy(self, device, mode_cls, op, symbolic):
+        mode = mode_cls(shape_env=ShapeEnv() if symbolic else None)
+        source = mode.from_tensor(torch.arange(3.0, device=device))
+        target = mode.from_tensor(torch.zeros(3, device=device))
+        with mode:
+            result = (
+                source.detach()
+                if op == "detach"
+                else aten.shallow_copy_data_.default(target, source)
+            )
+            source.unsqueeze_(0)
+            self.assertEqual(result.shape, (3,))
+            output = result.sin()
+        if mode.propagate_real_tensors:
+            expected = torch.arange(3.0, device=device)
+            self.assertEqual(maybe_get_real_tensor(result), expected)
+            self.assertEqual(maybe_get_real_tensor(output), expected.sin())
+
     @onlyAccelerator
     def test_accelerator_initialized(self, device):
         # doesn't error

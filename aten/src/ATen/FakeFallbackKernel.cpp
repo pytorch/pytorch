@@ -588,18 +588,21 @@ void fakeFallback(
   if (metadata_copy) {
     // These kernels only copy metadata. Run them on the fakes directly so
     // shallow_copy_data_ never replaces an existing fake inside a Meta kernel.
-    c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
-        {c10::DispatchKey::Fake,
-         c10::DispatchKey::Python,
-         c10::DispatchKey::PreDispatch,
-         c10::DispatchKey::PythonTLSSnapshot}));
-    auto self = (*stack)[arguments_begin].toTensor();
-    auto result = schema.name() == "aten::detach"
-        ? at::impl::fake_detach(self)
-        : at::impl::fake_shallow_copy_data_(
-              self, (*stack)[arguments_begin + 1].toTensor());
-    torch::jit::drop(*stack, num_arguments);
-    torch::jit::push(*stack, std::move(result));
+    {
+      c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
+          {c10::DispatchKey::Fake,
+           c10::DispatchKey::Python,
+           c10::DispatchKey::PreDispatch,
+           c10::DispatchKey::PythonTLSSnapshot}));
+      auto self = (*stack)[arguments_begin].toTensor();
+      auto result = schema.name() == "aten::detach"
+          ? at::impl::fake_detach(self)
+          : at::impl::fake_shallow_copy_data_(
+                self, (*stack)[arguments_begin + 1].toTensor());
+      torch::jit::drop(*stack, num_arguments);
+      torch::jit::push(*stack, std::move(result));
+    }
+    maybe_propagate_real_tensors();
     return;
   }
   // Mirror FakeTensor._find_common_device, with the device preference captured
