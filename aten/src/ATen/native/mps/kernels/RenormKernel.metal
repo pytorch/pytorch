@@ -7,10 +7,9 @@ kernel void renorm(
     device T* factor [[buffer(1)]],
     constant float& maxnorm [[buffer(2)]],
     uint index [[thread_position_in_grid]]) {
-  constexpr auto eps = static_cast<T>(1e-7);
   constexpr T one = 1;
   factor[index] = norm[index] > maxnorm
-      ? static_cast<T>(maxnorm / (norm[index] + eps))
+      ? static_cast<T>(maxnorm / norm[index])
       : one;
 }
 
