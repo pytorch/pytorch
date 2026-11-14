@@ -174,6 +174,7 @@ struct ConcretePyInterpreterVTable final
   bool fake_try_custom_op_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
       PyObject* real) const override;
   bool fake_try_op_impl(
       const c10::OperatorHandle& op,
@@ -1345,17 +1346,17 @@ bool ConcretePyInterpreterVTable::fake_try_meta(
 bool ConcretePyInterpreterVTable::fake_try_custom_op_impl(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
+    const std::shared_ptr<c10::FakeTensorMode>& mode,
     PyObject* real) const {
   py::gil_scoped_acquire gil;
   py::handle py_op = getTorchApiFunction(op);
-  auto active = get_active_fake_mode();
+  py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
   py::handle py_real = real ? py::handle(real) : py::none();
   return run_fake_python_callback(
       op,
       stack,
       [&](const py::object& args, const py::dict& kwargs) {
-        return get_run_fake_impl()(
-            active.py_fake_mode, py_op, args, kwargs, py_real);
+        return get_run_fake_impl()(py_mode, py_op, args, kwargs, py_real);
       },
       /*convert=*/{},
       "fake_impl");
