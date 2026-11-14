@@ -192,7 +192,9 @@ remat_using_tags_for_fwd_loss_bwd_graph = True
 # This knob controls the partitioner to make that tradeoff for you, choosing the
 # fastest option that saves less activations than the memory budget.
 # Specifically, 0.0 corresponds to the activation memory from applying
-# activation checkpointing to the full compiled region, and 1.0 corresponds to
+# activation checkpointing to the full compiled region (except that reads of
+# inputs the forward mutates are still saved, see
+# unsafe_allow_recompute_of_mutated_input_reads), and 1.0 corresponds to
 # the activation memory from the default runtime-optimized strategy.  So, 0.4
 # would result in a strategy that saves 40% of the activations compared to the
 # default strategy.
@@ -411,6 +413,14 @@ strict_autograd_cache = False
 # to broadcast information across ranks at compile time to ensure
 # that any decisions on collectives are made consistently.
 unsafe_allow_optimization_of_collectives = False
+
+# The partitioners save, rather than recompute, the forward reads of an input the
+# forward mutates, since a recompute in the backward would see the mutated value.
+# This holds at activation_memory_budget=0 and overrides PREFER_RECOMPUTE tags from
+# activation checkpointing, so it can save more than full checkpointing would.
+# Setting this to True restores recomputing such reads, which may give wrong
+# gradients.
+unsafe_allow_recompute_of_mutated_input_reads = False
 
 # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
 # TODO(ivankobzarev): Remove this config, being able to deduce it compile time.
