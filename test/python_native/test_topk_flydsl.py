@@ -8,6 +8,7 @@ from torch._native import flydsl_utils as fu
 from torch._native.ops.topk.flydsl_impl import (
     _REGISTER_KS as _impl_register_ks,
     _SUPPORTED_ARCHES,
+    _SUPPORTED_DTYPES,
 )
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -24,47 +25,62 @@ _REGISTER_KS = tuple(sorted(_impl_register_ks))
 # Radix sort-length padding edges; baseline (K, N) correctness lives in OpInfo.
 _RADIX_PADDING_KS = (65, 129, 513)
 # One K per radix gate row, plus the register gate, to cover each N ceiling.
-_GATE_MAX_N_KS = (max(_REGISTER_KS), 64, 257, 384, 1024)
+_GATE_MAX_N_KS = (max(_REGISTER_KS), 64, 257, 513)
 
 
-def _gate_n_bounds(k: int) -> tuple[int, int]:
+def _gate_n_bounds(k: int, dtype: torch.dtype = torch.float32) -> tuple[int, int]:
     from torch._native.ops.topk.flydsl_impl import _radix_n_range, _REGISTER_N_BOUNDS
 
     if k in _REGISTER_KS:
-        return _REGISTER_N_BOUNDS
-    n_range = _radix_n_range(k)
+        n_range = _REGISTER_N_BOUNDS.get(dtype)
+        if n_range is None:
+            raise AssertionError(f"missing register gate for dtype={dtype}")
+        return n_range
+    n_range = _radix_n_range(k, dtype)
     if n_range is None:
-        raise AssertionError(f"missing radix gate for K={k}")
+        raise AssertionError(f"missing radix gate for K={k} dtype={dtype}")
     return n_range
 
 
-def _test_n(k: int) -> int:
-    return _gate_n_bounds(k)[0]
+def _test_n(k: int, dtype: torch.dtype = torch.float32) -> int:
+    return _gate_n_bounds(k, dtype)[0]
 
 
-def _test_n_max(k: int) -> int:
-    return _gate_n_bounds(k)[1]
+def _test_n_max(k: int, dtype: torch.dtype = torch.float32) -> int:
+    return _gate_n_bounds(k, dtype)[1]
 
 
 def _special_cols(n: int) -> tuple[int, ...]:
     return (0, n // 3 + 1, n // 2, 2 * n // 3 + 2, n - 1)
 
 
-def _expected_kernel(k: int, n: int) -> str:
+def _expected_kernel(k: int, n: int, dtype: torch.dtype = torch.float32) -> str:
     from torch._native.ops.topk.flydsl_impl import _kernel_for
 
-    kernel = _kernel_for(k, n)
+    kernel = _kernel_for(k, n, dtype)
     if kernel is None:
-        raise AssertionError(f"K={k} N={n} is outside the FlyDSL gate")
+        raise AssertionError(f"K={k} N={n} dtype={dtype} is outside the FlyDSL gate")
     return kernel
 
 
-def _test_m(device_index: int | None = None) -> int:
-    from torch._native.ops.topk.flydsl_impl import _min_rows_for_full_wave
+def _test_m(
+    k: int = 8,
+    dtype: torch.dtype = torch.float32,
+    device_index: int | None = None,
+) -> int:
+    from torch._native.ops.topk.flydsl_impl import (
+        _min_rows_for_full_wave,
+        _RADIX_MIN_CU_WAVES,
+        _REGISTER_MIN_CU_WAVES,
+    )
 
     if device_index is None:
         device_index = torch.cuda.current_device()
-    return max(256, _min_rows_for_full_wave(device_index))
+    min_rows = _min_rows_for_full_wave(device_index)
+    min_cu_waves = (
+        _REGISTER_MIN_CU_WAVES[dtype] if k in _REGISTER_KS else _RADIX_MIN_CU_WAVES
+    )
+    return max(256, min_rows * min_cu_waves)
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
@@ -93,17 +109,29 @@ class TestFlyDSLTopK(TestCase):
 
         self.assertEqual(topk_cache_info().misses, 0)
 
-    def _assert_topk_matches_aten(self, x: torch.Tensor, k: int) -> None:
+    def _assert_topk_matches_aten(
+        self, x: torch.Tensor, k: int, *, largest: bool = True
+    ) -> None:
         with pn.flydsl.disabled():
-            ref_v, _ = torch.topk(x, k, dim=-1)
-        got_v, got_i = torch.topk(x, k, dim=-1)
+            ref_v, _ = torch.topk(x, k, dim=-1, largest=largest)
+        got_v, got_i = torch.topk(x, k, dim=-1, largest=largest)
         self.assertEqual(got_v, ref_v)
         self.assertEqual(torch.gather(x, -1, got_i), got_v)
         if k >= 2:
+            if largest:
+                ordered = got_v[..., :-1] >= got_v[..., 1:]
+            else:
+                ordered = got_v[..., :-1] <= got_v[..., 1:]
             self.assertTrue(
-                (got_v[..., :-1] >= got_v[..., 1:]).all(),
-                "output is not descending",
+                ordered.all(),
+                f"output is not {'descending' if largest else 'ascending'}",
             )
+
+    def test_signed_int32_element_span(self):
+        from torch._native.ops.topk.flydsl_impl import _fits_topk_buffer_span
+
+        self.assertTrue(_fits_topk_buffer_span(4095, 524288, 1024, 1))
+        self.assertFalse(_fits_topk_buffer_span(4096, 524288, 1024, 1))
 
     @parametrize("k", _RADIX_PADDING_KS)
     def test_radix_sort_length_padding(self, k: int):
@@ -121,6 +149,26 @@ class TestFlyDSLTopK(TestCase):
         rows = _test_m() | 1
         x = make_tensor((rows, n), device="cuda", dtype=torch.float32)
         self._assert_topk_matches_aten(x, k)
+
+    def test_supported_dtypes_and_orderings(self):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        torch.manual_seed(13)
+        for dtype in _SUPPORTED_DTYPES:
+            for largest in (True, False):
+                for k in (8, 65):
+                    n = _test_n(k, dtype)
+                    rows = _test_m(k, dtype)
+                    kernel = _expected_kernel(k, n, dtype)
+                    with self.subTest(dtype=dtype, largest=largest, k=k, n=n):
+                        x = make_tensor(
+                            (rows, n),
+                            device="cuda",
+                            dtype=dtype,
+                        )
+                        misses = topk_cache_info(kernel).misses
+                        self._assert_topk_matches_aten(x, k, largest=largest)
+                        self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
 
     def test_3d_input(self):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
@@ -169,20 +217,61 @@ class TestFlyDSLTopK(TestCase):
         got_finite = got_v.masked_select(~got_v.isnan()).reshape(m, -1)
         self.assertEqual(got_finite, ref_finite)
 
+    def test_narrow_nan_payloads_are_reloaded(self):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        payloads = {
+            torch.float16: (0x7E01, 0xFE02 - (1 << 16)),
+            torch.bfloat16: (0x7FC1, 0xFFC2 - (1 << 16)),
+        }
+        for dtype, (positive_nan, negative_nan) in payloads.items():
+            for largest in (True, False):
+                for k in (8, 65):
+                    n = _test_n(k, dtype)
+                    m = _test_m(k, dtype)
+                    kernel = _expected_kernel(k, n, dtype)
+                    with self.subTest(dtype=dtype, largest=largest, k=k):
+                        x = torch.empty((m, n), device="cuda", dtype=dtype)
+                        x_bits = x.view(torch.int16)
+                        x_bits[:, 0::2] = positive_nan
+                        x_bits[:, 1::2] = negative_nan
+
+                        misses = topk_cache_info(kernel).misses
+                        got_v, got_i = torch.topk(x, k, largest=largest)
+                        gathered = torch.gather(x, -1, got_i)
+
+                        self.assertTrue(got_v.isnan().all())
+                        self.assertEqual(
+                            gathered.view(torch.int16), got_v.view(torch.int16)
+                        )
+                        self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
+
     def test_out_variant(self):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
         k = 704
         m = _test_m()
-        x = make_tensor((m, _test_n(k)), device="cuda", dtype=torch.float32)
-        with pn.flydsl.disabled():
-            ref_v, _ = torch.topk(x, k, dim=-1)
+        for dtype, largest in ((torch.float32, True), (torch.float16, False)):
+            with self.subTest(dtype=dtype, largest=largest):
+                x = make_tensor((m, _test_n(k)), device="cuda", dtype=dtype)
+                with pn.flydsl.disabled():
+                    ref_v, _ = torch.topk(x, k, dim=-1, largest=largest)
 
-        out_v = torch.empty(m, k, dtype=torch.float32, device="cuda")
-        out_i = torch.empty(m, k, dtype=torch.int64, device="cuda")
-        got_v, got_i = torch.topk(x, k, dim=-1, out=(out_v, out_i))
-        self.assertIs(got_v, out_v)
-        self.assertIs(got_i, out_i)
-        self.assertEqual(got_v, ref_v)
-        self.assertEqual(torch.gather(x, -1, got_i), got_v)
+                out_v = torch.empty(m, k, dtype=dtype, device="cuda")
+                out_i = torch.empty(m, k, dtype=torch.int64, device="cuda")
+                misses = topk_cache_info("radix").misses
+                got_v, got_i = torch.topk(
+                    x,
+                    k,
+                    dim=-1,
+                    largest=largest,
+                    out=(out_v, out_i),
+                )
+                self.assertIs(got_v, out_v)
+                self.assertIs(got_i, out_i)
+                self.assertEqual(got_v, ref_v)
+                self.assertEqual(torch.gather(x, -1, got_i), got_v)
+                self.assertEqual(topk_cache_info("radix").misses, misses + 1)
 
     def test_cow_out_dispatches_and_materializes(self):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
@@ -289,8 +378,7 @@ class TestFlyDSLTopK(TestCase):
     @parametrize(
         "case",
         (
-            "dtype",
-            "smallest",
+            "unsupported_dtype",
             "unsorted",
             "non_last_dim",
             "noncontiguous",
@@ -300,19 +388,16 @@ class TestFlyDSLTopK(TestCase):
     def test_unsupported_case_falls_through_without_compiling(self, case: str):
         rows = _test_m()
         if case == "too_few_rows":
-            from torch._native.ops.topk.flydsl_impl import _min_rows_for_full_wave
-
-            rows = _min_rows_for_full_wave(torch.cuda.current_device()) - 1
+            rows -= 1
         n = _test_n(8)
         shape = (n, rows) if case == "noncontiguous" else (rows, n)
-        dtype = torch.float16 if case == "dtype" else torch.float32
+        dtype = torch.float64 if case == "unsupported_dtype" else torch.float32
         x = make_tensor(shape, device="cuda", dtype=dtype)
         if case == "noncontiguous":
             x = x.transpose(0, 1)
         dim = 0 if case == "non_last_dim" else -1
-        largest = case != "smallest"
         sorted_ = case != "unsorted"
-        torch.topk(x, 8, dim=dim, largest=largest, sorted=sorted_)
+        torch.topk(x, 8, dim=dim, sorted=sorted_)
         self._assert_no_flydsl_compiles()
 
     def test_radix_non_multiple_of_four_n(self):
@@ -442,7 +527,7 @@ class TestFlyDSLTopK(TestCase):
             for index in (0, 1):
                 device = torch.device("cuda", index)
                 x = make_tensor(
-                    (_test_m(index), _test_n(k)),
+                    (_test_m(k, device_index=index), _test_n(k)),
                     device=device,
                     dtype=torch.float32,
                 )
