@@ -3584,6 +3584,30 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(f(x, other), f_compile(x, other))
                 self.assertTrue(called)
 
+    @torch._functorch.config.patch("donated_buffer", True)
+    @requires_gpu_and_triton
+    def test_reused_subgraph_square_backward(self, device):
+        @nested_compile_region
+        def region(x, weight):
+            return x / torch.sqrt(x.square().mean(dim=-1, keepdim=True) + 1e-5) * weight
+
+        def fn(x, weight1, weight2):
+            return region(x, weight1).sum() + region(x, weight2).sum()
+
+        inputs = (
+            torch.randn(4, 8, device=device, requires_grad=True),
+            torch.randn(1, 8, device=device, requires_grad=True),
+            torch.randn(1, 8, device=device, requires_grad=True),
+        )
+        compiled_inputs = tuple(
+            value.detach().clone().requires_grad_(True) for value in inputs
+        )
+
+        fn(*inputs).backward()
+        torch.compile(fn, fullgraph=True)(*compiled_inputs).backward()
+
+        self.assertEqual(inputs[0].grad, compiled_inputs[0].grad)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
@@ -3623,30 +3647,6 @@ class TestInvokeSubgraphCompileCUDA(TestCase):
 
         res = opt_fn(q, k, v)
         res.sum().backward()
-
-    @torch._functorch.config.patch("donated_buffer", True)
-    @requires_cuda_and_triton
-    def test_reused_subgraph_square_backward(self):
-        @nested_compile_region
-        def region(x, weight):
-            return x / torch.sqrt(x.square().mean(dim=-1, keepdim=True) + 1e-5) * weight
-
-        def fn(x, weight1, weight2):
-            return region(x, weight1).sum() + region(x, weight2).sum()
-
-        inputs = (
-            torch.randn(4, 8, device="cuda", requires_grad=True),
-            torch.randn(1, 8, device="cuda", requires_grad=True),
-            torch.randn(1, 8, device="cuda", requires_grad=True),
-        )
-        compiled_inputs = tuple(
-            value.detach().clone().requires_grad_(True) for value in inputs
-        )
-
-        fn(*inputs).backward()
-        torch.compile(fn, fullgraph=True)(*compiled_inputs).backward()
-
-        self.assertEqual(inputs[0].grad, compiled_inputs[0].grad)
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
