@@ -1133,6 +1133,46 @@ class TestLinalg(TestCase):
             run_test(shape, batch, uplo)
 
     @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @largeTensorTest("20GB", device="cuda")
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("batch_size", [64497, 65537, 200000])
+    @setLinalgBackendsToDefaultFinally
+    def test_eigh_batched_chunk_limits(self, device, dtype, batch_size):
+        torch.backends.cuda.preferred_linalg_library("cusolver")
+        matrix = torch.tensor([[1, 0.25, 0.5], [0.25, 2, 0.125], [0.5, 0.125, 4]], dtype=dtype)
+        matrix = matrix + torch.linspace(0, 1, batch_size, dtype=dtype)[:, None, None] * torch.eye(3, dtype=dtype)
+        expected_w, expected_v = torch.linalg.eigh(matrix)
+        matrix = matrix.to(device)
+        actual_w, actual_v = torch.linalg.eigh(matrix)
+        self.assertEqual(actual_w, expected_w)
+        self.assertEqual(actual_v.abs(), expected_v.abs(), atol=1e-5, rtol=1e-5)
+        self.assertEqual(matrix @ actual_v, actual_v * actual_w.unsqueeze(-2), atol=1e-5, rtol=1e-5)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @largeTensorTest("125GB", device="cuda")
+    @dtypes(torch.float64)
+    @setLinalgBackendsToDefaultFinally
+    def test_eigh_batched_chunk_limits_large_n(self, device, dtype):
+        torch.backends.cuda.preferred_linalg_library("cusolver")
+        matrix = torch.randn(129, 129, dtype=dtype)
+        matrix = matrix + matrix.mT
+        expected_w, expected_v = torch.linalg.eigh(matrix)
+        # Share the input storage to leave room for the cuSOLVER workspace.
+        matrix = matrix.to(device)
+        actual_w, actual_v = torch.linalg.eigh(matrix.expand(65536, -1, -1))
+        self.assertEqual(actual_w, expected_w.to(device).expand_as(actual_w))
+        indices = torch.tensor([0, 32767, 65534, 65535], device=device)
+        vectors = actual_v[indices]
+        self.assertEqual(vectors.abs(), expected_v.to(device).abs().expand_as(vectors))
+        self.assertEqual(matrix @ vectors, vectors * actual_w[indices].unsqueeze(-2))
+
+    @onlyCUDA
     @skipCUDAIfNotRocm
     @serialTest()
     def test_eigh_workspace_growth_with_full_caching_allocator(self, device):
