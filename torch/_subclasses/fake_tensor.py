@@ -373,8 +373,7 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 # for a pytype other than Tensor. So a caller that needs a Python
 # FakeTensorMode narrows the result with
 # torch._guards.require_python_fake_mode, which raises RuntimeError for a C++
-# mode. With use_cpp_fake_tensor enabled, FakeTensorMode(...) constructs a
-# CppFakeTensorMode, although its return annotation remains Self.
+# mode.
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
     """The fake mode of t, a Python FakeTensorMode or, for a C++ fake or a
     wrapper of one, a CppFakeTensorMode (see Note [Fake mode lookups and
@@ -1044,13 +1043,12 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         allow_fallback_kernels: bool = True,
         allow_non_fake_inputs: bool = False,
         static_shapes: bool | None = None,
-        export: bool = False,
     ) -> None:
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         super().__init__(
-            FakeTensorConverter(copy_data=copy_data, export=export, cpp_fakes=True),
+            FakeTensorConverter(copy_data=copy_data, cpp_fakes=True),
             shape_env,
             creation_traceback=CapturedTraceback.extract(),
         )
@@ -2586,16 +2584,6 @@ class FakeTensorMode(TorchDispatchMode):
             torch.nested._internal.nested_tensor._tensor_id_counter
         )
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
-
-    @functools.wraps(__init__, assigned=(), updated=())
-    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
-        import torch._dynamo.config
-
-        if cls is FakeTensorMode and torch._dynamo.config.use_cpp_fake_tensor:
-            # Returning an unrelated type skips FakeTensorMode.__init__.
-            # pyrefly: ignore [bad-return]
-            return CppFakeTensorMode(*args, **kwargs)
-        return super().__new__(cls)
 
     def reset_nt_tensor_id_counter(self) -> None:
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
