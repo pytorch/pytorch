@@ -3531,6 +3531,8 @@ def cross_entropy(
     reduce: bool | None = None,
     reduction: str = "mean",
     label_smoothing: float = 0.0,
+    # Not keyword-only: TorchScript can't compile keyword-only arguments with defaults.
+    dim: int | None = None,
 ) -> Tensor:
     r"""Compute the cross entropy loss between input logits and target.
 
@@ -3560,13 +3562,22 @@ def cross_entropy(
             of smoothing when computing the loss, where 0.0 means no smoothing. The targets
             become a mixture of the original ground truth and a uniform distribution as described in
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
+        dim (int, optional): The dimension of :attr:`input` that holds the classes. For example,
+            ``dim=-1`` takes logits of shape :math:`(N, d_1, d_2, ..., d_K, C)`, as produced by a
+            linear layer applied to a sequence. The loss is the same as with that dimension moved
+            to the default class dimension. Default: ``None``, which means dimension 1, or 0 for
+            unbatched input.
 
     Shape:
         - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
-          in the case of `K`-dimensional loss.
+          in the case of `K`-dimensional loss. If :attr:`dim` is given, :math:`C` is at that dimension instead.
         - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
           :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
+          If :attr:`dim` is given, the shape is that of the input with dimension :attr:`dim` removed.
           If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
+        - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
+          in the case of K-dimensional loss, depending on the shape of the input, or the shape of the input with
+          dimension :attr:`dim` removed if :attr:`dim` is given. Otherwise, scalar.
 
         where:
 
@@ -3589,6 +3600,12 @@ def cross_entropy(
         >>> target = torch.randn(3, 5).softmax(dim=1)
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
+        >>>
+        >>> # Example of input with the classes in the last dimension
+        >>> input = torch.randn(2, 4, 5, requires_grad=True)
+        >>> target = torch.randint(5, (2, 4), dtype=torch.int64)
+        >>> loss = F.cross_entropy(input, target, dim=-1)
+        >>> loss.backward()
     """
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
@@ -3602,10 +3619,64 @@ def cross_entropy(
             reduce=reduce,
             reduction=reduction,
             label_smoothing=label_smoothing,
+            dim=dim,
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    return torch._C._nn.cross_entropy_loss(
+    out_shape: list[int] | None = None
+    if dim is not None:
+        if not torch.jit.is_scripting():
+            # The dims ATen takes: ints, NumPy ints and 0-d integer tensors, but not bools.
+            if isinstance(dim, Tensor):
+                if (
+                    dim.dim() != 0
+                    or dim.dtype == torch.bool
+                    or dim.is_floating_point()
+                    or dim.is_complex()
+                ):
+                    raise TypeError(
+                        f"dim must be an int or None, got a {dim.dtype} tensor of shape {tuple(dim.shape)}"
+                    )
+            elif isinstance(dim, bool) or not _is_integer(dim):
+                raise TypeError(f"dim must be an int or None, got {type(dim)}")
+            if not isinstance(dim, (int, torch.SymInt)):
+                # A Python int, so the arithmetic below can't change the caller's tensor.
+                dim = int(dim)
+        ndim = input.dim()
+        # As in maybe_wrap_dim, a 0-d input takes the dims of a 1-d one.
+        wrap_ndim = max(ndim, 1)
+        if dim < -wrap_ndim or dim >= wrap_ndim:
+            raise IndexError(
+                f"Dimension out of range (expected to be in range of [{-wrap_ndim}, {wrap_ndim - 1}], but got {dim})"
+            )
+        if dim < 0:
+            dim += wrap_ndim
+        if ndim > 1 and dim != 1:
+            # Fold the dims before the classes into the batch dim, which leaves the classes
+            # at dim 1 and the dims after them as the K-dimensional loss dims. Unlike moving
+            # the class dim, this doesn't copy a contiguous input.
+            shape = input.shape[:dim] + input.shape[dim + 1 :]
+            if target.shape != input.shape and target.shape != shape:
+                # As aten::cross_entropy_loss with the classes at dim 1: a ValueError for a
+                # batch size mismatch, a RuntimeError for any other.
+                if target.dim() > 0 and target.shape[0] != shape[0]:
+                    raise ValueError(
+                        f"Expected input batch_size ({shape[0]}) to match target batch_size ({target.shape[0]})."
+                    )
+                raise RuntimeError(
+                    f"Expected target size {list(shape)}, got {list(target.shape)}"
+                )
+            if dim == 0:
+                # On CUDA, log_softmax over dim 1 of a (1, C, ...) view is several times
+                # slower than copying the input with the classes last, so move them there.
+                input = input.movedim(0, -1)
+                if target.dim() == ndim:
+                    target = target.movedim(0, -1)
+                dim = ndim - 1
+            input, target = input.flatten(0, dim - 1), target.flatten(0, dim - 1)
+            # pyrefly: ignore [bad-assignment]
+            out_shape = shape
+    loss = torch._C._nn.cross_entropy_loss(
         input,
         target,
         weight,
@@ -3614,6 +3685,9 @@ def cross_entropy(
         ignore_index,
         label_smoothing,
     )
+    if out_shape is not None and reduction == "none":
+        loss = loss.view(out_shape)
+    return loss
 
 
 def binary_cross_entropy(

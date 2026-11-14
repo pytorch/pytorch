@@ -23,6 +23,7 @@ from unittest import mock, SkipTest
 import torch
 from torch import inf, nan
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.utils._python_dispatch import TorchDispatchMode
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
@@ -5502,6 +5503,40 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_1 = torch.rand([5, 0], dtype=torch.float32)
         input_2 = torch.rand([5, 0], dtype=torch.float32)
         torch.nn.CrossEntropyLoss()(input_1, input_2)
+
+    def test_cross_entropy_loss_unpickle_without_dim(self):
+        # Modules pickled before `dim` was added have no such attribute.
+        loss = nn.CrossEntropyLoss()
+        del loss.dim
+        loss = pickle.loads(pickle.dumps(loss))
+        self.assertIsNone(loss.dim)
+        input, target = torch.randn(3, 5), torch.randint(5, (3,))
+        self.assertEqual(loss(input, target), F.cross_entropy(input, target))
+
+    def test_cross_entropy_loss_dim_torch_function(self):
+        class Subclass(torch.Tensor):
+            pass
+
+        input, target = torch.randn(2, 4, 5), torch.randint(5, (2, 4))
+        expected = F.cross_entropy(input, target, dim=-1)
+        self.assertEqual(F.cross_entropy(input.as_subclass(Subclass), target, dim=-1), expected)
+
+    @unittest.skipUnless(TEST_NUMPY, "requires numpy")
+    def test_cross_entropy_loss_dim_integer_types(self):
+        # The integer types ATen takes for a dim.
+        input, target = torch.randn(2, 4, 5), torch.randint(5, (2, 4))
+        expected = F.cross_entropy(input, target, dim=-1)
+        for dim in (
+            np.int64(-1),
+            np.int32(2),
+            torch.tensor(-1),
+            torch.tensor(2, dtype=torch.uint8),
+        ):
+            self.assertEqual(F.cross_entropy(input, target, dim=dim), expected)
+        # A tensor dim is read, not changed.
+        dim = torch.tensor(-1)
+        F.cross_entropy(input, target, dim=dim)
+        self.assertEqual(dim, torch.tensor(-1))
 
     def test_linear_cross_entropy_options_aspect_ratio_chunk_size(self):
         """Pin the aspect_ratio heuristic's chunk size for representative shapes.
@@ -12703,6 +12738,105 @@ class TestNNDeviceType(NNTestCase):
                 # Check that we correctly tally the denominator for `mean`
                 # i.e. we don't count the ignored_idx at all.
                 check_equal(loss, (inp1, targ_positive_ignore_index), (inp2[1:], targ_positive_ignore_index[1:]))
+
+    @parametrize_test('reduction', ['none', 'mean', 'sum'])
+    @parametrize_test('prob_target', [False, True])
+    def test_cross_entropy_loss_dim(self, device, reduction, prob_target):
+        # Compare with the default layout: the classes moved to dim 1 (dim 0 if unbatched).
+        C = 5
+        shapes_and_dims = [
+            ((C,), -1), ((3, C), -1), ((C, 3), 0), ((C, 3, 2, 2), 0), ((3, 4, C), -1), ((3, 4, C), 2),
+            ((3, C, 4, 2), -3), ((3, 4, C, 2), 2), ((2, 3, C, 2, 2), 2), ((3, 2, 4, C), -1),
+            ((0, 4, C), -1), ((3, 0, C, 2), 2),
+        ]
+        weight = torch.rand(C, device=device)
+        kwargs_list = [{}, {'weight': weight}, {'label_smoothing': 0.1}, {'weight': weight, 'label_smoothing': 0.1},
+                       {'reduce': False}]
+        if not prob_target:
+            kwargs_list += [{'ignore_index': 1}, {'weight': weight, 'ignore_index': 1},
+                            {'weight': weight, 'ignore_index': 1, 'label_smoothing': 0.1}]
+
+        for (shape, dim), kwargs in product(shapes_and_dims, kwargs_list):
+            class_dim = dim % len(shape)
+            default_dim = 0 if len(shape) == 1 else 1
+            input = torch.randn(shape, device=device, requires_grad=True)
+            if prob_target:
+                target = torch.randn(shape, device=device).softmax(class_dim)
+                default_target = target.movedim(class_dim, default_dim)
+            else:
+                target = torch.randint(C, shape[:class_dim] + shape[class_dim + 1:], device=device)
+                default_target = target
+
+            loss = F.cross_entropy(input, target, reduction=reduction, dim=dim, **kwargs)
+            expected = F.cross_entropy(
+                input.movedim(class_dim, default_dim), default_target, reduction=reduction, **kwargs)
+            self.assertEqual(loss, expected)
+            self.assertEqual(nn.CrossEntropyLoss(reduction=reduction, dim=dim, **kwargs)(input, target), expected)
+
+            grad, = torch.autograd.grad(loss.sum(), input)
+            expected_grad, = torch.autograd.grad(expected.sum(), input)
+            self.assertEqual(grad, expected_grad)
+
+    def test_cross_entropy_loss_dim_errors(self, device):
+        input = torch.randn(2, 3, 5, device=device)
+        target = torch.randint(5, (2, 3), device=device)
+        # The errors ATen raises for the same tensors with the classes at dim 1.
+        for x, dim in ((input, -1), (input.movedim(-1, 0), 0)):
+            with self.assertRaisesRegex(ValueError, r"Expected input batch_size \(2\) to match target batch_size \(3\)"):
+                F.cross_entropy(x, target.t(), dim=dim)
+            with self.assertRaisesRegex(RuntimeError, r"Expected target size \[2, 3\], got \[2, 4\]"):
+                F.cross_entropy(x, torch.randint(5, (2, 4), device=device), dim=dim)
+            with self.assertRaisesRegex(RuntimeError, r"Expected target size \[2, 3\], got \[\]"):
+                F.cross_entropy(x, target[0, 0], dim=dim)
+        with self.assertRaisesRegex(RuntimeError, r"Expected target size \[2, 3\], got \[2, 5, 3\]"):
+            F.cross_entropy(input, input.transpose(1, 2).softmax(1), dim=-1)
+        for dim in (3, -4):
+            with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+                F.cross_entropy(input, target, dim=dim)
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            F.cross_entropy(input[0, 0], target[0, 0], dim=1)
+        with self.assertRaisesRegex(IndexError, r"range of \[-1, 0\], but got 1"):
+            F.cross_entropy(input[0, 0, 0], target[0, 0], dim=1)
+        for dim in (True, 1.0, 2.0):
+            with self.assertRaisesRegex(TypeError, "dim must be an int or None"):
+                F.cross_entropy(input, target, dim=dim)
+            with self.assertRaisesRegex(TypeError, "dim must be an int or None"):
+                nn.CrossEntropyLoss(dim=dim)
+        for dim in (
+            torch.tensor(True),
+            torch.tensor([-1]),
+            torch.tensor([1, 2]),
+            torch.tensor(1.0),
+            torch.tensor(1 + 0j),
+        ):
+            with self.assertRaisesRegex(TypeError, "dim must be an int or None"):
+                F.cross_entropy(input, target, dim=dim)
+
+    def test_cross_entropy_loss_dim_log_softmax_input(self, device):
+        class LogSoftmaxInput(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.input = None
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten._log_softmax.default:
+                    self.input = args[0]
+                return func(*args, **(kwargs or {}))
+
+        # Only the dims before the classes are folded into the batch dim, so log_softmax reads
+        # the input's own memory.
+        for shape, dim in (((2, 3, 5), -1), ((2, 3, 5, 4), 2)):
+            input = torch.randn(shape, device=device)
+            target = torch.randint(5, input.select(dim, 0).shape, device=device)
+            with LogSoftmaxInput() as mode:
+                F.cross_entropy(input, target, dim=dim)
+            self.assertEqual(mode.input.data_ptr(), input.data_ptr())
+            self.assertTrue(mode.input.is_contiguous())
+
+        # Except for dim=0, which moves the classes last.
+        with LogSoftmaxInput() as mode:
+            F.cross_entropy(torch.randn(5, 3, device=device), torch.randint(5, (3,), device=device), dim=0)
+        self.assertEqual(mode.input.shape, (3, 5))
 
     # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyAccelerator
