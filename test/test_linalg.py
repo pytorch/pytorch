@@ -6018,6 +6018,27 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                     f(torch.empty(1, 2, 2), pivot=False)
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @skipIfTorchDynamo("Runtime error with torch._C._linalg.linalg_lu_factor")
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_lu_factor_batched_set_num_threads(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/142815
+        # The CPU kernel splits a batch of matrices across threads. After
+        # torch.set_num_threads(), MKL used to run a multithreaded getrf on each
+        # of those threads, which gave wrong factors from 150 x 150 on.
+        prev_num_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(4)
+            A = make_fullrank_matrices_with_distinct_singular_values(4, 256, 256, device=device, dtype=dtype)
+            LU, pivots, info = torch.linalg.lu_factor_ex(A)
+            self.assertEqual(info, torch.zeros_like(info))
+            P, L, U = torch.lu_unpack(LU, pivots)
+            self.assertEqual(P @ L @ U, A)
+        finally:
+            torch.set_num_threads(prev_num_threads)
+
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
