@@ -1012,7 +1012,6 @@ if HAS_CUDA_AND_TRITON:
                 # alignment and NaN checks are also left to the partitions.
                 self.assertNotIn("assert_size_stride", runner_call)
                 self.assertNotIn("assert_alignment", runner_call)
-                self.assertIsNone(self.get_manager())
             else:
                 self.assertNotIn("def partition_0", code)
                 FileCheck().check("assert_alignment(arg0_1").check(
@@ -4587,7 +4586,7 @@ if HAS_CUDA_AND_TRITON:
         @torch._inductor.config.patch("graph_partition", True)
         def test_wrapper_refuses_override_cudagraphs(self, cudagraphs, wrapper):
             # An annotation must not undo the wrapper's refusal. Ignoring it is
-            # logged, but only a refused triton.cudagraphs=True counts as a skip.
+            # a warning, but only a refused triton.cudagraphs=True counts as a skip.
             @torch._dynamo.override_cudagraphs(fwd=True)
             def foo(x):
                 return x.sin() + 1
@@ -4599,6 +4598,7 @@ if HAS_CUDA_AND_TRITON:
             with (
                 config.patch({"triton.cudagraphs": cudagraphs, wrapper: True}),
                 ctx(),
+                self.assertLogs("torch._inductor.compile_fx", "WARNING") as warned,
             ):
                 for _ in range(3):
                     t = torch.rand([32], device="cuda")
@@ -4611,11 +4611,27 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], int(cudagraphs))
             FileCheck().check(
                 f"ignoring override_cudagraphs annotation: {skip_reason}"
-            ).run(log_stream.getvalue())
+            ).run("\n".join(warned.output))
             if cudagraphs:
                 FileCheck().check(f"skipping cudagraphs due to {skip_reason}").run(
                     log_stream.getvalue()
                 )
+
+        @torch._inductor.config.patch(
+            {"graph_partition": True, "triton.cudagraphs": True}
+        )
+        def test_annotation_disable_skips_cudagraph_partitions(self):
+            # override_cudagraphs(fwd=False) turns capture off for this compile
+            # only, so its lowering must not split the graph for CUDA Graphs.
+            @torch._dynamo.override_cudagraphs(fwd=False)
+            def foo(x):
+                return x.sin() + 1
+
+            x = torch.rand([32], device="cuda")
+            out, (code,) = run_and_get_code(torch.compile(foo), x)
+            self.assertEqual(out, foo(x))
+            self.assertNotIn("def partition_0", code)
+            self.assertIsNone(self.get_manager())
 
         def test_storage_access_error(self):
             x = torch.rand([4], device="cuda")
@@ -5150,6 +5166,72 @@ if HAS_CUDA_AND_TRITON:
             self.assertIsNotNone(self.get_manager())
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
+        @parametrize("bwd", (True, False))
+        @torch._inductor.config.patch(
+            {"triton.cudagraphs": False, "graph_partition": True}
+        )
+        def test_cudagraph_annotation_enable_with_compile_options(self, bwd):
+            """override_cudagraphs(fwd=True) still enables cudagraphs, and graph
+            partition still splits off the CPU op, when torch.compile is given
+            options={"triton.cudagraphs": False}. bwd=False keeps backward out."""
+
+            @torch._dynamo.override_cudagraphs(fwd=True, bwd=bwd)
+            def helper(x, y):
+                return (x * x).sin(), y * 2
+
+            def fn(x, y):
+                return helper(x, y)
+
+            fn_compiled = torch.compile(fn, options={"triton.cudagraphs": False})
+
+            for _ in range(3):
+                x = torch.randn(4, 4, device="cuda", requires_grad=True)
+                y = torch.randn(4)
+                torch.compiler.cudagraph_mark_step_begin()
+                out = fn_compiled(x, y)
+                out[0].sum().backward()
+
+            self.assertEqual(out, (x.detach().pow(2).sin(), y * 2))
+            # bwd=False only adds the bwd-disable skip
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0 if bwd else 1)
+            self.assertIsNotNone(self.get_manager())
+            # Forward, plus backward when bwd=True
+            self.assertEqual(self.get_manager().new_graph_id().id, 2 if bwd else 1)
+
+        @torch._inductor.config.patch(
+            {"triton.cudagraphs": False, "graph_partition": True, "freezing": True}
+        )
+        def test_cudagraph_annotation_enable_freezing(self):
+            """override_cudagraphs(fwd=True) enables cudagraphs, and graph
+            partition splits off the CPU op, on the freezing inference path."""
+
+            @torch._dynamo.override_cudagraphs(fwd=True)
+            def helper(x, w, y):
+                return (x @ w).sin(), y * 2
+
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.param = torch.nn.Parameter(torch.randn(4, 4, device="cuda"))
+
+                def forward(self, x, y):
+                    return helper(x, self.param, y)
+
+            mod = Mod()
+            mod_compiled = torch.compile(mod)
+
+            with torch.no_grad():
+                for _ in range(3):
+                    x = torch.randn(4, 4, device="cuda")
+                    y = torch.randn(4)
+                    torch.compiler.cudagraph_mark_step_begin()
+                    out = mod_compiled(x, y)
+
+                self.assertEqual(out, ((x @ mod.param).sin(), y * 2))
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            self.assertIsNotNone(self.get_manager())
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_cudagraph_annotation_enable_fwd_bwd(self):
             """override_cudagraphs(fwd=True, bwd=True) force-enables cudagraphs
@@ -5204,10 +5286,10 @@ if HAS_CUDA_AND_TRITON:
             {"triton.cudagraphs": False, "graph_partition": True, "freezing": True}
         )
         @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
-        def test_cudagraph_annotation_enable_freezing(self):
+        def test_cudagraph_annotation_enable_freezing_nonzero(self):
             """override_cudagraphs(fwd=True) applies to a frozen inference graph
-            as to any other: the nonzero gets its own partition and the rest is
-            captured."""
+            as to any other: the nonzero is split off into call() and the
+            linear's partition is captured."""
 
             import torch._inductor.compile_fx as compile_fx
 
@@ -5686,6 +5768,19 @@ if HAS_CUDA_AND_TRITON:
             compiled_result = self.run_twc(compiled, example_input)
             eager_result = f(example_input)
             self.assertEqual(compiled_result, eager_result)
+
+        # cpp_wrapper skips cudagraphs with graph partitioning on.
+        @torch._inductor.config.patch({"cpp_wrapper": True, "graph_partition": False})
+        def test_cpp_wrapper_cpu_constant(self):
+            # The CPU constant is folded into a CUDA constant, so nothing runs
+            # on the CPU and the graph is still captured.
+            def f(x):
+                return x + torch.arange(16.0).view(4, 4).to(x.device)
+
+            compiled = torch.compile(f, mode="reduce-overhead")
+            x = torch.randn(4, 4, device="cuda")
+            self.assertEqual(self.run_twc(compiled, x), f(x))
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition(self):
