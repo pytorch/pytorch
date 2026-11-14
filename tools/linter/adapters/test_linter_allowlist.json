@@ -49,7 +49,6 @@
   "test/distributed/_shard/sharding_plan/test_sharding_plan.py",
   "test/distributed/_shard/sharding_spec/test_sharding_spec.py",
   "test/distributed/_shard/test_sharder.py",
-  "test/distributed/_tools/test_fake_collectives.py",
   "test/distributed/_tools/test_fsdp2_mem_tracker.py",
   "test/distributed/_tools/test_mem_tracker.py",
   "test/distributed/_tools/test_memory_tracker.py",
