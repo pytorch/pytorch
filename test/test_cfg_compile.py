@@ -1708,6 +1708,18 @@ class TestCfgCallees(TestCase):
             ):
                 compiled()
 
+    def test_recursion_limit_means_the_same_depth(self):
+        def count(n):
+            try:
+                return count(n + 1)
+            except RecursionError:
+                return n
+
+        # A compiled call uses up the limit as an interpreted one does: both
+        # get as deep, give or take the frames of the wrappers.
+        compiled = torch.cfg_compile(count, fallback=False)
+        self.assertLess(abs(compiled(0) - count(0)), 5)
+
     def test_recursion_deeper_than_the_native_stack(self):
         def depth(n):
             return 0 if n == 0 else 1 + depth(n - 1)
