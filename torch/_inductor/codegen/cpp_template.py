@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 class CppTemplate(KernelTemplate):
     index_counter = itertools.count()
+    supports_epilogue_fusion = True
 
     def __init__(
         self,
