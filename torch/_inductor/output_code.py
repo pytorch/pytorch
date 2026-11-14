@@ -559,6 +559,10 @@ class CompiledFxGraph(OutputCode):
     inductor_provenance_stack_traces_str: str | None
     kernel_free_cudagraph: bool
 
+    # Whether this graph was compiled with cudagraphs on; an AOTAutograd cache
+    # hit or a precompile load can post-compile it with a box that differs from
+    # the one it was compiled with.
+    compiled_with_cudagraphs: bool
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
     split_into_partitions: bool
@@ -660,6 +664,7 @@ class CompiledFxGraph(OutputCode):
         self.counter_deltas = counter_deltas
         self.guards_expr = None
         self.extern_libs_key = None
+        self.compiled_with_cudagraphs = bool(cudagraphs)
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
         self.split_into_partitions = graph.split_into_partitions
@@ -923,24 +928,16 @@ class CompiledFxGraph(OutputCode):
 
         handed_to_cudagraphs = False
         if cudagraphs:
-            # It's possible that cudagraphs is enabled, but was disabled
-            # during a previous compilation we're loading from the cache.
-            # If so, we need to disable it on this new process too.
-            if self.disabled_cudagraphs_reason:
-                if any(is_gpu(device) for device in self.device_types):
-                    log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
-                    )
-                else:
-                    counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(cudagraphs)
-            elif self.cudagraph_info is None:
-                # Compiled with cudagraphs off: this graph never requested capture,
-                # or compile_fx_inner dropped a region-only request, so treat it
-                # like a fresh compile would. Only a loader that shares the
-                # forward's box with the backward (AOTAutograd cache hit,
-                # precompile) gets here, so leave that box alone and continue with
-                # a local one.
+            if not self.compiled_with_cudagraphs:
+                # This graph never requested capture, or compile_fx_inner dropped
+                # a region-only request, so treat it like a fresh compile would,
+                # even if lowering recorded a disabled reason. Only a loader whose
+                # box is not the one this graph was compiled with gets here: an
+                # AOTAutograd cache hit (see CompilerConfigExtra.backward_cudagraphs)
+                # or a precompile load, e.g. for a backward whose request the
+                # pre-AOT graph overestimated, or a graph whose region-only request
+                # was dropped under cpp_wrapper/fx_wrapper/aot_mode. So leave that
+                # box alone and continue with a local one.
                 if reason := self.fx_kwargs.get("cudagraphs_dropped_reason"):
                     log_cudagraph_skip_and_bump_counter(reason)
                 else:
@@ -948,6 +945,17 @@ class CompiledFxGraph(OutputCode):
                         "not capturing a graph that was compiled without cudagraphs"
                     )
                 cudagraphs = BoxedBool(False)
+            # It's possible that cudagraphs is enabled, but was disabled
+            # during a previous compilation we're loading from the cache.
+            # If so, we need to disable it on this new process too.
+            elif self.disabled_cudagraphs_reason:
+                if any(is_gpu(device) for device in self.device_types):
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
+                    )
+                else:
+                    counters["inductor"]["cudagraph_skips"] += 1
+                BoxedBool.disable(cudagraphs)
             else:
                 handed_to_cudagraphs = True
                 if is_backward:
