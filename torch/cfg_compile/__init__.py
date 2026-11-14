@@ -26,7 +26,8 @@ dynamic. A pass can narrow a dimension to a range by attaching a guard; when
 such a guard fails, only the basic block that carries it is recompiled.
 
 What is compiled is described by a :class:`Pipeline`, an ordered list of
-passes that is run over each block until it stops changing.
+passes that is run over each block until it stops changing. Passes are
+built-in ones, named by a string, or Python callables taking a ``Region``.
 """
 
 import functools
@@ -34,7 +35,7 @@ import importlib
 import sys
 import types
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import torch
@@ -42,7 +43,7 @@ import torch
 
 __all__ = ["Pipeline", "Unsupported", "cfg_compile", "is_available"]
 
-Pass = str
+Pass = str | Callable[[Any], bool]
 
 
 class Unsupported(RuntimeError):
@@ -53,7 +54,11 @@ class Pipeline:
     """An ordered list of CFG passes.
 
     The passes run in order over a region of the graph, and the whole list is
-    repeated until no pass changes the region anymore. The passes are:
+    repeated until no pass changes the region anymore. A pass is the name of a
+    built-in pass or a callable ``pass_(region) -> bool`` that returns whether
+    it changed the region.
+
+    Built-in passes:
 
     - ``resolve_dispatch``: operations the profile found to be a single
       dispatcher call become direct calls of the post-dispatch kernel.
@@ -73,8 +78,8 @@ class Pipeline:
     def __init__(self, passes: Iterable[Pass]) -> None:
         self.passes: tuple[Pass, ...] = tuple(passes)
         for p in self.passes:
-            if not isinstance(p, str):
-                raise TypeError(f"a pass is the name of a built-in pass, not {type(p)}")
+            if not isinstance(p, str) and not callable(p):
+                raise TypeError(f"a pass is a name or a callable, not {type(p)}")
 
     @classmethod
     def default(cls) -> "Pipeline":
@@ -107,7 +112,11 @@ class Pipeline:
         return Pipeline([p for p in self.passes if p != name])
 
     def __repr__(self) -> str:
-        return f"Pipeline({list(self.passes)})"
+        names = [
+            p if isinstance(p, str) else getattr(p, "__name__", repr(p))
+            for p in self.passes
+        ]
+        return f"Pipeline({names})"
 
 
 _runtime: Any = None
