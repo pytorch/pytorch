@@ -186,16 +186,25 @@ def set_flags(
     return orig_flags
 
 
+# Distinguishes an omitted allow_tf32 from an explicit None (leave unchanged).
+_FLAGS_UNSET = object()
+
+
 @contextmanager
 def flags(
     enabled=False,
     benchmark=False,
     benchmark_limit=10,
     deterministic=False,
-    allow_tf32=True,
+    allow_tf32=_FLAGS_UNSET,
     fp32_precision="none",
     depthwise_kernel="auto",
 ):
+    # On CUDA, omitting allow_tf32 keeps the historical default of True.
+    # On ROCm, TF32 is opt-in, so an omitted argument leaves the current value
+    # alone. Passing None also leaves it unchanged on both platforms.
+    if allow_tf32 is _FLAGS_UNSET:
+        allow_tf32 = None if torch.version.hip is not None else True
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(
             enabled,
