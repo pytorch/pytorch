@@ -1314,13 +1314,16 @@ void FakeTensorMode::invalidate_constant_aliases(
     aliases = std::move(it->second.tensors);
     constant_storage_mapping_.erase(it);
   }
+  // Releasing a constant can run a finalizer that reenters the mode. Keep all
+  // constants alive until every alias is cleared, then release outside the
+  // mutex.
+  std::vector<c10::intrusive_ptr<c10::TensorImpl>> constants_to_release;
+  constants_to_release.reserve(aliases.size());
   for (const auto& weak_ref : aliases) {
     auto impl = weak_ref.lock();
     if (!impl) {
       continue;
     }
-    // Destruction can reenter the mode or acquire the GIL too.
-    c10::intrusive_ptr<c10::TensorImpl> constant;
     std::lock_guard guard(constant_mutex_);
     auto* extra_meta = impl->maybe_get_extra_meta();
     if (extra_meta == nullptr || !extra_meta->fake_constant_ ||
@@ -1329,7 +1332,7 @@ void FakeTensorMode::invalidate_constant_aliases(
             storage_impl) {
       continue;
     }
-    constant = std::move(extra_meta->fake_constant_);
+    constants_to_release.emplace_back(std::move(extra_meta->fake_constant_));
   }
 }
 

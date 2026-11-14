@@ -172,7 +172,6 @@ struct ConcretePyInterpreterVTable final
   void fake_raise_python_error(
       c10::impl::FakePythonError kind,
       const std::string& msg) const override;
-  bool fake_has_plain_tensor_type(const c10::TensorImpl* self) const override;
   void invalidate_written_to_constants(
       const c10::OperatorHandle& op,
       const torch::jit::Stack& stack,
@@ -208,7 +207,7 @@ struct ConcretePyInterpreterVTable final
   c10::intrusive_ptr<c10::TensorImpl> from_real_tensor(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       const c10::intrusive_ptr<c10::TensorImpl>& real,
-      bool make_constant) const override;
+      c10::impl::FakeTensorConversion conversion) const override;
   bool allow_non_fake_inputs(
       const std::shared_ptr<c10::FakeTensorMode>& mode) const override;
   PyObject* fake_run_real_op(
@@ -1276,14 +1275,6 @@ void ConcretePyInterpreterVTable::fake_raise_python_error(
   throw py::error_already_set();
 }
 
-bool ConcretePyInterpreterVTable::fake_has_plain_tensor_type(
-    const c10::TensorImpl* self) const {
-  py::gil_scoped_acquire gil;
-  PyObject* obj = self->pyobj_slot()->load_pyobj();
-  return obj == nullptr ||
-      Py_TYPE(obj) == reinterpret_cast<PyTypeObject*>(THPVariableClass);
-}
-
 void ConcretePyInterpreterVTable::invalidate_written_to_constants(
     const c10::OperatorHandle& op,
     const torch::jit::Stack& stack,
@@ -1569,11 +1560,19 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::
     from_real_tensor(
         const std::shared_ptr<c10::FakeTensorMode>& mode,
         const c10::intrusive_ptr<c10::TensorImpl>& real_impl,
-        bool make_constant) const {
+        c10::impl::FakeTensorConversion conversion) const {
+  using c10::impl::FakeTensorConversion;
   py::gil_scoped_acquire gil;
+  const bool only_plain_tensor =
+      conversion == FakeTensorConversion::PlainTensor ||
+      conversion == FakeTensorConversion::ClonedConstant;
   // Subclasses with custom dispatch run at Python before Fake.
   if (auto* obj = real_impl->pyobj_slot()->load_pyobj()) {
     auto* type = Py_TYPE(obj);
+    if (only_plain_tensor &&
+        type != reinterpret_cast<PyTypeObject*>(THPVariableClass)) {
+      return nullptr;
+    }
     TORCH_CHECK(
         type == reinterpret_cast<PyTypeObject*>(THPVariableClass) ||
             PyType_IsSubtype(
@@ -1582,6 +1581,21 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::
         type->tp_name);
   }
   at::Tensor real(real_impl);
+  if (conversion == FakeTensorConversion::ClonedConstant) {
+    if (!at::impl::may_turn_const(real)) {
+      return nullptr;
+    }
+    // Check before cloning: a clone can erase the original Python type.
+    // Keep the check, clone and conversion in the same GIL scope.
+    c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
+        {c10::DispatchKey::Python,
+         c10::DispatchKey::PreDispatch,
+         c10::DispatchKey::Fake,
+         c10::DispatchKey::PythonTLSSnapshot}));
+    real = real.clone();
+  }
+  const bool make_constant = conversion == FakeTensorConversion::Constant ||
+      conversion == FakeTensorConversion::ClonedConstant;
   py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
   auto converter = py::reinterpret_borrow<py::object>(
       mode->fake_tensor_converter_->ptr(getPyInterpreter()));
