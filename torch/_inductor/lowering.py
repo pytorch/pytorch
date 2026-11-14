@@ -259,6 +259,7 @@ add_needs_realized_inputs(
         aten.upsample_nearest2d,
         aten._upsample_nearest_exact2d,
         aten._int_mm,
+        aten._weight_int8pack_mm,
     ]
 )
 
