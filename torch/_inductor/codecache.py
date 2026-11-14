@@ -110,6 +110,7 @@ from torch._inductor.utils import (
     is_linux,
     is_windows,
     parallel_num_threads,
+    tensor_is_aligned,
     XPU_KERNEL_FORMAT,
 )
 from torch._library.fake_class_registry import FakeScriptObject
@@ -869,6 +870,10 @@ class FxGraphCachePickler(pickle.Pickler):
             CacheabilityValidator.check_tensor(t)
 
         metadata = extract_tensor_metadata_for_cache_key(t)
+        # Unlike graph inputs, constants cannot be realigned when loading a
+        # cached kernel. Preserve an offset that affects codegen alignment.
+        if not tensor_is_aligned(t):
+            metadata = dataclasses.replace(metadata, storage_offset=t.storage_offset())
         if self._device_id_agnostic:
             metadata = dataclasses.replace(
                 metadata, device=torch.device(metadata.device.type, 0)

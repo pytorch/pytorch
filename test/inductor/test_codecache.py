@@ -4299,6 +4299,21 @@ class TestFxGraphCacheHashing(TestCase):
         data = pickler.dumps(large)
         self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
+    def test_frozen_parameter_alignment_affects_cache_key(self):
+        storage = torch.ones(40, dtype=torch.float16)
+
+        def key(offset):
+            weight = torch.nn.Parameter(storage[offset : offset + 32])
+            weight._is_frozen_param = True
+            graph = torch.fx.Graph()
+            graph.output(graph.get_attr("_frozen_param0"))
+            gm = torch.fx.GraphModule({"_frozen_param0": weight}, graph)
+            gm._has_frozen_params = True
+            return self._fx_graph_cache_key(gm, [])
+
+        self.assertNotEqual(key(0), key(1))
+        self.assertEqual(key(0), key(8))
+
     def test_hash_fake_tensors(self):
         """
         Test hashing (pickling) FakeTensors with various characteristics.

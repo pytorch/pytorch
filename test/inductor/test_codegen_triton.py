@@ -1167,6 +1167,31 @@ def helper(x):
         self.assertEqual(options.expand_shape, ("XBLOCK", "R0_BLOCK"))
         self.assertIn(override_mask, options.mask_vars)
 
+    @parametrize(
+        "dtype,offset,aligned",
+        [
+            (torch.float16, 0, True),
+            (torch.float16, 1, False),
+            (torch.float16, 4, False),
+            (torch.float16, 8, True),
+            (torch.float32, 1, False),
+            (torch.float32, 4, True),
+        ],
+    )
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_config_of_constant_view_alignment(self, dtype, offset, aligned):
+        self._graph.constants["frozen_view"] = torch.empty(32, dtype=dtype)[
+            offset : offset + 8
+        ]
+        metadata = triton_utils.config_of([TensorArg("ptr", "frozen_view", dtype)])
+        if isinstance(metadata, dict):
+            has_alignment = ["tt.divisibility", 16] in metadata.get((0,), [])
+        elif hasattr(metadata, "divisibility_16"):
+            has_alignment = 0 in metadata.divisibility_16
+        else:
+            has_alignment = 0 in metadata.divisible_by_16
+        self.assertEqual(has_alignment, aligned)
+
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
         from torch._inductor.utils import (
