@@ -3057,6 +3057,16 @@ def compile_fx_backward(
             if placeholders[i].meta.get("is_static_input", True)
         ]
 
+        # Legacy non-tree CUDA graphs run an eager warm-up iteration on static inputs.
+        # Reusing donated buffers in-place mutates saved activations during warm-up,
+        # corrupting the first graph replay. Clear static input idxs for donated inputs (#203535).
+        if config.triton.cudagraphs and not config.triton.cudagraph_trees:
+            static_input_idxs = [
+                i
+                for i in static_input_idxs
+                if not placeholders[i].meta.get("is_donated_buffer", False)
+            ]
+
         # Record AOT output strides before fake_tensor_prop in compile_fx_inner,
         # which can already be channels-last for convolution_backward (#197514).
         _recursive_record_original_output_strides(gm)
