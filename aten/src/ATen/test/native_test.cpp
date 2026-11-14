@@ -16,6 +16,7 @@
 #endif
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/util/irange.h>
 
 #include <cstdint>
@@ -391,6 +392,42 @@ TEST(TestNative, FakeDetach) {
       EXPECT_FALSE(result.requires_grad());
       EXPECT_TRUE(input.requires_grad());
       EXPECT_FALSE(c10::impl::FakeTensorModeTLS::in_kernel_invocation());
+    }
+  }
+}
+
+TEST(TestNative, FakeTensorData) {
+  for (bool inference : {false, true}) {
+    c10::InferenceMode guard(inference);
+    for (bool share_version : {false, true}) {
+      auto mode = make_cpp_fake_mode();
+      auto input = at::empty({1}, at::device(at::kMeta));
+      input.set_requires_grad(true);
+      at::init_cpp_fake(input.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
+      auto constant = at::ones({1});
+      mode->set_constant(input.unsafeGetTensorImpl(), constant.getIntrusivePtr());
+
+      auto result = Tensor(share_version ? input.tensor_data() : input.variable_data());
+      EXPECT_TRUE(result.is_fake());
+      EXPECT_TRUE(result.is_alias_of(input));
+      EXPECT_FALSE(result.requires_grad());
+      EXPECT_EQ(result.is_inference(), inference);
+      auto result_constant = mode->get_constant(result.unsafeGetTensorImpl());
+      ASSERT_NE(result_constant, nullptr);
+      EXPECT_NE(result_constant.get(), constant.unsafeGetTensorImpl());
+      EXPECT_EQ(
+          result_constant->storage().unsafeGetStorageImpl(),
+          constant.storage().unsafeGetStorageImpl());
+      if (!inference) {
+        auto version = input._version();
+        result.unsafeGetTensorImpl()->bump_version();
+        EXPECT_EQ(input._version(), version + share_version);
+        EXPECT_EQ(result._version(), 1);
+      }
+
+      mode->invalidate_constant_aliases(constant.storage().unsafeGetStorageImpl());
+      EXPECT_EQ(mode->get_constant(input.unsafeGetTensorImpl()), nullptr);
+      EXPECT_EQ(mode->get_constant(result.unsafeGetTensorImpl()), nullptr);
     }
   }
 }
