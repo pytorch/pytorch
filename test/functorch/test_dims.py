@@ -484,6 +484,7 @@ class TestMin(TestBase):
         i = dims()
         self.assertEqual(list(A[i].expand(2, 4).order(i).size()), [3, 2, 4])
 
+    @unittest.skipIf(resnet18 is None, "no torchvision")
     def test_network(self):
         if resnet18 is None:
             self.skipTest("no torchvision")

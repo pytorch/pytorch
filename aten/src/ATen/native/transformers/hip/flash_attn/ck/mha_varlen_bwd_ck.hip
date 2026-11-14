@@ -597,11 +597,12 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
         dk = dk.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
         dv = dv.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
     }
+    // Undefined unless a bias gradient was requested: the kernel writes none otherwise
+    // (has_dbias is false), and a dense [b, h, max_s_q, max_s_k] placeholder could exceed
+    // device memory at long sequence lengths.
     at::Tensor dbias;
     if(bias_requires_grad) {
         dbias = grad_bias.value();
-    } else {
-        dbias = at::empty({batch_size, num_heads, max_seqlen_q, max_seqlen_k}, q.options());
     }
 
 

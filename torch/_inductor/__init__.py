@@ -278,8 +278,9 @@ def aoti_load_package(
     Args:
         path: Path to the .pt2 package or extracted package directory.
         run_single_threaded (bool): Whether the model should be run without
-            thread synchronization logic. This is useful to avoid conflicts with
-            CUDAGraphs.
+            thread synchronization logic. This is useful to avoid conflicts
+            when capturing calls with torch.cuda.graph, and incompatible with
+            run_with_lazy_cuda_graphs.
         device_index (int): The index of the device to which the PT2 package is
             to be loaded. By default, `device_index=-1` is used, which corresponds
             to the device `cuda` when using CUDA. Passing `device_index=1` would

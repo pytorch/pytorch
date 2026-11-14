@@ -25,19 +25,26 @@ from torch.distributed.checkpoint.staging import (
     StagingOptions,
 )
 from torch.distributed.checkpoint.state_dict_saver import async_save
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
 from torch.testing._internal.common_distributed import (
     HAS_ACCELERATOR,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     DTensorTestBase,
     NUM_DEVICES,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -875,6 +882,47 @@ class TestStateDictStager(TestCase):
                 self.assertIsNotNone(metadata)
 
         stager.close()
+
+
+class TestStagerStorageOffset(TestCase):
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=1, store=FakeStore())
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    @parametrize("stager_type", ["state_dict_stager", "default_stager"])
+    @parametrize("offset", [0, 2])
+    def test_dtensor_with_storage_offset(self, stager_type, offset):
+        mesh = init_device_mesh("cpu", (1,))
+        base = torch.arange(12.0)
+        dtensor = DTensor.from_local(
+            base[offset : offset + 4], mesh, [Shard(0)], run_check=False
+        )
+        if stager_type == "state_dict_stager":
+            staged = StateDictStager().stage({"w": dtensor})
+        else:
+            options = StagingOptions(
+                use_pinned_memory=False,
+                use_shared_memory=False,
+                use_async_staging=False,
+                use_non_blocking_copy=False,
+            )
+            stager = DefaultStager(options)
+            staged = stager.stage({"w": dtensor})
+            stager.close()
+        self.assertIsInstance(staged["w"], DTensor)
+        self.assertEqual(staged["w"]._spec, dtensor._spec)
+        self.assertEqual(staged["w"].to_local(), dtensor.to_local())
+        self.assertNotEqual(
+            staged["w"].to_local().untyped_storage().data_ptr(),
+            base.untyped_storage().data_ptr(),
+        )
+
+
+instantiate_parametrized_tests(TestStagerStorageOffset)
 
 
 class TestDTensorStateDictStager(DTensorTestBase):
