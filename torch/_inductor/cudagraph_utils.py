@@ -15,7 +15,7 @@ from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
-from .utils import get_first_incompatible_cudagraph_node, is_using_cudagraph_partition
+from .utils import get_first_incompatible_cudagraph_node
 
 
 if TYPE_CHECKING:
@@ -108,9 +108,9 @@ class CUDAGraphPolicy:
         real call via an inner closure.  Subclasses that need the
         example inputs for warmup or static-input detection may use them.
 
-        When ``config.graph_partition=True``, setting a CUDAGraphPolicy
-        bypasses ``cudagraph_partition_post_compile`` (which wraps each
-        partition individually) and routes through ``cudagraph_post_compile``
+        When ``CompiledFxGraph.cudagraphs_per_partition=True``, setting a
+        CUDAGraphPolicy bypasses ``cudagraph_partition_post_compile`` (which wraps
+        each partition individually) and routes through ``cudagraph_post_compile``
         instead, so this method wraps the *entire* callable, not individual
         partitions.  Subclasses that need per-partition control should
         handle partitioning internally.
@@ -356,13 +356,14 @@ def _get_use_stack_trace(node: torch.fx.Node) -> str | None:
 
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
+    *,
+    cpu_nodes_partitioned_out: bool,
 ) -> str | None:
     # meta tensors are supported since there is no compute
     device_node_mapping.pop(torch.device("meta"), None)
 
-    # dynamo cudagraph does not support graph partition
-    if is_using_cudagraph_partition():
-        # graph partition supports splitting on cpu op. So we can ignore cpu nodes.
+    if cpu_nodes_partitioned_out:
+        # Graph partitioning splits cpu ops out of the captured partitions.
         device_node_mapping.pop(torch.device("cpu"), None)
 
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
@@ -371,6 +372,12 @@ def check_multiple_devices_or_any_cpu_nodes(
             return format_default_skip_message(f"{msg}. Found from : \n {stack_trace}")
 
         return format_default_skip_message(msg)
+
+    if not device_node_mapping:
+        # Everything left was tolerated above (cpu under partitioning, meta), so
+        # there is no GPU work to capture. Refuse, but name the real reason
+        # rather than falling through to an empty "multiple devices" list.
+        return format_default_skip_message("no GPU ops")
 
     if (
         len(device_node_mapping) == 1
@@ -404,10 +411,14 @@ def check_caching_allocator_for_cudagraphs() -> str | None:
 
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
+    *,
+    cpu_nodes_partitioned_out: bool,
 ) -> str | None:
     return (
         check_caching_allocator_for_cudagraphs()
-        or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
+        or check_multiple_devices_or_any_cpu_nodes(
+            device_node_mapping, cpu_nodes_partitioned_out=cpu_nodes_partitioned_out
+        )
     )
 
 
@@ -519,7 +530,10 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
         for g in graphs:
             for device, node in g.device_node_mapping.items():
                 device_node_mapping.setdefault(device, node)
-        if reason := check_multiple_devices_or_any_cpu_nodes(device_node_mapping):
+        # AOT mode lowers with graph_partition off, so CPU nodes count.
+        if reason := check_multiple_devices_or_any_cpu_nodes(
+            device_node_mapping, cpu_nodes_partitioned_out=False
+        ):
             return reason.removeprefix(format_default_skip_message(""))
         # The runtime checks every input's device, so unused inputs count too.
         (device,) = device_node_mapping
