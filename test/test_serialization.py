@@ -5280,8 +5280,7 @@ class TestSerializationAccelerator(TestCase):
             st = torch.sparse_coo_tensor(i, v, (2, 4))
         tt = TwoTensor(torch.randn(2, device=device), torch.randn(2, device=device))
 
-        mode = FakeTensorMode()
-        converter = mode.fake_tensor_converter
+        mode, converter = (mode := FakeTensorMode()), mode.fake_tensor_converter
 
         def fn(t):
             return converter.from_real_tensor(mode, t) if materialize_fake else t
