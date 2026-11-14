@@ -2319,6 +2319,7 @@ class _CppFakeTensorMode:
     allow_meta: _bool
     _allow_unsafe_data_ptr_access: _bool
     allow_non_fake_inputs: _bool
+    allow_fallback_kernels: _bool
     allow_scalar_outputs: _bool
     propagate_real_tensors: _bool
     epoch: _int
