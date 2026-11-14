@@ -45,6 +45,11 @@ def _nccl_ep_available() -> bool:
     # extension without dlopening it, so it would miss a missing libnccl_ep.so.
     if not torch.cuda.is_available():
         return False
+    if any(
+        torch.cuda.get_device_capability(i) < (9, 0)
+        for i in range(torch.cuda.device_count())
+    ):
+        return False
     try:
         _import_nccl_ep()
     except Exception:
@@ -56,7 +61,7 @@ def _nccl_ep_available() -> bool:
 def requires_nccl_ep():
     return skip_but_pass_in_sandcastle_if(
         not _nccl_ep_available(),
-        "Test requires a USE_NCCL_EP build (plus nccl-extensions for USE_SYSTEM_NCCL=ON)",
+        "Test requires sm_90+ and a USE_NCCL_EP build (plus nccl-extensions for USE_SYSTEM_NCCL=ON)",
     )
 
 
@@ -547,6 +552,11 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
     def backend_str(cls):
         return "nccl"
 
+    @classmethod
+    def _cleanup_worker(cls):
+        cls._cached_token_switch = None
+        cls._cached_contract_token_switch = None
+
     @property
     def device(self):
         return torch.device("cuda", self.rank)
@@ -581,6 +591,11 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
 
     def _init(self):
         torch.cuda.set_device(self.device)
+        # Zero-copy dispatch/combine needs NCCL window handles.
+        # The default CUDA backend would silently fall back to a device-pointer copy.
+        if symm_mem.get_backend(self.device) != "NCCL":
+            symm_mem.set_backend("NCCL")
+        self.assertEqual(symm_mem.get_backend(self.device), "NCCL")
         dist.barrier()
 
     def _weight_grad_inputs(self):
@@ -735,6 +750,69 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
             ts.create_routing(topk_idx, layout="flat")
 
     @skip_if_lt_x_gpu(2)
+    def test_create_routing_with_then_without_counts(self):
+        self._init()
+        ts = self.get_token_switch()
+        num_recv_tokens = self.world_size * NUM_TOKENS
+        topk_idx, topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
+        )
+        per_expert_counts = torch.zeros(1, dtype=torch.int32, device=self.device)
+        ts.create_routing(topk_idx, per_expert_counts, layout="flat")
+        routing = ts.create_routing(topk_idx, layout="flat")
+
+        tokens = torch.full(
+            (NUM_TOKENS, HIDDEN),
+            float(self.rank + 1),
+            dtype=torch.bfloat16,
+            device=self.device,
+        )
+        out_tokens = torch.zeros(
+            (num_recv_tokens, HIDDEN), dtype=torch.bfloat16, device=self.device
+        )
+        out_topk_weights = torch.zeros(
+            (num_recv_tokens, TOP_K), dtype=torch.float32, device=self.device
+        )
+        out_topk_idx = torch.zeros(
+            (num_recv_tokens, TOP_K), dtype=torch.int64, device=self.device
+        )
+        ts.dispatch(
+            routing,
+            tokens,
+            topk_weights,
+            out=(out_tokens, out_topk_weights, out_topk_idx),
+        )
+        torch.cuda.synchronize()
+
+        src_rank = (self.rank - 1) % self.world_size
+        expected = torch.full(
+            (NUM_TOKENS, HIDDEN),
+            float(src_rank + 1),
+            dtype=torch.bfloat16,
+            device=self.device,
+        )
+        self.assertEqual(out_tokens[:NUM_TOKENS], expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_create_routing_invalid_counts(self):
+        self._init()
+        ts = self.get_token_switch()
+        topk_idx, _topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
+        )
+        for bad_counts in (
+            torch.zeros(1, dtype=torch.int64, device=self.device),
+            torch.zeros(0, dtype=torch.int32, device=self.device),
+            torch.zeros(2, dtype=torch.int32, device=self.device),
+            torch.zeros((1, 1), dtype=torch.int32, device=self.device),
+            torch.zeros(1, dtype=torch.int32),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "recv_expert_counter must be a 1D int32 tensor"
+            ):
+                ts.create_routing(topk_idx, bad_counts, layout="flat")
+
+    @skip_if_lt_x_gpu(2)
     def test_dispatch(self):
         self._init()
         ts = self.get_token_switch()
@@ -743,9 +821,7 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
-        )
+        per_expert_counts = torch.zeros(1, dtype=torch.int32, device=self.device)
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
         token_val = float(self.rank + 1)
@@ -789,9 +865,7 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
-        )
+        per_expert_counts = torch.zeros(1, dtype=torch.int32, device=self.device)
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
         token_val = float(self.rank + 1)
@@ -835,9 +909,7 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
-        )
+        per_expert_counts = torch.zeros(1, dtype=torch.int32, device=self.device)
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
         tokens = torch.full(
@@ -867,9 +939,7 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
-        )
+        per_expert_counts = torch.zeros(1, dtype=torch.int32, device=self.device)
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
         # Pre-dispatch so the routing handle is primed, then test combine autograd
@@ -916,9 +986,7 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
-        )
+        per_expert_counts = torch.zeros(1, dtype=torch.int32, device=self.device)
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
         token_val = float(self.rank + 1)
@@ -950,9 +1018,7 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
         )
-        per_expert_counts = torch.zeros(
-            self.world_size, dtype=torch.int32, device=self.device
-        )
+        per_expert_counts = torch.zeros(1, dtype=torch.int32, device=self.device)
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
 
         out_tokens = torch.zeros(
@@ -1145,6 +1211,57 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    def test_dispatch_symm_mem_tokens_storage_offset(self):
+        """Dispatch with symm_mem views that start past the beginning of their storage."""
+        self._init()
+        ts = self.get_token_switch()
+        pg = dist.distributed_c10d._get_default_group()
+        num_recv_tokens = self.world_size * NUM_TOKENS
+
+        symm_buf = symm_mem.empty(
+            2 * NUM_TOKENS, HIDDEN, dtype=torch.bfloat16, device=self.device
+        )
+        symm_mem.rendezvous(symm_buf, group=pg)
+        symm_buf.fill_(-1)
+        symm_tokens = symm_buf[NUM_TOKENS:]
+        symm_tokens.fill_(float(self.rank + 1))
+
+        out_buf = symm_mem.empty(
+            2 * num_recv_tokens, HIDDEN, dtype=torch.bfloat16, device=self.device
+        )
+        symm_mem.rendezvous(out_buf, group=pg)
+        out_buf.zero_()
+        out_tokens = out_buf[num_recv_tokens:]
+
+        topk_idx, topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
+        )
+        routing = ts.create_routing(topk_idx, layout="flat")
+        out_topk_weights = torch.zeros(
+            (num_recv_tokens, TOP_K), dtype=torch.float32, device=self.device
+        )
+        out_topk_idx = torch.zeros(
+            (num_recv_tokens, TOP_K), dtype=torch.int64, device=self.device
+        )
+        ts.dispatch(
+            routing,
+            symm_tokens,
+            topk_weights,
+            out=(out_tokens, out_topk_weights, out_topk_idx),
+        )
+        torch.cuda.synchronize()
+
+        src_rank = (self.rank - 1) % self.world_size
+        expected = torch.full(
+            (NUM_TOKENS, HIDDEN),
+            float(src_rank + 1),
+            dtype=torch.bfloat16,
+            device=self.device,
+        )
+        self.assertEqual(out_tokens[:NUM_TOKENS], expected)
+        self.assertEqual(out_buf[:num_recv_tokens], torch.zeros_like(out_tokens))
+
+    @skip_if_lt_x_gpu(2)
     @parametrize("explicit_rendezvous", [True, False])
     def test_combine_symm_mem_tokens(self, explicit_rendezvous):
         """Combine with symm_mem-backed expert tokens (zero-copy window path).
@@ -1299,6 +1416,10 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
                 TOKEN_SIZE_BYTES,
             )
         return cls._cached_token_switch
+
+    @classmethod
+    def _cleanup_worker(cls):
+        cls._cached_token_switch = None
 
     @skip_if_lt_x_gpu(2)
     @dtypes(torch.int32, torch.int64)

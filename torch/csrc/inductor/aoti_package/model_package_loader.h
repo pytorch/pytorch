@@ -29,6 +29,12 @@ class TORCH_API AOTIModelPackageLoader {
       std::vector<at::Tensor>&& inputs,
       void* stream_handle = nullptr);
 
+  // Runs the model as CUDA graphs; see
+  // AOTInductorModelContainerRunWithLazyCudaGraphs.
+  std::vector<at::Tensor> run_with_lazy_cuda_graphs(
+      const std::vector<at::Tensor>& inputs,
+      void* stream_handle = nullptr);
+
   std::vector<std::string> get_call_spec();
   // When allow_h2d_copy is true, CPU tensors in constants_map are silently
   // copied to the model's device. allow_h2d_copy is incompatible with

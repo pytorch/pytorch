@@ -9,7 +9,12 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    onlyCPU,
+    skipXPUIf,
+)
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
 from torch.testing._internal.common_utils import (
     find_free_port,
@@ -33,15 +38,6 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
     @property
     def _rank_value(self):
         return self.rank + 1
-
-    def _requires_cuda(self):
-        """Return True when the test variant is NOT cuda.
-
-        MultiProcContinuousTest workers wrap unittest.SkipTest as RuntimeError,
-        so @onlyCUDA / self.skipTest() poison the entire class.  Tests that
-        need NCCL should call this and ``return`` early instead.
-        """
-        return self.device_type != "cuda"
 
     def _skip_if_product_overflows(self, op):
         if op == dist.ReduceOp.PRODUCT and self.world_size > 12:
@@ -222,13 +218,12 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         # If we reach this point, the barrier succeeded without deadlock
         self.assertTrue(True)
 
+    @onlyCPU
     def test_monitored_barrier(self):
         # monitored_barrier is gloo-only; the default PG is gloo only on the
-        # cpu variant (nccl on cuda/xpu), so run there. This drives the full
+        # cpu variant (nccl on cuda, xccl on xpu), so run there. This drives the full
         # dist.monitored_barrier dispatch onto BackendWrapper::monitoredBarrier
         # (the torchcomms reimplementation of ProcessGroupGloo::monitoredBarrier).
-        if self.device_type != "cpu":
-            return
         self.assertEqual(dist.get_backend(self.pg), dist.Backend.GLOO)
         # All ranks check in -> the health-checking barrier returns cleanly.
         dist.monitored_barrier(
@@ -259,27 +254,37 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
+    @onlyAccelerator
     def test_new_group_bare_default_backend_is_auto_qualified(self):
-        if self._requires_cuda():
-            return
         ranks = list(range(self.world_size))
-        ng = dist.new_group(ranks=ranks, backend="nccl")
+        backend = dist.get_default_backend_for_device(self.device_type)
+        ng = dist.new_group(ranks=ranks, backend=backend)
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
+    @skipXPUIf(
+        True,
+        "passes alone, but hangs when run after test_new_group_delegates_to_split_group "
+        "in the same workers (subgroup new_group() under torchcomms): "
+        "https://github.com/intel/torch-xpu-ops/issues/6001",
+    )
+    @onlyAccelerator
     def test_new_group_qualified_backend_passes_through(self):
-        if self._requires_cuda():
-            return
         ranks = list(range(self.world_size))
-        ng = dist.new_group(ranks=ranks, backend="cuda:nccl")
+        backend = dist.get_default_backend_for_device(self.device_type)
+        ng = dist.new_group(ranks=ranks, backend=f"{self.device_type}:{backend}")
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
+    @skipXPUIf(
+        True,
+        "ProcessGroupXCCL.Options has no config knobs equivalent to "
+        "ncclConfig_t: https://github.com/intel/torch-xpu-ops/issues/5385",
+    )
+    @onlyAccelerator
     def test_new_group_with_pg_options(self):
-        if self._requires_cuda():
-            return
         ranks = list(range(self.world_size))
         opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
         opts.config.cga_cluster_size = 2
@@ -289,9 +294,13 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
+    @skipXPUIf(
+        True,
+        "ProcessGroupXCCL.Options has no config knobs equivalent to "
+        "ncclConfig_t: https://github.com/intel/torch-xpu-ops/issues/5385",
+    )
+    @onlyAccelerator
     def test_new_group_sequential_pg_options_produce_distinct_groups(self):
-        if self._requires_cuda():
-            return
         ranks = list(range(self.world_size))
         opts_a = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
         opts_a.config.cga_cluster_size = 2

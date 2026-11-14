@@ -153,9 +153,14 @@ def _outer_config_opt(
     elif num_dynamic > 1:
         outer_r_block = max(min((rnumel // 64), 64), 8)
     elif num_dynamic == 1:
-        outer_r_block = (
-            1 if load_factor >= 3 else min(next_power_of_2(max(rnumel, 128) // 128), 8)
-        )
+        if load_factor >= 3 and inductor_meta.get("sm100_outer_reduction_r0_block_8"):
+            outer_r_block, num_warps = 8, 2
+        else:
+            outer_r_block = (
+                1
+                if load_factor >= 3
+                else min(next_power_of_2(max(rnumel, 128) // 128), 8)
+            )
     else:
         x_block = max(min(max_x_block, next_power_of_2(x // 4096)), x_block)
         if load_factor < 4 or rnumel <= 128:
