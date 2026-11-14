@@ -3060,6 +3060,17 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("fake"),
       py::arg("constant"));
 
+  py_module.def(
+      "_invalidate_fake_constant_aliases",
+      [](py::object mode, const at::Tensor& tensor) {
+        TORCH_CHECK(tensor.defined(), "Expected a defined tensor");
+        auto fake_mode = torch::fake_tensor::getCppFakeTensorMode(mode.ptr());
+        fake_mode->invalidate_constant_aliases(
+            tensor.storage().unsafeGetStorageImpl());
+      },
+      py::arg("mode"),
+      py::arg("tensor"));
+
   py_module.def("_fake_tensor_to_list", [](const at::Tensor& t) {
     return py::reinterpret_steal<py::object>(
         torch::utils::fake_tensor_to_list(t));
