@@ -9,6 +9,7 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
@@ -63,7 +64,7 @@ TORCH_PYTHON_API py::object toPyObject(IValue ivalue);
 
 // Hack to overload the behavior of toIValue to accept Python
 // numbers in places where a Tensor is expected
-// See also torch::should_allow_numbers_as_tensors
+// See also at::should_allow_numbers_as_tensors
 class TORCH_PYTHON_API ToIValueAllowNumbersAsTensors {
   bool old_;
 
@@ -230,6 +231,36 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
     py::gil_scoped_release release;
     fut->markCompleted(std::move(value));
+  }
+
+  // Completes the future with a C++ error wrapping the Python exception so
+  // C++ consumers see hasError(). wait()/value() rethrow the original
+  // exception via python_error.
+  void setError(const py::object& pyException) {
+    DCHECK(PyGILState_Check());
+    PyObject* exc = pyException.ptr();
+    TORCH_CHECK_TYPE(
+        PyExceptionInstance_Check(exc),
+        "_set_exception expects an exception instance, got ",
+        Py_TYPE(exc)->tp_name);
+    // setError asserts internally on a completed future.
+    TORCH_CHECK(
+        !fut->completed(),
+        "Attempting to mark a completed Future as complete again. Note that "
+        "a Future can only be marked completed once.");
+    python_error err;
+    Py_INCREF(Py_TYPE(exc));
+    Py_INCREF(exc);
+    err.type = reinterpret_cast<PyObject*>(Py_TYPE(exc));
+    err.value = exc;
+    err.traceback = PyException_GetTraceback(exc);
+    err.build_message();
+    auto eptr = std::make_exception_ptr(std::move(err));
+
+    // Pass a copy: if setError throws under the future's lock, the last
+    // python_error reference must not drop there, as its dtor takes the GIL.
+    py::gil_scoped_release release;
+    fut->setError(eptr);
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> fut;

@@ -25,6 +25,7 @@ from ._all_gather_layout import (
     _PersistentBuffers,
     AllGatherLayout,
     DEFAULT_ALL_GATHER_LAYOUT,
+    DefaultAllGatherLayout,
 )
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
@@ -32,7 +33,9 @@ from ._fsdp_collectives import (
     _wait_all_gather,
     AllGather,
     AllGatherResult,
+    AllReduce,
     DefaultAllGather,
+    DefaultAllReduce,
     DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
@@ -182,7 +185,7 @@ class AllGatherState(NamedTuple):
 
 class ReduceScatterState(NamedTuple):
     reduce_scatter_input: torch.Tensor
-    event: torch.Event | None  # reduce-scatter event
+    event: torch.Event | None  # last use of the input (see foreach_reduce)
     allocation_stream: torch.Stream  # Owns the input allocation
     param_group: FSDPParamGroup  # Identifies the owning FSDP root
 
@@ -252,6 +255,7 @@ class FSDPParamGroup:
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._all_reduce_hook: Callable[[torch.Tensor], None] | None = None
+        self._all_reduce_comm: AllReduce = DefaultAllReduce()
         self._all_gather_comm: AllGather = DefaultAllGather()
         self._all_gather_output = torch.empty(0, device=self.device)
         self._reduce_scatter_comm: ReduceScatter = DefaultReduceScatter()
@@ -398,42 +402,8 @@ class FSDPParamGroup:
         self._init_reduce_scatter_param_order()
         self._register_state_dict_hooks()
 
-    def _check_all_gather_replaceable(self) -> None:
-        # Only the layout that created a group's outputs can refill them, and a
-        # pending first all-gather adopts its layout's outputs when it completes
-        if self._all_gather_result is not None or self.is_unsharded:
-            raise RuntimeError(
-                self._with_fqn(
-                    "cannot replace the all-gather layout while an all-gather is "
-                    "pending or parameters are unsharded; reshard, or call "
-                    "reset_iter_state() after a failed unshard"
-                )
-            )
-        if any(p._keep_all_gather_output_storage for p in self.fsdp_params):
-            raise RuntimeError(
-                self._with_fqn(
-                    "cannot replace the all-gather layout after parameters adopted "
-                    "outputs from the installed custom layout"
-                )
-            )
-
-    def _check_layout_comm(self, layout: AllGatherLayout, comm_type: type) -> None:
-        if layout.comm_type is not None and not issubclass(comm_type, layout.comm_type):
-            raise ValueError(
-                self._with_fqn(
-                    f"all-gather layout {type(layout).__name__} requires a "
-                    f"{layout.comm_type.__name__} comm, not {comm_type.__name__}; "
-                    "install one with set_custom_all_gather() before the layout"
-                )
-            )
-
-    def _check_comm_swap(self, comm_type: type) -> None:
-        # Comms keep no per-call state and own no outputs, so only the layout's
-        # comm type limits a swap
-        self._check_layout_comm(self._all_gather_layout, comm_type)
-
     def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
-        self._check_comm_swap(SymmMemAllGather)
+        self._check_layout_comm(self._all_gather_layout, SymmMemAllGather)
         if not isinstance(self._all_gather_comm, (DefaultAllGather | SymmMemAllGather)):
             raise AssertionError(
                 "cannot call set_symm_mem() "
@@ -461,7 +431,7 @@ class FSDPParamGroup:
         the staging buffers for collective comms.
         """
         comm_type = ProcessGroupAllocAllGather if enable else DefaultAllGather
-        self._check_comm_swap(comm_type)
+        self._check_layout_comm(self._all_gather_layout, comm_type)
         if not isinstance(
             self._all_gather_comm, (DefaultAllGather | ProcessGroupAllocAllGather)
         ):
@@ -593,26 +563,12 @@ class FSDPParamGroup:
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
-                try:
-                    self._all_gather_buffers = foreach_all_gather_copy_out(
-                        self._all_gather_result,
-                        self.fsdp_params,
-                        self._all_gather_process_group,
-                        self._all_gather_buffers,
-                    )
-                except ValueError:
-                    # Drop the completed all-gather once its streams wait for the
-                    # rejected copy-out, so that a layout whose first unshard was
-                    # rejected can be replaced, and free what a refill re-allocated
-                    event = self.device_handle.Event()
-                    event.record()
-                    self.comm_ctx.wait_all_gather_streams_on_event(event)
-                    self._all_gather_result = None
-                    self._free_all_gather_buffers()
-                    for fsdp_param in self.fsdp_params:
-                        if not fsdp_param.keep_unsharded_storage:
-                            fsdp_param.free_all_gather_outputs()
-                    raise
+                self._all_gather_buffers = foreach_all_gather_copy_out(
+                    self._all_gather_result,
+                    self.fsdp_params,
+                    self._all_gather_process_group,
+                    self._all_gather_buffers,
+                )
 
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_unsharded_param()
@@ -779,8 +735,8 @@ class FSDPParamGroup:
                 if self.reshard_after_backward:
                     self.reshard()
             # Recycle prior modules' reduce-scatter input buffers, keeping at most
-            # `max_input_buffers` in flight: reclaim the oldest (wait on its
-            # reduce-scatter, then drop the keepalive ref that was deferring the
+            # `max_input_buffers` in flight: reclaim the oldest (wait on its last
+            # use, then drop the keepalive ref that was deferring the
             # allocator's reuse of its memory) until fewer than that remain, before
             # this module's reduce appends one more. See
             # set_reduce_scatter_max_input_buffers for the memory/overlap tradeoff.
@@ -883,6 +839,7 @@ class FSDPParamGroup:
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
                     prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
+                    all_reduce_comm=self._all_reduce_comm,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
@@ -1435,6 +1392,40 @@ class FSDPParamGroup:
                 f"{self._reduce_scatter_comm.__class__.__name__}. Keep "
                 "max_input_buffers=1 with symmetric memory, or use the default "
                 "reduce-scatter comm."
+            )
+
+    def _check_all_gather_replaceable(self) -> None:
+        # Only the layout that created a group's outputs can refill them, and a
+        # pending first all-gather adopts its layout's outputs when it completes
+        if self._all_gather_result is not None or self.is_unsharded:
+            raise RuntimeError(
+                self._with_fqn(
+                    "cannot replace the all-gather layout while an all-gather is "
+                    "pending or parameters are unsharded; reshard, or call "
+                    "reset_iter_state() after a failed unshard"
+                )
+            )
+        if any(p._keep_all_gather_output_storage for p in self.fsdp_params):
+            raise RuntimeError(
+                self._with_fqn(
+                    "cannot replace the all-gather layout after parameters adopted "
+                    "outputs from the installed custom layout"
+                )
+            )
+
+    def _check_layout_comm(self, layout: AllGatherLayout, comm_type: type) -> None:
+        # Installed comms expect the default copy-in into the output they allocate,
+        # while a custom layout packs its own input and carries its own comm
+        custom_layout = not isinstance(layout, DefaultAllGatherLayout)
+        if custom_layout and comm_type is not DefaultAllGather:
+            raise ValueError(
+                self._with_fqn(
+                    f"all-gather layout {type(layout).__name__} cannot use "
+                    f"{comm_type.__name__}: comms from set_custom_all_gather(), "
+                    "set_symm_mem_for_comm() and "
+                    "set_allocate_memory_from_process_group_for_comm() only work "
+                    "with DefaultAllGatherLayout; a custom layout carries its own comm"
+                )
             )
 
 

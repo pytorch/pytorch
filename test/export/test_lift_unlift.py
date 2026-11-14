@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: export"]
+import unittest
 import warnings
 from collections import OrderedDict
 from typing import Any
@@ -20,6 +21,7 @@ from torch.export.exported_program import (
 from torch.export.graph_signature import CustomObjArgument
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_MACOS,
     run_tests,
     TestCase,
 )
@@ -143,6 +145,7 @@ class GraphBuilder:
         )
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestLift(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -388,6 +391,7 @@ class TestLift(TestCase):
         self.assertEqual(module(x), foo(x))
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class ConstantAttrMapTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
