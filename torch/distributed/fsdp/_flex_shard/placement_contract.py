@@ -19,6 +19,7 @@ from torch.distributed.checkpoint.protocol import CheckpointableTensor
 if TYPE_CHECKING:
     import torch.nn as nn
     from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.tensor import Placement as DTensorPlacement
 
     from .bucket_runtime import ParamRepresentation
     from .bucket_storage import ParamInfo
@@ -223,6 +224,19 @@ class Placement(ABC):
     #: its unsharded parameters at copy-out, so a prefetched bucket holds only
     #: its gather buffer until its hook takes it.
     refills_persistent_buffers_in_finish: ClassVar[bool] = False
+
+    #: Whether a bucket of this placement can issue the collectives of the
+    #: FSDP2 ``fully_shard`` group it replaces, byte for byte
+    #: (``BucketSpec.fsdp2_compatible``).
+    matches_fsdp2_collectives: ClassVar[bool] = False
+
+    #: Whether ``prepare_unshard_bucket`` gathers local shards that a CPU
+    #: offloaded bucket keeps on the CPU onto its ``device`` (``CPUOffloadPolicy``).
+    supports_cpu_offload: ClassVar[bool] = False
+
+    def _api_placement(self) -> Placement | DTensorPlacement:
+        """The placement that flex_shard's API takes and reports for this one."""
+        return self
 
     def bucket_compatibility_key(self) -> object:
         """Return a key shared by placements that can use one bucket collective."""

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import torch
     from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.tensor import Placement as DTensorPlacement
 
     from .placement_contract import GlobalLayout, Placement
 
@@ -24,8 +25,11 @@ _MESH_ATTR = "_mesh"
 _OUTER_LAYOUT_ATTR = "_outer_layout"
 
 
-def get_placements(tensor: torch.Tensor) -> tuple[Placement, ...] | None:
-    """Get FlexShard placements from a tensor, or None if not annotated."""
+def get_placements(
+    tensor: torch.Tensor,
+) -> tuple[Placement | DTensorPlacement, ...] | None:
+    """Get FlexShard placements from a tensor (DTensor's ``Shard`` for a
+    parameter sharded on a dim), or None if not annotated."""
     return getattr(tensor, _PLACEMENTS_ATTR, None)
 
 
@@ -56,7 +60,7 @@ def is_flex_shard_param(tensor: torch.Tensor) -> bool:
 
 def set_sharding_info(
     tensor: torch.Tensor,
-    placements: tuple[Placement, ...],
+    placements: tuple[Placement | DTensorPlacement, ...],
     global_shape: torch.Size,
     global_stride: tuple[int, ...],
     mesh: DeviceMesh,

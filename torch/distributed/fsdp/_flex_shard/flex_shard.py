@@ -11,6 +11,10 @@ from typing import cast, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
+from torch.distributed.fsdp._fully_shard._fsdp_api import (
+    CPUOffloadPolicy,
+    MixedPrecisionPolicy,
+)
 
 from .bucket_comm import begin_explicit_bucket_unshard
 from .bucket_runtime import (
@@ -28,11 +32,11 @@ from .bucket_storage import (
     BucketParamFQNsByIndex,
     BucketSpec,
     GradientReduceOp,
-    MixedPrecisionPolicy,
     ParamInfo,
     PlacementFn,
     ShardedBucketStorage,
 )
+from .placements.shard import _engine_placements
 from .sharded_param import is_flex_shard_param
 from .utils import (
     _get_device_from_mesh,
@@ -549,6 +553,8 @@ def relayout_bucket(
         raise ValueError(
             "relayout_bucket needs materialized storage; call to_empty() first."
         )
+    if bucket_storage._cpu_offload is not None:
+        raise NotImplementedError("relayout_bucket does not support CPU offload yet.")
     runtime = _bucket_runtime_of(cast(nn.Module, module), bucket_storage)
     if runtime is not None and (runtime.is_unsharded or runtime.unsharded_params):
         raise RuntimeError(
@@ -584,13 +590,14 @@ def relayout_bucket(
         named_full_params.append((info.fqn, param))
     del result
 
-    param_placements = placement_fn(named_full_params, mesh)
+    param_placements = _engine_placements(placement_fn(named_full_params, mesh))
     _validate_placements(param_placements, named_full_params)
+    full_params = [param for _, param in named_full_params]
     param_infos, total_bytes = ShardedBucketStorage.create_param_infos(
         named_full_params,
         mesh,
         param_placements,
-        _mixed_precision_policy_of(infos),
+        _mixed_precision_policy_of(infos, full_params),
     )
     for info in infos:
         param_infos[info.fqn].shared_fqns = info.shared_fqns
@@ -607,6 +614,7 @@ def relayout_bucket(
         gradient_divide_factor=bucket_storage.gradient_divide_factor,
         defer_post_backward=bucket_storage._defer_post_backward,
         hook_module_fqns=bucket_storage._hook_module_fqns,
+        mp_policy=bucket_storage._mp_policy,
     )
     new_storage._requires_gradient_sync = bucket_storage._requires_gradient_sync
     new_storage._reshard_after_backward = bucket_storage._reshard_after_backward
@@ -643,29 +651,34 @@ def _module_param(module: nn.Module, fqn: str) -> nn.Parameter:
     return ParamOwnerRef.resolve(module, fqn).param
 
 
-def _mixed_precision_policy_of(infos: list[ParamInfo]) -> MixedPrecisionPolicy:
-    """The policy that gives each parameter the dtypes flex_shard() resolved."""
+def _mixed_precision_policy_of(
+    infos: list[ParamInfo], params: list[nn.Parameter]
+) -> MixedPrecisionPolicy:
+    """The policy that gives each of ``params`` the dtypes that flex_shard()
+    resolved for its ``infos`` entry."""
     param_dtypes = {info.param_dtype for info in infos}
     reduce_dtypes = {info.reduce_dtype for info in infos}
     if len(reduce_dtypes) != 1:
         raise AssertionError(f"Expected one reduce dtype, got {reduce_dtypes}")
+    reduce_dtype = reduce_dtypes.pop()
     if len(param_dtypes) == 1:
         return MixedPrecisionPolicy(
-            param_dtype=param_dtypes.pop(), reduce_dtype=reduce_dtypes.pop()
+            param_dtype=param_dtypes.pop(), reduce_dtype=reduce_dtype
         )
     # Overrides may name the parameter's own dtype, the only value other than
     # param_dtype they allow.
     param_dtype = next(
         info.param_dtype for info in infos if info.param_dtype != info.dtype
     )
+    overrides = {
+        id(param): info.unsharded_dtype
+        for info, param in zip(infos, params, strict=True)
+        if info.param_dtype != param_dtype
+    }
     return MixedPrecisionPolicy(
         param_dtype=param_dtype,
-        reduce_dtype=reduce_dtypes.pop(),
-        param_dtype_overrides={
-            info.fqn: info.unsharded_dtype
-            for info in infos
-            if info.param_dtype != param_dtype
-        },
+        reduce_dtype=reduce_dtype,
+        param_dtype_override_fn=lambda param: overrides.get(id(param)),
     )
 
 
@@ -771,9 +784,10 @@ def _resolve_bucket_param_placements(
         if not bucket_fqns:
             continue
         bucket_named_params = [(fqn, named_params_dict[fqn]) for fqn in bucket_fqns]
-        bucket_param_placements = buckets[bucket_idx].placement_fn(
-            bucket_named_params,
-            buckets[bucket_idx].mesh,
+        bucket_param_placements = _engine_placements(
+            buckets[bucket_idx].placement_fn(
+                bucket_named_params, buckets[bucket_idx].mesh
+            )
         )
         _validate_placements(bucket_param_placements, bucket_named_params)
         param_placements.update(bucket_param_placements)
@@ -782,58 +796,39 @@ def _resolve_bucket_param_placements(
     return param_placements
 
 
-def _validate_param_dtype_overrides(
-    named_params: list[tuple[str, nn.Parameter]],
-    bucket_assignments: BucketParamFQNsByIndex,
-    buckets: list[BucketSpec],
-) -> None:
-    # Builders often share one policy across buckets, so an override may name a
-    # param in any bucket whose policy is equal.
-    policy_groups: list[tuple[MixedPrecisionPolicy, list[int], set[str]]] = []
-    for bucket_idx, (bucket, bucket_fqns) in enumerate(
-        zip(buckets, bucket_assignments, strict=True)
-    ):
-        mp_policy = bucket.mp_policy
-        if mp_policy is None or mp_policy.param_dtype_overrides is None:
-            continue
-        for policy, bucket_indices, fqns in policy_groups:
-            if policy == mp_policy:
-                bucket_indices.append(bucket_idx)
-                fqns.update(bucket_fqns)
-                break
-        else:
-            policy_groups.append((mp_policy, [bucket_idx], set(bucket_fqns)))
-
-    param_dict = dict(named_params)
-    for mp_policy, bucket_indices, fqns in policy_groups:
-        overrides = mp_policy.param_dtype_overrides or {}
-        unknown_fqns = set(overrides) - fqns
-        if unknown_fqns:
-            raise ValueError(
-                f"param_dtype_overrides for buckets {bucket_indices} contains "
-                "FQNs not assigned to any bucket using that policy: "
-                f"{sorted(map(str, unknown_fqns))}."
-            )
-        for fqn in overrides:
-            mp_policy._resolve_param_dtype(fqn, param_dict[fqn])
-
-
 def _validate_fsdp2_compatible_buckets(
     bucket_assignments: BucketParamFQNsByIndex,
     param_placements: dict[str, tuple[Placement, ...]],
     buckets: list[BucketSpec],
 ) -> None:
-    from .placements.shard import Shard
-
     for bucket, bucket_fqns in zip(buckets, bucket_assignments, strict=True):
         if not bucket.fsdp2_compatible:
             continue
         for fqn in bucket_fqns:
             (placement,) = param_placements[fqn]
-            if type(placement) is not Shard:
+            if not placement.matches_fsdp2_collectives:
                 raise ValueError(
                     f"BucketSpec {bucket.patterns} sets fsdp2_compatible, which "
-                    f"requires Shard placements, but {fqn!r} uses {placement!r}."
+                    "requires placements whose collectives match FSDP2's, such as "
+                    f"Shard, but {fqn!r} uses {placement!r}."
+                )
+
+
+def _validate_offloaded_buckets(
+    bucket_assignments: BucketParamFQNsByIndex,
+    param_placements: dict[str, tuple[Placement, ...]],
+    buckets: list[BucketSpec],
+) -> None:
+    for bucket, bucket_fqns in zip(buckets, bucket_assignments, strict=True):
+        if not isinstance(bucket.offload_policy, CPUOffloadPolicy):
+            continue
+        for fqn in bucket_fqns:
+            (placement,) = param_placements[fqn]
+            if not placement.supports_cpu_offload:
+                raise NotImplementedError(
+                    f"BucketSpec {bucket.patterns} sets CPUOffloadPolicy, which "
+                    "requires placements that support CPU offload, such as Shard, "
+                    f"but {fqn!r} uses {placement!r}."
                 )
 
 
@@ -852,10 +847,6 @@ def _prepare_flex_shard_inputs(
         if not callable(bucket.placement_fn):
             raise TypeError("BucketSpec.placement_fn must be callable.")
         _validate_flex_shard_mesh(bucket.mesh)
-        if bucket.offload_policy is not None:
-            raise NotImplementedError(
-                "FlexShard eager mode does not yet support BucketSpec.offload_policy."
-            )
     # A bucket is one collective over one process group, so the mesh is a
     # per-bucket property. Buckets may use different meshes, but this rank has a
     # single local device, so require all bucket meshes to share a device type.
@@ -895,7 +886,6 @@ def _prepare_flex_shard_inputs(
     bucket_assignments = _assign_params_to_buckets(
         param_fqns, buckets, shared_param_names
     )
-    _validate_param_dtype_overrides(named_params, bucket_assignments, buckets)
     param_placements = _resolve_bucket_param_placements(
         named_params,
         bucket_assignments,
@@ -908,6 +898,7 @@ def _prepare_flex_shard_inputs(
         named_params,
     )
     _validate_fsdp2_compatible_buckets(bucket_assignments, param_placements, buckets)
+    _validate_offloaded_buckets(bucket_assignments, param_placements, buckets)
 
     return PreparedFlexShardInputs(
         named_params=named_params,

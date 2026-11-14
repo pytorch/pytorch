@@ -16,6 +16,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
+from torch.distributed.fsdp._fully_shard._fsdp_common import _cast_fp_tensor
+from torch.distributed.utils import _apply_to_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._pytree import tree_leaves, tree_map_only
 
@@ -933,7 +935,9 @@ class BucketRuntime:
                     ),
                 )
             )
-        comm_device = bucket_storage.byte_storage.device
+        comm_device = (
+            bucket_storage._compute_device or bucket_storage.byte_storage.device
+        )
         if context is None:
             context = BucketCommContext.get(bucket_storage._module, comm_device)
             if context is None:
@@ -2079,6 +2083,8 @@ class BucketRuntime:
             raise NotImplementedError(
                 "FlexShard buckets of patterns naming several modules are eager-only."
             )
+        if self.bucket_storage._cpu_offload is not None:
+            raise NotImplementedError("FlexShard CPU offload is eager-only.")
         full_params = _BucketUnshard.apply(self, *self._local_shards(use_autograd=True))
         self._swap_in_params(list(full_params))
 
@@ -2279,19 +2285,23 @@ def _match_param_grad_layout(
 def _install_bucket_unshard_hooks(
     bucket_storages: list[ShardedBucketStorage],
 ) -> None:
-    """Install each bucket's forward hooks (one collective per bucket), and
-    state-dict hooks that reshard first, as FSDP2 does."""
+    """Install each bucket's forward hooks (one collective per bucket), the
+    forward casts of its mixed precision policy, and state-dict hooks that
+    reshard first, as FSDP2 does."""
     owner_buckets: dict[nn.Module, dict[int, BucketRuntime]] = {}
     group_buckets: list[BucketRuntime] = []
+    # Each hooked module's input and output cast dtypes
+    module_casts: dict[nn.Module, tuple[torch.dtype | None, torch.dtype | None]] = {}
+    root_module = bucket_storages[0]._module
     module_positions = {
-        module: position
-        for position, module in enumerate(bucket_storages[0]._module.modules())
+        module: position for position, module in enumerate(root_module.modules())
     }
     for bucket_storage in bucket_storages:
         if not bucket_storage._param_infos:
             raise AssertionError("Expected FlexShard bucket storage to own parameters.")
-        if bucket_storage.byte_storage.device.type != "cuda":
-            raise AssertionError("Expected FlexShard bucket storage to be on CUDA.")
+        device = bucket_storage._compute_device or bucket_storage.byte_storage.device
+        if device.type != "cuda":
+            raise AssertionError("Expected FlexShard buckets to compute on CUDA.")
 
         bucket_runtime = BucketRuntime.from_bucket_storage(bucket_storage)
         # A bucket whose patterns name modules hooks those (BucketSpec.patterns).
@@ -2312,10 +2322,22 @@ def _install_bucket_unshard_hooks(
             pre_hook = bucket_runtime.group_pre_forward_hook
             post_hook = bucket_runtime.group_post_forward_hook
             group_buckets.append(bucket_runtime)
+        policy = bucket_storage._mp_policy
+        casts = (None, None)
+        if policy is not None:
+            input_dtype = policy.param_dtype if policy.cast_forward_inputs else None
+            casts = (input_dtype, policy.output_dtype)
         for module in modules:
             # Prepended so earlier user pre-forward hooks see the unsharded params.
             module.register_forward_pre_hook(pre_hook, prepend=True, with_kwargs=True)
             module.register_forward_hook(post_hook, always_call=True)
+            if module_casts.setdefault(module, casts) != casts:
+                fqn = next(n for n, m in root_module.named_modules() if m is module)
+                raise ValueError(
+                    f"Buckets that hook module {fqn!r} must cast its forward "
+                    "inputs and outputs alike (BucketSpec.mp_policy), but cast "
+                    f"to {module_casts[module]} and {casts}."
+                )
         bucket_runtime.context.buckets.append(bucket_runtime)
         for bucket_param in bucket_runtime.bucket_params:
             owner_buckets.setdefault(bucket_param.param_owner.module, {})[
@@ -2324,13 +2346,46 @@ def _install_bucket_unshard_hooks(
 
     if group_buckets:
         # After the buckets' own hooks on the root module, if any.
-        bucket_storages[0]._module.register_forward_hook(
+        root_module.register_forward_hook(
             functools.partial(_complete_group_passes, tuple(group_buckets))
         )
+    # Inputs are cast before the buckets' pre-forward hooks and outputs after
+    # their post-forward hooks, as in FSDP2
+    for module, (input_dtype, output_dtype) in module_casts.items():
+        if input_dtype is not None:
+            cast_input = functools.partial(_cast_fp_tensor, input_dtype)
+            module.register_forward_pre_hook(
+                functools.partial(_cast_forward_inputs, cast_input),
+                prepend=True,
+                with_kwargs=True,
+            )
+        if output_dtype is not None:
+            cast_output = functools.partial(_cast_fp_tensor, output_dtype)
+            module.register_forward_hook(
+                functools.partial(_cast_forward_output, cast_output)
+            )
     for module, buckets in owner_buckets.items():
         reshard_hook = functools.partial(_reshard_buckets, tuple(buckets.values()))
         module.register_state_dict_pre_hook(reshard_hook)
         module._register_load_state_dict_pre_hook(reshard_hook)
+
+
+def _cast_forward_inputs(
+    cast: Callable[[torch.Tensor], torch.Tensor],
+    module: nn.Module,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    return _apply_to_tensors(cast, args), _apply_to_tensors(cast, kwargs)
+
+
+def _cast_forward_output(
+    cast: Callable[[torch.Tensor], torch.Tensor],
+    module: nn.Module,
+    args: tuple[Any, ...],
+    output: Any,
+) -> Any:
+    return _apply_to_tensors(cast, output)
 
 
 def _complete_group_passes(
