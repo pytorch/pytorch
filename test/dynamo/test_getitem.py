@@ -1168,7 +1168,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
 
     def test_tuple_identity(self):
         class EmptyTuple(tuple):
-            pass
+            __slots__ = ()
 
         def fn(x, empty_subclass, second_empty_subclass):
             items = (x, x + 1)

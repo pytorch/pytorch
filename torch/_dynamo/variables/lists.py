@@ -2139,7 +2139,9 @@ class TupleVariable(BaseListVariable):  # noqa: RVT001
                 and args[1].python_type() is tuple
             ):
                 return args[1]
-            init_args = unpack_iterable(tx, args[1]) if len(args) == 2 else []
+            init_args: list[VariableTracker] = (
+                unpack_iterable(tx, args[1]) if len(args) == 2 else []
+            )
             return TupleVariable(
                 init_args,
                 identity_token=object() if init_args else None,
@@ -2200,7 +2202,12 @@ class TupleVariable(BaseListVariable):  # noqa: RVT001
                 f"can only concatenate tuple (not '{other.python_type_name()}') to tuple",
             )
 
-        if pytuple_checkexact(self) and not other.items:
+        other = other.realize()
+        if (
+            pytuple_checkexact(self)
+            and isinstance(other, TupleVariable)
+            and not other.items
+        ):
             return self
 
         items = self.items + unpack_iterable(tx, other)
