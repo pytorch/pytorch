@@ -19,9 +19,9 @@
 // The C++ counterpart of FakeTensorMode.__torch_dispatch__ for C++ fakes. It
 // runs an op whose tensor inputs are fakes of one mode on one device, or a
 // constructor under a mode.
-// Decompositions and CompositeImplicitAutograd kernels run with the mode entered
-// and return outputs as is. Otherwise, op_implementations handlers run with the
-// mode uninstalled. If none handles the op, it
+// Decompositions, CompositeImplicitAutograd kernels and prim metas run with the
+// mode entered and return outputs as is. Otherwise, op_implementations handlers
+// run with the mode uninstalled. If none handles the op, it
 // runs on the inputs' meta storage through its Meta kernel (its sparse Meta
 // kernel for sparse inputs), and the new outputs become fakes of that mode on
 // that device, as Python's wrap_meta_outputs_with_default_device_logic does.
@@ -41,13 +41,14 @@
 // A thread-safe policy would need a thread-local override integrated with the
 // Context getters/setters, or synchronization covering all readers and writers.
 //
-// The mode is uninstalled while this fallback runs, except for decomposition.
+// The mode is uninstalled while this fallback runs, except for decomposition
+// and prim metas.
 // Other callbacks that need an active mode must run outside that scope.
 //
 // So that ops do not give results Python's FakeTensorMode would not, it raises
 // NotImplementedError where Python runs something other than these,
 // apart from the known divergences in the TODOs below:
-//  - ops Python runs through custom op fake kernels or prim metas (the remaining
+//  - ops Python runs through custom op fake kernels (the remaining
 //    fake_try_* callbacks in c10/core/impl/PyInterpreter.h);
 //  - handlers that allocate unbacked sizes;
 //  - ops run under the Python dispatcher, whose Python-dispatcher-only Meta
@@ -76,6 +77,9 @@
 // TODO: Python CIA kernels written directly into py_kernels for ops without
 // native CIA kernels are not recorded in the tables. In-tree direct writers
 // (torch.export) override ops with native CIA kernels, which we always probe.
+//
+// TODO: rngprims are not in PrimMeta. Philox also needs the unsupported
+// lift_fresh path to construct its offset tensor.
 
 namespace {
 
@@ -391,9 +395,15 @@ void fakeFallback(
       }
     }
   }
-  if (has(FakeDispatchCategory::PrimMeta) ||
-      has(FakeDispatchCategory::CustomOpImpl)) {
-    unsupported(op, "custom op fake kernels and prim metas");
+  if (has(FakeDispatchCategory::PrimMeta)) {
+    const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
+    if (interpreter->fake_run_with_mode_entered(
+            mode, [&] { return interpreter->fake_try_prim_meta(op, stack); })) {
+      return;
+    }
+  }
+  if (has(FakeDispatchCategory::CustomOpImpl)) {
+    unsupported(op, "custom op fake kernels");
   }
   // Integer indexing works without unbacked sizes; bool indexing calls nonzero.
   const bool is_index_tensor =

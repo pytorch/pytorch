@@ -15,6 +15,7 @@ import subprocess
 import sys
 import unittest
 import weakref
+from functools import partial
 from unittest.mock import patch
 
 import numpy as np
@@ -1259,7 +1260,24 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     @fake_tensor_modes
     @parametrize(
         "op,args",
-        [(torch.rand, ()), (torch.empty, ()), (torch.zeros, ()), (torch.full, (1,))],
+        [
+            (torch.rand, ()),
+            (torch.empty, ()),
+            (torch.zeros, ()),
+            (torch.full, (1,)),
+            subtest(
+                (
+                    partial(
+                        prims.empty_strided,
+                        strides=(4, 1),
+                        dtype=torch.float32,
+                        requires_grad=False,
+                    ),
+                    (),
+                ),
+                name="prims_empty_strided",
+            ),
+        ],
         name_fn=lambda op, args: op.__name__,
     )
     def test_constructor(self, mode_cls, op, args):
@@ -1274,6 +1292,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertTrue(is_fake_tensor(x))
         self.assertTrue(x.device.type == "cpu")
         self.assertEqual(x.shape, (4, 4))
+        self.checkMetaProps(x, op([4, 4], *args, device="cpu"))
         self.assertIs(maybe_get_fake_mode(x), mode)
 
     def test_constructor_like_custom_op_without_device_arg(self):
@@ -1372,6 +1391,11 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             ),
             subtest(lambda x: torch._foreach_add([x, x], [x, x]), name="foreach_add"),
             subtest(aten.log_sigmoid_forward.default, name="log_sigmoid_forward"),
+            subtest(lambda x: prims.add(x, x), name="prims_add"),
+            subtest(
+                lambda x: prims.convert_element_type(x, torch.float64),
+                name="prims_convert_element_type",
+            ),
         ],
         name_fn=lambda op: op.__name__,
     )
