@@ -107,6 +107,8 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
     return xnnpack::linear(input, weight, *bias);
   }
 #endif
+  TORCH_CHECK(!bias->defined() || bias->scalar_type() == weight.scalar_type(),
+              "self and mat2 must have the same dtype, but got ", bias->scalar_type(), " and ", weight.scalar_type());
   if (input_dim == 2 && bias->defined()) {
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
@@ -152,6 +154,8 @@ Tensor& linear_out(const Tensor& input, const Tensor& weight, const std::optiona
   auto bias = bias_opt.has_value()
               ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
               : c10::MaybeOwned<Tensor>::owned(std::in_place);
+  TORCH_CHECK(!bias->defined() || bias->scalar_type() == weight.scalar_type(),
+              "self and mat2 must have the same dtype, but got ", bias->scalar_type(), " and ", weight.scalar_type());
 
   if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
