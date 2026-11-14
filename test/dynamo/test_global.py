@@ -514,8 +514,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
 
     @unittest.expectedFailure
     def test_delete_global_then_store_matches_eager_dict_order(self):
-        # The re-bound name keeps its old __dict__ slot instead of appending
-        # where eager re-inserts it.
         with mock.patch.dict(globals(), {"_dg_a": 1, "_dg_pad": 0}):
 
             def fn(x):
@@ -736,8 +734,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), x + 42)
             self.assertNotIn("delete_value", mod.__dict__)
 
-    # policy=error flags the zero-net store+delete as an unreplayed side
-    # effect; the shape itself matches eager.
     @unittest.expectedFailure
     def test_delete_global_crossfile_created_then_deleted(self):
         with crossfile_globals() as mod:
@@ -1120,8 +1116,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                         self.assertNotIn("_dg_a", globals())
 
     def test_delete_global_module_dict_realized_before(self):
-        # A dict VT realized before the delete makes the delete itself
-        # graph-break; later views on the alias then run eagerly.
         me = sys.modules[__name__]
 
         def fn(x):
