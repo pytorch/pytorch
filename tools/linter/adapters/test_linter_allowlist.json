@@ -53,7 +53,6 @@
   "test/distributed/_tools/test_mem_tracker.py",
   "test/distributed/_tools/test_memory_tracker.py",
   "test/distributed/_tools/test_runtime_estimator.py",
-  "test/distributed/_tools/test_sac_estimator.py",
   "test/distributed/_tools/test_sac_ilp.py",
   "test/distributed/algorithms/quantization/test_quantization.py",
   "test/distributed/algorithms/test_join.py",
