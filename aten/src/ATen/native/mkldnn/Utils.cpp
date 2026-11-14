@@ -82,7 +82,7 @@ void check_mkldnn_binary_fusion_inputs(
 #define ATTR_FUNC(NAME)                              \
   [](torch::List<std::optional<at::Scalar>> scalars, \
      std::optional<std::string_view> algorithm) {    \
-    return ideep::attr_t::fuse_##NAME();             \
+    return mkldnn::Attr::fuse_##NAME();             \
   }
 
 static AttrFunction attr_func_leaky_relu =
@@ -94,7 +94,7 @@ static AttrFunction attr_func_leaky_relu =
           "leaky_relu is expected to have one scalar input: negative_slope");
       auto alpha_value =
           scalars[0].get().toOptional<at::Scalar>().value().to<float>();
-      return ideep::attr_t::fuse_relu(1.0, alpha_value);
+      return mkldnn::Attr::fuse_relu(1.0, alpha_value);
     };
 
 static AttrFunction attr_func_hardtanh =
@@ -110,7 +110,7 @@ static AttrFunction attr_func_hardtanh =
           scalars[0].get().toOptional<at::Scalar>().value().to<float>();
       auto upper_bound_value =
           scalars[1].get().toOptional<at::Scalar>().value().to<float>();
-      return ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
+      return mkldnn::Attr::fuse_clamp(lower_bound_value, upper_bound_value);
     };
 
 static AttrFunction attr_func_gelu = [](torch::List<std::optional<at::Scalar>> scalars,
@@ -128,16 +128,16 @@ static AttrFunction attr_func_gelu = [](torch::List<std::optional<at::Scalar>> s
         false, "Unsupported gelu algorithm: ", algorithm.value());
   }
 
-  return ideep::attr_t::fuse_gelu(1.0, 0.f, 0.f, gelu_type);
+  return mkldnn::Attr::fuse_gelu(1.0, 0.f, 0.f, gelu_type);
 };
 
 static AttrFunction attr_func_hardsigmoid =
     [](torch::List<std::optional<at::Scalar>> scalars,
        std::optional<std::string_view> algorithm) {
-      ideep::attr_t attr;
+      mkldnn::Attr attr;
       ideep::post_ops po;
       po.append_eltwise(
-          ideep::algorithm::eltwise_hardsigmoid, 1.0f / 6.0f, 0.5f);
+          dnnl::algorithm::eltwise_hardsigmoid, 1.0f / 6.0f, 0.5f);
       attr.set_post_ops(po);
       return attr;
     };
@@ -157,19 +157,19 @@ const std::unordered_map<std::string_view, AttrFunction>& fusion_unary_attr_map(
   return fusion_attr_map;
 }
 
-const std::unordered_map<std::string_view, ideep::algorithm>& fusion_unary_alg_map() {
-  static const std::unordered_map<std::string_view, ideep::algorithm> fusion_attr_map{
-      {"relu", {ideep::algorithm::eltwise_relu}},
+const std::unordered_map<std::string_view, dnnl::algorithm>& fusion_unary_alg_map() {
+  static const std::unordered_map<std::string_view, dnnl::algorithm> fusion_attr_map{
+      {"relu", {dnnl::algorithm::eltwise_relu}},
   };
   return fusion_attr_map;
 }
 
-const std::unordered_map<std::string_view, ideep::algorithm>& fusion_binary_alg_map() {
-  static const std::unordered_map<std::string_view, ideep::algorithm> fusion_attr_map{
-      {"add", {ideep::algorithm::binary_add}},
-      {"sub", {ideep::algorithm::binary_sub}},
-      {"mul", {ideep::algorithm::binary_mul}},
-      {"div", {ideep::algorithm::binary_div}},
+const std::unordered_map<std::string_view, dnnl::algorithm>& fusion_binary_alg_map() {
+  static const std::unordered_map<std::string_view, dnnl::algorithm> fusion_attr_map{
+      {"add", {dnnl::algorithm::binary_add}},
+      {"sub", {dnnl::algorithm::binary_sub}},
+      {"mul", {dnnl::algorithm::binary_mul}},
+      {"div", {dnnl::algorithm::binary_div}},
   };
   return fusion_attr_map;
 }

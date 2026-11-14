@@ -99,6 +99,7 @@ bool use_mkldnn_tf32_matmul(
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Matmul.h>
 
 namespace at::native {
 
@@ -131,8 +132,8 @@ static bool use_mkldnn_tf32_matmul() {
 template <typename scalar_t>
 inline ideep::tensor make_ideep_tensor(
     std::vector<int64_t> dims,
-    ideep::tensor::data_type idtype,
-    ideep::tensor::dims& strides,
+    dnnl::memory::data_type idtype,
+    dnnl::memory::dims& strides,
     scalar_t *data){
     ideep::tensor res({
       dims,
@@ -166,17 +167,17 @@ mkldnn_gemm(
     return false;
   }
 
-  ideep::attr_t op_attr;
+  mkldnn::Attr op_attr;
   // Use mkldnn post ops to perform the add.
   if (beta != 0.0f) {
-    op_attr = ideep::attr_t::fuse_sum();
+    op_attr = mkldnn::Attr::fuse_sum();
   }
   if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
   if (tf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32); // tf32 path
 
   // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
   // Use identity: C = AB <=> C^T = B^T A^T
-  ideep::tensor::dims a_strides{{lda, 1}}, b_strides{{ldb, 1}}, c_strides{{ldc, 1}};
+  dnnl::memory::dims a_strides{{lda, 1}}, b_strides{{ldb, 1}}, c_strides{{ldc, 1}};
   if (transa != TransposeType::NoTranspose) {
     std::swap(a_strides[0], a_strides[1]);
   }
@@ -184,12 +185,12 @@ mkldnn_gemm(
     std::swap(b_strides[0], b_strides[1]);
   }
 
-  auto idtype = ideep::tensor::data_type::bf16;
+  auto idtype = dnnl::memory::data_type::bf16;
   if constexpr (std::is_same_v<scalar_t, c10::Half>) {
-    idtype = ideep::tensor::data_type::f16;
+    idtype = dnnl::memory::data_type::f16;
   }
   if constexpr (std::is_same_v<scalar_t, float>) {
-    idtype = ideep::tensor::data_type::f32;
+    idtype = dnnl::memory::data_type::f32;
   }
 
   ideep::tensor a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
@@ -211,9 +212,7 @@ mkldnn_gemm(
   }
 #endif
 
-  ideep::matmul_forward::compute(
-      src, a, c, alpha, beta,
-      ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
+  mkldnn::matmul_forward(src, a, c, alpha, beta, op_attr);
 
   if (c.get_data_handle() != c_data){
     // ideep will query oneDNN expect format of output
@@ -244,15 +243,15 @@ mkldnn_gemm(
     return false;
   }
 
-  ideep::attr_t op_attr;
+  mkldnn::Attr op_attr;
   // Use mkldnn post ops to perform the add.
   if (beta != 0.0f) {
-    op_attr = ideep::attr_t::fuse_sum();
+    op_attr = mkldnn::Attr::fuse_sum();
   }
 
   // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
   // Use identity: C = AB <=> C^T = B^T A^T
-  ideep::tensor::dims a_strides{{lda, 1}}, b_strides{{ldb, 1}}, c_strides{{ldc, 1}};
+  dnnl::memory::dims a_strides{{lda, 1}}, b_strides{{ldb, 1}}, c_strides{{ldc, 1}};
   if (transa != TransposeType::NoTranspose) {
     std::swap(a_strides[0], a_strides[1]);
   }
@@ -260,15 +259,13 @@ mkldnn_gemm(
     std::swap(b_strides[0], b_strides[1]);
   }
 
-  auto idtype = ideep::tensor::data_type::bf16;
+  auto idtype = dnnl::memory::data_type::bf16;
 
   ideep::tensor a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
   ideep::tensor b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
-  ideep::tensor c = make_ideep_tensor<float>({n, m}, ideep::tensor::data_type::f32, c_strides, c_data);
+  ideep::tensor c = make_ideep_tensor<float>({n, m}, dnnl::memory::data_type::f32, c_strides, c_data);
 
-  ideep::matmul_forward::compute(
-      b, a, c, alpha, beta,
-      ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
+  mkldnn::matmul_forward(b, a, c, alpha, beta, op_attr);
 
   if(c.get_data_handle() != c_data){
     // ideep will query onednn expect format of output
@@ -391,11 +388,11 @@ void mkldnn_matmul(
   bool bf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_bf32_matmul();
   bool tf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_tf32_matmul();
 
-  ideep::attr_t op_attr;
+  mkldnn::Attr op_attr;
   // "addmm", "addbmm" "baddbmm" in pytorch allow bias to be 2-D or 3-D tensor
   // but mkldnn matmul primitive only support bias be 1-D tensors
   // to address their differences, we use mkldnn post ops to perform a fused "add" after matrix multiplication is over
-  if (beta != 0.0f) op_attr = ideep::attr_t::fuse_sum();
+  if (beta != 0.0f) op_attr = mkldnn::Attr::fuse_sum();
   if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
   if (tf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32); // tf32 path
   // If alpha = 0, dose not need actually do gemm computation
@@ -426,8 +423,7 @@ void mkldnn_matmul(
   const ideep::tensor x = itensor_view_from_const_dense(mat1_);
   const ideep::tensor w = itensor_view_from_const_dense(mat2_);
   ideep::tensor y = itensor_view_from_dense(result_unsqueezed);
-  ideep::matmul_forward::compute(x, w, y, alpha, beta,
-      ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
+  mkldnn::matmul_forward(x, w, y, alpha, beta, op_attr);
   if (y.get_data_handle() != result.const_data_ptr()){
     // ideep will query onednn expect format of output
     // if given output format is not expected, ideep will re-init an output buffer
@@ -539,11 +535,11 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
     const Tensor &mat2,
     const Tensor &result) {
   // Create ideep tensors for oneDNN computation
-  ideep::tensor::data_type src_dtype;
+  dnnl::memory::data_type src_dtype;
   if (mat1.scalar_type() == at::kByte) {
-    src_dtype = ideep::tensor::data_type::u8;
+    src_dtype = dnnl::memory::data_type::u8;
   } else {
-    src_dtype = ideep::tensor::data_type::s8;
+    src_dtype = dnnl::memory::data_type::s8;
   }
   auto src = ideep::tensor(
       {mat1.sizes().vec(),
@@ -552,17 +548,17 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
       const_cast<void*>(mat1.const_data_ptr()));
   auto wei = ideep::tensor(
       {mat2.sizes().vec(),
-       ideep::tensor::data_type::s8,
+       dnnl::memory::data_type::s8,
        mat2.strides().vec()},
       const_cast<void*>(mat2.const_data_ptr()));
   auto dst = ideep::tensor(
       {result.sizes().vec(),
-       ideep::tensor::data_type::s32,
+       dnnl::memory::data_type::s32,
        result.strides().vec()},
       result.mutable_data_ptr());
   // Create primitive desc
   auto engine = ideep::engine::cpu_engine();
-  ideep::attr_t op_attr;
+  mkldnn::Attr op_attr;
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto src_desc = src.get_desc();
 #if defined(__aarch64__)
@@ -578,7 +574,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   auto expected_weight = wei.reorder_if_differ_in(prim_desc.weights_desc());
   // Prepare args for primitive
   ideep::tensor scratchpad(prim_desc.scratchpad_desc());
-  ideep::exec_args args;
+  std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, src});
   args.insert({DNNL_ARG_WEIGHTS, expected_weight});
   args.insert({DNNL_ARG_DST, dst});

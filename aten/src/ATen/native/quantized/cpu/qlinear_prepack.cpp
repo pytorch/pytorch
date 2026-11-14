@@ -227,7 +227,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   std::vector<int64_t> dims = weight.sizes().vec();
   auto N = weight.size(0);
   std::vector<int32_t> wgt_zero_points;
-  ideep::scale_t wgt_scales;
+  std::vector<float> wgt_scales;
   const auto qtype = weight.qscheme();
   if (qtype == c10::kPerTensorAffine) {
     TORCH_CHECK(
@@ -235,7 +235,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
         "quantized::linear_prepack: ONEDNN only supports symmetric quantization of weight,"
         " whose zero point must be 0, but got ", weight.q_zero_point());
     wgt_zero_points = std::vector<int32_t>(1, weight.q_zero_point());
-    wgt_scales = ideep::scale_t(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
+    wgt_scales = std::vector<float>(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
   } else if (qtype == c10::kPerChannelAffine) {
     wgt_zero_points.resize(N);
     wgt_scales.resize(N);
@@ -255,10 +255,10 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   auto weight_copy = weight.clone();
   ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
   wgt.transpose_(0, 1); // ONEDNN requires transposed weight
-  auto src_dims = ideep::dims(); // Unknown when prepacking
-  ideep::attr_t op_attr;
+  auto src_dims = dnnl::memory::dims(); // Unknown when prepacking
+  at::native::mkldnn::Attr op_attr;
   op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
-  auto w_desc = ideep::matmul_forward::expected_weights_desc(wgt.get_dims(), src_dims, dnnl::memory::data_type::s8,
+  auto w_desc = at::native::mkldnn::matmul_forward_expected_weights_desc(wgt.get_dims(), src_dims, dnnl::memory::data_type::s8,
                                                              dnnl::memory::data_type::u8, op_attr);
   ideep::tensor exp_wgt(w_desc);
   exp_wgt.feed_from(wgt);
@@ -318,15 +318,15 @@ static inline at::Tensor pack_weight_to_onednn_tensor(
       : dnnl::memory::data_type::s8;
   ideep::tensor wei = ideep::tensor({w_dims, w_data_type}, weight.data_ptr());
   wei.transpose_(0, 1); // oneDNN requires transposed weight
-  ideep::dims input_dims = input_shape.has_value() ? input_shape.value().vec() : ideep::dims();
-  ideep::attr_t op_attr;
+  dnnl::memory::dims input_dims = input_shape.has_value() ? input_shape.value().vec() : dnnl::memory::dims();
+  at::native::mkldnn::Attr op_attr;
   if (!is_fp8) {
     op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
   }
   auto x_data_type = is_fp8
       ? dnnl::memory::data_type::f8_e4m3
       : dnnl::memory::data_type::u8;
-  auto w_desc = ideep::matmul_forward::expected_weights_desc(
+  auto w_desc = at::native::mkldnn::matmul_forward_expected_weights_desc(
       wei.get_dims(), input_dims, w_data_type, x_data_type, op_attr);
   ideep::tensor expected_weight(w_desc);
   expected_weight.feed_from(wei);

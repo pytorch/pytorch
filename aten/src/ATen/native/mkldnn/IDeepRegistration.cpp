@@ -7,6 +7,7 @@
 // needs to be included only once in library.
 #include <ideep_pin_singletons.hpp>
 #include <ATen/native/mkldnn/IDeepRegistration.h>
+#include <ATen/native/mkldnn/detail/PrimitiveCache.h>
 
 using namespace ideep;
 
@@ -24,7 +25,10 @@ namespace at::native::mkldnn{
 void clear_computation_cache() {
   // Reset computation_cache for forward convolutions
   // As it also caches max number of OpenMP workers
-  ideep::convolution_forward::t_store().clear();
+#ifndef __aarch64__
+  utils::computation_cache<dnnl::convolution_forward::primitive_desc>::t_store()
+      .clear();
+#endif
 }
 
 } // namespace  at::native::mkldnn

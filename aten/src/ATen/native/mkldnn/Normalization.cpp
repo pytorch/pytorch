@@ -82,6 +82,9 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/detail/BatchNorm.h>
+#include <ATen/native/mkldnn/detail/Binary.h>
+#include <ATen/native/mkldnn/detail/LayerNorm.h>
 #include <ATen/native/layer_norm.h>
 #include <ideep/abstract_types.hpp>
 
@@ -118,7 +121,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
   auto bias_it = at::native::itensor_from_mkldnn(bias);
 
   auto out_it = inplace ? input_it : ideep::tensor(input_it.get_desc());
-  ideep::layer_normalization_forward::compute(input_it, weight_it, bias_it, out_it, mean_it, rstd_it, static_cast<float>(eps));
+  mkldnn::layer_normalization_forward(input_it, weight_it, bias_it, out_it, mean_it, rstd_it, static_cast<float>(eps));
 
   auto dst = at::native::new_with_itensor_mkldnn(
       std::move(out_it),
@@ -161,8 +164,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
         "mkldnn_batch_norm: currently mkldnn training only support 2d batchnorm");
     ideep::tensor saved_mean;
     ideep::tensor saved_var;
-    ideep::batch_normalization_forward_training::compute(
-        x, w, b, y, saved_mean, saved_var, static_cast<float>(momentum), static_cast<float>(eps));
+    mkldnn::batch_normalization_forward_training(
+        x, w, b, y, saved_mean, saved_var, static_cast<float>(eps));
     if (use_running_stat) {
       auto len = x.get_nelems() / w.get_nelems(); // n*h*w
       ideep::tensor m = itensor_from_tensor(running_mean);
@@ -171,8 +174,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
                                            static_cast<float>(momentum)};
       const std::vector<float> scales_var{static_cast<float>(1 - momentum),
                                           static_cast<float>(momentum * static_cast<double>(len) / (static_cast<double>(len) - 1))};
-      ideep::sum::compute(scales_mean, {m, saved_mean}, m);
-      ideep::sum::compute(scales_var, {v, saved_var}, v);
+      mkldnn::sum(scales_mean, {m, saved_mean}, m);
+      mkldnn::sum(scales_var, {v, saved_var}, v);
     }
     return std::make_tuple(
          new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
@@ -187,7 +190,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     if (use_running_stat) {
       ideep::tensor m = itensor_from_const_tensor(running_mean);
       ideep::tensor v = itensor_from_const_tensor(running_var);
-      ideep::batch_normalization_forward_inference::compute(
+      mkldnn::batch_normalization_forward_inference(
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           x, m, v, w, b, y, eps);
     } else {
@@ -261,7 +264,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   ideep::tensor& v = itensor_from_mkldnn(save_invstd);
 
   ideep::tensor gradx, gradw, gradb;
-  ideep::batch_normalization_backward::compute(
+  mkldnn::batch_normalization_backward(
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       x, m, v, grady, w, gradx, gradw, gradb, eps);
 

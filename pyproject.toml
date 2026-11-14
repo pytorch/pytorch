@@ -91,9 +91,9 @@ provider = { path = "tools/metadata", module = "dependencies" }
 # Goal: ship exactly the git-tracked sources, minus repo/CI plumbing. The
 # sdist file walk applies gitignore semantics, and several vendored trees
 # commit files their own .gitignore matches (XNNPACK gen/ microkernels,
-# oneDNN *.cpp via ideep, protobuf *.pb.cc, clog under deps/); PyTorch's own
-# .gitignore (gen, *.pb.h) also hits tracked third-party files. The blanket
-# includes below restore all of them.
+# oneDNN *.cpp in third_party/oneDNN and ideep, protobuf *.pb.cc, clog under
+# deps/); PyTorch's own .gitignore (gen, *.pb.h) also hits tracked third-party
+# files. The blanket includes below restore all of them.
 #
 # Mechanics governing both lists: an include match beats every exclude
 # source (this exclude list, gitignore, built-ins). A !-negation inside
@@ -420,9 +420,6 @@ license-files = [
     "third_party/gloo/LICENSE",
     "third_party/gloo/gloo/transport/uv/LICENSE.uvw",
     "third_party/ideep/LICENSE",
-    "third_party/ideep/mkl-dnn/LICENSE",
-    "third_party/ideep/mkl-dnn/third_party/ittnotify/LICENSE.BSD",
-    "third_party/ideep/mkl-dnn/third_party/opencl/LICENSE",
     "third_party/llvm-openmp/LICENSE.txt",
     "third_party/mimalloc/LICENSE",
     "third_party/miniz-3.0.2/LICENSE",
@@ -433,6 +430,9 @@ license-files = [
     "third_party/nccl_ep/LICENSE.txt",
     "third_party/nccl_ep/ThirdPartyNotices.txt",
     "third_party/nlohmann/LICENSE.MIT",
+    "third_party/oneDNN/LICENSE",
+    "third_party/oneDNN/third_party/ittnotify/LICENSE.BSD",
+    "third_party/oneDNN/third_party/opencl/LICENSE",
     "third_party/onnx/LICENSE",
     "third_party/perfetto/LICENSE",
     "third_party/protobuf/LICENSE",
