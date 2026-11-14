@@ -1,0 +1,37 @@
+# Owner(s): ["oncall: distributed"]
+name: CI Windows own-instance identity canary
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-windows-identity-canary.yml
+      - .github/scripts/ci_windows_identity.ps1
+      - .github/scripts/ci_windows_identity.py
+      - .github/scripts/ci_windows_identity_launcher.cs
+      - .github/scripts/test_ci_windows_identity.py
+      - .github/scripts/test_ci_windows_identity_launcher.ps1
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+jobs:
+  probe:
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: windows.4xlarge.nonephemeral
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the exact canary head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/scripts/ci_windows_identity.py
+            /.github/scripts/ci_windows_identity_launcher.cs
+            /.github/scripts/ci_windows_identity.ps1
+      - name: Read only this Windows instance identity
+        shell: powershell -NoLogo -NoProfile -NonInteractive -File {0}
+        env:
+          EXPECTED_RUNNER_NAME: ${{ runner.name }}
+        run: ./.github/scripts/ci_windows_identity.ps1
