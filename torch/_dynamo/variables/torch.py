@@ -701,7 +701,8 @@ class BaseTorchVariable(VariableTracker):
             # interaction with Kineto is not a valid usecase. So, this is ok.
             return True
 
-        return getattr(self.value, "__module__", None) in ("math", "cmath")
+        module = getattr(self.value, "__module__", None)
+        return self.value is not math.prod and module in ("math", "cmath")
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return python_constant_repr_impl(self, tx)
@@ -1428,11 +1429,58 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
             if kwargs or not any(
-                isinstance(arg, UserDefinedObjectVariable) for arg in args
+                isinstance(arg, (UserDefinedObjectVariable, variables.SymNodeVariable))
+                for arg in args
             ):
                 return None
 
             return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
+
+        @register(math.prod)
+        def handle_prod(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if len(args) != 1 or kwargs.keys() - {"start"}:
+                # Let CPython report version-specific errors without evaluating inputs.
+                try:
+                    math.prod(*[()] * len(args), **dict.fromkeys(kwargs, 1))
+                except TypeError as exc:
+                    raise_observed_exception(TypeError, tx, args=list(exc.args))
+
+            iterable = args[0]
+            start = kwargs.get("start", ConstantVariable.create(1))
+            if isinstance(iterable, (ListVariable, TupleVariable)) and (
+                iterable.python_type() in (list, tuple)
+            ):
+                if not iterable.items:
+                    return start
+                if all(
+                    isinstance(value, ConstantVariable)
+                    for value in (*iterable.items, start)
+                ):
+                    try:
+                        result = math.prod(
+                            iterable.as_python_constant(),
+                            start=start.as_python_constant(),
+                        )
+                    except (OverflowError, TypeError, ValueError) as exc:
+                        raise_observed_exception(type(exc), tx, args=list(exc.args))
+                    return VariableTracker.build(tx, result)
+                if (
+                    iterable.is_proxy()
+                    and start.is_proxy()
+                    and not check_unspec_or_constant_args(args, kwargs)
+                ):
+                    return None
+            elif isinstance(iterable, TensorVariable):
+                return None
+
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.math_prod), list(args), kwargs
+            )
 
         @register(math.lcm)
         def handle_lcm(

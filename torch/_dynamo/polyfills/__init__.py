@@ -452,6 +452,12 @@ def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | No
         return value
 
 
+def math_prod(iterable: Iterable[Any], /, *, start: Any = 1) -> Any:
+    for element in iterable:
+        start = start * element
+    return start
+
+
 def unpack_mapping_keys_and_values(
     mapping: Mapping[T, U],
 ) -> tuple[tuple[T, ...], tuple[U, ...]]:
