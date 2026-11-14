@@ -33,7 +33,10 @@ from torch.distributed.checkpoint.planner import (
     ReadItem,
     SavePlan,
 )
-from torch.distributed.checkpoint.planner_helpers import _create_write_item_for_tensor
+from torch.distributed.checkpoint.planner_helpers import (
+    _create_write_item_for_tensor,
+    _get_checkpointable_tensor_write_items,
+)
 from torch.distributed.checkpoint.storage import WriteResult
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -166,6 +169,27 @@ class TestHfStorage(TestCase):
                 actual_write_results,
                 expected_write_results,
             )
+
+    def test_write_data_several_chunks_of_one_tensor(self) -> None:
+        # A rank can hold several chunks of one tensor, for example a DTensor
+        # with a _StridedShard placement.
+        tensor = torch.rand(4, 2)
+        tensor.global_shape = (8, 2)
+        tensor.global_offsets = ((0, 0), (4, 0))
+        tensor.local_offsets = ((0, 0), (2, 0))
+        tensor.local_sizes = ((2, 2), (2, 2))
+
+        with tempfile.TemporaryDirectory() as path:
+            writer = HuggingFaceStorageWriter(path=path, save_distributed=True)
+            writer.fs = FileSystem()
+            save_planner = DefaultSavePlanner()
+            save_planner.set_up_planner(state_dict={"w13": tensor})
+            save_plan = SavePlan(
+                _get_checkpointable_tensor_write_items("w13", tensor),
+                storage_data={"shard_index": 1},
+            )
+            with self.assertRaisesRegex(ValueError, "several chunks of 'w13'"):
+                writer.write_data(save_plan, save_planner)
 
     def test_read_data_hf(self) -> None:
         tensor_0 = torch.tensor([1.0, 2.0, 3.0, 4.0])

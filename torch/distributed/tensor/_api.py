@@ -899,15 +899,15 @@ class DTensor(torch.Tensor):
         if hasattr(self._local_tensor, "__create_write_items__"):
             return self._local_tensor.__create_write_items__(fqn, object)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
-            return [_create_write_items_for_dtensor(fqn, object)]
+            return _create_write_items_for_dtensor(fqn, object)
         else:
             raise RuntimeError("Unsupported tensor type!")
 
     def __create_chunk_list__(self):
         """
         Return a list of ChunkStorageMetadata, which is a dataclass that describes the size/offset of the local shard/replica
-        on current rank. For DTensor, each rank will have a single local shard/replica, so the returned list usually only
-        has one element.
+        on current rank. The list usually has one element; a ``_StridedShard`` can leave a rank holding several
+        separate chunks of the global tensor, one element each.
 
         This dunder method is primariy used for distributed checkpoint purpose.
 
@@ -916,22 +916,29 @@ class DTensor(torch.Tensor):
         """
         self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
-            _create_chunk_from_dtensor,
+            _dtensor_as_checkpointable_tensor,
+        )
+        from torch.distributed.checkpoint.protocol import (
+            _get_checkpointable_tensor_chunks,
         )
 
         if hasattr(self._local_tensor, "__create_chunk_list__"):
             return self._local_tensor.__create_chunk_list__()  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
-            return [_create_chunk_from_dtensor(self)]
+            return _get_checkpointable_tensor_chunks(
+                _dtensor_as_checkpointable_tensor(self)
+            )
         else:
             raise RuntimeError("Unsupported tensor type!")
 
     def __get_tensor_shard__(self, index):
         self._raise_if_contains_partial_placements()
+        from torch.distributed.checkpoint.planner_helpers import _get_dtensor_chunk
+
         if hasattr(self._local_tensor, "__get_tensor_shard__"):
             return self._local_tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
-            return self.to_local()
+            return _get_dtensor_chunk(self, index)
         else:
             raise RuntimeError("Unsupported tensor type!")
 
