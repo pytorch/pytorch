@@ -72,6 +72,38 @@ void _fused_adam_mps_impl_(TensorList params,
                                                  found_inf);
 }
 
+void _fused_adam_mps_impl_(TensorList params,
+                           TensorList grads,
+                           TensorList exp_avgs,
+                           TensorList exp_avg_sqs,
+                           TensorList state_steps,
+                           const Tensor& lr,
+                           const Tensor& beta1,
+                           const Tensor& beta2,
+                           const double weight_decay,
+                           const double eps,
+                           const bool maximize,
+                           const std::optional<Tensor>& grad_scale,
+                           const std::optional<Tensor>& found_inf) {
+  auto tensor_lists = c10::make_nested<Tensor>(params.vec(), grads.vec(), exp_avgs.vec(), exp_avg_sqs.vec());
+
+  const auto kernel_name =
+      "fused_adam_" + scalarToMetalTypeString(params[0]) + "_" + scalarToMetalTypeString(state_steps[0]);
+
+  multi_tensor_apply_for_fused_optimizer<4, 512>(kernel_name,
+                                                 tensor_lists,
+                                                 state_steps,
+                                                 FusedAdamEncodingFunctor(),
+                                                 lr,
+                                                 beta1,
+                                                 beta2,
+                                                 weight_decay,
+                                                 eps,
+                                                 maximize,
+                                                 grad_scale,
+                                                 found_inf);
+}
+
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else

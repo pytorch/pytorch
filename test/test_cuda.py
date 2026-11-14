@@ -78,6 +78,7 @@ from torch.testing._internal.common_utils import (
     _restore_fp32_precision,
     _snapshot_fp32_precision,
     cuda_python_error_check,
+    CudaSyncGuard,
     decorateIf,
     EXPANDABLE_SEGMENTS,
     freeze_rng_state,
@@ -13445,6 +13446,70 @@ class TestCudaOptims(TestCase):
 
                 for p_control, p_graphed in zip(params_control, params_graphed):
                     self.assertEqual(p_control, p_graphed)
+
+    @onlyCUDA
+    @optims(
+        [o for o in optim_db if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW)],
+        dtypes=[torch.float32],
+    )
+    def test_fused_tensor_betas_does_not_sync(self, device, dtype, optim_info):
+        for optim_input in optim_info.optim_inputs_func(device=device):
+            kwargs = {**optim_input.kwargs, "fused": True}
+            if torch.is_tensor(kwargs.get("lr")):
+                kwargs["lr"] = kwargs["lr"].to(device)
+            kwargs["betas"] = tuple(torch.tensor(b, device=device) for b in (0.9, 0.99))
+            param = torch.randn(10, device=device, dtype=dtype)
+            optimizer = optim_info.optim_cls([param], **kwargs)
+            param.grad = torch.randn_like(param)
+            # The first step initializes the optimizer state
+            optimizer.step()
+            with CudaSyncGuard("error"):
+                optimizer.step()
+
+    @onlyCUDA
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @optims(
+        [o for o in optim_db if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW)],
+        dtypes=[torch.float32],
+    )
+    def test_fused_tensor_betas_graph_replay(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        for optim_input in optim_info.optim_inputs_func(device=device):
+            kwargs = {**optim_input.kwargs, "fused": True}
+            if not kwargs.get("capturable", False):
+                continue
+            if torch.is_tensor(kwargs.get("lr")):
+                kwargs["lr"] = kwargs["lr"].to(device)
+            betas = tuple(torch.tensor(b, device=device) for b in (0.9, 0.99))
+            kwargs.pop("betas", None)
+            grads = [torch.randn(10, device=device, dtype=dtype) for _ in range(6)]
+            param = torch.randn(10, device=device, dtype=dtype)
+            param_ref = param.clone()
+            param.grad = grads[0].clone()
+            param_ref.grad = grads[0].clone()
+            optimizer = optim_cls([param], betas=betas, **kwargs)
+            float_betas = tuple(b.item() for b in betas)
+            optimizer_ref = optim_cls([param_ref], betas=float_betas, **kwargs)
+            optimizer.step()
+            optimizer_ref.step()
+
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                optimizer.step()
+            for i, grad in enumerate(grads[1:]):
+                if i == 2:
+                    # The replays after this must read the new values
+                    for beta, new_beta in zip(betas, (0.5, 0.9)):
+                        beta.fill_(new_beta)
+                    float_betas = tuple(b.item() for b in betas)
+                    optimizer_ref.param_groups[0]["betas"] = float_betas
+                param.grad.copy_(grad)
+                graph.replay()
+                param_ref.grad = grad.clone()
+                optimizer_ref.step()
+                self.assertEqual(param, param_ref)
 
     # This test cases compares autocast scaling on a fused optim vs autocast scaling
     # on a forloop optim.

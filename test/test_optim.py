@@ -2925,6 +2925,48 @@ class TestOptimRenewed(TestCase):
                         tracker.pop_check_set(dc["max_exp_avg_sq"], self)
                 self.assertTrue(tracker.all_popped())
 
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ["Adam", "AdamW"]],
+        dtypes=[torch.float32],
+    )
+    def test_fused_tensor_betas_matches_float_betas(self, device, dtype, optim_info):
+        if _get_device_type(device) not in optim_info.supports_fused_on:
+            self.skipTest(f"{device} is not supported for fused")
+        optim_cls = optim_info.optim_cls
+        is_cpu = _get_device_type(device) == "cpu"
+        betas_devs = [device] if is_cpu else [device, "cpu"]
+        # bf16 states take the mixed-precision kernel, which only CUDA has
+        bf16s = [False, True] if _get_device_type(device) == "cuda" else [False]
+        is_mps = _get_device_type(device) == "mps"
+        betas_dtypes = [torch.float32] if is_mps else [torch.float32, torch.float64]
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        configs = product(optim_inputs, betas_devs, betas_dtypes, bf16s)
+        for optim_input, betas_dev, betas_dtype, bf16 in configs:
+            kwargs = {**optim_input.kwargs, "fused": True}
+            if kwargs.get("capturable", False) and is_cpu:
+                continue
+            betas = kwargs.pop("betas", (0.8, 0.95))
+            to = {"device": betas_dev, "dtype": betas_dtype}
+            betas = tuple(torch.tensor(float(b), **to) for b in betas)
+            float_betas = tuple(b.item() for b in betas)
+
+            params = [torch.randn(10, 5, device=device, dtype=dtype) for _ in range(2)]
+            params_t = [p.clone() for p in params]
+            optimizer = optim_cls(params, betas=float_betas, **kwargs)
+            optimizer_t = optim_cls(params_t, betas=betas, **kwargs)
+            if bf16:
+                optimizer.register_step_pre_hook(_bf16_state_init_hook)
+                optimizer_t.register_step_pre_hook(_bf16_state_init_hook)
+            for _ in range(5):
+                for p, p_t in zip(params, params_t):
+                    p.grad = torch.randn_like(p)
+                    p_t.grad = p.grad.clone()
+                optimizer.step()
+                optimizer_t.step()
+                self.assertEqual(params_t, params)
+                for p, p_t in zip(params, params_t):
+                    self.assertEqual(optimizer_t.state[p_t], optimizer.state[p])
+
     @parametrize("dtype", [torch.float32])
     def test_step_iteration(self, device, dtype):
         def _get_model_and_input_tensor(device, dtype):
