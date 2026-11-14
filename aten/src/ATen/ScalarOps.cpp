@@ -76,6 +76,7 @@ bool should_allow_numbers_as_tensors(std::string_view name) {
       "divide",
       "divide_",
       "divide_out", // alias of div
+      "divmod",
       "mul",
       "mul_",
       "mul_out",
