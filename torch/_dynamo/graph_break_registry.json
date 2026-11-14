@@ -1241,6 +1241,14 @@
       ]
     }
   ],
+  "GB0587": [
+    {
+      "Gb_type": "Autocast saved-state mutation inside with",
+      "Context": "name",
+      "Explanation": "Changing saved autocast state inside a compiled with block is unsupported.",
+      "Hints": []
+    }
+  ],
   "GB7230": [
     {
       "Gb_type": "iter() with no arguments",
@@ -5343,6 +5351,22 @@
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
+    }
+  ],
+  "GB7573": [
+    {
+      "Gb_type": "Graph break under sourced autocast",
+      "Context": "Active sourced autocast: {active_autocast}",
+      "Explanation": "An active sourced autocast object cannot be reentered with its original exit state after a graph break.",
+      "Hints": []
+    }
+  ],
+  "GB2763": [
+    {
+      "Gb_type": "Reentrant sourced autocast",
+      "Context": "self.source.name",
+      "Explanation": "Reentering an active sourced autocast object cannot preserve its original exit state.",
+      "Hints": []
     }
   ],
   "GB0285": [

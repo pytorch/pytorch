@@ -2210,7 +2210,7 @@ class OutputGraph(OutputGraphCommon):
                 meta.stack_null_idxes.append(i)
             else:
                 stack_values.append(value)
-            if isinstance(value, ContextWrappingVariable):
+            if value.source is None and isinstance(value, ContextWrappingVariable):
                 target_values = (
                     () if value.target_values is None else tuple(value.target_values)
                 )
@@ -2271,9 +2271,11 @@ class OutputGraph(OutputGraphCommon):
                         "variable should never be NULL in Python < 3.12"
                     )
             meta.locals_names[k] = len(meta.locals_names)
-            if isinstance(v, ContextWrappingVariable):
+            is_ctx = type.__instancecheck__(ContextWrappingVariable, v.unwrap())
+            if v.source is None and is_ctx:
+                ctx = cast(ContextWrappingVariable, v.unwrap())
                 target_values = (
-                    () if v.target_values is None else tuple(v.target_values)
+                    () if ctx.target_values is None else tuple(ctx.target_values)
                 )
                 meta.locals_ctx_args.append((k, target_values))
             stack_values.append(v)

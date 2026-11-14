@@ -3310,6 +3310,130 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
 
 @skipIfNotPy312
 class ComprehensionGeneratorTests(torch._dynamo.test_case.TestCase):
+    @parametrize("nested", [False, True])
+    @parametrize("lifecycle", ["created", "suspended"])
+    def test_comprehension_generator_releases_objects(self, device, nested, lifecycle):
+        class Keeper:
+            def __init__(self, events):
+                self.events = events
+
+            def __del__(self):
+                events = getattr(self, "events", None)
+                if events is not None:
+                    events.append("deleted")
+
+        def delayed(x, events):
+            _keeper = Keeper(events)
+            yield x
+
+        def unstarted(x, keeper):
+            yield x
+
+        def fn(x, xs, events):
+            if lifecycle == "created":
+                gen = unstarted(x, Keeper(events))
+                first = x
+            else:
+                gen = delayed(x, events)
+                first = next(gen)
+            del gen
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            return first.sin() + sum(ys)
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for _ in range(2):
+                expected_events, events = [], []
+                expected = fn(x, xs, expected_events)
+                actual = compiled(x, xs, events)
+                self.assertEqual(actual, expected)
+                self.assertEqual(events, expected_events)
+                self.assertEqual(events, ["deleted"])
+                self.assertTrue(actual.requires_grad)
+                self.assertTrue(torch.is_grad_enabled())
+        self.assertEqual(len(backend.graphs), 0)
+
+    @parametrize("nested", [False, True])
+    def test_dead_comprehension_generator_keeps_capture(self, device, nested):
+        def delayed(x, events):
+            events.append("yield")
+            yield x
+            events.append("unreachable")
+            yield x + 1
+
+        def fn(x, xs, events):
+            gen = delayed(x, events)
+            first = next(gen)
+            del gen
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            return first.sin() + sum(ys), torch.is_grad_enabled()
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        counts = []
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for _ in range(2):
+                expected_events = []
+                expected = fn(x, xs, expected_events)
+                events = []
+                actual = compiled(x, xs, events)
+                self.assertEqual(actual, expected)
+                self.assertEqual(events, expected_events)
+                self.assertEqual(events, ["yield"])
+                self.assertTrue(actual[0].requires_grad)
+                self.assertTrue(torch.is_grad_enabled())
+                counts.append(len(backend.graphs))
+        self.assertGreater(counts[0], 0)
+        self.assertEqual(counts[0], counts[1])
+
+    @parametrize("nested", [False, True])
+    @parametrize("delegated", [False, True])
+    def test_comprehension_generator_exit_handler(self, device, nested, delegated):
+        def on_close(state):
+            state["count"] += 1
+            state["ctx"] = torch.no_grad()
+            state["alias"] = state["ctx"]
+
+        def delayed(x, state):
+            try:
+                yield x
+            except GeneratorExit:
+                on_close(state)
+
+        def delegate(x, state):
+            yield from delayed(x, state)
+
+        def fn(x, xs, state):
+            gen = delegate(x, state) if delegated else delayed(x, state)
+            first = next(gen)
+            del gen
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            return first.sin() + sum(ys) + state["count"]
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        previous = None
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for _ in range(2):
+                expected_state = {"count": 0}
+                expected = fn(x, xs, expected_state)
+                state = {"count": 0}
+                self.assertEqual(compiled(x, xs, state), expected)
+                self.assertEqual(state["count"], 1)
+                self.assertIsInstance(state["ctx"], torch.no_grad)
+                self.assertIs(state["ctx"], state["alias"])
+                self.assertIsNot(state["ctx"], previous)
+                self.assertTrue(torch.is_grad_enabled())
+                previous = state["ctx"]
+        self.assertEqual(len(backend.graphs), 0)
+
     @torch._dynamo.config.patch(nested_graph_breaks=True)
     @parametrize("caller", [False, True])
     @parametrize("retained", [False, True])
@@ -3532,6 +3656,863 @@ class ComprehensionGeneratorTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend=backend, fullgraph=True)(x, [x], state)
         self.assertEqual(state, {"flag": 0})
         self.assertEqual(len(backend.graphs), 0)
+
+
+class ExecutingBackend(EagerAndRecordGraphs):
+    def __init__(self):
+        super().__init__()
+        self.executions = 0
+
+    def __call__(self, gm, example_inputs):
+        super().__call__(gm, example_inputs)
+
+        def execute(*args):
+            self.executions += 1
+            return gm.forward(*args)
+
+        return execute
+
+
+class ComprehensionContextTests(torch._dynamo.test_case.TestCase):
+    @skipIfNotPy312
+    @parametrize("nested", [False, True])
+    @parametrize(
+        "context", ["nullcontext", "autocast", "cpu_autocast", "cuda_autocast"]
+    )
+    def test_comprehension_sourced_context(self, device, nested, context):
+        device_type = torch.device(device).type
+
+        def body(x, ctx, xs):
+            alias = ctx
+            t = ctx
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            with alias as entered:
+                if context == "cpu_autocast":
+                    matches = isinstance(entered, torch.cpu.amp.autocast)
+                elif context == "cuda_autocast":
+                    matches = isinstance(entered, torch.cuda.amp.autocast)
+                else:
+                    matches = isinstance(entered, torch.autocast)
+                state = (
+                    ()
+                    if context == "nullcontext"
+                    else (ctx.prev, ctx.prev_fastdtype, ctx.prev_cache_enabled)
+                )
+                return (
+                    x.sin() + sum(ys),
+                    ctx,
+                    alias,
+                    t,
+                    entered,
+                    state,
+                    torch.is_autocast_enabled(device_type),
+                    type(entered),
+                    matches,
+                )
+
+        def fn(x, ctx, xs):
+            return body(x, ctx, xs)
+
+        def make_context():
+            if context == "nullcontext":
+                return contextlib.nullcontext()
+            if context == "autocast":
+                return torch.autocast(device_type=device_type)
+            autocast = (
+                torch.cpu.amp.autocast
+                if context == "cpu_autocast"
+                else torch.cuda.amp.autocast
+            )
+            with self.assertWarns(FutureWarning):
+                return autocast(enabled=False)
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        contexts = [make_context(), make_context()]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn if nested else body, backend=backend)
+        before = torch.is_autocast_enabled(device_type)
+        counts = []
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for ctx in (contexts[0], contexts[0], contexts[1]):
+                expected_ctx = make_context()
+                expected = body(x, expected_ctx, xs)
+                actual = compiled(x, ctx, xs)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[5:], expected[5:])
+                for value in actual[1:4]:
+                    self.assertIs(value, ctx)
+                self.assertIs(actual[4], None if context == "nullcontext" else ctx)
+                if context != "nullcontext":
+                    self.assertEqual(
+                        (ctx.prev, ctx.prev_fastdtype, ctx.prev_cache_enabled),
+                        actual[5],
+                    )
+                    self.assertEqual(list(vars(ctx)), list(vars(expected_ctx)))
+                expected_grad = torch.autograd.grad(expected[0].sum(), x)[0]
+                actual_grad = torch.autograd.grad(actual[0].sum(), x)[0]
+                self.assertEqual(actual_grad, expected_grad)
+                self.assertEqual(torch.is_autocast_enabled(device_type), before)
+                self.assertTrue(torch.is_grad_enabled())
+                counts.append(len(backend.graphs))
+        self.assertGreater(counts[0], 0)
+        self.assertEqual(counts, [counts[0]] * 3)
+
+    @skipIfNotPy312
+    @parametrize("active", [False, True])
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_comprehension_autocast_source_state(self, device, active):
+        device_type = torch.device(device).type
+
+        def mode():
+            return (
+                torch.is_autocast_enabled(device_type),
+                torch.get_autocast_dtype(device_type),
+                torch.is_autocast_cache_enabled(),
+            )
+
+        if active:
+
+            def fn(x, ctx, xs):
+                with ctx as entered:
+                    state = ctx.prev, ctx.prev_fastdtype, ctx.prev_cache_enabled
+                    ys = [t * 2 if t.sum() > 0 else t for t in xs]
+                    matrix = x @ x
+                    inside = mode()
+                return matrix, matrix + sum(ys), entered, ctx, state, inside, mode()
+
+        else:
+
+            def fn(x, ctx, xs):
+                ys = [t * 2 if t.sum() > 0 else t for t in xs]
+                with ctx as entered:
+                    state = ctx.prev, ctx.prev_fastdtype, ctx.prev_cache_enabled
+                    matrix = x @ x
+                    inside = mode()
+                return matrix, matrix + sum(ys), entered, ctx, state, inside, mode()
+
+        x = torch.ones(4, 4, device=device, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        initial = mode()
+        counts = []
+        for enabled, dtype, cache in (
+            (False, torch.bfloat16, True),
+            (False, torch.float16, True),
+            (True, torch.bfloat16, True),
+            (True, torch.float16, True),
+            (True, torch.float16, False),
+            (False, torch.bfloat16, True),
+        ):
+            ctx = torch.autocast(device_type, dtype=torch.bfloat16, cache_enabled=True)
+            expected_ctx = torch.autocast(
+                device_type, dtype=torch.bfloat16, cache_enabled=True
+            )
+            with torch.autocast(
+                device_type, enabled=enabled, dtype=dtype, cache_enabled=cache
+            ):
+                before = mode()
+                expected = fn(x, expected_ctx, xs)
+                reference = fn(
+                    x.double(),
+                    torch.autocast(device_type, dtype=torch.bfloat16),
+                    [t.double() for t in xs],
+                )
+                actual = compiled(x, ctx, xs)
+                self.assertEqual(actual[:2], expected[:2])
+                self.assertEqual(actual[0].double(), reference[0])
+                self.assertEqual(expected[0].double(), reference[0])
+                self.assertIs(actual[2], ctx)
+                self.assertIs(actual[3], ctx)
+                self.assertEqual(actual[4:], expected[4:])
+                self.assertEqual(actual[4], before)
+                self.assertEqual(
+                    (ctx.prev, ctx.prev_fastdtype, ctx.prev_cache_enabled), before
+                )
+                self.assertEqual(mode(), before)
+                actual_grad = torch.autograd.grad(actual[1].sum(), x)[0]
+                expected_grad = torch.autograd.grad(expected[1].sum(), x)[0]
+                self.assertEqual(actual_grad, expected_grad)
+                counts.append(len(backend.graphs))
+            self.assertEqual(mode(), initial)
+        if active:
+            self.assertEqual(counts, [0] * 6)
+        else:
+            self.assertGreater(counts[0], 0)
+            for index in range(1, 5):
+                self.assertGreater(counts[index], counts[index - 1])
+            self.assertEqual(counts[4], counts[5])
+
+    @skipIfNotPy312
+    @parametrize("nested", [False, True])
+    @parametrize("field", ["prev_cache_enabled", "prev_fastdtype", "prev"])
+    def test_comprehension_autocast_saved_state_mutation(self, device, nested, field):
+        device_type = torch.device(device).type
+        value = {
+            "prev_cache_enabled": False,
+            "prev_fastdtype": torch.float16,
+            "prev": True,
+        }[field]
+
+        def mode():
+            return (
+                torch.is_autocast_enabled(device_type),
+                torch.get_autocast_dtype(device_type),
+                torch.is_autocast_cache_enabled(),
+            )
+
+        def write(ctx, value):
+            setattr(ctx, field, value)
+
+        def fn(x, ctx, xs, mutate):
+            write(ctx, value)
+            prefix = x.sin()
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            with ctx as entered:
+                saved = ctx.prev, ctx.prev_fastdtype, ctx.prev_cache_enabled
+                alias = ctx
+                write(alias, value if mutate else getattr(alias, field))
+                result = prefix + sum(ys)
+            after = mode()
+            write(ctx, value)
+            return result, ctx, entered, saved, after
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        counts = []
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for mutate in (True, False, False):
+                ctx = torch.autocast(device_type, enabled=False, cache_enabled=True)
+                expected_ctx = torch.autocast(
+                    device_type, enabled=False, cache_enabled=True
+                )
+                with torch.autocast(device_type, enabled=False, cache_enabled=True):
+                    expected = fn(x, expected_ctx, xs, mutate)
+                    expected_mode = mode()
+                with torch.autocast(device_type, enabled=False, cache_enabled=True):
+                    actual = compiled(x, ctx, xs, mutate)
+                    self.assertEqual(mode()[1:], expected_mode[1:])
+                self.assertEqual(actual[0], expected[0])
+                self.assertIs(actual[1], ctx)
+                self.assertIs(actual[2], ctx)
+                self.assertEqual(actual[3:], expected[3:])
+                self.assertEqual(getattr(ctx, field), value)
+                actual_grad = torch.autograd.grad(actual[0].sum(), x)[0]
+                expected_grad = torch.autograd.grad(expected[0].sum(), x)[0]
+                self.assertEqual(actual_grad, expected_grad)
+                counts.append(len(backend.graphs))
+        self.assertGreater(counts[0], 0)
+        self.assertGreater(counts[1], counts[0])
+        self.assertEqual(counts[1], counts[2])
+
+    @skipIfNotPy312
+    @parametrize("nested", [False, True])
+    @parametrize("active", [False, True])
+    def test_comprehension_autocast_saved_state_break(self, device, nested, active):
+        device_type = torch.device(device).type
+
+        def fn(x, ctx, xs):
+            if not active:
+                ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            with ctx as entered:
+                if active:
+                    ys = [t * 2 if t.sum() > 0 else t for t in xs]
+                ctx.prev_cache_enabled = False
+                result = x.sin() + sum(ys)
+                if not active:
+                    torch._dynamo.graph_break()
+                    result = result.cos()
+            return result, ctx, entered, torch.is_autocast_cache_enabled()
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for _ in range(2):
+                ctx = torch.autocast(device_type, enabled=False)
+                expected_ctx = torch.autocast(device_type, enabled=False)
+                with torch.autocast(device_type, enabled=False, cache_enabled=True):
+                    expected = fn(x, expected_ctx, xs)
+                with torch.autocast(device_type, enabled=False, cache_enabled=True):
+                    actual = compiled(x, ctx, xs)
+                    self.assertFalse(torch.is_autocast_cache_enabled())
+                self.assertEqual(actual[0], expected[0])
+                self.assertIs(actual[1], ctx)
+                self.assertIs(actual[2], ctx)
+                self.assertEqual(actual[3], expected[3])
+                self.assertFalse(ctx.prev_cache_enabled)
+                actual_grad = torch.autograd.grad(actual[0].sum(), x)[0]
+                expected_grad = torch.autograd.grad(expected[0].sum(), x)[0]
+                self.assertEqual(actual_grad, expected_grad)
+        self.assertEqual(len(backend.graphs), 0)
+
+    @parametrize("fullgraph", [False, True])
+    def test_autocast_saved_state_fallback(self, device, fullgraph):
+        device_type = torch.device(device).type
+
+        def fn(x, ctx, mutate):
+            with ctx as entered:
+                ctx.prev_cache_enabled = False if mutate else ctx.prev_cache_enabled
+                result = x.sin()
+            return result, entered, torch.is_autocast_cache_enabled()
+
+        x = torch.ones(4, device=device, requires_grad=True)
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=fullgraph)
+        ctx = torch.autocast(device_type, enabled=False)
+        with torch.autocast(device_type, enabled=False, cache_enabled=True):
+            if fullgraph:
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported, "saved autocast state"
+                ):
+                    compiled(x, ctx, True)
+                self.assertTrue(torch.is_autocast_cache_enabled())
+            else:
+                actual = compiled(x, ctx, True)
+                self.assertEqual(actual[0], x.sin())
+                self.assertIs(actual[1], ctx)
+                self.assertFalse(actual[2])
+                self.assertFalse(torch.is_autocast_cache_enabled())
+        self.assertEqual(len(backend.graphs), 0)
+        for _ in range(2):
+            ctx = torch.autocast(device_type, enabled=False)
+            with torch.autocast(device_type, enabled=False, cache_enabled=True):
+                actual = compiled(x, ctx, False)
+                self.assertEqual(actual[0], x.sin())
+                self.assertIs(actual[1], ctx)
+                self.assertTrue(actual[2])
+                self.assertTrue(torch.is_autocast_cache_enabled())
+            self.assertEqual(ctx.prev_cache_enabled, True)
+        self.assertEqual(len(backend.graphs), 1)
+
+    @skipIfNotPy312
+    @parametrize("nested", [False, True])
+    def test_comprehension_autocast_device_write(self, device, nested):
+        device_type = torch.device(device).type
+        other = "cuda" if device_type == "cpu" else "cpu"
+
+        def mode():
+            return (
+                torch.is_autocast_enabled(device_type),
+                torch.get_autocast_dtype(device_type),
+                torch.is_autocast_enabled(other),
+                torch.get_autocast_dtype(other),
+                torch.is_autocast_cache_enabled(),
+            )
+
+        def fn(x, ctx, xs, mutate):
+            prefix = x.sin()
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            with ctx as entered:
+                ctx.device = other if mutate else ctx.device
+                result = prefix + sum(ys)
+            return result, ctx, entered, ctx.device, mode()
+
+        def invoke(fn, x, xs, mutate):
+            with torch.autocast(other, enabled=False, dtype=torch.float16):
+                with torch.autocast(device_type, enabled=False, dtype=torch.bfloat16):
+                    ctx = torch.autocast(
+                        device_type, enabled=False, dtype=torch.bfloat16
+                    )
+                    actual = fn(x, ctx, xs, mutate)
+                    self.assertIs(actual[1], ctx)
+                    self.assertIs(actual[2], ctx)
+                    self.assertEqual(actual[4], mode())
+                    return actual
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        backend = ExecutingBackend()
+        compiled = torch.compile(fn, backend=backend)
+        counts = []
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for mutate in (True, False, False):
+                expected = invoke(fn, x, xs, mutate)
+                before = backend.executions
+                actual = invoke(compiled, x, xs, mutate)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[3:], expected[3:])
+                self.assertEqual(
+                    torch.autograd.grad(actual[0].sum(), x)[0],
+                    torch.autograd.grad(expected[0].sum(), x)[0],
+                )
+                self.assertGreater(backend.executions, before)
+                counts.append(len(backend.graphs))
+        self.assertGreater(counts[0], 0)
+        self.assertGreater(counts[1], counts[0])
+        self.assertEqual(counts[1], counts[2])
+
+    @skipIfNotPy312
+    @parametrize("nested", [False, True])
+    def test_comprehension_autocast_reentrant_source(self, device, nested):
+        device_type = torch.device(device).type
+
+        def fn(x, xs, outer, inner):
+            prefix = x.sin()
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            with outer as entered_outer:
+                a = x.cos()
+                with inner as entered_inner:
+                    b = x.sin()
+                inside = torch.is_autocast_enabled(device_type)
+            return (
+                prefix + a + b + sum(ys),
+                entered_outer,
+                entered_inner,
+                inside,
+                torch.is_autocast_enabled(device_type),
+                outer.prev,
+                inner.prev,
+            )
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        backend = ExecutingBackend()
+        compiled = torch.compile(fn, backend=backend)
+        counts = []
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for alias in (True, False, False, True):
+                outer = torch.autocast(device_type)
+                inner = outer if alias else torch.autocast(device_type)
+                expected_outer = torch.autocast(device_type)
+                expected_inner = (
+                    expected_outer if alias else torch.autocast(device_type)
+                )
+                with torch.autocast(device_type, enabled=False):
+                    expected = fn(x, xs, expected_outer, expected_inner)
+                before = backend.executions
+                with torch.autocast(device_type, enabled=False):
+                    actual = compiled(x, xs, outer, inner)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[3:], expected[3:])
+                self.assertIs(actual[1], outer)
+                self.assertIs(actual[2], inner)
+                self.assertEqual(
+                    torch.autograd.grad(actual[0].sum(), x)[0],
+                    torch.autograd.grad(expected[0].sum(), x)[0],
+                )
+                self.assertGreater(backend.executions, before)
+                counts.append(len(backend.graphs))
+        self.assertGreater(counts[0], 0)
+        self.assertGreater(counts[1], counts[0])
+        self.assertEqual(counts[1], counts[2])
+        self.assertEqual(counts[2], counts[3])
+
+    @skipIfNotPy312
+    @parametrize("nested", [False, True])
+    @parametrize("setter", ["instance_dict", "object_setattr"])
+    def test_comprehension_autocast_setter_boundary(self, device, nested, setter):
+        device_type = torch.device(device).type
+
+        def fn(x, ctx, xs, mutate):
+            prefix = x.sin()
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            with ctx as entered:
+                if mutate:
+                    if setter == "instance_dict":
+                        ctx.__dict__["prev_cache_enabled"] = False
+                    else:
+                        object.__setattr__(ctx, "prev_cache_enabled", False)
+                else:
+                    ctx.prev_cache_enabled = ctx.prev_cache_enabled
+                result = prefix + sum(ys)
+            return result, ctx, entered, torch.is_autocast_cache_enabled()
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        backend = ExecutingBackend()
+        compiled = torch.compile(fn, backend=backend)
+        counts = []
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for mutate in (True, False, False):
+                expected_ctx = torch.autocast(device_type, enabled=False)
+                ctx = torch.autocast(device_type, enabled=False)
+                with torch.autocast(device_type, enabled=False, cache_enabled=True):
+                    expected = fn(x, expected_ctx, xs, mutate)
+                before = backend.executions
+                with torch.autocast(device_type, enabled=False, cache_enabled=True):
+                    actual = compiled(x, ctx, xs, mutate)
+                    self.assertEqual(torch.is_autocast_cache_enabled(), not mutate)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[3], expected[3])
+                self.assertIs(actual[1], ctx)
+                self.assertIs(actual[2], ctx)
+                self.assertEqual(
+                    ctx.prev_cache_enabled, expected_ctx.prev_cache_enabled
+                )
+                self.assertEqual(
+                    torch.autograd.grad(actual[0].sum(), x)[0],
+                    torch.autograd.grad(expected[0].sum(), x)[0],
+                )
+                self.assertGreater(backend.executions, before)
+                counts.append(len(backend.graphs))
+        self.assertGreater(counts[0], 0)
+        self.assertGreater(counts[1], counts[0])
+        self.assertEqual(counts[1], counts[2])
+
+    @parametrize("constant_position", ["inner", "outer"])
+    def test_autocast_constant_source_fullgraph(self, device, constant_position):
+        device_type = torch.device(device).type
+        fixed = torch.autocast(device_type)
+        eager_fixed = torch.autocast(device_type)
+
+        @torch._dynamo.assume_constant_result
+        def constant_context():
+            return fixed
+
+        def body(x, incoming, constant):
+            outer, inner = (
+                (incoming, constant)
+                if constant_position == "inner"
+                else (constant, incoming)
+            )
+            with outer as entered_outer:
+                with inner as entered_inner:
+                    result = x.sin() + x.cos()
+            return result, entered_outer, entered_inner, outer.prev, inner.prev
+
+        def fn(x, incoming):
+            return body(x, incoming, constant_context())
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        backend = ExecutingBackend()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        for alias in (False, False, True, False):
+            incoming = fixed if alias else torch.autocast(device_type)
+            with torch.autocast(device_type, enabled=False):
+                if alias:
+                    with self.assertRaisesRegex(
+                        torch._dynamo.exc.Unsupported, "Reentrant sourced autocast"
+                    ):
+                        compiled(x, incoming)
+                else:
+                    expected = body(x, torch.autocast(device_type), eager_fixed)
+                    actual = compiled(x, incoming)
+                    self.assertEqual(actual[0], expected[0])
+                    self.assertEqual(actual[3:], expected[3:])
+                    outer, inner = (
+                        (incoming, fixed)
+                        if constant_position == "inner"
+                        else (fixed, incoming)
+                    )
+                    self.assertIs(actual[1], outer)
+                    self.assertIs(actual[2], inner)
+                    self.assertEqual(
+                        torch.autograd.grad(actual[0].sum(), x)[0],
+                        torch.autograd.grad(expected[0].sum(), x)[0],
+                    )
+                self.assertFalse(torch.is_autocast_enabled(device_type))
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(backend.executions, 3)
+
+    def test_autocast_distinct_source_fullgraph(self, device):
+        device_type = torch.device(device).type
+
+        def fn(x, outer, inner):
+            with outer as entered_outer:
+                with inner as entered_inner:
+                    result = x.sin() + x.cos()
+            return result, entered_outer, entered_inner, outer.prev, inner.prev
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        backend = ExecutingBackend()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        for alias in (False, False, True, False):
+            outer = torch.autocast(device_type)
+            inner = outer if alias else torch.autocast(device_type)
+            with torch.autocast(device_type, enabled=False):
+                if alias:
+                    with self.assertRaisesRegex(
+                        torch._dynamo.exc.Unsupported, "Reentrant sourced autocast"
+                    ):
+                        compiled(x, outer, inner)
+                else:
+                    actual = compiled(x, outer, inner)
+                    self.assertEqual(actual[0], x.sin() + x.cos())
+                    self.assertIs(actual[1], outer)
+                    self.assertIs(actual[2], inner)
+                    self.assertEqual(actual[3:], (False, True))
+                self.assertFalse(torch.is_autocast_enabled(device_type))
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(backend.executions, 3)
+
+    @parametrize("fullgraph", [False, True])
+    def test_autocast_source_graph_break_scope(self, device, fullgraph):
+        device_type = torch.device(device).type
+
+        def fn(x, ctx, do_break):
+            with ctx as entered:
+                result = x.sin()
+                if do_break:
+                    torch._dynamo.graph_break()
+            return result, entered, torch.is_autocast_enabled(device_type)
+
+        x = torch.ones(4, device=device, requires_grad=True)
+        backend = ExecutingBackend()
+        compiled = torch.compile(fn, backend=backend, fullgraph=fullgraph)
+        ctx = torch.autocast(device_type, enabled=False)
+        before = torch.is_autocast_enabled(device_type)
+        if fullgraph:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                r"Call to `torch\._dynamo\.graph_break\(\)`",
+            ):
+                compiled(x, ctx, True)
+        else:
+            actual = compiled(x, ctx, True)
+            self.assertEqual(actual[0], x.sin())
+            self.assertIs(actual[1], ctx)
+            self.assertEqual(actual[2], before)
+        self.assertEqual(torch.is_autocast_enabled(device_type), before)
+        self.assertEqual(len(backend.graphs), 0)
+        self.assertEqual(backend.executions, 0)
+        for _ in range(2):
+            ctx = torch.autocast(device_type, enabled=False)
+            actual = compiled(x, ctx, False)
+            self.assertEqual(actual[0], x.sin())
+            self.assertIs(actual[1], ctx)
+            self.assertEqual(actual[2], before)
+            self.assertEqual(torch.is_autocast_enabled(device_type), before)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(backend.executions, 2)
+
+    @skipIfNotPy312
+    @parametrize("nested", [False, True])
+    @parametrize("direct", [False, True])
+    def test_comprehension_autocast_pending_source(self, device, nested, direct):
+        device_type = torch.device(device).type
+
+        def fn(x, ctx, xs):
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            ctx._enabled = False
+            if direct:
+                entered = ctx.__enter__()
+                matrix = x @ x
+                enabled = torch.is_autocast_enabled(device_type)
+                exited = ctx.__exit__(None, None, None)
+            else:
+                with ctx as entered:
+                    matrix = x @ x
+                    enabled = torch.is_autocast_enabled(device_type)
+                exited = False
+            return matrix, matrix + sum(ys), entered, ctx, ctx._enabled, enabled, exited
+
+        x = torch.ones(4, 4, device=device, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        before = torch.is_autocast_enabled(device_type)
+        counts = []
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for _ in range(2):
+                ctx = torch.autocast(device_type, dtype=torch.bfloat16)
+                expected_ctx = torch.autocast(device_type, dtype=torch.bfloat16)
+                expected = fn(x, expected_ctx, xs)
+                actual = compiled(x, ctx, xs)
+                self.assertEqual(actual[:2], expected[:2])
+                self.assertEqual(actual[0].dtype, torch.float32)
+                self.assertIs(actual[2], ctx)
+                self.assertIs(actual[3], ctx)
+                self.assertEqual(actual[4:], expected[4:])
+                self.assertFalse(ctx._enabled)
+                self.assertEqual(torch.is_autocast_enabled(device_type), before)
+                actual_grad = torch.autograd.grad(actual[1].sum(), x)[0]
+                expected_grad = torch.autograd.grad(expected[1].sum(), x)[0]
+                self.assertEqual(actual_grad, expected_grad)
+                counts.append(len(backend.graphs))
+        self.assertGreater(counts[0], 0)
+        self.assertEqual(counts[0], counts[1])
+
+    @parametrize("nested", [False, True])
+    @parametrize("context", ["nullcontext", "autocast"])
+    @parametrize("stack", [False, True])
+    def test_graph_break_sourced_context_identity(self, device, nested, context, stack):
+        def broken(x):
+            torch._dynamo.graph_break()
+            return x.cos()
+
+        def body(x, ctx):
+            alias = ctx
+            if stack:
+                stack_ctx, result, stack_alias = ctx, x.sin() + broken(x), alias
+                with stack_alias:
+                    return result, stack_ctx, stack_alias
+            prefix = x.sin()
+            torch._dynamo.graph_break()
+            with alias:
+                return prefix + x.cos(), ctx, alias
+
+        def fn(x, ctx):
+            return body(x, ctx)
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        contexts = [
+            contextlib.nullcontext()
+            if context == "nullcontext"
+            else torch.autocast(device_type=device)
+            for _ in range(2)
+        ]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn if nested else body, backend=backend)
+        before = torch.is_autocast_enabled(device)
+        counts = []
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for ctx in (contexts[0], contexts[0], contexts[1]):
+                expected = body(x, ctx)
+                actual = compiled(x, ctx)
+                self.assertEqual(actual[0], expected[0])
+                self.assertIs(actual[1], ctx)
+                self.assertIs(actual[2], ctx)
+                self.assertEqual(torch.is_autocast_enabled(device), before)
+                counts.append(len(backend.graphs))
+        self.assertGreater(counts[0], 0)
+        self.assertEqual(counts, [counts[0]] * 3)
+
+    @skipIfNotPy312
+    @parametrize("nested", [False, True])
+    @parametrize("active", [False, True])
+    def test_comprehension_autocast_subclass_effects(self, device, nested, active):
+        class CountingAutocast(torch.autocast):
+            def __init__(self):
+                super().__init__(device, enabled=False)
+                self.enters = 0
+                self.exits = 0
+
+            def __enter__(self):
+                self.enters += 1
+                return super().__enter__()
+
+            def __exit__(self, *args):
+                self.exits += 1
+                return super().__exit__(*args)
+
+        if active:
+
+            def fn(x, ctx, xs, fail):
+                with ctx:
+                    ys = [t * 2 if t.sum() > 0 else t for t in xs]
+                    if fail:
+                        raise Boom("body")
+                    return x.sin() + sum(ys), ctx
+        else:
+
+            def fn(x, ctx, xs, fail):
+                ys = [t * 2 if t.sum() > 0 else t for t in xs]
+                with ctx:
+                    if fail:
+                        raise Boom("body")
+                    return x.sin() + sum(ys), ctx
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        expected_ctx, ctx = CountingAutocast(), CountingAutocast()
+        compiled = torch.compile(fn, backend="eager")
+        before = torch.is_autocast_enabled(device)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for count, fail in enumerate((False, True, False), 1):
+                if fail:
+                    with self.assertRaisesRegex(Boom, "body"):
+                        fn(x, expected_ctx, xs, fail)
+                    with self.assertRaisesRegex(Boom, "body"):
+                        compiled(x, ctx, xs, fail)
+                else:
+                    expected = fn(x, expected_ctx, xs, fail)
+                    actual = compiled(x, ctx, xs, fail)
+                    self.assertEqual(actual[0], expected[0])
+                    self.assertIs(actual[1], ctx)
+                self.assertEqual((ctx.enters, ctx.exits), (count, count))
+                self.assertEqual(
+                    (ctx.enters, ctx.exits), (expected_ctx.enters, expected_ctx.exits)
+                )
+                self.assertEqual(torch.is_autocast_enabled(device), before)
+                self.assertTrue(torch.is_grad_enabled())
+
+    @skipIfNotPy312
+    @parametrize("nested", [False, True])
+    @parametrize("payload_kind", ["none", "object", "list"])
+    def test_comprehension_unused_input_guards(self, device, nested, payload_kind):
+        def fn(x, xs, payload):
+            prefix = x.sin()
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            return prefix + sum(ys), payload
+
+        x = torch.ones(4, device=device, dtype=torch.float64)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        payload = {"none": None, "object": object(), "list": []}[payload_kind]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for arg in (1, payload, payload):
+                actual = compiled(x, xs, arg)
+                self.assertEqual(actual[0], fn(x, xs, arg)[0])
+                self.assertIs(actual[1], arg)
+        prefix_graphs = [
+            gm
+            for gm in backend.graphs
+            if any(node.target == "sin" for node in gm.graph.nodes)
+        ]
+        self.assertEqual(len(prefix_graphs), 1)
+
+    @skipIfNotPy312
+    @parametrize("nested", [False, True])
+    def test_comprehension_dead_context(self, device, nested):
+        class Holder:
+            pass
+
+        def fn(x, xs):
+            holder = Holder()
+            holder.ctx = torch.no_grad()
+            del holder
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            return x.sin() + sum(ys), torch.is_grad_enabled()
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        expected = fn(x, xs)
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        counts = []
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for _ in range(2):
+                actual = compiled(x, xs)
+                self.assertEqual(actual, expected)
+                self.assertTrue(actual[0].requires_grad)
+                self.assertTrue(torch.is_grad_enabled())
+                counts.append(len(backend.graphs))
+        self.assertGreater(counts[0], 0)
+        self.assertEqual(counts[0], counts[1])
+
+    @skipIfNotPy312
+    @parametrize("nested", [False, True])
+    def test_comprehension_context_skip_is_invocation_scoped(self, device, nested):
+        def fn(x, xs, unsafe):
+            ctx = torch.set_grad_enabled(False) if unsafe else None
+            ys = [t * 2 if t.sum() > 0 else t for t in xs]
+            result = x.sin() + sum(ys), torch.is_grad_enabled()
+            if ctx is not None:
+                ctx.__exit__(None, None, None)
+            return result
+
+        x = torch.ones(4, device=device, dtype=torch.float64, requires_grad=True)
+        xs = [torch.ones_like(x), -torch.ones_like(x)]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        counts = []
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            for unsafe in (True, False, False):
+                actual = compiled(x, xs, unsafe)
+                self.assertEqual(actual, fn(x, xs, unsafe))
+                self.assertEqual(actual[0].requires_grad, not unsafe)
+                self.assertEqual(actual[1], not unsafe)
+                self.assertTrue(torch.is_grad_enabled())
+                counts.append(len(backend.graphs))
+        self.assertEqual(counts[0], 0)
+        self.assertGreater(counts[1], 0)
+        self.assertEqual(counts[1], counts[2])
 
 
 class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
@@ -5039,6 +6020,7 @@ class GraphModule(torch.nn.Module):
 instantiate_parametrized_tests(CtxManagerTests)
 instantiate_parametrized_tests(ContextlibContextManagerTests)
 instantiate_device_type_tests(ComprehensionGeneratorTests, globals(), allow_xpu=True)
+instantiate_device_type_tests(ComprehensionContextTests, globals(), allow_xpu=True)
 instantiate_device_type_tests(
     CtxManagerTestsDevice, globals(), except_for=("cpu",), allow_xpu=True
 )

@@ -3922,7 +3922,11 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
+            from .ctx_manager import AutocastModeVariable
+
             name = name_var.as_python_constant()
+            if isinstance(obj, AutocastModeVariable):
+                obj.check_saved_state_mutation(tx, name, val)
             if obj.is_tensor():
                 from .builder import wrap_fx_proxy
 

@@ -2132,7 +2132,14 @@ class VariableBuilder:
         elif value is set_allocator:
             return TritonSetAllocatorVariable(value)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
-            if isinstance(value, torch.amp.autocast_mode._UnmanagedAutocast):
+            if not istype(
+                value,
+                (
+                    torch.amp.autocast_mode.autocast,
+                    torch.cuda.amp.autocast,
+                    torch.cpu.amp.autocast,
+                ),
+            ):
                 return self.wrap_user_defined(value)
             else:
                 # Guard the four fields the trace specializes on rather than the
@@ -2149,10 +2156,12 @@ class VariableBuilder:
                                 GuardBuilder.EQUALS_MATCH
                             )
                         )
-                return AutocastModeVariable(
+                result = AutocastModeVariable(
                     target_values=[getattr(value, field) for field in fields],
+                    value_type=type(value),
                     source=self.source,
                 )
+                return self.tx.output.side_effects.track_object_existing(value, result)
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
             if inspect.isclass(value):
                 self.install_guards(GuardBuilder.CLASS_MATCH)

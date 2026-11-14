@@ -181,6 +181,7 @@ from .variables.builder import (
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
+    AutocastModeVariable,
     ContextWrappingVariable,
     GenericContextWrappingVariable,
     WithEnterFunctionVariable,
@@ -1186,6 +1187,29 @@ def break_graph_if_unsupported(
                 _record_graph_break_op(
                     self, lambda p: _record_graph_break_ops(p, popped)
                 )
+                active_autocast = [
+                    cast(AutocastModeVariable, value)
+                    for value in self.output.side_effects.id_to_variable.values()
+                    if type.__instancecheck__(AutocastModeVariable, value)
+                    and value.source is not None
+                    and cast(AutocastModeVariable, value).cleanup_fn is not None
+                ]
+                if active_autocast:
+                    if self.one_graph or self.error_on_graph_break:
+                        raise
+                    if isinstance(excp, Unsupported):
+                        excp.remove_from_stats()
+                    unimplemented(
+                        gb_type="Graph break under sourced autocast",
+                        context=f"Active sourced autocast: {active_autocast}",
+                        explanation="An active sourced autocast object cannot be "
+                        "reentered with its original exit state after a graph break.",
+                        hints=[],
+                        from_exc=excp,
+                        skip_frame=True,
+                        preserve_skip_frame_after_inline=True,
+                        apply_to_code=False,
+                    )
                 if self.active_generic_context_managers:
                     # raise original graph break if fullgraph/error_on_graph_break=True
                     if self.one_graph or self.error_on_graph_break:
