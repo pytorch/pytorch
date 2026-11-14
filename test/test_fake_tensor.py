@@ -88,6 +88,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
+    python_fake_tensor_mode,
     run_tests,
     skipIfCppFakeTensor,
     skipIfCrossRef,
@@ -120,32 +121,12 @@ aten = torch.ops.aten
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
-# Follow the library switch so the test harness (N/A skips, cpp mode
-# construction, cpp-specific assertions) always matches how FakeTensorMode is
+# Follow the library switch so the test harness (N/A skips and cpp-specific
+# assertions) always matches how FakeTensorMode is
 # actually built, rather than reading the env var with a different default.
 CPP_FAKETENSOR = torch._dynamo.config.use_cpp_fake_tensor
 
-if CPP_FAKETENSOR:
-
-    def FakeTensorMode(
-        *,
-        shape_env=None,
-        allow_fallback_kernels=True,
-        allow_non_fake_inputs=False,
-        static_shapes=None,
-        **kwargs,
-    ):
-        if not allow_fallback_kernels or kwargs:
-            raise NotImplementedError("CppFakeTensorMode has no such options yet")
-        return CppFakeTensorMode(
-            shape_env=shape_env,
-            allow_non_fake_inputs=allow_non_fake_inputs,
-            static_shapes=static_shapes,
-        )
-
-    FakeTensorModeCls = CppFakeTensorMode
-else:
-    FakeTensorModeCls = FakeTensorMode
+FakeTensorModeCls = CppFakeTensorMode if CPP_FAKETENSOR else FakeTensorMode
 
 _CPP_FAKE_DYNAMO_SKIP = "Dynamo does not support C++ fakes as inputs yet"
 
@@ -3751,7 +3732,11 @@ class TestFakeTensorConverter(TestCase):
     def test_memoized_conversion_from_meta(self, mode_cls, pytype):
         if mode_cls is CppFakeTensorMode and pytype is torch.nn.Parameter:
             self.skipTest("C++ fake tensors do not support Parameter pytype")
-        if TEST_WITH_TORCHDYNAMO and mode_cls is FakeTensorMode and pytype is not None:
+        if (
+            TEST_WITH_TORCHDYNAMO
+            and mode_cls is not CppFakeTensorMode
+            and pytype is not None
+        ):
             self.skipTest(
                 "Dynamo guards on pytype, which differs from the actual FakeTensor type"
             )
@@ -3766,7 +3751,7 @@ class TestFakeTensorConverter(TestCase):
         self.assertIs(maybe_get_fake_mode(fake), mode)
         self.assertEqual(fake.shape, x.shape)
         self.assertEqual(fake.device, torch.device("cpu"))
-        if mode_cls is FakeTensorMode:
+        if mode_cls is not CppFakeTensorMode:
             self.assertIs(fake.pytype, pytype)
         self.assertEqual(maybe_get_fake_dispatch_keys(fake), keys)
 
@@ -6426,7 +6411,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(torch._C._maybe_get_fake_mode(functional))
         self.assertIsNone(torch._C._maybe_get_fake_mode(TwoTensor(fake, fake)))
         self.assertIsNone(torch._C._maybe_get_fake_mode(_add_batch_dim(fake, 0, 1)))
-        python_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        python_mode = python_fake_tensor_mode()
         python_fake = python_mode.from_tensor(torch.empty(2))
         self.assertIsNone(torch._C._maybe_get_fake_mode(python_fake))
 
@@ -6467,7 +6452,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch._C._set_dispatch_mode(object())
         # A C++ mode and a Python FakeTensorMode cannot both be installed
-        python_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        python_mode = python_fake_tensor_mode()
         try:
             with python_mode:
                 msg = "Python FakeTensorMode is set"
@@ -6833,6 +6818,26 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertEqual(maybe_get_fake_dispatch_keys(out), expected)
 
     def test_cpp_fake_tensor_mode_init(self):
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=True):
+            shape_env = ShapeEnv()
+            selected = FakeTensorMode(
+                shape_env=shape_env,
+                allow_fallback_kernels=False,
+                allow_non_fake_inputs=True,
+                static_shapes=True,
+                export=True,
+            )
+            self.assertIs(type(selected), CppFakeTensorMode)
+            self.assertIs(selected.shape_env, shape_env)
+            self.assertFalse(selected.allow_fallback_kernels)
+            self.assertTrue(selected.allow_non_fake_inputs)
+            self.assertTrue(selected.static_shapes)
+            self.assertTrue(selected.fake_tensor_converter.export)
+            python_mode = python_fake_tensor_mode()
+            for copied in (copy.copy(python_mode), copy.deepcopy(python_mode)):
+                self.assertIs(type(copied), FakeTensorMode)
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=False):
+            self.assertIs(type(FakeTensorMode()), FakeTensorMode)
         shape_env = ShapeEnv()
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             mode = CppFakeTensorMode(shape_env=shape_env)
@@ -7569,7 +7574,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         msg = "CppFakeTensorMode is not supported here yet"
         with self.assertRaisesRegex(RuntimeError, msg):
             require_python_fake_mode(CppFakeTensorMode())
-        py_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        py_mode = python_fake_tensor_mode()
         self.assertIs(require_python_fake_mode(py_mode), py_mode)
         self.assertIsNone(require_python_fake_mode(None))
 

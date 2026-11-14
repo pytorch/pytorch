@@ -2344,11 +2344,23 @@ def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
 
 
 def fake_tensor_modes(fn):
-    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
 
     return parametrize(
-        "mode_cls", [FakeTensorMode, CppFakeTensorMode], name_fn=lambda cls: cls.__name__
+        "mode_cls",
+        [python_fake_tensor_mode, CppFakeTensorMode],
+        name_fn=lambda cls: (
+            "FakeTensorMode" if cls is python_fake_tensor_mode else cls.__name__
+        ),
     )(fn)
+
+
+def python_fake_tensor_mode(**kwargs: Any) -> "torch._subclasses.fake_tensor.FakeTensorMode":
+    from torch._dynamo import config
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with config.patch(use_cpp_fake_tensor=False):
+        return FakeTensorMode(**kwargs)
 
 
 def skipIfCppFakeTensor(reason):
