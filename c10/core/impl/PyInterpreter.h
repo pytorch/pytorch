@@ -367,6 +367,16 @@ struct C10_API PyInterpreterVTable {
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       PyObject* real) const = 0;
+  // Validates real input subclasses, then optionally tries initial constant
+  // computation or a plain lift, all under one GIL acquisition. Replaces the
+  // arguments with the converted output on success; otherwise leaves them
+  // intact.
+  virtual bool fake_try_initial_constant(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
+      bool makes_constant,
+      bool is_lift) const = 0;
   // Converts real through mode's converter under one GIL acquisition.
   // PlainTensor and ClonedConstant return nullptr unless real has the exact
   // Python Tensor type (or no Python object). ClonedConstant checks the type
