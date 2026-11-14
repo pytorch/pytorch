@@ -315,9 +315,6 @@ void fakeFallback(
   if (mode == nullptr) {
     unsupported(op, "fake tensors without a mode");
   }
-  if (mode->propagate_real_tensors_) {
-    unsupported(op, "propagate_real_tensors");
-  }
   // Python's FakeTensorMode is out of the FAKE dispatch mode slot while its
   // __torch_dispatch__ runs, apart from what it runs under `with self:`
   // (decompositions, say), so a Python Meta kernel calling active_fake_mode()
@@ -540,6 +537,18 @@ void fakeFallback(
         ->invalidate_written_to_constants(op, *stack, mode);
   }
 
+  auto* interpreter = c10::impl::getGlobalPyInterpreter();
+  c10::SafePyObject real(
+      mode->propagate_real_tensors_
+          ? (*interpreter)->fake_run_real_op(op, *stack, mode)
+          : nullptr,
+      interpreter);
+  const auto maybe_propagate_real_tensors = [&] {
+    if (real.ptr(interpreter)) {
+      (*interpreter)->propagate_real_tensors(op, real.ptr(interpreter), stack, mode);
+    }
+  };
+
   // Input devices in argument order, paired with whether each is a CPU scalar.
   c10::SmallVector<std::pair<c10::Device, bool>, 4> input_devices;
   // The sparse inputs' Meta keys; Meta is added before redispatch.
@@ -562,9 +571,6 @@ void fakeFallback(
         const auto input_mode = impl->fake_tensor_mode();
         if (input_mode == nullptr) {
           unsupported(op, "fake tensors without a mode");
-        }
-        if (impl->real_tensor() != nullptr) {
-          unsupported(op, "propagate_real_tensors");
         }
         const auto fake_device = impl->fake_device();
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
@@ -666,6 +672,7 @@ void fakeFallback(
   if (symbolic_sizes &&
       (*c10::impl::getGlobalPyInterpreter())
           ->fake_try_fast_impl(op, stack, mode)) {
+    maybe_propagate_real_tensors();
     return;
   }
   // FakeTensorMode._unbacked_special_fake_handling_ops, applied to all
@@ -703,6 +710,7 @@ void fakeFallback(
         return true;
       };
       if (interpreter->fake_run_with_mode_entered(mode, decompose)) {
+        maybe_propagate_real_tensors();
         return;
       }
     }
@@ -711,12 +719,23 @@ void fakeFallback(
     const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
     if (interpreter->fake_run_with_mode_entered(
             mode, [&] { return interpreter->prim_meta_impl(op, stack); })) {
+      maybe_propagate_real_tensors();
       return;
     }
   }
+  // Match library_utils.is_builtin before probing custom kernel registrations.
+  const auto op_namespace = op.operator_name().getNamespace();
+  const bool is_builtin = op_namespace &&
+      (*op_namespace == "aten" || *op_namespace == "prim" || *op_namespace == "prims");
+  if (real.ptr(interpreter) && mode->shape_env_ && !is_builtin &&
+      (*interpreter)->fake_infer_from_real_out(op, stack, mode, real.ptr(interpreter))) {
+    maybe_propagate_real_tensors();
+    return;
+  }
   if (has(FakeDispatchCategory::CustomOpImpl) &&
       (*c10::impl::getGlobalPyInterpreter())
-          ->run_fake_impl(op, stack, mode, /*real=*/nullptr)) {
+          ->run_fake_impl(op, stack, mode, real.ptr(interpreter))) {
+    maybe_propagate_real_tensors();
     return;
   }
   // Constructors finalize their own output devices.
@@ -726,6 +745,7 @@ void fakeFallback(
   if (has(FakeDispatchCategory::OpImpl) || has_op_impl_predicate(op)) {
     if ((*c10::impl::getGlobalPyInterpreter())
             ->fake_try_op_impl(op, stack, mode, common_device)) {
+      maybe_propagate_real_tensors();
       return;
     }
   }
@@ -904,6 +924,7 @@ void fakeFallback(
           return wrap(t, is_alias);
         });
   }
+  maybe_propagate_real_tensors();
 }
 
 TORCH_LIBRARY_IMPL(_, Fake, m) {
