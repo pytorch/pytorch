@@ -79,9 +79,9 @@ using AttrFunction = std::function<ideep::attr_t(
 
 const std::unordered_map<std::string_view, AttrFunction>& fusion_unary_attr_map();
 
-const std::unordered_map<std::string_view, ideep::algorithm>& fusion_unary_alg_map();
+const std::unordered_map<std::string_view, dnnl::algorithm>& fusion_unary_alg_map();
 
-const std::unordered_map<std::string_view, ideep::algorithm>& fusion_binary_alg_map();
+const std::unordered_map<std::string_view, dnnl::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()
 }
