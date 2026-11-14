@@ -843,6 +843,8 @@ void raw_miopen_convolution_forward_out_32bit(
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
 
   ConvolutionArgs args{input, output, weight};
+  // See Note [MIOpen calls during HIP graph capture]
+  c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{hipStreamCaptureModeRelaxed};
   args.handle = getMiopenHandle();
   at::MemoryFormat memory_format = miopen_conv_suggest_memory_format(input, weight);
   setConvolutionParams(
@@ -1143,6 +1145,8 @@ void raw_miopen_convolution_backward_input_out_32bit(
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
 
   ConvolutionArgs args{grad_input, grad_output, weight};
+  // See Note [MIOpen calls during HIP graph capture]
+  c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{hipStreamCaptureModeRelaxed};
   args.handle = getMiopenHandle();
   at::MemoryFormat memory_format =
     miopen_conv_suggest_memory_format(grad_input, weight);
@@ -1320,6 +1324,8 @@ void raw_miopen_convolution_backward_weight_out_32bit(
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
 
   ConvolutionArgs args{input, grad_output, grad_weight};
+  // See Note [MIOpen calls during HIP graph capture]
+  c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{hipStreamCaptureModeRelaxed};
   args.handle = getMiopenHandle();
   at::MemoryFormat memory_format =
     miopen_conv_suggest_memory_format(input, grad_weight);
