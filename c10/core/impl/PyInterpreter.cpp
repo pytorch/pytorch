@@ -223,6 +223,14 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       std::exception_ptr /*error*/) const override {
     PANIC(maybe_run_unsafe_fallback);
   }
+  bool fake_try_initial_constant(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      const std::shared_ptr<FakeTensorMode>& /*mode*/,
+      bool /*makes_constant*/,
+      bool /*is_lift*/) const override {
+    PANIC(fake_try_initial_constant);
+  }
   c10::intrusive_ptr<TensorImpl> from_real_tensor(
       const std::shared_ptr<FakeTensorMode>& /*mode*/,
       const c10::intrusive_ptr<TensorImpl>& /*real*/,

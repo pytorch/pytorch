@@ -588,14 +588,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             fake_impl_calls.append(True)
             return torch.empty_like(weight)
 
+        op = custom_op._opoverload
+
         class DispatchParameter(torch.nn.Parameter):
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 dispatch_calls.append(func)
-                if (
-                    func
-                    is torch.ops._torch_testing.fake_tensor_dispatch_parameter_subclass.default
-                ):
+                if func is op:
                     weight = args[0]
                     return torch.empty(
                         weight.shape, dtype=weight.dtype, device=weight.device
@@ -604,18 +603,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
         weight = DispatchParameter(torch.randn(10, 10))
         with mode_cls() as mode:
-            result = torch.ops._torch_testing.fake_tensor_dispatch_parameter_subclass(
-                weight
-            )
+            result = op(weight)
 
         self.assertTrue(is_fake_tensor(result))
         self.assertIs(maybe_get_fake_mode(result), mode)
         self.assertEqual(result.shape, weight.shape)
         self.assertEqual(result.device, torch.device("cpu"))
-        self.assertEqual(
-            dispatch_calls,
-            [torch.ops._torch_testing.fake_tensor_dispatch_parameter_subclass.default],
-        )
+        self.assertEqual(dispatch_calls, [op])
         self.assertEqual(fake_impl_calls, [])
 
     def test_check_for_subclass_arg_parameter_subclass(self):
@@ -6890,7 +6884,11 @@ class TestCppFakeTensorModeBindings(TestCase):
     @parametrize(
         "kind", ["tensor", "parameter", "parameter_subclass", "tensor_subclass"]
     )
-    def test_fake_fallback_subclasses_without_python_dispatch(self, mode_cls, kind):
+    @parametrize("size", [1, 2])
+    @parametrize("op", ["with_fake", "add", "add_", "lift_fresh_copy", "sin", "cat"])
+    def test_fake_fallback_subclasses_without_python_dispatch(
+        self, mode_cls, kind, size, op
+    ):
         class ParameterSubclass(torch.nn.Parameter):
             pass
 
@@ -6903,30 +6901,45 @@ class TestCppFakeTensorModeBindings(TestCase):
             "parameter_subclass": ParameterSubclass,
             "tensor_subclass": TensorSubclass,
         }[kind]
-        real = torch.empty(2, 3, device="cpu")
+        base = torch.ones(size)
+        real = base
         if tensor_cls is not torch.Tensor:
             real = torch.Tensor._make_subclass(tensor_cls, real)
         self.assertIs(type(real).__torch_dispatch__, torch.Tensor.__torch_dispatch__)
         self.assertFalse(torch._C._dispatch_keys(real).has(torch._C.DispatchKey.Python))
         mode = mode_cls(allow_non_fake_inputs=True)
-        fake = mode.from_tensor(torch.empty(2, 3, device="cpu"))
+        fake = mode.from_tensor(torch.empty(size)) if op == "with_fake" else None
+        calls = {
+            "with_fake": lambda: torch.add(real, fake),
+            "add": lambda: real + 1,
+            "add_": lambda: real.add_(1),
+            "lift_fresh_copy": lambda: aten.lift_fresh_copy.default(real),
+            "sin": lambda: real.sin(),
+            "cat": lambda: torch.cat([base, real]),
+        }
         with mode, torch._C.DisableTorchFunctionSubclass():
             if kind == "tensor_subclass":
                 if mode_cls is CppFakeTensorMode:
-                    error, msg = (
-                        RuntimeError,
-                        "does not support converting tensor subclass TensorSubclass",
-                    )
+                    error, msg = NotImplementedError, "tensor subclass inputs"
                 else:
-                    error, msg = TypeError, "Multiple dispatch failed"
+                    error, msg = (
+                        TypeError,
+                        "Multiple dispatch failed|unsupported operand type",
+                    )
                 with self.assertRaisesRegex(error, msg):
-                    torch.add(real, fake)
+                    calls[op]()
             else:
-                result = torch.add(real, fake)
-                self.assertTrue(is_fake_tensor(result))
-                self.assertIs(maybe_get_fake_mode(result), mode)
-                self.assertEqual(result.shape, (2, 3))
+                result = calls[op]()
+                if op == "add_":
+                    self.assertIs(result, real)
+                else:
+                    self.assertTrue(is_fake_tensor(result))
+                    self.assertIs(maybe_get_fake_mode(result), mode)
+                self.assertEqual(result.shape, (size * 2 if op == "cat" else size,))
                 self.assertEqual(result.device, torch.device("cpu"))
+        if kind == "tensor_subclass":
+            # In particular, rejection must precede the real add_ computation.
+            self.assertEqual(base, torch.ones(size))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
