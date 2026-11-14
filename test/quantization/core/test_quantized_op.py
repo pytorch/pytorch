@@ -9399,6 +9399,26 @@ class TestQNNPackOps(TestCase):
                                         "Quantized addition with ReLU failed.")
 
 
+    @unittest.skipIf(not torch.backends.xnnpack.enabled, "XNNPACK is not enabled")
+    def test_qnnpack_mul_non_contiguous(self):
+        for op in (torch.ops.quantized.mul, torch.ops.quantized.mul_relu):
+            a = torch.quantize_per_tensor(
+                torch.arange(1, 7, dtype=torch.float32).reshape(2, 3),
+                scale=0.1,
+                zero_point=0,
+                dtype=torch.qint8,
+            ).transpose(0, 1)
+            b = torch.quantize_per_tensor(
+                torch.ones(3, 2),
+                scale=0.1,
+                zero_point=0,
+                dtype=torch.qint8,
+            )
+            self.assertFalse(a.is_contiguous())
+            actual = op(a, b, 0.1, 0)
+            expected = op(a.contiguous(), b, 0.1, 0)
+            self.assertEqual(actual.int_repr(), expected.int_repr())
+
     """Tests that quantized add works with broadcasting """
     def test_qnnpack_add_broadcast(self):
         def _run_test(A, B):

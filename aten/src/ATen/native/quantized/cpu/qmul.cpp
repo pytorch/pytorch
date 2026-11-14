@@ -192,8 +192,8 @@ Tensor _mul_out_xnnpack(
       runtime_ptr, &xnn_delete_runtime);
 
   std::array<xnn_external_value, 3> external = {
-    xnn_external_value{input0_id, reinterpret_cast<void*>(self.mutable_data_ptr<scalar_t>())},
-    xnn_external_value{input1_id, reinterpret_cast<void*>(other.mutable_data_ptr<scalar_t>())},
+    xnn_external_value{input0_id, reinterpret_cast<void*>(self_contig.mutable_data_ptr<scalar_t>())},
+    xnn_external_value{input1_id, reinterpret_cast<void*>(other_contig.mutable_data_ptr<scalar_t>())},
     xnn_external_value{output_id, reinterpret_cast<void*>(out.mutable_data_ptr<scalar_t>())}};
 
   status = xnn_setup_runtime(
