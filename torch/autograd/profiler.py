@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import atexit
 import copy
 import logging
 import uuid
@@ -18,6 +19,7 @@ import torch.cuda
 from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import _ExperimentalConfig
 from torch.autograd import (
+    _close_global_callback_session,
     _disable_profiler,
     _enable_profiler,
     _kineto_step,
@@ -43,6 +45,8 @@ from torch.autograd.profiler_util import (
 )
 from torch.futures import Future
 
+
+atexit.register(_close_global_callback_session)
 
 __all__ = [
     "profile",
