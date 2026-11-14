@@ -1,0 +1,278 @@
+# Owner(s): ["module: ci"]
+name: CI remaining-hosts canary
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/scripts/ci_remaining_hosts.py
+      - .github/scripts/test_ci_remaining_hosts.py
+      - .github/workflows/ci-remaining-hosts-canary.yml
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+jobs:
+  own-host:
+    if: github.repository == 'pytorch/pytorch' && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.ref == 'd4l3k/ci-remaining-hosts'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - linux.idc.xpu
+          - linux.rocm.gpu.mi300.1
+          - linux.dgx.b200.8
+          - linux.s390x
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 3
+    steps:
+      # Inline stdlib collector: s390x needs no JS checkout action or installation.
+      - name: Inspect only this assigned runner
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
+        env:
+          EXPECTED_LABEL: ${{ matrix.runner }}
+          AUDIT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ ! -x /usr/bin/python3 ]; then
+            printf '%s\n' '{"collector_available":false,"completed":true,"probe_error":false,"sudo_probe_known":false,"sudo_probe_not_attempted":true,"sudo_root_shell":false}'
+            exit 0
+          fi
+          /usr/bin/python3 -I -B -S - <<'PY_REMAINING_HOSTS'
+          #!/usr/bin/env python3
+          """Test-only own-process/direct-local-daemon diagnostic; no workload inventory."""
+
+          import http.client
+          import json
+          import os
+          import re
+          import signal
+          import socket
+          import stat
+          import time
+
+
+          LABELS = {
+              "linux.idc.xpu": "x86_64",
+              "linux.rocm.gpu.mi300.1": "x86_64",
+              "linux.dgx.b200.8": "x86_64",
+              "linux.s390x": "s390x",
+          }
+          SOCKET = "/var/run/docker.sock"
+          REQUEST = b"GET /info HTTP/1.1\r\nHost: docker\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+          MAX_BODY = 1024 * 1024
+
+
+          class StopProbe(Exception):
+              """Whole-probe deadline or cancellation; do not downgrade to unknown."""
+
+
+          class Boundary(Exception):
+              """Fixed-scope failure; never print underlying error data."""
+
+
+          def require(condition):
+              if not condition:
+                  raise Boundary("refused")
+
+
+          def remaining(deadline, limit):
+              left = deadline - time.monotonic()
+              if left <= 0:
+                  raise StopProbe("deadline")
+              return min(limit, left)
+
+
+          class BoundedReader:
+              def __init__(self, stream):
+                  self.stream = stream
+                  self.headers = True
+                  self.used = 0
+
+              def account(self, value):
+                  self.used += len(value)
+                  require(self.used <= (16384 if self.headers else MAX_BODY + 65536))
+                  return value
+
+              def readline(self, size=-1):
+                  return self.account(self.stream.readline(size))
+
+              def read(self, size=-1):
+                  require(0 <= size <= MAX_BODY + 1)
+                  return self.account(self.stream.read(size))
+
+              def flush(self):
+                  self.stream.flush()
+
+              def close(self):
+                  self.stream.close()
+
+
+          class ResponseSocket:
+              def __init__(self, reader):
+                  self.reader = reader
+
+              def makefile(self, mode):
+                  require(mode == "rb")
+                  return self.reader
+
+
+          def unique_json(pairs):
+              result = {}
+              for key, value in pairs:
+                  require(key not in result)
+                  result[key] = value
+              return result
+
+
+          def security_options(data):
+              require(len(data) <= MAX_BODY)
+              try:
+                  obj = json.loads(data.decode("utf-8"), object_pairs_hook=unique_json)
+              except ValueError as error:
+                  raise Boundary("refused") from error
+              require(isinstance(obj, dict))
+              options = obj.get("SecurityOptions")
+              require(isinstance(options, list) and len(options) <= 64)
+              require(
+                  all(isinstance(item, str) and len(item.encode()) <= 256 for item in options)
+              )
+              names = {item.split(",", 1)[0] for item in options}
+              return "name=rootless" in names, "name=userns" in names
+
+
+          def docker_security(deadline):
+              before = os.lstat(SOCKET)
+              require(stat.S_ISSOCK(before.st_mode))  # Reject the final path if it is a symlink.
+              sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+              reader = None
+              response = None
+              try:
+                  sock.settimeout(remaining(deadline, 2))
+                  sock.connect(SOCKET)
+                  after = os.lstat(SOCKET)
+                  require(
+                      (before.st_dev, before.st_ino, before.st_mode, before.st_uid)
+                      == (after.st_dev, after.st_ino, after.st_mode, after.st_uid)
+                  )
+                  sock.settimeout(remaining(deadline, 3))
+                  sock.sendall(REQUEST)
+                  reader = BoundedReader(sock.makefile("rb"))
+                  response = http.client.HTTPResponse(ResponseSocket(reader))
+                  response.begin()
+                  require(response.status == 200)
+                  require(
+                      response.getheader("Content-Type", "").split(";", 1)[0]
+                      == "application/json"
+                  )
+                  length = response.getheader("Content-Length")
+                  encoding = response.getheader("Transfer-Encoding")
+                  require(encoding in {None, "chunked"})
+                  require(
+                      length is None
+                      or (
+                          encoding is None
+                          and re.fullmatch(r"[0-9]+", length)
+                          and int(length) <= MAX_BODY
+                      )
+                  )
+                  reader.headers = False
+                  reader.used = 0
+                  data = response.read(MAX_BODY + 1)
+                  remaining(deadline, 3)
+                  return security_options(data)
+              finally:
+                  if response is not None:
+                      response.close()
+                  elif reader is not None:
+                      reader.close()
+                  sock.close()
+
+
+          def initial_result():
+              return dict.fromkeys(
+                  (
+                      "scope_valid",
+                      "collector_available",
+                      "uid_zero",
+                      "os_linux",
+                      "arch_x86_64",
+                      "arch_aarch64",
+                      "arch_s390x",
+                      "architecture_expected",
+                      "sudo_probe_known",
+                      "sudo_probe_not_attempted",
+                      "sudo_root_shell",
+                      "dockerenv_present",
+                      "containerenv_present",
+                      "docker_access",
+                      "docker_rootless",
+                      "docker_userns",
+                      "docker_security_options_known",
+                      "completed",
+                      "probe_error",
+                  ),
+                  False,
+              )
+
+
+          def scope_valid(env):
+              return (
+                  env.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
+                  and env.get("GITHUB_EVENT_NAME") == "pull_request"
+                  and env.get("GITHUB_ACTOR") in {"ptdbot", "d4l3k"}
+                  and env.get("EXPECTED_LABEL") in LABELS
+                  and bool(re.fullmatch(r"[1-9][0-9]*", env.get("GITHUB_RUN_ID", "")))
+                  and bool(re.fullmatch(r"[1-9][0-9]*", env.get("GITHUB_RUN_ATTEMPT", "")))
+                  and bool(re.fullmatch(r"[0-9a-f]{40}", env.get("AUDIT_HEAD_SHA", "")))
+              )
+
+
+          def probe(env):
+              deadline = time.monotonic() + 60
+              result = initial_result()
+              result["collector_available"] = True
+              result["sudo_probe_not_attempted"] = True
+              try:
+                  require(scope_valid(env))
+                  result["scope_valid"] = True
+                  uname = os.uname()
+                  result["uid_zero"] = os.geteuid() == 0
+                  result["os_linux"] = uname.sysname == "Linux"
+                  for arch in ("x86_64", "aarch64", "s390x"):
+                      result["arch_" + arch] = uname.machine == arch
+                  result["architecture_expected"] = uname.machine == LABELS[env["EXPECTED_LABEL"]]
+                  require(result["os_linux"] and result["architecture_expected"])
+                  result["dockerenv_present"] = os.path.exists("/.dockerenv")
+                  result["containerenv_present"] = os.path.exists("/run/.containerenv")
+                  try:
+                      rootless, userns = docker_security(deadline)
+                      result["docker_access"] = True
+                      result["docker_rootless"] = rootless
+                      result["docker_userns"] = userns
+                      result["docker_security_options_known"] = True
+                  except (OSError, ValueError, Boundary, http.client.HTTPException):
+                      pass
+                  result["completed"] = True
+              except (Exception, KeyboardInterrupt):
+                  result["probe_error"] = True
+              return result
+
+
+          def main():
+              def stop(_signum, _frame):
+                  raise StopProbe
+
+              signal.signal(signal.SIGALRM, stop)
+              signal.signal(signal.SIGTERM, stop)
+              signal.setitimer(signal.ITIMER_REAL, 60)
+              try:
+                  result = probe(os.environ)
+              finally:
+                  signal.setitimer(signal.ITIMER_REAL, 0)
+              print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+              return int(result["probe_error"])
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          PY_REMAINING_HOSTS
