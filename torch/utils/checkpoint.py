@@ -18,7 +18,7 @@ import torch
 import torch.fx.traceback as fx_traceback
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import _disable_current_modes, TorchDispatchMode
 from torch._C._autograd import _make_saved_tensor, SavedTensor
 from typing import NoReturn, overload, ParamSpec, TypeVar
 
@@ -40,6 +40,7 @@ __all__ = [
     "create_selective_checkpoint_contexts",
     "SAC_IGNORED_OPS",
     "GraphExecGroup",
+    "register_determinism_check",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -552,9 +553,9 @@ def checkpoint(
             check to perform. By default it is set to ``"default"`` which
             compares the shapes, dtypes, and devices of the recomputed tensors
             against those the saved tensors. To turn off this check, specify
-            ``"none"``. Currently these are the only two supported values.
-            Please open an issue if you would like to see more determinism
-            checks. This argument is only supported if ``use_reentrant=False``,
+            ``"none"``. To use a custom check, register it with
+            :func:`register_determinism_check` and pass its name. This
+            argument is only supported if ``use_reentrant=False``,
             if ``use_reentrant=True``, the determinism check is always disabled.
         debug(bool, optional): If ``True``, error messages will also include
             a trace of the operators ran during the original forward computation
@@ -1078,8 +1079,9 @@ class _CheckpointFrame:
             # see pack hook, x_metadata is 1:1 with weak_holders.
             x_meta = self.x_metadatas[idx]
             recomputed_x = self.recomputed[gid][holder.handles[gid]]
-            if x_meta != self.metadata_fn(recomputed_x):
-                nb_meta_different.append((idx, x_meta, self.metadata_fn(recomputed_x)))
+            recomputed_meta = self.metadata_fn(recomputed_x)
+            if x_meta != recomputed_meta:
+                nb_meta_different.append((idx, x_meta, recomputed_meta))
 
         if len(nb_meta_different) > 0:
             mismatched_tensors = ""
@@ -1253,6 +1255,68 @@ _allowed_determinism_checks_to_fns: Dict[str, Callable[[torch.Tensor], Any]] = {
     _DEFAULT_DETERMINISM_MODE: _default_meta_extractor,
     "none": lambda _: None,
 }
+
+
+def register_determinism_check(name: str, metadata_fn: Callable[[torch.Tensor], Any], /) -> None:
+    """Register a determinism check that checkpoint can use by name.
+
+    When ``determinism_check=name`` is passed to
+    :func:`~torch.utils.checkpoint.checkpoint` with ``use_reentrant=False``,
+    ``metadata_fn`` is called on every tensor saved for backward during the
+    forward pass and again on its recomputed counterpart during backward. A
+    ``CheckpointError`` is raised if the two results compare unequal.
+
+    ``metadata_fn`` should return plain values, such as sizes or strides,
+    rather than a tensor: the result for each saved tensor is kept alive until
+    backward and compared with ``!=``. The recomputed tensor is detached, so
+    the result should not include autograd metadata such as ``requires_grad``
+    or ``grad_fn``.
+
+    ``metadata_fn`` may call operators on the tensor. It runs with all
+    ``TorchDispatchMode`` instances disabled, so neither selective activation
+    checkpointing (see
+    :func:`~torch.utils.checkpoint.create_selective_checkpoint_contexts`) nor
+    other dispatch modes, such as ``FlopCounterMode``, see these calls.
+
+    Like the built-in checks, a registered check does not run in code that
+    :func:`torch.compile` compiles through AOTAutograd, as its default backend
+    does.
+
+    Args:
+        name (str): The name to pass as ``determinism_check``. It must not
+            already be registered; ``"default"`` and ``"none"`` are built in.
+        metadata_fn (Callable[[Tensor], Any]): Returns the metadata of a
+            tensor to compare.
+
+    Example:
+        >>> # xdoctest: +SKIP("stub")
+        >>> def shape_and_strides(x):
+        >>>     return x.shape, x.stride()
+        >>>
+        >>> torch.utils.checkpoint.register_determinism_check(
+        >>>     "shape_and_strides", shape_and_strides
+        >>> )
+        >>> out = torch.utils.checkpoint.checkpoint(
+        >>>     fn, x, use_reentrant=False, determinism_check="shape_and_strides"
+        >>> )
+    """
+    if not isinstance(name, str):
+        raise TypeError(f"name should be a str, but got {type(name).__name__}")
+    if name in _allowed_determinism_checks_to_fns:
+        raise ValueError(f"determinism check {name!r} is already registered")
+    if not callable(metadata_fn):
+        raise TypeError(f"metadata_fn should be callable, but got {type(metadata_fn).__name__}")
+
+    # checkpoint calls the check on the saved tensors inside the forward context
+    # of context_fn, but on the recomputed ones only after the recompute context
+    # has exited. Selective checkpointing matches the operator calls of the two
+    # passes by their order, so it must not see the operators of metadata_fn.
+    def metadata_fn_without_modes(x: torch.Tensor) -> Any:
+        with _disable_current_modes():
+            return metadata_fn(x)
+
+    _allowed_determinism_checks_to_fns[name] = metadata_fn_without_modes
+
 
 # See Rule 5
 class _StopRecomputationError(Exception):
@@ -1923,9 +1987,8 @@ def _checkpoint_without_reentrant_generator_impl(
             check to perform. By default it is set to ``"default"`` which
             compares the shapes, dtypes, and devices of the recomputed tensors
             against those the saved tensors. To turn off this check, specify
-            ``"none"``. Currently these are the only two supported values.
-            Please open an issue if you would like to see more determinism
-            checks.
+            ``"none"``. To use a custom check, register it with
+            :func:`register_determinism_check` and pass its name.
         debug(bool, optional): If ``True``, error messages will also include
             a trace of the operators ran during the original forward computation
             as well as the recomputation.

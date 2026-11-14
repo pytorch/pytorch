@@ -5559,6 +5559,7 @@ known_graph_breaks_tests = {
     "test_reentrant_priority",  # reentrant .backward
     "test_simple_reentrant",  # reentrant .backward
     "test_checkpoint_detects_non_determinism",  # unpack hook in skip files
+    "test_checkpoint_custom_determinism_check",  # unpack hook in skip files
     "test_checkpoint_valid_reset_on_error",  # unpack hook in skip files
     "test_checkpointing_non_reentrant_autocast_cpu",  # unpack hook in skip files
     "test_checkpointing_non_reentrant_autocast_gpu",  # unpack hook in skip files

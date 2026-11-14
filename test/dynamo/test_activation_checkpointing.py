@@ -3030,6 +3030,41 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
         ):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
+    def test_custom_determinism_check(self):
+        # backend="eager" runs checkpoint as is, with the registered check, whose
+        # operators selective checkpointing must not count. Code compiled through
+        # AOTAutograd runs no determinism check.
+        calls = [0]
+
+        def metadata_fn(x):
+            calls[0] += 1
+            return x.t().sum().item()
+
+        name = "test_custom_determinism_check"
+        checks = torch.utils.checkpoint._allowed_determinism_checks_to_fns
+        torch.utils.checkpoint.register_determinism_check(name, metadata_fn)
+        self.addCleanup(checks.pop, name)
+        ctx_fn = functools.partial(
+            create_selective_checkpoint_contexts, [torch.ops.aten.t.default]
+        )
+
+        def gn(x):
+            return x.sin().t().cos()
+
+        def fn(x):
+            return checkpoint(
+                gn, x, use_reentrant=False, context_fn=ctx_fn, determinism_check=name
+            ).sum()
+
+        x = torch.randn(2, 3, requires_grad=True)
+        (expected,) = torch.autograd.grad(gn(x).sum(), x)
+        for backend, runs_check in (("eager", True), ("aot_eager", False)):
+            calls[0] = 0
+            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            (actual,) = torch.autograd.grad(opt_fn(x), x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(calls[0] > 0, runs_check)
+
     def test_dynamic_shape_checkpoint_shared_module_two_call_sites(self):
         # An unspecialized plain-float module attribute (self.eps), read
         # inside a torch.utils.checkpoint region that's entered from two

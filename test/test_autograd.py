@@ -97,8 +97,10 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import (
     checkpoint,
     checkpoint_sequential,
+    CheckpointError,
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
+    register_determinism_check,
 )
 from torch.utils.flop_counter import FlopCounterMode
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -8265,6 +8267,60 @@ Done""",
             with torch.utils.checkpoint.set_checkpoint_debug_enabled(False):
                 out = checkpoint(fn, a, use_reentrant=False, debug=True)
                 out.backward()
+
+    def test_checkpoint_custom_determinism_check(self):
+        def save_2_tensors(x):
+            return x.sin().exp()
+
+        def save_2_tensors_alt_strides(x):
+            return x.t().contiguous().t().sin().exp()
+
+        def get_non_det_fn(recompute_fn):
+            counter = [0]
+
+            def fn(x):
+                counter[0] += 1
+                return save_2_tensors(x) if counter[0] == 1 else recompute_fn(x)
+
+            return fn
+
+        calls = [0]
+
+        def shape_and_strides(x):
+            calls[0] += 1
+            return x.shape, x.stride()
+
+        name = "test_checkpoint_custom_determinism_check"
+        checks = torch.utils.checkpoint._allowed_determinism_checks_to_fns
+        register_determinism_check(name, shape_and_strides)
+        self.addCleanup(checks.pop, name)
+        a = torch.randn(2, 3, requires_grad=True)
+
+        # The default check only compares shapes, dtypes and devices
+        fn = get_non_det_fn(recompute_fn=save_2_tensors_alt_strides)
+        checkpoint(fn, a, use_reentrant=False).sum().backward()
+
+        fn = get_non_det_fn(recompute_fn=save_2_tensors)
+        checkpoint(fn, a, use_reentrant=False, determinism_check=name).sum().backward()
+
+        fn = get_non_det_fn(recompute_fn=save_2_tensors_alt_strides)
+        mismatch = (
+            r"saved metadata: \(torch.Size\(\[2, 3\]\), \(3, 1\)\)\n"
+            r"recomputed metadata: \(torch.Size\(\[2, 3\]\), \(1, 2\)\)"
+        )
+        calls[0] = 0
+        with self.assertRaisesRegex(CheckpointError, mismatch):
+            out = checkpoint(fn, a, use_reentrant=False, determinism_check=name)
+            out.sum().backward()
+        # Once for each of the 2 saved tensors and once for each recomputed one
+        self.assertEqual(calls[0], 4)
+
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            register_determinism_check("default", lambda x: None)
+        with self.assertRaisesRegex(TypeError, "name should be a str"):
+            register_determinism_check(None, lambda x: None)
+        with self.assertRaisesRegex(TypeError, "should be callable"):
+            register_determinism_check("not_callable", None)
 
     def test_checkpoint_error_suggests_mark_dynamic(self):
         """CheckpointError messages should suggest mark_dynamic and lru config."""
@@ -17142,6 +17198,31 @@ class TestSelectiveActivationCheckpoint(TestCase):
         context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
         out = checkpoint(fn, x_wrapper, use_reentrant=False, context_fn=context_fn)
         out.sum().backward()
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_custom_determinism_check_ops_are_ignored(self):
+        # Test that we ignore the ops that a registered determinism check calls.
+        # The check runs on every saved tensor during forward, but only after
+        # the recompute has finished, so counting its ops would pair the ops of
+        # the recompute with the wrong cached outputs.
+        def fn(x):
+            return x.sin().t().cos()
+
+        name = "test_custom_determinism_check_ops_are_ignored"
+        checks = torch.utils.checkpoint._allowed_determinism_checks_to_fns
+        register_determinism_check(name, lambda x: x.t().sum().item())
+        self.addCleanup(checks.pop, name)
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts, [torch.ops.aten.t.default]
+        )
+        x = torch.randn(2, 3, requires_grad=True)
+
+        out = checkpoint(
+            fn, x, use_reentrant=False, context_fn=context_fn, determinism_check=name
+        )
+        (actual,) = torch.autograd.grad(out.sum(), x)
+        (expected,) = torch.autograd.grad(fn(x).sum(), x)
+        self.assertEqual(actual, expected)
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_save_policies_skip_effect_lookup(self):
