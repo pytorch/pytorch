@@ -163,6 +163,38 @@ class DynamicShapesOpTests:
                 self.assertEqual(compiled_fn(x), fn(x))
         self.assertEqual(counter.frame_count, 1)
 
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_var_mean_empty_size_oblivious(self):
+        # A backed size can be 0 here, so the Welford mean needs the empty check.
+        def fn(x):
+            return (*torch.var_mean(x, 0), *torch.var_mean(x))
+
+        # The reduced size s - 1 has a value range starting at -1.
+        def fn_slice(x):
+            return fn(x[1:])
+
+        for f, sizes in ((fn, (5, 0)), (fn_slice, (5, 1))):
+            counter = CompileCounterWithBackend("inductor")
+            compiled_fn = torch.compile(
+                f, backend=counter, dynamic=True, fullgraph=True
+            )
+            for size in sizes:
+                with self.subTest(fn=f.__name__, size=size):
+                    x = torch.randn(size, 4, device=self.device)
+                    self.assertEqual(compiled_fn(x), f(x))
+            self.assertEqual(counter.frame_count, 1)
+
+    def test_var_mean_empty_slice(self):
+        # x[2:] has the symbolic size s - 2, which is 0 for an input of size 2.
+        def fn(x):
+            return (*torch.var_mean(x[2:], 0), *torch.var_mean(x[2:]))
+
+        compiled_fn = torch.compile(fn, dynamic=True, fullgraph=True)
+        for size in (5, 2):
+            with self.subTest(size=size):
+                x = torch.randn(size, 4, device=self.device)
+                self.assertEqual(compiled_fn(x), fn(x))
+
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_prod_backward_keeps_input_shape_dynamic(self):
         def fn(x):

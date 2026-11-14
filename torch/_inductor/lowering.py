@@ -7867,6 +7867,22 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
 
     if return_mean:
         mean.realize()
+        # Replace the mean with nan when the reduction is empty, to match eager.
+        # The Welford mean is 0 there on most codegen paths.
+        # Use value ranges rather than sympy assumptions: under
+        # backed_size_oblivious, backed sizes are positive symbols that can be 0.
+        rnumel_range = V.graph.sizevars.shape_env.bound_sympy(rnumel)
+        if rnumel_range.lower <= 0:  # not == 0: the range of s - 1 can start at -1
+
+            def empty_mean_fn(data):
+                N = get_constant_or_index_expr(rnumel, dtype)
+                return ops.where(
+                    ops.eq(N, ops.constant(0, dtype)),
+                    ops.constant(float("nan"), dtype),
+                    data,
+                )
+
+            mean = make_pointwise(empty_mean_fn)(mean)
         return var, mean
     return (var,)
 
