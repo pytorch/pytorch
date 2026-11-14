@@ -21802,6 +21802,19 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 got = torch.compile(fn, backend=backend, fullgraph=True)(a, b)
                 self.assertEqual(got, expected)
 
+    def test_const_to_cpp(self):
+        """
+        Test code in codecache which converts consts to c++ code. This is only
+        used in Windows but we can still test it on other platforms
+        """
+        data = bytearray(b"thisstringhas16b")
+        const_string = AotCodeCompiler._format_consts_to_cpp(data, 8)
+        self.assertContains(const_string, "116,104,105,115,115,116,114,105,110,103,104,97,115,49,54,98\n")
+        bigger_string = data+data+data+data[0:4]
+        bigger_const_string = AotCodeCompiler._format_consts_to_cpp(bigger_string, 8)
+        self.assertContains(bigger_const_string, "116,104,105,115\n")
+
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
