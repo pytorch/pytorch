@@ -367,10 +367,9 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 # maybe_get_fake_mode returns a CppFakeTensorMode for a C++ fake or a wrapper of
 # one, active_fake_mode while a C++ mode is installed, and detect_fake_mode in
 # either case. CppFakeTensorMode is not a FakeTensorMode subclass and has little of
-# its interface yet. Its from_tensor does not support MKLDNN tensors or
-# tensors with nested ints. Its converter's from_real_tensor rejects constants
-# that are fakes or not plain tensors. Its from_meta_and_device raises
-# NotImplementedError
+# its interface yet. Its from_tensor does not support tensors with nested ints.
+# Its converter's from_real_tensor rejects constants that are fakes or not plain
+# tensors, and its converter's from_meta_and_device raises NotImplementedError
 # for a pytype other than Tensor. So a caller that needs a Python
 # FakeTensorMode narrows the result with
 # torch._guards.require_python_fake_mode, which raises RuntimeError for a C++
@@ -531,6 +530,8 @@ def maybe_clear_fake_constant(x: object) -> None:
 def maybe_set_fake_dispatch_keys(x: object, keys: torch.DispatchKeySet | None) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         x.dispatch_keys = keys
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        torch._C._set_fake_dispatch_keys(x, keys)
 
 
 def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
@@ -4196,7 +4197,18 @@ def run_fallback_kernel(
 
         def to_real_tensor(e: T) -> T | Tensor:
             if isinstance(e, Tensor) and fake_mode.is_our_fake(e):
-                out = torch.zeros_like(e, device=maybe_get_fake_device(e))
+                if isinstance(fake_mode, CppFakeTensorMode) and e.is_mkldnn:
+                    # Native composites can select MKLDNN-specific operators.
+                    # Their real dummy inputs need that layout; zeros_like
+                    # passes a memory_format that MKLDNN factories reject.
+                    out = torch.zeros(
+                        e.shape,
+                        dtype=e.dtype,
+                        layout=e.layout,
+                        device=maybe_get_fake_device(e),
+                    )
+                else:
+                    out = torch.zeros_like(e, device=maybe_get_fake_device(e))
                 if e.is_sparse:
                     out._coalesced_(e.is_coalesced())
                 inp_impls[id(out)] = e
@@ -4212,7 +4224,7 @@ def run_fallback_kernel(
 
     for e in flat_args:
         if isinstance(e, Tensor):
-            if not is_sparse_any(e):
+            if not is_sparse_any(e) and not e.is_mkldnn:
                 storages.add(e._typed_storage()._cdata)
 
     # TODO: also check metadata change on inputs
@@ -4224,6 +4236,7 @@ def run_fallback_kernel(
         if id(e) not in inp_impls and (
             isinstance(e, Tensor)
             and not is_sparse_any(e)
+            and not e.is_mkldnn
             and e._typed_storage()._cdata in storages
         ):
             raise orig_not_implemented_exception

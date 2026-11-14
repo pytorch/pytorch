@@ -1725,7 +1725,6 @@ class MetaConverter(Generic[_TensorT]):
                             sizes, strides, dtype=t.dtype, device="meta"
                         )
                     )
-                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
                             if t.size is None:

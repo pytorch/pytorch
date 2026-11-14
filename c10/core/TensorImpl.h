@@ -18,6 +18,7 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/SymbolicShapeMeta.h>
 #include <c10/core/WrapDimMinimal.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/PyObjectSlot.h>
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/macros/Export.h>
@@ -239,9 +240,8 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 // A fake can record the dispatch keys of the real tensor it stands for
 // (ExtraMeta::fake_dispatch_keys_, Python's FakeTensor.dispatch_keys), so that
 // guards built from the fake check the real tensor's keys rather than the
-// fake's own. Python also derives is_mkldnn and layout from them; here only
-// guards read them, so a fake recorded with an mkldnn tensor's keys still
-// reports its own layout.
+// fake's own. As in Python, they also determine the fake's MKLDNN layout.
+// Inside Meta kernels the fake reports its strided backing layout.
 // Python keeps them on the output of a top-level alias or detach (dispatched,
 // through functionalization, or by calling fast_detach directly), but not of
 // other views. The fake fallback (FakeFallbackKernel.cpp) does the same for a
@@ -1268,7 +1268,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_mkldnn() const {
-    return key_set_.has_all(c10::mkldnn_ks);
+    return key_set_.has_all(c10::mkldnn_ks) ||
+        (is_fake() && extra_meta_ &&
+         extra_meta_->fake_dispatch_keys_.has_value() &&
+         extra_meta_->fake_dispatch_keys_->has_all(c10::mkldnn_ks) &&
+         !c10::impl::FakeTensorModeTLS::in_kernel_invocation());
   }
 
   bool is_vulkan() const {
@@ -1349,6 +1353,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   Layout layout() const {
     if (layout_policy_) [[unlikely]] {
       return layout_custom();
+    }
+    if (is_fake() && is_mkldnn()) {
+      return kMkldnn;
     }
 
     // NB: This method is not virtual and avoid dispatches for perf.
