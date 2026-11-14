@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 from .. import config, metrics
 from ..runtime.hints import TritonMeta
 from ..runtime.runtime_utils import next_power_of_2
+from ..runtime.tiling import is_z_prefix
 from ..runtime.triton_heuristics import (
     RoundRobinComboKernelGrid,
     SequentialComboKernelGrid,
@@ -393,7 +394,7 @@ class ComboKernel(Kernel):
 
             # Skip multi-axis reductions and 3D pointwise kernels from combo.
             keys = tiled_groups.keys()
-            if ("r0_" in keys and "r1_" in keys) or "z0_" in keys:
+            if ("r0_" in keys and "r1_" in keys) or any(is_z_prefix(k) for k in keys):
                 all_partitions.append([node_info])
                 continue
 
