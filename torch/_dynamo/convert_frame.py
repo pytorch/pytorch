@@ -23,6 +23,7 @@ which is checked for during the Dynamo cache lookup.
 
 from __future__ import annotations
 
+import builtins
 import collections
 import contextlib
 import cProfile
@@ -1155,6 +1156,15 @@ class GraphRuntimeEnv:
             for alias, module_name in self.import_sources.items()
         }
         f_globals = {
+            # First, so a caller-supplied scope's own binding wins. CPython's
+            # PyImport_Import reads __builtins__ out of the calling frame's
+            # globals, so a C-level import from this bytecode -- an
+            # accelerator's lazy device init, reached from the
+            # get_current_stream prologue a stream-touching graph emits --
+            # raises KeyError without it, even though LOAD_GLOBAL falls back to
+            # the interpreter's builtins. Bound here because PyFunction_New
+            # caches the frame builtins when the function below is created.
+            "__builtins__": builtins.__dict__,
             **import_sources,
             **self.used_globals,
             **(extra_globals or {}),
