@@ -41,6 +41,9 @@ BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 # to nonexistent device indices -> torch.cuda.device_count()==0.
 IS_ROCM = torch is not None and torch.version.hip is not None
 NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 3 if not TEST_CUDA or SM80OrLater else 2
+if not IS_MEM_LEAK_CHECK and not IS_ROCM:
+    # For a machine that the caller sized, rather than one of CI's runners
+    NUM_PROCS = int(os.getenv("PYTORCH_NUM_TEST_PROCS", NUM_PROCS))
 NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
 
