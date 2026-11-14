@@ -55,6 +55,7 @@ from torch._subclasses.fake_tensor import (
     unset_fake_temporarily,
     UnsupportedOperatorException,
 )
+from torch._subclasses.meta_utils import _live_view_base, MetaTensorDescriber
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
@@ -6037,6 +6038,178 @@ class TestFakeTensorViewCopy(TestCase):
                     ValueError, "Cannot view a tensor with shape *"
                 ):
                     _ = yf.view(-1)
+
+
+class TestLiveViewBase(TestCase):
+    """Direct coverage for live-base selection and stale-base metadata.
+
+    Exercises storage identity and the exemptions reachable through public
+    tensor APIs, without requiring an end-to-end compile for each case.
+    """
+
+    def _stale_pair(self):
+        # dest was a view of storage, then got rebound onto src's storage.
+        storage = torch.arange(5.0)
+        dest = storage[:3]
+        src = torch.full((3,), 7.0)
+        dest.set_(src)
+        return dest, src, storage
+
+    def test_stale_base_is_not_a_live_view_base(self):
+        dest, src, storage = self._stale_pair()
+        self.assertIsNotNone(dest._base)
+        self.assertIsNone(_live_view_base(dest))
+        # The un-rebound case is still a view base.
+        self.assertIs(_live_view_base(storage[:3]), storage)
+
+    def test_stale_base_fake_tensor_cache_crosscheck(self):
+        with FakeTensorMode():
+            base = torch.arange(5.0)
+            dest = base[:3]
+            src = torch.full((3,), 7.0)
+            dest.set_(src)
+            dest.add_(1)
+            dest.add_(1)
+
+    def test_tensor_exemptions_are_independent_of_the_base(self):
+        dest, _src, storage = self._stale_pair()
+        self.assertIsNone(_live_view_base(dest))
+        # Public vmap transforms can erase _base. Replace only each type
+        # predicate to isolate the tensor-side exemption from the base-side one.
+        for predicate in (
+            "is_traceable_wrapper_subclass",
+            "is_functorch_wrapped_tensor",
+            "is_legacy_batchedtensor",
+        ):
+            with self.subTest(predicate=predicate):
+                with patch(
+                    f"torch._subclasses.meta_utils.{predicate}",
+                    side_effect=lambda value: value is dest,
+                ):
+                    self.assertIs(_live_view_base(dest), storage)
+        with patch.object(
+            torch.Tensor, "is_nested", new=property(lambda value: value is dest)
+        ):
+            self.assertIs(_live_view_base(dest), storage)
+
+    def test_stale_base_describer_clears_view_fields(self):
+        storage = torch.arange(5.0)
+        dest = storage[:3]
+        src = torch.full((3,), 7.0, requires_grad=True)
+        dest.set_(src)
+        self.assertIsNotNone(torch._C._autograd._get_creation_meta(dest))
+        desc = MetaTensorDescriber().describe_tensor(dest)
+        self.assertFalse(desc.is_view)
+        self.assertIsNone(desc.base)
+        self.assertIsNone(desc.creation_meta)
+
+    def test_stale_base_is_described_standalone_and_aliases_src(self):
+        dest, src, storage = self._stale_pair()
+        mode = FakeTensorMode()
+        with mode:
+            f_dest = mode.from_tensor(dest)
+            f_src = mode.from_tensor(src)
+        self.assertFalse(f_dest._is_view())
+        self.assertEqual(
+            f_dest.untyped_storage()._cdata, f_src.untyped_storage()._cdata
+        )
+        f_storage = mode.from_tensor(storage)
+        self.assertNotEqual(
+            f_dest.untyped_storage()._cdata, f_storage.untyped_storage()._cdata
+        )
+
+    def test_live_view_base_keeps_nested_tensor_view(self):
+        nt = torch.nested.nested_tensor(
+            [torch.randn(3, 4), torch.randn(5, 4)], layout=torch.strided
+        )
+        values = nt.values()
+        self.assertIs(values._base, nt)
+        values.set_(torch.randn_like(values))
+        self.assertNotEqual(
+            values.untyped_storage()._cdata, nt.untyped_storage()._cdata
+        )
+        # The nested-base exemption applies even when its layout is strided.
+        self.assertIs(_live_view_base(values), nt)
+
+    def test_live_view_base_keeps_traceable_wrapper_subclass_view(self):
+        class _FreshViewTwoTensor(TwoTensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                kwargs = kwargs or {}
+                args_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, args)
+                args_b = pytree.tree_map_only(TwoTensor, lambda x: x.b, args)
+                kwargs_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, kwargs)
+                kwargs_b = pytree.tree_map_only(TwoTensor, lambda x: x.b, kwargs)
+                out_a = func(*args_a, **kwargs_a)
+                out_b = func(*args_b, **kwargs_b)
+                out_a_flat, spec = pytree.tree_flatten(out_a)
+                out_b_flat = pytree.tree_leaves(out_b)
+                out_flat = [
+                    cls(a, b) if isinstance(a, torch.Tensor) else a
+                    for a, b in zip(out_a_flat, out_b_flat, strict=True)
+                ]
+                # Deliberately do not call return_and_correct_aliasing: this
+                # gives the wrapper view a fresh outer storage.
+                return pytree.tree_unflatten(out_flat, spec)
+
+        inner = torch.randn(4)
+        wrapped = _FreshViewTwoTensor(inner, inner.clone())
+        view = wrapped[:2]
+        self.assertIs(view._base, wrapped)
+        self.assertNotEqual(
+            view.untyped_storage()._cdata, wrapped.untyped_storage()._cdata
+        )
+        self.assertIs(_live_view_base(view), wrapped)
+
+    def test_live_view_base_keeps_wrapper_subclass_base(self):
+        class _PlainViewTwoTensor(TwoTensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                args_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, args)
+                kwargs_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, kwargs)
+                # Return a plain inner view without return_and_correct_aliasing.
+                return func(*args_a, **kwargs_a)
+
+        inner = torch.randn(4)
+        wrapped = _PlainViewTwoTensor(inner, inner.clone())
+        child = wrapped[:2]
+        self.assertIs(type(child), torch.Tensor)
+        self.assertIs(child._base, wrapped)
+        self.assertNotEqual(
+            child.untyped_storage()._cdata, wrapped.untyped_storage()._cdata
+        )
+        self.assertIs(_live_view_base(child), wrapped)
+
+    def test_live_view_base_keeps_sparse_compressed_values(self):
+        base = torch.randn(4, 4).to_sparse_csr()
+        values = base.values()
+        self.assertIs(values._base, base)
+        self.assertIs(_live_view_base(values), values._base)
+
+    def test_live_view_base_skips_non_traceable_wrapper_subclass(self):
+        # Non-traceable wrappers do not get the traceable protocol exemption:
+        # their views still use storage identity to reject a stale base.
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        class _NonTraceableWrapper(torch.Tensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise NotImplementedError
+
+        wrapped = torch.Tensor._make_wrapper_subclass(
+            _NonTraceableWrapper, torch.randn(4).size()
+        )
+        self.assertFalse(is_traceable_wrapper_subclass(wrapped))
+        with torch._C._DisableTorchDispatch():
+            child = wrapped[:2]
+        self.assertIs(type(child), torch.Tensor)
+        self.assertIs(child._base, wrapped)
+        self.assertIs(_live_view_base(child), wrapped)
+
+        child.set_(torch.randn(2))
+        self.assertIs(child._base, wrapped)
+        self.assertIsNone(_live_view_base(child))
 
 
 @instantiate_parametrized_tests

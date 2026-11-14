@@ -3338,24 +3338,24 @@ def forward(self, arg0_1, arg1_1):
             """aot_autograd() does not yet handle non-differentiable view input mutations. Aliased inputs share storage but have different autograd ._base tensors: input 0 (a) and input 1 (b) have ._base fields that point to different tensors.""",
         )
 
-    def test_merge_view_inputs_error_mixed_base_states(self):
-        # Inference mode (no requires_grad) skips site-1, reaching site-3.
+    def test_merge_view_inputs_mixed_base_states_storage_fallback(self):
+        # Inference aliases do not need a common autograd base. Rebuild both the
+        # view and the standalone member from their shared storage.
         def make_inputs():
-            x = torch.randn(10)
-            v1 = x[0:5]  # _base = x
+            x = torch.arange(10, dtype=torch.float32)
+            v1 = x[0:5]
             v2 = torch.empty(5)
-            v2.set_(x.untyped_storage(), 0, (5,), (1,))  # _base=None
+            v2.set_(x.untyped_storage(), 0, (5,), (1,))
             return [v1, v2]
 
         def fn(a, b):
             a.mul_(2)
             return a + b
 
-        self._check_merge_view_inputs_error(
-            fn,
-            make_inputs,
-            """aot_autograd() does not yet handle non-differentiable view input mutations. Aliased inputs share storage but have mixed autograd ._base states: ['input 0 (a)'] have ._base set, while ['input 1 (b)'] have ._base=None (and are not the synthetic base).""",
-        )
+        expected = fn(*make_inputs())
+        actual = torch.compile(fn, backend="aot_eager")(*make_inputs())
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual, torch.arange(5, dtype=torch.float32) * 4)
 
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes
@@ -10116,6 +10116,8 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("def _synthetic_base_wrapper(", source)
         self.assertIn("_bases", source)
+        self.assertNotIn("_member_cdata", source)
+        self.assertNotIn("for _i in", source)
 
     @xfailIfTorchDynamo
     def test_synthetic_base_codegen_correctness(self):
@@ -10133,6 +10135,25 @@ def forward(self, primals_1, tangents_1):
         compiled_f = aot_function(f, nop)
         compiled_f(a, b)
         self.assertEqual(a, a_ref * 2)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_storage_mismatch_is_actionable(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.mul_(2)
+            return a + b
+
+        base = torch.randn(8)
+        a = base[:6]
+        b = base[2:]
+        compiled_f = aot_function(f, nop)
+        compiled_f(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, r"storage groups .*Recompile") as ctx:
+            compiled_f(a, torch.randn(6))
+        self.assertNotIn("flat input indices", str(ctx.exception))
 
     def test_synthetic_base_no_codegen_when_not_needed(self):
         with capture_codegen_source("synthetic_base_wrapper") as captured:
@@ -10167,6 +10188,62 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("as_strided_", source)
         self.assertIn("_meta_mut", source)
+
+    def test_synthetic_base_storage_mode_rebuilds_whole_storage(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
+        )
+
+        root = torch.arange(10.0).reshape(2, 5).clone()
+        view = root[0]
+        standalone = torch.empty(0).set_(root.untyped_storage(), 0, (5,), (1,))
+        wrapper = AOTSyntheticBaseWrapper(
+            trace_joint=False,
+            base_groups={0: [0, 1]},
+            base_group_names={0: ["view", "standalone"]},
+            storage_base_groups={0},
+        )
+        captured = []
+
+        def compiled(args):
+            captured.append((args[0].size(), args[0].stride()))
+            return args[0]
+
+        call = wrapper.post_compile(
+            compiled,
+            SimpleNamespace(),
+            runtime_metadata=SimpleNamespace(),
+        )
+        result = call([view, standalone])
+        self.assertEqual(captured, [(torch.Size([10]), (1,))])
+        self.assertEqual(result, root.reshape(-1))
+        with self.assertRaisesRegex(RuntimeError, "storage groups"):
+            call([view, standalone.clone()])
+
+    def test_synthetic_base_single_member_skips_storage_group_check(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
+        )
+
+        wrapper = AOTSyntheticBaseWrapper(
+            trace_joint=False,
+            base_groups={0: [0]},
+            base_group_names={0: ["a"]},
+        )
+        base = torch.randn(4)
+        view = base[:3]
+
+        with capture_codegen_source("synthetic_base_wrapper") as captured:
+            compiled = wrapper.post_compile(
+                lambda args: args[0],
+                SimpleNamespace(),
+                runtime_metadata=SimpleNamespace(),
+            )
+            result = compiled([view])
+
+        self.assertEqual(len(captured), 1)
+        self.assertNotIn("_storage_groups", captured[0])
+        self.assertIs(result, base)
 
     @xfailIfTorchDynamo
     def test_synthetic_base_codegen_multiple_base_groups(self):

@@ -119,6 +119,7 @@ from torch._guards import (
     GuardEnvExpr,
     GuardSource,
     Source,
+    StorageIdentity,
     StorageOverlap,
     StorageOverlapPartition,
 )
@@ -6695,6 +6696,18 @@ class CheckFunctionManager:
                     None,
                 )
                 add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageIdentity):
+                sources = guard.aliased_sources
+                identity_code_parts = [
+                    f"{sources[0].name}.untyped_storage()._cdata == {source.name}.untyped_storage()._cdata"
+                    for source in sources[1:]
+                ]
+                if identity_code_parts:
+                    builder.add_python_lambda_leaf_guard_to_root(
+                        identity_code_parts, identity_code_parts
+                    )
+                    for code_part in identity_code_parts:
+                        add_code_part(code_part, None, True)
             elif isinstance(guard, StorageOverlap):
                 overlapping_guard_managers = [
                     builder.get_guard_manager_from_source(s)

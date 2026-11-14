@@ -2507,6 +2507,29 @@ from user code:
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_save_load_with_mutated_synthetic_base(self):
+        def fn(a, b):
+            b[0] = 10.0
+            return a[0].clone()
+
+        base = torch.arange(5, dtype=torch.float32)
+        compiled_fn = torch.compile(
+            fn, fullgraph=True, backend="inductor", dynamic=False
+        ).aot_compile(((base[:3], base), {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+
+        expected_base = torch.arange(5, dtype=torch.float32)
+        expected = fn(expected_base[:3], expected_base)
+        actual_base = torch.arange(5, dtype=torch.float32)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                loaded_fn = torch.compiler.load_compiled_function(f)
+            actual = loaded_fn(actual_base[:3], actual_base)
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(expected_base, actual_base)
+
     def test_aot_compile_loaded_graph_does_not_rerun_inlined_saved_tensors_hooks(self):
         def fn(x, w):
             return (x.sin() * w).cos().sum()
