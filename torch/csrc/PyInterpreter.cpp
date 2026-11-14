@@ -164,6 +164,10 @@ struct ConcretePyInterpreterVTable final
   bool fake_run_with_mode_entered(
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       c10::function_ref<bool()> step) const override;
+  void fake_raise_device_mismatch(
+      const c10::OperatorHandle& op,
+      c10::Device common_device,
+      c10::Device device) const override;
   bool fake_try_decomp(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
@@ -180,7 +184,7 @@ struct ConcretePyInterpreterVTable final
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       const std::shared_ptr<c10::FakeTensorMode>& mode,
-      c10::Device common_device) const override;
+      std::optional<c10::Device> common_device) const override;
   bool fake_try_prim_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const override;
@@ -1052,6 +1056,10 @@ DEFINE_CACHED_PYTHON_IMPORT(
 DEFINE_CACHED_PYTHON_IMPORT(
     get_fake_tensor_tls,
     py::module::import("torch._subclasses.fake_tensor").attr("fake_tensor_tls"))
+DEFINE_CACHED_PYTHON_IMPORT(
+    get_fake_tensor_device_mismatch_error,
+    py::module::import("torch._subclasses.fake_tensor")
+        .attr("FakeTensorDeviceMismatchError"))
 
 #undef DEFINE_CACHED_PYTHON_IMPORT
 
@@ -1059,7 +1067,7 @@ DEFINE_CACHED_PYTHON_IMPORT(
 // Under a C++ FakeTensorMode, Python op_implementations handlers may return raw
 // Meta tensors and leave it to fake_try_op_impl to finalize them:
 //  - A returned Meta tensor that is not yet fake is wrapped through the mode's
-//    converter on the op's common_device.
+//    converter on the op's common_device, or is an error without one.
 //  - An already-fake output is kept as is, including its device.
 //  - A handler that needs a different device per output must return finalized
 //    fake tensors.
@@ -1068,7 +1076,7 @@ DEFINE_CACHED_PYTHON_IMPORT(
 // Any other tensor, e.g. a real CPU tensor, is an error.
 std::function<py::object(py::object)> make_fake_device_stamp(
     const c10::OperatorHandle& op,
-    c10::Device common_device,
+    std::optional<c10::Device> common_device,
     py::object py_mode) {
   return [&op, common_device, py_mode = std::move(py_mode)](
              py::object obj) -> py::object {
@@ -1087,8 +1095,15 @@ std::function<py::object(py::object)> make_fake_device_stamp(
         t.device(),
         " tensor; handlers must return Meta or fake tensors, see "
         "Note [C++ fake op_impl outputs]");
+    TORCH_CHECK(
+        common_device.has_value(),
+        "op_impl handler for ",
+        op.operator_name(),
+        " returned a Meta tensor for inputs on devices with no common device; "
+        "handlers must return fake tensors for them, see "
+        "Note [C++ fake op_impl outputs]");
     return py_mode.attr("fake_tensor_converter")
-        .attr("from_meta_and_device")(py_mode, obj, py::cast(common_device));
+        .attr("from_meta_and_device")(py_mode, obj, py::cast(*common_device));
   };
 }
 
@@ -1222,6 +1237,17 @@ bool ConcretePyInterpreterVTable::fake_run_with_mode_entered(
   }
   py_mode.attr("__exit__")(py::none(), py::none(), py::none());
   return done;
+}
+
+void ConcretePyInterpreterVTable::fake_raise_device_mismatch(
+    const c10::OperatorHandle& op,
+    c10::Device common_device,
+    c10::Device device) const {
+  py::gil_scoped_acquire gil;
+  auto error_type = get_fake_tensor_device_mismatch_error();
+  auto error = error_type(getTorchApiFunction(op), common_device, device);
+  PyErr_SetObject(error_type.ptr(), error.ptr());
+  throw py::error_already_set();
 }
 
 // Try a registered Python decomposition for op.
@@ -1371,7 +1397,7 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     const std::shared_ptr<c10::FakeTensorMode>& mode,
-    c10::Device common_device) const {
+    std::optional<c10::Device> common_device) const {
   py::gil_scoped_acquire gil;
   py::handle py_op = getTorchApiFunction(op);
   py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);

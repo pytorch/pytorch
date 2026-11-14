@@ -7,17 +7,20 @@
 #include <c10/core/impl/PyInterpreterHooks.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/util/ScopeExit.h>
+#include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
 #include <algorithm>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 
 // Note [C++ fake fallback]
 // The C++ counterpart of FakeTensorMode.__torch_dispatch__ for C++ fakes. It
-// runs an op whose tensor inputs are fakes of one mode on one device, or a
+// runs an op whose tensor inputs are fakes of one mode, or a
 // constructor under a mode.
 // Decompositions, CompositeImplicitAutograd kernels and prim metas run with the
 // mode entered and return outputs as is. Registered custom fake kernels then
@@ -26,7 +29,8 @@
 // the op, it
 // runs on the inputs' meta storage through its Meta kernel (its sparse Meta
 // kernel for sparse inputs), and the new outputs become fakes of that mode on
-// that device, as Python's wrap_meta_outputs_with_default_device_logic does.
+// the device argument or the inputs' common device, as Python's
+// wrap_meta_outputs_with_default_device_logic does.
 // Python Meta registrations
 // that torch._meta_registrations installs as Meta kernels run here like C++
 // ones.
@@ -67,8 +71,23 @@
 // Callers that need to tell these apart from other NotImplementedErrors match
 // the message unsupported() raises.
 //
+// TODO: native common-device resolution snapshots fake_tensor_prefer_device_type
+// at mode construction to avoid GIL/Python lookups on device conflicts. Python
+// op_impls, including foreach and sparse compressed constructors, still read
+// live config. Changing None to "cuda" after construction can make CPU/CUDA add
+// raise while _foreach_add chooses CUDA; changing "cuda" to None reverses that
+// behavior. We assume the preference stays fixed for a mode's lifetime and have
+// not found real use cases requiring changes during that lifetime. We accept
+// this divergence rather than pay for live lookups or propagate the snapshot
+// through Python handlers.
+//
 // TODO: an op in torch._dynamo.config._custom_ops_profile runs its Meta kernel
 // here, where Python runs the profile's generic fake kernel.
+//
+// TODO: in-place output conversion changes raw Meta tensors retained by a
+// kernel and bypasses the converter's memo. On later calls they are existing
+// fakes, so a changed common device or a prior device override can cause a
+// mismatch where Python reuses a memoized wrapper.
 //
 // TODO: new outputs other than aliases do not require grad here, as they are
 // made below autograd, while Python's FakeTensor keeps the requires_grad a Meta
@@ -256,12 +275,8 @@ void fakeFallback(
       c10::autocast_dispatch_keyset |
       c10::autograd_dispatch_keyset_with_ADInplaceOrView);
 
-  bool has_device_arguments = false;
   for (const auto idx : c10::irange(num_arguments)) {
     const auto& ivalue = (*stack)[arguments_begin + idx];
-    if (ivalue.isDevice()) {
-      has_device_arguments = true;
-    }
     if (is_symbolic(ivalue)) {
       unsupported(op, "symbolic shapes");
     }
@@ -274,7 +289,8 @@ void fakeFallback(
     }
   }
 
-  std::optional<c10::Device> device;
+  // Input devices in argument order, paired with whether each is a CPU scalar.
+  c10::SmallVector<std::pair<c10::Device, bool>, 4> input_devices;
   // The sparse inputs' Meta keys; Meta is added before redispatch.
   c10::DispatchKeySet meta_keyset;
   for_each_tensor(
@@ -316,19 +332,8 @@ void fakeFallback(
         }
         const auto fake_device = impl->fake_device();
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
-        if (!device.has_value()) {
-          device = fake_device;
-        } else if (!metadata_copy && *device != *fake_device) {
-          // Including a zero-dim CPU tensor with others, which Python allows
-          unsupported(
-              op,
-              c10::str(
-                  "inputs on different devices (",
-                  *device,
-                  " and ",
-                  *fake_device,
-                  ")"));
-        }
+        input_devices.emplace_back(
+            *fake_device, fake_device->is_cpu() && impl->dim() == 0);
         if (impl->is_sparse()) {
           meta_keyset = meta_keyset.add(c10::DispatchKey::SparseMeta);
         } else if (impl->is_sparse_compressed()) {
@@ -338,7 +343,7 @@ void fakeFallback(
   const bool has_sparse_inputs =
       meta_keyset.has(c10::DispatchKey::SparseMeta) ||
       meta_keyset.has(c10::DispatchKey::SparseCsrMeta);
-  if (!device.has_value() && !is_tensor_constructor(schema)) {
+  if (input_devices.empty() && !is_tensor_constructor(schema)) {
     unsupported(op, "ops without fake tensor inputs");
   }
   if (metadata_copy) {
@@ -358,6 +363,67 @@ void fakeFallback(
     torch::jit::push(*stack, std::move(result));
     return;
   }
+  // Mirror FakeTensor._find_common_device, with the device preference captured
+  // at mode construction. Probe without resolving conflicts for
+  // op_implementations, which may choose devices themselves. Resolve only when
+  // wrapping a Meta output, so kernel errors take precedence.
+  const bool cpu_zero_dim_defers = schema.name() != "aten::nextafter" ||
+      !schema.overload_name().empty();
+  const bool allows_cpu = schema.name() == "aten::_foreach_copy" &&
+      schema.overload_name().empty();
+  const bool allows_meta =
+      schema.name() == "aten::add_" && schema.overload_name() == "Tensor";
+  const auto find_common_device =
+      [&](bool resolve) -> std::optional<c10::Device> {
+    std::optional<c10::Device> common_device;
+    bool common_is_cpu_zero_dim = false;
+    for (const auto& [input_device, is_cpu_zero_dim] : input_devices) {
+      if (!common_device.has_value()) {
+        common_device = input_device;
+        common_is_cpu_zero_dim = is_cpu_zero_dim;
+        continue;
+      }
+      if (input_device == *common_device) {
+        common_is_cpu_zero_dim = common_is_cpu_zero_dim && is_cpu_zero_dim;
+        continue;
+      }
+      if (cpu_zero_dim_defers && is_cpu_zero_dim) {
+        continue;
+      }
+      if (cpu_zero_dim_defers && common_is_cpu_zero_dim) {
+        common_device = input_device;
+        common_is_cpu_zero_dim = is_cpu_zero_dim;
+        continue;
+      }
+      if ((allows_cpu && (common_device->is_cpu() || input_device.is_cpu())) ||
+          (allows_meta &&
+           (common_device->is_meta() || input_device.is_meta()))) {
+        continue;
+      }
+      if (!resolve) {
+        return std::nullopt;
+      }
+      if (mode->prefer_device_type_.has_value()) {
+        const auto& preferred = *mode->prefer_device_type_;
+        const bool common_has_preferred =
+            c10::DeviceTypeName(common_device->type(), /*lower_case=*/true)
+                .find(preferred) != std::string::npos;
+        const bool input_has_preferred =
+            c10::DeviceTypeName(input_device.type(), /*lower_case=*/true)
+                .find(preferred) != std::string::npos;
+        if (common_has_preferred != input_has_preferred) {
+          if (input_has_preferred) {
+            common_device = input_device;
+            common_is_cpu_zero_dim = is_cpu_zero_dim;
+          }
+          continue;
+        }
+      }
+      (*c10::impl::getGlobalPyInterpreter())
+          ->fake_raise_device_mismatch(op, *common_device, input_device);
+    }
+    return common_device;
+  };
   using at::impl::FakeDispatchCategory;
   const auto categories =
       at::impl::fakeDispatchTableCategories(op.operator_name());
@@ -425,17 +491,16 @@ void fakeFallback(
     unsupported(op, "ops with data-dependent outputs");
   }
   // Constructors finalize their own output devices.
-  const auto common_device = device.value_or(c10::Device(c10::kCPU));
+  const auto common_device = input_devices.empty()
+      ? std::optional(c10::Device(c10::kCPU))
+      : find_common_device(/*resolve=*/false);
   if (has(FakeDispatchCategory::OpImpl) || has_op_impl_predicate(op)) {
     if ((*c10::impl::getGlobalPyInterpreter())
             ->fake_try_op_impl(op, stack, mode, common_device)) {
       return;
     }
   }
-  if (has_device_arguments) {
-    unsupported(op, "device arguments");
-  }
-  if (!device.has_value()) {
+  if (input_devices.empty()) {
     unsupported(op, "ops without fake tensor inputs");
   }
   if (has_sparse_inputs &&
@@ -452,6 +517,16 @@ void fakeFallback(
   if (schema.overload_name().empty() && schema.name() == "aten::alias") {
     const auto& self = (*stack)[arguments_begin].toTensor();
     output_dispatch_keys = self.unsafeGetTensorImpl()->fake_dispatch_keys();
+  }
+  // __torch_dispatch__ receives non-default kwarg-only arguments as kwargs.
+  std::optional<c10::Device> device_argument;
+  if (const auto idx = schema.argumentIndexWithName("device")) {
+    const auto& argument = schema.arguments()[*idx];
+    const auto& ivalue = (*stack)[arguments_begin + *idx];
+    if (argument.kwarg_only() && ivalue.isDevice() &&
+        argument.default_value() != ivalue) {
+      device_argument = ivalue.toDevice();
+    }
   }
 
   // Run the (sparse) Meta kernel with the inputs reporting the meta device (see
@@ -529,30 +604,40 @@ void fakeFallback(
   // converts retained custom and COO outputs in place, accepting the mutation,
   // cross-mode/device failures and concurrent-conversion limitation above.
   // It does not provide Python's wrapping/memoization semantics.
-  auto wrap_output = [&](const at::Tensor& t, bool is_alias) {
+  std::optional<c10::Device> output_common_device;
+  std::unordered_set<const c10::TensorImpl*> converted_outputs;
+  auto wrap = [&](const at::Tensor& t, bool is_alias) {
     if (!t.defined()) {
       return;
     }
+    if (!output_common_device.has_value()) {
+      output_common_device = find_common_device(/*resolve=*/true);
+    }
     auto* impl = t.unsafeGetTensorImpl();
-    if (t.is_fake()) {
-      TORCH_CHECK(
-          impl->fake_tensor_mode() == mode,
-          "Meta kernel returned a fake tensor from another mode");
+    // The same Meta tensor can occur several times in the return values.
+    if (converted_outputs.contains(impl)) {
+      return;
+    }
+    if (t.is_fake() && impl->fake_tensor_mode() == mode) {
       // device() reports meta inside the kernel invocation scope.
       const auto fake_device = impl->fake_device();
       TORCH_CHECK(
-          fake_device == device,
+          fake_device == output_common_device,
           "FakeTensor is wrapped to wrong device, found ",
           *fake_device,
           ", expected ",
-          *device);
+          *output_common_device);
       if (output_dispatch_keys.has_value()) {
         impl->set_fake_dispatch_keys(output_dispatch_keys);
       }
       return;
     }
+    TORCH_CHECK(
+        !t.is_fake(),
+        "Meta kernel returned a fake tensor from another mode");
     // New views and shallow copies inside the kernel are plain Meta tensors.
-    at::init_cpp_fake(impl, *device, mode);
+    at::init_cpp_fake(
+        impl, device_argument.value_or(*output_common_device), mode);
     if (!is_alias && t.requires_grad()) {
       // Backend kernels run below autograd, but a Meta kernel can copy
       // requires_grad from an input. Existing fakes returned above, and
@@ -563,13 +648,17 @@ void fakeFallback(
     }
     impl->set_real_tensor(nullptr);
     impl->set_fake_dispatch_keys(output_dispatch_keys);
+    if (device_argument.has_value() &&
+        device_argument != output_common_device) {
+      converted_outputs.insert(impl);
+    }
   };
   const auto num_returns = schema.returns().size();
   const auto returns_begin = stack->size() - num_returns;
   for (const auto i : c10::irange(num_returns)) {
     const bool is_alias = schema.returns()[i].alias_info() != nullptr;
     for_each_tensor(stack, returns_begin + i, 1, [&](const at::Tensor& t) {
-      wrap_output(t, is_alias);
+      wrap(t, is_alias);
     });
   }
 }

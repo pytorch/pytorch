@@ -1381,6 +1381,8 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             torch.square,
             subtest(lambda x: x.view(2, 2), name="view"),
             subtest(lambda x: x.select(0, 1), name="select"),
+            subtest(lambda x: x.detach(), name="detach"),
+            subtest(lambda x: x.data, name="data"),
             subtest(lambda x: aten.copy(x, x), name="copy"),
             subtest(lambda x: x[x.new_zeros(2, dtype=torch.int64)], name="index"),
             subtest(
@@ -1400,8 +1402,9 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         name_fn=lambda op: op.__name__,
     )
     @parametrize("active", [False, True])
+    @parametrize("inference", [False, True])
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    def test_mode(self, mode_cls, op, active):
+    def test_mode(self, mode_cls, op, active, inference):
         if (
             mode_cls is CppFakeTensorMode
             and torch._functorch.config.fake_tensor_propagate_real_tensors
@@ -1409,8 +1412,12 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         real = torch.rand([4], device="cpu")
         mode = mode_cls()
-        fake = mode.from_tensor(real)
-        with mode if active else contextlib.nullcontext(), torch.inference_mode():
+        with torch.inference_mode(inference):
+            fake = mode.from_tensor(real)
+        with (
+            mode if active else contextlib.nullcontext(),
+            torch.inference_mode(inference),
+        ):
             out = op(fake)
         for result, expected in zip(
             pytree.tree_leaves(out), pytree.tree_leaves(op(real)), strict=True
@@ -1418,6 +1425,11 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.checkMetaProps(result, expected)
             self.assertTrue(is_fake_tensor(result))
             self.assertIs(maybe_get_fake_mode(result), mode)
+            self.assertEqual(result.storage_offset(), expected.storage_offset())
+            self.assertEqual(
+                torch._C._is_alias_of(result, fake),
+                torch._C._is_alias_of(expected, real),
+            )
 
     def test_full(self):
         # Test torch.full returns tensor with correct dtype
@@ -2377,20 +2389,44 @@ def forward(self, x_1):
                 self.assertIsNone(active_fake_mode())
 
     @fake_tensor_modes
+    @parametrize(
+        "shape,input_device,other_device",
+        [
+            ((2, 3), "cpu", "cpu"),
+            ((), "cpu", "cuda:0"),
+            ((), "cuda:0", "cpu"),
+        ],
+    )
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    def test_inplace_and_out_identity(self, mode_cls):
+    def test_inplace_and_out_identity(
+        self, mode_cls, shape, input_device, other_device
+    ):
         if (
             mode_cls is CppFakeTensorMode
             and torch._functorch.config.fake_tensor_propagate_real_tensors
         ):
             self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         mode = mode_cls()
-        fake = mode.from_tensor(torch.randn(2, 3))
-        out = mode.from_tensor(torch.empty(2, 3))
+        fake, out, other = (
+            self.fake_from_meta(mode, torch.empty(shape, device="meta"), device)
+            for device in (input_device, input_device, other_device)
+        )
         # Inspect the fallback's return, without ADInplaceOrView returning its input.
         with torch._C._AutoDispatchBelowADInplaceOrView():
             self.assertIs(torch.ops.aten.add_.Tensor(fake, 1), fake)
-            self.assertIs(torch.ops.aten.add.out(fake, fake, out=out), out)
+            for op, destination in (
+                (lambda: aten.add_.Tensor(fake, other), fake),
+                (lambda: aten.add.out(fake, other, out=out), out),
+            ):
+                if input_device == "cpu" and other_device != "cpu":
+                    with self.assertRaisesRegex(
+                        RuntimeError, "FakeTensor is wrapped to wrong device"
+                    ):
+                        op()
+                else:
+                    self.assertIs(op(), destination)
+                self.assertEqual(destination.device, torch.device(input_device))
+                self.assertIs(maybe_get_fake_mode(destination), mode)
 
     @fake_tensor_modes
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
@@ -2536,31 +2572,43 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                     )
 
     @onlyAccelerator
-    def test_zero_dim(self, device):
-        with FakeTensorMode() as mode:
-            x = torch.tensor(0.0)
+    @fake_tensor_modes
+    @parametrize("reverse", [False, True])
+    @parametrize("constant", [False, True])
+    def test_zero_dim(self, device, mode_cls, reverse, constant):
+        if mode_cls is CppFakeTensorMode and constant:
+            self.skipTest("C++ fake fallback does not support constant inputs")
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
+        with mode_cls() as mode:
+            x = torch.tensor(0.0) if constant else torch.empty(())
             y = torch.rand([4, 4], device=device)
-            out = x + y
+            out = y + x if reverse else x + y
             self.assertEqual(out.shape, (4, 4))
             self.assertEqual(out.device, y.device)
             self.assertTrue(is_fake_tensor(out))
+            self.assertIs(maybe_get_fake_mode(out), mode)
 
     @onlyAccelerator
     @skipIfPropagateRealTensors("Propagate real tensor not supported")
-    def test_op_with_zero_dim_bypassed(self, device):
+    @fake_tensor_modes
+    def test_op_with_zero_dim_bypassed(self, device, mode_cls):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
         shape_env = ShapeEnv()
-        mode = FakeTensorMode(shape_env=shape_env)
+        mode = mode_cls(shape_env=shape_env)
         x = torch.tensor(1.0, device=device)
         y = torch.tensor(2.0)
         fake_x = mode.from_tensor(x)
         fake_y = mode.from_tensor(y)
 
         with self.assertRaisesRegex(
-            (FakeTensorDeviceMismatchError, RuntimeError),
-            "Expected all tensors to be on the same device",
-        ) as exc:
+            FakeTensorDeviceMismatchError,
+            re.escape(f"found at least two devices, {fake_x.device} and cpu!"),
+        ):
             torch.nextafter(fake_x, fake_y)
 
     @onlyAccelerator
@@ -2585,18 +2633,25 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
 
     @onlyAccelerator
     @skipIfPropagateRealTensors("Propagate real tensor not supported")
-    def test_add_one_dim_single_elem_cpu_with_device_tensor(self, device):
+    @fake_tensor_modes
+    @parametrize("reverse", [False, True])
+    def test_add_one_dim_single_elem_cpu_with_device_tensor(
+        self, device, mode_cls, reverse
+    ):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
-        with FakeTensorMode():
+        with mode_cls():
             x = torch.randn([1])
             y = torch.randn(10, device=device)
+            lhs, rhs = (y, x) if reverse else (x, y)
 
             with self.assertRaisesRegex(
-                (FakeTensorDeviceMismatchError, RuntimeError),
-                "Expected all tensors to be on the same device",
-            ) as exc:
-                x + y
+                FakeTensorDeviceMismatchError,
+                re.escape(
+                    f"found at least two devices, {lhs.device} and {rhs.device}!"
+                ),
+            ):
+                lhs + rhs
 
     @onlyAccelerator
     def test_throw(self, device):
@@ -5710,17 +5765,19 @@ instantiate_device_type_tests(
 )
 
 
+@instantiate_parametrized_tests
 class TestFakeTensorPreferDeviceType(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def test_fake_tensor_prefer_device_type_cpu_only(self):
+    @fake_tensor_modes
+    def test_fake_tensor_prefer_device_type_cpu_only(self, mode_cls):
         """
         Test that fake_tensor_prefer_device_type works correctly when only CPU tensors are involved.
         """
         # The preferred type only has to differ from the tensors' device; nothing
         # is ever dispatched to it, so this needs no accelerator.
         with torch._functorch.config.patch(fake_tensor_prefer_device_type="cuda"):
-            with FakeTensorMode():
+            with mode_cls():
                 # When all tensors are CPU, the result should still be CPU
                 x = torch.randn(2, 3, device="cpu")
                 y = torch.randn(2, 3, device="cpu")
@@ -5728,75 +5785,111 @@ class TestFakeTensorPreferDeviceType(TestCase):
                 self.assertEqual(result.device.type, "cpu")
                 self.assertTrue(is_fake_tensor(result))
 
+    @torch._functorch.config.patch(fake_tensor_prefer_device_type=None)
+    @fake_tensor_modes
+    @parametrize("reverse", [False, True])
+    @parametrize(
+        "devices,preference,expected_device",
+        [
+            (("cuda:0", "cuda:1"), "cuda", None),
+            (("cuda:0", "cuda:1"), "uda", None),
+            (("cpu", "cuda:1"), "cuda", "cuda:1"),
+            (("cpu", "cuda:1"), "cpu", "cpu"),
+            (("cpu", "cuda:1"), "uda", "cuda:1"),
+            (("cpu", "cuda:1"), "cp", "cpu"),
+            (("cpu", "cuda:1"), "xpu", None),
+            (("cpu", "cuda:1"), "u", None),
+            (("cpu", "cuda:1"), "", None),
+            (("cpu", "cuda:1"), "cuda:1", None),
+        ],
+    )
+    def test_fake_tensor_prefer_device_type_fallback(
+        self, mode_cls, reverse, devices, preference, expected_device
+    ):
+        # Synthetic accelerator indices must not initialize GPU contexts.
+        with (
+            patch("torch._subclasses.fake_tensor.init_gpu_context", lambda _: None),
+            patch.object(mode_cls, "avoid_device_init", True),
+            torch.library._scoped_library("_test_fake_device_conflict", "DEF") as lib,
+            torch._functorch.config.patch(fake_tensor_prefer_device_type=preference),
+        ):
+            mode = mode_cls()
+            a, b = (
+                mode.fake_tensor_converter.from_meta_and_device(
+                    mode, torch.empty(2, 3, device="meta"), torch.device(device)
+                )
+                for device in devices
+            )
+            if reverse:
+                a, b = b, a
+
+            lib.define("resolve(Tensor a, Tensor b) -> Tensor")
+            # A fresh Meta output forces common-device resolution in the fallback.
+            lib.impl("resolve", lambda a, b: torch.empty(2, 3, device="meta"), "Meta")
+            op = torch.ops._test_fake_device_conflict.resolve.default
+
+            def check(expected):
+                if expected is None:
+                    msg = re.escape(
+                        f"found at least two devices, {a.device} and {b.device}!"
+                    )
+                    with self.assertRaisesRegex(
+                        FakeTensorDeviceMismatchError, msg
+                    ) as exc:
+                        op(a, b)
+                    self.assertIs(exc.exception.func, op)
+                    self.assertEqual(exc.exception.common_device, a.device)
+                    self.assertEqual(exc.exception.device, b.device)
+                else:
+                    result = op(a, b)
+                    self.assertEqual(result.device, torch.device(expected))
+                    self.assertEqual(result.shape, (2, 3))
+                    self.assertIs(maybe_get_fake_mode(result), mode)
+
+            with mode:
+                check(expected_device)
+                # This Meta-output path uses C++'s captured preference; Python
+                # mode reads live config. Python op_impls also read live config
+                # for C++ modes; see Note [C++ fake fallback].
+                with torch._functorch.config.patch(fake_tensor_prefer_device_type=None):
+                    check(expected_device if mode_cls is CppFakeTensorMode else None)
+                check(expected_device)
+
 
 class TestFakeTensorPreferDeviceTypeDevice(TestCase):
     r"""Accelerator-only TestFakeTensorPreferDeviceType cases (see except_for below)."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_fake_tensor_prefer_device_type(self, device):
-        """
-        Test that fake_tensor_prefer_device_type configuration works correctly
-        for device mismatch scenarios.
-        """
-        device_type = self.device_type
-
-        # Create a custom operation that would normally cause device mismatch
-        def mixed_device_op(a, b):
-            # This simulates an operation where 'a' is on the accelerator but
-            # 'b' is created on CPU
-            cpu_tensor = torch.arange(a.shape[0], device="cpu")
-            return a + cpu_tensor.unsqueeze(-1)
-
-        with FakeTensorMode():
-            # Test default behavior (should raise error on device mismatch)
-            gpu_tensor = torch.randn(3, 4, device=device)
-
-            # Without the config, this should raise a device mismatch error
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Expected all tensors to be on the same device",
+    @torch._dynamo.config.patch(fake_tensor_cache_enabled=False)
+    @fake_tensor_modes
+    @parametrize("reverse", [False, True])
+    def test_fake_tensor_prefer_device_type(self, device, mode_cls, reverse):
+        for preference in (None, self.device_type):
+            with (
+                torch._functorch.config.patch(
+                    fake_tensor_prefer_device_type=preference
+                ),
+                mode_cls() as mode,
             ):
-                mixed_device_op(gpu_tensor, None)
-
-        # Test with prefer_device_type set to the accelerator
-        with torch._functorch.config.patch(fake_tensor_prefer_device_type=device_type):
-            with FakeTensorMode():
                 gpu_tensor = torch.randn(3, 4, device=device)
-
-                # This should now work and prefer the accelerator device
-                result = mixed_device_op(gpu_tensor, None)
-
-                # The result should be on the accelerator (preferred device type)
-                self.assertEqual(result.device.type, device_type)
+                cpu_tensor = torch.arange(3).unsqueeze(-1)
+                lhs, rhs = (
+                    (cpu_tensor, gpu_tensor) if reverse else (gpu_tensor, cpu_tensor)
+                )
+                if preference is None:
+                    msg = re.escape(
+                        f"found at least two devices, {lhs.device} and {rhs.device}!"
+                    )
+                    with self.assertRaisesRegex(FakeTensorDeviceMismatchError, msg):
+                        lhs + rhs
+                    continue
+                result = lhs + rhs
+                self.assertEqual(result.device, gpu_tensor.device)
                 self.assertEqual(result.shape, (3, 4))
-                self.assertTrue(is_fake_tensor(result))
-
-        # Test that the configuration doesn't affect normal operations
-        with torch._functorch.config.patch(fake_tensor_prefer_device_type=device_type):
-            with FakeTensorMode():
-                # Normal same-device operations should work as before
-                x = torch.randn(2, 3, device=device)
-                y = torch.randn(2, 3, device=device)
-                result = x + y
-                self.assertEqual(result.device.type, device_type)
-
-                # CPU operations should still work
-                x_cpu = torch.randn(2, 3, device="cpu")
-                y_cpu = torch.randn(2, 3, device="cpu")
-                result_cpu = x_cpu + y_cpu
-                self.assertEqual(result_cpu.device.type, "cpu")
-
-        # Test that the configuration is properly scoped
-        with FakeTensorMode():
-            gpu_tensor = torch.randn(3, 4, device=device)
-
-            # After exiting the config context, should raise error again
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Expected all tensors to be on the same device",
-            ):
-                mixed_device_op(gpu_tensor, None)
+                self.assertIs(maybe_get_fake_mode(result), mode)
+                for tensor in (gpu_tensor, cpu_tensor):
+                    self.assertEqual((tensor + tensor).device, tensor.device)
 
 
 instantiate_device_type_tests(
@@ -5810,13 +5903,20 @@ instantiate_device_type_tests(
 class TestFakeTensorMetaDevicePropagationDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_inplace_add_with_meta_rhs_keeps_destination_device(self, device):
-        with FakeTensorMode():
-            log_det = torch.zeros(2, device=device)
-            log_det += torch.zeros(2, device="meta")
+    @fake_tensor_modes
+    @parametrize("meta_rhs", [False, True])
+    def test_inplace_add_with_meta_rhs_keeps_destination_device(
+        self, device, mode_cls, meta_rhs
+    ):
+        with mode_cls() as mode:
+            lhs_device, rhs_device = (device, "meta") if meta_rhs else ("meta", device)
+            log_det = torch.zeros(2, device=lhs_device)
+            expected_device = log_det.device
+            self.assertIs(log_det.add_(torch.zeros(2, device=rhs_device)), log_det)
 
-            self.assertEqual(log_det.device.type, self.device_type)
+            self.assertEqual(log_det.device, expected_device)
             self.assertTrue(is_fake_tensor(log_det))
+            self.assertIs(maybe_get_fake_mode(log_det), mode)
 
 
 instantiate_device_type_tests(
@@ -6652,57 +6752,80 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertFalse(torch._C._in_kernel_invocation())
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
+    @fake_tensor_modes
     @parametrize("active", [False, True])
-    def test_fake_fallback_retained_outputs(self, active):
-        mode = CppFakeTensorMode()
+    @parametrize("device", [None, "cuda:0"])
+    def test_fake_fallback_retained_outputs(self, mode_cls, active, device):
+        mode = mode_cls()
         fake = mode.from_tensor(torch.randn(2, 3))
         retained = torch.empty(2, 3, device="meta")
         self.assertFalse(is_fake_tensor(retained))
 
-        def meta_impl(x):
+        def meta_impl(x, *, device=None):
             return retained, [retained, retained], [None, retained]
 
         with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
-            lib.define("retained(Tensor x) -> (Tensor, Tensor[], Tensor?[])")
+            lib.define(
+                "retained(Tensor x, *, Device? device=None)"
+                " -> (Tensor, Tensor[], Tensor?[])"
+            )
             lib.impl("retained", meta_impl, "Meta")
+            previous = None
             with mode if active else contextlib.nullcontext():
-                for _ in range(2):
+                # In-place finalization does not preserve raw Meta tensors for
+                # converter memo reuse across calls with a device override.
+                for _ in range(2 if device is None else 1):
                     result, repeated, optional = torch.ops._test_fake_fallback.retained(
-                        fake
+                        fake, device=device
                     )
                     for output in (result, *repeated, optional[1]):
-                        self.assertIs(output, retained)
+                        self.assertIs(output, result)
                         self.assertIs(maybe_get_fake_mode(output), mode)
-                        self.assertEqual(output.device, fake.device)
+                        self.assertEqual(output.device, torch.device(device or "cpu"))
+                        self.assertEqual(output.shape, retained.shape)
                     self.assertIsNone(optional[0])
-        self.assertTrue(is_fake_tensor(retained))
+                    self.assertTrue(torch._C._is_alias_of(result, retained))
+                    if previous is not None:
+                        self.assertIs(result, previous)
+                    previous = result
+                    if mode_cls is CppFakeTensorMode:
+                        self.assertIs(result, retained)
+                        self.assertTrue(is_fake_tensor(retained))
+                    else:
+                        self.assertIsNot(result, retained)
+                        self.assertFalse(is_fake_tensor(retained))
+                        self.assertEqual(retained.device, torch.device("meta"))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     @parametrize("active", [False, True])
     @parametrize("output_device", ["cpu", "meta"])
+    @parametrize("device", [None, "cuda:0"])
     @parametrize("implementation", ["meta", "custom"])
     @fake_tensor_modes
     def test_fake_fallback_existing_fake_output(
-        self, active, output_device, implementation, mode_cls
+        self, active, output_device, device, implementation, mode_cls
     ):
         mode = mode_cls()
         fake = mode.from_tensor(torch.empty(2))
         retained = mode.from_tensor(torch.empty(2, device=output_device))
         with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
-            lib.define("retained(Tensor x) -> Tensor")
+            lib.define("retained(Tensor x, *, Device? device=None) -> Tensor")
             op = torch.ops._test_fake_fallback.retained.default
             if implementation == "custom":
-                torch.library.register_fake(op, lambda x: retained, lib=lib)
+                torch.library.register_fake(
+                    op, lambda x, device=None: retained, lib=lib
+                )
             else:
-                lib.impl("retained", lambda x: retained, "Meta")
+                lib.impl("retained", lambda x, device=None: retained, "Meta")
             with mode if active else contextlib.nullcontext():
                 if implementation == "custom" or output_device == "cpu":
-                    self.assertIs(op(fake), retained)
+                    self.assertIs(op(fake, device=device), retained)
                 else:
                     msg = "FakeTensor is wrapped to wrong device, found meta, expected cpu"
                     with self.assertRaisesRegex(RuntimeError, msg):
-                        op(fake)
+                        op(fake, device=device)
         self.assertEqual(retained.device, torch.device(output_device))
         self.assertIs(maybe_get_fake_mode(retained), mode)
 

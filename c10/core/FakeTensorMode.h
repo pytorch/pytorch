@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -35,6 +37,14 @@ struct C10_API FakeTensorMode {
 
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
+
+  // Snapshot of fake_tensor_prefer_device_type for native device resolution.
+  // We assume the config stays fixed for the mode's lifetime; we have not found
+  // real use cases requiring changes during that lifetime. Python op_impls
+  // still read live config, so changing it can give different device decisions
+  // across paths; see Note [C++ fake fallback]. Kept as a string to preserve
+  // Python's substring matching of device types.
+  std::optional<std::string> prefer_device_type_;
 
   // When true, real tensor inputs to an op are converted to fakes instead of
   // raising. A non-None fake_tensor_tls.allow_non_fake_inputs_override, a

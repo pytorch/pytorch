@@ -154,6 +154,12 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       c10::function_ref<bool()> /*step*/) const override {
     PANIC(fake_run_with_mode_entered);
   }
+  void fake_raise_device_mismatch(
+      const c10::OperatorHandle& /*op*/,
+      c10::Device /*common_device*/,
+      c10::Device /*device*/) const override {
+    PANIC(fake_raise_device_mismatch);
+  }
   bool fake_try_decomp(
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
@@ -177,7 +183,7 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       const c10::OperatorHandle& /*op*/,
       torch::jit::Stack* /*stack*/,
       const std::shared_ptr<FakeTensorMode>& /*mode*/,
-      c10::Device /*common_device*/) const override {
+      std::optional<c10::Device> /*common_device*/) const override {
     PANIC(fake_try_op_impl);
   }
   bool fake_try_prim_meta(
