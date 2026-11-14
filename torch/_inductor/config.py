@@ -2631,6 +2631,16 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Maximum K per decompose_k split (K // split). Each partial matmul accumulates
+    # K // split products into a single fp32 output, and that accumulation error grows
+    # with the chunk length; with very large K and few splits the partial sum can lose
+    # enough precision that outputs near zero exceed an absolute tolerance even though
+    # the full aten mm does not. Splits whose chunk exceeds this bound are skipped.
+    # 0 disables the bound.
+    decompose_k_max_k_per_split = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_MAX_K_PER_SPLIT", "16384")
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.

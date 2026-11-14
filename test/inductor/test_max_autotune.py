@@ -3440,6 +3440,71 @@ class TestMaxAutotune(TestCase):
             any(name.startswith("decompose_k_mm") for name in names), names
         )
 
+    @fresh_cache()
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="ATEN,TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_decompose_k_max_k_per_split_numerics(self):
+        # Each decompose_k partial accumulates K // split products into one fp32
+        # value. With K = 2**18 and split 2, that chunk is long enough for outputs
+        # near zero to miss tolerance against an fp32 reference.
+        M, N, K = 64, 64, 2**18
+        torch.manual_seed(0)
+        a = torch.randn(M, K, device=GPU_TYPE).to(torch.bfloat16)
+        b = torch.randn(K, N, device=GPU_TYPE).to(torch.bfloat16)
+        ref = a.float() @ b.float()
+
+        def compile_decompose_k_only(max_k_per_split):
+            names: list[str] = []
+
+            def keep_decompose_k(choices):
+                # Also runs for the partial bmm inside the decompose_k subgraph,
+                # which has no decompose_k choices; leave that one alone.
+                kept = [c for c in choices if c.name.startswith("decompose_k_mm")]
+                names.extend(c.name for c in kept)
+                return kept or choices
+
+            torch._dynamo.reset()
+            get_k_splits.cache_clear()
+            use_decompose_k_choice.cache_clear()
+            add_preprocessing_fn(keep_decompose_k)
+            try:
+                with config.patch(
+                    {
+                        "triton.num_decompose_k_splits": 1,
+                        "triton.decompose_k_max_k_per_split": max_k_per_split,
+                    }
+                ):
+                    out = torch.compile(lambda x, y: x @ y)(a, b)
+            finally:
+                clear_preprocessing_fns(clear_defaults=False)
+                get_k_splits.cache_clear()
+                use_decompose_k_choice.cache_clear()
+            return out, names
+
+        def within_tolerance(out):
+            # bf16 tolerances used by TritonBench accuracy checks
+            err = (out.float() - ref).abs()
+            return bool((err <= 1e-2 + 1e-1 * ref.abs()).all())
+
+        # Default bound: chunks of at most 16384, so the single split is 16.
+        out, names = compile_decompose_k_only(16384)
+        self.assertTrue(names, names)
+        self.assertTrue(
+            all(n.startswith("decompose_k_mm_16_split") for n in names), names
+        )
+        self.assertTrue(within_tolerance(out))
+
+        # Unbounded: the single split is 2 (chunks of 131072).
+        out, names = compile_decompose_k_only(0)
+        self.assertTrue(names, names)
+        self.assertTrue(
+            all(n.startswith("decompose_k_mm_2_split") for n in names), names
+        )
+        self.assertFalse(within_tolerance(out))
+
     @config.patch(
         {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "TRITON"}
     )
