@@ -1060,6 +1060,16 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     _maybe_infer_fake = _maybe_infer_fake
     _maybe_infer_fake_kernel_from_pytree_out = _maybe_infer_fake_kernel_from_pytree_out
 
+    def _prep_args_for_hash(
+        self,
+        result: list[object],
+        args: Mapping[str, object] | Sequence[object] | Iterable[object],
+        state: _CacheKeyState,
+        id_hashed_objects: list[object],
+    ) -> None:
+        # HOP backward caches reuse metadata hashing without the Python dispatch cache.
+        FakeTensorMode._prep_args_for_hash(self, result, args, state, id_hashed_objects)
+
     def can_run_unsafe_fallback(self, func: OpOverload) -> bool:
         return self.allow_fallback_kernels and (
             func.namespace in FakeTensorMode._can_run_unsafe_fallback_allowed_namespaces
@@ -2414,7 +2424,7 @@ class TensorMetadata:
     def _flatten_into(
         self,
         result: list[object],
-        mode: FakeTensorMode,
+        mode: FakeTensorMode | CppFakeTensorMode,
         state: _CacheKeyState,
     ) -> None:
         # Flatten the TensorMetadata out into `result`.  Make sure to call
@@ -3071,7 +3081,7 @@ class FakeTensorMode(TorchDispatchMode):
             raise _BypassDispatchCache("CompositeImplicitAutograd")
 
     def _prep_args_for_hash(
-        self,
+        self: FakeTensorMode | CppFakeTensorMode,
         result: list[object],
         args: Mapping[str, object] | Sequence[object] | Iterable[object],
         state: _CacheKeyState,
