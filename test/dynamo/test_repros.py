@@ -3865,6 +3865,78 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(v.shape, ref_v.shape)
         self.assertIsInstance(v, Subclass)
 
+    @parametrize("call", ["overload", "packet"])
+    @parametrize("op", ["unsqueeze_", "squeeze_"])
+    @parametrize("style", ["positional", "keyword"])
+    def test_inplace_view_on_input_via_ops_api(self, call, op, style):
+        # `torch.ops.aten.*` does not go through the is_tensor_method() path, so
+        # an inplace view op on a graph input needs the same guard here.
+        # squeeze_ has multiple overloads, so it is included alongside the
+        # single-overload unsqueeze_ to cover the packet form with a dim arg.
+        # The "keyword" style passes self as a keyword: OpOverload/OpOverloadPacket
+        # __call__ is (self, /, *args, **kwargs), so those calls arrive with empty
+        # positional args and the guard must fall back to kwargs["self"].
+        def fn(x):
+            if style == "keyword":
+                if call == "overload":
+                    if op == "unsqueeze_":
+                        torch.ops.aten.unsqueeze_.default(self=x, dim=0)
+                    else:
+                        torch.ops.aten.squeeze_.dim(self=x, dim=0)
+                else:
+                    getattr(torch.ops.aten, op)(self=x, dim=0)
+            elif call == "overload":
+                if op == "unsqueeze_":
+                    torch.ops.aten.unsqueeze_.default(x, 0)
+                else:
+                    torch.ops.aten.squeeze_.dim(x, 0)
+            else:
+                getattr(torch.ops.aten, op)(x, 0)
+            return x
+
+        x = torch.arange(24).reshape(1, 4, 6)
+        # fullgraph first: a failed compile caches nothing, so the next call traces again.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "inplace view op on input tensor"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
+        ref_x, opt_x = x.clone(), x.clone()
+        self.assertEqual(torch.compile(fn, backend="eager")(opt_x), fn(ref_x))
+        self.assertEqual(opt_x.shape, ref_x.shape)
+
+    def test_inplace_view_rank_preserving_on_input_via_ops_api(self):
+        # transpose_ preserves rank but is still an inplace view; it compiled
+        # before this guard and now graph-breaks like the tensor-method path.
+        def fn(x):
+            torch.ops.aten.transpose_.default(x, 0, 1)
+            return x
+
+        x = torch.arange(24).reshape(4, 6)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "inplace view op on input tensor"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
+
+    def test_inplace_view_on_copy_via_ops_api(self):
+        def fn(x):
+            v = x.clone()
+            torch.ops.aten.unsqueeze_(v, 0)
+            return v
+
+        x = torch.arange(24).reshape(4, 6)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_inplace_non_view_on_input_via_ops_api(self):
+        # add_ is inplace but not a view; the inplace_view guard must not fire.
+        def fn(x):
+            torch.ops.aten.add_(x, 1)
+            return x
+
+        x = torch.arange(24).reshape(4, 6)
+        ref_x, opt_x = x.clone(), x.clone()
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(opt_x), fn(ref_x))
+        self.assertEqual(opt_x, ref_x)
+
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):
             tensor_inputs = [x for x in example_inputs if isinstance(x, torch.Tensor)]
