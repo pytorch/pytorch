@@ -891,9 +891,10 @@ class TensorVariable(VariableTracker):
             var = VariableTracker.build(tx, getattr).call_function(
                 tx, [self, VariableTracker.build(tx, name)], {}
             )
-            # in the event that TensorVariable returns NotImplemented
-            # GetAttrBuiltinVariable.call_function returns GetAttrVariable
-            ret_val = not isinstance(var, GetAttrVariable)
+            # A lookup that raised NotImplementedError comes back as an untyped
+            # GetAttrVariable. A typed one (e.g. a bound method found by
+            # dynamic_getattr) was resolved on the real value, so it exists.
+            ret_val = not isinstance(var, GetAttrVariable) or var.py_type is not None
         except (AttributeError, ObservedAttributeError):
             ret_val = False
 
