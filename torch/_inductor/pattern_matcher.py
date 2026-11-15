@@ -1769,9 +1769,10 @@ class ReplacementPatternEntry(PatternEntry):
                 for user in old_uses:
                     idx = maybe_getitem(user)
                     if idx is None:
-                        # Output is used directly
+                        # Output is used directly. Skip replace_all_uses_with: its
+                        # replace hooks (e.g. provenance tracking) expect a Node.
                         # pyrefly: ignore [bad-argument-type]
-                        old.replace_all_uses_with(new)
+                        user._replace_input_with(old, new)
                     else:
                         replace(user, new[idx])
                 graph.erase_node(old)
