@@ -293,12 +293,13 @@ def cfg_compile(
             mode), so that Inductor folds what follows from them alone (a
             batch norm into the convolution before it) and lays convolution
             weights out for the kernels. Such a graph is checked on every
-            call: a tensor that was written to in place since (by an
-            optimizer, say) or replaced makes the region compile again with
-            the tensors of that call, and a region this happens to twice
-            takes its weights as inputs from then on. A tensor the region
-            itself writes is not built in. A write through ``.data`` does
-            not count as one to the tensor, and is not seen.
+            call: a tensor that was written to since (in place, through
+            ``.data``, by an optimizer) or replaced makes the region compile
+            again with the tensors of that call, and a region this happens
+            to twice takes its weights as inputs from then on. Not built
+            in: a tensor the region itself writes, and memory PyTorch does
+            not see the writes to (shared with another process, or a NumPy
+            array's).
             ``regions()`` reports ``frozen`` per region. On by default
             (``TORCH_CFG_COMPILE_FREEZE=0`` turns it off).
 

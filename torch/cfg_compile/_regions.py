@@ -78,8 +78,10 @@ In a call of inference (no gradients recorded, every module in eval mode) the
 parameters and buffers are not inputs of an Inductor graph but part of it, so
 that Inductor folds what follows from them alone (``freeze=``). Such a variant
 checks on every call that they are the tensors it was made with and that
-nothing wrote to them in place: ``tensor_stamp`` hashes, per tensor, the
-object, the address of its memory and its version counter.
+nothing wrote to them: ``tensor_stamp`` hashes, per tensor, the object, the
+address of its memory and its version counter, and each tensor has a lazy
+clone that is never read, so that a write by anything but an in-place
+operation on the tensor itself still moves it to other memory (``_watched``).
 A variant whose tensors changed is made again for what they are then, and
 a region this happens to twice takes them as inputs from then on.
 """
@@ -1996,6 +1998,7 @@ class _Variant:
         "shape",
         "stamp",
         "state",
+        "watch",
     )
 
     def __init__(
@@ -2033,6 +2036,9 @@ class _Variant:
         self.rest: Callable[[list[Any]], list[Any]] | None = None
         self.state: Callable[[list[Any]], list[Any]] | None = None
         self.stamp: int | None = None
+        # The clones that keep the memory of the built-in tensors shared
+        # (see ``_watched``).
+        self.watch: list[torch.Tensor] = []
 
     def run(self, inputs: _Inputs) -> Any:
         flat, held = inputs.flat, inputs.held
@@ -2057,13 +2063,17 @@ class _Variant:
         self.effects, self.grows = effects, grows
         self.direct = self.direct and not effects
 
-    def freeze(self, count: int, positions: list[int], stamp: int) -> None:
-        """Says that the graph has the tensors at ``positions``, of the
-        ``count`` a call has, built in as they were at ``stamp``."""
+    def freeze(
+        self, flat: list[torch.Tensor], positions: list[int], clones: list[torch.Tensor]
+    ) -> None:
+        """Says that the graph has the tensors at ``positions`` of a call
+        built in as they are now. ``clones`` (see ``_watched``) are kept for
+        as long as the graph is."""
         taken = set(positions)
-        self.rest = _picker([i for i in range(count) if i not in taken])
+        self.rest = _picker([i for i in range(len(flat)) if i not in taken])
         self.state = _picker(positions)
-        self.stamp = stamp
+        self.watch = clones
+        self.stamp = _runtime.tensor_stamp([flat[i] for i in positions])
 
     def fresh(self, inputs: _Inputs) -> bool:
         """Whether what the graph has built in is what the modules hold: the
@@ -2472,7 +2482,7 @@ class _Region:
         variant = _Variant(compiled, found["recipes"], ops, keep)
         variant.affects(*found["effects"])
         if built is not None:
-            variant.freeze(len(flat), *built)
+            variant.freeze(flat, *built)
         if opening is not None:
             self.leave_open(variant, key, inputs, opening, conditions)
         self.seconds += time.perf_counter() - start
@@ -2533,11 +2543,11 @@ class _Region:
         key: Any,
         opening: _Open | None,
         frozen: list[int],
-    ) -> tuple[Any, list[str] | None, tuple[list[int], int] | None]:
+    ) -> tuple[Any, list[str] | None, tuple[list[int], list[torch.Tensor]] | None]:
         """Hands a traced graph to the backend, unless it has seen it. Also
         returns, for a graph with open sizes, the conditions it holds under,
-        and for one that has the tensors at ``frozen`` built in, those
-        positions and the stamp of the tensors."""
+        and for one that has tensors of ``frozen`` built in, their positions
+        and the clones that watch them."""
         options = self.plan.options
         ops = self.ops_of(graph)
         if ops < options.min_ops:
@@ -2563,10 +2573,10 @@ class _Region:
             same = (graph.code, key[1], bytes(tensors), key[3], opened, left)
         # What this trace needed of the sizes, before the backend adds to it.
         own = opening.conditions() if opening is not None else None
-        # None for tensors that do not count their writes.
-        tensors = [inputs.flat[i] for i in frozen]
-        stamp = _runtime.tensor_stamp(tensors) if frozen else None
-        if stamp is not None and self.compiles < options.max_variants:
+        watch: list[torch.Tensor] = []
+        if frozen and self.compiles < options.max_variants:
+            frozen, watch = _watched(inputs.flat, frozen)
+        if frozen and self.compiles < options.max_variants:
             example = opening.example() if opening is not None else list(inputs.flat)
             taken = set(frozen)
             rest = [e for i, e in enumerate(example) if i not in taken]
@@ -2580,7 +2590,7 @@ class _Region:
                 options.frozen += 1
                 self.compiles += 1
                 conditions = opening.conditions() if opening is not None else None
-                return compiled, conditions, (frozen, stamp)
+                return compiled, conditions, (frozen, watch)
         made = options.compiled.get(same)
         if made is None:
             if self.compiles >= options.max_variants:
@@ -2959,7 +2969,7 @@ class _Path(_Region):
         variant.guards = found["guards"]
         variant.affects(*found["effects"])
         if built is not None:
-            variant.freeze(len(inputs.flat), *built)
+            variant.freeze(inputs.flat, *built)
         if opening is not None:
             self.leave_open(variant, key, final, opening, conditions)
         self.seconds += time.perf_counter() - start
@@ -3384,16 +3394,47 @@ def _written(
     return written
 
 
+def _watched(
+    flat: list[torch.Tensor], positions: list[int]
+) -> tuple[list[int], list[torch.Tensor]]:
+    """Makes the tensors at ``positions`` ones whose every write shows: each
+    gets a lazy clone that is kept and never read, so the tensor shares its
+    memory with the clone, and whatever writes to it (in place, through
+    ``.data``, through a NumPy array made from it afterwards) first moves it
+    to memory of its own. With the version counter, which only in-place
+    operations on the tensor itself advance, that is what ``tensor_stamp``
+    looks at. Returns the positions this can be done for (not for memory
+    that is shared with another process or belongs to a NumPy array, where
+    writes cannot be seen, nor for tensors without a version counter), and
+    the clones."""
+    kept, watch = [], []
+    with torch.no_grad():
+        for position in positions:
+            tensor = flat[position]
+            if tensor.is_inference() or tensor.layout is not torch.strided:
+                continue
+            try:
+                watch.append(tensor._lazy_clone())
+            except RuntimeError:
+                continue
+            kept.append(position)
+    return kept, watch
+
+
 def _built_in(
     graph: torch.fx.GraphModule, flat: list[torch.Tensor], positions: list[int]
 ) -> torch.fx.GraphModule:
     """A copy of a graph that has the tensors at ``positions`` as buffers of
-    its own where the graph has inputs."""
+    its own where the graph has inputs. The buffers are lazy clones: what
+    the backend makes reads some through pointers it could write through,
+    which gives those memory of their own, and would do the same, call
+    after call, to the tensors of the module (see ``_watched``)."""
     graph = deepcopy(graph)
     placeholders = [node for node in graph.graph.nodes if node.op == "placeholder"]
     for position in positions:
         node, name = placeholders[position], f"_state_{position}"
-        graph.register_buffer(name, flat[position])
+        with torch.no_grad():
+            graph.register_buffer(name, flat[position]._lazy_clone())
         with graph.graph.inserting_before(node):
             constant = graph.graph.get_attr(name)
         node.replace_all_uses_with(constant)
