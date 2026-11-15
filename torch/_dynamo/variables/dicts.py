@@ -1906,6 +1906,19 @@ class DictViewVariable(VariableTracker):
         ),
     }
 
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # View types are immutable builtins without instance attributes or lookup hooks.
+        if mro_lookup(self.python_type(), name) is NO_SUCH_SUBOBJ:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[f"'{self.python_type_name()}' object has no attribute '{name}'"],
+                kwargs={"name": ConstantVariable.create(name), "obj": self},
+            )
+        return super().tp_getattro_impl(tx, name)
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5741-L5765
         self.install_order_guard(tx)
