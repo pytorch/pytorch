@@ -2976,6 +2976,31 @@ class TestOptimRenewed(TestCase):
             expected,
         )
 
+    def test_adafactor_empty_params(self):
+        # Empty (0-numel) params must not raise in step(): the update
+        # divides by numel() and by the last two dims of the grad, which
+        # are 0 for these shapes, on both the single- and multi-tensor
+        # paths.
+        for foreach in (False, True):
+            for shape in ((0,), (0, 3), (3, 0), (2, 0, 3)):
+                param = Parameter(torch.empty(shape))
+                param.grad = torch.empty(shape)
+                optimizer = torch.optim.Adafactor([param], foreach=foreach)
+                optimizer.step()
+
+        # An empty param sharing a group with a non-empty one is skipped,
+        # and the non-empty param still updates.
+        for foreach in (False, True):
+            empty = Parameter(torch.empty(3, 0))
+            empty.grad = torch.empty(3, 0)
+            full = Parameter(torch.ones(2, 2))
+            full.grad = torch.ones(2, 2)
+            optimizer = torch.optim.Adafactor([empty, full], lr=0.1, foreach=foreach)
+            before = full.detach().clone()
+            optimizer.step()
+            self.assertEqual(empty.shape, torch.Size([3, 0]))
+            self.assertFalse(torch.equal(full, before))
+
 
 class TestOptimizerLoadStateDictContext(TestCase):
     hw_classification = HardwareClassification.GENERIC
