@@ -408,8 +408,6 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def neg(x: CSEVariable) -> str:
-        # TODO: Does it rely on undefined behavior?
-        # If so, add special logic for unsigned types
         return MetalOverrides._wrap_small_int(f"static_cast<decltype({x})>(-{x})", x)
 
     @staticmethod
