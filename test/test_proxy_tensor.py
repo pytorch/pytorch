@@ -21,7 +21,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, skipOps, skip, xfail
 from torch.testing._internal.common_methods_invocations import op_db
-from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode, is_fake_tensor
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, fake_mode_cls, is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
@@ -45,8 +45,7 @@ from torch.fx.experimental.proxy_tensor import (
 
 # Under the C++ fake configuration, explicit FakeTensorMode() calls in this
 # module construct a CppFakeTensorMode.
-if torch._dynamo.config.use_cpp_fake_tensor:
-    from torch._subclasses.fake_tensor import CppFakeTensorMode as FakeTensorMode
+FakeTensorMode = fake_mode_cls()
 
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts

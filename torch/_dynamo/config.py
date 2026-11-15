@@ -750,8 +750,8 @@ fake_tensor_cache_crosscheck_enabled = (
 # the inference_mode is still respected.
 fake_tensor_disable_inference_mode = True
 
-# Use C++ FakeTensor mode (DispatchKey::Fake) instead of Python FakeTensorMode
-# for fake tensor propagation during dynamo tracing.
+# Select C++ FakeTensorMode at construction sites using fake_mode_cls(),
+# including make_fx's fake and symbolic tracing.
 use_cpp_fake_tensor = os.environ.get("CPP_FAKETENSOR", "0") == "1"
 
 # Experimental feature for running automatic caching precompile.

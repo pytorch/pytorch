@@ -321,6 +321,12 @@ def get_plain_tensors(
     return out
 
 
+def fake_mode_cls() -> type[FakeTensorMode | CppFakeTensorMode]:
+    from torch._dynamo import config
+
+    return CppFakeTensorMode if config.use_cpp_fake_tensor else FakeTensorMode
+
+
 def is_fake_tensor(x: object) -> TypeGuard[Tensor]:
     # True if x is itself a fake tensor: a Python FakeTensor, or a C++ fake.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
