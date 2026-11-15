@@ -76,6 +76,7 @@ from ..utils import (
     extract_fake_example_value,
     get_fake_value,
     has_torch_function,
+    is_safe_constant,
     is_tensor_getset_descriptor,
     is_torch_class,
     istype,
@@ -346,6 +347,10 @@ def _try_computed_lazy_constant(
         ):
             any_unrealized = True
         elif not isinstance(arg, ConstantVariable):
+            return None
+        elif arg.source is None and not is_safe_constant(arg.as_python_constant()):
+            # Output bytecode recomputes the op from its operands, so each one
+            # must be loadable from a source or as a LOAD_CONST
             return None
     if not any_unrealized:
         return None
@@ -1964,9 +1969,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         key: tuple[object, ...]
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
-            key = (self.fn, *(type(x) for x in args), True)
+            key = (self.fn, *map(type, args), True)
         else:
-            key = (self.fn, *(type(x) for x in args))
+            key = (self.fn, *map(type, args))
 
         handler = self.call_function_handler_cache.get(key)
         if not handler:
@@ -2664,6 +2669,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Reuse existing HashableTracker keys from a set/frozenset/dict operand
         # instead of re-hashing, mirroring CPython's set_update_internal fast
         # path (do-not-rehash-dict-keys).
+        if isinstance(args[0], variables.ConstDictVariable):
+            args[0].install_dict_order_guard(tx)
         if isinstance(
             args[0],
             (
@@ -3824,23 +3831,10 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
             ]
         if len(args) != 2 or kwargs:
             raise_observed_exception(TypeError, tx)
+        from .object_protocol import generic_hasattr
+
         obj, attr = args
-        if not attr.is_python_constant():
-            raise_observed_exception(TypeError, tx)
-        attr_name = attr.as_python_constant()
-        if not isinstance(attr_name, str):
-            raise_type_error(
-                tx, f"attribute name must be string, not '{attr.python_type_name()}'"
-            )
-        result = obj.call_obj_hasattr(tx, attr_name)
-        if result is None:
-            unimplemented(
-                gb_type="hasattr() on unsupported type",
-                context=f"hasattr({obj}, {attr})",
-                explanation=f"hasattr() is not supported on type {obj.python_type_name()}",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return result
+        return generic_hasattr(tx, obj, attr)
 
 
 class SetAttrBuiltinVariable(BaseBuiltinVariable):
