@@ -4,6 +4,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <memory>
 #include <optional>
 
 namespace c10d::nccl_ep {
@@ -18,16 +19,29 @@ enum class NcclEpLayout : int64_t {
   Flat = 3,
 };
 
+// Values mirror ncclEpHtFlow_t without exposing native headers here.
+enum class NcclEpHtFlow : int64_t { Auto = 0, PushPull = 1, PullPush = 2 };
+
+struct NcclEpCommState;
+
 struct NcclEpGroup : c10::intrusive_ptr_target {
   void* group{nullptr}; // ncclEpGroup_t, opaque to avoid including nccl_ep.h
   std::string group_name;
   int64_t num_local_experts{0};
+  int64_t max_dispatch_tokens_per_rank{0};
+  int64_t max_recv_tokens_per_rank{0};
+  int64_t max_token_bytes{0};
+  c10::DeviceIndex device_index{-1};
+  std::shared_ptr<NcclEpCommState> comm_state;
 
-  NcclEpGroup() = default;
+  explicit NcclEpGroup(c10::DeviceIndex device);
   ~NcclEpGroup();
+  void close();
 };
 
 struct NcclEpHandle : c10::intrusive_ptr_target {
+  // Native handle destruction dereferences the group; release it last.
+  c10::intrusive_ptr<NcclEpGroup> group;
   void* handle{nullptr}; // ncclEpHandle_t, opaque
   NcclEpLayout layout{NcclEpLayout::Unset}; // queried for output shapes
   std::string group_name; // for symm_mem zero-copy rendezvous lookup
@@ -42,13 +56,15 @@ struct NcclEpHandle : c10::intrusive_ptr_target {
   at::Tensor recv_expert_counter;
 
   NcclEpHandle(
+      c10::intrusive_ptr<NcclEpGroup> group,
       void* handle,
       NcclEpLayout layout,
       std::string group_name,
       at::Tensor topk_idx,
       at::Tensor recv_total_counter,
       at::Tensor recv_expert_counter)
-      : handle(handle),
+      : group(std::move(group)),
+        handle(handle),
         layout(layout),
         group_name(std::move(group_name)),
         topk_idx(std::move(topk_idx)),
@@ -62,13 +78,20 @@ TORCH_API c10::intrusive_ptr<NcclEpGroup> nccl_ep_create_group(
     int64_t num_experts,
     int64_t max_dispatch_tokens_per_rank,
     int64_t max_recv_tokens_per_rank,
-    int64_t max_token_bytes);
+    int64_t max_token_bytes,
+    NcclEpHtFlow ht_flow = NcclEpHtFlow::Auto);
 
 TORCH_API c10::intrusive_ptr<NcclEpHandle> nccl_ep_create_handle(
     const c10::intrusive_ptr<NcclEpGroup>& group,
     const at::Tensor& topk_idx,
     const std::optional<at::Tensor>& recv_expert_counter,
-    NcclEpLayout layout);
+    NcclEpLayout layout,
+    int64_t alignment = 1);
+
+TORCH_API void nccl_ep_update_handle(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& topk_idx,
+    const std::optional<at::Tensor>& recv_expert_counter);
 
 TORCH_API int64_t nccl_ep_handle_get_num_recv_tokens(
     const c10::intrusive_ptr<NcclEpHandle>& handle);
@@ -82,23 +105,60 @@ TORCH_API void nccl_ep_dispatch(
     const at::Tensor& topk_weights,
     at::Tensor& out_tokens,
     std::optional<at::Tensor> out_topk_weights,
-    std::optional<at::Tensor> out_topk_idx);
+    std::optional<at::Tensor> out_topk_idx,
+    bool async_op = false);
 
 TORCH_API void nccl_ep_dispatch_backward(
     const c10::intrusive_ptr<NcclEpHandle>& handle,
     const at::Tensor& grad_tokens,
-    at::Tensor& out_tokens);
+    at::Tensor& out_tokens,
+    bool async_op = false);
 
 TORCH_API void nccl_ep_combine(
     const c10::intrusive_ptr<NcclEpHandle>& handle,
     const at::Tensor& expert_tokens,
-    at::Tensor& out_tokens);
+    at::Tensor& out_tokens,
+    bool async_op = false);
 
 TORCH_API void nccl_ep_combine_backward(
     const c10::intrusive_ptr<NcclEpHandle>& handle,
     const at::Tensor& grad_tokens,
     const at::Tensor& grad_topk_weights,
     at::Tensor& out_tokens,
-    at::Tensor& out_topk_weights);
+    at::Tensor& out_topk_weights,
+    bool async_op = false);
+
+TORCH_API void nccl_ep_dispatch_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    const at::Tensor& scales,
+    const at::Tensor& topk_weights,
+    at::Tensor& out_tokens,
+    at::Tensor& out_scales,
+    std::optional<at::Tensor> out_topk_weights,
+    std::optional<at::Tensor> out_topk_idx,
+    bool async_op = false);
+
+TORCH_API void nccl_ep_dispatch_backward_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    const at::Tensor& scales,
+    at::Tensor& out_tokens,
+    at::Tensor& out_scales,
+    bool async_op = false);
+
+TORCH_API void nccl_ep_combine_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    at::Tensor& out_tokens,
+    bool async_op = false);
+
+TORCH_API void nccl_ep_combine_backward_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    const at::Tensor& topk_weights,
+    at::Tensor& out_tokens,
+    at::Tensor& out_topk_weights,
+    bool async_op = false);
 
 } // namespace c10d::nccl_ep
