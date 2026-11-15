@@ -27,7 +27,7 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 6;
+pub const TCFG_API_VERSION: u32 = 7;
 
 #[repr(C)]
 pub struct TcfgPyOp {
@@ -51,7 +51,11 @@ pub struct TcfgTensorInfo {
     pub storage_offset: i64,
     pub dtype: i32,
     pub device: i32,
+    pub data: *const std::ffi::c_void,
+    pub version: u64,
 }
+
+pub const TCFG_NO_VERSION: u64 = u64::MAX;
 
 impl TcfgTensorInfo {
     pub fn empty() -> TcfgTensorInfo {
@@ -62,6 +66,8 @@ impl TcfgTensorInfo {
             key_set: 0,
             strides: std::ptr::null(),
             storage_offset: 0,
+            data: std::ptr::null(),
+            version: 0,
             dtype: 0,
             device: 0,
         }

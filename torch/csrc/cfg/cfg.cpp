@@ -1691,6 +1691,10 @@ int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
     out->strides = nullptr;
     out->storage_offset = 0;
   }
+  out->data = impl->has_storage() ? impl->unsafe_storage().data() : nullptr;
+  const auto& version = impl->version_counter();
+  out->version =
+      version.enabled() ? version.current_version() : TCFG_NO_VERSION;
   out->dtype = static_cast<int32_t>(impl->dtype().toScalarType());
   const auto device = impl->device();
   out->device = (static_cast<int32_t>(device.type()) << 16) |

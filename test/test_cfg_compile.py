@@ -5205,6 +5205,23 @@ class TestCfgRegions(TestCase):
         with self.assertRaises(ValueError):
             runtime.ShapeGuard(numbers, offsets, [], [("power", size, size)])
 
+    def test_stamp_of_tensors(self):
+        stamp = importlib.import_module("torch._cfg_rs").tensor_stamp
+        a, b = torch.nn.Parameter(torch.randn(3)), torch.randn(3)
+        first = stamp([a, b])
+        self.assertEqual(stamp([a, b]), first)
+        self.assertNotEqual(stamp([b, a]), first)
+        self.assertNotEqual(stamp([a, b.clone()]), first)
+        b.add_(1)
+        second = stamp([a, b])
+        self.assertNotEqual(second, first)
+        # Not an operation on the tensor: other memory.
+        a.data = torch.randn(3)
+        self.assertNotEqual(stamp([a, b]), second)
+        with torch.inference_mode():
+            unversioned = torch.randn(3)
+        self.assertIsNone(stamp([a, unversioned]))
+
     def test_product_with_one_row_becomes_a_reduction(self):
         from torch.fx.experimental.proxy_tensor import make_fx
 
