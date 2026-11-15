@@ -249,7 +249,7 @@ class TestTritonDotReduction(TestCase):
         f = torch.compile(f)
         code = run_and_get_triton_code(f, x, y)
 
-        FileCheck().check("zoffset = tl.program_id(0)").check(
+        FileCheck().check("z0_offset = tl.program_id(0)").check(
             "yoffset = tl.program_id(1)"
         ).check("xoffset = tl.program_id(2)").run(code)
 
@@ -265,11 +265,12 @@ class TestTritonDotReduction(TestCase):
         f = torch.compile(f)
         code = run_and_get_triton_code(f, x, y)
 
-        FileCheck().check_not("tl.arange(0, ZBLOCK)[:, None, None, None]").check(
-            "tl.arange(0, ZBLOCK)"
-        ).check("tl.arange(0, YBLOCK)[None, :, None, None]").check(
-            "tl.arange(0, XBLOCK)[None, None, :, None]"
-        ).check("tl.arange(0, R0_BLOCK)[None, None, None, :]").run(code)
+        check = FileCheck().check_not("tl.arange(0, Z0_BLOCK)[:, None, None, None]")
+        check.check("tl.arange(0, Z0_BLOCK)").check(
+            "tl.arange(0, YBLOCK)[None, :, None, None]"
+        ).check("tl.arange(0, XBLOCK)[None, None, :, None]").check(
+            "tl.arange(0, R0_BLOCK)[None, None, None, :]"
+        ).run(code)
 
 
 @inductor_config.patch({"triton.native_matmul": True})
