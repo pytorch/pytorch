@@ -5,14 +5,18 @@ from typing import Any
 
 import torch
 from torch._export.verifier import SpecViolationError
-from torch._guards import detect_fake_mode, require_python_fake_mode
+from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import (
     get_opaque_type_name,
     is_custom_class,
     is_opaque_symbolic_type,
 )
-from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    maybe_clear_fake_constant,
+    unset_fake_temporarily,
+)
 from torch.export.exported_program import (
     ArgumentSpec,
     CustomObjArgument,
@@ -210,7 +214,7 @@ def lift_constants_pass(
     )
 
     placeholder_vals = (n.meta["val"] for n in gm.graph.nodes if n.op == "placeholder")
-    fake_mode = require_python_fake_mode(detect_fake_mode(tuple(placeholder_vals)))
+    fake_mode = detect_fake_mode(tuple(placeholder_vals))
 
     first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     used_target_names = set()
@@ -329,10 +333,18 @@ def lift_constants_pass(
                 input_spec_arg: ArgumentSpec
                 if isinstance(constant_val, torch.Tensor):
                     if fake_mode is not None:
-                        const_placeholder_node.meta["val"] = fake_mode.from_tensor(
-                            constant_val, static_shapes=True
-                        )
-                        const_placeholder_node.meta["val"].constant = constant_val
+                        if isinstance(fake_mode, CppFakeTensorMode):
+                            fake_constant = fake_mode.from_tensor(
+                                constant_val, static_shapes=True
+                            )
+                            maybe_clear_fake_constant(fake_constant)
+                            torch._C._set_fake_constant(fake_constant, constant_val)
+                            const_placeholder_node.meta["val"] = fake_constant
+                        else:
+                            const_placeholder_node.meta["val"] = fake_mode.from_tensor(
+                                constant_val, static_shapes=True
+                            )
+                            const_placeholder_node.meta["val"].constant = constant_val
                     else:
                         const_placeholder_node.meta["val"] = constant_val
                     input_spec_arg = TensorArgument(name=const_placeholder_node.name)

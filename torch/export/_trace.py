@@ -70,7 +70,6 @@ from torch._guards import (
     compile_context,
     CompileContext,
     detect_fake_mode,
-    require_python_fake_mode,
     tracing,
     TracingContext,
 )
@@ -349,7 +348,7 @@ def _extract_fake_inputs(gm, args, kwargs):
     # both. Unfortunately we can't see what fake mode is attached to the shape
     # env, then we can just compare fake modes.
     fake_inputs = fake_inps + fake_vals
-    detected_fake_mode = require_python_fake_mode(detect_fake_mode(fake_inputs))
+    detected_fake_mode = detect_fake_mode(fake_inputs)
     detected_shape_env = detect_shape_env(fake_inputs)
 
     if detected_fake_mode:
@@ -618,18 +617,14 @@ def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
             node.meta["unbacked_bindings"] = unbacked_bindings
 
 
-def _add_input_unbacked_bindings(
-    gm: torch.fx.GraphModule, shape_env: ShapeEnv | None = None
-) -> None:
+def _add_input_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
     from torch._export.utils import _get_shape_env_from_gm
     from torch.fx.experimental.symbolic_shapes import (
         _free_unbacked_symbols_with_path,
         free_unbacked_symbols,
     )
 
-    if shape_env is None:
-        shape_env = _get_shape_env_from_gm(gm)
-    if shape_env is None:
+    if (shape_env := _get_shape_env_from_gm(gm)) is None:
         return
 
     for node in gm.graph.find_nodes(op="placeholder"):

@@ -353,6 +353,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
 ):
     from torch._export.passes.lift_constants_pass import _materialize_and_lift_constants
     from torch._functorch.aot_autograd import aot_export_module
+    from torch._guards import require_python_fake_mode
     from torch.export._trace import (
         _disable_custom_triton_op_functional_decomposition,
         _export_to_aten_ir,
@@ -401,7 +402,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         }
 
         # TODO T204030333
-        fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
+        fake_mode = require_python_fake_mode(_detect_fake_mode_from_gm(ep.graph_module))
         if fake_mode is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 

@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: export"]
+import copy
 import unittest
 import warnings
 from collections import OrderedDict
@@ -20,7 +21,9 @@ from torch.export.exported_program import (
 )
 from torch.export.graph_signature import CustomObjArgument
 from torch.testing._internal.common_utils import (
+    fake_tensor_modes,
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_MACOS,
     run_tests,
     TestCase,
@@ -146,12 +149,60 @@ class GraphBuilder:
 
 
 @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
+@instantiate_parametrized_tests
 class TestLift(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
         load_torchbind_test_lib()
+
+    @fake_tensor_modes
+    def test_lift_fake_constant(self, mode_cls):
+        from torch._subclasses.fake_tensor import (
+            maybe_get_fake_constant,
+            maybe_get_fake_mode,
+        )
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        mode = mode_cls(shape_env=ShapeEnv())
+        real = torch.randn(2, 3)
+        constant = torch.randn(2, 3)
+        builder = GraphBuilder()
+        builder.input("x", mode.from_tensor(real), InputKind.USER_INPUT)
+        builder.constant("constant", mode.from_tensor(constant))
+        builder.add("x", "constant", "out")
+        builder.output("out")
+        for _ in range(2):
+            gm = torch.fx.GraphModule(
+                {"constant": constant}, copy.deepcopy(builder.graph)
+            )
+            signature = builder.gen_graph_signature()
+            constants = lift_constants_pass(gm, signature, {})
+            gm.graph.lint()
+            lifted, original = gm.graph.find_nodes(op="placeholder")
+            self.assertIs(maybe_get_fake_mode(lifted.meta["val"]), mode)
+            self.assertIs(maybe_get_fake_constant(lifted.meta["val"]), constant)
+            self.assertIs(original.meta["val"], builder.values["x"])
+            self.assertEqual(lifted.meta["val"].shape, constant.shape)
+            self.assertIs(constants[signature.input_specs[0].target], constant)
+            self.assertEqual(signature.input_specs[0].kind, InputKind.CONSTANT_TENSOR)
+
+    def test_lift_python_wrapper_constant(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_mode
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        mode = FakeTensorMode()
+        constant = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        builder = GraphBuilder()
+        builder.input("x", mode.from_tensor(torch.randn(2, 3)), InputKind.USER_INPUT)
+        builder.constant("constant", mode.from_tensor(constant))
+        builder.output("constant")
+        gm = torch.fx.GraphModule({"constant": constant}, builder.graph)
+        lift_constants_pass(gm, builder.gen_graph_signature(), {})
+        lifted = next(iter(gm.graph.nodes)).meta["val"]
+        self.assertIs(maybe_get_fake_mode(lifted), mode)
+        self.assertIs(lifted.constant, constant)
 
     def test_lift_basic(self):
         builder = GraphBuilder()
