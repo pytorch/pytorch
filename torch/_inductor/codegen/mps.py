@@ -355,7 +355,7 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def abs(x: CSEVariable) -> str:
-        return f"metal::abs({x})"
+        return MetalOverrides._wrap_small_int(f"metal::abs({x})", x)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -410,12 +410,15 @@ class MetalOverrides(OpOverrides):
     def neg(x: CSEVariable) -> str:
         # TODO: Does it rely on undefined behavior?
         # If so, add special logic for unsigned types
-        return f"static_cast<decltype({x})>(-{x})"
+        return MetalOverrides._wrap_small_int(f"static_cast<decltype({x})>(-{x})", x)
 
     @staticmethod
     def _wrap_small_int(expr: str, *args: OpVarT) -> str:
         # Metal promotes char, uchar and short operands to int, so cast the
-        # result back to wrap like eager does
+        # result back to wrap like eager does. The operand can already be an int
+        # temporary, for example from where, maximum or minimum, so this is
+        # needed for neg and abs as well. uint16 is left out because eager MPS
+        # has no uint16 add or mul to compare the compiled result against.
         dtypes = [a.dtype for a in args if isinstance(a, CSEVariable)]
         if not dtypes or None in dtypes:
             return expr
