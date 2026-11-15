@@ -621,7 +621,7 @@ class TritonTemplateKernel(TritonKernel):
                     f"TMA template output rank must be in {supported_ranks}, "
                     f"got {output_rank}"
                 )
-            prefixes = ("x", "y", "z")
+            prefixes = ("x", "y", "z0_")
             tiling = dict(zip(prefixes, output_node.get_size()))
             tiling["r0_"] = sympy.S.One
         else:
@@ -636,7 +636,7 @@ class TritonTemplateKernel(TritonKernel):
         )
         if tma_tiled:
             # By default `construct_range_trees` will return the range_trees in the order
-            # ["z", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
+            # ["z0_", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
             # and this order defines what the kernel block shape will be. So if the template
             # input / output has requested e.g. ["x", "y"], `construct_range_trees` will still return the
             # trees in the order ["y", "x"]. This would mean that the template would need to transpose
