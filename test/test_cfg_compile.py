@@ -3884,6 +3884,18 @@ class RegionStarts(torch.nn.Module):
         return self.net(x), RegionState()
 
 
+class RegionMasked(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(6, 6)
+        self.mask = torch.empty(0)
+
+    def forward(self, x):
+        # Built on every call, and kept.
+        self.mask = torch.tril(torch.ones(x.shape[0], x.shape[0]))
+        return self.linear(self.mask @ x).tanh()
+
+
 def region_note(log, x, out):
     log.append(out.shape[0])
     x.add_(1)
@@ -4730,6 +4742,22 @@ class TestCfgRegions(TestCase):
         self.assertEqual(len({id(state.steps) for state in states}), 8)
         (region,) = self.compiled_regions(compiled)
         self.assertTrue(region["where"].startswith("region_infer"))
+
+    def test_module_keeps_a_tensor_it_computes(self):
+        torch.manual_seed(0)
+        model, reference = RegionMasked().eval(), RegionMasked().eval()
+        reference.load_state_dict(model.state_dict())
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for n in (4, 4, 4, 4, 4, 5, 6, 3, 4):
+                x = torch.randn(n, 6)
+                self.assertEqual(compiled(model, x), reference(x), atol=0, rtol=0)
+                # What the graph computed for the attribute is stored in it.
+                self.assertIs(type(model.mask), torch.Tensor)
+                self.assertEqual(model.mask, reference.mask, atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_infer"))
+        self.assertEqual(self.left_to_vm(compiled, "RegionMasked"), [])
 
     def test_path_ends_before_a_call_that_fails_part_way(self):
         torch.manual_seed(0)
