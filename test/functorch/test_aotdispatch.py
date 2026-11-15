@@ -6561,12 +6561,18 @@ class <lambda>(torch.nn.Module):
 
         mod = TestMod(fn)
         inp = torch.randn(2, 4)
-        with self.assertRaisesRegex(
-            RuntimeError, "Found an input that received a metadata mutation"
-        ):
-            aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False)
-            aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
-            aot_export_module(mod, [inp], trace_joint=False)
+        export_calls = (
+            lambda: aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False),
+            lambda: aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True),
+            lambda: aot_export_module(mod, [inp], trace_joint=False),
+        )
+        for export_call in export_calls:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"(?s)Found an input that received a metadata mutation.*by flat input index\): \[1\]",
+            ) as cm:
+                export_call()
+            self.assertNotIn("ViewAndMutationMeta", str(cm.exception))
 
     def test_aot_export_forward_mutation_no_buffer_mut(self):
         class M(torch.nn.Module):
@@ -6658,11 +6664,22 @@ graph():
             "aot_export_joint_simple does not support input mutations. ViewAndMutationMeta",
         ):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Found a graph input that requires gradients, and received a mutation",
-        ):
-            aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
+        with patch("torch._functorch.aot_autograd.trace_structured") as trace_mock:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"(?s)Found a graph input that requires gradients, and received a mutation"
+                r".*by flat input index\): \[0\]",
+            ) as cm:
+                aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
+        self.assertNotIn("ViewAndMutationMeta", str(cm.exception))
+        self.assertIn("TORCH_TRACE", str(cm.exception))
+        (call,) = trace_mock.call_args_list
+        self.assertEqual(call.args, ("artifact",))
+        self.assertEqual(
+            call.kwargs["metadata_fn"]()["name"],
+            "aot_export_requires_grad_mutation_fw_metadata",
+        )
+        self.assertIn("ViewAndMutationMeta", call.kwargs["payload_fn"]())
 
         gm, _ = aot_export_module(mod, [inp], trace_joint=False)
         self.assertExpectedInline(
