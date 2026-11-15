@@ -517,6 +517,23 @@ def _is_control_deps_ordering_only_use(
     return view in additional_deps and view not in pass_through
 
 
+def _is_auto_functionalized_v2_updated_base(
+    src: torch.fx.Node, dst: torch.fx.Node
+) -> bool:
+    """src is the getitem of an auto_functionalized_v2 that returns the updated base dst.
+
+    The node returns the op's own outputs followed by one tensor per entry of _all_bases.
+    """
+    if src.target is not operator.getitem:
+        return False
+    hop, index = cast(tuple[torch.fx.Node, int], src.args)
+    if hop.target is not torch.ops.higher_order.auto_functionalized_v2:
+        return False
+    all_bases = cast(list[torch.fx.Node], hop.kwargs["_all_bases"])
+    base_index = index - (len(hop.meta["val"]) - len(all_bases))
+    return 0 <= base_index < len(all_bases) and all_bases[base_index] is dst
+
+
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
@@ -563,6 +580,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 )
                 or (src.args[0].target in inplaceable_foreach_ops)
                 or (src.args[0].target is torch.ops.higher_order.auto_functionalized)
+                or _is_auto_functionalized_v2_updated_base(src, dst)
             ):
                 src = src.args[0]
 
