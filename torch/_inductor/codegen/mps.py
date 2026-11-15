@@ -35,7 +35,7 @@ from .common import (
     OpOverrides,
     PythonPrinter,
 )
-from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
+from .simd import IterationRangesEntry, IterationRangesRoot, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
@@ -663,7 +663,7 @@ class MetalKernel(SIMDKernel):
     cexpr = CppPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
-    headers: OrderedSet[str] = OrderedSet(["utils"])
+    headers: OrderedSet[str]
     multistage_reduction_entry: list[IterationRangesEntry] = []
 
     def __init__(
@@ -672,6 +672,7 @@ class MetalKernel(SIMDKernel):
         **kwargs: Any,
     ) -> None:
         super().__init__(tiling, **kwargs)
+        self.headers = OrderedSet(["utils"])
         self.acc_var_ids = itertools.count()
         # Reductions shorter than a simdgroup run serially, in one thread per output
         rnumel = self.features.reduction_numel
@@ -687,7 +688,7 @@ class MetalKernel(SIMDKernel):
             if outer in self.removed_buffers:
                 continue
             dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
-            rc.append(_TensorArg(outer, inner, f"device {dtype_str}*", False))
+            rc.append(_TensorArg(outer, str(inner), f"device {dtype_str}*", False))
         for outer, inner in self.args.input_buffers.items():
             if outer in self.removed_buffers:
                 continue
@@ -706,7 +707,7 @@ class MetalKernel(SIMDKernel):
             rc.append(_TensorArg(outer, inner, f"constant {dtype_str}*", on_cpu))
         return rc
 
-    def _dynamic_numel_trees(self) -> list[IterationRangesEntry]:
+    def _dynamic_numel_trees(self) -> list[IterationRangesRoot]:
         return [
             t
             for t in self.active_range_trees()
@@ -719,7 +720,9 @@ class MetalKernel(SIMDKernel):
         tensors in one argument buffer and all their ints in one array.
         """
         n_args = num_tensor_args + len(self.args.sizevars)
-        n_args += len(self._dynamic_numel_trees()) + ("error" in self.headers)
+        n_args += len(self._dynamic_numel_trees())
+        # The C++ wrapper does not pass an error buffer, matching can_fuse
+        n_args += "error" in self.headers and not V.graph.cpp_wrapper
         if n_args <= self.max_buffer_args:
             return False
         if V.graph.cpp_wrapper:
@@ -1279,7 +1282,7 @@ class MetalKernel(SIMDKernel):
         tensor_args = self._tensor_args()
         args = [arg.outer for arg in tensor_args]
         args += [str(v) for v in self.args.sizevars]
-        arg_types = [arg_name_to_type[arg] for arg in args]
+        arg_types: list[Any] = [arg_name_to_type[arg] for arg in args]
 
         # Add any dynamic ints as inputs
         for tree in self._dynamic_numel_trees():
