@@ -485,7 +485,8 @@ enable_complex_wrapper: bool = False
 # the shared recompute runs as its own subgraph, so the forward also writes out
 # values only the backward reads, and neither graph can fuse across it.
 # Recompute it can't share is left as partitioned (TORCH_LOGS=aot says why).
-# Not applied with enable_complex_wrapper or compiled autograd.
+# Not applied with enable_complex_wrapper or compiled autograd; rejected under
+# non-strict train-step tracing.
 deterministic_recompute: bool = False
 
 
