@@ -3820,6 +3820,8 @@ class DeterministicRecomputeHelperTests(torch._dynamo.test_case.TestCase):
     """The helpers of torch._functorch._aot_autograd.deterministic_recompute, on
     their own."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def _partitioned(self, fn, *args):
         """The forward and backward graphs the partitioner makes for fn, and the
         values the forward saves for the backward."""
