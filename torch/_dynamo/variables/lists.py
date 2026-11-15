@@ -3525,7 +3525,7 @@ class ByteArrayIteratorVariable(IteratorVariable):
     ) -> VariableTracker:
         if self.is_exhausted:
             return VariableTracker.build(tx, (iter, ((),)))
-        # Keep the live parent rather than copying it into the reduction.
+        # Preserve the parent reference so restored iterators see later mutations.
         return TupleVariable(
             [
                 VariableTracker.build(tx, iter),

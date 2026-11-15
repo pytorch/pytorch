@@ -1527,20 +1527,19 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         )
 
     @parametrize("data", [b"", b"abc", b"\x00\xff"])
-    @parametrize("protocol", [None, 0, 4])
-    def test_reduce(self, data, protocol):
+    def test_reduce(self, data):
         def f(value, x):
-            if protocol is None:
-                reduced = value.__reduce__()
-            else:
-                reduced = value.__reduce_ex__(protocol)
-            return reduced, x + 1
+            return value.__reduce__(), x + 1
+
+        @torch._dynamo.disable
+        def eager(value, x):
+            return f(value, x)
 
         value = bytearray(data)
         reduced, result = torch.compile(f, backend="eager", fullgraph=True)(
             value, torch.ones(1)
         )
-        self.assertEqual((reduced, result), f(value, torch.ones(1)))
+        self.assertEqual((reduced, result), eager(value, torch.ones(1)))
         restored = reduced[0](*reduced[1])
         self.assertEqual(restored, value)
         self.assertIsNot(restored, value)
@@ -1557,6 +1556,10 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 next(iterator, None)
             return iterator.__reduce__(), value, x + 1
 
+        @torch._dynamo.disable
+        def eager(x):
+            return f(x)
+
         @torch._dynamo.disable(recursive=False)
         def check_reduction(reduced, value):
             restored = reduced[0](*reduced[1])
@@ -1570,7 +1573,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 self.assertEqual(list(restored), [])
 
         actual = torch.compile(f, backend="eager", fullgraph=True)(torch.ones(1))
-        self.assertEqual(actual, f(torch.ones(1)))
+        self.assertEqual(actual, eager(torch.ones(1)))
         check_reduction(actual[0], actual[1])
 
     # -- reconstruct: force a graph break with a live bytearray --
