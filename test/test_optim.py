@@ -2976,6 +2976,34 @@ class TestOptimRenewed(TestCase):
             expected,
         )
 
+    def test_muon_empty_params(self):
+        # Empty (0-numel) 2D params must not raise in step(): _adjust_lr
+        # divides by the last dimension for the default/"original" and
+        # "spectral_unclamped" adjustments, which is 0 for these shapes.
+        for adjust_lr_fn in (
+            None,
+            "original",
+            "spectral_unclamped",
+            "match_rms_adamw",
+        ):
+            for shape in ((3, 0), (0, 0)):
+                param = Parameter(torch.empty(shape))
+                param.grad = torch.empty(shape)
+                optimizer = torch.optim.Muon([param], adjust_lr_fn=adjust_lr_fn)
+                optimizer.step()
+
+        # An empty param sharing a group with a non-empty one is skipped,
+        # and the non-empty param still updates.
+        empty = Parameter(torch.empty(3, 0))
+        empty.grad = torch.empty(3, 0)
+        full = Parameter(torch.ones(2, 2))
+        full.grad = torch.ones(2, 2)
+        optimizer = torch.optim.Muon([empty, full], lr=0.1)
+        before = full.detach().clone()
+        optimizer.step()
+        self.assertEqual(empty.shape, torch.Size([3, 0]))
+        self.assertFalse(torch.equal(full, before))
+
 
 class TestOptimizerLoadStateDictContext(TestCase):
     hw_classification = HardwareClassification.GENERIC
