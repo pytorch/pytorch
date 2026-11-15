@@ -3,11 +3,24 @@
 The partitioner recomputes a checkpointed region by copying its forward ops
 into the backward graph. The forward and backward are compiled separately, so
 the two copies can lower to different kernels and the recompute can drift
-numerically from the forward (gh-186572). The helpers here find that
-recompute and outline it into a subgraph both graphs invoke.
+numerically from the forward (gh-186572). With
+torch._functorch.config.deterministic_recompute, each checkpointed region's
+recompute is outlined into a subgraph that both graphs invoke, so both run the
+same computation.
+
+The pass runs after partitioning because that is the first point where the
+recomputed ops are known: a selective-checkpointing policy is evaluated per aten
+op while AOT autograd traces the joint graph, and the partitioner then makes the
+final save/recompute choices (saving region boundaries, skipping ops the backward
+never reads, overriding PREFER_* preferences). Outlining regions before AOT
+tracing would give explicit boundaries, but would have to know those choices in
+advance, and would make each region a HOP in the traced program (its outputs may
+not alias its inputs, re-invoking it re-draws RNG, and backends without AOT
+autograd get no recompute).
 """
 
 import copy
+import functools
 import logging
 import operator
 from collections import defaultdict
@@ -16,11 +29,74 @@ from typing import Any
 import sympy
 
 import torch
+from torch._functorch import config
 from torch._inductor.fx_utils import get_mutated_input_nodes, get_node_storage
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 
 
 log = logging.getLogger(__name__)
+
+
+def deterministic_recompute(
+    fw_module: torch.fx.GraphModule,
+    bw_module: torch.fx.GraphModule,
+    num_fwd_outputs: int,
+) -> None:
+    """Rewrite the partitioned fw_module and bw_module in place so each piece of
+    the backward's recompute runs as a shared subgraph."""
+    # Both trace the graphs again and can't trace the shared calls (compiled
+    # autograd would graph-break on each backward call).
+    if config.enable_complex_wrapper or torch._dynamo.config.compiled_autograd:
+        msg = "not applied under enable_complex_wrapper or compiled_autograd"
+        torch._logging.warning_once(log, "deterministic_recompute: %s", msg)
+        return
+    # Nodes in a user memory pool (torch.cuda.use_mem_pool) carry it in their
+    # metadata, which a call replacing them wouldn't, and the call could land
+    # after the pool's end marker: their allocations would leave the pool (and
+    # Inductor would CUDA-graph the parent). (A nested_compile_region body
+    # called in a pool has only the metadata.)
+    pool_markers = ("mempool::begin", "mempool::end")
+    for gm in (fw_module, bw_module):
+        for n in gm.graph.nodes:
+            op = n.target
+            marker = isinstance(op, torch._ops.OpOverload) and op.name() in pool_markers
+            if marker or "mempool" in n.meta.get("custom", {}):
+                log.info("deterministic_recompute: %s is in a memory pool", n.name)
+                return
+    # Only the storage they write orders in-place writes (e.g. an input
+    # mutation's copy_) against other nodes, which outlining could reorder; a
+    # graph with any is left as partitioned for now.
+    for gm in (fw_module, bw_module):
+        if writer := next((n for n in gm.graph.nodes if _writes(n)), None):
+            log.info("deterministic_recompute: %s writes in place", writer.name)
+            return
+    fw_outs = fw_module.graph.find_nodes(op="output")[0].args[0]
+    saved = {n for n in fw_outs[num_fwd_outputs:] if isinstance(n, torch.fx.Node)}
+    _, regions = _recomputed_copies(fw_module, bw_module, saved)
+
+    # A region's recompute is one piece. If a path leaves it and comes back
+    # (e.g. through a value a selective policy saves), no single call can replace
+    # it, and it is left as partitioned (see _readers_to_move).
+    pieces = list(regions.values())
+
+    changed = False
+    # The backward node holding each value a shared piece returns, so later
+    # pieces can read it.
+    bw_of: dict[torch.fx.Node, torch.fx.Node] = {}
+    # Name pieces by their order in this graph, not by ac_graph_id: that is a
+    # process-global counter, so recompiling the same graph would get new names
+    # and miss the FX graph cache.
+    for i, piece in enumerate(pieces):
+        identifier = f"recompute_{i}"
+        outputs = _share_region(fw_module, bw_module, piece, saved, bw_of, identifier)
+        if outputs is not None:
+            bw_of.update(outputs)
+            changed = True
+    if changed:
+        for gm in (fw_module, bw_module):
+            gm.graph.eliminate_dead_code()
+            gm.graph.lint()
+            gm.recompile()
 
 
 def _recomputed_copies(
@@ -81,6 +157,16 @@ def _recomputed_copies(
     return copies, regions
 
 
+@functools.cache
+def _waits() -> tuple[Any, ...]:
+    if not torch.distributed.is_available():
+        return ()
+    return (
+        torch.ops._c10d_functional.wait_tensor.default,
+        torch.ops._c10d_functional.wait_tensors.default,
+    )
+
+
 # Ops that end the use of their tensors' storage without a write in their
 # schema: resize_storage_bytes_ frees it, a sync_dealloc must stay its tensor's
 # last use, and activation offloading's wait frees its keepalive.
@@ -118,6 +204,157 @@ def _is_rng(n: torch.fx.Node) -> bool:
         run_dtensor_rng_op,
     )
     return is_rng_op(n) or n.target in rng_hops
+
+
+def _share_region(
+    fw_module: torch.fx.GraphModule,
+    bw_module: torch.fx.GraphModule,
+    s_nodes: list[torch.fx.Node],
+    saved: set[torch.fx.Node],
+    bw_of: dict[torch.fx.Node, torch.fx.Node],
+    identifier: str,
+) -> dict[torch.fx.Node, torch.fx.Node] | None:
+    """Outline one piece of recomputed forward nodes ``s_nodes`` (in topological
+    order) into a subgraph invoked from both graphs, and return each forward
+    output's backward counterpart. If the piece can't be expressed as a shared
+    subgraph, logs why and returns None, leaving both graphs untouched."""
+
+    def _skip(reason: str) -> None:
+        log.info(
+            "deterministic_recompute: %s left as partitioned: %s", identifier, reason
+        )
+
+    fw_graph = fw_module.graph
+    bw_graph = bw_module.graph
+    bw_by_name = {n.name: n for n in bw_graph.nodes}
+    node_index = {n: i for i, n in enumerate(fw_graph.nodes)}
+
+    s_set = set(s_nodes)
+
+    # A recompute that re-draws RNG can't share the forward's draw.
+    for n in s_nodes:
+        if _is_rng(n):
+            return _skip(f"its recompute contains RNG ({n.name})")
+
+    # Slice inputs: values the slice reads from outside it, in first-seen order
+    # for a stable signature.
+    s_inputs: list[torch.fx.Node] = []
+    seen: set[torch.fx.Node] = set()
+    for n in s_nodes:
+        for inp in n.all_input_nodes:
+            if inp not in s_set and inp not in seen:
+                seen.add(inp)
+                s_inputs.append(inp)
+
+    # Left as partitioned for now: a multi-output op; a scalar (e.g. a SymInt
+    # size) or a graph attribute (e.g. a tensor constant), which can't be an
+    # operand; and an unbacked symbol (e.g. from .item() or nonzero), which
+    # Inductor can't bind coming out of a subgraph, nor in general passed in.
+    for n in (*s_inputs, *s_nodes):
+        val = n.meta.get("val")
+        if isinstance(val, (tuple, list)):
+            return _skip(f"{n.name} is a multi-output op")
+        if n.op == "get_attr" or not isinstance(val, torch.Tensor):
+            return _skip(f"{n.name} is a scalar or a graph attribute")
+        if free_unbacked_symbols(val):
+            return _skip(f"{n.name} carries an unbacked symbol")
+    if unbound := _unbound_symbols(s_inputs, s_nodes):
+        names = ", ".join(sorted(map(str, unbound)))
+        return _skip(f"no input binds the symbols its sizes use ({names})")
+
+    # Inductor treats invoke_subgraph outputs as fresh buffers and may reuse one
+    # in place, so the slice must not return a view of one of its inputs (e.g.
+    # w.t() of a weight, which would be overwritten with a gradient) or of
+    # another of its outputs. Views aren't handled yet: a piece with one is left
+    # as partitioned.
+    seen_storages = {get_node_storage(n) for n in s_inputs} - {None}
+    for n in s_nodes:
+        storage = get_node_storage(n)
+        # (A collective's wait has no kernel: Inductor lowers it to return its
+        # input's buffer, although wait_tensor's fake output has fresh storage.)
+        if storage in seen_storages or n.target in _waits():
+            return _skip(f"{n.name} aliases a value")
+        if storage is not None:
+            seen_storages.add(storage)
+    contracted_names = {n.name for n in s_nodes}
+
+    # The backward must supply every input: primals and saved values (its
+    # placeholders), or outputs of pieces shared earlier.
+    bw_operands: list[torch.fx.Node] = []
+    for inp in s_inputs:
+        if inp in bw_of:
+            m = bw_of[inp]
+        elif inp.op == "placeholder" or inp in saved:
+            m = bw_by_name.get(inp.name)
+            m = m if m is not None and m.op == "placeholder" else None
+        else:
+            m = None
+        if m is None:
+            return _skip(f"its input {inp.name} isn't available in the backward")
+        bw_operands.append(m)
+
+    # Return only values read outside the slice, in either graph.
+    def _used_outside(n: torch.fx.Node) -> bool:
+        users = (*n.users, *bw_by_name[n.name].users)
+        return any(u.name not in contracted_names for u in users)
+
+    s_out_nodes = [n for n in s_nodes if _used_outside(n)]
+
+    # Each call goes right before the first node that reads the piece (see
+    # _place). The forward otherwise falls back to right after the last slice
+    # input; a piece that reads none (e.g. a factory op and what is computed
+    # from it) is left as partitioned for now.
+    if not s_inputs:
+        return _skip("it reads no tensor input")
+    last_input = max(s_inputs, key=node_index.__getitem__)
+    insert_after, fw_moved, reason = _place(s_set, s_inputs, last_input, node_index)
+    if reason is not None:
+        return _skip(reason)
+
+    # The backward falls back to where the partitioner placed the piece's
+    # recompute, but not before its operands.
+    bw_index = {n: i for i, n in enumerate(bw_graph.nodes)}
+    first_recompute = next(n for n in bw_graph.nodes if n.name in contracted_names)
+    last_operand = max([first_recompute.prev, *bw_operands], key=lambda n: bw_index[n])
+    bw_replaced_nodes = {bw_by_name[name] for name in contracted_names}
+    bw_insert_after, bw_moved, reason = _place(
+        bw_replaced_nodes, bw_operands, last_operand, bw_index
+    )
+    if reason is not None:
+        return _skip(reason)
+
+    # Inductor rewrites a graph's subgraph modules in place while compiling it,
+    # so each graph gets its own (identical) copy rather than one shared object.
+    fw_slice_gm = _slice_module(fw_module, s_inputs, s_nodes, s_out_nodes)
+    bw_slice_gm = _slice_module(fw_module, s_inputs, s_nodes, s_out_nodes)
+    slice_out_vals = [n.meta.get("val") for n in s_out_nodes]
+    slice_index = {n.name: i for i, n in enumerate(s_out_nodes)}
+
+    fw_outs = _splice_slice_call(
+        fw_module,
+        fw_slice_gm,
+        f"{identifier}_fw",
+        slice_out_vals,
+        operands=s_inputs,
+        replace={n.name: n for n in s_out_nodes},
+        slice_index=slice_index,
+        erase_names=contracted_names,
+        insert_after=insert_after,
+        move_below=fw_moved,
+    )
+    bw_outs = _splice_slice_call(
+        bw_module,
+        bw_slice_gm,
+        f"{identifier}_bw",
+        slice_out_vals,
+        operands=bw_operands,
+        replace={n.name: bw_by_name[n.name] for n in s_out_nodes},
+        slice_index=slice_index,
+        erase_names=contracted_names,
+        insert_after=bw_insert_after,
+        move_below=bw_moved,
+    )
+    return {fw_outs[n.name]: bw_outs[n.name] for n in s_out_nodes}
 
 
 def _unbound_symbols(
