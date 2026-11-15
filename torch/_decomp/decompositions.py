@@ -5809,6 +5809,7 @@ def multi_margin_loss(
     weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
+    orig_target_shape = target.shape
     input = torch.atleast_2d(input)
     target = torch.atleast_1d(target)
     nframe = input.shape[0]
@@ -5845,7 +5846,9 @@ def multi_margin_loss(
     elif reduction == Reduction.SUM.value:
         return z.sum() / z.shape[1]
     else:
-        return z.mean(dim=1)
+        # Like eager, an unreduced loss has the target's shape, so a 0-d
+        # target gives a 0-d loss.
+        return z.mean(dim=1).reshape(orig_target_shape)
 
 
 @register_decomposition(aten.multilabel_margin_loss_forward)
