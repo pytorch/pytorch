@@ -4355,18 +4355,7 @@ def run_fallback_kernel(
 
         def to_real_tensor(e: T) -> T | Tensor:
             if isinstance(e, Tensor) and fake_mode.is_our_fake(e):
-                if isinstance(fake_mode, CppFakeTensorMode) and e.is_mkldnn:
-                    # Native composites can select MKLDNN-specific operators.
-                    # Their real dummy inputs need that layout; zeros_like
-                    # passes a memory_format that MKLDNN factories reject.
-                    out = torch.zeros(
-                        e.shape,
-                        dtype=e.dtype,
-                        layout=e.layout,
-                        device=maybe_get_fake_device(e),
-                    )
-                else:
-                    out = torch.zeros_like(e, device=maybe_get_fake_device(e))
+                out = torch.zeros_like(e, device=maybe_get_fake_device(e))
                 if e.is_sparse:
                     out._coalesced_(e.is_coalesced())
                 inp_impls[id(out)] = e
@@ -4382,7 +4371,7 @@ def run_fallback_kernel(
 
     for e in flat_args:
         if isinstance(e, Tensor):
-            if not is_sparse_any(e) and not e.is_mkldnn:
+            if not is_sparse_any(e):
                 storages.add(e._typed_storage()._cdata)
 
     # TODO: also check metadata change on inputs
@@ -4394,7 +4383,6 @@ def run_fallback_kernel(
         if id(e) not in inp_impls and (
             isinstance(e, Tensor)
             and not is_sparse_any(e)
-            and not e.is_mkldnn
             and e._typed_storage()._cdata in storages
         ):
             raise orig_not_implemented_exception
