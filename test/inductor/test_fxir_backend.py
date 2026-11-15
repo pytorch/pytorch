@@ -907,6 +907,51 @@ class FxirTestCase(InductorTestCase):
         args = [torch.randn(32, device=self.device) for _ in range(2)]
         self._compile_and_check(add, args)
 
+    @parametrize("constexpr_first", (False, True))
+    def test_custom_triton_constexpr_launch_grid(self, constexpr_first: bool):
+        """
+        Test a user kernel whose constexpr arg is smaller than its grid.
+        The launcher omits constexprs, so they must not displace the other
+        args or the grid read from the end of the args.
+        """
+
+        @triton.jit
+        def add_kernel_constexpr_last(
+            in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        @triton.jit
+        def add_kernel_constexpr_first(
+            BLOCK_SIZE: tl.constexpr, in_ptr0, in_ptr1, out_ptr, n_elements
+        ):
+            offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = (triton.cdiv(n_elements, 4),)
+            if constexpr_first:
+                add_kernel_constexpr_first[grid](4, x, y, output, n_elements)
+            else:
+                add_kernel_constexpr_last[grid](x, y, output, n_elements, BLOCK_SIZE=4)
+            return output
+
+        args = [torch.randn(32, device=self.device) for _ in range(2)]
+        (gm,) = self._compile_and_check(add, args)
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+        self.assertEqual(triton_node.kwargs["grid"], [(8, 1, 1)])
+
     def test_output_slice_view(self):
         """
         Test when the output is a view of the input.

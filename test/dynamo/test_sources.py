@@ -17,6 +17,7 @@ from torch._dynamo.source import (
     TypeDictSource,
 )
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class CausalLMOutputWithPast:
@@ -24,6 +25,8 @@ class CausalLMOutputWithPast:
 
 
 class SourceTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_constant_source_property_setter_falls_back(self):
         class Box:
             def __init__(self):
