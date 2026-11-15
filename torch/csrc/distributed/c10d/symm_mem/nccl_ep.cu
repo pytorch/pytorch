@@ -100,9 +100,13 @@ class NcclEpOperation {
         TORCH_CHECK_VALUE(
             tensor.is_cuda() && tensor.get_device() == state_.stream.device_index(),
             "NCCL EP tensors must be on the group's CUDA device");
+        // Keep async tensors alive in the Work until wait_tensor joins the
+        // caller stream, instead of recordStream: recorded blocks cannot be
+        // reused until a CUDA graph capture ends. As with ProcessGroupNCCL's
+        // TORCH_NCCL_AVOID_RECORD_STREAMS, a tensor last used here must not be
+        // freed on a stream that has not waited on this op, or its block can
+        // be reused before the group stream finishes reading it.
         if (async_op_) {
-            c10::cuda::CUDACachingAllocator::recordStream(
-                tensor.storage().data_ptr(), state_.stream);
             tensors_.push_back(tensor);
         }
     }
