@@ -1266,15 +1266,6 @@ static PyObject* assert_alignment(
     return nullptr;
   }
 
-  if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-    std::ostringstream msg;
-    msg << "expected Tensor()";
-    if (op_name) {
-      msg << " for op: " << op_name;
-    }
-    PyErr_SetString(PyExc_TypeError, std::move(msg).str().c_str());
-    return nullptr;
-  }
   if (alignment == 0) {
     std::ostringstream msg;
     msg << "alignment cannot be 0";
@@ -1282,6 +1273,20 @@ static PyObject* assert_alignment(
       msg << " in op: " << op_name;
     }
     PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
+    return nullptr;
+  }
+
+  if (item == Py_None) {
+    Py_RETURN_TRUE;
+  }
+
+  if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
+    std::ostringstream msg;
+    msg << "expected Tensor()";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, std::move(msg).str().c_str());
     return nullptr;
   }
 
