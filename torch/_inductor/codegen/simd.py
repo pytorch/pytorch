@@ -1197,8 +1197,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # kernel inputs and outputs are not set yet, we'd need a deeper refactor
         # to do it this way
 
-        if len(index.atoms(sympy.ceiling)):
-            for a in index.atoms(sympy.ceiling):
+        if len(index.atoms(sympy.ceiling, FloorDiv)):
+            for a in index.atoms(sympy.ceiling, FloorDiv):
                 # for nested exprs, atoms yields top level first (?)
                 # so if everything goes fine, lower level replacements will come up empty
                 symbols = a.free_symbols
