@@ -7399,6 +7399,7 @@ class TestNNDeviceType(NNTestCase):
         out_cpu.backward(grad.cpu())
         self.assertEqual(x.grad, ref_x.grad)
 
+    @skipIfTorchDynamo("compiled F.pad converts the fill to double")
     def test_pad_int64_fill_value_is_exact(self, device):
         # https://github.com/pytorch/pytorch/issues/170798
         x = torch.zeros(1, dtype=torch.int64, device=device)
@@ -7415,13 +7416,14 @@ class TestNNDeviceType(NNTestCase):
             F.pad(x, (0, 2), value=2**63)
 
     @unittest.skipUnless(TEST_NUMPY, "requires numpy")
+    @skipIfTorchDynamo("compiled F.pad converts the fill to double")
     def test_pad_numpy_int_fill_value_is_exact(self, device):
         x = torch.zeros(1, dtype=torch.int64, device=device)
         v = 2**53 + 1
         expected = torch.tensor([0, v, v], dtype=torch.int64, device=device)
         self.assertEqual(F.pad(x, (0, 2), value=np.int64(v)), expected)
 
-    @skipMPS  # MPS does not support uint64
+    @skipIfTorchDynamo("compiled F.pad converts the fill to double")
     def test_pad_uint64_fill_value_is_exact(self, device):
         x = torch.zeros(1, dtype=torch.uint64, device=device)
         v = 2**64 - 1
@@ -7431,6 +7433,8 @@ class TestNNDeviceType(NNTestCase):
             F.pad(x, (0, 2), value=-(2**53 + 1))
 
     def test_pad_int_fill_value_other_dtypes(self, device):
+        # None of these inputs reach the exact int path in F.pad: they guard
+        # its dtype and range filters, so the old behavior must be unchanged.
         for x, value, expected in (
             ([5], 3, [3, 5, 3]),
             ([False], True, [True, False, True]),

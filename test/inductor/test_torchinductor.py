@@ -19983,17 +19983,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 if len(inps) != 0:
                     raise AssertionError(f"Expected len(inps) == 0, got {len(inps)}")
 
-    @skip_if_halide
     def test_pad_int_fill_value_dynamic(self):
+        # Compiled F.pad does not take the exact int path that eager uses for
+        # fills above 2**53: Inductor cannot lower a symbolic fill, so the fill
+        # goes through a double.
         def fn(x, value):
             return torch.nn.functional.pad(x, (1, 1), value=value)
 
         x = torch.zeros(3, dtype=torch.int64, device=self.device)
         opt = torch.compile(fn, dynamic=True)
         for value in (5, 2**53 + 1):
-            res = opt(x, value)
-            if value == 5:
-                self.assertEqual(res, fn(x, value))
+            expected = torch._C._nn.pad(x, (1, 1), "constant", float(value))
+            self.assertEqual(opt(x, value), expected)
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_pad_dynamic(self):
