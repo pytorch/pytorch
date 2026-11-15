@@ -112,6 +112,11 @@ class _Failed(Exception):
         self.reason = reason
 
 
+class _Capped(_Failed):
+    # A region has as many graphs as it may have.
+    pass
+
+
 class _Opaque(Exception):
     # An input of a region that cannot be an input of a graph.
     def __init__(self, position: int, reason: str) -> None:
@@ -188,6 +193,12 @@ _WIDE = 1 << 62
 # How many variants of a region may leave sizes open, for inputs that are
 # otherwise alike: one per path that the sizes choose.
 _MOST_OPEN = 4
+# A region may have ``region_max_variants`` graphs. Variants that use the
+# graph of another (the layers of a model, called in a loop) do not count,
+# up to this many times the limit; and after this many traces whose graph
+# was one too many, no further variant is tried.
+_MOST_SHARED = 8
+_MOST_SURPLUS = 4
 # How many times regions wait for one that was surveyed before them to be
 # compiled, before they go ahead without it.
 _MOST_WAITS = 256
@@ -2048,6 +2059,8 @@ class _Region:
         # Graphs given to the backend, and the time traces and backend took.
         self.compiles = 0
         self.seconds = 0.0
+        # Traces that were made for nothing: their graph was one too many.
+        self.surplus = 0
 
     def __call__(self, *args: Any) -> Any:
         if not self.hot:
@@ -2247,9 +2260,9 @@ class _Region:
             self.hot = False
             self.plan.split(self, None, "its inputs take ever new values")
             return None
-        if (
-            key not in self.variants
-            and len(self.variants) >= self.plan.options.max_variants
+        if key not in self.variants and (
+            self.surplus >= _MOST_SURPLUS
+            or len(self.variants) >= _MOST_SHARED * self.plan.options.max_variants
         ):
             return None
         growing = sum(1 for v in self.variants.values() if v is not None and v.grows)
@@ -2317,6 +2330,8 @@ class _Region:
                 return self.build(key, args, inputs, opening)
             except _Close as close:
                 known.fixed |= close.slots
+            except _Capped:
+                raise
             except _Failed:
                 # What a trace on symbols cannot do, one on numbers may.
                 known.static = True
@@ -2426,14 +2441,24 @@ class _Region:
         # tensor of its own is not looked up, the code does not say which.
         same = None
         if not any(node.op == "get_attr" for node in graph.graph.nodes):
-            # The integers of the call are in the code, or are open.
-            tensors = key[2][: len(key[2]) - 8 * len(inputs.ints)]
+            # The integers of the call are in the code, or are open; and a
+            # graph is the same one whatever number stood for an open size
+            # when it was traced.
+            tensors = bytearray(key[2][: len(key[2]) - 8 * len(inputs.ints)])
+            left: tuple[int, ...] = ()
+            if opening is not None:
+                left = tuple(sorted(opening.left()))
+                for slot in left:
+                    tensors[slot * 8 : slot * 8 + 8] = bytes(8)
             opened = tuple(sorted(opening.opened)) if opening is not None else None
-            same = (graph.code, key[1], tensors, key[3], opened)
+            same = (graph.code, key[1], bytes(tensors), key[3], opened, left)
         # What this trace needed of the sizes, before the backend adds to it.
         own = opening.conditions() if opening is not None else None
         made = options.compiled.get(same)
         if made is None:
+            if self.compiles >= options.max_variants:
+                self.surplus += 1
+                raise _Capped(None, "more graphs than a region may have")
             example = opening.example() if opening is not None else list(inputs.flat)
             try:
                 compiled = options.backend(graph, example)
@@ -2768,8 +2793,8 @@ class _Path(_Region):
             except _Close as close:
                 self.sizes[_kind(key)].fixed |= close.slots
                 continue
-            except _Failed:
-                if opening is None:
+            except _Failed as e:
+                if opening is None or isinstance(e, _Capped):
                     raise
                 # What a trace on symbols cannot do, one on numbers may.
                 self.sizes[_kind(key)].static = True
