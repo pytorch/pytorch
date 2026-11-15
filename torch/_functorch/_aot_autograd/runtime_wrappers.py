@@ -3243,8 +3243,11 @@ def _accumulate_mutated_inp_grad(
             target.grad = target.grad + g
 
 
+_MutatedInpTrigger = tuple[int, int | None, weakref.ref[Tensor] | None]
+
+
 def _defer_mutated_inp_retain_grad(
-    triggers: Sequence[tuple[int, weakref.ref[Tensor] | None]],
+    triggers: Sequence[_MutatedInpTrigger],
     bw_out: Sequence[Any],
     target_ref: weakref.ref[Tensor],
     ctx: Any,
@@ -3269,13 +3272,17 @@ def _defer_mutated_inp_retain_grad(
         _cleanup()
         _accumulate_mutated_inp_grad(target_ref(), ctx_ref(), g)
 
-    for dep_idx, dep_ref in triggers:
+    for dep_idx, edge_idx, dep_ref in triggers:
         if bw_out[dep_idx] is None:
             continue
         if dep_ref is not None and (dep_t := dep_ref()) is not None:
             if dep_t.requires_grad:
                 handles.append(dep_t.register_hook(_fire))
-        elif dep_idx < len(next_fns) and (nf := next_fns[dep_idx][0]) is not None:
+        elif (
+            edge_idx is not None
+            and edge_idx < len(next_fns)
+            and (nf := next_fns[edge_idx][0]) is not None
+        ):
             handles.append(nf.register_prehook(_fire))
 
     if handles:
@@ -3290,15 +3297,22 @@ _MutatedInpCaptureSpec = tuple[tuple[int, tuple[tuple[int, bool], ...]], ...]
 def _capture_mutated_inp_retain_grad_refs(
     args: Sequence[Any],
     spec: _MutatedInpCaptureSpec,
-) -> tuple[
-    tuple[weakref.ref[Tensor], tuple[tuple[int, weakref.ref[Tensor] | None], ...]],
-    ...,
-]:
+) -> tuple[tuple[weakref.ref[Tensor], tuple[_MutatedInpTrigger, ...]], ...]:
+    tensor_edge_idx: dict[int, int] = {}
+    edge_pos = 0
+    for i, arg in enumerate(args):
+        if isinstance(arg, Tensor):
+            tensor_edge_idx[i] = edge_pos
+            edge_pos += 1
     return tuple(
         (
             weakref.ref(args[idx]),
             tuple(
-                (dep_idx, weakref.ref(args[dep_idx]) if keep_ref else None)
+                (
+                    dep_idx,
+                    tensor_edge_idx.get(dep_idx),
+                    weakref.ref(args[dep_idx]) if keep_ref else None,
+                )
                 for dep_idx, keep_ref in dep_specs
             ),
         )

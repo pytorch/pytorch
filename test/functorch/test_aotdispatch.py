@@ -2029,9 +2029,11 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     return (transpose, add, add_1, diagonal, add_2)""",
         )
 
-    def _check_retain_grad_parity(self, fn, run_fn):
+    def _check_retain_grad_parity(self, fn, run_fn, *, dynamic=False):
         exp = run_fn(fn)
-        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager", fullgraph=True, dynamic=dynamic
+        )
         self.assertEqual(run_fn(compiled_fn), exp)
 
     def test_input_mutation_retain_grad_non_leaf(self):
@@ -2260,12 +2262,18 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
                     res_leaf = (g_oth, xg_after_oth, g_w, xg_after_ag_w, x1.grad, w1.grad)
             return res_leaf, res_non_leaf
 
-        self._check_retain_grad_parity(copy_plus_other, run_copy_partial)
+        for dyn in (False, True):
+            self._check_retain_grad_parity(
+                copy_plus_other, run_copy_partial, dynamic=dyn
+            )
 
         # Partial differentiation exclusion (backward(inputs=[w]), autograd.grad, retain_graph)
         def mul_w(x, w):
             x.mul_(3)
             return x.square(), w * 2
+
+        def mul_w_rev(w, x):
+            return mul_w(x, w)
 
         def run_partial(fn):
             leaf = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
@@ -2281,7 +2289,13 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
             loss.backward(inputs=[leaf])
             return g_w, g_after_ag, g_after_bw_w, x.grad, leaf.grad
 
-        self._check_retain_grad_parity(mul_w, run_partial)
+        for dyn in (False, True):
+            self._check_retain_grad_parity(mul_w, run_partial, dynamic=dyn)
+            self._check_retain_grad_parity(
+                mul_w_rev,
+                lambda fn: run_partial(lambda x, w: fn(w, x)),
+                dynamic=dyn,
+            )
 
     def test_input_mutation_retain_grad_subclass_and_export(self):
         from torch._dynamo import compiled_autograd
