@@ -4,6 +4,7 @@ import unittest
 
 import torch
 import torch._dynamo.test_case
+from torch.testing._internal.common_dtype import complex_types
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -169,9 +170,10 @@ class ComplexTests(ComplexDynamoTestCase):
         mutate_c = torch.compile(mutate, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(mutate(), mutate_c())
 
-    @parametrize("dtype", [torch.complex64, torch.complex128])
+    @parametrize("dtype", complex_types())
     def test_add(self, dtype):
         def f(a, b):
+            # a + 1.0 covers ComplexTensor's scalar add; the decomposition skips it
             return a + b, torch.add(a, b, alpha=2), a + 1.0, (a + b).real
 
         fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND

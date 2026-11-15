@@ -717,9 +717,10 @@ def add(
     if not x_is_complex_tensor or not y_is_complex_tensor:
         return NotImplemented
 
-    # The view(real dtype) below assumes interleaved complex storage. The graph
-    # produced here is later retraced with ComplexTensor, which keeps the real and
-    # imaginary parts as separate tensors, so keep aten.add for it to decompose.
+    # The view(real dtype) below assumes interleaved complex storage. Forward and
+    # inference graphs are later retraced with ComplexTensor, which keeps the real
+    # and imaginary parts as separate tensors, so keep aten.add for it to decompose.
+    # Backward graphs are not retraced, so a complex add there falls back to eager.
     if functorch_config.enable_complex_wrapper:
         return NotImplemented
 
