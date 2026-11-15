@@ -848,6 +848,66 @@ cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, index_t class
   }
 }
 
+template <int ILP, typename scalar_t, typename accscalar_t, int32_t vecs_per_thread>
+__global__ void
+cunn_SoftMaxForwardRegVectorized(scalar_t* output, const scalar_t* input, int64_t classes)
+{
+  extern __shared__ unsigned char smem[];
+  auto* sdata = reinterpret_cast<accscalar_t*>(smem);
+  using Vec = at::native::memory::aligned_vector<scalar_t, ILP>;
+
+  const int64_t row_offset = static_cast<int64_t>(blockIdx.x) * classes;
+  const auto* input_vec = reinterpret_cast<const Vec*>(input + row_offset);
+  auto* output_vec = reinterpret_cast<Vec*>(output + row_offset);
+  const int num_vecs = classes / ILP;
+  Vec reg[vecs_per_thread];
+
+  accscalar_t threadMax = std::numeric_limits<accscalar_t>::lowest();
+  MaxFloat<scalar_t, accscalar_t> maxFunc;
+  #pragma unroll
+  for (int i = 0; i < vecs_per_thread; ++i) {
+    const int offset = threadIdx.x + i * blockDim.x;
+    if (offset < num_vecs) {
+      reg[i] = input_vec[offset];
+      #pragma unroll
+      for (int j = 0; j < ILP; ++j) {
+        threadMax = maxFunc(threadMax, reg[i].val[j]);
+      }
+    }
+  }
+
+  const accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(sdata, threadMax,
+    Max<accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
+  accscalar_t threadExp = 0;
+  SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
+  #pragma unroll
+  for (int i = 0; i < vecs_per_thread; ++i) {
+    const int offset = threadIdx.x + i * blockDim.x;
+    if (offset < num_vecs) {
+      #pragma unroll
+      for (int j = 0; j < ILP; ++j) {
+        threadExp = sumExpFunc(threadExp, reg[i].val[j]);
+      }
+    }
+  }
+
+  const accscalar_t sumAll = blockReduceWarp<Add, accscalar_t>(sdata, threadExp,
+    Add<accscalar_t>(), accscalar_t(0));
+  SoftMaxForwardEpilogue<scalar_t, accscalar_t, scalar_t> epilogue(max_k, sumAll);
+  #pragma unroll
+  for (int i = 0; i < vecs_per_thread; ++i) {
+    const int offset = threadIdx.x + i * blockDim.x;
+    if (offset < num_vecs) {
+      Vec out;
+      #pragma unroll
+      for (int j = 0; j < ILP; ++j) {
+        out.val[j] = epilogue(reg[i].val[j]);
+      }
+      output_vec[offset] = out;
+    }
+  }
+}
+
 
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t,
   template <typename, typename, typename> class EpilogueWithMul, typename index_t = int32_t>
@@ -1145,15 +1205,40 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
                     <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
               }
             } else {
+              const auto* device_properties = at::cuda::getCurrentDeviceProperties();
+              const bool can_vectorize = dim_size % ILP == 0 &&
+                reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES == 0 &&
+                reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES == 0;
+              if constexpr (!is_log_softmax &&
+                  (std::is_same_v<scalar_t, at::Half> || std::is_same_v<scalar_t, at::BFloat16>)) {
+                constexpr int block_size = 256;
+                constexpr int max_vecs_per_thread = 4;
+                // With one block per row, small grids benefit from more threads per block.
+                if (can_vectorize && dim_size <= block_size * ILP * max_vecs_per_thread &&
+                    outer_size >= device_properties->multiProcessorCount) {
+                  const auto vecs_per_thread = potential_register_count(dim_size / ILP, block_size);
+                  const auto smem_size = block_size / at::cuda::warp_size() * sizeof(accscalar_t);
+                  if (vecs_per_thread <= 2) {
+                    cunn_SoftMaxForwardRegVectorized<ILP, scalar_t, accscalar_t, 2>
+                      <<<grid, block_size, smem_size, stream>>>(output_ptr, input_ptr, dim_size);
+                  } else if (vecs_per_thread == 3) {
+                    cunn_SoftMaxForwardRegVectorized<ILP, scalar_t, accscalar_t, 3>
+                      <<<grid, block_size, smem_size, stream>>>(output_ptr, input_ptr, dim_size);
+                  } else {
+                    cunn_SoftMaxForwardRegVectorized<ILP, scalar_t, accscalar_t, max_vecs_per_thread>
+                      <<<grid, block_size, smem_size, stream>>>(output_ptr, input_ptr, dim_size);
+                  }
+                  C10_CUDA_KERNEL_LAUNCH_CHECK();
+                  return;
+                }
+              }
+
               dim3 block = SoftMaxForward_getBlockSize(dim_size);
               size_t smem_reduction_sz = block.x / at::cuda::warp_size() * sizeof(accscalar_t);
-              auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
+              auto max_elements_per_smem = (device_properties->sharedMemPerBlock -
                 smem_reduction_sz) / sizeof(scalar_t);
 
-              bool can_use_smem = static_cast<size_t>(dim_size) < max_elements_per_smem;
-              can_use_smem &= !(reinterpret_cast<uintptr_t>(input_ptr) % ALIGN_BYTES);
-              can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
-              can_use_smem &= !(dim_size % ILP);
+              const bool can_use_smem = can_vectorize && static_cast<size_t>(dim_size) < max_elements_per_smem;
 
               int32_t potential_reg_cnt = potential_register_count(dim_size, block.x);
               if(potential_reg_cnt < 10){

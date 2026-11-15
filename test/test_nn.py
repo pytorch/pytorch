@@ -10694,6 +10694,23 @@ class TestNNDeviceType(NNTestCase):
                         self.assertEqual(grad_input, ref_grad_input)
                         self.assertEqual(input.grad, ref_input.grad)
 
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16)
+    @parametrize_test("cols", [2048, 2049, 2056, 4096, 4104, 6144, 6152, 8192, 8200])
+    @parametrize_test("input_offset,output_offset", [(0, 0), (1, 0), (0, 1)])
+    def test_softmax_wide_rows(self, device, dtype, cols, input_offset, output_offset):
+        rows = max(5, torch.cuda.get_device_properties(device).multi_processor_count)
+        x = torch.randn(rows * cols + input_offset, device=device, dtype=dtype)[input_offset:].view(rows, cols)
+        out = torch.empty(rows * cols + output_offset, device=device, dtype=dtype)[output_offset:].view(rows, cols)
+        x[1].mul_(100)
+        x[2, -1] = torch.nan
+        x[3].fill_(-torch.inf)
+        x[4, -1] = torch.inf
+
+        expected = torch.softmax(x, dim=-1, dtype=torch.float64).to(dtype)
+        torch.softmax(x, dim=-1, out=out)
+        self.assertEqual(out, expected)
+
     @onlyAccelerator
     @dtypes(torch.half)
     def test_softmax_half_to_float_matches_half(self, device, dtype):
