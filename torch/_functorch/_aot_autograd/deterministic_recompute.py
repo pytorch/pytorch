@@ -66,13 +66,6 @@ def deterministic_recompute(
             if marker or "mempool" in n.meta.get("custom", {}):
                 log.info("deterministic_recompute: %s is in a memory pool", n.name)
                 return
-    # Only the storage they write orders in-place writes (e.g. an input
-    # mutation's copy_) against other nodes, which outlining could reorder; a
-    # graph with any is left as partitioned for now.
-    for gm in (fw_module, bw_module):
-        if writer := next((n for n in gm.graph.nodes if _writes(n)), None):
-            log.info("deterministic_recompute: %s writes in place", writer.name)
-            return
     fw_outs = fw_module.graph.find_nodes(op="output")[0].args[0]
     saved = {n for n in fw_outs[num_fwd_outputs:] if isinstance(n, torch.fx.Node)}
     copies, regions = _recomputed_copies(fw_module, bw_module, saved)
@@ -291,6 +284,10 @@ def _cheap_ops() -> Any:
     from torch._functorch.partitioners import get_default_op_list
 
     return get_default_op_list()
+
+
+def _reads(n: torch.fx.Node) -> set[int]:
+    return {s for a in n.all_input_nodes if (s := get_node_storage(a)) is not None}
 
 
 # Ops that end the use of their tensors' storage without a write in their
@@ -581,14 +578,15 @@ def _share_region(
     if len(items) != len(set(items)):
         return _skip("it would return one result twice")
 
-    # Each call goes right before the first node that reads the piece (see
-    # _place). The forward otherwise falls back to right after the last slice
-    # input. (Every piece has one: a node computed from no tensor input is a
-    # constant.)
+    # _place says where each call goes; the forward's fallback is right after
+    # the last slice input. (Every piece has one: a node computed from no
+    # tensor input is a constant.)
     last_input = max(s_inputs, key=node_index.__getitem__)
     fw_replaced = {n for n in s_nodes if n not in inline} | set(fw_extra.values())
+    fw_recomputed = [n for n in s_nodes if n.op != "get_attr"]
+    fw_recomputed += fw_extra.values()
     insert_after, fw_moved, reason = _place(
-        fw_replaced, s_inputs, last_input, node_index
+        fw_recomputed, fw_replaced, s_inputs, last_input, node_index
     )
     if reason is not None:
         return _skip(reason)
@@ -600,8 +598,14 @@ def _share_region(
     last_operand = max([first_recompute.prev, *bw_operands], key=lambda n: bw_index[n])
     bw_replaced = contracted_names | bw_extra.keys()
     bw_replaced_nodes = {bw_by_name[name] for name in bw_replaced}
+    bw_recomputed = [
+        m
+        for name in [*(n.name for n in s_nodes), *bw_extra]
+        if (m := bw_by_name.get(name)) is not None
+        and m.op not in ("placeholder", "get_attr")
+    ]
     bw_insert_after, bw_moved, reason = _place(
-        bw_replaced_nodes, bw_operands, last_operand, bw_index
+        bw_recomputed, bw_replaced_nodes, bw_operands, last_operand, bw_index
     )
     if reason is not None:
         return _skip(reason)
@@ -679,32 +683,53 @@ def _unbound_symbols(
 
 
 def _place(
+    recomputed: list[torch.fx.Node],
     replaced: set[torch.fx.Node],
     operands: list[torch.fx.Node],
     fallback: torch.fx.Node,
     index: dict[torch.fx.Node, int],
 ) -> tuple[torch.fx.Node, list[torch.fx.Node], str | None]:
     """The node after which the call replacing ``replaced`` goes, and the
-    readers that move below it, or the reason it can't go anywhere. The call
-    goes right before the first node that reads one of ``replaced``, so it
-    computes them no earlier than the first of them is needed. If an operand
-    only comes then or later, it goes after ``fallback`` (at or after every
-    operand) and the readers before that move below it. The replaced
-    nodes move to the call and the readers below it with only data edges to
-    order them, so the caller must make sure no in-place write (see _writes)
-    is ordered against them."""
+    readers that move below it, or the reason it can't go anywhere.
+    ``recomputed`` are the nodes the call computes: ``replaced``, plus the
+    inline nodes it copies for itself (views, copied constants, scalars),
+    which each graph keeps for its other readers; the call's copies read their
+    storages where it goes. The call goes right before the first node that
+    reads one of ``replaced``, so it computes them no earlier than the first
+    of them is needed, but keeps its order with in-place writes (see _writes)
+    to storages the piece reads: before a later write that follows the reads,
+    after one that precedes them. If an operand only comes then or later, it
+    goes after ``fallback`` (at or after every operand) or such a write
+    instead, and the readers before that move below it."""
+    start = min(index[n] for n in replaced)
     readers = [u for n in replaced for u in n.users if u not in replaced]
+    after = list(operands)
+    reads: dict[int, list[int]] = defaultdict(list)
+    for n in recomputed:
+        for s in _reads(n):
+            reads[s].append(index[n])
+    for w in fallback.graph.nodes:
+        if index[w] > start and w not in replaced:
+            for s in _writes(w) & reads.keys():
+                if min(reads[s]) < index[w]:
+                    readers.append(w)
+                else:
+                    after.append(w)
     first = min(readers, key=index.__getitem__, default=None)
-    if first is not None and all(index[o] < index[first] for o in operands):
-        return first.prev, [], None
-    moved, reason = _readers_to_move(replaced, operands, fallback)
-    return fallback, moved, reason
+    if first is not None and all(index[o] < index[first] for o in after):
+        point = first.prev
+    else:
+        point = max([fallback, *after], key=index.__getitem__)
+    moved, reason = _readers_to_move(recomputed, replaced, operands, point, index)
+    return point, moved, reason
 
 
 def _readers_to_move(
+    recomputed: list[torch.fx.Node],
     replaced: set[torch.fx.Node],
     operands: list[torch.fx.Node],
     insert_after: torch.fx.Node,
+    index: dict[torch.fx.Node, int],
 ) -> tuple[list[torch.fx.Node], str | None]:
     """A call inserted after ``insert_after`` will replace the nodes in
     ``replaced``, so whatever reads them (directly or through each other) up to
@@ -730,6 +755,29 @@ def _readers_to_move(
     # each draws.
     if rng := next((n for n in readers if _is_rng(n)), None):
         return [], f"it would move the random op {rng.name}"
+    # Data edges order everything else (stream syncs are wrapped in
+    # control_deps), except in-place writes: computing ``recomputed`` at the
+    # call and moving the readers below it must not reorder a write with a read
+    # or write of the same storage.
+    point = index[insert_after]
+    new_index = {n: (point, 1, index[n]) for n in recomputed}
+    new_index |= {n: (point, 2, index[n]) for n in readers}
+    lo = min(point, *(index[n] for n in new_index))
+    hi = max(point, *(index[n] for n in new_index))
+    window = [n for n in insert_after.graph.nodes if lo <= index[n] <= hi]
+
+    def _before(a: torch.fx.Node, b: torch.fx.Node) -> bool:
+        return new_index.get(a, (index[a], 0, 0)) < new_index.get(b, (index[b], 0, 0))
+
+    # (A write reads the storage it writes.)
+    for w in window:
+        written = _writes(w)
+        if not written:
+            continue
+        for n in window:
+            reordered = n is not w and (index[w] < index[n]) != _before(w, n)
+            if reordered and written & _reads(n):
+                return [], f"it would reorder {w.name} and {n.name}"
     return readers, None
 
 
