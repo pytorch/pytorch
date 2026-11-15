@@ -3471,6 +3471,18 @@ class ByteArrayIteratorVariable(IteratorVariable):
         self.index += 1
         return value
 
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.is_exhausted:
+            return ConstantVariable.create(0)
+        return ConstantVariable.create(max(len(self.parent.data) - self.index, 0))
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
+
     def python_type(self) -> type:
         return type(iter(bytearray()))
 
