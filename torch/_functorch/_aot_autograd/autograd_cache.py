@@ -1303,9 +1303,13 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             # which is true either way.
             if compiled_fn is not None:
                 log.info("AOTAutograd cache hit for key %s", cache_key)
-                # The trace path emits this guard from merge_view_inputs, which a
+                # The trace path emits this guard during graph capture, which a
                 # cache hit skips.
-                if any(i.mutates_data for i in entry.runtime_metadata.input_info):
+                meta = entry.runtime_metadata
+                if (
+                    any(i.mutates_data for i in meta.input_info)
+                    or meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw
+                ):
                     add_input_mutation_storage_overlap_partition_guard(aot_config, args)
 
                 counters["aot_autograd"]["autograd_cache_hit"] += 1

@@ -1735,6 +1735,42 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                     self.assertEqual(base, base_ref)
                     self.assertEqual(compiler.frame_count, 2)
 
+    def test_input_mutation_in_bw_storage_overlap(self):
+        # buf is mutated only in the backward, so synthetic bases (decided
+        # from forward mutations) must still account for y aliasing buf.
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, buf, y):
+                ctx.save_for_backward(buf, y)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, g):
+                buf, y = ctx.saved_tensors
+                before = y * 1
+                buf.add_(1)
+                return g * 2 + (y - before), None, None
+
+        def f(x, buf, y):
+            return Fn.apply(x, buf, y)
+
+        def run(fn, aliased):
+            x = torch.ones(4, requires_grad=True)
+            buf = torch.zeros(4)
+            y = buf.view(-1) if aliased else torch.zeros(4)
+            fn(x, buf, y).sum().backward()
+            return x.grad, buf
+
+        for dynamic in (False, True):
+            for first_aliased in (True, False):
+                with self.subTest(dynamic=dynamic, first_aliased=first_aliased):
+                    torch._dynamo.reset()
+                    compiler = CompileCounterWithBackend("aot_eager")
+                    opt_f = torch.compile(f, backend=compiler, dynamic=dynamic)
+                    for aliased in (first_aliased, not first_aliased):
+                        self.assertEqual(run(opt_f, aliased), run(f, aliased))
+                    self.assertEqual(compiler.frame_count, 2)
+
     def test_input_mutation_storage_overlap_full_view_recompiles(self):
         def f(field, indices, gain, workspace):
             torch.index_select(field, 0, indices, out=workspace)
