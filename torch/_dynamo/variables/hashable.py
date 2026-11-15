@@ -116,8 +116,11 @@ def is_hashable(x: VariableTracker) -> bool:
     return x.is_hashable()
 
 
+# Note [Builtin method key summaries]
+# Check before lookup/merge; insertions update and removals invalidate summaries.
+# Sizes include DeletedVariable slots. equality_sources finalizes flags before add reads them.
+# One trace owns the storage/receiver relations; summaries must not outlive it.
 class BuiltinMethodKeyTracker:
-    # Per-trace receiver relations and container summaries; never shared across traces.
     def __init__(self) -> None:
         self.receivers: dict[Source, object] = {}
         self.parents: dict[Source, Source] = {}
@@ -208,7 +211,6 @@ class BuiltinMethodKeyTracker:
 
 
 class KeySummary:
-    # Container-local dependencies; insertions update this cache and removals invalidate it.
     def __init__(
         self, tracker: BuiltinMethodKeyTracker, keys: Iterable["HashableTracker"]
     ) -> None:
@@ -627,7 +629,6 @@ class HashableTracker:
             isinstance(vt, variables.FrozensetVariable)
             and vt.python_type() is frozenset
         ):
-            # Constructed keys guard elements; input keys stay lazy until observed.
             if tuple_storage:
                 children = cast(variables.TupleVariable, vt).items
                 items = [HashableTracker(item) for item in children]

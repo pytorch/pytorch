@@ -1469,34 +1469,38 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self, view_name, view_owner, wrapped
     ):
         def view(self):
+            self.view_calls += 1
             return getattr(view_owner, view_name)(self)
 
         method = view if wrapped else getattr(view_owner, view_name)
         Mapping = type("Mapping", (OrderedDict,), {view_name: method})
         view_type = type(getattr(view_owner(), view_name)())
-        names = (
-            "mapping",
-            "__len__",
-            "isdisjoint",
-            "__contains__",
-            "__or__",
-            "missing",
-        )
+        names = ("mapping", "__len__", "isdisjoint")
+        names += ("__contains__", "__or__", "missing")
 
         def fn(x, mapping):
             view = getattr(mapping, view_name)()
             attributes = tuple(hasattr(view, name) for name in names)
-            return x + 1, view, type(view), isinstance(view, view_type), attributes
+            attributes += (view.__len__() == len(mapping),)
+            try:
+                view.missing
+            except AttributeError as error:
+                absent = error.name == "missing" and error.obj is view
+            absent = absent and getattr(view, "missing", None) is None
+            return x + 1, view, isinstance(view, view_type), attributes, absent
 
-        mapping = Mapping(a=1, b=2)
-        mapping.move_to_end("a")
         x = torch.ones(1)
+        mapping = Mapping(a=x + 1, b=x + 2)
+        mapping.move_to_end("a")
+        mapping.view_calls = 0
         expected = fn(x, mapping)
+        mapping.view_calls = 0
         actual = torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
-        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(mapping.view_calls, int(wrapped))
+        self.assertIs(actual[1].mapping["a"], mapping["a"])
         self.assertIs(type(actual[1]), type(expected[1]))
         self.assertEqual(list(actual[1]), list(expected[1]))
-        self.assertEqual(actual[2:], expected[2:])
+        self.assertEqual((actual[0], actual[2:]), (expected[0], expected[2:]))
         mapping["c"] = 3
         self.assertEqual(list(actual[1]), list(expected[1]))
 
@@ -1851,7 +1855,30 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertIn(fn.__code__, traced_code)
         self.assertNotIn(torch._dynamo.polyfills.odict_update.__code__, traced_code)
 
-    @parametrize("source_type", [dict, OrderedDict])
+    @parametrize("source_type, entries", [(list, ()), (tuple, (("initial", 0),))])
+    def test_ordered_dict_update_classifies_pairs_once(self, source_type, entries):
+        def fn(x, source, destination):
+            destination.update(source, tail=x)
+            return x + len(destination), destination
+
+        x = torch.ones(1)
+        source = source_type([("a", 1), ("a", 2), ("tail", 3)])
+        expected = fn(x, source, OrderedDict(entries))
+        destination = OrderedDict(entries)
+        with patch(
+            "torch._dynamo.variables.dicts._is_fast_dict_key",
+            wraps=variables.dicts._is_fast_dict_key,
+        ) as classify:
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(
+                x, source, destination
+            )
+        self.assertEqual(actual, expected)
+        self.assertIs(actual[1], destination)
+        self.assertIs(type(actual[1]), OrderedDict)
+        self.assertEqual(list(destination.items()), [*entries, ("a", 2), ("tail", x)])
+        self.assertEqual(classify.call_count, len(source))
+
+    @parametrize("source_type", [dict, OrderedDict, tuple])
     @parametrize("equal", [False, True])
     def test_ordered_dict_update_destination_key_comparisons(self, source_type, equal):
         class Key:
@@ -1869,7 +1896,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             key = Key()
             destination = OrderedDict([(key, 0)])
             key.calls = 0
-            destination.update(source_type({1: 2}))
+            destination.update(source_type([(1, 2), (1, 3)]))
             return x + key.calls, len(destination)
 
         x = torch.zeros(1)
@@ -6315,6 +6342,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     thetype = dict
+    base = dict
 
     # Methods:
     # + bool
@@ -6452,8 +6480,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_binop_ior(self):
-        # Raw dict writes on OrderedDict are covered by the explicit fallback test.
-        base = self.thetype if self.thetype is OrderedDict else dict
         d1 = self.thetype({"a": 1, "b": 2})
         d2 = self.thetype({"b": 3, "c": 4})
 
@@ -6473,16 +6499,16 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.__or__
         d3, d4 = d1.copy(), d2.copy()
-        self.assertEqual(base.__ior__(d3, d2), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(self.base.__ior__(d3, d2), {"a": 1, "b": 3, "c": 4})
         self.assertEqual(self.thetype.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
 
         # Test return value
         d3, d4 = d1.copy(), d2.copy()
         self.assertEqual(d3.__ior__(d2), {"a": 1, "b": 3, "c": 4})
-        self.assertEqual(base.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
+        self.assertEqual(self.base.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
 
         # Test with non-dict types
-        self.assertRaises(TypeError, lambda: base.__ior__(d1, 1))
+        self.assertRaises(TypeError, lambda: self.base.__ior__(d1, 1))
 
     @make_dynamo_test
     def test_binop_ior_iterable(self):
@@ -6498,7 +6524,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_clear(self):
-        base = self.thetype if self.thetype is OrderedDict else dict
         d = self.thetype({"a": 1, "b": 2})
         d.clear()
         self.assertEqual(d, {})
@@ -6509,7 +6534,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.clear
         d = self.thetype({"a": 1, "b": 2})
-        base.clear(d)
+        self.base.clear(d)
         self.assertEqual(d, {})
 
         d = self.thetype({"a": 1, "b": 2})
@@ -6592,7 +6617,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_pop(self):
-        base = self.thetype if self.thetype is OrderedDict else dict
         d = self.thetype({"a": 1, "b": 2})
         self.assertEqual(d.pop("a"), 1)
         self.assertEqual(d, {"b": 2})
@@ -6600,7 +6624,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.pop
         d = self.thetype({"a": 1, "b": 2})
-        self.assertEqual(base.pop(d, "b"), 2)
+        self.assertEqual(self.base.pop(d, "b"), 2)
         self.assertEqual(self.thetype.pop(d, "a"), 1)
 
         # Test invalid usage
@@ -6609,7 +6633,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_popitem(self):
-        base = self.thetype if self.thetype is OrderedDict else dict
         d = self.thetype({"a": 1})
         key, value = d.popitem()
         self.assertEqual(key, "a")
@@ -6623,7 +6646,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.popitem
         d = self.thetype({"a": 1})
-        key, value = base.popitem(d)
+        key, value = self.base.popitem(d)
         self.assertEqual(key, "a")
         self.assertEqual(value, 1)
 
@@ -6639,7 +6662,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_setdefault(self):
-        base = self.thetype if self.thetype is OrderedDict else dict
         d = self.thetype({"a": 1, "b": 2})
         self.assertEqual(d.setdefault("a", 3), 1)
         self.assertEqual(d.setdefault("c", 3), 3)
@@ -6647,7 +6669,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d, {"a": 1, "b": 2, "c": 3, "d": None})
 
         # Test Dict.setdefault
-        self.assertEqual(base.setdefault(d, "f", 5), 5)
+        self.assertEqual(self.base.setdefault(d, "f", 5), 5)
         self.assertEqual(self.thetype.setdefault(d, "e", 5), 5)
 
         # Test invalid usage
@@ -6656,8 +6678,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_update(self):
-        # Raw dict writes on OrderedDict are covered by the explicit fallback test.
-        base = self.thetype if self.thetype is OrderedDict else dict
         d = self.thetype({"a": 1, "b": 2})
         d.update({"b": 3, "c": 4})
         self.assertEqual(d, {"a": 1, "b": 3, "c": 4})
@@ -6669,7 +6689,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.update
         d3 = self.thetype({"e": 6})
-        base.update(d, d3)
+        self.base.update(d, d3)
         self.assertEqual(d, {"a": 1, "b": 3, "c": 4, "d": 5, "e": 6})
         d4 = self.thetype({"f": 7})
         self.thetype.update(d, d4)
@@ -6880,6 +6900,7 @@ class OrderedDictMethodsTests(DictMethodsTests):
     hw_classification = HardwareClassification.GENERIC
 
     thetype = OrderedDict
+    base = OrderedDict
 
     # Methods:
     # - popitem - Inherited from DictMethodsTest
