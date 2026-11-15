@@ -571,6 +571,42 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("dynamic", (False, True))
+    def test_input_mutation_storage_overlap(self, dynamic):
+        """
+        Graphs traced with disjoint vs. overlapping mutated inputs must get
+        separate cache entries, and a cache hit must still guard on the input
+        storage overlap so the other aliasing pattern recompiles.
+        """
+
+        def fn(x, y):
+            x.add_(1)
+            y.clamp_(min=0)
+            return x.clone()
+
+        def disjoint():
+            a = torch.full((3,), -10.0)
+            return a, a.clone()
+
+        def aliased():
+            a = torch.full((3,), -10.0)
+            return a, a.view(-1)
+
+        compiled_fn = torch.compile(fn, backend="inductor", dynamic=dynamic)
+        for make_args in (disjoint, aliased):
+            self.assertEqual(fn(*make_args()), compiled_fn(*make_args()))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+        self._clear_dynamo_and_codecache()
+        for make_args in (disjoint, aliased):
+            self.assertEqual(fn(*make_args()), compiled_fn(*make_args()))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )
