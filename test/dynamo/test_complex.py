@@ -169,6 +169,18 @@ class ComplexTests(ComplexDynamoTestCase):
         mutate_c = torch.compile(mutate, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(mutate(), mutate_c())
 
+    @parametrize("dtype", [torch.complex64, torch.complex128])
+    def test_add(self, dtype):
+        def f(a, b):
+            return a + b, torch.add(a, b, alpha=2), a + 1.0, (a + b).real
+
+        fn_c = torch.compile(f, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        a = torch.randn(4, 8, dtype=dtype)
+        b = torch.randn(4, 8, dtype=dtype)
+
+        self.assertEqual(fn_c(a, b), f(a, b))
+        self.assertEqual(fn_c(a, a), f(a, a))
+
     def test_view_as_real(self):
         def f():
             a = torch.ones(2, 2, dtype=torch.complex64)

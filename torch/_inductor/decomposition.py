@@ -28,6 +28,7 @@ from torch._decomp.decompositions import (
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
 from torch._environment import is_fbcode
+from torch._functorch import config as functorch_config
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
@@ -714,6 +715,12 @@ def add(
     x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
     y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
     if not x_is_complex_tensor or not y_is_complex_tensor:
+        return NotImplemented
+
+    # The view(real dtype) below assumes interleaved complex storage. The graph
+    # produced here is later retraced with ComplexTensor, which keeps the real and
+    # imaginary parts as separate tensors, so keep aten.add for it to decompose.
+    if functorch_config.enable_complex_wrapper:
         return NotImplemented
 
     def _requires_fallback(tensor: torch.Tensor) -> bool:
