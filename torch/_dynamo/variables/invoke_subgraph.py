@@ -9,6 +9,7 @@ import enum
 import logging
 import traceback
 import types
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeGuard
 
@@ -19,15 +20,21 @@ import torch._higher_order_ops
 from torch._dynamo import config as dynamo_config, graph_break_hints
 from torch._dynamo.exc import unimplemented
 from torch._dynamo.guards import (
+    _receiver_alias_pattern,
     extract_tensor_metadata,
     GUARD_VALUE_DISPATCH,
     GuardBuilder,
     GuardCheckSpec,
     install_guard,
+    record_lexical_alias,
     SKIP_GUARD,
     UnsupportedGuardCheckSpec,
 )
-from torch._dynamo.source import SyntheticLocalSource, TensorPropertySource
+from torch._dynamo.source import (
+    is_from_source,
+    SyntheticLocalSource,
+    TensorPropertySource,
+)
 from torch._dynamo.utils import (
     _make_inlined,
     constants_identical,
@@ -49,7 +56,10 @@ from torch._guards import (
     Source,
 )
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+from torch.fx.experimental.symbolic_shapes import (
+    canonicalize_bool_expr,
+    GuardOnDataDependentSymNode,
+)
 from torch.fx.graph_module import GraphModule
 from torch.fx.proxy import Proxy
 from torch.utils import _pytree as pytree
@@ -100,14 +110,12 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #   - arg_sources: sources of the original call's arguments
 #   - subgraph_input_mapping: how each lifted arg maps back to user inputs or captures
 #   - output_metadata: shape/stride/dtype/device of outputs
-#   - shape_guards: predicates, finite range bounds and deferred assertions to remap
 #
 # Paired with an InvokeSubgraphReuseCondition containing:
 #   - input_checks: (tag, tensor_metadata) per input
 #   - guards: (source, handler, expected, guard) tuples
 #   - treespec: pytree structure of the args
-#   - traced_sources: sources accessed during the trace, including successful children
-#   - guard_dependencies/guard_on_key_order: dependencies and order needed for replay
+#   - traced_sources: sources accessed during the trace
 #
 # CACHE LOOKUP (is_reusable)
 # ==========================
@@ -117,15 +125,12 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #      (old: L['self'].layers[0].weight -> new: L['self'].layers[1].weight),
 #      then evaluate against the new source's runtime value.
 #   3. Mutation check -- reject if the subgraph mutated any captured var.
-#   4. Rebind captured symbols, validate every dependent capture, and check shape predicates.
 #
-# Each invocation shares source/capture/symbol resolutions in a SubgraphReuseMatch.
-# Remapped predicates commit only at stamp-out; input construction can install guards
-# and placeholders during lookup. The match cache never survives the invocation.
+# A shared resolve_cache memoizes intermediate source resolution (e.g.
+# L['self'].layers is evaluated once and reused across all guards).
 #
 # STAMP OUT (stamp_out_subgraph)
 # ==============================
-# Stamp out with rebound symbols/metadata, committed predicates and remapped guards/orders.
 # On cache hit, reconstruct the argument list using the freevar mapping
 # (list[LiftedArgOrigin]):
 #
@@ -141,9 +146,6 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #   LiftedSyntheticObject(ctor_fn, ctor_args, ctor_arg_sources)
 #       Synthetic object (opaque type with SyntheticLocalSource).
 #       Reconstructed via synthetic_graph_input with cached constructor info.
-#
-#   LiftedBoundSymbol(expr, source)
-#       Rebind to the current captured source, or retain a source-independent proxy.
 #
 # SAFETY
 # ======
@@ -381,6 +383,31 @@ def sym_num_key(sym_num: Any) -> Any:
     return sym_num.node.expr
 
 
+def input_aliases(
+    tx: "InstructionTranslatorBase",
+    fingerprint: InputFingerprint,
+    tensors: Iterable[Any],
+) -> tuple[int, ...]:
+    from .builder import lookup_tracked_variable
+
+    values = []
+    for tag, vt in fingerprint.flat_vts:
+        if tag in (InputTag.TENSOR, InputTag.SYMNODE):
+            node = vt.as_proxy().node
+            values.append(node)  # Stamp-out deduplicates placeholder operands by node.
+            if tag is InputTag.TENSOR:
+                values.append(node.meta["example_value"])
+        elif tag is InputTag.OBJECT:
+            values.append(vt.value)
+    for tensor in tensors:
+        tracked = lookup_tracked_variable(tx, tensor)
+        # A metadata-only Parameter can have a guard without a fake or a placeholder.
+        if isinstance(tracked, TensorVariable):
+            tensor = tracked.proxy.node.meta["example_value"]
+        values.append(tensor)
+    return _receiver_alias_pattern(tuple(values))
+
+
 def get_flat_proxies(fingerprint: InputFingerprint) -> list[Proxy]:
     """Collect deduplicated proxies from tensor/symnode leaves."""
     seen: set[torch.fx.Node] = set()
@@ -419,7 +446,14 @@ class LiftedSyntheticObject:
 
 @dataclass
 class LiftedBoundSymbol:
-    """Symbolic input bound to an actual traced capture, or to its existing proxy."""
+    """Lifted arg that is a SymInt already bound as a graph input.
+
+    SymInt graph inputs are created during tensor wrapping (not through
+    VariableBuilder.wrap_symint), so they aren't registered in
+    unspec_variable_map or variable_tracker_cache. Using LiftedCapturedSource
+    for these would resolve the source to a concrete Python int via
+    source.get_value() instead of reusing the existing symbolic proxy.
+    """
 
     expr: Any  # sympy.Expr
     source: Source | None = None
@@ -430,14 +464,23 @@ LiftedArgOrigin = (
 )
 
 
-def get_fn_code(fn_var: Any) -> types.CodeType | None:
+def get_fn_key(
+    fn_var: Any, tx: "InstructionTranslatorBase | None" = None
+) -> types.FunctionType | types.CodeType | None:
     if isinstance(fn_var, UserFunctionVariable):
-        return fn_var.get_function().__code__
+        fn = fn_var.get_function()
     elif isinstance(fn_var, UnspecializedNNModuleVariable):
-        return (
-            fn_var.value.forward.__func__.__code__  # pyrefly: ignore[missing-attribute]
-        )
-    return None
+        fn = fn_var.value.forward.__func__  # pyrefly: ignore[missing-attribute]
+    else:
+        return None
+    if tx is not None and (
+        fn.__closure__
+        or fn.__defaults__
+        or fn.__kwdefaults__
+        or fn.__globals__ is not tx.output.root_tx.f_globals
+    ):
+        return fn
+    return fn.__code__
 
 
 def has_mutated_vars(
@@ -484,11 +527,22 @@ def is_reuse_eligible(
         rely on the treespec and tags for structural matching, so only
         types with well-defined comparison semantics are supported.
 
-    When ``has_reuse_hash_fn`` is True, the hash key replaces side-effect,
-    mutation and builtin-method identity checks. Its caller must include
-    these dependencies in the key to prevent stale reuse.
+    When ``has_reuse_hash_fn`` is True, side-effect and mutation checks are
+    skipped because the hash key replaces guards — there are no guards to
+    go stale from mutations.
+    The caller must include these dependencies in the key.
     """
     if not has_reuse_hash_fn:
+        reads = tracing_info.lexical_sources
+        for _, vt in fingerprint.flat_vts:
+            record_lexical_alias(reads, vt.source, vt.unwrap().source)
+        if any(
+            is_from_source(vt.source, read)
+            for tag, vt in fingerprint.flat_vts
+            if tag is not InputTag.CONSTANT and vt.source is not None
+            for read, _ in reads
+        ):
+            return False
         if tracing_info.has_builtin_method_identity:
             # Stamp-out cannot replay remapped receiver-alias guards.
             hc_log.debug("subgraph_reuse: not eligible -- builtin-method identity")
@@ -610,6 +664,8 @@ def build_reuse_condition(
 
     traced_sources = traced_sources.copy()
     guard_tuples: list[tuple[Source, GuardCheckSpec, object, Guard]] = []
+    tensors = {}
+    guard_dependencies = []
     for guard in all_relevant_guards:
         source = guard.originating_source
         type_str = guard.create_fn_name()
@@ -630,8 +686,7 @@ def build_reuse_condition(
                 f"subgraph_reuse: failed to resolve source '{source.name}' for {type_str} guard"
             ) from None
 
-        # Tensor aliases determine which captures were deduplicated into one input.
-        # Non-tensor aliases remain unchecked by reuse, as before this guard replay.
+        # Explicit object aliases are checked by the positional alias pattern.
         if type_str == "DUPLICATE_INPUT" and not isinstance(value, torch.Tensor):
             continue
 
@@ -641,9 +696,10 @@ def build_reuse_condition(
         #     continue
 
         handler = cast(GuardCheckSpec, handler)
+        extra_sources = ()
         if handler.get_extra_sources_fn is not None:
-            extra_sources = OrderedSet(handler.get_extra_sources_fn(guard))
-            if has_mutated_vars(tx, extra_sources):
+            extra_sources = handler.get_extra_sources_fn(guard)
+            if has_mutated_vars(tx, OrderedSet(extra_sources)):
                 return None
             traced_sources.update(extra_sources)
             try:
@@ -655,20 +711,20 @@ def build_reuse_condition(
                 raise RuntimeError(
                     f"subgraph_reuse: failed to resolve dependencies of '{source.name}' for {type_str} guard"
                 ) from None
+        if type_str == "TENSOR_MATCH" and source not in fingerprint.arg_sources:
+            tensors[source] = value
         expected = handler.get_metadata_fn(guard, value)
         guard_tuples.append((source, handler, expected, guard))
+        guard_dependencies.append(guard.source_dependencies(extra_sources))
 
     hc_log.debug("Number of guards %s", len(guard_tuples))
 
-    guard_dependencies = [
-        guard.source_dependencies() for _, _, _, guard in guard_tuples
-    ]
-    needed_sources = OrderedSet(traced_sources)
-    for dependencies in guard_dependencies:
-        needed_sources.update(dependencies)
+    needed_sources = traced_sources.union(*guard_dependencies)
 
     return InvokeSubgraphReuseCondition(
         input_checks=input_checks,
+        tensor_sources=tuple(tensors),
+        aliases=input_aliases(tx, fingerprint, tensors.values()),
         guards=guard_tuples,
         guard_dependencies=guard_dependencies,
         treespec=fingerprint.treespec,
@@ -742,9 +798,8 @@ class SubgraphReuseMatch:
         from .builder import VariableBuilder
 
         if source not in self.captured_variables:
-            self.captured_variables[source] = VariableBuilder(tx, source)(
-                self.resolve(source)
-            )
+            value = self.resolve(source)
+            self.captured_variables[source] = VariableBuilder(tx, source)(value)
         return self.captured_variables[source]
 
     def remap_bound_symbol(
@@ -821,12 +876,12 @@ def capture_policy_matches(
     cached = tx.output.input_source_to_var.get(source)
     if not isinstance(cached, TensorVariable):
         try:
-            # Graph attributes are tracked objects rather than lifted inputs.
             cached = lookup_tracked_variable(tx, match.resolve(source))
         except Exception:
             cached = None
-    if not isinstance(cached, TensorVariable) or cached.python_type() is not type(
-        value
+    if (
+        not isinstance(cached, TensorVariable)
+        or type(value) is not cached.python_type()
     ):
         hc_log.debug("subgraph_reuse: cached tensor type differs for %s", source.name)
         return False
@@ -852,17 +907,16 @@ def capture_policy_matches(
             dim is DimDynamic.STATIC for dim in context.dynamic_sizes
         ):
             # Use builder policy/PGO without unused metadata-only parameter attributes.
-            tx.output.input_source_to_sizes_strides[new_source] = {
-                "size": value.size(),
-                "stride": value.stride(),
-            }
+            metadata = {"size": value.size(), "stride": value.stride()}
+            tx.output.input_source_to_sizes_strides[new_source] = metadata
             match.metadata_captures.add(new_source)
             return True
     current = match.build_capture(tx, new_source)
-    if not isinstance(current, TensorVariable):
-        hc_log.debug("subgraph_reuse: no current tensor for %s", new_source.name)
-        return False
-    current_example = current.proxy.node.meta.get("example_value")
+    current_example = (
+        current.proxy.node.meta.get("example_value")
+        if isinstance(current, TensorVariable)
+        else None
+    )
     if current_example is None:
         hc_log.debug("subgraph_reuse: missing capture example for %s", new_source.name)
         return False
@@ -997,6 +1051,11 @@ def is_reusable(
                     if i < len(fingerprint.arg_sources)
                     else None
                 )
+                if cached_src is not None and any(
+                    is_from_source(cached_src, read)
+                    for read, _ in condition.lexical_sources
+                ):
+                    return False
                 if cached_src is None or new_src is None:
                     hc_log.debug(
                         "subgraph_reuse: reuse failed -- input %d constant mismatch "
@@ -1007,40 +1066,45 @@ def is_reusable(
                     )
                     return False
 
-    # Check mutations before reusing the resolved guard values for stamp-out.
-    remapped = (
-        OrderedSet(match.remap_source(s) for s in condition.traced_sources)
-        if match.source_replacement
-        else condition.traced_sources
-    )
-    if has_mutated_vars(tx, remapped):
-        return False
-    if not match.source_replacement:
-        return True
+    bindings: dict[Source, Source | None] = {}
+    for old, new in zip(match.entry.arg_sources, fingerprint.arg_sources):
+        if old is not None and bindings.setdefault(old, new) != new:
+            return False
+    # Parameterized source - this function gives you new sources parameterized
+    # on the arg_sources. For example, if the input to the nested compile region
+    # is a nn Module layer with source `layers[0]`, then old source
+    # `layers[0].weight` gets remapped to `layers[1].weight`. This
+    # parameterization is central in getting the new sources and then running
+    # guards on them.
+    remap = match.remap_source
 
+    # Check for mutations on remapped traced_sources.
+    if tx.output.side_effects.mutated_sources and has_mutated_vars(
+        tx, OrderedSet(remap(s) for s in condition.traced_sources)
+    ):
+        return False
+    # Shared resolution context so source.get_value memoizes intermediate
+    # results (e.g. common base sources) across all guards in this check.
+    resolve = match.resolve
     capture_checks: list[tuple[Source, Source]] = []
     guards_to_replay: list[Guard] = []
     for (source, handler, expected, guard), dependencies in zip(
         condition.guards, condition.guard_dependencies
     ):
-        new_source = match.remap_source(source)
+        changed = not match.source_replacement.keys().isdisjoint(dependencies)
+        new_source = remap(source) if changed else source
         if guard.create_fn_name() == "TENSOR_MATCH":
             capture_checks.append((source, new_source))
-        if new_source is source and all(
-            match.remap_source(dep) is dep for dep in dependencies
+        if not changed or (
+            new_source is source and all(remap(d) is d for d in dependencies)
         ):
             continue
 
         try:
-            value = match.resolve(new_source)
+            value = resolve(new_source)
             if handler.get_extra_sources_fn is not None:
-                value = (
-                    value,
-                    *(
-                        match.resolve(match.remap_source(dep))
-                        for dep in handler.get_extra_sources_fn(guard)
-                    ),
-                )
+                extras = handler.get_extra_sources_fn(guard)
+                value = (value, *(resolve(remap(dep)) for dep in extras))
         except Exception:
             hc_log.debug(
                 "subgraph_reuse: reuse failed -- cannot resolve source\n"
@@ -1079,6 +1143,21 @@ def is_reusable(
 
         guards_to_replay.append(guard)
 
+    try:
+        for source, _ in condition.lexical_sources:
+            remapped = remap(source)
+            if remapped is not source and resolve(remapped) is not resolve(source):
+                return False
+        tensors = (resolve(remap(s)) for s in condition.tensor_sources)
+        if input_aliases(tx, fingerprint, tensors) != condition.aliases:
+            return False
+    except Exception:
+        return False
+    # If no sources changed, all guards were already checked during the
+    # original trace and will trivially pass again.
+    if not match.source_replacement:
+        return True
+
     for lifted in match.entry.subgraph_input_mapping:
         if isinstance(lifted, LiftedBoundSymbol):
             match.remap_bound_symbol(tx, lifted)
@@ -1097,7 +1176,6 @@ def is_reusable(
                 return False
             if expr == predicate:
                 continue
-            # Resolving captures may build inputs; predicate checks do not add shape guards.
             if not expr.free_symbols.issubset(shape_env.var_to_range):
                 matches = False
             else:
@@ -1121,14 +1199,18 @@ def is_reusable(
         if new_source is source and not match.symbol_replacements:
             continue
         if not capture_policy_matches(
-            tx, match, source, new_source, match.resolve(new_source)
+            tx, match, source, new_source, resolve(new_source)
         ):
             return False
 
-    # Guard objects are copied only for the winning match.
-    match.runtime_guards = []
     for guard in guards_to_replay:
-        remapped_guard = guard.remap_sources(match.remap_source)
+        if guard.create_fn_name() == "TENSOR_MATCH":
+            source = remap(guard.originating_source)
+            if source in match.metadata_captures:
+                guard = source.make_guard(GuardBuilder.TENSOR_MATCH)
+                match.runtime_guards.append(guard)
+            continue  # The builder already guarded other tensors.
+        remapped_guard = guard.remap_sources(remap)
         if remapped_guard is not guard:
             match.runtime_guards.append(remapped_guard)
     return True
@@ -1146,7 +1228,7 @@ def has_reuse_entries(
     )
     if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
         return False
-    fn_code = get_fn_code(fn_var)
+    fn_code = get_fn_key(fn_var, tx)
     return fn_code is not None and fn_code in invoke_subgraph_cache.subgraph_reuse_cache
 
 
@@ -1162,7 +1244,7 @@ def find_reuse_match(
     )
     if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
         return None
-    fn_code = get_fn_code(fn_var)
+    fn_code = get_fn_key(fn_var, tx)
     if fn_code is None:
         return None
 
@@ -1222,7 +1304,7 @@ def save_reuse_entry(
     if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
         return
 
-    fn_code = get_fn_code(fn_var)
+    fn_code = get_fn_key(fn_var, tx if condition is not None else None)
     if fn_code is None:
         return
 
@@ -1285,7 +1367,19 @@ def save_reuse_entry(
                 for assertion in assertions
                 if assertion.expr.free_symbols & rebound
             )
-        shape_guards = list(dict.fromkeys(shape_guards))
+        # Implications cannot cross the size-oblivious evaluation policy.
+        implied: dict[bool, set[sympy.Basic]] = {False: set(), True: set()}
+        unique_guards = []
+        for predicate, oblivious in shape_guards:
+            if canonicalize_bool_expr(predicate) in implied[oblivious]:
+                continue
+            unique_guards.append((predicate, oblivious))
+            implied[oblivious].update(
+                expr
+                for expr, truth in shape_env.get_implications(predicate)
+                if truth is sympy.true
+            )
+        shape_guards = unique_guards
 
     entry = InvokeSubgraphReuseEntry(
         body_name=body_name,
@@ -1306,8 +1400,8 @@ def save_reuse_entry(
             fn_code, condition, entry, max_reuse_entries
         )
     else:
-        if hash_key is None:
-            raise AssertionError("hash_key must not be None when condition is None")
+        if hash_key is None or not isinstance(fn_code, types.CodeType):
+            raise AssertionError("expected a hash key and function code")
         invoke_subgraph_cache.add_reuse_entry_by_key(
             fn_code, hash_key, entry, max_reuse_entries
         )
@@ -1354,8 +1448,8 @@ def find_reuse_entry_by_key(
     )
     if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
         return None
-    fn_code = get_fn_code(fn_var)
-    if fn_code is None:
+    fn_code = get_fn_key(fn_var)
+    if not isinstance(fn_code, types.CodeType):
         return None
     return invoke_subgraph_cache.find_reuse_entry_by_key(fn_code, hash_key)
 
@@ -1370,8 +1464,7 @@ def stamp_out_subgraph(
     Sources in the cached entry are parameterized: they refer to the original
     call's sources and must be rewritten to the current call's sources via
     source replacement before we can look up or create the corresponding
-    graph placeholders. Replay runtime guards and order annotations from the winning
-    match before returning; its dependencies then participate in outer-region reuse.
+    graph placeholders.
     """
     from torch._dynamo.variables.higher_order_ops import add_call_function, make_attr
 
@@ -1380,29 +1473,27 @@ def stamp_out_subgraph(
         tx.output.shape_env.evaluate_expr(predicate, size_oblivious=size_oblivious)
     flat_proxies = get_flat_proxies(fingerprint)
     for guard in match.runtime_guards:
-        if guard.create_fn_name() == "TENSOR_MATCH":
-            source = guard.originating_source
-            if source in match.metadata_captures:
-                # A copied partial can still hold the previous tensor's type and markings.
-                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
-            else:
-                match.build_capture(tx, source)
-        elif not any(
-            guard.is_equivalent_to(existing)
-            for existing in tx.output.guards.get_guards_for_source(
-                guard.originating_source
-            )
-        ):
+        existing = tx.output.guards.get_guards_for_source(guard.originating_source)
+        if not any(guard.is_equivalent_to(other) for other in existing):
             install_guard(guard)
     if match.condition is not None:
-        tx.output.guard_on_key_order.update(
-            match.remap_source(source) for source in match.condition.guard_on_key_order
-        )
-        tx.output.current_tracer.traced_sources.update(
-            match.remap_source(source) for source in match.condition.traced_sources
-        )
+        orders = map(match.remap_source, match.condition.guard_on_key_order)
+        tx.output.guard_on_key_order.update(orders)
+        tracer = tx.output.current_tracer
+        if tracer.parent is not None:
+            tracer.traced_sources.update(
+                map(match.remap_source, match.condition.traced_sources)
+            )
+            for source, scope in match.condition.lexical_sources:
+                if scope <= tracer.debug_level:
+                    tracer.lexical_sources.update(
+                        ((source, scope), (match.remap_source(source), scope))
+                    )
 
     new_lifted_args = []
+    # Shared resolution context so get_value memoizes intermediate results
+    # (e.g. L['self'].layers) across all freevars in this stamp-out.
+
     # Find the args for the about-to-be-inserted invoke_subgraph call.
     for subgraph_input in cached.subgraph_input_mapping:
         if isinstance(subgraph_input, LiftedUserArg):
@@ -1526,20 +1617,6 @@ def build_subgraph_input_mapping(
     - LiftedBoundSymbol: a SymInt already bound as a graph input
     """
     explicit_symbols = set()
-    for tag, vt in flat_vts:
-        example = (
-            vt.as_proxy().node.meta.get("example_value")
-            if tag in (InputTag.TENSOR, InputTag.SYMNODE)
-            else None
-        )
-        values = (
-            (*example.shape, *example.stride(), example.storage_offset())
-            if isinstance(example, torch.Tensor)
-            else (example,)
-        )
-        for value in values:
-            if isinstance(value, torch.SymInt):
-                explicit_symbols.update(cast(sympy.Expr, value.node._expr).free_symbols)
     proxy_node_to_idx: dict[torch.fx.Node, int] = {}
     idx = 0
     for tag, vt in flat_vts:
@@ -1548,6 +1625,19 @@ def build_subgraph_input_mapping(
             if node not in proxy_node_to_idx:
                 proxy_node_to_idx[node] = idx
                 idx += 1
+                example = node.meta.get("example_value")
+                values = (example,)
+                if isinstance(example, torch.Tensor):
+                    values = (
+                        *example.shape,
+                        *example.stride(),
+                        example.storage_offset(),
+                    )
+                for value in values:
+                    if isinstance(value, torch.SymInt):
+                        explicit_symbols.update(
+                            cast(sympy.Expr, value.node._expr).free_symbols
+                        )
 
     subgraph_input_mapping: list[LiftedArgOrigin] = []
     for outer_proxy in p_args[2:]:
@@ -1562,7 +1652,6 @@ def build_subgraph_input_mapping(
             # concrete int). They appear as either:
             # - placeholder nodes with grapharg.example being a SymInt
             # - call_function nodes (e.g. sym_size_int) with no grapharg
-            # Rebind captured symbols; keep source-independent proxies.
             example = (
                 grapharg.example
                 if grapharg is not None
@@ -1867,6 +1956,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                         traced_sources,
                     )
                     if condition is not None:
+                        condition.lexical_sources = tracing_info.lexical_sources
                         save_reuse_entry(
                             tx,
                             fn_var,
