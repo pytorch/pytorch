@@ -321,6 +321,18 @@ class TestHfStorageOnFsspec(_MemoryFsTestCase):
         )
         self.assertEqual(loaded, self.state_dict)
 
+    def test_writer_reset_keeps_listing_cache_off(self) -> None:
+        # dcp.save(..., checkpoint_id=...) resets the writer onto the id; the
+        # inherited reset would rebuild the fsspec filesystem with its
+        # listing cache on.
+        writer = dist_cp.HuggingFaceStorageWriter(path=f"{self.root}/other")
+        dist_cp.save(self.state_dict, storage_writer=writer, checkpoint_id=self.path)
+
+        self.assertFalse(writer.fs.fs.dircache.use_listings_cache)
+        self.assertTrue(self.memory_fs.exists(f"/{self.name}/ckpt/{_metadata_fn}"))
+        loaded = self._load(dist_cp.HuggingFaceStorageReader(path=self.path))
+        self.assertEqual(loaded, self.state_dict)
+
 
 class _ListingCachingLocalFileSystem(LocalFileSystem):
     """``file://`` that caches directory listings, as gcsfs, s3fs and adlfs do."""
