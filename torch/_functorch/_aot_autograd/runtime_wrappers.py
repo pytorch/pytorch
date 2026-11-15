@@ -2105,10 +2105,20 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             # guard that would request a fresh compile after an input rebind.
             if not all(source is not None for source in sources):
                 continue
-            first_storage = flat_args[group[0]].untyped_storage()._cdata
+            # base_groups only collects indices that passed the Tensor check in
+            # merge_view_inputs, so every member here is a tensor.
+            members = []
+            for index in group:
+                arg = flat_args[index]
+                if not isinstance(arg, Tensor):
+                    break
+                members.append(arg)
+            if len(members) != len(group):
+                continue
+            first_storage = members[0].untyped_storage()._cdata
             if any(
-                flat_args[index].untyped_storage()._cdata != first_storage
-                for index in group[1:]
+                member.untyped_storage()._cdata != first_storage
+                for member in members[1:]
             ):
                 return (
                     "cached synthetic-base inputs no longer share storage in "
@@ -2494,7 +2504,12 @@ def merge_view_inputs(
             )
             # We don't actually have a convenient way of going from storage -> tensor,
             # So using set_() here (we suffer some minor overhead, but this case is rare).
-            synthetic_base.set_(example_alias.untyped_storage())
+            # Pass the size explicitly: the single-argument overload reads
+            # Storage.nbytes() in C++, which rejects a storage whose size is an
+            # unbacked SymInt. Python's nbytes() returns that SymInt instead.
+            example_storage = example_alias.untyped_storage()
+            storage_numel = example_storage.nbytes() // example_alias.dtype.itemsize
+            synthetic_base.set_(example_storage, 0, (storage_numel,), (1,))
             synthetic_base_desc = SyntheticBaseAOTInput(fwd_inputs_descs[example_idx])
         else:
             # Case where all of the aliases require gradients, and have the same _base.
