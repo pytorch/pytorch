@@ -21,6 +21,7 @@ autograd get no recompute).
 
 import copy
 import functools
+import itertools
 import logging
 import operator
 from collections import defaultdict
@@ -77,6 +78,7 @@ def deterministic_recompute(
     fw_outs = fw_module.graph.find_nodes(op="output")[0].args[0]
     saved = {n for n in fw_outs[num_fwd_outputs:] if isinstance(n, torch.fx.Node)}
     copies, regions = _recomputed_copies(fw_module, bw_module, saved, prefix)
+    bw_body = {n.name: n for n in bw_module.graph.nodes}
 
     # A recomputed node that reads or produces a value carrying an unbacked
     # symbol (e.g. from .item() or nonzero, including those nodes themselves)
@@ -125,7 +127,13 @@ def deterministic_recompute(
     # arithmetic. An impure op isn't one, since copying it would run it again.
     # A piece copies the recomputed constants and the attributes it reads, so
     # they fuse into its kernels instead of being operands; a submodule (e.g.
-    # flex_attention's score_mod) couldn't be an operand anyway.
+    # flex_attention's score_mod) couldn't be an operand anyway. A constant the
+    # backward reads directly must be the value the forward used, so it is
+    # shared as a piece of its own instead, which other pieces read; except one
+    # that is the same in any lowering, which stays copied: a scalar, which a
+    # piece couldn't return to Inductor anyway, or an integer or bool tensor
+    # computed only from such values and sizes (e.g. a causal mask; a threshold
+    # on float math could differ).
     constants: set[torch.fx.Node] = set()
     for n in fw_module.graph.nodes:
         if n.op == "get_attr" or (
@@ -139,29 +147,63 @@ def deterministic_recompute(
             )
         ):
             constants.add(n)
-    copied = copies & constants
-    copied |= set(fw_module.graph.find_nodes(op="get_attr"))
-    # A tensor constant the backward also reads directly (e.g. the gradient of
-    # h * table reads table) is read from its own copy there, which could differ
-    # from the one the forward's piece computes; say so.
     copy_names = {n.name for n in copies}
-    bw_body = {n.name: n for n in bw_module.graph.nodes}
+    in_regions = {n for nodes in regions.values() for n in nodes}
+    direct = {
+        c
+        for c in in_regions & constants
+        if any(u.name not in copy_names for u in bw_body[c.name].users)
+    }
+    # Reading a view of a constant reads the constant: the piece returns the
+    # constant and the view stays inline. A multi-output op goes together with
+    # all of its getitems, since a piece can't take or return a tuple.
+    stack = list(direct)
+    while stack:
+        c = stack.pop()
+        group = list(c.all_input_nodes) if _is_view(c.target) else []
+        if isinstance(c.meta.get("val"), (tuple, list)):
+            group += c.users
+        for a in group:
+            if a in in_regions and a in constants and a not in direct:
+                direct.add(a)
+                stack.append(a)
+
+    exact: set[torch.fx.Node] = set()
+    sizes = (int, bool, torch.SymInt, torch.SymBool)
     for c in fw_module.graph.nodes:
-        if c not in copies or c not in constants:
+        val = c.meta.get("val")
+        vals = val if isinstance(val, (tuple, list)) else (val,)
+        tensors = [v for v in vals if isinstance(v, torch.Tensor)]
+        inexact = any(t.is_floating_point() or t.is_complex() for t in tensors)
+        if c not in constants or inexact:
             continue
-        direct = any(u.name not in copy_names for u in bw_body[c.name].users)
-        if direct and isinstance(c.meta.get("val"), torch.Tensor):
-            log.info(
-                "deterministic_recompute: %s%s left as partitioned: the backward "
-                "reads it directly",
-                prefix,
-                c.name,
-            )
+        exact_inputs = all(
+            a in exact or isinstance(a.meta.get("val"), sizes)
+            for a in c.all_input_nodes
+        )
+        if not tensors or exact_inputs:
+            exact.add(c)
+    direct -= exact
+    # A constant outside every region that the backward reads directly is read
+    # from its own copy there, which could differ; say so.
+    outside = (copies & constants) - in_regions - exact
+    for c in fw_module.graph.nodes:
+        if c in outside:
+            if any(u.name not in copy_names for u in bw_body[c.name].users):
+                log.info(
+                    "deterministic_recompute: %s%s left as partitioned: the "
+                    "backward reads it directly",
+                    prefix,
+                    c.name,
+                )
+    copied = (copies & constants) - direct
+    copied |= set(fw_module.graph.find_nodes(op="get_attr"))
 
     # A region's recompute is one piece, with the copied constants it reads. If
     # a path leaves it and comes back (e.g. through a value a selective policy
     # saves), no single call can replace it, and it is left as partitioned (see
-    # _readers_to_move).
+    # _readers_to_move). Each region's constants that the backward reads
+    # directly form a piece of their own.
     order = {n: i for i, n in enumerate(fw_module.graph.nodes)}
 
     def _with_copied(nodes: list[torch.fx.Node]) -> list[torch.fx.Node]:
@@ -174,12 +216,6 @@ def deterministic_recompute(
                 stack.extend(b for b in a.all_input_nodes if b in copied)
         return sorted(piece, key=order.__getitem__)
 
-    pieces = []
-    for nodes in regions.values():
-        rest = [n for n in nodes if n not in copied]
-        if rest:
-            pieces.append(_with_copied(rest))
-
     changed = False
     # The backward node holding each value a shared piece returns, so later
     # pieces can read it.
@@ -187,14 +223,38 @@ def deterministic_recompute(
     # Name pieces by their order in this graph, not by ac_graph_id: that is a
     # process-global counter, so recompiling the same graph would get new names
     # and miss the FX graph cache.
-    for i, piece in enumerate(pieces):
-        identifier = f"{prefix}recompute_{i}"
-        outputs = _share_region(
-            fw_module, bw_module, piece, saved, copies, copied, bw_of, identifier
-        )
-        if outputs is not None:
-            bw_of.update(outputs)
-            changed = True
+    index = itertools.count()
+
+    def _share(pieces: list[list[torch.fx.Node]]) -> list[list[torch.fx.Node]]:
+        """Share ``pieces`` in order; returns those left as partitioned."""
+        nonlocal changed
+        skipped = []
+        for piece in pieces:
+            identifier = f"{prefix}recompute_{next(index)}"
+            outputs = _share_region(
+                fw_module, bw_module, piece, saved, copies, copied, bw_of, identifier
+            )
+            if outputs is None:
+                skipped.append(piece)
+            else:
+                bw_of.update(outputs)
+                changed = True
+        return skipped
+
+    # Constant pieces go first, so the pieces that read them find their outputs
+    # in bw_of; the constants of one left as partitioned are copied into those
+    # pieces instead.
+    direct_by_region: dict[Any, list[torch.fx.Node]] = defaultdict(list)
+    for c in sorted(direct, key=order.__getitem__):
+        direct_by_region[c.meta.get("ac_graph_id")].append(c)
+    for piece in _share([_with_copied(nodes) for nodes in direct_by_region.values()]):
+        copied |= direct & set(piece)
+    pieces = []
+    for nodes in regions.values():
+        rest = [n for n in nodes if n not in direct and n not in copied]
+        if rest:
+            pieces.append(_with_copied(rest))
+    _share(pieces)
     if changed:
         for gm in (fw_module, bw_module):
             gm.graph.eliminate_dead_code()
@@ -603,9 +663,12 @@ def _share_region(
         return _skip("it would return one result twice")
 
     # _place says where each call goes; the forward's fallback is right after
-    # the last slice input. (Every piece has one: a node computed from no
-    # tensor input is a constant.)
-    last_input = max(s_inputs, key=node_index.__getitem__)
+    # the last slice input, or the last placeholder when the slice reads
+    # nothing (a piece of constants).
+    if s_inputs:
+        last_input = max(s_inputs, key=node_index.__getitem__)
+    else:
+        last_input = fw_graph.find_nodes(op="placeholder")[-1]
     fw_replaced = {n for n in s_nodes if n not in inline} | set(fw_extra.values())
     fw_recomputed = [n for n in s_nodes if n.op != "get_attr"]
     fw_recomputed += fw_extra.values()
