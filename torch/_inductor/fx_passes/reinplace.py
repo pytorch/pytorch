@@ -520,17 +520,15 @@ def _is_control_deps_ordering_only_use(
 def _is_auto_functionalized_v2_updated_base(
     src: torch.fx.Node, dst: torch.fx.Node
 ) -> bool:
-    """src is the getitem of an auto_functionalized_v2 that returns the updated base dst.
-
-    The node returns the op's own outputs followed by one tensor per entry of _all_bases.
-    """
-    if src.target is not operator.getitem:
-        return False
+    """Return whether getitem node src is the updated value of base dst of an
+    auto_functionalized_v2 node, which returns the op's own outputs followed by
+    one updated tensor per entry of _all_bases."""
     hop, index = cast(tuple[torch.fx.Node, int], src.args)
-    if hop.target is not torch.ops.higher_order.auto_functionalized_v2:
+    val = hop.meta.get("val")
+    if hop.target is not torch.ops.higher_order.auto_functionalized_v2 or val is None:
         return False
     all_bases = cast(list[torch.fx.Node], hop.kwargs["_all_bases"])
-    base_index = index - (len(hop.meta["val"]) - len(all_bases))
+    base_index = index - (len(val) - len(all_bases))
     return 0 <= base_index < len(all_bases) and all_bases[base_index] is dst
 
 

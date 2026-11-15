@@ -513,8 +513,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(self._count_copies(gm.graph), 0)
 
     def test_copy_back_of_other_base_kept_functionalize_v2(self):
-        # Each input is overwritten with the other input's updated value, so the
-        # copy_ nodes are not copy-backs of the base the op mutated in place.
+        # x is overwritten with the updated value of y, which is not the base
+        # the op mutated in place into x, so that copy_ must stay.
         def f(x, y):
             af = auto_functionalized_v2(
                 torch.ops._reinplacing.sin_cos.default,
@@ -524,7 +524,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 _all_bases=[x, y],
             )
             aten.copy_.default(x, af[2])
-            aten.copy_.default(y, af[1])
             return ()
 
         x, y = (torch.randn(3, device=device) for _ in range(2))
@@ -532,7 +531,22 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         reinplace_inplaceable_ops_core(gm.graph)
         gm.graph.lint()
 
-        self.assertEqual(self._count_copies(gm.graph), 2)
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
+        self.assertEqual(self._count_copies(gm.graph), 1)
+
+    def test_copy_back_of_other_base_numerics_functionalize_v2(self):
+        def f(inp, x, y):
+            sin_cos(inp, x, y)
+            x.copy_(y)
+
+        with inductor_config.patch({"enable_auto_functionalized_v2": True}):
+            inp = torch.randn(3, device=device)
+            x, y = (torch.randn(3, device=device) for _ in range(2))
+            x2, y2 = x.clone(), y.clone()
+            f(inp, x, y)
+            torch.compile(f)(inp, x2, y2)
+            self.assertEqual(x2, x)
+            self.assertEqual(y2, y)
 
     def test_multi_output_intermediate(self):
         for requires_grad in [False, True]:
