@@ -113,7 +113,8 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
   DLDevice ctx;
 
   ctx.device_id =
-      (device.is_cuda() || device.is_privateuseone() || device.is_mtia())
+      (device.is_cuda() || device.is_xpu() || device.is_privateuseone() ||
+       device.is_mtia())
       ? static_cast<int32_t>(static_cast<unsigned char>(device.index()))
       : 0;
 
@@ -138,7 +139,6 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
       break;
     case DeviceType::XPU:
       ctx.device_type = DLDeviceType::kDLOneAPI;
-      ctx.device_id = at::detail::getXPUHooks().getGlobalIdxFromDevice(device);
       break;
     case DeviceType::MAIA:
       ctx.device_type = DLDeviceType::kDLMAIA;
@@ -162,7 +162,7 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
 Device dlDeviceToTorchDevice(
     DLDeviceType type,
     c10::DeviceIndex index,
-    void* data) {
+    void* data [[maybe_unused]]) {
   switch (type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
@@ -181,8 +181,7 @@ Device dlDeviceToTorchDevice(
       return at::Device(DeviceType::HIP, index);
 #endif
     case DLDeviceType::kDLOneAPI:
-      TORCH_CHECK(data != nullptr, "Can't get ATen device for XPU without XPU data.");
-      return at::detail::getXPUHooks().getDeviceFromPtr(data);
+      return at::Device(DeviceType::XPU, index);
     case DLDeviceType::kDLMAIA:
       return at::Device(DeviceType::MAIA, index);
     case DLDeviceType::kDLExtDev:
