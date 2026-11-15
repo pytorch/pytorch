@@ -77,6 +77,9 @@ if TYPE_CHECKING:
     from .symbolic_convert import InstructionTranslatorBase
 
 
+_IMMUTABLE_AGGREGATE_TYPES = (TupleVariable, FrozensetVariable, SliceVariable)
+
+
 def _skip_container_constant_probe(value: VariableTracker) -> bool:
     return isinstance(value, (ConstDictVariable, SetVariable)) or (
         isinstance(value, BaseListVariable) and not isinstance(value, TupleVariable)
@@ -161,10 +164,12 @@ class PyCodegen:
             )
         if value in self._constant_reconstruction_cache:
             return self._constant_reconstruction_cache[value]
-        if isinstance(value, (TupleVariable, SliceVariable)):
-            items = value.items
-        elif isinstance(value, FrozensetVariable):
-            items = [key.vt for key in value.set_items]
+        if isinstance(value, _IMMUTABLE_AGGREGATE_TYPES):
+            items = (
+                [key.vt for key in value.set_items]
+                if isinstance(value, FrozensetVariable)
+                else value.items
+            )
         elif _skip_container_constant_probe(value):
             # Probing container members would specialize their lazy children.
             return True
@@ -403,7 +408,7 @@ class PyCodegen:
             # disables it, but other export codegen paths can keep it enabled).
             and not (
                 self.value_from_source
-                and isinstance(value, (TupleVariable, FrozensetVariable, SliceVariable))
+                and isinstance(value, _IMMUTABLE_AGGREGATE_TYPES)
                 and self._constant_requires_reconstruction(value)
             )
             and value.is_python_constant()
