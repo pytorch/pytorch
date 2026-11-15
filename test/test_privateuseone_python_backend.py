@@ -6,7 +6,13 @@ import numpy as np
 import torch
 import torch._C
 import torch._dynamo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 from torch.utils.backend_registration import _setup_privateuseone_for_python_backend
 
 
@@ -130,6 +136,7 @@ def pow_scalar(scalar, exponent):
     return wrap(ans, ans.shape, torch.float32)
 
 
+@instantiate_parametrized_tests
 class PrivateUse1BackendTest(TestCase):
     @classmethod
     def setupClass(cls):
@@ -156,6 +163,20 @@ class PrivateUse1BackendTest(TestCase):
         c = (a + b).sum()
         c.backward()
         self.assertTrue(np.allclose(a.grad.raw_data, np.ones((2, 2))))
+
+    @parametrize("requires_grad", [False, True])
+    def test_fake_tensor_view(self, requires_grad):
+        x = torch.empty((2, 3), device="npy", requires_grad=requires_grad)
+        with FakeTensorMode() as mode:
+            fake = mode.from_tensor(x)
+            flat = fake.view(-1)
+
+        self.assertTrue(mode.is_our_fake(flat))
+        self.assertEqual(flat.shape, (6,))
+        self.assertEqual(flat.device, x.device)
+        self.assertEqual(flat.dtype, x.dtype)
+        self.assertEqual(flat.requires_grad, requires_grad)
+        self.assertIs(flat._base, fake)
 
     def test_ldexp(self):
         a_cpu = torch.tensor([1.0, 2.0], dtype=torch.float32)

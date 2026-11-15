@@ -1942,22 +1942,30 @@ class FakeTensor(Tensor):
                 "'device' (or 'fake_device')"
             )
 
-        self = Tensor._make_subclass(
-            cls,
-            elem,
-            elem.requires_grad if requires_grad is None else requires_grad,
-            dispatch_device=True,
-            device_for_backend_keys=device,
-        )
+        if elem.device.type != "meta":
+            raise AssertionError(
+                f"elem.device.type must be 'meta', got {elem.device.type}"
+            )
+        # Plain Meta results for PrivateUse1 can retain that backend's key.
+        # Keep their detach on Meta so it skips the backend kernel.
+        with (
+            torch._C._IncludeDispatchKeyGuard(torch._C.DispatchKey.Meta)
+            if device.type == torch._C._get_privateuse1_backend_name()
+            and type(elem) is Tensor
+            else contextlib.nullcontext()
+        ):
+            self = Tensor._make_subclass(
+                cls,
+                elem,
+                elem.requires_grad if requires_grad is None else requires_grad,
+                dispatch_device=True,
+                device_for_backend_keys=device,
+            )
         if not fake_mode._allow_unsafe_data_ptr_access:
             torch._C._set_throw_on_mutable_data_ptr(self)
         else:
             torch._C._set_warn_deprecated_on_mutable_data_ptr(self)
 
-        if elem.device.type != "meta":
-            raise AssertionError(
-                f"elem.device.type must be 'meta', got {elem.device.type}"
-            )
         # NB: it is fine, if a little confusing, for device to be meta
         # (we are faking a meta tensor in that case).  However, it often
         # indicates some sort of confusion (e.g., you accidentally passed
