@@ -18,10 +18,12 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import (
+    _validate_and_convert_non_fake_tensors,
     FakeTensor,
     FakeTensorMode,
     is_fake_tensor,
     maybe_get_fake_mode,
+    unset_fake_temporarily,
 )
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
@@ -41,6 +43,29 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 @dataclass
 class UnsupportedAliasMutationException(RuntimeError):
     reason: str
+
+
+def _fake_mode_handler(handler):
+    """Adapt a HOP mode handler to DispatchKey.Fake.
+
+    Pass the active mode or the first input's mode with the fake mode slot
+    unset. Input modes are not entered; the handler controls mode entry.
+    Restore an active mode when the handler returns or raises.
+    """
+
+    @functools.wraps(handler)
+    def impl(*args, **kwargs):
+        with unset_fake_temporarily() as mode:
+            if mode is None:
+                for arg in pytree.arg_tree_leaves(*args, **kwargs):
+                    mode = maybe_get_fake_mode(arg)
+                    if mode is not None:
+                        break
+            if mode is None:
+                raise AssertionError("No fake mode found for higher-order operator")
+            return handler(mode, *args, **kwargs)
+
+    return impl
 
 
 def _find_or_create_fake_mode() -> FakeTensorMode:
@@ -1311,8 +1336,9 @@ def register_fake(hop, fn: F, *, skip_cache: bool = ...) -> F: ...
 def register_fake(hop, fn=None, *, skip_cache=False):
     """
     Register a fake function for a HOP. This is conceptually equivalent of the
-    register_fake utility for the custom ops. The registered function is called
-    inside the fake_tensor _dispatch_impl.
+    register_fake utility for the custom ops. Install both a FakeTensorMode
+    handler and a DispatchKey.Fake kernel, which call the function with the
+    fake mode active.
 
     Set skip_cache=True to keep a HOP's fake output out of the FakeTensorMode
     cache -- either to preserve the historical uncached behavior of
@@ -1326,6 +1352,26 @@ def register_fake(hop, fn=None, *, skip_cache=False):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         redirect_to_mode(hop, FakeTensorMode)
+
+        @hop.py_impl(torch._C.DispatchKey.Fake)
+        @_fake_mode_handler
+        def cpp_fake_tensor_mode(mode, *args, **kwargs):
+            flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+            flat_args, _ = _validate_and_convert_non_fake_tensors(
+                mode,
+                hop,
+                mode.fake_tensor_converter,
+                flat_args,
+                args_spec,
+            )
+            args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
+            ignore_unbacked = (
+                contextlib.nullcontext()
+                if mode.shape_env is None
+                else mode.shape_env.ignore_fresh_unbacked_symbols()
+            )
+            with mode, ignore_unbacked:
+                return func(*args, **kwargs)
 
         registered_hop_fake_fns[hop] = func
         if skip_cache:
