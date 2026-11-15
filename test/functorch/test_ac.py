@@ -424,9 +424,7 @@ class MemoryBudgetTestDevice(TestCase):
         self.assertEqual(flops, eager_flops)
 
 
-instantiate_device_type_tests(
-    MemoryBudgetTestDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
-)
+instantiate_device_type_tests(MemoryBudgetTestDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
