@@ -11,6 +11,7 @@ In particular, the following analyses are provided:
 
 import contextlib
 import itertools
+from collections.abc import Sequence
 from typing import Any
 
 import torch
@@ -413,14 +414,22 @@ def _storage_overlap_partition(
         )
 
 
+def storage_overlap_partition_for_cache_key(
+    inputs: Sequence[Any],
+) -> tuple[tuple[int, ...], ...]:
+    return _storage_overlap_partition([x for x in inputs if isinstance(x, Tensor)])
+
+
 def add_input_mutation_storage_overlap_partition_guard(
     aot_config: AOTConfig,
     fwd_inputs: list[Any],
-    input_info: list[InputAliasInfo],
 ) -> None:
-    if not any(info.mutates_data for info in input_info):
-        return
-
+    """
+    Guards that the storage-overlap partition of the tensor inputs matches the
+    one seen at compile time. Callers must only call this for graphs that
+    mutate input data; the guard is emitted on both the trace path and on
+    AOTAutogradCache hits.
+    """
     tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is None:
         return
@@ -438,10 +447,6 @@ def add_input_mutation_storage_overlap_partition_guard(
         tensor_indices.append(i)
         seen_sources.add(source)
     if len(tensor_indices) <= 1:
-        return
-
-    mutated_tensor_indices = [i for i in tensor_indices if input_info[i].mutates_data]
-    if not mutated_tensor_indices:
         return
 
     selected_inputs = [fwd_inputs[i] for i in tensor_indices]

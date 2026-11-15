@@ -81,6 +81,10 @@ from .aot_autograd_result import (
     GenericAOTAutogradResult,
     SerializedGraphModule,
 )
+from .input_output_analysis import (
+    add_input_mutation_storage_overlap_partition_guard,
+    storage_overlap_partition_for_cache_key,
+)
 from .runtime_wrappers import (
     CompilerWrapper,
     SerializableCompiledFunction,
@@ -644,6 +648,11 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         # _save_config_ignore) since they're not serializable. We must access the
         # config module directly to get the patched runtime values.
         self.custom_estimator_solver_uuids = _get_custom_estimator_solver_uuids(config)
+        # Input aliasing decides whether AOTAutograd builds synthetic bases, so
+        # graphs traced with different input storage overlap must not share an entry.
+        self.input_storage_overlap_partition = storage_overlap_partition_for_cache_key(
+            example_inputs
+        )
         self._init_fx_graph_hash_details(gm, example_inputs, fx_config)
 
     def _record_runtime_state(self, gm: torch.fx.GraphModule) -> None:
@@ -1294,6 +1303,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             # which is true either way.
             if compiled_fn is not None:
                 log.info("AOTAutograd cache hit for key %s", cache_key)
+                # The trace path emits this guard from merge_view_inputs, which a
+                # cache hit skips.
+                if any(i.mutates_data for i in entry.runtime_metadata.input_info):
+                    add_input_mutation_storage_overlap_partition_guard(aot_config, args)
 
                 counters["aot_autograd"]["autograd_cache_hit"] += 1
                 cache_state = "hit"
