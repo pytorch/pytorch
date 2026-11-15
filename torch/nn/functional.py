@@ -5908,7 +5908,10 @@ def pad(
             :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
         mode: ``'constant'``, ``'reflect'``, ``'replicate'`` or ``'circular'``.
             Default: ``'constant'``
-        value: fill value for ``'constant'`` padding. Default: ``0``
+        value: fill value for ``'constant'`` padding. Default: ``0``.
+            In eager mode, a Python ``int`` larger than ``2**53`` is kept exact
+            for ``int64`` and ``uint64`` inputs. TorchScript and direct callers
+            of ``torch._C._nn.pad`` convert the value to a ``double``.
 
     Examples::
 
@@ -5949,10 +5952,17 @@ def pad(
                 return importlib.import_module(
                     "torch._decomp.decompositions"
                 )._replication_pad(input, pad)
-        if mode == "constant" and isinstance(value, int):
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and mode == "constant"
+        ):
             # _C._nn.pad takes value as a double, which rounds ints above 2**53.
             # constant_pad_nd takes a Scalar and keeps the int exact.
-            return torch.constant_pad_nd(input, pad, value)
+            if input.dtype == torch.int64 and abs(value) > 2**53:
+                return torch.constant_pad_nd(input, pad, value)
+            if input.dtype == torch.uint64 and value > 2**53:
+                return torch.constant_pad_nd(input, pad, value)
     return torch._C._nn.pad(input, pad, mode, value)
 
 

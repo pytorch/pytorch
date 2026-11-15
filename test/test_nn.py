@@ -7399,25 +7399,41 @@ class TestNNDeviceType(NNTestCase):
         out_cpu.backward(grad.cpu())
         self.assertEqual(x.grad, ref_x.grad)
 
-    @skipMPS
+    @skipMPS  # exact int64 fill values are not verified on MPS
     def test_pad_int64_fill_value_is_exact(self, device):
         # https://github.com/pytorch/pytorch/issues/170798
-        iinfo = torch.iinfo(torch.int64)
-        for v in (2**53 + 1, -(2**53 + 1), iinfo.max, iinfo.min):
-            x = torch.tensor([v], dtype=torch.int64, device=device)
-            expected = torch.tensor([v, v, v], dtype=torch.int64, device=device)
+        x = torch.zeros(1, dtype=torch.int64, device=device)
+        for v in (2**53 + 1, -(2**53 + 1), torch.iinfo(torch.int64).max):
+            expected = torch.tensor([0, v, v], dtype=torch.int64, device=device)
             self.assertEqual(F.pad(x, (0, 2), value=v), expected)
-            self.assertEqual(F.pad(x, (1, 1), mode="constant", value=v), expected)
+            self.assertEqual(F.pad(x, (0, 2), mode="constant", value=v), expected)
+
+    @onlyCPU
+    def test_pad_uint64_fill_value_is_exact(self, device):
+        x = torch.zeros(1, dtype=torch.uint64, device=device)
+        v = 2**64 - 1
+        expected = torch.tensor([0, v, v], dtype=torch.uint64, device=device)
+        self.assertEqual(F.pad(x, (0, 2), value=v), expected)
+        with self.assertRaisesRegex(RuntimeError, "without overflow"):
+            F.pad(x, (0, 2), value=-(2**53 + 1))
 
     def test_pad_int_fill_value_other_dtypes(self, device):
         for x, value, expected in (
             ([5], 3, [3, 5, 3]),
-            ([True], False, [False, True, False]),
-            ([1.0], 3, [3.0, 1.0, 3.0]),
+            ([False], True, [True, False, True]),
+            ([1.0], 2**70, [2.0**70, 1.0, 2.0**70]),
         ):
             x = torch.tensor(x, device=device)
             expected = torch.tensor(expected, device=device)
             self.assertEqual(F.pad(x, (1, 1), value=value), expected)
+        with self.assertRaisesRegex(RuntimeError, "without overflow"):
+            F.pad(torch.zeros(2, dtype=torch.uint8, device=device), (1, 1), value=-1)
+
+    @onlyCPU
+    def test_pad_bool_fill_value_jit_trace(self, device):
+        x = torch.zeros(2, device=device)
+        traced = torch.jit.trace(lambda t: F.pad(t, (1, 1), value=True), x)
+        self.assertEqual(traced(x), F.pad(x, (1, 1), value=1.0))
 
     @onlyAccelerator
     @skipMPS
