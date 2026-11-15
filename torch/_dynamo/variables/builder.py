@@ -81,7 +81,6 @@ from torch._subclasses.fake_tensor import (
     maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
-from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
 from torch.fx.experimental.dynamic_spec import (
@@ -2537,11 +2536,7 @@ class VariableBuilder:
                 source=self.source,
                 tx=self.tx,
             )
-        elif (
-            isinstance(value, (dict, collections.OrderedDict))
-            and type(value).__new__ is dict.__new__
-        ):
-            # Construct a dict_vt that will reside inside the UserDefinedDictVariable
+        elif issubclass(type(value), dict) and type(value).__new__ is dict.__new__:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -2566,7 +2561,7 @@ class VariableBuilder:
                 build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
             )
 
-            if isinstance(value, collections.defaultdict):
+            if issubclass(type(value), collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
                 result = UserDefinedDefaultDictVariable(
                     value,
@@ -2579,7 +2574,7 @@ class VariableBuilder:
             else:
                 udf_cls = (
                     UserDefinedOrderedDictVariable
-                    if isinstance(value, collections.OrderedDict)
+                    if issubclass(type(value), collections.OrderedDict)
                     else UserDefinedDictVariable
                 )
                 result = udf_cls(value, items=kv_items, source=self.source)
@@ -3976,7 +3971,6 @@ class VariableBuilder:
             # when specialize_float=False
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda
             or torch._inductor.config.triton.cudagraphs
-            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or (
                 config.assume_static_by_default
                 and frame_state_entry.scalar is not auto_dynamic
