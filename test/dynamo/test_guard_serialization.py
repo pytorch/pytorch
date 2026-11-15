@@ -1047,6 +1047,14 @@ class PlainNamespaceDict(dict):
     pass
 
 
+class GenericGetattrDict(collections.defaultdict):
+    # Retain defaultdict's distinct wrapper for PyObject_GenericGetAttr.
+    __new__ = dict.__new__
+    __init__ = dict.__init__
+    __reduce__ = object.__reduce__
+    __reduce_ex__ = object.__reduce_ex__
+
+
 class SlottedDictionary(dict):
     __slots__ = ("tag",)
 
@@ -1791,7 +1799,7 @@ class _ODictSlotsState(_ODictSubclass):
 
 @instantiate_parametrized_tests
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
-    @parametrize("mapping_type", [dict, PlainNamespaceDict])
+    @parametrize("mapping_type", [dict, PlainNamespaceDict, GenericGetattrDict])
     @parametrize(
         "consumer_type",
         [
