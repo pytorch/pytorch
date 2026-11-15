@@ -350,7 +350,8 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     return constant
                 return fake
             elif tensor_meta := node.meta.get("tensor_meta"):
-                if self.fake_tensor_mode is None:
+                fake_mode = self.fake_tensor_mode
+                if fake_mode is None:
                     raise AssertionError("fake_tensor_mode must not be None")
                 with unset_fake_temporarily():
                     meta_tensor = torch.empty(
@@ -360,10 +361,8 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                         requires_grad=tensor_meta.requires_grad,
                         memory_format=tensor_meta.memory_format,
                     )
-                return self.fake_tensor_mode.fake_tensor_converter.from_meta_and_device(
-                    self.fake_tensor_mode,
-                    meta_tensor,
-                    torch.device("cpu"),
+                return fake_mode.fake_tensor_converter.from_meta_and_device(
+                    fake_mode, meta_tensor, torch.device("cpu")
                 )
             elif len(node.users) == 0:
                 return None
