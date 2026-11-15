@@ -19,6 +19,7 @@ import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
+from torch._dynamo.utils import counters
 from torch._dynamo.variables.functions import _TIME_FUNCTION_NAMES
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_device_type import (
@@ -1362,6 +1363,61 @@ else:
             x = torch.randn(3)
             for scale in [0.5, 0.75, 1.0]:
                 self.assertEqual(fn_opt(x, scale), fn(x, scale))
+
+    @parametrize("requires_grad", [False, True])
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("force_disable_caches", False)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_tensor_alpha_specialized_in_aot_not_cached(self, requires_grad):
+        # A 0-d tensor alpha is specialized by a float guard during AOT
+        # compile, which must not be pruned into a reusable cache entry.
+        def fn(x, alpha):
+            return (x * 2).add(x, alpha=alpha)
+
+        fn_opt = torch.compile(fn, backend="inductor", fullgraph=True)
+        with fresh_cache():
+            counters.clear()
+            for rate in [0.1, 0.2, 0.03]:
+                alpha = torch.tensor(rate, dtype=torch.float64)
+                x = torch.ones(2, dtype=torch.float64, requires_grad=requires_grad)
+                x_ref = x.detach().clone().requires_grad_(requires_grad)
+                actual = fn_opt(x, alpha)
+                expected = fn(x_ref, alpha)
+                self.assertEqual(actual, expected)
+                if requires_grad:
+                    actual.sum().backward()
+                    expected.sum().backward()
+                    self.assertEqual(x.grad, x_ref.grad)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertGreater(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @parametrize("op", ["rms_norm", "huber_loss", "interpolate", "cumsum_int"])
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("force_disable_caches", False)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_float_arg_specialized_in_aot_not_cached(self, op):
+        # Float guards from AOT specialization are not input SymInts, so the
+        # cache entry would otherwise hit for any value of s.
+        fn = {
+            "rms_norm": lambda x, s: F.rms_norm(x * s, (4,), eps=s + 1e-3),
+            "huber_loss": lambda x, s: F.huber_loss(x * s, x.flip(0), delta=s + 0.1),
+            "interpolate": lambda x, s: F.interpolate(
+                (x * s)[None], scale_factor=1.0 + s
+            ),
+            "cumsum_int": lambda x, s: (x * s).cumsum(int(s * 2) % 2),
+        }[op]
+        x = torch.randn(4, 4)
+        fn_opt = torch.compile(fn, backend="inductor")
+        with fresh_cache():
+            counters.clear()
+            for s in [0.9, 0.5, 0.25, 2.0]:
+                self.assertEqual(fn_opt(x, s), fn(x, s))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertGreater(counters["aot_autograd"]["autograd_cache_bypass"], 0)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_tensorfiy_python_scalars_1(self):
