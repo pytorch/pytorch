@@ -146,6 +146,7 @@ class SubgraphTracingInfo:
     # All sources accessed via VariableBuilder during the subgraph trace.
     traced_sources: OrderedSet[Any] = field(default_factory=OrderedSet)
     has_builtin_method_identity: bool = False
+    lexical_sources: set[tuple[Source, int]] = field(default_factory=set)
 
 
 # This function is a syntax sugar for creating a dummy new subtracer so that
@@ -2027,6 +2028,7 @@ def speculate_subgraph_with_auto_output_flattening(
             tracing_info = SubgraphTracingInfo(
                 side_effect_stack=subtracer.side_effect_stack,
                 traced_sources=subtracer.traced_sources,
+                lexical_sources=subtracer.lexical_sources,
                 has_builtin_method_identity=subtracer.has_builtin_method_identity,
             )
 
