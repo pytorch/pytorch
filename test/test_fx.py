@@ -3047,6 +3047,26 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         x, w = torch.rand(3, 4), torch.rand(4, 4)
         self.assertTrue(any(n.target == torch.relu for n in traced.graph.nodes))
 
+    def test_wrapped_method_with_varargs(self):
+        # Issue #171981: wrapped forward method with *args or **kwargs should not crash with
+        # ValueError: code: co_varnames is too small
+        def dummy_wrapper(fn):
+            @functools.wraps(fn)
+            def wrapper(self, *args, **kwargs):
+                return fn(self, *args, **kwargs)
+
+            return wrapper
+
+        class MyModule(torch.nn.Module):
+            @dummy_wrapper
+            def forward(self, x, a, **kwargs):
+                return torch.relu(x + a)
+
+        m = MyModule()
+        gm = symbolic_trace(m)
+        x, a = torch.randn(3), torch.randn(3)
+        self.assertEqual(gm(x, a), m(x, a))
+
     def test_empty_graph_codegen(self):
         graph = torch.fx.Graph()
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
