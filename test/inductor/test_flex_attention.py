@@ -80,6 +80,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (
     decorateIf,
+    fake_tensor_modes,
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
@@ -5954,13 +5955,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
             )
 
-    def test_backward_fake_symbolic_query_key_batch_metadata(self, device):
+    @fake_tensor_modes
+    def test_backward_fake_symbolic_query_key_batch_metadata(self, device, mode_cls):
         from torch._dynamo.source import LocalSource
         from torch._higher_order_ops.flex_attention import (
             _permute_strides,
             flex_attention_backward_fake_tensor_mode,
         )
-        from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import (
             DimDynamic,
             ShapeEnv,
@@ -5968,7 +5969,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
         shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        fake_mode = mode_cls(allow_non_fake_inputs=True, shape_env=shape_env)
 
         def fakeify(t, name, shape_id=None):
             dynamic_sizes = [DimDynamic.STATIC] * t.dim()
