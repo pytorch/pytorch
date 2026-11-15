@@ -222,8 +222,9 @@ _MOST_FROZEN = 8
 # before its graphs take all of them as inputs.
 _MOST_MELTS = 3
 # How many times the tensors a graph has built in may be found moved to
-# other memory, unchanged, before the ones that moved become inputs.
-_MOST_MOVES = 8
+# other memory, unchanged, before the ones that moved become inputs: each
+# time is a copy of them that something else made.
+_MOST_MOVES = 3
 _HEAPTYPE = 1 << 9
 # How many variants of a region may leave what they were given with other
 # items, keys or attributes than it had. A cache that is filled on the first
@@ -2536,10 +2537,12 @@ class _Region:
         self, inputs: _Inputs, modules: dict[int, nn.Module], written: set[int]
     ) -> list[int]:
         """The tensors of a call that its graph may have built in instead of
-        taking them: those of the modules, when the call is one of inference
-        (no gradients recorded, no module in training). Not the ones the
-        region itself writes to or replaces, nor the ones a graph of the
-        region had built in when they changed."""
+        taking them: the parameters and buffers of the modules, when the
+        call is one of inference (no gradients recorded, no module in
+        training). Not the ones the region itself writes to or replaces, nor
+        the ones a graph of the region had built in when they changed. A
+        tensor a module keeps in a plain attribute is a cache more often
+        than a weight, and stays an input."""
         options = self.plan.options
         if options.backend not in _BUILDS_IN or torch.is_grad_enabled():
             return []
@@ -2548,14 +2551,12 @@ class _Region:
         if self.melts >= _MOST_MELTS:
             return []
         state: set[int] = set()
-        try:
-            for module in modules.values():
-                if any(m.training for m in module.modules()):
+        for module in modules.values():
+            for part in module.modules():
+                if part.training:
                     return []
-                for store, name in _module_state(module).accessors:
-                    state.add(id(store[name]))
-        except LookupError:
-            return []
+                state.update(map(id, part._parameters.values()))
+                state.update(map(id, part._buffers.values()))
         flat, left = inputs.flat, written | self.unstable
         return [i for i, t in enumerate(flat) if id(t) in state and i not in left]
 
@@ -2597,6 +2598,10 @@ class _Region:
             raise _Failed(None, f"{ops} tensor operations, not worth a graph")
         _views_to_reshapes(graph)
         if frozen:
+            # A region is handed every tensor of a module it takes: the
+            # ones its graph does not use are no part of it.
+            placeholders = [n for n in graph.graph.nodes if n.op == "placeholder"]
+            frozen = [i for i in frozen if placeholders[i].users]
             # While the products of the graph are still products.
             frozen = _worth_building_in(graph, frozen)
         if options.backend is _inductor:
