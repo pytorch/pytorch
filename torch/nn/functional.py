@@ -5949,6 +5949,10 @@ def pad(
                 return importlib.import_module(
                     "torch._decomp.decompositions"
                 )._replication_pad(input, pad)
+        if mode == "constant" and isinstance(value, int):
+            # _C._nn.pad takes value as a double, which rounds ints above 2**53.
+            # constant_pad_nd takes a Scalar and keeps the int exact.
+            return torch.constant_pad_nd(input, pad, value)
     return torch._C._nn.pad(input, pad, mode, value)
 
 
