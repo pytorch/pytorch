@@ -1038,8 +1038,42 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         X, matA = _create_matrices(
             m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
         )
-        matA = matA.t()
-        torch.nn.functional.linear(X, matA, bias)
+        # A key carries a labelled "_act_<name>" token when _addmm_activation set
+        # an epilogue, and a trailing "_bias_None" when the call reached the Lt
+        # path without a 1-D bias; on CUDA either can appear without the other.
+        # Replay has to reproduce both or it tunes a different key and leaves
+        # the recorded one unfilled. The "act" label is what says an epilogue is
+        # there at all.
+        tokens = untuned_gemm_temp
+        no_bias = tokens[-2:] == ["bias", "None"]
+        if no_bias:
+            tokens = tokens[:-2]
+        epilogue = tokens[-1] if len(tokens) > 1 and tokens[-2] == "act" else None
+        if epilogue not in (None, "RELU", "GELU"):
+            warnings.warn(
+                f"error: unknown epilogue {epilogue}. "
+                + f"Skipped tuning for: {untuned_gemm[1]}",
+                stacklevel=2,
+            )
+            return
+
+        if no_bias:
+            # Every self that reaches this path without being 1-D leaves the
+            # bias null, and for one epilogue they share a key. On CUDA a
+            # contiguous (1, n) is the shape to replay with because it gets
+            # there with or without an epilogue, while any other 2-D self
+            # needs one. ROCm never records such a key.
+            addmm_self = torch.rand(1, n, dtype=dtype, device=deviceid)
+        else:
+            addmm_self = bias
+
+        if epilogue is not None:
+            torch._addmm_activation(addmm_self, X, matA, use_gelu=(epilogue == "GELU"))
+        elif no_bias:
+            torch.addmm(addmm_self, X, matA)
+        else:
+            matA = matA.t()
+            torch.nn.functional.linear(X, matA, bias)
     else:
         warnings.warn(f"error: unknown op {op_sig}", stacklevel=2)
 
