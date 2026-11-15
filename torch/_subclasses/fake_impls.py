@@ -2521,7 +2521,7 @@ def infer_size(
             guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
-            f"at non-singleton dimension {i})",
+            f"at non-singleton dimension {i}",
         )
         expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
     return tuple(expandedSizes)
