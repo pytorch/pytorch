@@ -5955,10 +5955,13 @@ def pad(
         if (
             isinstance(value, int)
             and not isinstance(value, bool)
+            and not torch.compiler.is_compiling()
             and mode == "constant"
         ):
             # _C._nn.pad takes value as a double, which rounds ints above 2**53.
-            # constant_pad_nd takes a Scalar and keeps the int exact.
+            # constant_pad_nd takes a Scalar and keeps the int exact. Dynamo
+            # reports a SymInt as an int and Inductor cannot lower a symbolic
+            # fill, so compiled code keeps using _C._nn.pad.
             if input.dtype == torch.int64 and abs(value) > 2**53:
                 return torch.constant_pad_nd(input, pad, value)
             if input.dtype == torch.uint64 and value > 2**53:
