@@ -510,6 +510,8 @@ inductor_override_kwargs["cuda"] = {
     },
     ("nn.functional.batch_norm", f16): {"reference_in_float": True},
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
+    # Exception: Tensor-likes are not close!
+    ("nn.functional.bilinear", f16): {"atol": 3e-3, "rtol": 3e-3},
     ("nn.functional.cosine_similarity", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", f16): {"reference_in_float": True},
     ("nn.functional.linear", f16): {"atol": 3e-4, "rtol": 0.01},
@@ -776,6 +778,8 @@ inductor_override_kwargs["xpu"] = {
         "grad_atol": 2e-3,
         "grad_rtol": 1e-3,
     },
+    # fp16 backward reduces over frames in a different order than eager.
+    ("stft", f16): {"grad_atol": 1e-2, "grad_rtol": 1e-3},
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
