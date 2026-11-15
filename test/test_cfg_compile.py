@@ -3830,6 +3830,150 @@ def region_counter(x, i):
     return ((x + i).sin() * i).cos().exp().tanh()
 
 
+class RegionLinears(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = torch.nn.Sequential(
+            torch.nn.Linear(6, 8),
+            torch.nn.Tanh(),
+            torch.nn.Linear(8, 6),
+            torch.nn.ReLU(),
+        )
+        self.layers = torch.nn.ModuleList(torch.nn.Linear(6, 6) for _ in range(5))
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class RegionAverage:
+    # State that a call reads and replaces.
+    def __init__(self):
+        self.mean = torch.zeros(6)
+
+    def update(self, value):
+        self.mean = self.mean * 0.9 + value.mean(0) * 0.1
+        return self.mean
+
+
+class RegionRunningMean(RegionAverage):
+    def __init__(self):
+        super().__init__()
+        self.count = 0
+
+    def update(self, value):
+        self.count = self.count + 1
+        self.mean = self.mean + (value.mean(0) - self.mean) / self.count
+        return self.mean
+
+
+def region_running(model, x, stats):
+    out = model(x)
+    return out - stats.update(out)
+
+
+def region_remember(model, x, memory):
+    out = model(x)
+    memory["last"] = out.detach()
+    memory["sum"] = memory.get("sum", 0) + out.sum()
+    return out * 2
+
+
+class RegionState:
+    def __init__(self):
+        self.steps = []
+        self.total = None
+
+
+class RegionStarts(torch.nn.Module):
+    # Makes an object that has nothing of its input in it, as a model does
+    # that starts a cache.
+    def __init__(self):
+        super().__init__()
+        self.net = RegionLinears()
+
+    def forward(self, x):
+        return self.net(x), RegionState()
+
+
+class RegionMasked(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(6, 6)
+        self.mask = torch.empty(0)
+
+    def forward(self, x):
+        # Built on every call, and kept.
+        self.mask = torch.tril(torch.ones(x.shape[0], x.shape[0]))
+        return self.linear(self.mask @ x).tanh()
+
+
+def region_note(log, x, out):
+    log.append(out.shape[0])
+    x.add_(1)
+    return float(out.sum())
+
+
+def region_partway(model, x, log, note):
+    # The call is in another block than the model's, where a path comes by
+    # it, and its callee is an argument, so that it is not inlined.
+    out = model(x)
+    total = 0.0
+    if note is not None:
+        total = note(log, x, out)
+    return out * 2, total
+
+
+def region_sized(model, x):
+    out = model(x)
+    return out.sum(0) / x.shape[0], x.shape[0] * 2
+
+
+def region_branching(model, x):
+    out = model(x)
+    if x.shape[0] > 4:
+        out = out * 2
+    return out.sin()
+
+
+def region_pick(model, x, i):
+    return model.layers[i](x).sin().cos()
+
+
+class RegionAsks(torch.nn.Module):
+    # Code of a model that asks what a number is, in the way ``how`` says:
+    # the number of rows of its input, or the one it is handed.
+    def __init__(self, how):
+        super().__init__()
+        self.net = RegionLinears()
+        self.how = how
+
+    def forward(self, x, n):
+        if n is None:
+            n = x.shape[0]
+        if self.how == "isinstance":
+            whole = isinstance(n, int)
+        elif self.how == "type":
+            whole = type(n) is int
+        else:
+            whole = str(n).isdigit()
+        if whole:
+            x = x * n
+        return self.net(x)
+
+
+def region_asked(model, x, n):
+    return model(x, n)
+
+
+class RegionNames(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = RegionLinears()
+
+    def forward(self, x):
+        return {f"rows_{x.shape[0]}": self.net(x)}
+
+
 def region_clock(model, x):
     start = time.perf_counter_ns()
     out = model(x)
@@ -4005,21 +4149,19 @@ class TestCfgRegions(TestCase):
         graphs = []
 
         def backend(graph, inputs):
-            graphs.append([tuple(i.shape) for i in inputs])
+            graphs.append([i.dtype for i in inputs])
             return graph
 
         compiled = torch.cfg_compile(
             region_chain, backend=backend, fallback=False, region_max_variants=3
         )
-        sizes = [2, 2, 2, 2, 3, 2, 3, 4, 5, 6, 5, 2]
-        for n in sizes:
-            x, y = torch.randn(n), torch.randn(n)
+        f32, f64, i64, i32 = torch.float32, torch.float64, torch.int64, torch.int32
+        for dtype in (f32, f32, f32, f32, f64, f32, f64, i64, i32, i64, i32, f32):
+            x, y = torch.ones(2, dtype=dtype), torch.full((2,), 3, dtype=dtype)
             self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
-        # One graph per shape, up to the limit; the shapes after that ran the
-        # instructions as they are.
-        self.assertEqual(graphs, [[(2,), (2,)], [(3,), (3,)], [(4,), (4,)]])
-        x = torch.randn(2, dtype=torch.float64)
-        self.assertEqual(compiled(x, x), region_chain(x, x), atol=0, rtol=0)
+        # One graph per kind of input, up to the limit; the kinds after that
+        # ran the instructions as they are.
+        self.assertEqual(graphs, [[f32, f32], [f64, f64], [i64, i64]])
         (region,) = self.compiled_regions(compiled)
         self.assertEqual(region["variants"], 3)
 
@@ -4043,6 +4185,37 @@ class TestCfgRegions(TestCase):
         self.assertTrue(region["where"].startswith("RegionLayers.forward"))
         self.assertEqual((region["variants"], region["compiles"]), (5, 1))
         self.assertEqual(len(graphs), 1)
+
+    def test_limit_is_on_graphs_not_on_variants(self):
+        graphs = []
+
+        def backend(graph, inputs):
+            graphs.append(graph)
+            return graph
+
+        torch.manual_seed(0)
+        model = RegionLayers().eval()
+        compiled = torch.cfg_compile(
+            region_infer, backend=backend, fallback=False, region_max_variants=2
+        )
+        with torch.no_grad():
+            for n in (3, 3, 3, 3, 3, 3, 3, 3, 4, 5, 6, 4, 9):
+                x = torch.randn(n, 6)
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        # Five layers, each with a variant for three rows and one that leaves
+        # the rows open: ten variants of two graphs, which is as many graphs
+        # as the region may have.
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual((region["variants"], region["compiles"]), (10, 2))
+        self.assertEqual(len(region["open"]), 5)
+        self.assertEqual(len(graphs), 2)
+        # A third graph would be one too many: these inputs run the layers
+        # as they are.
+        model.double()
+        with torch.no_grad():
+            x = torch.randn(4, 6, dtype=torch.float64)
+            self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        self.assertEqual(len(graphs), 2)
 
     def test_same_tensor_twice_is_its_own_variant(self):
         graphs = []
@@ -4348,13 +4521,13 @@ class TestCfgRegions(TestCase):
         self.assertEqual(len({id(r) for r in results}), 6)
         self.assertEqual(len({id(r.hidden) for r in results}), 6)
 
-    def test_object_from_before_a_region_is_left_alone(self):
+    def test_object_that_grows_on_every_call_is_left_to_the_vm(self):
         torch.manual_seed(0)
         model = RegionStateful().eval()
         compiled = torch.cfg_compile(region_cached, backend="aot_eager", fallback=False)
         cache, expected_cache = RegionCache(), RegionCache()
         with torch.no_grad():
-            for _ in range(8):
+            for _ in range(14):
                 x = torch.randn(2, 3, 6, 6)
                 expected = region_cached(model, x, expected_cache)
                 result = compiled(model, x, cache)
@@ -4362,8 +4535,10 @@ class TestCfgRegions(TestCase):
                 # A trace that ran the update would have left its own tensors
                 # in the cache, or left it one entry short on later calls.
                 self.assertEqual(cache.seen, expected_cache.seen, atol=0, rtol=0)
+        # A region may change an object it is given, but this one is never
+        # what a graph was made for: its list has one more item every time.
         reasons = " / ".join(self.left_to_vm(compiled, "region_cached"))
-        self.assertIn("takes a RegionCache from before the region", reasons)
+        self.assertIn("changes what it is given on every call", reasons)
         # The module below the call that takes the cache is a graph.
         self.assertGreaterEqual(len(self.compiled_regions(compiled)), 1)
 
@@ -4454,13 +4629,15 @@ class TestCfgRegions(TestCase):
 
     def test_named_tuples_and_sets_of_values_are_inputs(self):
         compiled = torch.cfg_compile(region_pair, backend="aot_eager", fallback=False)
-        for i in range(8):
+        for i in range(12):
             pair = RegionPair(torch.randn(3), torch.randn(3))
             kinds = {"double"} if i % 2 else {"single", "plain"}
             result, expected = compiled(pair, kinds), region_pair(pair, kinds)
             self.assertIs(type(result), RegionPair)
             self.assertEqual(tuple(result), tuple(expected), atol=0, rtol=0)
-        self.assertGreaterEqual(len(self.compiled_regions(compiled)), 2)
+        # One region, which goes on through the branch: a graph per set.
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 2)
         # Neither was turned away as something a trace might change.
         reasons = " / ".join(self.left_to_vm(compiled, "region_pair"))
         self.assertNotIn("from before the region", reasons)
@@ -4525,7 +4702,10 @@ class TestCfgRegions(TestCase):
         compiled = torch.cfg_compile(region_counter, backend=backend, fallback=False)
         x = torch.randn(4)
         for i in range(40):
-            self.assertEqual(compiled(x, i), region_counter(x, i), atol=0, rtol=0)
+            scale = i / 7
+            self.assertEqual(
+                compiled(x, scale), region_counter(x, scale), atol=0, rtol=0
+            )
         self.assertLessEqual(len(graphs), 3)
         self.assertEqual(self.compiled_regions(compiled), [])
         (reason,) = self.left_to_vm(compiled, "region_counter")
@@ -4582,6 +4762,336 @@ class TestCfgRegions(TestCase):
             torch.cfg_compile(region_infer, backend="aot_eager", specialize=False)
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.cfg_compile(region_infer, backend="nope")
+
+    def counting(self, graphs):
+        from torch._dynamo.backends.debugging import aot_eager
+
+        def backend(graph, inputs):
+            graphs.append(graph)
+            return aot_eager(graph, inputs)
+
+        return backend
+
+    # --- what a region is given and changes
+
+    def test_region_changes_an_object_it_is_given(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        graphs = []
+        compiled = torch.cfg_compile(
+            region_running, backend=self.counting(graphs), fallback=False
+        )
+        stats, expected_stats = RegionAverage(), RegionAverage()
+        with torch.no_grad():
+            for _ in range(10):
+                x = torch.randn(4, 6)
+                expected = region_running(model, x, expected_stats)
+                self.assertEqual(compiled(model, x, stats), expected, atol=1e-6, rtol=0)
+                # What the graph computed for the attribute, stored in the
+                # object itself once the graph has run.
+                self.assertEqual(stats.mean, expected_stats.mean, atol=1e-6, rtol=0)
+                self.assertIs(type(stats.mean), torch.Tensor)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_running"))
+        self.assertEqual(len(graphs), 1)
+
+    def test_region_stores_into_a_dict_it_is_given(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        compiled = torch.cfg_compile(
+            region_remember, backend="aot_eager", fallback=False
+        )
+        memory, expected_memory = {}, {}
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(4, 6)
+                expected = region_remember(model, x, expected_memory)
+                self.assertEqual(compiled(model, x, memory), expected, atol=0, rtol=0)
+                self.assertEqual(list(memory), list(expected_memory))
+                self.assertEqual(
+                    memory["last"], expected_memory["last"], atol=0, rtol=0
+                )
+                self.assertEqual(
+                    memory["sum"], expected_memory["sum"], atol=1e-5, rtol=0
+                )
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_remember"))
+
+    def test_object_made_in_a_region_is_made_on_every_call(self):
+        torch.manual_seed(0)
+        model = RegionStarts().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        states = []
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(4, 6)
+                out, state = compiled(model, x)
+                self.assertEqual(out, model.net(x), atol=0, rtol=0)
+                # Not the object of an earlier call, with what was done to it.
+                self.assertIs(type(state), RegionState)
+                self.assertEqual(state.steps, [])
+                state.steps.append(out)
+                states.append(state)
+        self.assertEqual(len({id(state) for state in states}), 8)
+        self.assertEqual(len({id(state.steps) for state in states}), 8)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_infer"))
+
+    def test_module_keeps_a_tensor_it_computes(self):
+        torch.manual_seed(0)
+        model, reference = RegionMasked().eval(), RegionMasked().eval()
+        reference.load_state_dict(model.state_dict())
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for n in (4, 4, 4, 4, 4, 5, 6, 3, 4):
+                x = torch.randn(n, 6)
+                self.assertEqual(compiled(model, x), reference(x), atol=0, rtol=0)
+                # What the graph computed for the attribute is stored in it.
+                self.assertIs(type(model.mask), torch.Tensor)
+                self.assertEqual(model.mask, reference.mask, atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_infer"))
+        self.assertEqual(self.left_to_vm(compiled, "RegionMasked"), [])
+
+    def test_path_ends_before_a_call_that_fails_part_way(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        compiled = torch.cfg_compile(
+            region_partway, backend="aot_eager", fallback=False
+        )
+        log, expected_log = [], []
+        with torch.no_grad():
+            for n in (4, 4, 4, 4, 4, 4, 5, 6):
+                x = torch.randn(n, 6)
+                expected_x = x.clone()
+                expected = region_partway(model, expected_x, expected_log, region_note)
+                out, total = compiled(model, x, log, region_note)
+                self.assertEqual(out, expected[0], atol=0, rtol=0)
+                self.assertEqual(total, expected[1])
+                # The trace ran the append and the addition and then could
+                # not go on. The VM runs the call, and the region does not
+                # do the two as well.
+                self.assertEqual(log, expected_log)
+                self.assertEqual(x, expected_x, atol=0, rtol=0)
+        # What came before the call is still a graph.
+        where = [r["where"] for r in self.compiled_regions(compiled)]
+        self.assertTrue(any(w.startswith("region_partway") for w in where), where)
+
+    def test_size_that_varies_is_left_open(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        graphs = []
+        compiled = torch.cfg_compile(
+            region_sized, backend=self.counting(graphs), fallback=False
+        )
+        with torch.no_grad():
+            for n in (4, 4, 4, 4, 5, 6, 7, 1, 9, 4, 12, 1, 300):
+                x = torch.randn(n, 6)
+                expected, _ = region_sized(model, x)
+                mean, doubled = compiled(model, x)
+                self.assertEqual(mean, expected, atol=1e-6, rtol=0)
+                # Computed by the graph from the size, and a plain int again.
+                self.assertIs(type(doubled), int)
+                self.assertEqual(doubled, 2 * n)
+        # One graph for the size of the first calls, one for every size from
+        # 2 on, and one for a single row, which is not like the others.
+        self.assertEqual(len(graphs), 3)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 3)
+        (conditions,) = region["open"]
+        self.assertTrue(any(".size()[0]" in c for c in conditions), conditions)
+
+    def test_branch_on_a_size_is_a_condition_of_the_variant(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        graphs = []
+        compiled = torch.cfg_compile(
+            region_branching, backend=self.counting(graphs), fallback=False
+        )
+        with torch.no_grad():
+            for n in (2, 2, 2, 2, 3, 6, 8, 3, 4, 5, 2, 40):
+                x = torch.randn(n, 6)
+                expected = region_branching(model, x)
+                self.assertEqual(compiled(model, x), expected, atol=0, rtol=0)
+        # One for two rows; then one per way the branch goes.
+        self.assertEqual(len(graphs), 3)
+        (region,) = self.compiled_regions(compiled)
+        below, above = region["open"]
+        self.assertNotEqual(below, above)
+
+    def test_integer_that_varies_is_an_input_of_the_graph(self):
+        graphs = []
+        compiled = torch.cfg_compile(
+            region_counter, backend=self.counting(graphs), fallback=False
+        )
+        x = torch.randn(4)
+        for i in range(40):
+            self.assertEqual(compiled(x, i), region_counter(x, i), atol=1e-6, rtol=0)
+        self.assertLessEqual(len(graphs), 2)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(len(region["open"]), 1)
+
+    def test_integer_kept_in_an_object_is_an_input_of_the_graph(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        graphs = []
+        compiled = torch.cfg_compile(
+            region_running, backend=self.counting(graphs), fallback=False
+        )
+        stats, expected_stats = RegionRunningMean(), RegionRunningMean()
+        with torch.no_grad():
+            for _ in range(10):
+                x = torch.randn(4, 6)
+                expected = region_running(model, x, expected_stats)
+                self.assertEqual(compiled(model, x, stats), expected, atol=1e-6, rtol=0)
+                self.assertEqual(stats.mean, expected_stats.mean, atol=1e-6, rtol=0)
+        # The count is another integer on every call: the graph takes it,
+        # and what the graph makes of it is stored as a plain int.
+        self.assertEqual(stats.count, 10)
+        self.assertIs(type(stats.count), int)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_running"))
+        self.assertLessEqual(len(graphs), 3)
+
+    def test_code_that_asks_what_an_integer_is(self):
+        torch.manual_seed(0)
+        calls = [(4, n) for n in (1, 1, 1, 1, 2, 3, 4, 5, 6, 7)]
+        self.assertEqual(len(self.asked("isinstance", calls)), 1)
+        self.assertEqual(self.asked("type", calls), [])
+        self.assertEqual(self.asked("text", calls), [])
+
+    def test_integer_that_picks_a_layer_is_not_left_open(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        graphs = []
+        compiled = torch.cfg_compile(
+            region_pick, backend=self.counting(graphs), fallback=False
+        )
+        with torch.no_grad():
+            for step in range(30):
+                x, i = torch.randn(3, 6), step % 5
+                self.assertEqual(
+                    compiled(model, x, i), region_pick(model, x, i), atol=0, rtol=0
+                )
+        # An index is the number it is: no graph is good for another one,
+        # and there is no end to them.
+        self.assertLessEqual(len(graphs), 4)
+        reasons = " / ".join(self.left_to_vm(compiled, "region_pick"))
+        self.assertIn("ever new values", reasons)
+
+    def asked(self, how, calls):
+        """Runs a model that asks what a number is, and returns the
+        conditions of the open variants of the region around its call."""
+        model = RegionAsks(how).eval()
+        compiled = torch.cfg_compile(region_asked, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for rows, n in calls:
+                x = torch.randn(rows, 6)
+                self.assertEqual(compiled(model, x, n), model(x, n), msg=how)
+        return [
+            conditions
+            for region in self.compiled_regions(compiled)
+            if region["where"].startswith("region_asked")
+            for conditions in region["open"]
+        ]
+
+    def test_code_that_asks_what_a_size_is(self):
+        torch.manual_seed(0)
+        calls = [(rows, None) for rows in (2, 2, 2, 2, 3, 4, 5, 6, 7, 3)]
+        # isinstance is told what it will be told when the code runs for
+        # real, and the call of the model is one graph for all the sizes.
+        self.assertEqual(len(self.asked("isinstance", calls)), 1)
+        # type() and str() cannot be told: for them the size stays the
+        # number it is, and every size has a graph of its own.
+        self.assertEqual(self.asked("type", calls), [])
+        self.assertEqual(self.asked("text", calls), [])
+
+    def test_text_of_a_size(self):
+        torch.manual_seed(0)
+        model = RegionNames().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with torch.no_grad():
+            for n in (4, 4, 4, 4, 5, 6, 7, 5):
+                x = torch.randn(n, 6)
+                result = compiled(model, x)
+                self.assertEqual(list(result), [f"rows_{n}"])
+                self.assertEqual(result[f"rows_{n}"], model.net(x), atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_infer"))
+        self.assertEqual(region["open"], [])
+
+    def test_strides_select_a_variant(self):
+        compiled = torch.cfg_compile(region_chain, backend="aot_eager", fallback=False)
+        for _ in range(6):
+            x, y = torch.randn(4, 4), torch.randn(4, 4)
+            self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
+            # The same sizes, laid out the other way.
+            x = x.t()
+            self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 2)
+
+    def test_numbers_of_a_call(self):
+        runtime = importlib.import_module("torch._cfg_rs")
+        torch.cfg_compile(region_small)
+        a, b = torch.randn(4, 12, 8), torch.nn.Parameter(torch.randn(3))
+        view = a[:, 2:9]
+        kinds, numbers, offsets = runtime.tensor_key([a, view, b], [5, -2])
+        # The sizes and then the strides of each tensor, then the integers.
+        self.assertEqual(
+            memoryview(numbers).cast("q").tolist(),
+            [4, 12, 8, 96, 8, 1, 4, 7, 8, 96, 8, 1, 3, 1, 5, -2],
+        )
+        self.assertEqual(memoryview(offsets).cast("q").tolist(), [0, 16, 0])
+        # Other elements, or gradients, make another kind of tensor of the
+        # same numbers.
+        for other in (a.double(), a.clone().requires_grad_()):
+            key = runtime.tensor_key([other, view, b], [5, -2])
+            self.assertNotEqual(kinds, key[0])
+            self.assertEqual(numbers, key[1])
+        with self.assertRaises(TypeError):
+            runtime.tensor_key([a, 3], [])
+
+    def test_condition_on_the_numbers_of_a_call(self):
+        runtime = importlib.import_module("torch._cfg_rs")
+        torch.cfg_compile(region_small)
+        a, b = torch.randn(4, 12, 8), torch.nn.Parameter(torch.randn(3))
+        view = a[:, 2:9]
+        _, numbers, offsets = runtime.tensor_key([a, view, b], [5, -2])
+        # Open where the first tensor has 12, and what follows from it: 12
+        # may be anything from 2 to 100 that is even.
+        size = ("slot", 1)
+        conditions = [
+            ("and", [("le", ("const", 2), size), ("le", size, ("const", 100))]),
+            ("eq", ("mod", size, ("const", 2)), ("const", 0)),
+            ("eq", ("slot", 3), ("mul", ("const", 8), size)),
+        ]
+        guard = runtime.ShapeGuard(numbers, offsets, [1, 3], conditions)
+        self.assertEqual(guard.open, 2)
+
+        def holds(rows, tensors=None):
+            c = torch.randn(4, rows, 8)
+            key = runtime.tensor_key(tensors or [c, view, b], [5, -2])
+            return guard.holds(key[1], key[2])
+
+        self.assertTrue(holds(12))
+        self.assertTrue(holds(30))
+        self.assertFalse(holds(31))
+        self.assertFalse(holds(102))
+        self.assertFalse(holds(1))
+        # A number that is not open is another one.
+        self.assertFalse(holds(30, [torch.randn(5, 30, 8), view, b]))
+        # Where a tensor starts in its storage is no part of the numbers,
+        # but a condition may speak of it: it comes after them.
+        self.assertTrue(holds(30, [torch.randn(4, 30, 8), a[:, 1:8], b]))
+        conditions.append(("le", ("const", 2), ("slot", 16 + 1)))
+        guard = runtime.ShapeGuard(numbers, offsets, [1, 3], conditions)
+        self.assertTrue(holds(30))
+        self.assertFalse(holds(30, [torch.randn(4, 30, 8), a[:, 0:7], b]))
+        with self.assertRaises(ValueError):
+            runtime.ShapeGuard(numbers, offsets, [], [("slot", 99)])
+        with self.assertRaises(ValueError):
+            runtime.ShapeGuard(numbers, offsets, [], [("power", size, size)])
 
     @slowTest
     def test_inductor(self):

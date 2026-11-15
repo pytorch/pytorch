@@ -261,11 +261,13 @@ def cfg_compile(
         region_min_ops: a region with fewer tensor operations than this is
             left to the VM, whose direct kernel calls are cheaper than
             entering a compiled graph.
-        region_max_variants: how many combinations of inputs (shapes, dtypes,
-            modules, modes) a region is compiled for before further ones run
-            its instructions as they are. Combinations that trace to the same
+        region_max_variants: how many graphs a region gives the backend
+            before further kinds of inputs (dtypes, ranks, modules, modes)
+            run its instructions as they are. Inputs that trace to the same
             graph, as the layers of a model do when a region is called with
-            one after the other, share what the backend made of it.
+            one after the other, share what the backend made of it, and
+            sizes that differ from call to call are left open in one graph
+            rather than compiled one by one.
         max_versions: how many specialized versions a block can have at once.
         max_respecializations: how many times a block may be profiled and
             specialized again before it settles on code without guards.
@@ -354,10 +356,11 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     One dict per region, with ``where`` (function, block and instructions),
     ``state`` (``"compiled"``, or ``"waiting"`` for a region that has not been
     tried yet), ``variants``, ``compiles`` (how many of the variants went to
-    the backend: the others had the graph of an earlier one), ``ops`` and
-    ``seconds`` spent tracing and compiling; and one per instruction or run of
-    instructions that was left to the VM, with ``state`` ``"vm"`` and the
-    ``reason``.
+    the backend: the others had the graph of an earlier one), ``open`` (per
+    variant that leaves sizes open, the conditions it holds under), ``ops``
+    and ``seconds`` spent tracing and compiling; and one per instruction or
+    run of instructions that was left to the VM, with ``state`` ``"vm"`` and
+    the ``reason``.
     """
     fn = getattr(fn, "__func__", fn)
     found = _region_passes.get(fn)
