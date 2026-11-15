@@ -102,6 +102,25 @@ TensorImpl::TensorImpl(
 // the Python and PythonTLSSnapshot dispatch keys will be set and all is well.
 // The point is to delay the dispatch key setting until that point.
 
+namespace {
+
+// Note [C++ fake outputs inside Meta kernels]
+// Like Python's removal of subclass keys, new tensors made inside a Meta
+// kernel must not inherit Fake from an input. Their storage is Meta, and the
+// fake fallback assigns their logical device when the kernel returns. An
+// existing fake returned by the kernel keeps its keys and device. As for
+// Python subclass keys, removing Fake retains the backend keys: shallow-copy
+// compatibility checks still use them for copies made inside the kernel.
+DispatchKeySet remove_fake_keys_in_kernel(DispatchKeySet key_set) {
+  if (key_set.has(DispatchKey::Fake) &&
+      impl::FakeTensorModeTLS::in_kernel_invocation()) [[unlikely]] {
+    key_set = key_set.remove(DispatchKey::Fake);
+  }
+  return key_set;
+}
+
+} // namespace
+
 TensorImpl::TensorImpl(
     ImplType /*type*/,
     Storage&& storage,
@@ -111,7 +130,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(key_set - c10::python_ks) { // See [Note: Python key removal]
+      key_set_(remove_fake_keys_in_kernel(key_set - c10::python_ks)) {
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
@@ -133,6 +152,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
+  key_set = remove_fake_keys_in_kernel(key_set);
   if (!key_set.empty()) {
     TORCH_INTERNAL_ASSERT(
         data_type == ScalarType::Undefined || device_opt_.has_value());
@@ -713,6 +733,9 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
 void TensorImpl::copy_generic_tensor_metadata(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl) {
+  TORCH_INTERNAL_ASSERT(
+      !dest_impl->is_fake() || !impl::FakeTensorModeTLS::in_kernel_invocation(),
+      "Meta kernels must not replace the metadata of an existing fake tensor");
   dest_impl->sizes_and_strides_ = src_impl->sizes_and_strides_;
   dest_impl->has_symbolic_sizes_strides_ =
       src_impl->has_symbolic_sizes_strides_;
@@ -739,13 +762,18 @@ void TensorImpl::copy_generic_tensor_metadata(
     TORCH_INTERNAL_ASSERT(mode);
     mode->set_constant(dest_impl, nullptr);
   }
-  if (src_impl->extra_meta_ != nullptr) {
-    dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
-  } else if (dest_impl->extra_meta_ != nullptr) {
-    // Clean dest_impl extra meta data, cause shallow_copy_from dest impl is a
-    // real tensor impl, which maybe take extra meta data. This info will
-    // contaminate the new dest_impl metadata info.
-    dest_impl->extra_meta_.reset(nullptr);
+  dest_impl->extra_meta_ =
+      src_impl->extra_meta_ ? src_impl->extra_meta_->clone() : nullptr;
+  if (src_impl->is_fake() && impl::FakeTensorModeTLS::in_kernel_invocation()) {
+    // A new shallow copy inside a kernel is a Meta tensor.
+    // See Note [C++ fake outputs inside Meta kernels].
+    if (auto& extra = dest_impl->extra_meta_) {
+      extra->fake_device_.reset();
+      extra->fake_tensor_mode_.reset();
+      extra->real_tensor_.reset();
+      extra->fake_dispatch_keys_.reset();
+    }
+    dest_impl->custom_device_ = false;
   }
 
   // NB: symbolic sizes and strides are copied as is custom policy, but python
@@ -771,8 +799,9 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   // it should), which means that we have to preserve whatever the
   // original Python keyset was (as it's associated with the PyObject
   // being a tensor subclass or not)
-  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
-      (dest_impl->key_set_ & c10::python_ks);
+  auto key_set =
+      remove_fake_keys_in_kernel(src_impl->key_set_ - c10::python_ks);
+  dest_impl->key_set_ = key_set | (dest_impl->key_set_ & c10::python_ks);
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
@@ -1185,11 +1214,13 @@ FakeTensorMode::FakeTensorMode(
     std::shared_ptr<c10::SafePyObject> shape_env,
     std::shared_ptr<c10::SafePyObject> converter,
     bool allow_meta,
-    bool allow_unsafe_data_ptr_access)
+    bool allow_unsafe_data_ptr_access,
+    bool propagate_real_tensors)
     : shape_env_(std::move(shape_env)),
       fake_tensor_converter_(std::move(converter)),
       allow_meta_(allow_meta),
-      allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
+      allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access),
+      propagate_real_tensors_(propagate_real_tensors) {}
 
 FakeTensorMode::~FakeTensorMode() = default;
 
