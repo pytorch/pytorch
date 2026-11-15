@@ -103,36 +103,20 @@ bool is_nvshmem_available() {
   return ok;
 }
 
-ShmemSignalOp shmem_signal_set() {
-  return static_cast<ShmemSignalOp>(ROCSHMEM_SIGNAL_SET);
+ShmemSignalOps shmem_signal_ops() {
+  return {
+      static_cast<ShmemSignalOp>(ROCSHMEM_SIGNAL_SET),
+      static_cast<ShmemSignalOp>(ROCSHMEM_SIGNAL_ADD)};
 }
 
-ShmemSignalOp shmem_signal_add() {
-  return static_cast<ShmemSignalOp>(ROCSHMEM_SIGNAL_ADD);
-}
-
-ShmemCompareOp shmem_cmp_eq() {
-  return static_cast<ShmemCompareOp>(ROCSHMEM_CMP_EQ);
-}
-
-ShmemCompareOp shmem_cmp_ne() {
-  return static_cast<ShmemCompareOp>(ROCSHMEM_CMP_NE);
-}
-
-ShmemCompareOp shmem_cmp_gt() {
-  return static_cast<ShmemCompareOp>(ROCSHMEM_CMP_GT);
-}
-
-ShmemCompareOp shmem_cmp_ge() {
-  return static_cast<ShmemCompareOp>(ROCSHMEM_CMP_GE);
-}
-
-ShmemCompareOp shmem_cmp_lt() {
-  return static_cast<ShmemCompareOp>(ROCSHMEM_CMP_LT);
-}
-
-ShmemCompareOp shmem_cmp_le() {
-  return static_cast<ShmemCompareOp>(ROCSHMEM_CMP_LE);
+ShmemCompareOps shmem_compare_ops() {
+  return {
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_EQ),
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_NE),
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_GT),
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_GE),
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_LT),
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_LE)};
 }
 
 void nvshmemx_cumodule_init(uintptr_t module) {
