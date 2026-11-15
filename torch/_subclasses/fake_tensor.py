@@ -1951,11 +1951,16 @@ class FakeTensor(Tensor):
         ):
             # Plain Meta results for PrivateUse1 can retain that backend's key.
             # Run the constructor's detach on Meta.
+            # Resolve requires_grad first so TorchFunctionMode hooks run with
+            # the caller's dispatch keys.
+            requires_grad = (
+                elem.requires_grad if requires_grad is None else requires_grad
+            )
             with torch._C._IncludeDispatchKeyGuard(torch._C.DispatchKey.Meta):
                 self = Tensor._make_subclass(
                     cls,
                     elem,
-                    elem.requires_grad if requires_grad is None else requires_grad,
+                    requires_grad,
                     dispatch_device=True,
                     device_for_backend_keys=device,
                 )
