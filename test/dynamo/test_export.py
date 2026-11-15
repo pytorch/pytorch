@@ -37,6 +37,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    fake_tensor_modes,
     HardwareClassification,
     IS_LINUX,
     TEST_WITH_SLOW,
@@ -3540,30 +3541,47 @@ def forward(self, x):
     return pytree.tree_unflatten([slice_1, slice_4, slice_7, slice_10], self._out_spec)""",
         )
 
-    def test_capture_symbolic_tracing_simple_within_fake_mode(self):
+    @fake_tensor_modes
+    def test_capture_symbolic_tracing_simple_within_fake_mode(self, mode_cls):
         from torch._dynamo.output_graph import config
 
         def f(x):
             y = torch.randn(3)
             return x + x * y
 
-        with fake_tensor.FakeTensorMode(
-            shape_env=ShapeEnv(
-                allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+        with (
+            config.patch(use_cpp_fake_tensor=mode_cls is fake_tensor.CppFakeTensorMode),
+            mode_cls(
+                shape_env=ShapeEnv(
+                    allow_scalar_outputs=config.capture_scalar_outputs,
+                    allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                ),
             ),
         ):
             x = torch.randn(3)
 
             for aten_graph in [True, False]:
                 gm, _ = torch._dynamo.export(f, aten_graph=aten_graph)(x)
+                fake_values = [
+                    n.meta.get("val", n.meta.get("example_value"))
+                    for n in gm.graph.nodes
+                ]
+                self.assertTrue(any(fake_tensor.is_fake_tensor(v) for v in fake_values))
+                self.assertTrue(
+                    all(
+                        isinstance(fake_tensor.maybe_get_fake_mode(v), mode_cls)
+                        for v in fake_values
+                        if fake_tensor.is_fake_tensor(v)
+                    )
+                )
                 self.assertTrue(
                     isinstance(gm, torch.fx.GraphModule),
                     msg="test_capture_symbolic_tracing_simple_within_fake_mode_aten_graph_"
                     + str(aten_graph),
                 )
 
-    def test_export_with_symbool_inputs(self):
+    @fake_tensor_modes
+    def test_export_with_symbool_inputs(self, mode_cls):
         def f(pred: bool, x: torch.Tensor):
             if pred:
                 return x.sin()
@@ -3576,9 +3594,14 @@ def forward(self, x):
             f, size_tests, exp_graph, exp_guard_code, exp_shape_env_guards
         ):
             shape_env = ShapeEnv()
-            with fake_tensor.FakeTensorMode(
-                shape_env=shape_env,
-            ) as fake_mode:
+            with (
+                config.patch(
+                    use_cpp_fake_tensor=mode_cls is fake_tensor.CppFakeTensorMode
+                ),
+                mode_cls(
+                    shape_env=shape_env,
+                ) as fake_mode,
+            ):
                 fake_x = fake_mode.from_tensor(
                     x,
                     symbolic_context=StatelessSymbolicContext(
@@ -3688,10 +3711,11 @@ class GraphModule(torch.nn.Module):
 
         torch._dynamo.export(f)(torch.randn(3))
 
-    def test_symbolic_tracing_within_fake_mode_with_constraints(self):
+    @fake_tensor_modes
+    def test_symbolic_tracing_within_fake_mode_with_constraints(self, mode_cls):
         from torch._subclasses import fake_tensor
 
-        fake_mode = fake_tensor.FakeTensorMode()
+        fake_mode = mode_cls()
 
         class DynamicShapeSimpleModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -3705,7 +3729,10 @@ class GraphModule(torch.nn.Module):
                 e = d.view(d_s3)
                 return torch.cat([e, e])
 
-        with fake_mode:
+        with (
+            config.patch(use_cpp_fake_tensor=mode_cls is fake_tensor.CppFakeTensorMode),
+            fake_mode,
+        ):
             model = DynamicShapeSimpleModel()
             inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
             dim = torch.export.Dim("dim")
@@ -3721,10 +3748,13 @@ class GraphModule(torch.nn.Module):
         inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
         self.assertEqual(model(*inputs), gm(*inputs))
 
-    def test_symbolic_tracing_within_fake_mode_with_constraints_with_parameters(self):
+    @fake_tensor_modes
+    def test_symbolic_tracing_within_fake_mode_with_constraints_with_parameters(
+        self, mode_cls
+    ):
         from torch._subclasses import fake_tensor
 
-        fake_mode = fake_tensor.FakeTensorMode()
+        fake_mode = mode_cls()
 
         # TODO: Seems to choke if you don't make a fresh model and
         # just try to export Linear directly...
@@ -3737,7 +3767,10 @@ class GraphModule(torch.nn.Module):
                 out = self.linear(x)
                 return out
 
-        with fake_mode:
+        with (
+            config.patch(use_cpp_fake_tensor=mode_cls is fake_tensor.CppFakeTensorMode),
+            fake_mode,
+        ):
             model = Model()
             inputs = (torch.randn(10, 2, 2),)
             dynamic_shapes = ({0: torch.export.Dim("dim")},)
@@ -3748,7 +3781,8 @@ class GraphModule(torch.nn.Module):
                     aten_graph=aten_graph,
                 )(*inputs).graph_module
 
-    def test_capture_symbolic_tracing_within_fake_mode(self):
+    @fake_tensor_modes
+    def test_capture_symbolic_tracing_within_fake_mode(self, mode_cls):
         from torch._dynamo.output_graph import config
         from torch._subclasses import fake_tensor
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -3765,7 +3799,7 @@ class GraphModule(torch.nn.Module):
                 return out
 
         # User-instantiated FakeTensorMode
-        fake_mode = fake_tensor.FakeTensorMode(
+        fake_mode = mode_cls(
             allow_non_fake_inputs=False,
             allow_fallback_kernels=True,
             shape_env=ShapeEnv(
@@ -3774,7 +3808,10 @@ class GraphModule(torch.nn.Module):
             ),
         )
         # Fakefy input+model before exporting it
-        with fake_mode:
+        with (
+            config.patch(use_cpp_fake_tensor=mode_cls is fake_tensor.CppFakeTensorMode),
+            fake_mode,
+        ):
             x = torch.rand(5, 2, 2)
             model = Model()
 

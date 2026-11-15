@@ -618,18 +618,14 @@ def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
             node.meta["unbacked_bindings"] = unbacked_bindings
 
 
-def _add_input_unbacked_bindings(
-    gm: torch.fx.GraphModule, shape_env: ShapeEnv | None = None
-) -> None:
+def _add_input_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
     from torch._export.utils import _get_shape_env_from_gm
     from torch.fx.experimental.symbolic_shapes import (
         _free_unbacked_symbols_with_path,
         free_unbacked_symbols,
     )
 
-    if shape_env is None:
-        shape_env = _get_shape_env_from_gm(gm)
-    if shape_env is None:
+    if (shape_env := _get_shape_env_from_gm(gm)) is None:
         return
 
     for node in gm.graph.find_nodes(op="placeholder"):
