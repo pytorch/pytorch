@@ -1279,18 +1279,20 @@ Example:
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
 
+  const auto signal_ops = ::c10d::nvshmem_extension::shmem_signal_ops();
   py::enum_<::c10d::nvshmem_extension::ShmemSignalOp>(module, "_ShmemSignalOp")
-      .value("SET", ::c10d::nvshmem_extension::shmem_signal_set())
-      .value("ADD", ::c10d::nvshmem_extension::shmem_signal_add());
+      .value("SET", signal_ops.set)
+      .value("ADD", signal_ops.add);
 
+  const auto compare_ops = ::c10d::nvshmem_extension::shmem_compare_ops();
   py::enum_<::c10d::nvshmem_extension::ShmemCompareOp>(
       module, "_ShmemCompareOp")
-      .value("EQ", ::c10d::nvshmem_extension::shmem_cmp_eq())
-      .value("NE", ::c10d::nvshmem_extension::shmem_cmp_ne())
-      .value("GT", ::c10d::nvshmem_extension::shmem_cmp_gt())
-      .value("GE", ::c10d::nvshmem_extension::shmem_cmp_ge())
-      .value("LT", ::c10d::nvshmem_extension::shmem_cmp_lt())
-      .value("LE", ::c10d::nvshmem_extension::shmem_cmp_le());
+      .value("EQ", compare_ops.eq)
+      .value("NE", compare_ops.ne)
+      .value("GT", compare_ops.gt)
+      .value("GE", compare_ops.ge)
+      .value("LT", compare_ops.lt)
+      .value("LE", compare_ops.le);
 
   // Check if NVSHMEM is available on current system.
   module.def(
