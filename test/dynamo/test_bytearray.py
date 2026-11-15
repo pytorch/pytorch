@@ -1431,9 +1431,13 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             hints.append(operator.length_hint(iterator))
             return hints, x + 1
 
+        @torch._dynamo.disable
+        def eager(x):
+            return f(x)
+
         self.assertEqual(
             torch.compile(f, backend="eager", fullgraph=True)(torch.ones(1)),
-            f(torch.ones(1)),
+            eager(torch.ones(1)),
         )
 
     # -- reconstruct: force a graph break with a live bytearray --
