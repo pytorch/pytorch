@@ -85,7 +85,27 @@ _blocklisted_modules = [
     # traceback.FrameSummary and linecache read arbitrary files
     "traceback",
     "linecache",
+    # subprocess/runpy/ctypes can spawn processes or execute arbitrary native code
+    "subprocess",
+    "runpy",
+    "ctypes",
 ]
+
+# Specific dangerous builtins / loaders that must never be allowlisted, even by full-path alias.
+# These can be invoked as GLOBAL ops (e.g. ``builtins.eval``, ``pickle.loads``, ...).
+_blocklisted_globals: set[tuple[str, str]] = {
+    ("builtins", "eval"),
+    ("builtins", "exec"),
+    ("builtins", "compile"),
+    ("builtins", "__import__"),
+    ("builtins", "getattr"),
+    ("builtins", "setattr"),
+    ("builtins", "delattr"),
+    ("pickle", "load"),
+    ("pickle", "loads"),
+    ("marshal", "load"),
+    ("marshal", "loads"),
+}
 
 _marked_safe_globals_set: set[Callable | tuple[Callable, str]] = set()
 
@@ -154,6 +174,13 @@ def _get_user_allowed_globals():
         # Blocklisted modules can't be allowlisted, even under an alias.
         if getattr(f, "__module__", None) in _blocklisted_modules:
             continue
+        # Also blocklist specific dangerous globals regardless of how they were aliased.
+        # name is already in "module.qualname" form (either from the tuple's 2nd item or
+        # computed as f"{f.__module__}.{f.__qualname__}").
+        if "." in name:
+            mod_part, _, qual_part = name.partition(".")
+            if (mod_part, qual_part) in _blocklisted_globals:
+                continue
         rc[name] = f
     return rc
 
@@ -345,6 +372,11 @@ class Unpickler:
                 if module in _blocklisted_modules:
                     raise UnpicklingError(
                         f"Trying to load unsupported GLOBAL {full_path} whose module {module} is blocked."
+                    )
+                # Hard reject specific dangerous globals regardless of any allowlist.
+                if (module, name) in _blocklisted_globals:
+                    raise UnpicklingError(
+                        f"Trying to load unsupported GLOBAL {full_path} which is blocklisted for safety."
                     )
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
