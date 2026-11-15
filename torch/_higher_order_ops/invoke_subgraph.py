@@ -56,12 +56,15 @@ invoke_subgraph_counter = 0
 # any read outside the region's patch; check new keys the same way.
 _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
     {
+        "benchmark_combo_kernel",
+        "benchmark_fusion",
         # Read by the region's own scheduler. It only switches combo kernels on
         # or off: all other combo_kernel* and benchmark_combo_kernel settings,
         # e.g. combo_kernels_autotune, combo_kernel_max_distance and
         # combo_kernel_peak_memory_*, are not patchable per region and always
         # come from the enclosing compile.
         "combo_kernels",
+        "deterministic",
         # Read per node while the region is lowered (GraphLowering).
         "fallback_by_default",
         # Read during lowering for GEMM autotuning choices, and baked into the
