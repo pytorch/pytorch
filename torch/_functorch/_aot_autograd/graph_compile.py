@@ -64,6 +64,10 @@ from .autograd_cache import (
 from .codegen import aggregate_runtime_wrapper_sources
 from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
+from .input_output_analysis import (
+    _storage_overlap_partition,
+    add_input_mutation_storage_overlap_partition_guard,
+)
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
     _should_disable_saved_tensors_hooks,
@@ -193,11 +197,31 @@ aten = torch.ops.aten
 DispatchReturn = tuple[Callable[..., Any], ViewAndMutationMeta]
 
 
-def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]:
+def _create_wrappers_for_dispatch(
+    needs_autograd: bool, inputs_mutated_in_bw: list[Tensor]
+) -> list[CompilerWrapper]:
     """
     Wrappers that run on every dispatch function
     """
-    return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
+    return [
+        AOTDedupeWrapper(),
+        AOTSyntheticBaseWrapper(
+            trace_joint=needs_autograd, inputs_mutated_in_bw=inputs_mutated_in_bw
+        ),
+    ]
+
+
+def _bw_mutated_inputs_overlapping_other_inputs(
+    flat_args: list[FxValue], fw_metadata: ViewAndMutationMeta
+) -> list[Tensor]:
+    bw_mutated = fw_metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw
+    if not bw_mutated:
+        return []
+    tensors = {i: a for i, a in enumerate(flat_args) if isinstance(a, Tensor)}
+    indices = list(tensors)
+    groups = _storage_overlap_partition(list(tensors.values()))
+    overlapping = {indices[j] for group in groups for j in group}
+    return [tensors[i] for i in bw_mutated if i in overlapping]
 
 
 def aot_stage1_graph_capture(
@@ -221,10 +245,31 @@ def aot_stage1_graph_capture(
         return out, out_descs
 
     aot_config = aot_state.aot_config
+    orig_flat_args = aot_state.flat_args
+    orig_flat_args_descs = aot_state.flat_args_descs
+    orig_fw_metadata = aot_state.fw_metadata
+    tracing_context = TracingContext.try_get()
+    num_aot_guards = (
+        len(tracing_context.guards_context.aotautograd_guards)
+        if tracing_context is not None
+        else 0
+    )
 
-    wrappers = _create_wrappers_for_dispatch(aot_state.needs_autograd)
-    flat_fn, aot_state.flat_args, aot_state.flat_args_descs, aot_state.fw_metadata = (
-        pre_compile(
+    # Synthetic bases are decided before the joint trace, from forward-only
+    # mutation info. If the joint trace finds an input mutated in the backward
+    # that overlaps another input, retrace once treating it as mutated so its
+    # aliases are regenerated from a synthetic base.
+    inputs_mutated_in_bw: list[Tensor] = []
+    while True:
+        wrappers = _create_wrappers_for_dispatch(
+            aot_state.needs_autograd, inputs_mutated_in_bw
+        )
+        (
+            flat_fn,
+            aot_state.flat_args,
+            aot_state.flat_args_descs,
+            aot_state.fw_metadata,
+        ) = pre_compile(
             wrappers,
             orig_flat_fn2,
             aot_state.flat_args,
@@ -232,48 +277,82 @@ def aot_stage1_graph_capture(
             aot_config,
             fw_metadata=aot_state.fw_metadata,
         )
-    )
-    if aot_config.disable_functionalization:
-        # Effect tokens are introduced by FunctionalTensorMode.  The
-        # disable_functionalization path intentionally traces without the
-        # effect-token wrapper, so metadata-discovered tokens must not affect
-        # graph signatures or forward/backward output partitioning.
-        aot_state.fw_metadata.tokens = {}
-        aot_state.fw_metadata.num_backward_tokens = 0
+        if aot_config.disable_functionalization:
+            # Effect tokens are introduced by FunctionalTensorMode.  The
+            # disable_functionalization path intentionally traces without the
+            # effect-token wrapper, so metadata-discovered tokens must not affect
+            # graph signatures or forward/backward output partitioning.
+            aot_state.fw_metadata.tokens = {}
+            aot_state.fw_metadata.num_backward_tokens = 0
 
-    # NB: This is currently only used for backwards, where fwd/bwd
-    # deterministic TLS can be different
-    aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
-    updated_flat_args: list[Any] | tuple[list[Any], list[Any]]
+        # NB: This is currently only used for backwards, where fwd/bwd
+        # deterministic TLS can be different
+        aot_state.fw_metadata.deterministic = (
+            torch.are_deterministic_algorithms_enabled()
+        )
+        updated_flat_args: list[Any] | tuple[list[Any], list[Any]]
 
-    with maybe_skip_decompose(aot_config) as graph_capture_aot_config:
-        # if config.selective_decompose, skip decomposition and apply selective_decompose
-        # after we get the joint graph. See [Note: Selective Decomposition] for details.
-        if aot_state.needs_autograd and not aot_config.pre_dispatch:
-            # FYI: this being moved to trigger in export is new, seems fine!
-            with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
+        with maybe_skip_decompose(aot_config) as graph_capture_aot_config:
+            # if config.selective_decompose, skip decomposition and apply selective_decompose
+            # after we get the joint graph. See [Note: Selective Decomposition] for details.
+            if aot_state.needs_autograd and not aot_config.pre_dispatch:
+                # FYI: this being moved to trigger in export is new, seems fine!
+                with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
+                    (
+                        graph,
+                        updated_flat_args,
+                        updated_flat_args_descs,
+                        maybe_subclass_meta,
+                    ) = aot_dispatch_autograd_graph(
+                        flat_fn,
+                        aot_state.flat_args,
+                        aot_state.flat_args_descs,
+                        graph_capture_aot_config,
+                        fw_metadata=aot_state.fw_metadata,
+                    )
+            else:
                 (
                     graph,
                     updated_flat_args,
                     updated_flat_args_descs,
                     maybe_subclass_meta,
-                ) = aot_dispatch_autograd_graph(
+                ) = aot_dispatch_base_graph(
                     flat_fn,
                     aot_state.flat_args,
                     aot_state.flat_args_descs,
                     graph_capture_aot_config,
                     fw_metadata=aot_state.fw_metadata,
                 )
-        else:
-            graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
-                aot_dispatch_base_graph(
-                    flat_fn,
-                    aot_state.flat_args,
-                    aot_state.flat_args_descs,
-                    graph_capture_aot_config,
-                    fw_metadata=aot_state.fw_metadata,
-                )
+
+        if maybe_subclass_meta is not None:
+            break
+        overlapping = _bw_mutated_inputs_overlapping_other_inputs(
+            aot_state.flat_args, aot_state.fw_metadata
+        )
+        if not overlapping:
+            break
+        if inputs_mutated_in_bw:
+            raise AssertionError(
+                "inputs mutated in the backward still alias other inputs after "
+                "retracing with synthetic bases"
             )
+        inputs_mutated_in_bw = overlapping
+        aot_state.flat_args = orig_flat_args
+        aot_state.flat_args_descs = orig_flat_args_descs
+        aot_state.fw_metadata = orig_fw_metadata
+        orig_fw_metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw.clear()
+        if tracing_context is not None:
+            del tracing_context.guards_context.aotautograd_guards[num_aot_guards:]
+
+    # merge_view_inputs only guards input aliasing for forward mutations. After
+    # a retrace the backward mutation shows up as a synthetic-base mutation.
+    has_bw_mutation = bool(
+        inputs_mutated_in_bw
+        or aot_state.fw_metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw
+    )
+    if has_bw_mutation and not any(i.mutates_data for i in orig_fw_metadata.input_info):
+        add_input_mutation_storage_overlap_partition_guard(aot_config, orig_flat_args)
+
     if config.selective_decompose:
         from torch.fx.experimental.proxy_tensor import selective_decompose
         from torch.fx.passes.regional_inductor import _needs_inductor_compile

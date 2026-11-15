@@ -1884,6 +1884,9 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     # Currently, the only reason we need to plumb this bool is because
     # the synthetic base code prohibits more cases in the autograd case than the inference case.
     trace_joint: bool  # TODO: refactor trace_joint
+    # Inputs that the joint trace found mutated in the backward while
+    # overlapping another input; merge_view_inputs treats them as mutated.
+    inputs_mutated_in_bw: list[Tensor] = field(default_factory=list)
     needs_post_compile: bool = True
     aliased_arg_idx_with_metadata_mutations: list[int] = field(default_factory=list)
     base_groups: dict[int, list[int]] = field(
@@ -1911,6 +1914,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             flat_args_descs,
             fw_metadata.input_info,
             is_inference=is_inference,
+            inputs_mutated_in_bw=self.inputs_mutated_in_bw,
         )
 
         # Happy path: we don't need synthetic bases
@@ -2216,6 +2220,7 @@ def merge_view_inputs(
     *,
     # The autograd case currently has more restrictions than the inference case.
     is_inference: bool,
+    inputs_mutated_in_bw: list[Tensor],
 ) -> tuple[list[Any], list[AOTInput], list[int | tuple[int, torch.Tensor]] | None]:
     if fwd_inputs_descs is None:
         fwd_inputs_descs = [DummyAOTInput(i) for i in range(len(fwd_inputs))]
@@ -2255,11 +2260,15 @@ def merge_view_inputs(
             f"expected len(fwd_inputs) == len(mutated_input_info), "
             f"got {len(fwd_inputs)} != {len(mutated_input_info)}"
         )
-    if not [info for info in mutated_input_info if info.mutates_data]:
+    mutates_data = [info.mutates_data for info in mutated_input_info]
+    if any(mutates_data):
+        add_input_mutation_storage_overlap_partition_guard(aot_config, fwd_inputs)
+    for i, inpt in enumerate(fwd_inputs):
+        if any(inpt is t for t in inputs_mutated_in_bw):
+            mutates_data[i] = True
+    if not any(mutates_data):
         # Return early when there are no mutations.
         return fwd_inputs, fwd_inputs_descs, None
-
-    add_input_mutation_storage_overlap_partition_guard(aot_config, fwd_inputs)
 
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
     # pyrefly: ignore [implicit-any]
@@ -2286,7 +2295,7 @@ def merge_view_inputs(
         if len(aliased_input_indices) <= 1 or not any(
             # We only care about mutations that affect all aliases,
             # so metadata mutations on an input doesn't require us to do synthetic base handling.
-            mutated_input_info[inpt_idx].mutates_data
+            mutates_data[inpt_idx]
             for inpt_idx in aliased_input_indices
         ):
             other_args.extend(
