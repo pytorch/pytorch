@@ -337,6 +337,12 @@ if not functorch_config.view_replay_for_aliased_outputs:
 inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handled)
 inductor_expected_failures_single_sample["xpu"].update(intentionally_not_handled)
 
+# Eager F.pad keeps an int64 fill above 2**53 exact; compiled F.pad converts it
+# to double, so the OpInfo sample with such a fill differs under torch.compile.
+pad_large_int_fill = {"nn.functional.pad.constant": {i64}}
+for _device_type in ("cpu", "cuda", "xpu"):
+    inductor_expected_failures_single_sample[_device_type].update(pad_large_int_fill)
+
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 

@@ -7414,6 +7414,13 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "without overflow"):
             F.pad(x, (0, 2), value=2**63)
 
+    @unittest.skipUnless(TEST_NUMPY, "requires numpy")
+    def test_pad_numpy_int_fill_value_is_exact(self, device):
+        x = torch.zeros(1, dtype=torch.int64, device=device)
+        v = 2**53 + 1
+        expected = torch.tensor([0, v, v], dtype=torch.int64, device=device)
+        self.assertEqual(F.pad(x, (0, 2), value=np.int64(v)), expected)
+
     @skipMPS  # MPS does not support uint64
     def test_pad_uint64_fill_value_is_exact(self, device):
         x = torch.zeros(1, dtype=torch.uint64, device=device)
