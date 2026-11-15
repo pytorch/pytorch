@@ -270,12 +270,6 @@ def deterministic_recompute(
         for n in nodes
     }
 
-    def _nbytes(n: torch.fx.Node) -> int:
-        val = n.meta.get("val")
-        if not isinstance(val, torch.Tensor):
-            return 0
-        return optimization_hint(val.numel(), fallback=1) * val.element_size()
-
     def _readers(name: str) -> list[torch.fx.Node]:
         # (A view keeps its base alive while it's read.)
         stack = list(bw_body[name].users)
@@ -365,12 +359,20 @@ def deterministic_recompute(
     _share(_dependency_order(pieces, order))
     if changed:
         for gm in (fw_module, bw_module):
+            _call_cheap_pieces_at_readers(gm, inputs_held=gm is fw_module)
             gm.graph.eliminate_dead_code()
             gm.graph.lint()
             gm.recompile()
 
 
 _SCALARS = (int, float, bool, torch.SymInt, torch.SymFloat, torch.SymBool)
+
+
+def _nbytes(n: torch.fx.Node) -> int:
+    val = n.meta.get("val")
+    if not isinstance(val, torch.Tensor):
+        return 0
+    return optimization_hint(val.numel(), fallback=1) * val.element_size()
 
 
 def _recomputed_copies(
@@ -1319,3 +1321,108 @@ def _splice_slice_call(
     for n in reversed(erase):
         g.erase_node(n)
     return getitems
+
+
+def _is_cheap_piece(slice_gm: torch.fx.GraphModule) -> bool:
+    """Whether a piece is only ops Inductor would inline into each reader's
+    kernel instead of storing: pointwise ops, views and same-device casts, with
+    no random ops."""
+    for n in slice_gm.graph.nodes:
+        if n.op != "call_function":
+            continue
+        val = n.meta.get("val")
+        if _is_rng(n):
+            return False
+        if not isinstance(val, torch.Tensor) or _is_view(n.target):
+            continue
+        if n.target is torch.ops.aten._to_copy.default:
+            src = n.args[0].meta.get("val")
+            if isinstance(src, torch.Tensor) and src.device == val.device:
+                continue
+        tags = getattr(n.target, "tags", ())
+        if torch.Tag.pointwise not in tags:
+            return False
+    return True
+
+
+def _call_cheap_pieces_at_readers(gm: torch.fx.GraphModule, inputs_held: bool) -> None:
+    """Call each cheap piece (see _is_cheap_piece) again right before a later
+    reader, instead of keeping its outputs alive from the first reader to the
+    last: unshared, Inductor would recompute such values in each reader's
+    kernel and never store them (e.g. a cast or table from an input that the
+    backward reads at its start and again in a late layer's recompute). Every
+    call runs the same compiled subgraph on the same operands, so the copies
+    are bit-identical.
+
+    A call keeps its operands alive until it runs, so one is added only if the
+    outputs it lets go (bytes times nodes since their previous reader) outweigh
+    the operands it keeps alive longer (bytes times nodes past the last other
+    reader; a graph input the caller holds, ``inputs_held``, costs nothing):
+    not e.g. for a product of two saved matmul outputs feeding a later matmul,
+    which Inductor would store too. A reader otherwise reads the latest call,
+    and so does one right after the previous reader or after an in-place write
+    to an operand."""
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+
+    g = gm.graph
+    calls = [
+        n
+        for n in g.find_nodes(op="call_function", target=invoke_subgraph)
+        if _is_cheap_piece(getattr(gm, n.args[0].target))
+    ]
+    # Later calls first, so the calls this adds are readers of earlier pieces.
+    for call in reversed(calls):
+        getitems = list(call.users)
+        # A returned output (e.g. saved for the backward) is kept by name.
+        if any(u.op == "output" for gi in getitems for u in gi.users):
+            continue
+        index = {n: i for i, n in enumerate(g.nodes)}
+        readers = sorted(
+            {u for gi in getitems for u in gi.users}, key=index.__getitem__
+        )
+        reads = _reads(call)
+        identifier = call.args[1]
+        alive_until: dict[torch.fx.Node, int] = {}
+        for a in call.args[2:]:
+            if not isinstance(a, torch.fx.Node) or not _nbytes(a):
+                continue
+            if inputs_held and a.op == "placeholder":
+                continue
+            others = [
+                index[u]
+                for u in a.users
+                if not (u.target is invoke_subgraph and u.args[1] == identifier)
+            ]
+            alive_until[a] = max(others, default=-1)
+        provider, provider_at = call, index[call]
+        items: dict[torch.fx.Node, torch.fx.Node] = {}
+        for i, r in enumerate(readers):
+            used = [gi for gi in getitems if gi in r.all_input_nodes]
+            if i > 0 and index[r] - index[readers[i - 1]] > 1:
+                at = index[r]
+                held = sum(map(_nbytes, used)) * (at - index[readers[i - 1]])
+                extended = [a for a, until in alive_until.items() if until < at]
+                kept = sum(
+                    _nbytes(a) * (at - max(alive_until[a], provider_at))
+                    for a in extended
+                )
+                n = provider.next
+                while n is not r and not (_writes(n) & reads):
+                    n = n.next
+                if kept < held and n is r:
+                    with g.inserting_before(r):
+                        provider = g.call_function(invoke_subgraph, args=call.args)
+                    provider.meta = dict(call.meta)
+                    provider_at = at
+                    items = {}
+                    alive_until.update(dict.fromkeys(extended, at))
+            if provider is call:
+                continue
+            for gi in used:
+                if gi not in items:
+                    with g.inserting_after(provider):
+                        items[gi] = g.call_function(
+                            operator.getitem, args=(provider, gi.args[1])
+                        )
+                    items[gi].meta = dict(gi.meta)
+                r.replace_input_with(gi, items[gi])
