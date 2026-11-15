@@ -1,7 +1,7 @@
 # pyre-strict
 
 import concurrent.futures
-import glob
+import contextlib
 import json
 import logging
 import math
@@ -10,13 +10,14 @@ import struct
 import time
 import warnings
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch import distributed as dist
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
     _get_dcp_custom_metadata,
+    _get_fs_and_path,
     _get_safetensors_file_metadata,
     _metadata_fn,
     DATA_OFFSETS_KEY,
@@ -26,6 +27,12 @@ from torch.distributed.checkpoint._hf_utils import (
     SHAPE_KEY,
     SUFFIX,
 )
+from torch.distributed.checkpoint.filesystem import FileSystemBase
+
+
+if TYPE_CHECKING:
+    from torch.distributed.checkpoint.filesystem import FileSystem
+    from torch.distributed.checkpoint.fsspec_filesystem import _FileSystem
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -141,62 +148,59 @@ def _parse_input_metadata(
                 )
 
 
-def _write_metadata(
-    output_files_data: dict[str, _OutputFileData],
-) -> None:
+def _build_header(output_data: _OutputFileData) -> bytes:
     """
-    Write metadata to the beginning of each output safetensors file.
+    Build the metadata header of an output safetensors file.
 
-    This function writes the metadata section to each output file, including information
+    This function builds the metadata section of the output file, including information
     about tensor shapes, data types, and offsets. It also updates the offset_in_file
-    field for each tensor in the output_files_data.
+    field for each tensor in the output_data.
 
     Args:
-        output_files_data: Dictionary mapping output file paths to their metadata
+        output_data: Metadata for the output file
+
+    Returns:
+        Header bytes to write at the beginning of the output file
     """
-    # Process each output file
-    for file_path, output_data in output_files_data.items():
-        with open(file_path, "wb") as f:
-            metadata = {}
-            curr_offset = 0
+    metadata = {}
+    curr_offset = 0
 
-            # Calculate offsets for each tensor in the file
-            for fqn, fqn_data in output_data.fqn_data.items():
-                # Calculate the end offset by multiplying all dimensions and the data type size
-                end_offset = (
-                    curr_offset
-                    + math.prod(fqn_data.shape_in_file) * fqn_data.dtype_size
-                )
+    # Calculate offsets for each tensor in the file
+    for fqn, fqn_data in output_data.fqn_data.items():
+        # Calculate the end offset by multiplying all dimensions and the data type size
+        end_offset = (
+            curr_offset + math.prod(fqn_data.shape_in_file) * fqn_data.dtype_size
+        )
 
-                # Store metadata for this tensor
-                metadata[fqn] = {
-                    SHAPE_KEY: fqn_data.shape_in_file,
-                    DTYPE_KEY: fqn_data.dtype_str,
-                    DATA_OFFSETS_KEY: [
-                        curr_offset,
-                        end_offset,
-                    ],  # Start and end byte offsets
-                }
-                # Store the offset for later use when writing the actual tensor data
-                fqn_data.offset_in_file = curr_offset
+        # Store metadata for this tensor
+        metadata[fqn] = {
+            SHAPE_KEY: fqn_data.shape_in_file,
+            DTYPE_KEY: fqn_data.dtype_str,
+            DATA_OFFSETS_KEY: [
+                curr_offset,
+                end_offset,
+            ],  # Start and end byte offsets
+        }
+        # Store the offset for later use when writing the actual tensor data
+        fqn_data.offset_in_file = curr_offset
 
-                # Update current offset for the next tensor
-                curr_offset = end_offset
+        # Update current offset for the next tensor
+        curr_offset = end_offset
 
-            # Convert metadata to JSON and encode as bytes
-            json_metadata = json.dumps(metadata)
-            json_bytes = json_metadata.encode("utf-8")
+    # Convert metadata to JSON and encode as bytes
+    json_metadata = json.dumps(metadata)
+    json_bytes = json_metadata.encode("utf-8")
 
-            # Write the metadata size as an 8-byte unsigned integer (little-endian)
-            size_in_bytes = len(json_bytes)
-            header_len = struct.pack("<Q", size_in_bytes)
+    # Write the metadata size as an 8-byte unsigned integer (little-endian)
+    size_in_bytes = len(json_bytes)
+    header_len = struct.pack("<Q", size_in_bytes)
 
-            # Write the header length and metadata to the file
-            f.write(header_len)
-            f.write(json_bytes)
+    # Concatenate the header length and metadata
+    header = header_len + json_bytes
 
-            # Store the total metadata size (header + JSON) for later use
-            output_data.metadata_size = f.tell()
+    # Store the total metadata size (header + JSON) for later use
+    output_data.metadata_size = len(header)
+    return header
 
 
 def _read_tensor_data(
@@ -225,6 +229,8 @@ def _read_tensor_data(
 
 
 def _process_output_file(
+    input_fs: FileSystemBase,
+    output_fs: FileSystemBase,
     output_file: str,
     output_data: _OutputFileData,
     input_files_data: dict[str, _InputFileData],
@@ -235,11 +241,14 @@ def _process_output_file(
     This function is designed to be run in parallel for different output files.
 
     Args:
+        input_fs: Filesystem holding the input files
+        output_fs: Filesystem holding the output files
         output_file: Path to the output file
         output_data: Metadata for the output file
         input_files_data: Dictionary mapping input file paths to their metadata
     """
 
+    header = _build_header(output_data)
     sorted_tensors = sorted(
         output_data.fqn_data.items(), key=lambda x: x[1].offset_in_file
     )
@@ -249,13 +258,15 @@ def _process_output_file(
     for safetensors_file, file_data in input_files_data.items():
         dcp_metadata[safetensors_file] = _get_dcp_custom_metadata(file_data.metadata)
 
-    try:
+    with contextlib.ExitStack() as stack:
         # Open all input files for reading
         for safetensors_file in input_files_data:
-            file_handles[safetensors_file] = open(safetensors_file, "rb")  # noqa: SIM115
+            file_handles[safetensors_file] = stack.enter_context(
+                input_fs.create_stream(safetensors_file, "rb")
+            )
 
-        with open(output_file, "r+b") as output_stream:
-            output_stream.seek(0, os.SEEK_END)
+        with output_fs.create_stream(output_file, "wb") as output_stream:
+            output_stream.write(header)
             # Process each tensor in sequential output order
             for tensor_fqn, tensor_fqn_data in sorted_tensors:
                 full_tensor_mv = memoryview(
@@ -306,12 +317,10 @@ def _process_output_file(
 
                 output_stream.write(full_tensor_mv)
 
-    finally:
-        for f in file_handles.values():
-            f.close()
-
 
 def _write_data(
+    input_fs: FileSystemBase,
+    output_fs: FileSystemBase,
     input_files_data: dict[str, _InputFileData],
     output_files_data: dict[str, _OutputFileData],
     num_threads: int = 1,
@@ -324,6 +333,8 @@ def _write_data(
     the work is split across threads with each thread handling a different output file.
 
     Args:
+        input_fs: Filesystem holding the input files
+        output_fs: Filesystem holding the output files
         input_files_data: Dictionary mapping input file paths to their metadata
         output_files_data: Dictionary mapping output file paths to their metadata
         num_threads: Number of threads to use for parallel processing
@@ -331,7 +342,9 @@ def _write_data(
     if num_threads <= 1 or len(output_files_data) <= 1:
         # Sequential processing
         for output_file, output_data in output_files_data.items():
-            _process_output_file(output_file, output_data, input_files_data)
+            _process_output_file(
+                input_fs, output_fs, output_file, output_data, input_files_data
+            )
     else:
         # Parallel processing with ThreadPoolExecutor
         with concurrent.futures.ThreadPoolExecutor(
@@ -342,6 +355,8 @@ def _write_data(
                 futures.append(
                     executor.submit(
                         _process_output_file,
+                        input_fs,
+                        output_fs,
                         output_file,
                         output_data,
                         input_files_data,
@@ -517,6 +532,7 @@ def _calculate_max_contiguous_elements(
 
 
 def _write_overall_metadata_file(
+    fs: FileSystemBase,
     output_dir: str,
     output_files_data: dict[str, _OutputFileData],
 ) -> None:
@@ -527,6 +543,7 @@ def _write_overall_metadata_file(
     to locate tensors across multiple files.
 
     Args:
+        fs: Filesystem holding output_dir
         output_dir: Directory where the metadata file will be written
         output_files_data: Dictionary mapping output file paths to their metadata
     """
@@ -541,12 +558,14 @@ def _write_overall_metadata_file(
     metadata_to_write["metadata"] = {"total_size": total_size}
     metadata_to_write["weight_map"] = weight_map
 
-    metadata_path = os.path.join(output_dir, f"{_metadata_fn}")
-    with open(metadata_path, "w") as metadata_file:
+    metadata_path = fs.concat_path(output_dir, f"{_metadata_fn}")
+    with fs.create_stream(metadata_path, "w") as metadata_file:
         json.dump(metadata_to_write, metadata_file, indent=2)
 
 
 def _consolidate_safetensors_files(
+    input_fs: "FileSystem | _FileSystem",
+    output_fs: FileSystemBase,
     input_dir: str,
     output_dir: str,
     fqn_to_file_mapping: dict[str, str],
@@ -560,12 +579,12 @@ def _consolidate_safetensors_files(
     written, so a file whose entries were all left out holds no tensors.
     """
     # Find all safetensors files in the input directory
-    safetensors_files = glob.glob(os.path.join(input_dir, f"*{SUFFIX}"))
+    safetensors_files = [f for f in input_fs.ls(input_dir) if f.endswith(SUFFIX)]
 
     # Read metadata from all input files
     input_files_data: dict[str, _InputFileData] = {}
     for safetensor_file in safetensors_files:
-        with open(safetensor_file, "rb") as f:
+        with input_fs.create_stream(safetensor_file, "rb") as f:
             metadata, size = _get_safetensors_file_metadata(f)
             input_files_data[safetensor_file] = _InputFileData(
                 metadata_size=size, metadata=metadata
@@ -578,7 +597,7 @@ def _consolidate_safetensors_files(
     output_files_data: dict[str, _OutputFileData] = {}
     # Create multiple output files based on the provided mapping
     for fqn, filename in fqn_to_file_mapping.items():
-        output_path = os.path.join(output_dir, filename)
+        output_path = str(output_fs.concat_path(output_dir, filename))
 
         if output_path not in output_files_data:
             output_files_data[output_path] = _OutputFileData()
@@ -588,10 +607,8 @@ def _consolidate_safetensors_files(
     # Step 1: Parse metadata to determine tensor shapes and types
     _parse_input_metadata(input_files_data, output_files_data)
 
-    # Step 2: Write metadata headers to output files
-    _write_metadata(output_files_data)
-    # Step 3: Write actual tensor data from input files to output files
-    _write_data(input_files_data, output_files_data, num_threads)
+    # Step 2: Write metadata headers and tensor data to output files
+    _write_data(input_fs, output_fs, input_files_data, output_files_data, num_threads)
 
     return output_files_data
 
@@ -650,6 +667,8 @@ def consolidate_safetensors_files(
         output_dir,
         start_time,
     )
+    input_fs, _ = _get_fs_and_path(input_dir)
+    output_fs, _ = _get_fs_and_path(output_dir)
 
     max_index = max(fqn_to_index_mapping.values())
     fqn_to_file_mapping = {
@@ -657,11 +676,11 @@ def consolidate_safetensors_files(
     }
 
     output_files_data = _consolidate_safetensors_files(
-        input_dir, output_dir, fqn_to_file_mapping, num_threads
+        input_fs, output_fs, input_dir, output_dir, fqn_to_file_mapping, num_threads
     )
 
     # Step 4: Write overall model.index.safetensors.json file with weight map
-    _write_overall_metadata_file(output_dir, output_files_data)
+    _write_overall_metadata_file(output_fs, output_dir, output_files_data)
 
     logger.info("Done consolidating. Took %.2f secs.", time.time() - start_time)
     _warn_skipped_fqns(input_dir, fqn_to_index_mapping, output_files_data)
@@ -694,6 +713,8 @@ def consolidate_safetensors_files_on_every_rank(
     """
 
     start_time = time.time()
+    input_fs, _ = _get_fs_and_path(input_dir)
+    output_fs, _ = _get_fs_and_path(output_dir)
     # Derive rank and world_size from process_group or default distributed environment
     if dist.is_available() and dist.is_initialized():
         rank = dist.get_rank(group=process_group)
@@ -748,6 +769,8 @@ def consolidate_safetensors_files_on_every_rank(
 
         # Call the existing consolidation function with the filtered mapping
         output_files_data = _consolidate_safetensors_files(
+            input_fs=input_fs,
+            output_fs=output_fs,
             input_dir=input_dir,
             output_dir=output_dir,
             fqn_to_file_mapping=filtered_filename_mapping,
@@ -781,7 +804,7 @@ def consolidate_safetensors_files_on_every_rank(
             for rank_data in gathered_output_files_data:
                 all_output_files_data.update(rank_data)
 
-            _write_overall_metadata_file(output_dir, all_output_files_data)
+            _write_overall_metadata_file(output_fs, output_dir, all_output_files_data)
             logger.info("Rank 0: Wrote overall metadata file.")
             logger.info("Total time taken: %.2f secs.", time.time() - start_time)
         dist.barrier(group=process_group)

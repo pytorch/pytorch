@@ -2,6 +2,7 @@
 import dataclasses
 import json
 import logging
+import os
 import queue
 import threading
 from typing import Any
@@ -13,8 +14,10 @@ from torch.distributed.checkpoint._consolidate_hf_safetensors import (
 )
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
+    _get_fs_and_path,
     _HFStorageInfo,
     _metadata_fn,
+    _open_safetensors,
     CUSTOM_METADATA_KEY,
     SAVED_OFFSETS_KEY,
     SHARDED_DIR_NAME,
@@ -91,6 +94,9 @@ class HuggingFaceStorageWriter(FileSystemWriter):
         self.save_distributed: bool = save_distributed
         self.enable_consolidation: bool = enable_consolidation
         self.consolidated_output_path: str | None = None
+        # The parent declares fs as FileSystem; this may be an fsspec _FileSystem.
+        # pyrefly: ignore [bad-override]
+        self.fs, self.path = _get_fs_and_path(path)
         if self.enable_consolidation:
             self.consolidated_output_path = str(self.path)
             self.path = self.fs.concat_path(self.path, SHARDED_DIR_NAME)
@@ -218,7 +224,16 @@ class HuggingFaceStorageReader(FileSystemReader):
         """
 
         super().__init__(path=path)
+        # The parent declares fs as FileSystem; this may be an fsspec _FileSystem.
+        # pyrefly: ignore [bad-override]
+        self.fs, self.path = _get_fs_and_path(path)
         self.thread_count = thread_count
+
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
+        super().reset()
+        if checkpoint_id:
+            # pyrefly: ignore [bad-override]
+            self.fs, self.path = _get_fs_and_path(checkpoint_id)
 
     def _process_read_request(self, f, req: ReadItem, planner: LoadPlanner) -> None:
         """Helper function to process a single read request."""
@@ -244,12 +259,10 @@ class HuggingFaceStorageReader(FileSystemReader):
         result_queue: queue.Queue,
         planner: LoadPlanner,
     ) -> None:
-        from safetensors import safe_open  # type: ignore[import]
-
         try:
             while True:
                 file_name, reqs = file_queue.get_nowait()
-                with safe_open(filename=file_name, framework="pt") as f:
+                with _open_safetensors(self.fs, file_name) as f:
                     for req in reqs:
                         self._process_read_request(f, req, planner)
                 result_queue.put(True)  # Signal that this file has been processed
@@ -257,8 +270,6 @@ class HuggingFaceStorageReader(FileSystemReader):
             pass
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
-        from safetensors import safe_open  # type: ignore[import]
-
         per_file: dict[str, list[ReadItem]] = {}
 
         for read_item in plan.items:
@@ -268,7 +279,7 @@ class HuggingFaceStorageReader(FileSystemReader):
 
         if self.thread_count <= 1 or len(per_file) <= 1:
             for file_name, reqs in per_file.items():
-                with safe_open(filename=file_name, framework="pt") as f:
+                with _open_safetensors(self.fs, file_name) as f:
                     for req in reqs:
                         self._process_read_request(f, req, planner)
         else:
@@ -315,7 +326,6 @@ class HuggingFaceStorageReader(FileSystemReader):
 
     # pyrefly: ignore [bad-override]
     def read_metadata(self) -> Metadata:
-        from safetensors import safe_open  # type: ignore[import]
         from safetensors.torch import _getdtype  # type: ignore[import]
 
         state_dict_metadata: dict[str, TensorStorageMetadata] = {}
@@ -327,7 +337,7 @@ class HuggingFaceStorageReader(FileSystemReader):
                 safetensors_files.append(file)
 
         for safetensor_file in safetensors_files:
-            with safe_open(safetensor_file, framework="pt") as f:
+            with _open_safetensors(self.fs, safetensor_file) as f:
                 keys = f.keys()
                 extra_metadata = f.metadata()
 
