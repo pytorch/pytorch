@@ -38,11 +38,14 @@ tracer of PyTorch programs makes, with the usual offenders turned into errors
 while the trace runs (``_traps``).
 
 The inputs of a region are tensors, modules, plain values, functions and
-classes, and tuples, lists, dicts and pytree nodes of those. An instruction
-that takes anything else from before the region, say a cache object, stays
-with the VM: a trace could change such an object without anyone noticing. What
-a region gives back may also be an object it made itself, which every call
-then makes again from the results of the graph (``_Recipes``).
+classes, and tuples, lists, dicts, pytree nodes and plain objects of those
+(an object that is its class and its ``__dict__``: a cache, say). A trace
+runs on copies of the lists, dicts and objects, so that what the code does to
+them shows: storing an item or an attribute is then something the region does
+to the real ones after its graph has run (``_Variant.effects``). An
+instruction that takes anything else from before the region stays with the
+VM. What a region gives back may also be an object it made itself, which
+every call then makes again from the results of the graph (``_Recipes``).
 
 The last region of a block does not end with the block. Its trace goes on into
 the blocks that follow, along the way the values of the trace take through
@@ -167,6 +170,13 @@ _TENSOR_TYPES = tuple(_TENSORS)
 # compiled, before they go ahead without it.
 _MOST_WAITS = 256
 _HEAPTYPE = 1 << 9
+# How many variants of a region may leave what they were given with other
+# items, keys or attributes than it had. A cache that is filled on the first
+# call does that once.
+_MOST_GROWTH = 2
+# How many lists, dicts and objects with state one call of a region may hand
+# it: each is copied for a trace and compared after it.
+_MOST_HELD = 4096
 
 
 _CONTAINERS = frozenset(
@@ -203,6 +213,8 @@ _READERS = frozenset(
         "isdisjoint",
     }
 )
+# Methods of a dict that put something into it or take something out.
+_DICT_STORES = frozenset({"__setitem__", "__delitem__", "update", "setdefault", "pop"})
 # Methods of tensors whose effect is not a tensor operation.
 _TENSOR_EFFECTS = frozenset(
     {
@@ -292,7 +304,9 @@ def _is_outside_tensor(value: Any, depth: int = 2) -> bool:
     return False
 
 
-def _receiver_problem(receiver: Any, name: str, local: dict[int, Any]) -> str | None:
+def _receiver_problem(
+    receiver: Any, name: str, local: dict[int, Any], given: Any = ()
+) -> str | None:
     cls = type(receiver)
     if isinstance(receiver, torch.Tensor):
         if name in _TENSOR_READS:
@@ -310,17 +324,30 @@ def _receiver_problem(receiver: Any, name: str, local: dict[int, Any]) -> str | 
     if cls in _CONTAINERS:
         if id(receiver) in local or name in _READERS:
             return None
+        if (
+            id(receiver) in given
+            and isinstance(receiver, dict)
+            and name in _DICT_STORES
+        ):
+            # Done to a copy in a trace, and to the dict itself after the
+            # graph (``_Variant.effects``). A list that is appended to is
+            # another list on every call: that stays with the VM.
+            return None
         return f"changes a {cls.__name__} from before the region"
+    if id(receiver) in given:
+        # An object whose state the region keeps track of.
+        return None
     return f"a method of a {cls.__name__}, which may have effects"
 
 
-def _callee_problem(callee: Any, local: dict[int, Any]) -> str | None:
+def _callee_problem(callee: Any, local: dict[int, Any], given: Any = ()) -> str | None:
     """Why a region cannot hold a call of ``callee``, or None if it can."""
     cls = type(callee)
     if cls is types.FunctionType or isinstance(callee, (nn.Module, type)):
         return None
     if cls is types.MethodType:
-        return _receiver_problem(callee.__self__, callee.__func__.__name__, local)
+        name = callee.__func__.__name__
+        return _receiver_problem(callee.__self__, name, local, given)
     if cls is types.BuiltinFunctionType:
         receiver = callee.__self__
         if receiver is None or type(receiver) is types.ModuleType:
@@ -328,9 +355,9 @@ def _callee_problem(callee: Any, local: dict[int, Any]) -> str | None:
                 callee.__module__ == "builtins" and callee.__name__ in _IMPURE_BUILTINS
             )
             return f"{callee.__name__} has an effect" if impure else None
-        return _receiver_problem(receiver, callee.__name__, local)
+        return _receiver_problem(receiver, callee.__name__, local, given)
     if cls is types.MethodWrapperType:
-        return _receiver_problem(callee.__self__, callee.__name__, local)
+        return _receiver_problem(callee.__self__, callee.__name__, local, given)
     if cls is types.MethodDescriptorType or cls is types.WrapperDescriptorType:
         owner = callee.__objclass__
         if owner in _CONTAINERS and callee.__name__ not in _READERS:
@@ -348,15 +375,16 @@ def _is_pure(callee: Any) -> bool:
 
 
 def _problem(
-    inst: dict[str, Any], env: dict[int, Any], local: dict[int, Any]
+    inst: dict[str, Any], env: dict[int, Any], local: dict[int, Any], given: Any = ()
 ) -> str | None:
     """Why a region cannot hold this instruction, on the values it is about
-    to run on, or None if it can."""
+    to run on, or None if it can. ``given`` has the ids of the lists, dicts
+    and objects the region was handed and keeps track of."""
     op = inst["op"]
     if op == "call" or op == "call_ex":
         uses = inst["uses"]
         callee = env.get(uses[0])
-        reason = _callee_problem(callee, local)
+        reason = _callee_problem(callee, local, given)
         if reason is not None:
             return reason
         if any(callee is scalar for scalar in _SCALARS):
@@ -592,38 +620,79 @@ def _module_state(module: nn.Module) -> _ModuleState:
 # ----------------------------------------------------------------------
 
 
-def _describe(obj: Any, flat: list[torch.Tensor], seen: dict[int, int]) -> Any:
-    """What a compiled region depends on in ``obj``, as something hashable.
+class _Inputs:
+    """What one call hands a region, as ``_describe`` finds it."""
 
-    The tensors found on the way are appended to ``flat``, each object once.
-    """
+    __slots__ = ("flat", "held", "seen")
+
+    def __init__(self) -> None:
+        # The tensors, each object once.
+        self.flat: list[torch.Tensor] = []
+        # The objects whose state a region may change: lists, dicts, sets,
+        # cells, plain instances.
+        self.held: list[Any] = []
+        # Where a tensor is in ``flat``, or, counted down from -1, an object
+        # in ``held``; by id.
+        self.seen: dict[int, int] = {}
+
+
+def _hold(obj: Any, inputs: _Inputs) -> int | None:
+    """Notes an object a region may change. Returns where it was noted before,
+    or None if it is new: found a second time, it is the same object, and a
+    trace must see one copy of it, not two."""
+    known = inputs.seen.get(id(obj))
+    if known is None:
+        if len(inputs.held) >= _MOST_HELD:
+            raise _Opaque(0, "more objects than a region keeps track of")
+        inputs.seen[id(obj)] = -1 - len(inputs.held)
+        inputs.held.append(obj)
+    return known
+
+
+def _describe(obj: Any, inputs: _Inputs) -> Any:
+    """What a compiled region depends on in ``obj``, as something hashable,
+    but for its tensors: those go to ``inputs`` in the order they are found,
+    and are compared by what they are like (``_key``)."""
     cls = type(obj)
     if cls in _TENSORS:
-        position = seen.get(id(obj))
+        position = inputs.seen.get(id(obj))
         if position is None:
-            position = seen[id(obj)] = len(flat)
-            flat.append(obj)
+            position = inputs.seen[id(obj)] = len(inputs.flat)
+            inputs.flat.append(obj)
         return position
     if cls in _VALUES:
         return (cls, obj)
     if cls in _PLAIN:
         return ("object", id(obj))
-    if cls is tuple or cls is list:
-        return (cls, tuple([_describe(item, flat, seen) for item in obj]))
+    if cls is tuple:
+        return (cls, tuple([_describe(item, inputs) for item in obj]))
+    if cls is list:
+        known = _hold(obj, inputs)
+        if known is not None:
+            return ("again", known)
+        return (cls, tuple([_describe(item, inputs) for item in obj]))
     if cls is dict or cls is collections.OrderedDict:
+        known = _hold(obj, inputs)
+        if known is not None:
+            return ("again", known)
         for key in obj:
             if type(key) not in _VALUES:
                 raise _Opaque(0, "a dict with keys that are not plain values")
-        values = tuple([_describe(item, flat, seen) for item in obj.values()])
+        values = tuple([_describe(item, inputs) for item in obj.values()])
         return (cls, tuple(obj), values)
     if cls is set or cls is frozenset:
         if all(type(item) in _VALUES for item in obj):
+            if cls is set and _hold(obj, inputs) is not None:
+                return ("again", inputs.seen[id(obj)])
             return (cls, frozenset(obj))
         raise _Opaque(0, "a set of things that are not plain values")
     if cls is types.CellType:
         # A variable that a nested function shares: what it holds.
+        known = _hold(obj, inputs)
+        if known is not None:
+            return ("again", known)
         try:
-            return ("cell", _describe(obj.cell_contents, flat, seen))
+            return ("cell", _describe(obj.cell_contents, inputs))
         except ValueError:
             raise _Opaque(0, "a variable that has no value yet") from None
     if isinstance(obj, nn.Module):
@@ -632,6 +701,7 @@ def _describe(obj: Any, flat: list[torch.Tensor], seen: dict[int, int]) -> Any:
             raise _Opaque(
                 0, "a module with hooks, which run code a graph does not hold"
             )
+        flat, seen = inputs.flat, inputs.seen
         try:
             for store, name in state.accessors:
                 tensor = store[name]
@@ -643,10 +713,14 @@ def _describe(obj: Any, flat: list[torch.Tensor], seen: dict[int, int]) -> Any:
         except LookupError:
             # Changed since the stamp was taken.
             state.refresh(obj, _runtime.module_stamp(obj, _TENSOR_TYPES))
-            return _describe(obj, flat, seen)
+            return _describe(obj, inputs)
         return ("module", id(obj), state.token)
     if cls is types.MethodType:
-        return ("method", id(obj.__func__), _describe(obj.__self__, flat, seen))
+        return (
+            "method",
+            id(obj.__func__),
+            _describe(obj.__self__, inputs),
+        )
     if cls is types.BuiltinFunctionType:
         receiver = obj.__self__
         if receiver is None or type(receiver) is types.ModuleType:
@@ -655,123 +729,295 @@ def _describe(obj: Any, flat: list[torch.Tensor], seen: dict[int, int]) -> Any:
             raise _Opaque(
                 0, f"a method of a {type(receiver).__name__} from before the region"
             )
-        return ("method", obj.__name__, _describe(receiver, flat, seen))
+        return ("method", obj.__name__, _describe(receiver, inputs))
     if isinstance(obj, tuple):
         # Named tuples and the like.
-        return (cls, tuple([_describe(item, flat, seen) for item in obj]))
+        return (cls, tuple([_describe(item, inputs) for item in obj]))
     node = pytree.SUPPORTED_NODES.get(cls)
     if node is not None:
+        # Looked into once, like the copy a trace makes of it: what it holds
+        # is then found once, in the order the trace finds it.
+        known = inputs.seen.get(id(obj))
+        if known is not None:
+            return ("again", known)
+        inputs.seen[id(obj)] = -_MOST_HELD - len(inputs.seen)
         children, context = node.flatten_fn(obj)
         return (
             cls,
             repr(context),
-            tuple([_describe(item, flat, seen) for item in children]),
+            tuple([_describe(item, inputs) for item in children]),
         )
     if isinstance(
         obj, (type, enum.Enum, torch._ops.OpOverload, torch._ops.OpOverloadPacket)
     ):
         return ("object", id(obj))
-    # Anything else may have state that a trace would change.
+    if _has_plain_state(obj):
+        # An object that is its class and its attributes: a cache, say. What
+        # it holds is looked at like the items of a dict.
+        known = _hold(obj, inputs)
+        if known is not None:
+            return ("again", known)
+        state = vars(obj)
+        values = tuple([_describe(item, inputs) for item in state.values()])
+        return ("instance", cls, tuple(state), values)
+    # Anything else may have state that a trace would change unseen.
     raise _Opaque(0, f"a {cls.__name__} from before the region")
 
 
 def _acceptable(obj: Any) -> str | None:
     """Why ``obj`` cannot be an input of a region, or None if it can."""
     try:
-        _describe(obj, [], {})
+        _describe(obj, _Inputs())
     except _Opaque as e:
         return e.reason
     return None
 
 
-def _rebuild(obj: Any, fakes: dict[int, torch.Tensor], copies: list[Any]) -> Any:
-    """``obj`` with its tensors replaced by the ones the trace runs on.
+def _key(parts: list[Any], inputs: _Inputs) -> Any:
+    """The key of the variant for a call: what its inputs are apart from
+    tensors, what the tensors are like, and the modes it runs in."""
+    tensors = [(t.shape, t.dtype, t.device, t.requires_grad) for t in inputs.flat]
+    return (tuple(parts), tuple(tensors), _modes())
 
-    Containers are built anew, so that a trace that changes one changes a
-    copy; ``copies`` collects them with what they started as.
+
+class _Copies:
+    """The copies a trace runs on in place of what a region was given.
+
+    A trace runs the code of the region, and that code may change a list, a
+    dict or an object it was handed. It changes a copy; what it did to the
+    copy is what the region does to the real one after its graph has run
+    (``_Variant.effects``).
     """
+
+    def __init__(self, fakes: dict[int, torch.Tensor]) -> None:
+        self.fakes = fakes
+        # By the id of what they are copies of.
+        self.of: dict[int, Any] = {}
+        # Pytree nodes, with their children: these must stay as they are.
+        self.nodes: list[tuple[Any, list[Any]]] = []
+        self.tracked: list[tuple[Any, Any]] = []
+
+    def track(self, held: list[Any]) -> None:
+        """Remembers what the copies of ``held`` hold before the trace."""
+        self.tracked = [
+            (self.of[id(real)], _state_of(self.of[id(real)])) for real in held
+        ]
+
+    def given(self) -> dict[int, int]:
+        return {id(copy): k for k, (copy, _) in enumerate(self.tracked)}
+
+
+def _state_of(copy: Any) -> Any:
+    cls = type(copy)
+    if cls is list:
+        return list(copy)
+    if cls is set:
+        return set(copy)
+    if cls is types.CellType:
+        try:
+            return [copy.cell_contents]
+        except ValueError:
+            return []
+    return dict(copy) if isinstance(copy, dict) else dict(vars(copy))
+
+
+def _rebuild(obj: Any, copies: _Copies) -> Any:
+    """``obj`` with its tensors replaced by the ones the trace runs on, and
+    with everything a trace could change in it built anew."""
     cls = type(obj)
     if cls in _TENSORS:
-        return fakes[id(obj)]
+        return copies.fakes[id(obj)]
     if cls is tuple:
-        return tuple([_rebuild(item, fakes, copies) for item in obj])
+        return tuple([_rebuild(item, copies) for item in obj])
+    copy = copies.of.get(id(obj))
+    if copy is not None:
+        return copy
     if cls is list:
-        copy = [_rebuild(item, fakes, copies) for item in obj]
-        copies.append((copy, list(copy)))
+        copy = copies.of[id(obj)] = []
+        copy.extend([_rebuild(item, copies) for item in obj])
         return copy
     if cls is dict or cls is collections.OrderedDict:
-        copy = cls((k, _rebuild(v, fakes, copies)) for k, v in obj.items())
-        copies.append((copy, dict(copy)))
+        copy = copies.of[id(obj)] = cls()
+        for key, value in obj.items():
+            copy[key] = _rebuild(value, copies)
         return copy
     if cls is set:
-        copy = set(obj)
-        copies.append((copy, set(copy)))
+        copy = copies.of[id(obj)] = set(obj)
         return copy
     if cls is types.CellType:
-        contents = _rebuild(obj.cell_contents, fakes, copies)
-        copy = types.CellType(contents)
-        copies.append((copy, contents))
-        return copy
+        cell: Any = types.CellType()
+        copies.of[id(obj)] = cell
+        try:
+            cell.cell_contents = _rebuild(obj.cell_contents, copies)
+        except ValueError:
+            pass
+        return cell
     if cls is types.MethodType:
-        receiver = _rebuild(obj.__self__, fakes, copies)
+        receiver = _rebuild(obj.__self__, copies)
         return (
             obj
             if receiver is obj.__self__
             else types.MethodType(obj.__func__, receiver)
         )
     if cls is types.BuiltinFunctionType:
-        receiver = _rebuild(obj.__self__, fakes, copies)
+        receiver = _rebuild(obj.__self__, copies)
         return obj if receiver is obj.__self__ else getattr(receiver, obj.__name__)
     if isinstance(obj, tuple) and not isinstance(obj, torch.Size):
-        items = [_rebuild(item, fakes, copies) for item in obj]
+        items = [_rebuild(item, copies) for item in obj]
         return cls(*items) if hasattr(cls, "_fields") else cls(items)
     node = pytree.SUPPORTED_NODES.get(cls)
     if node is not None and not isinstance(obj, nn.Module):
         children, context = node.flatten_fn(obj)
-        children = [_rebuild(item, fakes, copies) for item in children]
-        copy = node.unflatten_fn(children, context)
-        copies.append((copy, children))
+        children = [_rebuild(item, copies) for item in children]
+        copy = copies.of[id(obj)] = node.unflatten_fn(children, context)
+        copies.nodes.append((copy, children))
+        return copy
+    if not isinstance(obj, nn.Module) and _has_plain_state(obj):
+        copy = copies.of[id(obj)] = object.__new__(cls)
+        for name, value in vars(obj).items():
+            copy.__dict__[name] = _rebuild(value, copies)
         return copy
     return obj
 
 
-def _unchanged(copy: Any, before: Any) -> bool:
-    """Whether a copy a trace ran on still holds what it started with."""
-    if isinstance(copy, set):
-        return copy == before
-    if isinstance(copy, types.CellType):
-        return copy.cell_contents is before
-    if isinstance(copy, list):
-        now = copy
-    elif isinstance(copy, dict) and isinstance(before, dict):
-        if list(copy) != list(before):
-            return False
-        now, before = list(copy.values()), list(before.values())
-    else:
-        now = pytree.SUPPORTED_NODES[type(copy)].flatten_fn(copy)[0]
+def _same_items(now: list[Any], before: list[Any]) -> bool:
     return len(now) == len(before) and all(a is b for a, b in zip(now, before))
 
 
-def _identities(obj: Any, modules: dict[int, nn.Module], others: list[Any]) -> None:
+def _unchanged(copy: Any, children: list[Any]) -> bool:
+    """Whether the copy of a pytree node still holds what it started with."""
+    return _same_items(pytree.SUPPORTED_NODES[type(copy)].flatten_fn(copy)[0], children)
+
+
+def _effects(copies: _Copies, recipes: "_Recipes") -> tuple[list[Any], bool]:
+    """What a trace did to the copies of what the region was given, as what
+    to do to the real things after the graph, and whether one of them is not
+    of the shape it was (more items, other keys, other attributes): the next
+    call then finds the region's inputs changed."""
+    effects: list[Any] = []
+    grows = False
+    for k, (copy, before) in enumerate(copies.tracked):
+        cls = type(copy)
+        if cls is list:
+            if not _same_items(copy, before):
+                grows |= len(copy) != len(before)
+                effects.append(("list", k, [recipes.of(item) for item in copy]))
+        elif cls is set:
+            if copy != before:
+                if not all(type(item) in _VALUES for item in copy):
+                    raise Untraceable("puts something that is no plain value in a set")
+                grows = True
+                effects.append(("set", k, frozenset(copy)))
+        elif cls is types.CellType:
+            now = _state_of(copy)
+            if not _same_items(now, before):
+                if not now:
+                    raise Untraceable("deletes a variable of an enclosing function")
+                effects.append(("cell", k, recipes.of(now[0])))
+        else:
+            now = copy if isinstance(copy, dict) else vars(copy)
+            if list(now) == list(before) and _same_items(
+                list(now.values()), list(before.values())
+            ):
+                continue
+            if isinstance(copy, dict):
+                for key in now:
+                    if type(key) not in _VALUES:
+                        raise Untraceable("gives a dict a key that is no plain value")
+                grows |= list(now) != list(before)
+                parts = [recipes.of(item) for item in now.values()]
+                effects.append(("dict", k, list(now), parts))
+            else:
+                grows |= set(now) != set(before)
+                changed = [
+                    name
+                    for name, value in now.items()
+                    if name not in before or before[name] is not value
+                ]
+                parts = [recipes.of(now[name]) for name in changed]
+                gone = [name for name in before if name not in now]
+                effects.append(("attrs", k, changed, parts, gone))
+    return effects, grows
+
+
+def _checked(
+    copies: _Copies,
+    fake: Any,
+    grads: list[bool],
+    reachable: set[int],
+    given: dict[int, int],
+) -> "_Recipes":
+    """After the instructions of a trace ran: what a region must not have
+    done, and the recipes for what it gives back."""
+    for copy, children in copies.nodes:
+        if not _unchanged(copy, children):
+            raise _Failed(None, f"changes a {type(copy).__name__} it was given")
+    if grads != [f.requires_grad for f in fake]:
+        raise _Failed(None, "changes requires_grad of a tensor it was given")
+    return _Recipes(reachable, given, {id(f): i for i, f in enumerate(fake)})
+
+
+def _effects_of(copies: _Copies, recipes: "_Recipes") -> tuple[list[Any], bool]:
+    try:
+        return _effects(copies, recipes)
+    except Untraceable as e:
+        raise _Failed(None, str(e)) from None
+
+
+def _apply(
+    effect: Any, results: Any, built: dict[int, Any], flat: Any, held: Any
+) -> None:
+    kind, target = effect[0], held[effect[1]]
+    if kind == "list":
+        target[:] = [_build(part, results, built, flat, held) for part in effect[2]]
+    elif kind == "set":
+        target.clear()
+        target.update(effect[2])
+    elif kind == "cell":
+        target.cell_contents = _build(effect[2], results, built, flat, held)
+    elif kind == "dict":
+        values = [_build(part, results, built, flat, held) for part in effect[3]]
+        target.clear()
+        target.update(zip(effect[2], values))
+    else:
+        state = vars(target)
+        for name, part in zip(effect[2], effect[3]):
+            state[name] = _build(part, results, built, flat, held)
+        for name in effect[4]:
+            state.pop(name, None)
+
+
+def _identities(
+    obj: Any, modules: dict[int, nn.Module], others: list[Any], seen: set[int]
+) -> None:
     """The modules in an input of a region, and the other objects that
     ``_describe`` names by their id."""
+    if isinstance(obj, torch.Tensor) or type(obj) in _VALUES or id(obj) in seen:
+        return
+    seen.add(id(obj))
     if isinstance(obj, nn.Module):
         modules[id(obj)] = obj
     elif isinstance(obj, (tuple, list)):
         for item in obj:
-            _identities(item, modules, others)
+            _identities(item, modules, others, seen)
     elif isinstance(obj, dict):
         for item in obj.values():
-            _identities(item, modules, others)
+            _identities(item, modules, others, seen)
     elif type(obj) in (types.MethodType, types.BuiltinFunctionType):
         others.append(obj)
-        _identities(obj.__self__, modules, others)
+        _identities(obj.__self__, modules, others, seen)
     elif type(obj) is types.CellType:
-        _identities(obj.cell_contents, modules, others)
+        try:
+            _identities(obj.cell_contents, modules, others, seen)
+        except ValueError:
+            pass
     elif type(obj) in pytree.SUPPORTED_NODES:
         for item in pytree.SUPPORTED_NODES[type(obj)].flatten_fn(obj)[0]:
-            _identities(item, modules, others)
-    elif not isinstance(obj, torch.Tensor) and type(obj) not in _VALUES:
+            _identities(item, modules, others, seen)
+    elif _has_plain_state(obj):
+        for item in vars(obj).values():
+            _identities(item, modules, others, seen)
+    else:
         others.append(obj)
 
 
@@ -794,6 +1040,19 @@ def _modes() -> tuple[Any, ...]:
         torch.is_autocast_enabled("cpu"),
         torch.get_default_dtype(),
     )
+
+
+def _trace(fn: Callable[..., Any], example: list[Any]) -> Any:
+    """The graph of what ``fn`` does to tensors like ``example``."""
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    try:
+        return make_fx(fn, tracing_mode="fake")(*example)
+    except (_Failed, _Retry):
+        raise
+    except Exception as e:
+        reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
+        raise _Failed(getattr(e, "cfg_index", None), reason) from None
 
 
 # ----------------------------------------------------------------------
@@ -947,20 +1206,46 @@ def _is_plain_instance(obj: Any) -> bool:
     )
 
 
+_PLAIN_STATE: dict[type, bool] = {}
+
+
+def _has_plain_state(obj: Any) -> bool:
+    """Whether ``obj`` is its class and its ``__dict__``, read and written
+    the way ``object`` does it: then what a trace does to a copy of it can be
+    seen, and done to the object itself afterwards."""
+    cls = type(obj)
+    known = _PLAIN_STATE.get(cls)
+    if known is None:
+        known = _PLAIN_STATE[cls] = (
+            _is_plain_instance(obj)
+            and cls.__setattr__ is object.__setattr__
+            and cls.__delattr__ is object.__delattr__
+            and cls.__getattribute__ is object.__getattribute__
+            and not hasattr(cls, "__getattr__")
+            and not hasattr(cls, "__del__")
+        )
+    return known
+
+
 class _Recipes:
     """How to make the outputs of a trace again from the results of its graph.
 
     A recipe is a list ``[kind, dynamic, ...]``: ``result`` (a tensor the
-    graph returns), ``same`` (the object itself, on every call), ``sequence``,
-    ``dict``, ``node`` (a pytree node) or ``instance`` (an object the region
-    made: a new one of its class with the same attributes). ``dynamic`` says
-    whether a result is somewhere inside.
+    graph returns), ``input`` (a tensor the region was given), ``given`` (a
+    list, dict or object it was given), ``same`` (the object itself, on every
+    call), ``sequence``, ``dict``, ``node`` (a pytree node) or ``instance``
+    (an object the region made: a new one of its class with the same
+    attributes). ``dynamic`` says whether something of the call is inside.
     """
 
-    def __init__(self, reachable: set[int], given: set[int]) -> None:
+    def __init__(
+        self, reachable: set[int], given: dict[int, int], inputs: dict[int, int]
+    ) -> None:
         self.reachable = reachable
-        # Copies of the containers the region was given: not its to return.
+        # Copies of what the region was given, and the tensors of the trace
+        # that stand for its inputs: the call has the real ones.
         self.given = given
+        self.inputs = inputs
         self.results: list[torch.Tensor] = []
         self.memo: dict[int, list[Any]] = {}
 
@@ -968,14 +1253,16 @@ class _Recipes:
         known = self.memo.get(id(obj))
         if known is not None:
             return known
-        if id(obj) in self.given:
-            raise Untraceable("gives back a list or dict it was given")
         if depth > 40:
             raise Untraceable("gives an object that is nested too deeply")
         cls = type(obj)
         children: list[Any] | None = None
         recipe: list[Any]
-        if is_fake_tensor(obj):
+        if id(obj) in self.given:
+            recipe = ["given", True, self.given[id(obj)]]
+        elif id(obj) in self.inputs:
+            recipe = ["input", True, self.inputs[id(obj)]]
+        elif is_fake_tensor(obj):
             recipe = ["result", True, len(self.results)]
             self.results.append(obj)
         elif _static_output(obj, self.reachable):
@@ -1009,21 +1296,27 @@ class _Recipes:
         return recipe
 
 
-def _build(recipe: list[Any], results: Any, built: dict[int, Any]) -> Any:
+def _build(
+    recipe: list[Any], results: Any, built: dict[int, Any], flat: Any, held: Any
+) -> Any:
     kind = recipe[0]
     if kind == "result":
         return results[recipe[2]]
     if kind == "same":
         return recipe[2]
+    if kind == "input":
+        return flat[recipe[2]]
+    if kind == "given":
+        return held[recipe[2]]
     value = built.get(id(recipe))
     if value is not None:
         return value
     if kind == "instance":
         value = built[id(recipe)] = object.__new__(recipe[2])
         for name, part in zip(recipe[3], recipe[4]):
-            value.__dict__[name] = _build(part, results, built)
+            value.__dict__[name] = _build(part, results, built, flat, held)
         return value
-    parts = [_build(part, results, built) for part in recipe[-1]]
+    parts = [_build(part, results, built, flat, held) for part in recipe[-1]]
     if kind == "sequence":
         value = recipe[2](parts)
     elif kind == "dict":
@@ -1040,6 +1333,8 @@ class _Variant:
     __slots__ = (
         "compiled",
         "direct",
+        "effects",
+        "grows",
         "guards",
         "keep",
         "leap",
@@ -1065,17 +1360,29 @@ class _Variant:
         # that are unset there; and what the path read that is no input.
         self.leap: tuple[int, int, list[int], list[int]] | None = None
         self.guards: list[tuple[str, Any, str, Any]] = []
+        # What the region does to the lists, dicts and objects it was given,
+        # once its graph has run (see ``_effects``), and whether that leaves
+        # one of them with other items, keys or attributes than it had.
+        self.effects: list[Any] = []
+        self.grows = False
 
-    def run(self, flat: list[torch.Tensor]) -> Any:
+    def run(self, inputs: _Inputs) -> Any:
+        flat, held = inputs.flat, inputs.held
         results = self.compiled(*flat)
         if self.direct:
             return tuple(results)
         built: dict[int, Any] = {}
-        made = [_build(recipe, results, built) for recipe in self.recipes]
+        made = [_build(recipe, results, built, flat, held) for recipe in self.recipes]
+        for effect in self.effects:
+            _apply(effect, results, built, flat, held)
         if self.leap is None:
             return tuple(made)
         block, index, values, unset = self.leap
         return (block, index, dict(zip(values, made)), unset)
+
+    def affects(self, effects: list[Any], grows: bool) -> None:
+        self.effects, self.grows = effects, grows
+        self.direct = self.direct and not effects
 
     def holds(self) -> bool:
         """Whether what the path read is still what it was."""
@@ -1109,19 +1416,19 @@ class _Region:
     def __call__(self, *args: Any) -> Any:
         if not self.hot:
             return self.cold(args)
-        flat: list[torch.Tensor] = []
+        inputs = _Inputs()
         try:
-            key = self.key(args, flat)
+            key = self.key(args, inputs)
         except _Opaque:
             return self.decline(args)
         variant = self.variants.get(key, self)
         if variant is self or (variant is not None and not variant.holds()):  # type: ignore[union-attr]
-            variant = self.specialize(key, args, flat)
+            variant = self.specialize(key, args, inputs)
         if variant is None:
             return self.decline(args)
         if variant.proven:  # type: ignore[union-attr]
-            return variant.run(flat)  # type: ignore[union-attr]
-        return self.first_run(key, variant, args, flat)  # type: ignore[arg-type]
+            return variant.run(inputs)  # type: ignore[union-attr]
+        return self.first_run(key, variant, args, inputs)  # type: ignore[arg-type]
 
     def install(self, region: Any) -> bool:
         """Puts the region into the block a pass is working on."""
@@ -1140,18 +1447,14 @@ class _Region:
         return self.replay(args)
 
     def first_run(
-        self,
-        key: Any,
-        variant: "_Variant",
-        args: tuple[Any, ...],
-        flat: list[torch.Tensor],
+        self, key: Any, variant: "_Variant", args: tuple[Any, ...], inputs: _Inputs
     ) -> tuple[Any, ...]:
         """Runs a variant that has not run yet. What a backend made can fail
         where the instructions would not (or would with another error): then
         they run instead, this time and from now on."""
         generator = torch.get_rng_state()
         try:
-            outputs = variant.run(flat)
+            outputs = variant.run(inputs)
         except Exception as e:
             torch.set_rng_state(generator)
             self.variants[key] = None
@@ -1163,16 +1466,14 @@ class _Region:
         variant.proven = True
         return outputs
 
-    def key(self, args: tuple[Any, ...], flat: list[torch.Tensor]) -> Any:
-        seen: dict[int, int] = {}
+    def key(self, args: tuple[Any, ...], inputs: _Inputs) -> Any:
         parts = []
         for position, arg in enumerate(args):
             try:
-                parts.append(_describe(arg, flat, seen))
+                parts.append(_describe(arg, inputs))
             except _Opaque as e:
                 raise _Opaque(position, e.reason) from None
-        tensors = [(t.shape, t.dtype, t.device, t.requires_grad) for t in flat]
-        return (tuple(parts), tuple(tensors), _modes())
+        return _key(parts, inputs)
 
     def replay(self, args: tuple[Any, ...]) -> Any:
         env = self.bind(args)
@@ -1212,10 +1513,18 @@ class _Region:
         local: dict[int, Any] = {}
         bad: dict[int, str] = {}
         tensors = 0
-        refused = {v: _acceptable(arg) for v, arg in zip(self.inputs, args)}
+        refused: dict[int, str | None] = {}
+        handed = _Inputs()
+        for value, arg in zip(self.inputs, args):
+            try:
+                _describe(arg, handed)
+                refused[value] = None
+            except _Opaque as e:
+                refused[value] = e.reason
+        given = {id(obj) for obj in handed.held}
         for i in range(self.lo, self.hi):
             inst = plan.insts[i]
-            reason = _problem(inst, env, local)
+            reason = _problem(inst, env, local, given)
             if reason is None and inst["op"] != "hold":
                 reason = next(
                     (refused[v] for v in inst["uses"] if refused.get(v)), None
@@ -1239,9 +1548,9 @@ class _Region:
 
     def decide(self, args: tuple[Any, ...]) -> None:
         """Compiles the region for the first time, or takes it out of the plan."""
-        flat: list[torch.Tensor] = []
+        inputs = _Inputs()
         try:
-            key = self.key(args, flat)
+            key = self.key(args, inputs)
         except _Opaque as e:
             value = self.inputs[e.position]
             users = [
@@ -1256,7 +1565,7 @@ class _Region:
             )
             return
         try:
-            self.variants[key] = self.compile(key, args, flat)
+            self.variants[key] = self.compile(key, args, inputs)
             self.hot = True
         except _Failed as e:
             self.plan.split(
@@ -1264,7 +1573,7 @@ class _Region:
             )
 
     def specialize(
-        self, key: Any, args: tuple[Any, ...], flat: list[torch.Tensor]
+        self, key: Any, args: tuple[Any, ...], inputs: _Inputs
     ) -> _Variant | None:
         """Another variant of a region that has one, for inputs not seen yet."""
         if len(self.variants) >= 3 and all(
@@ -1280,43 +1589,50 @@ class _Region:
             and len(self.variants) >= self.plan.options.max_variants
         ):
             return None
+        growing = sum(1 for v in self.variants.values() if v is not None and v.grows)
         try:
-            variant: _Variant | None = self.compile(key, args, flat)
+            variant: _Variant | None = self.compile(key, args, inputs)
         except _Failed:
             # These inputs do what the first ones did not: they run the
             # instructions as they are.
             variant = None
+        if variant is not None and variant.grows and growing >= _MOST_GROWTH:
+            # A list it appends to on every call, say: what it is given is
+            # never what a graph was made for.
+            self.hot = False
+            self.plan.split(self, None, "changes what it is given on every call")
+            return None
         self.variants[key] = variant
         return variant
 
-    def compile(
-        self, key: Any, args: tuple[Any, ...], flat: list[torch.Tensor]
-    ) -> _Variant:
-        from torch.fx.experimental.proxy_tensor import make_fx
-
+    def compile(self, key: Any, args: tuple[Any, ...], inputs: _Inputs) -> _Variant:
         start = time.perf_counter()
+        flat, held = inputs.flat, inputs.held
         modules: dict[int, nn.Module] = {}
         # What the key names by id is kept alive, so the ids stay theirs. Not
         # the tensors: a variant must not hold on to the batch it was made on.
         keep: list[Any] = []
+        visited: set[int] = set()
         for arg in args:
-            _identities(arg, modules, keep)
+            _identities(arg, modules, keep, visited)
         keep.extend(modules.values())
         reachable: set[int] = set()
         for module in modules.values():
             reachable |= _module_state(module).ids
         found: dict[str, Any] = {}
 
-        def region(*fake: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        def region(*fake: torch.Tensor) -> tuple[Any, ...]:
             fakes = {id(real): f for real, f in zip(flat, fake)}
-            copies: list[Any] = []
-            env = dict(zip(self.inputs, [_rebuild(arg, fakes, copies) for arg in args]))
+            copies = _Copies(fakes)
+            env = dict(zip(self.inputs, [_rebuild(arg, copies) for arg in args]))
+            copies.track(held)
+            given = copies.given()
             grads = [f.requires_grad for f in fake]
             local: dict[int, Any] = {}
             insts, replay = self.plan.insts, self.plan.replay
             with _swapped(modules, fakes), _traps(modules):
                 for i in range(self.lo, self.hi):
-                    reason = _problem(insts[i], env, local)
+                    reason = _problem(insts[i], env, local, given)
                     if reason is not None:
                         raise _Failed(i, reason)
                     replay.run(i, i + 1, env, True)
@@ -1327,28 +1643,20 @@ class _Region:
                         # Read from a global, a closure or a plain object. Left
                         # to the VM, it is an input of the next region.
                         raise _Failed(i, "gives a tensor from outside the region")
-            if not all(_unchanged(copy, before) for copy, before in copies):
-                raise _Failed(None, "changes a list or dict it was given")
-            if grads != [f.requires_grad for f in fake]:
-                raise _Failed(None, "changes requires_grad of a tensor it was given")
-            recipes = _Recipes(reachable, {id(copy) for copy, _ in copies})
+            recipes = _checked(copies, fake, grads, reachable, given)
             found["recipes"] = []
             for value in self.outputs:
                 try:
                     found["recipes"].append(recipes.of(env[value]))
                 except Untraceable as e:
                     raise _Failed(self.definition(value), str(e)) from None
+            found["effects"] = _effects_of(copies, recipes)
             return tuple(recipes.results)
 
-        try:
-            graph = make_fx(region, tracing_mode="fake")(*flat)
-        except _Failed:
-            raise
-        except Exception as e:
-            reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
-            raise _Failed(getattr(e, "cfg_index", None), reason) from None
+        graph = _trace(region, list(flat))
         ops = self.ops_of(graph)
-        variant = _Variant(self.finish(graph, flat, key), found["recipes"], ops, keep)
+        variant = _Variant(self.finish(graph, inputs, key), found["recipes"], ops, keep)
+        variant.affects(*found["effects"])
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()
         return variant
@@ -1357,9 +1665,7 @@ class _Region:
     def ops_of(graph: torch.fx.GraphModule) -> int:
         return sum(1 for node in graph.graph.nodes if node.op == "call_function")
 
-    def finish(
-        self, graph: torch.fx.GraphModule, flat: list[torch.Tensor], key: Any
-    ) -> Any:
+    def finish(self, graph: torch.fx.GraphModule, inputs: _Inputs, key: Any) -> Any:
         """Hands a traced graph to the backend, unless it has seen it."""
         options = self.plan.options
         ops = self.ops_of(graph)
@@ -1375,7 +1681,7 @@ class _Region:
         compiled = options.compiled.get(same)
         if compiled is None:
             try:
-                compiled = options.backend(graph, list(flat))
+                compiled = options.backend(graph, list(inputs.flat))
             except Exception as e:
                 reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
                 raise _Failed(None, f"the backend failed: {reason}") from None
@@ -1417,11 +1723,18 @@ class _Walk:
     comes that a region cannot hold or that the trace cannot decide."""
 
     def __init__(
-        self, region: "_Path", env: dict[int, Any], refused: set[int], limit: int | None
+        self,
+        region: "_Path",
+        env: dict[int, Any],
+        refused: set[int],
+        limit: int | None,
+        handed: dict[int, int],
     ) -> None:
         self.region = region
         self.plan = region.plan
         self.env = env
+        # The copies of the lists, dicts and objects the region was given.
+        self.handed = handed
         # Values from before the region that cannot be inputs of a graph.
         self.refused = refused
         # How many blocks to go on into: None for as far as it gets, -1 to
@@ -1453,7 +1766,7 @@ class _Walk:
                 inst = insts[self.index]
                 inside = self.entered == 0 and self.index < region.hi
                 if inside:
-                    reason = _problem(inst, env, self.local)
+                    reason = _problem(inst, env, self.local, self.handed)
                     if reason is not None:
                         raise _Failed(self.index, reason)
                 elif (self.limit == -1 and self.entered == 0) or self.stops(inst):
@@ -1520,10 +1833,15 @@ class _Walk:
             return False
         if any(value in self.refused or value not in env for value in uses):
             return True
+        if op == "set_item" and type(env[uses[0]]) in (list, dict):
+            # On what the path made itself, or on a copy of what it was
+            # given: the store is then done to the real one after the graph.
+            target = id(env[uses[0]])
+            return target not in self.local and target not in self.handed
         if op == "iter_next" or op == "set_item" or op in _MUTATORS:
             # Only on what the path made itself.
             return id(env[uses[0]]) not in self.local
-        return _problem(inst, env, self.local) is not None
+        return _problem(inst, env, self.local, self.handed) is not None
 
     def note(self, inst: dict[str, Any], receiver: Any) -> None:
         op, value = inst["op"], self.env.get(inst["dst"])
@@ -1617,18 +1935,14 @@ class _Path(_Region):
     def decline(self, args: tuple[Any, ...]) -> Any:
         return None
 
-    def key(
-        self, args: tuple[Any, ...], flat: list[torch.Tensor], positions: Any = None
-    ) -> Any:
-        seen: dict[int, int] = {}
+    def key(self, args: tuple[Any, ...], inputs: _Inputs, positions: Any = None) -> Any:
         parts = []
         for position in positions if positions is not None else self.positions or ():
             try:
-                parts.append(_describe(args[position], flat, seen))
+                parts.append(_describe(args[position], inputs))
             except _Opaque as e:
                 raise _Opaque(position, e.reason) from None
-        tensors = [(t.shape, t.dtype, t.device, t.requires_grad) for t in flat]
-        return (tuple(parts), tuple(tensors), _modes())
+        return _key(parts, inputs)
 
     def decide(self, args: tuple[Any, ...]) -> None:
         try:
@@ -1641,9 +1955,7 @@ class _Path(_Region):
         self.variants[key] = variant
         self.hot = True
 
-    def compile(
-        self, key: Any, args: tuple[Any, ...], flat: list[torch.Tensor]
-    ) -> _Variant:
+    def compile(self, key: Any, args: tuple[Any, ...], inputs: _Inputs) -> _Variant:
         # The key is made again: the path may look at other inputs.
         self.variants.pop(key, None)
         key, variant = self.follow(args)
@@ -1651,9 +1963,9 @@ class _Path(_Region):
         return variant
 
     def specialize(
-        self, key: Any, args: tuple[Any, ...], flat: list[torch.Tensor]
+        self, key: Any, args: tuple[Any, ...], inputs: _Inputs
     ) -> _Variant | None:
-        variant = super().specialize(key, args, flat)
+        variant = super().specialize(key, args, inputs)
         if variant is None:
             self.variants.pop(key, None)
         return variant
@@ -1674,10 +1986,10 @@ class _Path(_Region):
         ]
         limit: int | None = None
         for _ in range(8):
-            flat: list[torch.Tensor] = []
-            key = self.key(args, flat, positions)
+            inputs = _Inputs()
+            key = self.key(args, inputs, positions)
             try:
-                graph, found, keep = self.trace(args, flat, positions, refused, limit)
+                graph, found, keep = self.trace(args, inputs, positions, refused, limit)
             except _Retry as again:
                 limit = again.limit if again.limit is not None else limit
                 positions = (
@@ -1687,10 +1999,12 @@ class _Path(_Region):
             # Keyed on what some path looked at, and on nothing else.
             wanted = sorted(set(found["used"]) | set(self.positions or ()))
             if wanted != positions:
-                narrowed: list[torch.Tensor] = []
-                self.key(args, narrowed, wanted)
-                same = len(narrowed) == len(flat) and all(
-                    a is b for a, b in zip(narrowed, flat)
+                fewer = _Inputs()
+                self.key(args, fewer, wanted)
+                # The recipes and effects count the tensors and the objects
+                # the region was given: they must be the same ones.
+                same = _same_items(fewer.flat, inputs.flat) and _same_items(
+                    fewer.held, inputs.held
                 )
                 positions = wanted
                 if not same:
@@ -1701,13 +2015,14 @@ class _Path(_Region):
         if tuple(positions) != self.positions:
             self.positions = tuple(positions)
             self.variants.clear()
-        key = self.key(args, [])
+        key = self.key(args, _Inputs())
         variant = _Variant(
-            self.finish(graph, flat, key), found["recipes"], self.ops_of(graph), keep
+            self.finish(graph, inputs, key), found["recipes"], self.ops_of(graph), keep
         )
         variant.direct = False
         variant.leap = found["leap"]
         variant.guards = found["guards"]
+        variant.affects(*found["effects"])
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()
         return key, variant
@@ -1715,19 +2030,19 @@ class _Path(_Region):
     def trace(
         self,
         args: tuple[Any, ...],
-        flat: list[torch.Tensor],
+        inputs: _Inputs,
         positions: list[int],
         refused: set[int],
         limit: int | None,
     ) -> tuple[Any, dict[str, Any], list[Any]]:
-        from torch.fx.experimental.proxy_tensor import make_fx
-
         plan = self.plan
+        flat, held = inputs.flat, inputs.held
         undefined = _runtime.UNDEFINED
         modules: dict[int, nn.Module] = {}
         keep: list[Any] = []
+        visited: set[int] = set()
         for position in positions:
-            _identities(args[position], modules, keep)
+            _identities(args[position], modules, keep, visited)
         keep.extend(modules.values())
         reachable: set[int] = set()
         for module in modules.values():
@@ -1735,22 +2050,25 @@ class _Path(_Region):
         found: dict[str, Any] = {}
         keyed = set(positions)
 
-        def path(*fake: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        def path(*fake: torch.Tensor) -> tuple[Any, ...]:
             fakes = {id(real): f for real, f in zip(flat, fake)}
-            copies: list[Any] = []
+            copies = _Copies(fakes)
             env: dict[int, Any] = {}
             for position, (value, arg) in enumerate(zip(self.inputs, args)):
                 if position in keyed:
-                    env[value] = _rebuild(arg, fakes, copies)
+                    env[value] = _rebuild(arg, copies)
                 elif arg is not undefined and value in refused:
                     # There for the instructions that only hold it.
                     env[value] = arg
+            copies.track(held)
+            given = copies.given()
             grads = [f.requires_grad for f in fake]
             walk = _Walk(
                 self,
                 env,
                 refused | {v for p, v in enumerate(self.inputs) if p not in keyed},
                 limit,
+                given,
             )
             try:
                 with _swapped(modules, fakes), _traps(modules):
@@ -1767,11 +2085,7 @@ class _Path(_Region):
                 # More to compile in that block: it is left whole, to its own
                 # regions.
                 raise _Retry(limit=walk.entered - 1)
-            if not all(_unchanged(copy, before) for copy, before in copies):
-                raise _Failed(None, "changes a list or dict it was given")
-            if grads != [f.requires_grad for f in fake]:
-                raise _Failed(None, "changes requires_grad of a tensor it was given")
-            recipes = _Recipes(reachable, {id(copy) for copy, _ in copies})
+            recipes = _checked(copies, fake, grads, reachable, given)
             live = [v for v in plan.replay.live(block, index) if v in walk.born]
             # What an instruction reads from there on is made. What a block
             # only keeps alive to the end of its scope is not: it would be a
@@ -1790,19 +2104,14 @@ class _Path(_Region):
                         raise _Failed(self.definition(value), str(e)) from None
                     raise _Retry(limit=born - 1) from None
             found["leap"] = (block, index, values, [v for v in live if v not in values])
+            found["effects"] = _effects_of(copies, recipes)
             found["guards"] = walk.guards
             found["used"] = [
                 p for p, v in enumerate(self.inputs) if v in walk.used and p in keyed
             ]
             return tuple(recipes.results)
 
-        try:
-            graph = make_fx(path, tracing_mode="fake")(*flat)
-        except (_Failed, _Retry):
-            raise
-        except Exception as e:
-            reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
-            raise _Failed(getattr(e, "cfg_index", None), reason) from None
+        graph = _trace(path, list(flat))
         return graph, found, keep
 
 
