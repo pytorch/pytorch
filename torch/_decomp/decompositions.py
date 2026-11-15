@@ -3712,6 +3712,21 @@ def get_scale_value(scales, idx):
     return scales[idx]
 
 
+def _upsample_check_sizes(input_size, output_size) -> None:
+    # Same check as upsample_common_check in torch/_meta_registrations.py and
+    # the eager kernels (aten/src/ATen/native/UpSample.h). The upsample
+    # decompositions below are also registered as CompositeImplicitAutograd and
+    # Autograd py_impls, so under torch.compile they run before any meta kernel
+    # and have to validate the sizes themselves. Without this, a zero size
+    # spatial dim in the input makes the gathers read out of bounds.
+    for s in (*input_size[2:], *output_size):
+        torch._check(
+            s > 0,
+            lambda: "Input and output sizes should be greater than 0, but got "
+            f"input size {list(input_size)} and output size {list(output_size)}",
+        )
+
+
 @register_decomposition(aten.upsample_nearest1d.vec)
 @register_decomposition(aten.upsample_nearest2d.vec)
 @register_decomposition(aten.upsample_nearest3d.vec)
@@ -3885,6 +3900,7 @@ def _upsample_nearest(
     scales: list[float | None],
     exact: bool = False,
 ) -> Tensor:
+    _upsample_check_sizes(input.shape, output_size)
     spatial_indices = _compute_upsample_nearest_indices(
         input, output_size, scales, exact=exact
     )
@@ -4768,6 +4784,7 @@ def _upsample_linear(
     align_corners: bool,
     scales: list[float | None],
 ) -> Tensor:
+    _upsample_check_sizes(input.shape, output_size)
     # get dimensions of original image
     n_channels = input.shape[1]
     inp_sizes = input.shape[2:]
@@ -5535,6 +5552,7 @@ def upsample_bicubic2d_default(
     scale_h: float | None = None,
     scale_w: float | None = None,
 ) -> Tensor:
+    _upsample_check_sizes(input.shape, output_size)
     # get dimensions of original image
     _, _, in_h, in_w = input.shape
 

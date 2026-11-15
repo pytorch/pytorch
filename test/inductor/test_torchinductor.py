@@ -11042,6 +11042,43 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=1e-3,
         )
 
+    def test_upsample_zero_size_errors(self):
+        # Eager rejects a zero size spatial dim in the input or the output. The
+        # upsample decompositions run before the meta kernels under
+        # torch.compile, so they have to reject it as well instead of gathering
+        # out of bounds and returning garbage.
+        msg = "Input and output sizes should be greater than 0"
+        cases = [
+            ((2, 3, 0), dict(size=3, mode="nearest")),
+            ((2, 3, 0), dict(size=3, mode="nearest-exact")),
+            ((2, 3, 0), dict(size=3, mode="linear")),
+            ((1, 2, 0, 4), dict(size=(3, 3), mode="nearest")),
+            ((1, 2, 0, 4), dict(size=(3, 3), mode="bilinear")),
+            ((1, 2, 4, 0), dict(size=(3, 3), mode="bicubic")),
+            ((1, 2, 0, 4, 4), dict(size=(3, 3, 3), mode="trilinear")),
+            (
+                (2, 3, 1),
+                dict(scale_factor=0.6, mode="nearest", recompute_scale_factor=False),
+            ),
+            (
+                (1, 2, 1, 4),
+                dict(
+                    scale_factor=(0.6, 1.0),
+                    mode="bilinear",
+                    recompute_scale_factor=False,
+                ),
+            ),
+        ]
+        for shape, kwargs in cases:
+            fn = functools.partial(F.interpolate, **kwargs)
+            x = torch.randn(shape, device=self.device)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                fn(x)
+
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.compile(fn, fullgraph=True)(x)
+
     def test_float_index_expression(self):
         # Test that index propagation doesn't generate bad index_expr calls like
         # ops.index_expr(0.5*x, dtype) where the expression is not integral
