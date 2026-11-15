@@ -3445,7 +3445,7 @@ class _MakefxTracer:
                 # spec-introduced unbacked symbols.
                 from torch.export._trace import _add_input_unbacked_bindings
 
-                _add_input_unbacked_bindings(t, fake_mode.shape_env)
+                _add_input_unbacked_bindings(t)
             insert_deferred_runtime_asserts(t, fake_mode.shape_env, "reenter_make_fx")
             t.recompile()
         # TODO: kind of a bad way to do it, should maybe figure out a better way
