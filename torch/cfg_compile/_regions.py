@@ -82,8 +82,7 @@ nothing wrote to them: ``tensor_stamp`` hashes, per tensor, the object, the
 address of its memory and its version counter, and each tensor has a lazy
 clone that is never read, so that a write by anything but an in-place
 operation on the tensor itself still moves it to other memory (``_watched``).
-A variant whose tensors changed is made again for what they are then, and
-a region this happens to twice takes them as inputs from then on.
+A variant whose tensors changed is made again with those as inputs.
 """
 
 import ast
@@ -218,9 +217,13 @@ _MOST_WAITS = 256
 # How many graphs of a compiled function may have the tensors of its modules
 # built in: such a graph is the graph of one module and no other.
 _MOST_FROZEN = 8
-# How many times a region may find the tensors of a module changed under a
-# graph that had them built in, before its graphs take them as inputs.
-_MOST_MELTS = 2
+# How many times a region may find tensors of a module changed under a graph
+# that had them built in (each time the ones that changed become inputs),
+# before its graphs take all of them as inputs.
+_MOST_MELTS = 3
+# How many times the tensors a graph has built in may be found moved to
+# other memory, unchanged, before the ones that moved become inputs.
+_MOST_MOVES = 8
 _HEAPTYPE = 1 << 9
 # How many variants of a region may leave what they were given with other
 # items, keys or attributes than it had. A cache that is filled on the first
@@ -1991,7 +1994,9 @@ class _Variant:
         "keep",
         "leap",
         "numbers",
+        "moves",
         "ops",
+        "positions",
         "proven",
         "recipes",
         "rest",
@@ -2036,9 +2041,11 @@ class _Variant:
         self.rest: Callable[[list[Any]], list[Any]] | None = None
         self.state: Callable[[list[Any]], list[Any]] | None = None
         self.stamp: int | None = None
-        # The clones that keep the memory of the built-in tensors shared
-        # (see ``_watched``).
-        self.watch: list[torch.Tensor] = []
+        self.positions: list[int] = []
+        # Per built-in tensor: which object it was, its version, and the
+        # clone that keeps its memory shared (see ``_watched``).
+        self.watch: list[tuple[int, int, torch.Tensor]] = []
+        self.moves = 0
 
     def run(self, inputs: _Inputs) -> Any:
         flat, held = inputs.flat, inputs.held
@@ -2072,15 +2079,46 @@ class _Variant:
         taken = set(positions)
         self.rest = _picker([i for i in range(len(flat)) if i not in taken])
         self.state = _picker(positions)
-        self.watch = clones
-        self.stamp = _runtime.tensor_stamp([flat[i] for i in positions])
+        self.positions = positions
+        tensors = [flat[i] for i in positions]
+        self.watch = [(id(t), t._version, clone) for t, clone in zip(tensors, clones)]
+        self.stamp = _runtime.tensor_stamp(tensors)
 
-    def fresh(self, inputs: _Inputs) -> bool:
-        """Whether what the graph has built in is what the modules hold: the
-        same tensors, not written to since."""
+    def stale(self, inputs: _Inputs) -> list[int] | None:
+        """None while what the graph has built in is what the modules hold:
+        the same tensors, not written to since. Else the positions, in the
+        call, of the tensors that are not.
+
+        A tensor can be in other memory with nothing written to it: saving
+        it, ``.numpy()`` and other compiled code ask for a pointer they
+        could write through, which is all that the clone sees. Such a tensor
+        is compared with what it was and watched anew; one that keeps moving
+        counts as changed."""
         if self.state is None:
-            return True
-        return _runtime.tensor_stamp(self.state(inputs.flat)) == self.stamp
+            return None
+        tensors = self.state(inputs.flat)
+        if _runtime.tensor_stamp(tensors) == self.stamp:
+            return None
+        address = torch._C._data_address
+        changed, moved = [], []
+        for k, (tensor, (who, version, clone)) in enumerate(zip(tensors, self.watch)):
+            if id(tensor) != who or tensor.is_inference() or tensor._version != version:
+                changed.append(k)
+            elif address(tensor) != address(clone):
+                moved.append(k)
+        with torch.no_grad():
+            same = torch.equal
+            changed += [k for k in moved if not same(tensors[k], self.watch[k][2])]
+            self.moves += 1
+            if not changed and self.moves > _MOST_MOVES:
+                changed = moved
+            if changed:
+                return [self.positions[k] for k in changed]
+            for k in moved:
+                who, version, _ = self.watch[k]
+                self.watch[k] = (who, version, tensors[k]._lazy_clone())
+        self.stamp = _runtime.tensor_stamp(tensors)
+        return None
 
     def holds(self) -> bool:
         """Whether what the path read is still what it was."""
@@ -2115,9 +2153,11 @@ class _Region:
         # Traces that were made for nothing: their graph was one too many.
         self.surplus = 0
         # How many times a graph with the weights built in met other
-        # weights. A region that does so again and again has modules that
-        # are being trained, and its graphs take the weights from then on.
+        # weights, and which tensors of a call those were: the next graph
+        # takes them as inputs. A region that goes on meeting other weights
+        # has modules that are being trained.
         self.melts = 0
+        self.unstable: set[int] = set()
 
     def __call__(self, *args: Any) -> Any:
         if not self.hot:
@@ -2129,8 +2169,9 @@ class _Region:
             return self.decline(args)
         variant = self.variants.get(key, self)
         if variant is not self and variant is not None:
-            if not variant.fresh(inputs):  # type: ignore[union-attr]
-                self.melt(variant)  # type: ignore[arg-type]
+            stale = variant.stale(inputs)  # type: ignore[union-attr]
+            if stale is not None:
+                self.melt(variant, stale)  # type: ignore[arg-type]
                 variant = self
         if variant is self or (variant is not None and not variant.holds()):  # type: ignore[union-attr]
             variant = self.widened(key, inputs)
@@ -2151,16 +2192,18 @@ class _Region:
         if known is not None:
             for variant in reversed(known.open):
                 if variant.shape.holds(key[2], inputs.offsets) and variant.holds():
-                    if variant.fresh(inputs):
+                    stale = variant.stale(inputs)
+                    if stale is None:
                         return variant
-                    self.melt(variant)
+                    self.melt(variant, stale)
                     return self.widened(key, inputs)
         return None
 
-    def melt(self, variant: _Variant) -> None:
-        """Takes out a variant whose graph has weights built in that the
-        modules no longer have."""
+    def melt(self, variant: _Variant, stale: list[int]) -> None:
+        """Takes out a variant whose graph has tensors built in that the
+        modules no longer have: the ones at ``stale``."""
         self.melts += 1
+        self.unstable.update(stale)
         for other in [k for k, v in self.variants.items() if v is variant]:
             del self.variants[other]
         for known in self.sizes.values():
@@ -2196,7 +2239,7 @@ class _Region:
             torch.set_rng_state(generator)
             if variant.stamp is not None:
                 # The graph without the weights built in may do.
-                self.melt(variant)
+                self.melt(variant, [])
                 self.melts = _MOST_MELTS
                 again = self.specialize(key, args, inputs)
                 if again is None:
@@ -2494,9 +2537,9 @@ class _Region:
     ) -> list[int]:
         """The tensors of a call that its graph may have built in instead of
         taking them: those of the modules, when the call is one of inference
-        (no gradients recorded, no module in training) and the region has
-        not found the modules with other weights twice. Not the ones the
-        region itself writes to or replaces."""
+        (no gradients recorded, no module in training). Not the ones the
+        region itself writes to or replaces, nor the ones a graph of the
+        region had built in when they changed."""
         options = self.plan.options
         if options.backend not in _BUILDS_IN or torch.is_grad_enabled():
             return []
@@ -2513,8 +2556,8 @@ class _Region:
                     state.add(id(store[name]))
         except LookupError:
             return []
-        flat = inputs.flat
-        return [i for i, t in enumerate(flat) if id(t) in state and i not in written]
+        flat, left = inputs.flat, written | self.unstable
+        return [i for i, t in enumerate(flat) if id(t) in state and i not in left]
 
     def leave_open(
         self, variant: _Variant, key: Any, inputs: _Inputs, opening: _Open, texts: Any

@@ -5320,16 +5320,16 @@ class TestCfgRegions(TestCase):
 
         compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
         with self.building_in():
-            # Compiled again for the weights it finds, then, when they have
-            # changed once more, with the weights as inputs.
-            for frozen in (1, 1, 0, 0):
+            # Compiled again with what changed as an input: for "load", all.
+            for compiles in (1, 2, 2, 2):
                 with torch.no_grad():
                     for _ in range(6):
                         self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
                 (region,) = self.compiled_regions(compiled)
-                self.assertEqual((region["variants"], region["frozen"]), (1, frozen))
+                frozen = 0 if write == "load" and compiles > 1 else 1
+                seen = (region["variants"], region["compiles"], region["frozen"])
+                self.assertEqual(seen, (1, compiles, frozen))
                 change()
-            self.assertEqual(region["compiles"], 3)
 
     def test_buffer_a_region_writes_is_not_built_in(self):
         torch.manual_seed(0)
@@ -5344,6 +5344,26 @@ class TestCfgRegions(TestCase):
                     self.assertEqual(model.calls, reference.calls)
         (region,) = self.compiled_regions(compiled)
         self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
+
+    def test_weights_that_were_only_moved_stay_built_in(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with self.building_in(), torch.no_grad():
+            for i in range(12):
+                if i in (7, 9):
+                    # Asks for pointers one could write through.
+                    for tensor in model.state_dict().values():
+                        tensor.data_ptr()
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+            (region,) = self.compiled_regions(compiled)
+            self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
+            # Watched as before.
+            model.conv.weight.data.mul_(2)
+            self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+            (region,) = self.compiled_regions(compiled)
+            self.assertEqual((region["compiles"], region["frozen"]), (2, 1))
 
     @unittest.skipUnless(TEST_NUMPY, "needs NumPy")
     def test_memory_of_a_numpy_array_is_not_built_in(self):
