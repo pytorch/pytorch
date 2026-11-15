@@ -525,6 +525,16 @@ def maybe_get_fake_constant(x: object) -> Tensor | None:
     return None
 
 
+def maybe_set_fake_constant(x: Any, constant: Tensor) -> None:
+    fake_mode = maybe_get_fake_mode(x)
+    if isinstance(fake_mode, FakeTensorMode):
+        # Python wrapper subclasses also carry an outer constant attribute.
+        x.constant = constant
+    elif isinstance(fake_mode, CppFakeTensorMode):
+        maybe_clear_fake_constant(x)
+        torch._C._set_fake_constant(x, constant)
+
+
 def maybe_clear_fake_constant(x: object) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         x.constant = None

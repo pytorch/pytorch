@@ -13,8 +13,7 @@ from torch._library.opaque_object import (
     is_opaque_symbolic_type,
 )
 from torch._subclasses.fake_tensor import (
-    CppFakeTensorMode,
-    maybe_clear_fake_constant,
+    maybe_set_fake_constant,
     unset_fake_temporarily,
 )
 from torch.export.exported_program import (
@@ -333,18 +332,11 @@ def lift_constants_pass(
                 input_spec_arg: ArgumentSpec
                 if isinstance(constant_val, torch.Tensor):
                     if fake_mode is not None:
-                        if isinstance(fake_mode, CppFakeTensorMode):
-                            fake_constant = fake_mode.from_tensor(
-                                constant_val, static_shapes=True
-                            )
-                            maybe_clear_fake_constant(fake_constant)
-                            torch._C._set_fake_constant(fake_constant, constant_val)
-                            const_placeholder_node.meta["val"] = fake_constant
-                        else:
-                            const_placeholder_node.meta["val"] = fake_mode.from_tensor(
-                                constant_val, static_shapes=True
-                            )
-                            const_placeholder_node.meta["val"].constant = constant_val
+                        fake_constant = fake_mode.from_tensor(
+                            constant_val, static_shapes=True
+                        )
+                        maybe_set_fake_constant(fake_constant, constant_val)
+                        const_placeholder_node.meta["val"] = fake_constant
                     else:
                         const_placeholder_node.meta["val"] = constant_val
                     input_spec_arg = TensorArgument(name=const_placeholder_node.name)
