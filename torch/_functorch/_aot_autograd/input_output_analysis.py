@@ -33,6 +33,7 @@ from .schemas import (
     GraphSignature,
     InputAliasInfo,
     MemoryFormatMeta,
+    MutationType,
     OutputAliasInfo,
     OutputType,
     ViewAndMutationMeta,
@@ -314,13 +315,24 @@ def create_synthetic_base_metadata(
     ]
 
     output_info = existing_output_infos + input_metadata_output_info
+
+    num_outer_mutated_tangents = len(
+        [
+            info
+            for info in m.input_info
+            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
+            and info.mutates_data
+            and info.requires_grad
+        ]
+    )
+
     # Regenerate traced tangents to include mutated inputs including synthetic bases
     traced_tangents = (
-        inner_mutated_tangents + m.traced_tangents[len(inner_mutated_tangents) :]
+        inner_mutated_tangents + m.traced_tangents[num_outer_mutated_tangents :]
     )
     traced_tangents_descs = (
         inner_mutated_tangents_descs
-        + m.traced_tangents_descs[len(inner_mutated_tangents) :]
+        + m.traced_tangents_descs[num_outer_mutated_tangents :]
     )
     if m.subclass_tangent_meta is None:
         raise AssertionError("m.subclass_tangent_meta must not be None")
@@ -328,7 +340,7 @@ def create_synthetic_base_metadata(
         # pyrefly: ignore[bad-argument-type]
         PlainTensorMeta(0, memory_format=x)
         for x in inner_mutated_tangents_memory_formats
-    ] + m.subclass_tangent_meta[len(inner_mutated_tangents) :]
+    ] + m.subclass_tangent_meta[num_outer_mutated_tangents :]
 
     return (
         ViewAndMutationMeta(
