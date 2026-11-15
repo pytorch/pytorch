@@ -630,15 +630,15 @@ ownership:
       - /.github/workflows/pr-review-scripts-test.yml: [izaitsevfb]
   - name: runners_ci
     labels: ["module: ci", "module: infra"]
-    owners: [atalman, huydhn]
+    owners: [atalman, huydhn, zxiiro]
     section: infra_github_automation
     paths:
-      - /.github/arc.yaml: [huydhn, atalman]
-      - /.github/scripts/runner_determinator.py: [huydhn, atalman]
-      - /.github/scripts/test_runner_determinator.py: [huydhn, atalman]
-      - /.github/workflows/_runner-determinator.yml: [huydhn, atalman]
-      - /.github/workflows/_select-release-runner.yml: [huydhn, atalman]
-      - /.github/workflows/release-runner-groups-refresh.yml: [huydhn, atalman]
+      - /.github/arc.yaml: [huydhn, atalman, zxiiro]
+      - /.github/scripts/runner_determinator.py: [huydhn, atalman, zxiiro]
+      - /.github/scripts/test_runner_determinator.py: [huydhn, atalman, zxiiro]
+      - /.github/workflows/_runner-determinator.yml: [huydhn, atalman, zxiiro]
+      - /.github/workflows/_select-release-runner.yml: [huydhn, atalman, zxiiro]
+      - /.github/workflows/release-runner-groups-refresh.yml: [huydhn, atalman, zxiiro]
   - name: binaries_ci
     labels: ["module: ci", "module: binaries"]
     owners: [atalman, huydhn, malfet, zklaus]

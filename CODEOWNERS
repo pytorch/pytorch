@@ -1025,13 +1025,13 @@
 /.github/workflows/hardened-pr-review.yml @izaitsevfb
 /.github/workflows/pr-review-scripts-test.yml @izaitsevfb
 # label: module: ci, module: infra
-# owner: @atalman @huydhn
-/.github/arc.yaml @huydhn @atalman
-/.github/scripts/runner_determinator.py @huydhn @atalman
-/.github/scripts/test_runner_determinator.py @huydhn @atalman
-/.github/workflows/_runner-determinator.yml @huydhn @atalman
-/.github/workflows/_select-release-runner.yml @huydhn @atalman
-/.github/workflows/release-runner-groups-refresh.yml @huydhn @atalman
+# owner: @atalman @huydhn @zxiiro
+/.github/arc.yaml @huydhn @atalman @zxiiro
+/.github/scripts/runner_determinator.py @huydhn @atalman @zxiiro
+/.github/scripts/test_runner_determinator.py @huydhn @atalman @zxiiro
+/.github/workflows/_runner-determinator.yml @huydhn @atalman @zxiiro
+/.github/workflows/_select-release-runner.yml @huydhn @atalman @zxiiro
+/.github/workflows/release-runner-groups-refresh.yml @huydhn @atalman @zxiiro
 #
 # [infra_build_packaging]
 # label: module: ci, module: binaries
