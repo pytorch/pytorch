@@ -103,14 +103,10 @@ bool is_nvshmem_available() {
   return ok;
 }
 
-ShmemSignalOps shmem_signal_ops() {
+ShmemOps shmem_ops() {
   return {
       static_cast<ShmemSignalOp>(ROCSHMEM_SIGNAL_SET),
-      static_cast<ShmemSignalOp>(ROCSHMEM_SIGNAL_ADD)};
-}
-
-ShmemCompareOps shmem_compare_ops() {
-  return {
+      static_cast<ShmemSignalOp>(ROCSHMEM_SIGNAL_ADD),
       static_cast<ShmemCompareOp>(ROCSHMEM_CMP_EQ),
       static_cast<ShmemCompareOp>(ROCSHMEM_CMP_NE),
       static_cast<ShmemCompareOp>(ROCSHMEM_CMP_GT),
