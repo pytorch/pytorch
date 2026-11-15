@@ -3406,12 +3406,6 @@ class TestMPS(TestCaseMPS):
         rev = torch.fft.rfftn(rdata, dim=(3, 0))
         check(lambda y: torch.fft.irfftn(y, s=(rdata.size(3), rdata.size(0)), dim=(3, 0)), rev)
 
-    def test_fftn_too_many_dims(self):
-        # MPSGraph cannot transform more than four dims.
-        x = torch.randn(2, 2, 2, 2, 2, device="mps", dtype=torch.complex64)
-        with self.assertRaisesRegex(RuntimeError, "up to 4 dimensions"):
-            torch.fft.fftn(x, dim=(0, 1, 2, 3, 4))
-
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
 
@@ -15563,6 +15557,70 @@ class TestComplex(TestCase):
 @skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
     exact_dtype = True
+
+    @parametrize("shape, dtype", [((2, 3, 4, 5, 6), torch.complex64), ((32, 8192), torch.complex64),
+                                  ((8192,), torch.complex32), ((64, 128), torch.complex32)])
+    def test_fftn_round_trip(self, device, shape, dtype):
+        # Every dim, several passes per axis, and fp16 partials above the half range (amplitude 100 before scaling)
+        x = 100 * torch.randn(shape, dtype=torch.complex64)
+        spectrum, expected = torch.fft.fftn(x.to(device)).cpu(), torch.fft.fftn(x)
+        # float32 rounding scales with the largest output, which a per-element rtol does not model
+        self.assertEqual(spectrum, expected, atol=2e-6 * expected.abs().max().item(), rtol=0)
+        result = torch.fft.ifftn(spectrum.to(dtype).to(device)).cpu().to(torch.complex64)
+        self.assertEqual(result, x, atol=0.5 if dtype == torch.complex32 else 1e-3, rtol=0)
+
+    def test_fft_private_ops_edge_dims(self, device):
+        # The private ops wrap negative dims like the CPU
+        x = torch.randn(3, 16, dtype=torch.complex64, device=device)
+        self.assertEqual(torch._fft_c2c(x, [-1], 0, True), torch.fft.fft(x))
+
+    @dtypes(torch.float32, torch.float16)
+    @parametrize("n", [64, 128, 200, 240, 256, 512, 1024, 2048, 2401, 4096, 4099])
+    @parametrize("kind", ["fft", "ifft"])
+    @parametrize("layout", ["contiguous", "transposed", "sliced", "out"])
+    def test_fft_strides(self, device, dtype, n, kind, layout):
+        complex_dtype = torch.complex32 if dtype == torch.float16 else torch.complex64
+        x = torch.randn(5, 2 * n + 3, device=device, dtype=complex_dtype)
+        x = {"sliced": x[:, 3::2], "transposed": x[:, :n].t().contiguous().t()}.get(layout, x[:, :n].contiguous())
+        op = getattr(torch.fft, kind)
+        kwargs = {"norm": "ortho"}
+        reference = op(x.cpu().to(torch.complex128), **kwargs)
+        if layout == "out":
+            kwargs["out"] = torch.empty(5, 2 * reference.size(-1) + 3, device=device, dtype=complex_dtype)[:, 3::2]
+        result, tol = op(x, **kwargs), 2e-3 if dtype == torch.float16 else None  # None: the default tolerance
+        self.assertEqual(result.cpu(), reference.to(result.dtype), atol=tol, rtol=tol)
+
+    @parametrize("n", [3 * 2**17, 441000, 4 * 3**10, 8 * 5**7, 2 * 7**6, 4 * 5**7, 2**20])
+    @parametrize("kind", ["fft", "ifft"])
+    @parametrize("dim", [0, 1])
+    def test_fft_long(self, device, n, kind, dim):
+        # Non-pow2 lengths from 2^17 take one global-memory stage per radix (every radix between them); 2^20 nests
+        x = torch.randn((n, 2) if dim == 0 else (2, n), device=device, dtype=torch.complex64)
+        op = getattr(torch.fft, kind)
+        reference = op(x.cpu().to(torch.complex128), dim=dim, norm="ortho")
+        self.assertEqual(op(x, dim=dim, norm="ortho").cpu(), reference.to(torch.complex64))
+
+    def test_fft_bluestein_long(self, device):
+        # A prime above 2^23: Bluestein's transforms take 2^25 points, past the two tile passes
+        x = torch.randn(8388617, device=device, dtype=torch.complex64)
+        reference = torch.fft.fft(x.cpu().to(torch.complex128), norm="ortho")
+        self.assertEqual(torch.fft.fft(x, norm="ortho").cpu(), reference.to(torch.complex64))
+
+    @serialTest()
+    @dtypes(torch.complex32, torch.complex64)
+    @parametrize("n", [16, 32, 96, 2401, 4096, 8192])
+    @largeTensorTest(lambda self, device, dtype, n: 2**31 * dtype.itemsize + 2**30)
+    @largeMPSBufferTest(lambda self, device, dtype, n: 2**31 * dtype.itemsize + 2**30)
+    def test_fft_64bit_offsets(self, device, dtype, n):
+        # A transform spanning 2^31 elements takes the kernels with 64-bit offsets; 8192 points take several passes
+        wide = torch.empty(2**31 + n, device=device, dtype=dtype)[:: 2**31 // (n - 1) + 1]
+        x = torch.randn(n, device=device, dtype=dtype)
+        reference = torch.fft.fft(x.cpu().to(torch.complex128), norm="ortho").to(dtype)
+        tol = 2e-3 if dtype == torch.complex32 else None
+        torch.fft.fft(x, norm="ortho", out=wide)
+        # Only the last point lies past 2^31: read it back without the kernels
+        self.assertEqual(wide[-1].cpu(), reference[-1], atol=tol, rtol=tol)
+        self.assertEqual(torch.fft.ifft(wide, norm="ortho"), x, atol=tol, rtol=tol)
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
