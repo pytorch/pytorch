@@ -21,22 +21,18 @@ TORCH_API bool is_nvshmem_available();
 enum class ShmemSignalOp : int64_t {};
 enum class ShmemCompareOp : int64_t {};
 
-struct ShmemSignalOps {
-  ShmemSignalOp set;
-  ShmemSignalOp add;
+struct ShmemOps {
+  ShmemSignalOp signal_set;
+  ShmemSignalOp signal_add;
+  ShmemCompareOp cmp_eq;
+  ShmemCompareOp cmp_ne;
+  ShmemCompareOp cmp_gt;
+  ShmemCompareOp cmp_ge;
+  ShmemCompareOp cmp_lt;
+  ShmemCompareOp cmp_le;
 };
 
-struct ShmemCompareOps {
-  ShmemCompareOp eq;
-  ShmemCompareOp ne;
-  ShmemCompareOp gt;
-  ShmemCompareOp ge;
-  ShmemCompareOp lt;
-  ShmemCompareOp le;
-};
-
-TORCH_API ShmemSignalOps shmem_signal_ops();
-TORCH_API ShmemCompareOps shmem_compare_ops();
+TORCH_API ShmemOps shmem_ops();
 
 // Release the NVSHMEM team pool associated with a process group.
 TORCH_API void release_nvshmem_team_pool(const std::string& group_name);
