@@ -250,6 +250,24 @@ class ShapeGuard(NamedTuple):
     size_oblivious: bool
 
 
+def _guard_payloads_equivalent(a: Any, b: Any) -> bool:
+    if a is b:
+        return True
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, Source) or type(a) in (str, int, bool, bytes, type(None)):
+        return a == b
+    if type(a) is tuple:
+        return len(a) == len(b) and all(
+            _guard_payloads_equivalent(x, y) for x, y in zip(a, b)
+        )
+    if type(a) is dict:
+        return a.keys() == b.keys() and all(
+            _guard_payloads_equivalent(a[k], b[k]) for k in a
+        )
+    return False
+
+
 @dataclasses.dataclass(slots=True)
 class Guard:
     # originating_source is the source that called the make_guard method to
@@ -315,6 +333,90 @@ class Guard:
             return self.create_fn.func
         else:
             return self.create_fn
+
+    def with_source(
+        self,
+        source: Source,
+        /,
+        *,
+        create_fn: Callable[[GuardBuilderBase, Guard], None] | None = None,
+    ) -> Guard:
+        """Copy a guard for rebuilding, without derived export metadata or cached hash."""
+        return dataclasses.replace(
+            self,
+            originating_source=source,
+            create_fn=self.create_fn if create_fn is None else create_fn,
+            guard_types=None,
+            code_list=None,
+            obj_weakref=None,
+            guarded_class_weakref=None,
+            _hash=None,
+        )
+
+    def remap_sources(self, remap_source: Callable[[Source], Source], /) -> Guard:
+        """Remap explicit source dependencies; return self when nothing changes."""
+
+        def remap(value: Any) -> Any:
+            if isinstance(value, Source):
+                return remap_source(value)
+            if type(value) is tuple:
+                items = tuple(remap(item) for item in value)
+                return value if all(a is b for a, b in zip(value, items)) else items
+            return value
+
+        source = remap(self.originating_source)
+        create_fn = self.create_fn
+        if isinstance(create_fn, functools.partial):
+            args = tuple(remap(arg) for arg in create_fn.args)
+            keywords = {key: remap(value) for key, value in create_fn.keywords.items()}
+            if any(a is not b for a, b in zip(args, create_fn.args)) or any(
+                value is not create_fn.keywords[key] for key, value in keywords.items()
+            ):
+                create_fn = functools.partial(create_fn.func, *args, **keywords)
+        if source is self.originating_source and create_fn is self.create_fn:
+            return self
+        return self.with_source(source, create_fn=create_fn)
+
+    def source_dependencies(
+        self, extra_sources: tuple[Source, ...] = ()
+    ) -> OrderedSet[Source]:
+        """Explicit sources, including ancestors and source-valued partial payloads."""
+        sources: OrderedSet[Source] = OrderedSet()
+
+        def collect(value: Any) -> None:
+            if isinstance(value, Source):
+                if value in sources:
+                    return
+                sources.add(value)
+                if dataclasses.is_dataclass(value):
+                    for field in dataclasses.fields(value):
+                        collect(getattr(value, field.name))
+            elif type(value) is tuple:
+                for item in value:
+                    collect(item)
+
+        collect(self.originating_source)
+        collect(extra_sources)
+        if isinstance(self.create_fn, functools.partial):
+            collect(self.create_fn.args)
+            collect(tuple(self.create_fn.keywords.values()))
+        return sources
+
+    def is_equivalent_to(self, other: Guard, /) -> bool:
+        """Prove equivalence for known payload types; keep unfamiliar payloads distinct."""
+
+        if (
+            self.originating_source != other.originating_source
+            or self._force_dict_keys_match != other._force_dict_keys_match
+            or self.inner_create_fn() is not other.inner_create_fn()
+        ):
+            return False
+        return _guard_payloads_equivalent(
+            getattr(self.create_fn, "args", ()), getattr(other.create_fn, "args", ())
+        ) and _guard_payloads_equivalent(
+            getattr(self.create_fn, "keywords", {}),
+            getattr(other.create_fn, "keywords", {}),
+        )
 
     @property
     def name(self) -> str:
@@ -1100,6 +1202,35 @@ class InlinedCodeCache:
     code_options: CodeOptions
 
 
+class _CurrentFrame:
+    """Context manager behind TracingContext.current_frame. Hand-written
+    rather than @contextmanager because it is entered on every inlined call
+    and generator resume."""
+
+    __slots__ = ("frame_summary", "old", "old_positions", "tc")
+
+    def __init__(self, frame_summary: traceback.FrameSummary | None) -> None:
+        self.frame_summary = frame_summary
+
+    def __enter__(self) -> None:
+        tc = self.tc = TracingContext.get()
+        if self.frame_summary is not None:
+            tc.frame_summary_stack.append(self.frame_summary)
+        self.old = tc.loc_in_frame
+        self.old_positions = tc.loc_in_frame_positions
+        tc.loc_in_frame = None
+        tc.loc_in_frame_positions = None
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        tc = self.tc
+        if isinstance(exc, Exception) and not hasattr(exc, "real_stack"):
+            exc.real_stack = tc.extract_stack()  # pyrefly: ignore [missing-attribute]
+        if self.frame_summary is not None:
+            tc.frame_summary_stack.pop()
+        tc.loc_in_frame = self.old
+        tc.loc_in_frame_positions = self.old_positions
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -1263,30 +1394,12 @@ class TracingContext:
                 raise
 
     @staticmethod
-    @contextlib.contextmanager
     def current_frame(
         frame_summary: traceback.FrameSummary | None,
-    ) -> Generator[None, None, None]:
+    ) -> _CurrentFrame:
         # frame_summary can be None to solely take advantage of real_stack
         # attachment to thrown exceptions
-        tc = TracingContext.get()
-        if frame_summary is not None:
-            tc.frame_summary_stack.append(frame_summary)
-        old = tc.loc_in_frame
-        old_positions = tc.loc_in_frame_positions
-        tc.loc_in_frame = None
-        tc.loc_in_frame_positions = None
-        try:
-            yield
-        except Exception as e:
-            if not hasattr(e, "real_stack"):
-                e.real_stack = tc.extract_stack()  # type: ignore[attr-defined]
-            raise
-        finally:
-            if frame_summary is not None:
-                tc.frame_summary_stack.pop()
-            tc.loc_in_frame = old
-            tc.loc_in_frame_positions = old_positions
+        return _CurrentFrame(frame_summary)
 
     @staticmethod
     @contextlib.contextmanager
@@ -1643,7 +1756,7 @@ def require_python_fake_mode(
     Returns mode unchanged if it is a FakeTensorMode or None.
 
     Use it on a fake mode that must be a Python FakeTensorMode, for example to
-    call from_tensor or is_our_fake on it or to pass it on to code typed for
+    get Python FakeTensors from it or to pass it on to code typed for
     FakeTensorMode: a result of detect_fake_mode, active_fake_mode or
     maybe_get_fake_mode, or a mode the caller was given. Callers narrow the
     lookups with it so that they keep getting a Python FakeTensorMode when a
