@@ -157,6 +157,16 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
 
     def _build_weight_scale_mapping(self, weight_map: dict[str, str]):
         """Analyze and build weight-scale tensor pairs from weight mapping."""
+        # Validate all weight_map file paths to prevent path traversal.
+        # Resolve checkpoint dir once.
+        checkpoint_dir = Path(self.path).resolve()
+        for fqn, file_path in weight_map.items():
+            resolved = (checkpoint_dir / file_path).resolve()
+            if not resolved.is_relative_to(checkpoint_dir):
+                raise ValueError(
+                    f"weight_map entry for '{fqn}' escapes checkpoint directory: {file_path!r}"
+                )
+
         # Store the complete weight map for file location lookups.
         self._weight_map = weight_map
 
@@ -605,3 +615,4 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         except Exception as e:
             logger.error("Failed to read the quantized tensor!!")
             raise e
+
