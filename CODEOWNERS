@@ -959,14 +959,20 @@
 #
 # [infra_ci]
 # label: module: ci
-# owner: @pytorch/pytorch-dev-infra
-/.ci/ @pytorch/pytorch-dev-infra
+# owner: @atalman @georgehong @huydhn @jathu
+/.ci/ @huydhn @atalman
+/.ci/pytorch/ @huydhn @georgehong @atalman @jathu
+# label: module: ci, module: docker
+# owner: @atalman @huydhn
+/.ci/docker/ @atalman @huydhn
 # label: module: ci, module: rocm
 # owner: @jeffdaily
 /.ci/docker/ubuntu-rocm/ @jeffdaily
 /.ci/docker/common/install_roc*.sh @jeffdaily
 /.ci/docker/common/install_amdsmi.sh @jeffdaily
 /.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
+/.ci/pytorch/rocm_preflight.py @jeffdaily
+/.ci/pytorch/rocm_utils.sh @jeffdaily
 # label: module: ci, module: inductor
 # owner: @Chillee @desertfire @eellison @jataylo @jeffdaily @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
