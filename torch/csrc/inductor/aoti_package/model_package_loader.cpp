@@ -1,4 +1,4 @@
-#if !defined(C10_MOBILE) && !defined(ANDROID)
+﻿#if !defined(C10_MOBILE) && !defined(ANDROID)
 
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/FileSystem.h>
@@ -108,6 +108,72 @@ bool path_starts_with_directory(
       append_separator_if_needed(normalized_directory);
   return normalized_path == normalized_directory ||
       normalized_path.starts_with(normalized_directory_with_sep);
+}
+
+// Validate that a zip archive member path is safe (no path traversal).
+// Rejects absolute paths, Windows drive roots, and any ".." components.
+// Also verifies the resolved destination path stays within temp_dir.
+void validate_zip_member_path(
+    const std::string& zip_member_name,
+    const std::string& temp_dir) {
+  // Reject empty member names
+  TORCH_CHECK(
+      !zip_member_name.empty(),
+      "Rejecting unsafe zip member: empty path");
+
+  // Normalize separator for checking
+  std::string normalized = normalize_path_separator(zip_member_name);
+
+  // Reject absolute paths (Unix style starting with /)
+  TORCH_CHECK(
+      !normalized.starts_with("/"),
+      "Rejecting unsafe zip member (absolute path): ",
+      zip_member_name);
+
+  // Reject Windows drive roots like C:/...
+  TORCH_CHECK(
+      !is_windows_drive_root(normalized.substr(0, 3)),
+      "Rejecting unsafe zip member (Windows drive root): ",
+      zip_member_name);
+
+  // Reject any path component equal to ".." (path traversal)
+  // Also reject "." components which could hide traversal tricks
+  size_t pos = 0;
+  while (pos < normalized.size()) {
+    size_t next_sep = normalized.find('/', pos);
+    std::string component = (next_sep == std::string::npos)
+        ? normalized.substr(pos)
+        : normalized.substr(pos, next_sep - pos);
+
+    TORCH_CHECK(
+        component != ".." && component != ".",
+        "Rejecting unsafe zip member (path traversal component): ",
+        zip_member_name);
+
+    if (next_sep == std::string::npos) {
+      break;
+    }
+    pos = next_sep + 1;
+  }
+
+  // Reconstruct the final destination and verify it stays within temp_dir
+  std::string dest = normalize_path_separator(
+      temp_dir + k_separator + normalized);
+  fs::path dest_path(dest);
+  fs::path temp_path(normalize_path_separator(temp_dir));
+
+  // lexically_normal resolves "." and ".." components without touching the
+  // filesystem. We then ensure the result is still under temp_dir.
+  fs::path resolved = dest_path.lexically_normal();
+  fs::path temp_resolved = temp_path.lexically_normal();
+
+  TORCH_CHECK(
+      path_starts_with_directory(
+          resolved.string(), temp_resolved.string()),
+      "Rejecting unsafe zip member (escapes temp directory): ",
+      zip_member_name,
+      " -> ",
+      resolved.string());
 }
 
 void list_files_recursive(
@@ -655,6 +721,11 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     if (!metadata_filename.empty()) {
       // Create temporary directory for extraction
       std::string temp_dir = normalize_path_separator(create_temp_dir());
+
+      // Security: validate the metadata zip member path before extraction
+      // to prevent path traversal attacks (CWE-22).
+      validate_zip_member_path(metadata_filename, temp_dir);
+
       std::string output_path_str =
           normalize_path_separator(temp_dir + k_separator + metadata_filename);
 
@@ -843,6 +914,11 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     // zip_filename_str can't be normalize_path_separator, because it should be
     // as index for mz_zip_reader_extract_file_to_file.
     for (auto const& zip_filename_str : found_filenames) {
+      // Security: validate the zip member path before any processing.
+      // Prevents path traversal attacks via ".." or absolute paths that could
+      // write files outside the temporary directory (CWE-22).
+      validate_zip_member_path(zip_filename_str, temp_dir_);
+
       auto cur_filename = normalize_path_separator(zip_filename_str);
       // Only compile files in the specified model directory
       if (path_starts_with_directory(cur_filename, model_directory) ||
@@ -1065,3 +1141,4 @@ void AOTIModelPackageLoader::update_constant_buffer(
 }
 } // namespace torch::inductor
 #endif
+
