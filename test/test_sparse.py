@@ -2442,6 +2442,43 @@ class TestSparse(TestSparseBase):
         expected = self.safeToDense(x) + self.safeToDense(x)
         self.assertEqual(self.safeToDense(y), expected)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/204446
+    @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
+    def test_add_dense_sparse_view_storage_offset(self, device, dtype):
+        def check_inplace_add(view, sparse):
+            expected = view.clone()
+            expected.add_(sparse.to_dense())
+            view.add_(sparse)
+            self.assertEqual(view, expected)
+
+        # Contiguous 1D view with nonzero storage_offset (row middle / last).
+        coo = torch.ones(8, dtype=dtype, device=device).to_sparse()
+        base = torch.zeros(3, 8, dtype=dtype, device=device)
+        check_inplace_add(base[1], coo)
+        self.assertEqual(base[0], torch.zeros(8, dtype=dtype, device=device))
+        self.assertEqual(base[2], torch.zeros(8, dtype=dtype, device=device))
+
+        base2 = torch.zeros(2, 8, dtype=dtype, device=device)
+        check_inplace_add(base2[-1], coo)
+        self.assertEqual(base2[0], torch.zeros(8, dtype=dtype, device=device))
+
+        # Multi-dim sparse indices into a contiguous 2D view with offset.
+        indices = self.index_tensor([[0, 1], [1, 2]], device=device)
+        values = torch.tensor([3.0, 4.0], dtype=dtype, device=device)
+        sparse_2d = self.sparse_tensor(indices, values, torch.Size([2, 4]), dtype=dtype, device=device)
+        base3 = torch.zeros(3, 2, 4, dtype=dtype, device=device)
+        check_inplace_add(base3[1], sparse_2d)
+        self.assertEqual(base3[0], torch.zeros(2, 4, dtype=dtype, device=device))
+        self.assertEqual(base3[2], torch.zeros(2, 4, dtype=dtype, device=device))
+
+        # Hybrid sparse (dense dims on values); hybrid worker was already correct.
+        hybrid = torch.ones(2, 3, dtype=dtype, device=device).to_sparse(1)
+        base4 = torch.zeros(3, 2, 3, dtype=dtype, device=device)
+        check_inplace_add(base4[1], hybrid)
+        self.assertEqual(base4[0], torch.zeros(2, 3, dtype=dtype, device=device))
+        self.assertEqual(base4[2], torch.zeros(2, 3, dtype=dtype, device=device))
+
     def _test_sparse_mask_shape(self, nnz_x1, nnz_x2, shape_i, shape_v, dtype, device, coalesced):
         shape = shape_i + (shape_v or [])
         x1, _, _ = self._gen_sparse(len(shape_i), nnz_x1, shape, dtype, device, coalesced)
