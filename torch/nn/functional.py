@@ -5909,9 +5909,9 @@ def pad(
         mode: ``'constant'``, ``'reflect'``, ``'replicate'`` or ``'circular'``.
             Default: ``'constant'``
         value: fill value for ``'constant'`` padding. Default: ``0``.
-            In eager mode, a Python ``int`` larger than ``2**53`` is kept exact
-            for ``int64`` and ``uint64`` inputs. TorchScript and direct callers
-            of ``torch._C._nn.pad`` convert the value to a ``double``.
+            A Python ``int`` fill value is kept exact for ``int64`` and ``uint64``
+            inputs, except under ``torch.jit.script``, ``torch.compile`` and the
+            C++ API, which convert it to ``double``.
 
     Examples::
 
@@ -5954,17 +5954,16 @@ def pad(
                 )._replication_pad(input, pad)
         if (
             isinstance(value, int)
-            and not isinstance(value, bool)
             and not torch.compiler.is_compiling()
             and mode == "constant"
+            and input.dtype in (torch.int64, torch.uint64)
         ):
             # _C._nn.pad takes value as a double, which rounds ints above 2**53.
             # constant_pad_nd takes a Scalar and keeps the int exact. Dynamo
             # reports a SymInt as an int and Inductor cannot lower a symbolic
             # fill, so compiled code keeps using _C._nn.pad.
-            if input.dtype == torch.int64 and abs(value) > 2**53:
-                return torch.constant_pad_nd(input, pad, value)
-            if input.dtype == torch.uint64 and value > 2**53:
+            info = torch.iinfo(input.dtype)
+            if abs(value) > 2**53 and info.min <= value <= info.max:
                 return torch.constant_pad_nd(input, pad, value)
     return torch._C._nn.pad(input, pad, mode, value)
 
