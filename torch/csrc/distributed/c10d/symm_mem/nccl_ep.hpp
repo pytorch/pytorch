@@ -28,6 +28,8 @@ struct NcclEpGroup : c10::intrusive_ptr_target {
 };
 
 struct NcclEpHandle : c10::intrusive_ptr_target {
+  // Native handle destruction dereferences the group; release it last.
+  c10::intrusive_ptr<NcclEpGroup> group;
   void* handle{nullptr}; // ncclEpHandle_t, opaque
   NcclEpLayout layout{NcclEpLayout::Unset}; // queried for output shapes
   std::string group_name; // for symm_mem zero-copy rendezvous lookup
@@ -42,13 +44,15 @@ struct NcclEpHandle : c10::intrusive_ptr_target {
   at::Tensor recv_expert_counter;
 
   NcclEpHandle(
+      c10::intrusive_ptr<NcclEpGroup> group,
       void* handle,
       NcclEpLayout layout,
       std::string group_name,
       at::Tensor topk_idx,
       at::Tensor recv_total_counter,
       at::Tensor recv_expert_counter)
-      : handle(handle),
+      : group(std::move(group)),
+        handle(handle),
         layout(layout),
         group_name(std::move(group_name)),
         topk_idx(std::move(topk_idx)),
