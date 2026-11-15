@@ -109,7 +109,15 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         [("forward", False), ("forward", True)]
         + [
             (operation, False)
-            for operation in ("call_values", "keys", "values", "items", "len_keys")
+            for operation in (
+                "call_values",
+                "keys",
+                "values",
+                "items",
+                "len_keys",
+                "unpack",
+                "empty_unpack",
+            )
         ],
     )
     def test_hook_dict_iteration_order(
@@ -121,6 +129,12 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         def fn(x, module):
             if operation == "forward":
                 return module(x)
+            if operation in ("unpack", "empty_unpack"):
+                keys = [*module._forward_hooks]
+                pairs = [*module._forward_hooks.items()]
+                for hook in [*module._forward_hooks.values()]:
+                    x = hook(module, (), x)
+                return x + 1, keys, pairs
             if operation == "call_values":
                 for hook in module._forward_hooks.values():
                     x = hook(module, (x,), x)
@@ -135,11 +149,16 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         for _ in range(2):
             module = torch.nn.Identity()
-            for callback in (add_one, multiply_forward_hook):
+            callbacks = (
+                () if operation == "empty_unpack" else (add_one, multiply_forward_hook)
+            )
+            for callback in callbacks:
                 module.register_forward_hook(callback, with_kwargs=with_kwargs)
             module._forward_hooks = mapping_type(module._forward_hooks)
             self.assertEqual(compiled(x, module), fn(x, module))
             self.assertEqual(counter.frame_count, 1)
+        if operation == "empty_unpack":
+            return
         if issubclass(mapping_type, OrderedDict):
             module._forward_hooks.move_to_end(next(iter(module._forward_hooks)))
         else:
@@ -231,9 +250,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     def test_empty_hook_subclass_truth_protocol(
         self, mapping_type, spoof_type, truth_method
     ):
-        def hook(module, args, output):
-            return output + 2
-
         class Meta(type):
             __hash__ = type.__hash__
 
@@ -253,7 +269,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                     return True
 
             def items(self):
-                return [(1, hook)]
+                return [(1, add_two)]
 
         module = torch.nn.Identity()
         module._forward_hooks = Hooks()
@@ -324,37 +340,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                     torch.compile(fn, backend="eager", fullgraph=True)(x, module)
             self.assertEqual(compiled(x, module), fn(x, module))
         if mapping_type is dict and not custom_new:
-            self.assertEqual(counter.frame_count, 2)
-
-    @parametrize("populated", [False, True])
-    def test_ordered_hook_fast_unpack(self, populated):
-        def fn(x, module):
-            keys = [*module._forward_hooks]
-            callbacks = [*module._forward_hooks.values()]
-            pairs = [*module._forward_hooks.items()]
-            for callback in callbacks:
-                x = callback(module, (), x)
-            return x + 1, keys, pairs
-
-        def add(module, args, output):
-            return output + 1
-
-        def multiply(module, args, output):
-            return output * 2
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for _ in range(2):
-            module = torch.nn.Identity()
-            if populated:
-                module.register_forward_hook(add)
-                module.register_forward_hook(multiply)
-            self.assertEqual(compiled(x, module), fn(x, module))
-        self.assertEqual(counter.frame_count, 1)
-        if populated:
-            module._forward_hooks.move_to_end(next(iter(module._forward_hooks)))
-            self.assertEqual(compiled(x, module), fn(x, module))
             self.assertEqual(counter.frame_count, 2)
 
     def test_always_call_hook(self):
