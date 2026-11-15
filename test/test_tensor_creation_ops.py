@@ -1245,6 +1245,30 @@ class TestTensorCreation(TestCase):
         ref = torch.cat([x1.cpu(), x2.cpu()], dim=-1)
         self.assertEqual(res, ref)
 
+    @dtypes(torch.bfloat16, torch.float, torch.int8, torch.float64)
+    def test_cat_last_dim_strided_rows(self, device, dtype):
+        # Last-dim concatenation of inputs read as rows of contiguous elements:
+        # slices, contiguous tensors, more inputs than one launch takes, and
+        # layouts that must fall back (misaligned, narrow, non-collapsible rows).
+        x = make_tensor((3, 5, 7, 64), device=device, dtype=dtype)
+        cases = [
+            (x[..., :48], x[..., 48:]),
+            (x[..., 16:], x[..., :16], x[..., 8:24]),
+            (x[..., :48].contiguous(), x[..., 48:]),
+            (x[:, 1:4, :, :32], x[:, 1:4, :, 32:]),
+            (x[1, :, :, 8:24], x[1, :, :, 40:56]),
+            tuple(x[..., 8 * i : 8 * (i + 1)] for i in range(8)),
+            tuple(x[..., 4 * i : 4 * (i + 1)] for i in range(10)),
+            (x[..., 1:17], x[..., 17:33]),
+            (x[..., :3], x[..., 3:7]),
+            (x[:, ::2, :, :32], x[:, ::2, :, 32:]),
+            (x.transpose(1, 2)[..., :32], x.transpose(1, 2)[..., 32:]),
+        ]
+        for inputs in cases:
+            res = torch.cat(inputs, dim=-1)
+            ref = torch.cat([t.cpu() for t in inputs], dim=-1)
+            self.assertEqual(res, ref, atol=0, rtol=0)
+
     @dtypes(torch.float)
     def test_cat_multi_batch(self, device, dtype):
         xs = [torch.randn(16, 16, device=device, dtype=dtype) for _ in range(130)]

@@ -320,6 +320,104 @@ __global__ void CatArrayBatchedCopy_alignedK_contig(
     }
 }
 
+#ifdef USE_ROCM
+// Concatenation along the innermost dimension when every input is a stack of
+// equally strided rows whose elements are contiguous, e.g. slices x[..., a:b].
+// The generic kernel computes a multi-dimensional offset per element; this one
+// copies one 16-byte vector per thread.
+constexpr int CAT_ROWS_MAX_INPUTS = 8;
+
+struct CatRowsInputs {
+  const int4* input[CAT_ROWS_MAX_INPUTS];
+  int64_t rowStride[CAT_ROWS_MAX_INPUTS];  // in vectors
+  int64_t colBegin[CAT_ROWS_MAX_INPUTS + 1];  // output column of each input, in vectors
+};
+
+__global__ void CatLastDimRowsCopy(int4* output, CatRowsInputs inputs, int64_t rows, int64_t rowWidth) {
+  const int64_t n = rows * rowWidth;
+  for (int64_t i = blockIdx.x * static_cast<int64_t>(blockDim.x) + threadIdx.x; i < n;
+       i += static_cast<int64_t>(gridDim.x) * blockDim.x) {
+    const int64_t row = i / rowWidth;
+    const int64_t col = i - row * rowWidth;
+    int k = 0;
+    while (col >= inputs.colBegin[k + 1]) {
+      ++k;
+    }
+    output[i] = inputs.input[k][row * inputs.rowStride[k] + (col - inputs.colBegin[k])];
+  }
+}
+
+// Launches CatLastDimRowsCopy and returns true when `dim` is the innermost
+// dimension of a contiguous `result` and every input can be read as rows of
+// 16-byte vectors; returns false (doing nothing) otherwise.
+bool cat_last_dim_rows(const Tensor& result, const MaterializedITensorListRef& inputs, int64_t dim) {
+  constexpr int64_t kVec = sizeof(int4);
+  const int64_t nDims = result.dim();
+  if (nDims == 0 || dim != nDims - 1 || !result.is_contiguous() || !is_aligned_vec4(result.const_data_ptr())) {
+    return false;
+  }
+  const int64_t elemSize = result.element_size();
+  if ((result.size(-1) * elemSize) % kVec != 0) {
+    return false;
+  }
+  const int64_t rows = result.numel() / result.size(-1);
+
+  CatRowsInputs meta{};
+  int nInputs = 0;
+  int64_t col = 0;
+  for (const Tensor& t : inputs) {
+    if (cat_should_skip_tensor(t) || t.size(-1) == 0) {
+      continue;
+    }
+    if (nInputs == CAT_ROWS_MAX_INPUTS || t.dim() != nDims || t.scalar_type() != result.scalar_type() ||
+        t.stride(-1) != 1) {
+      return false;
+    }
+    // The leading dimensions must collapse into one row index with a single stride.
+    int64_t rowStride = -1;
+    int64_t span = 1;
+    for (int64_t d = nDims - 2; d >= 0; --d) {
+      if (t.size(d) == 1) {
+        continue;
+      }
+      if (rowStride < 0) {
+        rowStride = t.stride(d);
+      } else if (t.stride(d) != rowStride * span) {
+        return false;
+      }
+      span *= t.size(d);
+    }
+    if (rowStride < 0) {
+      rowStride = t.size(-1);
+    }
+    const int64_t widthBytes = t.size(-1) * elemSize;
+    if (widthBytes % kVec != 0 || (rowStride * elemSize) % kVec != 0 || !is_aligned_vec4(t.const_data_ptr())) {
+      return false;
+    }
+    meta.input[nInputs] = static_cast<const int4*>(t.const_data_ptr());
+    meta.rowStride[nInputs] = rowStride * elemSize / kVec;
+    meta.colBegin[nInputs] = col;
+    col += widthBytes / kVec;
+    ++nInputs;
+  }
+  if (nInputs == 0) {
+    return false;
+  }
+  for (int k = nInputs; k <= CAT_ROWS_MAX_INPUTS; ++k) {
+    meta.colBegin[k] = col;
+  }
+
+  constexpr int threads = 256;
+  const int64_t n = rows * col;
+  const int64_t maxBlocks = static_cast<int64_t>(at::cuda::getCurrentDeviceProperties()->multiProcessorCount) * 32;
+  const int blocks = static_cast<int>(std::min(ceil_div(n, static_cast<int64_t>(threads)), maxBlocks));
+  CatLastDimRowsCopy<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      static_cast<int4*>(result.mutable_data_ptr()), meta, rows, col);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return true;
+}
+#endif
+
 template <typename scalar_t, int batch_size, int stride_size>
 void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, int64_t dimension,
                   int nDims, c10::MemoryFormat memory_format) {
@@ -591,6 +689,12 @@ TORCH_IMPL_FUNC(cat_out_cuda)
   }
 
   auto materialized = tensors.materialize();
+
+#ifdef USE_ROCM
+  if (all_same_dtype && cat_last_dim_rows(result, materialized, dim)) {
+    return;
+  }
+#endif
 
   // We parallelize the copy if all 6 conditions pass:
   //
