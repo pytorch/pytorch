@@ -1,5 +1,8 @@
 # MPS softmax benchmarks
 
+See [the M4 comparison report](softmax_results.md) for per-shape timings,
+memory results, and an explanation of the collapse-preserving kernels.
+
 Run from the repository root with the local PyTorch environment. Both scripts
 support `--op softmax`, `--op log_softmax`, or `--op both` (the default), and
 `--dtype float32` (default), `float16`, or `bfloat16`. The 20 original model
@@ -36,5 +39,23 @@ and all measurements. The acceptance limit for this comparison is at most 5%
 latency regression per shape for each operator. Repeat results near the noise
 range and inspect individual shapes rather than relying on an overall mean.
 
-These scripts measure performance. Numerical and collapse regression tests
-are in `test/test_mps.py` and should pass separately before accepting a kernel.
+`compare_softmax.py` checks all 40 operator/shape combinations and returns a
+nonzero exit code if any median exceeds the limit. Pass all repeated runs of
+the same kernel to pool their measured trials; it rejects missing shapes,
+mixed dtypes, and mixed kernel versions within a group.
+
+```sh
+./venv/bin/python benchmarks/mps/compare_softmax.py \
+  --baseline agent_space/main_latency.json agent_space/main_latency_repeat.json \
+  --candidate agent_space/candidate_latency.json agent_space/candidate_latency_repeat.json
+```
+
+The optional model correctness check copies three complete reduction rows
+per shape to CPU float64, avoiding a second full-size copy of the largest
+tensors. It covers both operators and all three supported dtypes. The broader
+numerical and collapse regressions are in `test/test_mps.py`.
+
+```sh
+./venv/bin/python benchmarks/mps/test_softmax.py
+./venv/bin/python test/test_mps.py -k softmax
+```

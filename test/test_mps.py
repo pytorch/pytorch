@@ -15565,7 +15565,42 @@ class TestCommon(TestCase):
     exact_dtype = True
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    @parametrize("shape,dim", [((2, 3), -1), ((3, 8192), -1), ((3, 33), 0), ((4100, 7), 0)])
+    @parametrize("shape,dim", [
+        ((2, 3), -1), ((9, 65), -1), ((129, 2048), -1), ((3, 8192), -1),
+        ((3, 33), 0), ((4100, 7), 0), ((257, 4096), -1),
+    ])
+    @parametrize("margin", [8.0, 17.0, 18.0, 40.0])
+    @parametrize("op", [F.softmax, F.log_softmax])
+    def test_softmax_collapse(self, device, dtype, shape, dim, margin, op):
+        x = torch.full(shape, -math.inf, dtype=dtype)
+        target = shape[dim] // 2
+        x.select(dim, target).fill_(0)
+        x.select(dim, 0).fill_(-margin)
+        x.select(dim, shape[dim] - 1).fill_(-margin)
+        tail = 2 * math.exp(-margin)
+        if op == F.log_softmax:
+            # Form the log probability directly, retaining tails below float64 epsilon.
+            peak = -math.log1p(tail)
+            other = -margin + peak
+            expected = torch.full_like(x, -math.inf)
+        else:
+            peak = 1 / (1 + tail)
+            other = math.exp(-margin) / (1 + tail)
+            expected = torch.zeros_like(x)
+        expected.select(dim, target).fill_(peak)
+        expected.select(dim, 0).fill_(other)
+        expected.select(dim, shape[dim] - 1).fill_(other)
+        actual = op(x.to(device), dim=dim).cpu()
+        rtol = {torch.float32: 2e-6, torch.float16: 2e-3, torch.bfloat16: 2e-2}[dtype]
+        self.assertEqual(actual, expected, atol=0, rtol=rtol)
+        if op == F.softmax:
+            self.assertEqual(actual.select(dim, target), expected.select(dim, target), atol=0, rtol=0)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("shape,dim", [
+        ((2, 3), -1), ((9, 65), -1), ((129, 2048), -1),
+        ((3, 8192), -1), ((3, 33), 0), ((4100, 7), 0),
+    ])
     @parametrize("margin", [8.0, 18.0, 40.0])
     @parametrize("scale", [-1.0, 0.25])
     def test_log_softmax_backward_collapse(self, device, dtype, shape, dim, margin, scale):
@@ -15599,19 +15634,23 @@ class TestCommon(TestCase):
         self.assertEqual(actual.cpu(), expected.to(dtype), atol=1e-7, rtol=rtol)
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    @parametrize("shape,dim", [((3, 33), 0), ((256, 33), 0), ((257, 4096), 1)])
+    @parametrize("shape,dim", [
+        ((2, 3), -1), ((9, 33), -1), ((9, 65), -1), ((9, 1024), -1), ((129, 2048), -1),
+        ((3, 33), 0), ((256, 33), 0), ((257, 4096), 1),
+    ])
+    @parametrize("op", [F.softmax, F.log_softmax])
     @parametrize("values", [
         (0, -17, -math.inf), (-17, 0, -math.inf), (-20, -math.inf, 0),
         (0, 0, 0), (-math.inf, -math.inf, 0), (-math.inf, -math.inf, -math.inf),
         (0, math.inf, 0), (0, math.nan, 0),
     ])
-    def test_log_softmax_fallback_tail(self, device, dtype, shape, dim, values):
-        # Short strided reductions and many long contiguous rows use the fallback.
+    def test_softmax_tail(self, device, dtype, shape, dim, op, values):
+        # Cover row and fallback kernels, including tied maxima in the same lane.
         x = torch.full(shape, -math.inf, dtype=dtype)
         for index, value in zip((0, shape[dim] // 2, shape[dim] - 1), values):
             x.select(dim, index).fill_(value)
-        expected = F.log_softmax(x.double(), dim=dim).to(dtype)
-        actual = F.log_softmax(x.to(device), dim=dim).cpu()
+        expected = op(x.double(), dim=dim).to(dtype)
+        actual = op(x.to(device), dim=dim).cpu()
         self.assertEqual(actual, expected)
         self.assertEqual(actual.amax(dim), expected.amax(dim), atol=0, rtol=1e-6)
 
