@@ -73,6 +73,16 @@ variant". When a region is called with inputs that differ from earlier ones
 in such numbers only, the next variant leaves those numbers open: its graph
 computes with them, and it holds for every call that satisfies what its trace
 needed to know about them (see "Sizes" below).
+
+In a call of inference (no gradients recorded, every module in eval mode) the
+parameters and buffers are not inputs of an Inductor graph but part of it, so
+that Inductor folds what follows from them alone (``freeze=``). Such a variant
+checks on every call that they are the tensors it was made with and that
+nothing wrote to them: ``tensor_stamp`` hashes, per tensor, the object, the
+address of its memory and its version counter, and each tensor has a lazy
+clone that is never read, so that a write by anything but an in-place
+operation on the tensor itself still moves it to other memory (``_watched``).
+A variant whose tensors changed is made again with those as inputs.
 """
 
 import ast
@@ -81,6 +91,7 @@ import collections
 import contextlib
 import enum
 import gc
+import operator
 import random
 import sys
 import threading
@@ -88,6 +99,7 @@ import time
 import types
 import weakref
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
 
 import torch
@@ -202,6 +214,16 @@ _MOST_SURPLUS = 4
 # How many times regions wait for one that was surveyed before them to be
 # compiled, before they go ahead without it.
 _MOST_WAITS = 256
+# How many graphs of a compiled function may have the tensors of its modules
+# built in: such a graph is the graph of one module and no other.
+_MOST_FROZEN = 8
+# How many times a region may find tensors of a module changed under a graph
+# that had them built in (each time the ones that changed become inputs),
+# before its graphs take all of them as inputs.
+_MOST_MELTS = 3
+# How many times the tensors a graph has built in may be found moved to
+# other memory, unchanged, before the ones that moved become inputs.
+_MOST_MOVES = 8
 _HEAPTYPE = 1 << 9
 # How many variants of a region may leave what they were given with other
 # items, keys or attributes than it had. A cache that is filled on the first
@@ -1972,10 +1994,16 @@ class _Variant:
         "keep",
         "leap",
         "numbers",
+        "moves",
         "ops",
+        "positions",
         "proven",
         "recipes",
+        "rest",
         "shape",
+        "stamp",
+        "state",
+        "watch",
     )
 
     def __init__(
@@ -2006,14 +2034,27 @@ class _Variant:
         self.shape: Any = None
         self.conditions: list[str] = []
         self.numbers: list[int] = []
+        # For a variant whose graph has the tensors of its modules built in
+        # (``freeze``): what picks the tensors the graph still takes, and
+        # the built-in ones, out of those of a call, and the stamp of the
+        # built-in ones when the graph was made.
+        self.rest: Callable[[list[Any]], list[Any]] | None = None
+        self.state: Callable[[list[Any]], list[Any]] | None = None
+        self.stamp: int | None = None
+        self.positions: list[int] = []
+        # Per built-in tensor: which object it was, its version, and the
+        # clone that keeps its memory shared (see ``_watched``).
+        self.watch: list[tuple[int, int, torch.Tensor]] = []
+        self.moves = 0
 
     def run(self, inputs: _Inputs) -> Any:
         flat, held = inputs.flat, inputs.held
+        taken = flat if self.rest is None else self.rest(flat)
         if self.numbers:
             ints = inputs.ints
-            results = self.compiled(*flat, *[ints[k] for k in self.numbers])
+            results = self.compiled(*taken, *[ints[k] for k in self.numbers])
         else:
-            results = self.compiled(*flat)
+            results = self.compiled(*taken)
         if self.direct:
             return tuple(results)
         built: dict[int, Any] = {}
@@ -2028,6 +2069,56 @@ class _Variant:
     def affects(self, effects: list[Any], grows: bool) -> None:
         self.effects, self.grows = effects, grows
         self.direct = self.direct and not effects
+
+    def freeze(
+        self, flat: list[torch.Tensor], positions: list[int], clones: list[torch.Tensor]
+    ) -> None:
+        """Says that the graph has the tensors at ``positions`` of a call
+        built in as they are now. ``clones`` (see ``_watched``) are kept for
+        as long as the graph is."""
+        taken = set(positions)
+        self.rest = _picker([i for i in range(len(flat)) if i not in taken])
+        self.state = _picker(positions)
+        self.positions = positions
+        tensors = [flat[i] for i in positions]
+        self.watch = [(id(t), t._version, clone) for t, clone in zip(tensors, clones)]
+        self.stamp = _runtime.tensor_stamp(tensors)
+
+    def stale(self, inputs: _Inputs) -> list[int] | None:
+        """None while what the graph has built in is what the modules hold:
+        the same tensors, not written to since. Else the positions, in the
+        call, of the tensors that are not.
+
+        A tensor can be in other memory with nothing written to it: saving
+        it, ``.numpy()`` and other compiled code ask for a pointer they
+        could write through, which is all that the clone sees. Such a tensor
+        is compared with what it was and watched anew; one that keeps moving
+        counts as changed."""
+        if self.state is None:
+            return None
+        tensors = self.state(inputs.flat)
+        if _runtime.tensor_stamp(tensors) == self.stamp:
+            return None
+        address = torch._C._data_address
+        changed, moved = [], []
+        for k, (tensor, (who, version, clone)) in enumerate(zip(tensors, self.watch)):
+            if id(tensor) != who or tensor.is_inference() or tensor._version != version:
+                changed.append(k)
+            elif address(tensor) != address(clone):
+                moved.append(k)
+        with torch.no_grad():
+            same = torch.equal
+            changed += [k for k in moved if not same(tensors[k], self.watch[k][2])]
+            self.moves += 1
+            if not changed and self.moves > _MOST_MOVES:
+                changed = moved
+            if changed:
+                return [self.positions[k] for k in changed]
+            for k in moved:
+                who, version, _ = self.watch[k]
+                self.watch[k] = (who, version, tensors[k]._lazy_clone())
+        self.stamp = _runtime.tensor_stamp(tensors)
+        return None
 
     def holds(self) -> bool:
         """Whether what the path read is still what it was."""
@@ -2061,6 +2152,12 @@ class _Region:
         self.seconds = 0.0
         # Traces that were made for nothing: their graph was one too many.
         self.surplus = 0
+        # How many times a graph with the weights built in met other
+        # weights, and which tensors of a call those were: the next graph
+        # takes them as inputs. A region that goes on meeting other weights
+        # has modules that are being trained.
+        self.melts = 0
+        self.unstable: set[int] = set()
 
     def __call__(self, *args: Any) -> Any:
         if not self.hot:
@@ -2071,6 +2168,11 @@ class _Region:
         except _Opaque:
             return self.decline(args)
         variant = self.variants.get(key, self)
+        if variant is not self and variant is not None:
+            stale = variant.stale(inputs)  # type: ignore[union-attr]
+            if stale is not None:
+                self.melt(variant, stale)  # type: ignore[arg-type]
+                variant = self
         if variant is self or (variant is not None and not variant.holds()):  # type: ignore[union-attr]
             variant = self.widened(key, inputs)
             if variant is not None:
@@ -2090,8 +2192,23 @@ class _Region:
         if known is not None:
             for variant in reversed(known.open):
                 if variant.shape.holds(key[2], inputs.offsets) and variant.holds():
-                    return variant
+                    stale = variant.stale(inputs)
+                    if stale is None:
+                        return variant
+                    self.melt(variant, stale)
+                    return self.widened(key, inputs)
         return None
+
+    def melt(self, variant: _Variant, stale: list[int]) -> None:
+        """Takes out a variant whose graph has tensors built in that the
+        modules no longer have: the ones at ``stale``."""
+        self.melts += 1
+        self.unstable.update(stale)
+        for other in [k for k, v in self.variants.items() if v is variant]:
+            del self.variants[other]
+        for known in self.sizes.values():
+            if variant in known.open:
+                known.open.remove(variant)
 
     def install(self, region: Any) -> bool:
         """Puts the region into the block a pass is working on."""
@@ -2120,6 +2237,14 @@ class _Region:
             outputs = variant.run(inputs)
         except Exception as e:
             torch.set_rng_state(generator)
+            if variant.stamp is not None:
+                # The graph without the weights built in may do.
+                self.melt(variant, [])
+                self.melts = _MOST_MELTS
+                again = self.specialize(key, args, inputs)
+                if again is None:
+                    return self.decline(args)
+                return self.first_run(key, again, args, inputs)
             self.variants[key] = None
             known = self.sizes.get(_kind(key))
             if known is not None and variant in known.open:
@@ -2357,6 +2482,7 @@ class _Region:
 
         def region(*example: Any) -> tuple[Any, ...]:
             fake = example[: len(flat)]
+            versions = [f._version for f in fake]
             fakes = {id(real): f for real, f in zip(flat, fake)}
             copies = _Copies(
                 fakes, inputs.ints, dict(zip(numbers, example[len(flat) :]))
@@ -2389,18 +2515,49 @@ class _Region:
                 except Untraceable as e:
                     raise _Failed(self.definition(value), str(e)) from None
             found["effects"] = _effects_of(copies, recipes, stored)
+            found["written"] = _written(flat, fake, versions, stored)
             return tuple(recipes.results)
 
         graph = _trace(region, opening.example() if opening else list(flat), opening)
         ops = self.ops_of(graph)
-        compiled, conditions = self.finish(graph, inputs, key, opening)
+        frozen = self.freezable(inputs, modules, found["written"])
+        compiled, conditions, built = self.finish(graph, inputs, key, opening, frozen)
         variant = _Variant(compiled, found["recipes"], ops, keep)
         variant.affects(*found["effects"])
+        if built is not None:
+            variant.freeze(flat, *built)
         if opening is not None:
             self.leave_open(variant, key, inputs, opening, conditions)
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()
         return variant
+
+    def freezable(
+        self, inputs: _Inputs, modules: dict[int, nn.Module], written: set[int]
+    ) -> list[int]:
+        """The tensors of a call that its graph may have built in instead of
+        taking them: those of the modules, when the call is one of inference
+        (no gradients recorded, no module in training). Not the ones the
+        region itself writes to or replaces, nor the ones a graph of the
+        region had built in when they changed."""
+        options = self.plan.options
+        if options.backend not in _BUILDS_IN or torch.is_grad_enabled():
+            return []
+        if not options.freeze or options.frozen >= _MOST_FROZEN:
+            return []
+        if self.melts >= _MOST_MELTS:
+            return []
+        state: set[int] = set()
+        try:
+            for module in modules.values():
+                if any(m.training for m in module.modules()):
+                    return []
+                for store, name in _module_state(module).accessors:
+                    state.add(id(store[name]))
+        except LookupError:
+            return []
+        flat, left = inputs.flat, written | self.unstable
+        return [i for i, t in enumerate(flat) if id(t) in state and i not in left]
 
     def leave_open(
         self, variant: _Variant, key: Any, inputs: _Inputs, opening: _Open, texts: Any
@@ -2428,14 +2585,22 @@ class _Region:
         inputs: _Inputs,
         key: Any,
         opening: _Open | None,
-    ) -> tuple[Any, list[str] | None]:
+        frozen: list[int],
+    ) -> tuple[Any, list[str] | None, tuple[list[int], list[torch.Tensor]] | None]:
         """Hands a traced graph to the backend, unless it has seen it. Also
-        returns, for a graph with open sizes, the conditions it holds under."""
+        returns, for a graph with open sizes, the conditions it holds under,
+        and for one that has tensors of ``frozen`` built in, their positions
+        and the clones that watch them."""
         options = self.plan.options
         ops = self.ops_of(graph)
         if ops < options.min_ops:
             raise _Failed(None, f"{ops} tensor operations, not worth a graph")
         _views_to_reshapes(graph)
+        if frozen:
+            # While the products of the graph are still products.
+            frozen = _worth_building_in(graph, frozen)
+        if options.backend is _inductor:
+            _rows_to_reductions(graph)
         # The parameters are inputs, so the layers of a model that are built
         # alike give the same graph: it is compiled once. A graph that holds a
         # tensor of its own is not looked up, the code does not say which.
@@ -2454,6 +2619,32 @@ class _Region:
             same = (graph.code, key[1], bytes(tensors), key[3], opened, left)
         # What this trace needed of the sizes, before the backend adds to it.
         own = opening.conditions() if opening is not None else None
+        whose: set[int] = set()
+        watch: list[torch.Tensor] = []
+        if frozen and self.compiles < options.max_variants:
+            # Layers that are built alike share one graph, which takes their
+            # weights: the graph of the second is not one more to compile.
+            whose = {id(inputs.flat[i]) for i in frozen}
+            if same in options.compiled or not options.built.get(same, whose) & whose:
+                frozen = []
+            frozen, watch = _watched(inputs.flat, frozen)
+        if frozen and self.compiles < options.max_variants:
+            example = opening.example() if opening is not None else list(inputs.flat)
+            taken = set(frozen)
+            rest = [e for i, e in enumerate(example) if i not in taken]
+            try:
+                with_weights = _built_in(graph, inputs.flat, frozen)
+                compiled = _BUILDS_IN[options.backend](with_weights, rest)
+            except Exception:
+                # The graph that takes its weights is still to be had.
+                compiled = None
+            if compiled is not None:
+                options.frozen += 1
+                self.compiles += 1
+                if same is not None:
+                    options.built.setdefault(same, set()).update(whose)
+                conditions = opening.conditions() if opening is not None else None
+                return compiled, conditions, (frozen, watch)
         made = options.compiled.get(same)
         if made is None:
             if self.compiles >= options.max_variants:
@@ -2470,9 +2661,9 @@ class _Region:
                 options.compiled[same] = made
             self.compiles += 1
         if own is None:
-            return made[0], None
+            return made[0], None, None
         theirs: list[str] = made[1] or []
-        return made[0], list(dict.fromkeys([*own, *theirs]))
+        return made[0], list(dict.fromkeys([*own, *theirs])), None
 
     def definition(self, value: int) -> int | None:
         """The instruction of the region that defines a value."""
@@ -2824,12 +3015,15 @@ class _Path(_Region):
         final = _Inputs()
         key = self.key(args, final)
         self.sizes.setdefault(_kind(key), _Sizes(key[2]))
-        compiled, conditions = self.finish(graph, inputs, key, opening)
+        frozen = self.freezable(inputs, found["modules"], found["written"])
+        compiled, conditions, built = self.finish(graph, inputs, key, opening, frozen)
         variant = _Variant(compiled, found["recipes"], self.ops_of(graph), keep)
         variant.direct = False
         variant.leap = found["leap"]
         variant.guards = found["guards"]
         variant.affects(*found["effects"])
+        if built is not None:
+            variant.freeze(inputs.flat, *built)
         if opening is not None:
             self.leave_open(variant, key, final, opening, conditions)
         self.seconds += time.perf_counter() - start
@@ -2863,6 +3057,7 @@ class _Path(_Region):
 
         def path(*example: Any) -> tuple[Any, ...]:
             fake = example[: len(flat)]
+            versions = [f._version for f in fake]
             fakes = {id(real): f for real, f in zip(flat, fake)}
             copies = _Copies(
                 fakes, inputs.ints, dict(zip(numbers, example[len(flat) :]))
@@ -2920,6 +3115,8 @@ class _Path(_Region):
                     raise _Retry(limit=born - 1) from None
             found["leap"] = (block, index, values, [v for v in live if v not in values])
             found["effects"] = _effects_of(copies, recipes, stored)
+            found["written"] = _written(flat, fake, versions, stored)
+            found["modules"] = modules
             found["guards"] = walk.guards
             found["used"] = [
                 p for p, v in enumerate(self.inputs) if v in walk.used and p in keyed
@@ -3048,16 +3245,26 @@ class Regions:
     __name__ = "regions"
 
     def __init__(
-        self, backend: Backend, min_ops: int, max_variants: int, warmup: int
+        self,
+        backend: Backend,
+        min_ops: int,
+        max_variants: int,
+        warmup: int,
+        freeze: bool = True,
     ) -> None:
         self.backend = backend
         self.min_ops = min_ops
         self.max_variants = max_variants
         self.warmup = warmup
+        self.freeze = freeze
         self.plans: list[_Plan] = []
         # What the backend made of each graph, by the code of the graph and
         # what its inputs are like.
         self.compiled: dict[Any, Any] = {}
+        # How many graphs have the tensors of their modules built in, and
+        # per graph that others could share, which tensors those are.
+        self.frozen = 0
+        self.built: dict[Any, set[int]] = {}
         # Per function: the regions that were surveyed and are compiled at
         # their next call, in the order they were surveyed, and how often
         # another region waited for each.
@@ -3123,6 +3330,8 @@ class Regions:
                         "ends": sorted({v.leap[:2] for v in variants if v.leap}),
                         "ops": max((v.ops for v in variants), default=0),
                         "seconds": part.seconds,
+                        # How many variants have the weights built in.
+                        "frozen": sum(v.stamp is not None for v in variants),
                         # Per variant that leaves sizes open: what it needs
                         # of them.
                         "open": [
@@ -3168,6 +3377,173 @@ def _views_to_reshapes(graph: torch.fx.GraphModule) -> None:
         graph.recompile()
 
 
+# How many elements a matrix has from which on a product with one row is
+# made a reduction: one that does not fit a core's cache.
+_ROW_PRODUCT = 1 << 18
+
+
+def _rows_to_reductions(graph: torch.fx.GraphModule) -> None:
+    """A matrix product with one row on the left, as a reduction.
+
+    A decoder that makes one token at a time multiplies one row by every
+    weight of the model. BLAS runs such a product on one core, and since
+    the weights do not fit the cache, the core spends the time waiting for
+    them. As ``(row.T * matrix).sum(0)`` the product is a loop over the
+    columns of the result that Inductor splits over the cores, each of
+    which reads its part of the matrix.
+    """
+    aten = torch.ops.aten
+    changed = False
+    for node in list(graph.graph.nodes):
+        if node.op != "call_function" or node.kwargs:
+            continue
+        if node.target is aten.mm.default:
+            bias, (row, matrix) = None, node.args
+        elif node.target is aten.addmm.default:
+            bias, row, matrix = node.args
+        else:
+            continue
+        shapes = [getattr(n.meta.get("val"), "shape", None) for n in (row, matrix)]
+        if shapes[0] is None or shapes[1] is None or len(shapes[1]) != 2:
+            continue
+        if type(shapes[0][0]) is not int or shapes[0][0] != 1:
+            continue
+        if any(type(n) is not int for n in shapes[1]):
+            continue
+        if shapes[1][0] * shapes[1][1] < _ROW_PRODUCT:
+            continue
+        with graph.graph.inserting_before(node):
+            column = graph.graph.call_function(aten.reshape.default, (row, [-1, 1]))
+            scaled = graph.graph.call_function(aten.mul.Tensor, (matrix, column))
+            result = graph.graph.call_function(
+                aten.sum.dim_IntList, (scaled, [0], True)
+            )
+            if bias is not None:
+                result = graph.graph.call_function(aten.add.Tensor, (result, bias))
+        node.replace_all_uses_with(result)
+        graph.graph.erase_node(node)
+        changed = True
+    if changed:
+        graph.recompile()
+
+
+def _picker(positions: list[int]) -> Callable[[list[Any]], list[Any]]:
+    """What takes the items at ``positions`` out of a list, as a list."""
+    if len(positions) < 2:
+        return lambda items: [items[p] for p in positions]
+    pick = operator.itemgetter(*positions)
+    return lambda items: list(pick(items))
+
+
+def _written(
+    flat: list[torch.Tensor], fake: Any, versions: list[int], stored: list[Any]
+) -> set[int]:
+    """The inputs of a trace that it wrote to, and the ones the region puts
+    another tensor in the place of: at the next call they are not what they
+    were, so no graph has them built in."""
+    written = {i for i, f in enumerate(fake) if f._version != versions[i]}
+    where = {id(tensor): i for i, tensor in enumerate(flat)}
+    for module, name, _ in stored:
+        position = where.get(id(vars(module).get(name)))
+        if position is not None:
+            written.add(position)
+    return written
+
+
+def _watched(
+    flat: list[torch.Tensor], positions: list[int]
+) -> tuple[list[int], list[torch.Tensor]]:
+    """Makes the tensors at ``positions`` ones whose every write shows: each
+    gets a lazy clone that is kept and never read, so the tensor shares its
+    memory with the clone, and whatever writes to it (in place, through
+    ``.data``, through a NumPy array made from it afterwards) first moves it
+    to memory of its own. With the version counter, which only in-place
+    operations on the tensor itself advance, that is what ``tensor_stamp``
+    looks at. Returns the positions this can be done for (not for memory
+    that is shared with another process or belongs to a NumPy array, where
+    writes cannot be seen, nor for tensors without a version counter), and
+    the clones."""
+    kept, watch = [], []
+    with torch.no_grad():
+        for position in positions:
+            tensor = flat[position]
+            if tensor.is_inference() or tensor.layout is not torch.strided:
+                continue
+            try:
+                watch.append(tensor._lazy_clone())
+            except RuntimeError:
+                continue
+            kept.append(position)
+    return kept, watch
+
+
+def _worth_building_in(graph: torch.fx.GraphModule, positions: list[int]) -> list[int]:
+    """Which of the inputs at ``positions`` a graph gains from having built
+    in. Not a matrix that the graph only multiplies with, or only looks rows
+    up in by indices that depend on the call: the product and the lookup
+    are the same with the matrix as an input, and built in it is a second
+    copy of the largest tensors a model has."""
+    aten = torch.ops.aten
+    products = (aten.addmm.default, aten.mm.default)
+    products += (aten.matmul.default, aten.linear.default)
+    turned = (aten.t.default, aten.permute.default, aten.transpose.int)
+    placeholders = [node for node in graph.graph.nodes if node.op == "placeholder"]
+    constant = {placeholders[position] for position in positions}
+    for node in graph.graph.nodes:
+        given = node.all_input_nodes
+        if node.op == "call_function" and all(n in constant for n in given):
+            constant.add(node)
+
+    def plain(node: torch.fx.Node, user: torch.fx.Node) -> bool:
+        if user.target in products:
+            return True
+        if user.target is aten.embedding.default:
+            return user.args[0] is node and user.args[1] not in constant
+        return user.target in turned and all(u.target in products for u in user.users)
+
+    worth = []
+    for position in positions:
+        node = placeholders[position]
+        shape = getattr(node.meta.get("val"), "shape", ())
+        if len(shape) >= 2 and node.users and all(plain(node, u) for u in node.users):
+            continue
+        worth.append(position)
+    return worth
+
+
+def _built_in(
+    graph: torch.fx.GraphModule, flat: list[torch.Tensor], positions: list[int]
+) -> torch.fx.GraphModule:
+    """A copy of a graph that has the tensors at ``positions`` as buffers of
+    its own where the graph has inputs. The buffers are lazy clones: what
+    the backend makes reads some through pointers it could write through,
+    which gives those memory of their own, and would do the same, call
+    after call, to the tensors of the module (see ``_watched``)."""
+    graph = deepcopy(graph)
+    placeholders = [node for node in graph.graph.nodes if node.op == "placeholder"]
+    for position in positions:
+        node, name = placeholders[position], f"_state_{position}"
+        with torch.no_grad():
+            graph.register_buffer(name, flat[position]._lazy_clone())
+        with graph.graph.inserting_before(node):
+            constant = graph.graph.get_attr(name)
+        node.replace_all_uses_with(constant)
+        graph.graph.erase_node(node)
+    graph.recompile()
+    return graph
+
+
+def _inductor_frozen(
+    graph: torch.fx.GraphModule, inputs: list[Any]
+) -> Callable[..., Any]:
+    """Inductor on a graph whose weights are buffers of the graph: it folds
+    what is computed from them alone (a batch norm into the convolution in
+    front of it, the mask a model builds from nothing but a size), and lays
+    the weights of convolutions out the way the kernels want them."""
+    with torch._inductor.config.patch({"freezing": True}):
+        return torch._inductor.compile(graph, inputs)
+
+
 def _inductor(graph: torch.fx.GraphModule, inputs: list[Any]) -> Callable[..., Any]:
     return torch._inductor.compile(graph, inputs)
 
@@ -3183,10 +3559,18 @@ def _aot_eager(
 
 
 _BACKENDS: dict[str, Backend] = {"inductor": _inductor, "aot_eager": _aot_eager}
+# The backends that gain from a graph that has the weights as buffers of its
+# own, and what makes something of such a graph for each.
+_BUILDS_IN: dict[Backend, Backend] = {_inductor: _inductor_frozen}
 
 
 def make_pass(
-    runtime: Any, backend: str | Backend, min_ops: int, max_variants: int, warmup: int
+    runtime: Any,
+    backend: str | Backend,
+    min_ops: int,
+    max_variants: int,
+    warmup: int,
+    freeze: bool = True,
 ) -> Regions:
     global _runtime
     if isinstance(backend, str):
@@ -3194,4 +3578,4 @@ def make_pass(
             raise ValueError(f"unknown backend {backend!r}; known: {sorted(_BACKENDS)}")
         backend = _BACKENDS[backend]
     _runtime = runtime
-    return Regions(backend, min_ops, max_variants, warmup)
+    return Regions(backend, min_ops, max_variants, warmup, freeze)
