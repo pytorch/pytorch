@@ -4065,6 +4065,19 @@ class RegionCounted(torch.nn.Module):
         return self.inner(x) * self.calls
 
 
+class RegionTwoHeads(torch.nn.Module):
+    # One head is used by forward, the other is not; and a tensor that is
+    # kept in a plain attribute.
+    def __init__(self):
+        super().__init__()
+        self.used = RegionNet()
+        self.unused = RegionNet()
+        self.cache = torch.zeros(5)
+
+    def forward(self, x):
+        return self.used(x) + self.cache
+
+
 class RegionAlike(torch.nn.Module):
     # Layers that are built alike, with data deciding what comes between.
     def __init__(self):
@@ -5354,6 +5367,21 @@ class TestCfgRegions(TestCase):
                 seen = (region["variants"], region["compiles"], region["frozen"])
                 self.assertEqual(seen, (1, compiles, frozen))
                 change()
+
+    def test_only_parameters_and_buffers_a_graph_uses_are_built_in(self):
+        torch.manual_seed(0)
+        model = RegionTwoHeads().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with self.building_in(), torch.no_grad():
+            for i in range(12):
+                if i >= 6:
+                    # Neither is part of the graph as a constant.
+                    model.unused.conv.weight.mul_(2)
+                    model.cache.add_(1)
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
 
     def test_buffer_a_region_writes_is_not_built_in(self):
         torch.manual_seed(0)
