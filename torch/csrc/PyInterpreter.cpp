@@ -1362,7 +1362,12 @@ bool ConcretePyInterpreterVTable::fake_try_custom_op_profile(
     return false;
   }
   py::handle py_op = getTorchApiFunction(op);
-  if (!profiles.attr("data").contains(py_op)) {
+  py::object data = profiles.attr("data");
+  const int contains = PySequence_Contains(data.ptr(), py_op.ptr());
+  if (contains < 0) {
+    throw py::error_already_set();
+  }
+  if (contains == 0) {
     return false;
   }
   py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
