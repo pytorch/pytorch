@@ -4338,6 +4338,19 @@ class TestSparse(TestSparseBase):
                 check(self, x, y)
                 # TODO: uncomment once supported
                 # check_autograd(x, y)
+                if sparse_dim:
+                    x0 = self._gen_sparse(sparse_dim, 0, (0,) + sub_shape[1:], dtype, device, coalesced)[0]
+                    y0 = self._gen_sparse(sparse_dim, 0, (0,) + new_shape[1:], dtype, device, coalesced)[0]
+                    check(self, x0, y0)
+
+        # prod(sparse sizes) overflows int32
+        i = torch.tensor([[0, 1], [0, 1]], device=device)
+        v = make_tensor((2, 3), dtype=dtype, device=device)
+        x = torch.sparse_coo_tensor(i, v, (2**16, 2**16, 3))
+        y = torch.sparse_coo_tensor(i, v[:, :1], (2**16, 2**16, 1))
+        res = (x * y).coalesce()
+        self.assertEqual(res.indices(), i)
+        self.assertEqual(res.values(), v * v[:, :1])
 
     @coalescedonoff
     @expectedFailureMPS

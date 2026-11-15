@@ -1045,7 +1045,7 @@ void add_out_sparse_csr(
   auto A_32 = at::native::_sparse_csr_tensor_unsafe(
       A.crow_indices().to(kInt),
       A.col_indices().to(kInt),
-      A.values(),
+      A.values().contiguous(),
       A.sizes(),
       A.scalar_type(),
       A.layout(),
@@ -1053,7 +1053,7 @@ void add_out_sparse_csr(
   auto B_32 = at::native::_sparse_csr_tensor_unsafe(
       B.crow_indices().to(kInt),
       B.col_indices().to(kInt),
-      B.values(),
+      B.values().contiguous(),
       B.sizes(),
       B.scalar_type(),
       B.layout(),
