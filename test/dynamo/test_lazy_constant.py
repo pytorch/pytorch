@@ -1123,6 +1123,44 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 1.5, 2.5)], expected_frames=2)
 
+    def test_operand_type_change_in_reconstructed_container_recompiles(self):
+        # The tensor ahead of the computed constant keeps the container from
+        # being loaded as a constant, so the constant is recomputed in output bytecode
+        t = torch.ones(2)
+
+        def to_str(a):
+            try:
+                return "p" + a
+            except TypeError:
+                return "int"
+
+        def fn_extend(t, a, lst):
+            lst.extend([t.sin(), to_str(a)])
+            return t.cos()
+
+        def fn_setitem(t, a, d):
+            d["v"] = (t.sin(), to_str(a))
+            return t.cos()
+
+        for fn, make in [(fn_extend, list), (fn_setitem, dict)]:
+            with self.subTest(fn=fn.__name__):
+                torch._dynamo.reset()
+                counter = CompileCounter()
+                opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+                for a in ["x", "y", 1]:
+                    eager_out, compiled_out = make(), make()
+                    self.assertEqual(opt_fn(t, a, compiled_out), fn(t, a, eager_out))
+                    self.assertEqual(compiled_out, eager_out)
+                self.assertEqual(counter.frame_count, 2)
+
+        def fn_graph_break(t, a):
+            pair = (t.sin(), to_str(a))
+            torch._dynamo.graph_break()
+            return pair
+
+        torch._dynamo.reset()
+        self._check(fn_graph_break, [(t, "x"), (t, "y"), (t, 1)], expected_frames=2)
+
     def test_chained_computed_constants_do_not_recompile(self):
         t = torch.ones(2)
 
