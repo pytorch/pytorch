@@ -2493,10 +2493,12 @@ class _Region:
         self, inputs: _Inputs, modules: dict[int, nn.Module], written: set[int]
     ) -> list[int]:
         """The tensors of a call that its graph may have built in instead of
-        taking them: those of the modules, when the call is one of inference
-        (no gradients recorded, no module in training) and the region has
-        not found the modules with other weights twice. Not the ones the
-        region itself writes to or replaces."""
+        taking them: the parameters and buffers of the modules, when the
+        call is one of inference (no gradients recorded, no module in
+        training) and the region has not found the modules with other
+        weights twice. Not the ones the region itself writes to or replaces. A
+        tensor a module keeps in a plain attribute is a cache more often
+        than a weight, and stays an input."""
         options = self.plan.options
         if options.backend not in _BUILDS_IN or torch.is_grad_enabled():
             return []
@@ -2505,14 +2507,12 @@ class _Region:
         if self.melts >= _MOST_MELTS:
             return []
         state: set[int] = set()
-        try:
-            for module in modules.values():
-                if any(m.training for m in module.modules()):
+        for module in modules.values():
+            for part in module.modules():
+                if part.training:
                     return []
-                for store, name in _module_state(module).accessors:
-                    state.add(id(store[name]))
-        except LookupError:
-            return []
+                state.update(map(id, part._parameters.values()))
+                state.update(map(id, part._buffers.values()))
         flat = inputs.flat
         return [i for i, t in enumerate(flat) if id(t) in state and i not in written]
 
@@ -2553,6 +2553,11 @@ class _Region:
         if ops < options.min_ops:
             raise _Failed(None, f"{ops} tensor operations, not worth a graph")
         _views_to_reshapes(graph)
+        if frozen:
+            # A region is handed every tensor of a module it takes: the
+            # ones its graph does not use are no part of it.
+            placeholders = [n for n in graph.graph.nodes if n.op == "placeholder"]
+            frozen = [i for i in frozen if placeholders[i].users]
         if options.backend is _inductor:
             _rows_to_reductions(graph)
         # The parameters are inputs, so the layers of a model that are built
