@@ -1610,11 +1610,11 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
 
     @parametrize("serialize", [False])
     def test_joint_graph_passes_run_on_hop_subgraph(self, serialize):
-        # Inductor's joint-graph passes (e.g. scatter_upon_const_tensor, which
-        # rewrites full+scatter into eq+where to avoid materializing a sparse
-        # buffer) must run on the HOP subgraph's joint graph, not just the
-        # outer one. nll_loss_backward decomposes to full+scatter; without the
-        # rewrite the bw subgraph keeps a (B, V) scatter destination buffer.
+        # Inductor's joint-graph passes must run on the HOP subgraph's joint
+        # graph, not just the outer one. nll_loss_backward decomposes to a
+        # one-hot where, and log_softmax_backward sums it over the classes;
+        # one_hot_sum folds that sum into the selected term, which only
+        # happens if the joint-graph passes ran on the subgraph.
         from torch._inductor.decomposition import select_decomp_table
 
         nested_config = get_invoke_subgraph_compile_options(
@@ -1644,8 +1644,8 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             opt_fn(logits, targets).backward()
 
         # captured_gms[0] is the fw subgraph and captured_gms[1] is the bw
-        # subgraph. The bw should NOT contain aten.scatter — the joint pass
-        # rewrote full+scatter into eq+where.
+        # subgraph. The bw should have no class-dim sum: one_hot_sum replaced
+        # it with the selected term.
         self.assertExpectedInline(
             captured_gms[0].code.strip(),
             """\
@@ -1665,35 +1665,41 @@ def forward(self, primals_0, primals_1):
     neg = torch.ops.aten.neg.default(squeeze);  squeeze = None
     full_default_1 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     where_1 = torch.ops.aten.where.self(ne, neg, full_default_1);  ne = neg = full_default_1 = None
-    return (where_1, primals_0, primals_1, amax, log)""",
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(primals_1, 1);  primals_1 = None
+    ne_2 = torch.ops.aten.ne.Scalar(unsqueeze_1, -100)
+    ge = torch.ops.aten.ge.Scalar(unsqueeze_1, 0)
+    bitwise_and = torch.ops.aten.bitwise_and.Tensor(ne_2, ge);  ne_2 = ge = None
+    lt = torch.ops.aten.lt.Scalar(unsqueeze_1, 64)
+    bitwise_and_1 = torch.ops.aten.bitwise_and.Tensor(bitwise_and, lt);  bitwise_and = lt = None
+    full_default_2 = torch.ops.aten.full.default([], -1, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where_2 = torch.ops.aten.where.self(bitwise_and_1, unsqueeze_1, full_default_2);  bitwise_and_1 = unsqueeze_1 = full_default_2 = None
+    convert_element_type = torch.ops.prims.convert_element_type.default(where_2, torch.int32);  where_2 = None
+    return (where_1, primals_0, amax, log, convert_element_type)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
         self.assertExpectedInline(
             captured_gms[1].code.strip(),
             """\
-def forward(self, primals_0, primals_1, amax, log, tangents_0):
+def forward(self, primals_0, amax, log, convert_element_type, tangents_0):
     unsqueeze_2 = torch.ops.aten.unsqueeze.default(tangents_0, 1);  tangents_0 = None
-    full_default_4 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(primals_1, 1);  primals_1 = None
-    ne_2 = torch.ops.aten.ne.Scalar(unsqueeze_1, -100)
-    where_3 = torch.ops.aten.where.self(ne_2, unsqueeze_2, full_default_4);  unsqueeze_2 = full_default_4 = None
-    full_default_2 = torch.ops.aten.full.default([], 0, dtype = torch.int64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    where_2 = torch.ops.aten.where.self(ne_2, unsqueeze_1, full_default_2);  ne_2 = unsqueeze_1 = full_default_2 = None
-    iota_default = torch.ops.prims.iota.default(64, start = 0, step = 1, dtype = torch.int64, device = device(type='cpu'), requires_grad = False)
-    view_default = torch.ops.aten.view.default(iota_default, [1, 64]);  iota_default = None
-    expand_default = torch.ops.aten.expand.default(where_2, [8, 64]);  where_2 = None
-    eq_tensor = torch.ops.aten.eq.Tensor(expand_default, view_default);  expand_default = view_default = None
-    scalar_tensor_default = torch.ops.aten.scalar_tensor.default(0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
-    scalar_tensor_default_1 = torch.ops.aten.scalar_tensor.default(-1.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
-    where_self = torch.ops.aten.where.self(eq_tensor, scalar_tensor_default_1, scalar_tensor_default);  eq_tensor = scalar_tensor_default_1 = scalar_tensor_default = None
-    mul = torch.ops.aten.mul.Tensor(where_self, where_3);  where_self = where_3 = None
+    iota = torch.ops.prims.iota.default(64, start = 0, step = 1, dtype = torch.int32, device = device(type='cpu'), requires_grad = False)
+    eq = torch.ops.aten.eq.Tensor(convert_element_type, iota);  iota = None
+    neg_1 = torch.ops.aten.neg.default(unsqueeze_2);  unsqueeze_2 = None
+    full_default_3 = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    where_3 = torch.ops.aten.where.self(eq, neg_1, full_default_3);  eq = full_default_3 = None
     sub = torch.ops.aten.sub.Tensor(primals_0, amax);  primals_0 = amax = None
     sub_1 = torch.ops.aten.sub.Tensor(sub, log);  sub = log = None
     exp_1 = torch.ops.aten.exp.default(sub_1);  sub_1 = None
-    sum_2 = torch.ops.aten.sum.dim_IntList(mul, [1], True)
-    mul_1 = torch.ops.aten.mul.Tensor(exp_1, sum_2);  exp_1 = sum_2 = None
-    sub_2 = torch.ops.aten.sub.Tensor(mul, mul_1);  mul = mul_1 = None
+    ge_scalar = torch.ops.aten.ge.Scalar(convert_element_type, 0)
+    lt_scalar = torch.ops.aten.lt.Scalar(convert_element_type, 64);  convert_element_type = None
+    bitwise_and_tensor = torch.ops.aten.bitwise_and.Tensor(ge_scalar, lt_scalar);  ge_scalar = lt_scalar = None
+    ne_scalar = torch.ops.aten.ne.Scalar(neg_1, 0)
+    bitwise_and_tensor_1 = torch.ops.aten.bitwise_and.Tensor(bitwise_and_tensor, ne_scalar);  bitwise_and_tensor = ne_scalar = None
+    scalar_tensor_default = torch.ops.aten.scalar_tensor.default(0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+    where_self = torch.ops.aten.where.self(bitwise_and_tensor_1, neg_1, scalar_tensor_default);  bitwise_and_tensor_1 = neg_1 = scalar_tensor_default = None
+    mul = torch.ops.aten.mul.Tensor(exp_1, where_self);  exp_1 = where_self = None
+    sub_2 = torch.ops.aten.sub.Tensor(where_3, mul);  where_3 = mul = None
     return (sub_2, None)""",
             ignore_comments=True,
             ignore_empty_lines=True,
