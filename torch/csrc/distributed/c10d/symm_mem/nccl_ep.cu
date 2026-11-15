@@ -479,8 +479,12 @@ int64_t nccl_ep_handle_get_num_recv_tokens(
 // Combine inputs are not bounded here: they may be sliced to the device-side
 // receive count.
 static void check_rows(
-    const NcclEpHandle& handle, const at::Tensor& tokens, const char* name) {
+    const NcclEpHandle& handle,
+    const at::Tensor& tokens,
+    const char* name,
+    bool check_row_bytes = true) {
     TORCH_CHECK_VALUE(tokens.dim() == 2, name, " must be 2D, got ", tokens.sizes());
+    if (!check_row_bytes) return;
     const int64_t row_bytes = tokens.size(1) * tokens.element_size();
     TORCH_CHECK_VALUE(
         row_bytes <= handle.group->max_token_bytes,
@@ -548,9 +552,10 @@ static void check_combine_shapes(
     const at::Tensor& expert_tokens,
     const at::Tensor& out_tokens,
     const std::optional<at::Tensor>& topk_weights,
-    const std::optional<at::Tensor>& out_topk_weights) {
+    const std::optional<at::Tensor>& out_topk_weights,
+    bool check_row_bytes) {
     const auto& topk = handle.topk_idx;
-    check_rows(handle, expert_tokens, "expert_tokens");
+    check_rows(handle, expert_tokens, "expert_tokens", check_row_bytes);
     TORCH_CHECK_VALUE(
         out_tokens.dim() == 2 && out_tokens.size(0) == topk.size(0) &&
             out_tokens.size(1) == expert_tokens.size(1) &&
@@ -581,9 +586,31 @@ static void nccl_ep_dispatch_impl(
     std::optional<at::Tensor> out_topk_weights,
     std::optional<at::Tensor> out_topk_idx,
     bool backward,
-    bool async_op) {
+    bool async_op,
+    const std::optional<at::Tensor>& scales = std::nullopt,
+    const std::optional<at::Tensor>& out_scales = std::nullopt,
+    ncclEpDispQuant_t quant_recipe = NCCL_EP_DISP_QUANT_NONE) {
+    TORCH_INTERNAL_ASSERT(
+        scales.has_value() == (quant_recipe == NCCL_EP_DISP_QUANT_FWD) &&
+        out_scales.has_value() == scales.has_value());
     check_dispatch_shapes(
         *handle, tokens, topk_weights, out_tokens, out_topk_weights, out_topk_idx);
+    if (scales) {
+        TORCH_CHECK_VALUE(
+            scales->dim() == 2 && scales->size(0) == tokens.size(0) &&
+                out_scales->dim() == 2 &&
+                out_scales->size(0) >= out_tokens.size(0) &&
+                out_scales->size(1) == scales->size(1) &&
+                out_scales->element_size() == scales->element_size(),
+            "scales must be [num_tokens, n] and out_scales [>= out_tokens rows, n] "
+            "with the same element size, got ", scales->sizes(), " and ",
+            out_scales->sizes());
+        for (const at::Tensor* value : {&*scales, &*out_scales}) {
+            TORCH_CHECK_VALUE(
+                reinterpret_cast<uintptr_t>(value->data_ptr()) % 16 == 0,
+                "MXFP8 scale storage must be 16-byte aligned");
+        }
+    }
     NcclEpOperation operation(handle->group, async_op);
     auto stream = operation.stream();
     auto ep_handle = reinterpret_cast<ncclEpHandle_t>(handle->handle);
@@ -595,6 +622,13 @@ static void nccl_ep_dispatch_impl(
     if (topk_weights) operation.record(*topk_weights);
     if (out_topk_weights) operation.record(*out_topk_weights);
     if (out_topk_idx) operation.record(*out_topk_idx);
+    std::optional<EpTensor> in_scales, out_scales_desc;
+    if (scales) {
+        operation.record(*scales);
+        operation.record(*out_scales);
+        in_scales.emplace(make_ep_tensor(*scales, handle->group_name));
+        out_scales_desc.emplace(make_ep_tensor(*out_scales, handle->group_name));
+    }
     EpTensor in_tokens = make_ep_tensor(tokens, handle->group_name);
     std::optional<EpTensor> in_weights;
     if (topk_weights) in_weights.emplace(*topk_weights);
@@ -606,14 +640,17 @@ static void nccl_ep_dispatch_impl(
 
     ncclEpDispatchInputs_t inputs = NCCL_EP_DISPATCH_INPUTS_INIT;
     inputs.tokens = &in_tokens.desc;
+    inputs.scales = in_scales ? &in_scales->desc : nullptr;
     inputs.topk_weights = in_weights ? &in_weights->desc : nullptr;
 
     ncclEpDispatchOutputs_t outputs = NCCL_EP_DISPATCH_OUTPUTS_INIT;
     outputs.tokens = &out_tok.desc;
+    outputs.scales = out_scales_desc ? &out_scales_desc->desc : nullptr;
     outputs.topk_weights = out_wts ? &out_wts->desc : nullptr;
     outputs.topk_idx = out_idx ? &out_idx->desc : nullptr;
 
     ncclEpDispatchConfig_t config = NCCL_EP_DISPATCH_CONFIG_INIT;
+    config.quant_recipe = quant_recipe;
     config.pass_direction = backward ? NCCL_EP_BWD_PASS : NCCL_EP_FWD_PASS;
 
     NCCL_EP_CHECK(ncclEpDispatch(
@@ -621,6 +658,7 @@ static void nccl_ep_dispatch_impl(
         /*layout_info=*/nullptr,
         &config, stream));
     std::vector<at::Tensor> result_tensors{out_tokens};
+    if (out_scales) result_tensors.push_back(*out_scales);
     if (out_topk_weights) result_tensors.push_back(*out_topk_weights);
     if (out_topk_idx) result_tensors.push_back(*out_topk_idx);
     operation.finish(handle, result_tensors);
@@ -654,9 +692,12 @@ static void nccl_ep_combine_impl(
     const std::optional<at::Tensor>& topk_weights,
     const std::optional<at::Tensor>& out_topk_weights,
     bool backward,
-    bool async_op) {
+    bool async_op,
+    ncclEpCombQuant_t quant_recipe = NCCL_EP_COMB_QUANT_NONE) {
+    // MXFP8 combine checks its quantized row size natively.
     check_combine_shapes(
-        *handle, expert_tokens, out_tokens, topk_weights, out_topk_weights);
+        *handle, expert_tokens, out_tokens, topk_weights, out_topk_weights,
+        quant_recipe == NCCL_EP_COMB_QUANT_NONE);
     NcclEpOperation operation(handle->group, async_op);
     auto stream = operation.stream();
     auto ep_handle = reinterpret_cast<ncclEpHandle_t>(handle->handle);
@@ -680,6 +721,7 @@ static void nccl_ep_combine_impl(
     outputs.topk_weights = out_weights ? &out_weights->desc : nullptr;
 
     ncclEpCombineConfig_t config = NCCL_EP_COMBINE_CONFIG_INIT;
+    config.quant_recipe = quant_recipe;
     config.pass_direction = backward ? NCCL_EP_BWD_PASS : NCCL_EP_FWD_PASS;
 
     NCCL_EP_CHECK(ncclEpCombine(
@@ -708,6 +750,53 @@ void nccl_ep_combine_backward(
     bool async_op) {
     nccl_ep_combine_impl(
         handle, grad_tokens, out_tokens, grad_topk_weights, out_topk_weights, true, async_op);
+}
+
+void nccl_ep_dispatch_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    const at::Tensor& scales,
+    const at::Tensor& topk_weights,
+    at::Tensor& out_tokens,
+    at::Tensor& out_scales,
+    std::optional<at::Tensor> out_topk_weights,
+    std::optional<at::Tensor> out_topk_idx,
+    bool async_op) {
+    nccl_ep_dispatch_impl(handle, tokens, topk_weights, out_tokens,
+        out_topk_weights, out_topk_idx, false, async_op,
+        scales, out_scales, NCCL_EP_DISP_QUANT_FWD);
+}
+
+void nccl_ep_dispatch_backward_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    const at::Tensor& scales,
+    at::Tensor& out_tokens,
+    at::Tensor& out_scales,
+    bool async_op) {
+    nccl_ep_dispatch_impl(handle, tokens, std::nullopt, out_tokens,
+        std::nullopt, std::nullopt, true, async_op,
+        scales, out_scales, NCCL_EP_DISP_QUANT_FWD);
+}
+
+void nccl_ep_combine_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    at::Tensor& out_tokens,
+    bool async_op) {
+    nccl_ep_combine_impl(handle, tokens, out_tokens, std::nullopt,
+        std::nullopt, false, async_op, NCCL_EP_COMB_QUANT_MXFP8);
+}
+
+void nccl_ep_combine_backward_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    const at::Tensor& topk_weights,
+    at::Tensor& out_tokens,
+    at::Tensor& out_topk_weights,
+    bool async_op) {
+    nccl_ep_combine_impl(handle, tokens, out_tokens, topk_weights,
+        out_topk_weights, true, async_op, NCCL_EP_COMB_QUANT_MXFP8);
 }
 
 } // namespace c10d::nccl_ep
@@ -782,6 +871,34 @@ void nccl_ep_combine_backward(
     const at::Tensor&,
     at::Tensor&,
     at::Tensor&, bool) {
+    not_supported();
+}
+
+void nccl_ep_dispatch_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>&,
+    const at::Tensor&, const at::Tensor&, const at::Tensor&,
+    at::Tensor&, at::Tensor&,
+    std::optional<at::Tensor>, std::optional<at::Tensor>, bool) {
+    not_supported();
+}
+
+void nccl_ep_dispatch_backward_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>&,
+    const at::Tensor&, const at::Tensor&,
+    at::Tensor&, at::Tensor&, bool) {
+    not_supported();
+}
+
+void nccl_ep_combine_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>&,
+    const at::Tensor&, at::Tensor&, bool) {
+    not_supported();
+}
+
+void nccl_ep_combine_backward_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>&,
+    const at::Tensor&, const at::Tensor&,
+    at::Tensor&, at::Tensor&, bool) {
     not_supported();
 }
 
