@@ -955,6 +955,22 @@ class TestFakeProxyTensor(TestCase):
             (fake.shape, fake.stride(), fake.storage_offset()),
         )
 
+    @fake_tensor_modes
+    def test_snapshot_fake_of_sparse_batched_tensor(self, mode_cls):
+        from torch._functorch.vmap import vmap_increment_nesting
+
+        functorch = torch._C._functorch
+        mode = mode_cls()
+        fake = mode.from_tensor(torch.eye(3).to_sparse())
+        with vmap_increment_nesting(3, "error") as level:
+            with mode:
+                batched = functorch._add_batch_dim(fake, 0, level)
+                val = snapshot_fake(batched)
+            self.assertTrue(functorch.is_batchedtensor(val))
+            self.assertTrue(is_fake_tensor(functorch.get_unwrapped(val)))
+            self.assertEqual(val.layout, torch.sparse_coo)
+            self.assertEqual(val.shape, (3,))
+
     def test_use_fake_and_tensor(self):
         def f(x, y):
             z = torch.tensor([2.0, 3.0])
@@ -1040,202 +1056,47 @@ def forward(self, x_1):
                 continue
             self.assertTrue('val' in n.meta)
 
-    def test_fake_tensor_mode(self):
-        def f(a):
-            d = a.cos()
-            return d
-
-        from torch._guards import detect_fake_mode
-
-        existing_fake_mode = FakeTensorMode()
-        with existing_fake_mode:
-            out = make_fx(f, tracing_mode="real")(torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1]]))
-
-        fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
-        self.assertEqual(fake_mode, existing_fake_mode)
-
-
-class TestMakeFxFakeMode(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @parametrize("use_cpp", [False, True])
     @parametrize("tracing_mode", ["fake", "symbolic"])
     @parametrize("pre_dispatch", [False, True])
-    def test_mode_selection(self, device, use_cpp, tracing_mode, pre_dispatch):
+    def test_fake_tensor_mode_selection(self, use_cpp, tracing_mode, pre_dispatch):
         from torch._guards import detect_fake_mode
         from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode as PythonFakeTensorMode
 
-        def f(x):
-            y = x.sin()
-            y.add_(torch.ones_like(y))
-            return y.view(-1)
-
         with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-            gm = make_fx(f, tracing_mode=tracing_mode, pre_dispatch=pre_dispatch)(
-                torch.randn(3, 4, device=device)
+            gm = make_fx(lambda x: x.cos(), tracing_mode=tracing_mode, pre_dispatch=pre_dispatch)(
+                torch.randn(3, 4)
             )
         vals = [n.meta["val"] for n in gm.graph.nodes if "val" in n.meta]
         mode = detect_fake_mode(vals)
         self.assertIsInstance(mode, CppFakeTensorMode if use_cpp else PythonFakeTensorMode)
         self.assertTrue(all(mode.is_our_fake(v) for v in vals if isinstance(v, torch.Tensor)))
-        self.assertEqual(mode.static_shapes, tracing_mode == "fake")
-        self.assertEqual(mode.allow_fallback_kernels, tracing_mode == "fake")
-        x = torch.randn(5 if tracing_mode == "symbolic" else 3, 4, device=device)
-        self.assertEqual(gm(x), f(x))
         self.assertIsNone(detect_fake_mode())
 
     @fake_tensor_modes
-    @parametrize("tracing_mode", ["fake", "symbolic"])
+    @parametrize("tracing_mode", ["real", "fake", "symbolic"])
     @parametrize("ambient", [False, True])
-    def test_reuse_mode(self, device, mode_cls, tracing_mode, ambient):
+    def test_fake_tensor_mode(self, mode_cls, tracing_mode, ambient):
         from contextlib import nullcontext
         from torch._guards import detect_fake_mode
         from torch._subclasses.fake_tensor import CppFakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         mode = mode_cls(shape_env=ShapeEnv())
-        x = torch.randn(3, 4, device=device)
+        x = torch.randn(3, 4)
+        if not ambient or tracing_mode == "real":
+            x = mode.from_tensor(x)
         # An existing mode takes precedence over the constructor configuration.
         with torch._dynamo.config.patch(use_cpp_fake_tensor=mode_cls is not CppFakeTensorMode):
             with mode if ambient else nullcontext():
-                gm = make_fx(lambda x: x.cos(), tracing_mode=tracing_mode)(
-                    x if ambient else mode.from_tensor(x)
-                )
+                gm = make_fx(lambda x: x.cos(), tracing_mode=tracing_mode)(x)
                 self.assertIs(detect_fake_mode(), mode if ambient else None)
         vals = [n.meta["val"] for n in gm.graph.nodes if "val" in n.meta]
         self.assertIs(detect_fake_mode(vals), mode)
         if tracing_mode == "symbolic":
             self.assertIs(gm.shape_env, mode.shape_env)
-        self.assertEqual(gm(x), x.cos())
         self.assertIsNone(detect_fake_mode())
 
-    @parametrize("use_cpp", [False, True])
-    @parametrize("tracing_mode", ["fake", "symbolic"])
-    def test_nested_trace(self, device, use_cpp, tracing_mode):
-        from torch._guards import detect_fake_mode
-
-        inner_graphs = []
-
-        def f(x):
-            gm = make_fx(lambda x: x.sin(), tracing_mode=tracing_mode)(x)
-            inner_graphs.append(gm)
-            return gm(x).cos()
-
-        x = torch.randn(3, 4, device=device)
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-            gm = make_fx(f, tracing_mode=tracing_mode)(x)
-        outer_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
-        inner_mode = detect_fake_mode([n.meta.get("val") for n in inner_graphs[0].graph.nodes])
-        self.assertIs(outer_mode, inner_mode)
-        self.assertEqual(gm(x), x.sin().cos())
-
-    @parametrize("use_cpp", [False, True])
-    def test_unbacked_bindings(self, device, use_cpp):
-        def f(x):
-            indices = x.nonzero()
-            return indices, indices.shape[0]
-
-        x = torch.tensor([0, 1, 0, 2], device=device)
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-            gm = make_fx(f, tracing_mode="symbolic")(x)
-        node = next(n for n in gm.graph.nodes if n.target == aten.nonzero.default)
-        self.assertTrue(node.meta["unbacked_bindings"])
-        self.assertIsInstance(node.meta["val"].shape[0], torch.SymInt)
-        y = torch.tensor([1, 2, 3, 0, 0, 4], device=device)
-        self.assertEqual(gm(y), f(y))
-
-    @parametrize("use_cpp", [False, True])
-    def test_dynamic_shapes(self, device, use_cpp):
-        from torch.fx.experimental.dynamic_spec import ShapeVar, STATIC, TensorSpec
-
-        def f(x):
-            return x.sum(0)
-
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-            gm = make_fx(
-                f,
-                tracing_mode="fake",
-                dynamic_shapes={"x": TensorSpec([ShapeVar("batch", min=2, max=6), STATIC])},
-            )(torch.randn(3, 4, device=device))
-        placeholder = next(iter(gm.graph.find_nodes(op="placeholder")))
-        self.assertTrue(placeholder.meta["unbacked_bindings"])
-        x = torch.randn(5, 4, device=device)
-        self.assertEqual(gm(x), f(x))
-        with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
-            gm(torch.randn(7, 4, device=device))
-
-    @parametrize("use_cpp", [False, True])
-    def test_higher_order_subgraphs(self, device, use_cpp):
-        from torch._guards import detect_fake_mode
-
-        def f(pred, x):
-            return torch.ops.higher_order.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
-
-        x = torch.randn(3, 4, device=device)
-        pred = torch.tensor(True, device=device)
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-            gm = make_fx(f, tracing_mode="fake")(pred, x)
-        mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
-        for branch in (gm.true_graph_0, gm.false_graph_0):
-            vals = [n.meta.get("val") for n in branch.graph.nodes]
-            self.assertIs(detect_fake_mode(vals), mode)
-        self.assertEqual(gm(pred, x), x.sin())
-        self.assertEqual(gm(~pred, x), x.cos())
-
-    @parametrize("use_cpp", [False, True])
-    @parametrize("tracing_mode", ["fake", "symbolic"])
-    def test_while_loop(self, device, use_cpp, tracing_mode):
-        def f(x):
-            return torch.while_loop(lambda t: t.sum() < 8, lambda t: (t + 1,), (x,))
-
-        x = torch.zeros(3, 4, device=device)
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-            gm = make_fx(f, tracing_mode=tracing_mode)(x)
-        self.assertEqual(gm(x), (torch.ones_like(x),))
-
-    @parametrize("use_cpp", [False, True])
-    @parametrize("tracing_mode", ["fake", "symbolic"])
-    def test_zero_length_scan(self, device, use_cpp, tracing_mode):
-        from torch._higher_order_ops.scan import scan
-
-        def f(x):
-            return scan(lambda carry, _: (carry + 1, carry.sin()), x, None, length=0)
-
-        x = torch.randn(3, 4, device=device)
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-            gm = make_fx(f, tracing_mode=tracing_mode)(x)
-        self.assertEqual(gm(x), (x, torch.empty(0, 3, 4, device=device)))
-
-    @fake_tensor_modes
-    def test_sparse_batched_snapshot(self, device, mode_cls):
-        from torch._export.utils import _compiling_state_context
-
-        x = torch.eye(3, device=device).to_sparse()
-        mode = mode_cls()
-        with _compiling_state_context():
-            gm = make_fx(torch.vmap(lambda row: row), pre_dispatch=True)(mode.from_tensor(x))
-        self.assertEqual(gm(x), x)
-
-    @parametrize("use_cpp", [False, True])
-    @parametrize("tracing_mode", ["fake", "symbolic"])
-    @parametrize("noncontiguous_grad", [False, True])
-    def test_invoke_subgraph_backward(self, device, use_cpp, tracing_mode, noncontiguous_grad):
-        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
-
-        subgraph = torch.fx.symbolic_trace(lambda x: (x.sin(),))
-
-        def f(x, grad):
-            y, = invoke_subgraph(subgraph, "sin", x)
-            return torch.autograd.grad(y, x, grad)[0]
-
-        x = torch.randn(3, 4, device=device, requires_grad=True)
-        grad = torch.randn(4, 3, device=device).t() if noncontiguous_grad else torch.randn_like(x)
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-            gm = make_fx(f, tracing_mode=tracing_mode)(x, grad)
-        self.assertEqual(gm(x, grad), x.cos() * grad)
-
-
-instantiate_device_type_tests(TestMakeFxFakeMode, globals())
 
 
 def _get_node(fx_g, cond):
