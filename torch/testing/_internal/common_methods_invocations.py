@@ -14074,12 +14074,6 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           skips=(
-               # Exception: Tensor-likes are not close!
-               # torch-xpu-ops: #3296
-               DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive',
-                            device_type='xpu', dtypes=(torch.float16,)),
-            ),
            ),
     OpInfo('istft',
            dtypes=complex_types(),
