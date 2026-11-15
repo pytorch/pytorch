@@ -1076,6 +1076,10 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         # HOP backward caches reuse metadata hashing without the Python dispatch cache.
         FakeTensorMode._prep_args_for_hash(self, result, args, state, id_hashed_objects)
 
+    def reset_nt_tensor_id_counter(self) -> None:
+        # C++ fake modes do not maintain a NestedTensor id counter.
+        pass
+
     def can_run_unsafe_fallback(self, func: OpOverload) -> bool:
         return self.allow_fallback_kernels and (
             func.namespace in FakeTensorMode._can_run_unsafe_fallback_allowed_namespaces

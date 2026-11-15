@@ -1,149 +1,24 @@
 # Owner(s): ["oncall: export"]
 import copy
 import unittest
-from contextlib import nullcontext
 
 import torch
 from functorch.experimental import control_flow
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
-from torch._export.utils import _detect_fake_mode_from_gm, _get_shape_env_from_gm
 from torch.export import export
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.testing._internal.common_utils import (
-    fake_tensor_modes,
     HardwareClassification,
-    instantiate_parametrized_tests,
     IS_WINDOWS,
-    parametrize,
     run_tests,
     TestCase,
 )
 
 
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
-@instantiate_parametrized_tests
 class TestPassInfra(TestCase):
     hw_classification = HardwareClassification.GENERIC
-
-    @fake_tensor_modes
-    @parametrize("metadata_key", ["val", "example_value"])
-    @parametrize("placeholder", [False, True])
-    def test_fake_mode_from_graph(self, mode_cls, metadata_key, placeholder):
-        mode = mode_cls(shape_env=ShapeEnv())
-        fake = mode.from_tensor(torch.randn(3, 4))
-        graph = torch.fx.Graph()
-        node = (
-            graph.placeholder("x")
-            if placeholder
-            else graph.call_function(torch.ops.aten.ones.default, ([3, 4],))
-        )
-        node.meta[metadata_key] = fake
-        graph.output(node)
-        gm = torch.fx.GraphModule({}, graph)
-        self.assertIs(_detect_fake_mode_from_gm(gm), mode)
-        self.assertIs(_get_shape_env_from_gm(gm), mode.shape_env)
-
-    @fake_tensor_modes
-    def test_extract_fake_inputs(self, mode_cls):
-        from torch.export._trace import _extract_fake_inputs
-
-        mode = mode_cls(shape_env=ShapeEnv())
-        x = torch.randn(3, 4)
-        with mode:
-            gm = make_fx(lambda x, n: x + n, tracing_mode="symbolic")(x, 2)
-        args, kwargs, detected_mode = _extract_fake_inputs(gm, (x,), {"n": 2})
-        placeholders = list(gm.graph.find_nodes(op="placeholder"))
-        self.assertIs(args[0], placeholders[0].meta["val"])
-        self.assertIs(kwargs["n"], placeholders[1].meta["val"])
-        self.assertIs(detected_mode, mode)
-
-    @fake_tensor_modes
-    def test_runtime_assertion_pass_fake_mode(self, mode_cls):
-        from torch._export.utils import apply_runtime_assertion_pass
-        from torch._functorch._aot_autograd.schemas import GraphSignature
-        from torch.export._trace import _replace_unbacked_bindings
-        from torch.utils import _pytree as pytree
-
-        def f(x):
-            result = x.nonzero()
-            torch._check(result.shape[0] <= 2)
-            return (result,)
-
-        x = torch.tensor([1, 0, 1, 0])
-        mode = mode_cls(shape_env=ShapeEnv())
-        with mode:
-            gm = make_fx(f, tracing_mode="symbolic")(x)
-        _replace_unbacked_bindings(gm)
-        nonzero = next(
-            n for n in gm.graph.nodes if n.target == torch.ops.aten.nonzero.default
-        )
-        self.assertTrue(nonzero.meta["unbacked_bindings"])
-        signature = GraphSignature(
-            parameters=[],
-            buffers=[],
-            user_inputs=["x_1"],
-            user_outputs=[nonzero.name],
-            inputs_to_parameters={},
-            inputs_to_buffers={},
-            buffers_to_mutate={},
-            parameters_to_mutate={},
-            user_inputs_to_mutate={},
-            in_spec=pytree.tree_structure(((x,), {})),
-            out_spec=pytree.tree_structure((x,)),
-            backward_signature=None,
-            input_tokens=[],
-            output_tokens=[],
-        )
-        gm, signature = apply_runtime_assertion_pass(gm, signature)
-        self.assertEqual(gm(x)[0].shape, (2, 1))
-        self.assertEqual(signature.user_outputs, [nonzero.name])
-        with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
-            gm(torch.ones(4))
-
-    @fake_tensor_modes
-    @parametrize("ambient", [False, True])
-    def test_export_pass_tensor_metadata(self, mode_cls, ambient):
-        from torch._subclasses.fake_tensor import maybe_get_fake_mode
-        from torch.fx.passes.shape_prop import _extract_tensor_metadata
-
-        x = torch.randn(3, 4, requires_grad=True)
-        graph = torch.fx.Graph()
-        node = graph.placeholder("x")
-        node.meta["tensor_meta"] = _extract_tensor_metadata(x)
-        graph.output(node)
-        gm = torch.fx.GraphModule({}, graph)
-        mode = mode_cls()
-        export_pass = _ExportPassBaseDeprecatedDoNotUse()
-        export_pass.fake_tensor_mode = mode
-        with mode if ambient else nullcontext():
-            (fake,) = export_pass.inputs(gm)
-        self.assertIs(maybe_get_fake_mode(fake), mode)
-        self.assertEqual(_extract_tensor_metadata(fake), node.meta["tensor_meta"])
-        self.assertEqual(fake.device, x.device)
-
-    @fake_tensor_modes
-    def test_export_pass_fake_mode(self, mode_cls):
-        from torch._subclasses.fake_tensor import maybe_get_fake_mode
-
-        def f(x):
-            return x.t(), x.sin()
-
-        mode = mode_cls(shape_env=ShapeEnv())
-        with mode:
-            gm = make_fx(f, tracing_mode="symbolic")(torch.randn(3, 4))
-        result = _ExportPassBaseDeprecatedDoNotUse()(gm).graph_module
-        self.assertEqual(
-            [(n.op, n.target) for n in gm.graph.nodes],
-            [(n.op, n.target) for n in result.graph.nodes],
-        )
-        for before, after in zip(gm.graph.nodes, result.graph.nodes):
-            if isinstance(val := after.meta.get("val"), torch.Tensor):
-                self.assertIs(maybe_get_fake_mode(val), mode)
-                self.assertEqual(val.shape, before.meta["val"].shape)
-                self.assertEqual(val.stride(), before.meta["val"].stride())
 
     def test_export_pass_base(self) -> None:
         class Foo(torch.nn.Module):

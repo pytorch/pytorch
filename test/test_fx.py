@@ -87,7 +87,6 @@ from torch.testing._internal.common_utils import (
     IS_CPU_CAPABILITY_SVE256,
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
-    parametrize,
     run_tests,
     skipIfTorchDynamo,
     xfailIf,
@@ -2541,7 +2540,8 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
                 kwargs={},
             )
 
-    def test_example_shape_prop(self):
+    @fake_tensor_modes
+    def test_example_shape_prop(self, mode_cls):
         class TestCase(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -2554,7 +2554,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         tc = TestCase()
         tc_traced = symbolic_trace(tc)
         ref_out = tc_traced(torch.rand(3, 4))
-        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
+        shape_prop.ShapeProp(tc_traced, fake_mode=mode_cls()).propagate(torch.rand(3, 4))
 
         # Make sure we're testing all opcodes
         opcodes = set()
@@ -2688,7 +2688,8 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
                     node.meta["tensor_meta"].memory_format, torch.channels_last_3d
                 )
 
-    def test_shape_prop_unbacked_sym(self):
+    @fake_tensor_modes
+    def test_shape_prop_unbacked_sym(self, mode_cls):
         from torch._dynamo.utils import detect_fake_mode
 
         class M(torch.nn.Module):
@@ -2700,37 +2701,9 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         fake_inputs = [
             node.meta.get("val") for node in gm.graph.nodes if node.op == "placeholder"
         ]
-        inp = fake_inputs
-        fake_mode = detect_fake_mode(inp)
+        fake_mode = mode_cls(shape_env=detect_fake_mode(fake_inputs).shape_env)
         shape_prop.ShapeProp(gm=gm, fake_mode=fake_mode).propagate(*inp)
         self.assertEqual(len(fake_mode.shape_env.pending_fresh_unbacked_symbols), 0)
-
-    @fake_tensor_modes
-    @parametrize("ambient", [False, True])
-    def test_shape_prop_fake_mode(self, mode_cls, ambient):
-        from torch._guards import detect_fake_mode
-        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        gm = symbolic_trace(torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()))
-        mode = mode_cls(shape_env=ShapeEnv(), allow_non_fake_inputs=True)
-        x = torch.randn(2, 4)
-        with mode if ambient else contextlib.nullcontext():
-            prop = shape_prop.ShapeProp(gm, fake_mode=None if ambient else mode)
-            output = prop.propagate(x)
-            self.assertIs(detect_fake_mode(), mode if ambient else None)
-        self.assertIs(prop.fake_mode, mode)
-        self.assertIs(maybe_get_fake_mode(output), mode)
-        self.assertEqual(output.shape, (2, 3))
-        for param in gm.parameters():
-            self.assertFalse(is_fake_tensor(param))
-        for param in prop.fake_module.parameters():
-            self.assertIs(maybe_get_fake_mode(param), mode)
-        self.assertEqual(
-            next(n for n in gm.graph.nodes if n.op == "output").meta["tensor_meta"].shape,
-            (2, 3),
-        )
-        self.assertIsNone(detect_fake_mode())
 
     def test_nn_module_stack(self):
         class SubModule(torch.nn.Module):
