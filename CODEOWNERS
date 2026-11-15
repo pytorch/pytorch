@@ -1241,7 +1241,7 @@
 #
 # [infra_linting]
 # label: module: lint
-# owner: none
+# owner: @atalman @huydhn
 # /.bc-linter.yml
 # /.clang-format
 # /.clang-tidy
@@ -1262,8 +1262,8 @@
 # /scripts/codeowners/
 # /scripts/lint_urls.sh
 # /scripts/lint_xrefs.sh
-# /scripts/lintrunner.py
-# /tools/linter/
+/scripts/lintrunner.py @huydhn @atalman
+/tools/linter/ @huydhn @atalman
 #
 # [infra_codegen]
 # label: module: codegen, module: autograd
