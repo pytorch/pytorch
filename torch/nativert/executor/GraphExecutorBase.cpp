@@ -2,6 +2,7 @@
 #include <torch/nativert/executor/GraphExecutorBase.h>
 
 #include <c10/util/Logging.h>
+#include <c10/util/irange.h>
 #include <caffe2/core/timer.h>
 
 namespace torch::nativert {
@@ -73,7 +74,7 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
   }
 
   // Warmup
-  for (uint32_t i = 0; i < warmupRuns; i++) {
+  for ([[maybe_unused]] const auto _ : c10::irange(warmupRuns)) {
     for (const auto& inputs : inputsList) {
       execute(executionFrame, inputs);
     }
@@ -97,7 +98,7 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
   // Execute kernels
   caffe2::Timer timer;
   executionFrame.withManagedMemory([&](auto) {
-    for (uint32_t i = 0; i < mainRuns; i++) {
+    for ([[maybe_unused]] const auto _ : c10::irange(mainRuns)) {
       for (auto inputs : inputsList) {
         const auto& inputValues = graph_.userInputs();
 

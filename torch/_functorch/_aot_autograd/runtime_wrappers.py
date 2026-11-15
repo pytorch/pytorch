@@ -73,6 +73,7 @@ from .descriptors import (
 from .functional_utils import gen_alias_from_base
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
+    add_input_mutation_storage_overlap_partition_guard,
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
     remove_dupe_metadata,
@@ -1227,7 +1228,13 @@ def _create_runtime_wrapper(
             exit_prologue()
         return result
 
-    if not (trace_joint and _should_disable_saved_tensors_hooks()):
+    # A wrapper rebuilt from a cache entry may run outside the hooks context the
+    # graph was compiled (and its hooks inlined) under, so the recorded decision
+    # wins over the ambient hooks.
+    disable_hooks = runtime_metadata.disable_saved_tensors_hooks
+    if disable_hooks is None:
+        disable_hooks = _should_disable_saved_tensors_hooks()
+    if not (trace_joint and disable_hooks):
         return runtime_wrapper
 
     @simple_wraps(runtime_wrapper)
@@ -2251,6 +2258,10 @@ def merge_view_inputs(
     if not [info for info in mutated_input_info if info.mutates_data]:
         # Return early when there are no mutations.
         return fwd_inputs, fwd_inputs_descs, None
+
+    add_input_mutation_storage_overlap_partition_guard(
+        aot_config, fwd_inputs, mutated_input_info
+    )
 
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
     # pyrefly: ignore [implicit-any]
