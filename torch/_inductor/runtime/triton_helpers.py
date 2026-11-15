@@ -400,6 +400,78 @@ def max_with_index(value, index, dim):
     return tl.reduce((value, index), dim, maximum_with_index)
 
 
+# expf for a pair of float32 values using the packed f32x2 FMA/ADD/MUL
+# instructions of sm_10x. Bitwise identical to libdevice.exp for every float32
+# input (denormal results included), with fewer instructions per element. The
+# three constants that multiply x are passed in so that exp(-x) can negate them
+# (exact) instead of materializing -x, which ptxas cannot fold into inline asm.
+def _exp_f32x2_asm(c0: str, c1: str, c2: str) -> str:
+    return f"""{{
+    .reg .b64 X, H, C, A, B, R, J, E, P;
+    .reg .b32 a0, a1, b0, b1, p0, p1;
+    mov.b64 X, {{$2, $3}};
+    mov.b64 H, 0x3F0000003F000000;
+    mov.b64 C, 0x{c0}{c0};
+    fma.rn.ftz.f32x2 R, X, C, H;
+    mov.b64 {{a0, a1}}, R;
+    cvt.ftz.sat.f32.f32 a0, a0;
+    cvt.ftz.sat.f32.f32 a1, a1;
+    mov.b64 A, {{a0, a1}};
+    mov.b64 C, 0x437C0000437C0000;
+    mov.b64 H, 0x4B4000014B400001;
+    fma.rm.ftz.f32x2 B, A, C, H;
+    mov.b64 C, 0x4B40007F4B40007F;
+    sub.f32x2 J, C, B;
+    mov.b64 C, 0x{c1}{c1};
+    fma.rn.ftz.f32x2 R, X, C, J;
+    mov.b64 C, 0x{c2}{c2};
+    fma.rn.ftz.f32x2 R, X, C, R;
+    mov.b64 {{a0, a1}}, R;
+    ex2.approx.ftz.f32 p0, a0;
+    ex2.approx.ftz.f32 p1, a1;
+    mov.b64 {{b0, b1}}, B;
+    shl.b32 b0, b0, 23;
+    shl.b32 b1, b1, 23;
+    mov.b64 E, {{b0, b1}};
+    mov.b64 P, {{p0, p1}};
+    mul.f32x2 R, P, E;
+    mov.b64 {{$0, $1}}, R;
+}}"""
+
+
+_EXP_F32X2_ASM: tl.constexpr = tl.constexpr(
+    _exp_f32x2_asm("3BBB989D", "3FB8AA3B", "32A57060")
+)
+_EXP_NEG_F32X2_ASM: tl.constexpr = tl.constexpr(
+    _exp_f32x2_asm("BBBB989D", "BFB8AA3B", "B2A57060")
+)
+
+
+@triton.jit
+def exp_f32x2(x, negate: tl.constexpr = False):
+    """libdevice.exp(x), or libdevice.exp(-x) if negate, computed two float32
+    lanes at a time on sm_10x."""
+    # Packing pairs needs at least two elements per block.
+    if x.numel > 1:
+        if negate:
+            return tl.inline_asm_elementwise(
+                _EXP_NEG_F32X2_ASM,
+                "=f,=f,f,f",
+                [x],
+                dtype=tl.float32,
+                is_pure=True,
+                pack=2,
+            )
+        else:
+            return tl.inline_asm_elementwise(
+                _EXP_F32X2_ASM, "=f,=f,f,f", [x], dtype=tl.float32, is_pure=True, pack=2
+            )
+    elif negate:
+        return libdevice.exp(-x)
+    else:
+        return libdevice.exp(x)
+
+
 @triton.jit
 def exp(x, use_fast_math: tl.constexpr):
     if use_fast_math:
