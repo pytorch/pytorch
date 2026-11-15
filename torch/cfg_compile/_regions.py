@@ -60,13 +60,13 @@ of the region, which every call checks, or an attribute of a module or a
 global that the path read, which is checked along with them (``_Walk.guards``).
 
 A compiled region is valid for the inputs it was traced with. Every call
-compares the tensors (shape, dtype, device, ``requires_grad``, which of them
-are the same object), the values of numbers and strings, the identity of
-functions and classes, the modules (their submodules and ``training`` flags)
-and the grad and autocast modes; a new combination is traced and compiled as
-another variant. What the trace read from anywhere else, such as an attribute
-of a module that is not a tensor or a global that is rebound later, is not
-checked.
+compares the tensors (rank, dtype, device, ``requires_grad``, sizes and
+strides, which of them are the same object), the values of numbers and
+strings, the identity of functions and classes, the modules (their submodules
+and ``training`` flags) and the grad and autocast modes; a new combination is
+traced and compiled as another variant. What the trace read from anywhere
+else, such as an attribute of a module that is not a tensor or a global that
+is rebound later, is not checked.
 """
 
 import collections
@@ -822,9 +822,13 @@ def _acceptable(obj: Any) -> str | None:
 
 def _key(parts: list[Any], inputs: _Inputs) -> Any:
     """The key of the variant for a call: what its inputs are apart from
-    tensors, what the tensors are like, and the modes it runs in."""
-    tensors = [(t.shape, t.dtype, t.device, t.requires_grad) for t in inputs.flat]
-    return (tuple(parts), tuple(tensors), _modes())
+    tensors, what kinds of tensors they hold, the numbers of the call (the
+    sizes and strides of the tensors), and the modes it runs in."""
+    try:
+        kinds, numbers, _ = _runtime.tensor_key(inputs.flat, [])
+    except TypeError:
+        raise _Opaque(0, "a tensor without sizes of its own") from None
+    return (tuple(parts), kinds, numbers, _modes())
 
 
 class _Copies:
@@ -1762,7 +1766,7 @@ class _Region:
         # tensor of its own is not looked up, the code does not say which.
         same = None
         if not any(node.op == "get_attr" for node in graph.graph.nodes):
-            same = (graph.code, key[1], key[2])
+            same = (graph.code, key[1], key[2], key[3])
         compiled = options.compiled.get(same)
         if compiled is None:
             try:
