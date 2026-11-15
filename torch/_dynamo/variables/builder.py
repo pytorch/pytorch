@@ -126,6 +126,7 @@ from ..guards import (
     install_builtin_method_guard,
     install_guard,
     make_dupe_guard,
+    record_lexical_alias,
 )
 from ..pgo import (
     auto_dynamic,
@@ -1220,6 +1221,9 @@ class VariableBuilder:
             return None
 
         if self.source != result.source:
+            tracer = self.tx.output.current_tracer
+            if tracer.parent is not None:
+                record_lexical_alias(tracer.lexical_sources, self.source, result.source)
             dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
                 self.install_guards(dup_guard)
@@ -1876,7 +1880,7 @@ class VariableBuilder:
                 ),
             )
         elif (
-            isinstance(value, types.MethodType)
+            issubclass(type(value), (types.MethodType, types.BuiltinMethodType))
             and istype(
                 getattr(value, "__self__", None), torch.autograd.function.FunctionMeta
             )
@@ -1884,19 +1888,22 @@ class VariableBuilder:
             and value == getattr(value.__self__, "apply", None)
         ):
             # handle aliased autograd function `apply` calls
+            obj_source = AttrSource(self.source, "__self__")
+            obj = VariableBuilder(self.tx, obj_source)(value.__self__)
+            if isinstance(value, types.BuiltinMethodType):
+                self.install_guards(GuardBuilder.BUILTIN_MATCH)
+                descriptor = cast(Any, find_bound_builtin_method_descriptor(value))
+                if descriptor is None:
+                    raise AssertionError("Expected builtin apply descriptor")
+                return BoundBuiltinMethodVariable(
+                    descriptor, obj, value=value, source=self.source
+                )
             install_guard(
                 AttrSource(self.get_source(), "__func__").make_guard(
                     GuardBuilder.CLOSURE_MATCH
                 )
             )
-            return GetAttrVariable(
-                AutogradFunctionVariable(
-                    value.__self__,
-                    source=AttrSource(self.source, member="__self__"),
-                ),
-                "apply",
-                py_type=type(value),
-            )
+            return GetAttrVariable(obj, "apply", py_type=type(value))
         elif (
             isinstance(value, types.MethodType)
             and value.__name__ in ("shuffle", "sample", "seed")
