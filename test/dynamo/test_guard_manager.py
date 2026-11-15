@@ -20,7 +20,13 @@ import torch._dynamo.testing
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
-from torch._dynamo.guards import _ordered_dict_order, GuardBuilder
+from torch._dynamo.guards import (
+    _ordered_dict_order,
+    GuardBuilder,
+    GuardCheckSpec,
+    register_guard_check_spec,
+)
+from torch._dynamo.source import AttrSource, LocalSource
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -2989,6 +2995,7 @@ class SourceCloneTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cloned.name, source.name)
 
 
+@instantiate_parametrized_tests
 class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
     """Tests for the GuardCheckSpec get_metadata_fn/eval_fn handlers on GuardBuilder."""
 
@@ -3003,6 +3010,235 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         from torch._dynamo.source import LocalSource
 
         return LocalSource("x").make_guard(create_fn)
+
+    @parametrize("override", [False, True])
+    def test_guard_with_source_resets_derived_metadata(self, override):
+        guard = self._make_guard(GuardBuilder.TYPE_MATCH)
+        guard.guard_types, guard.code_list = ["TYPE_MATCH"], ["old code"]
+        guard.obj_weakref = weakref_x
+        guard.guarded_class_weakref = weakref.ref(torch.Tensor)
+        guard._unserializable = torch.Tensor
+        guard._force_dict_keys_match = True
+        old_hash = hash(guard)
+        source = LocalSource("other")
+        create_fn = GuardBuilder.CONSTANT_MATCH if override else guard.create_fn
+        copied = guard.with_source(source, create_fn=create_fn if override else None)
+        self.assertIsNot(copied, guard)
+        self.assertIs(copied.originating_source, source)
+        self.assertIs(copied.create_fn, create_fn)
+        for name in (
+            "guard_types",
+            "code_list",
+            "obj_weakref",
+            "guarded_class_weakref",
+            "_hash",
+        ):
+            self.assertIsNone(getattr(copied, name))
+        self.assertEqual(hash(copied), hash(source.make_guard(create_fn)))
+        self.assertIs(copied._unserializable, torch.Tensor)
+        self.assertTrue(copied._force_dict_keys_match)
+        self.assertEqual(
+            (guard.guard_types, guard.code_list), (["TYPE_MATCH"], ["old code"])
+        )
+        self.assertIs(guard.obj_weakref, weakref_x)
+        self.assertIs(guard.guarded_class_weakref(), torch.Tensor)
+        self.assertEqual(guard._hash, old_hash)
+
+    def test_guard_remap_sources_preserves_payloads(self):
+        old, new = LocalSource("old"), LocalSource("new")
+        before, after = AttrSource(old, "value"), AttrSource(new, "value")
+        opaque = [old]
+        create_fn = functools.partial(
+            lambda payload, builder, guard, *, dependency: None,
+            (old, opaque),
+            dependency=(before, (old,)),
+        )
+        guard = before.make_guard(create_fn)
+        self.assertIs(guard.remap_sources(lambda source: source), guard)
+        replacements = {old: new, before: after}
+        copied = guard.remap_sources(lambda source: replacements.get(source, source))
+        copied_fn = copied.create_fn
+        if not isinstance(copied_fn, functools.partial):
+            raise AssertionError("expected a remapped functools.partial")
+        self.assertIs(copied.originating_source, after)
+        self.assertIs(copied_fn.func, create_fn.func)
+        self.assertIs(copied_fn.args[0][0], new)
+        self.assertIs(copied_fn.args[0][1], opaque)
+        self.assertEqual(copied_fn.keywords, {"dependency": (after, (new,))})
+        self.assertIs(guard.originating_source, before)
+        self.assertIs(guard.create_fn, create_fn)
+        self.assertEqual(opaque, [old])
+
+    def test_guard_source_dependencies_include_ancestors_and_partial_payloads(self):
+        root, other = LocalSource("root"), LocalSource("other")
+        source, dependency = AttrSource(root, "value"), AttrSource(other, "value")
+        opaque = [LocalSource("ignored")]
+        create_fn = functools.partial(
+            lambda payload, builder, guard, *, dependency: None,
+            (root, (source, opaque)),
+            dependency=(dependency, source),
+        )
+        guard = source.make_guard(create_fn)
+        self.assertEqual(
+            list(guard.source_dependencies()), [source, root, dependency, other]
+        )
+        self.assertIs(guard.create_fn, create_fn)
+        self.assertIs(create_fn.args[0][1][1], opaque)
+
+    @parametrize(
+        "case",
+        [
+            "identity",
+            "type",
+            "scalar",
+            "source",
+            "nested",
+            "length",
+            "keys",
+            "opaque",
+            "float",
+        ],
+    )
+    def test_guard_equivalence_payload_policy(self, case):
+        marker = object()
+        cases = {
+            "identity": (marker, marker, True),
+            "type": (True, 1, False),
+            "scalar": (int("257"), int("257"), True),
+            "source": (LocalSource("same"), LocalSource("same"), True),
+            "nested": (
+                ({"a": (1, LocalSource("x"))},),
+                ({"a": (1, LocalSource("x"))},),
+                True,
+            ),
+            "length": ((1,), (1, 2), False),
+            "keys": ({"a": 1}, {"b": 1}, False),
+            "opaque": (object(), object(), False),
+            "float": (float("1.25"), float("1.25"), False),
+        }
+
+        def create_fn(payload, builder, guard):
+            pass
+
+        left, right, expected = cases[case]
+        guard = self._make_guard(functools.partial(create_fn, left))
+        other = self._make_guard(functools.partial(create_fn, right))
+        self.assertIs(guard.is_equivalent_to(other), expected)
+
+    def test_guard_equivalence_header_and_keyword_policy(self):
+        def create_fn(builder, guard, **payload):
+            pass
+
+        guard = self._make_guard(create_fn)
+        self.assertTrue(
+            guard.is_equivalent_to(self._make_guard(functools.partial(create_fn)))
+        )
+        left = self._make_guard(
+            functools.partial(create_fn, a=(1,), b=LocalSource("value"))
+        )
+        right = self._make_guard(
+            functools.partial(create_fn, b=LocalSource("value"), a=(1,))
+        )
+        self.assertTrue(left.is_equivalent_to(right))
+        right._force_dict_keys_match = True
+        self.assertFalse(left.is_equivalent_to(right))
+        self.assertFalse(left.is_equivalent_to(left.with_source(LocalSource("other"))))
+        self.assertFalse(
+            guard.is_equivalent_to(self._make_guard(GuardBuilder.TYPE_MATCH))
+        )
+
+    @parametrize("args_match", [False, True])
+    def test_guard_equivalence_reads_args_before_keywords(self, args_match):
+        calls = []
+
+        class Create:
+            @property
+            def args(self):
+                calls.append("args")
+                return () if args_match else (len(calls),)
+
+            @property
+            def keywords(self):
+                calls.append("keywords")
+                return {}
+
+            def __call__(self, builder, guard):
+                pass
+
+        create_fn = Create()
+        guard = self._make_guard(create_fn)
+        self.assertIs(guard.is_equivalent_to(self._make_guard(create_fn)), args_match)
+        self.assertEqual(
+            calls, ["args", "args"] + (["keywords", "keywords"] if args_match else [])
+        )
+
+    def test_guard_equivalence_does_not_compare_opaque_payloads(self):
+        class Payload:
+            def __eq__(self, other):
+                raise AssertionError("opaque equality must not run")
+
+        def create_fn(payload, builder, guard):
+            pass
+
+        marker = Payload()
+        guard = self._make_guard(functools.partial(create_fn, marker))
+        self.assertTrue(
+            guard.is_equivalent_to(
+                self._make_guard(functools.partial(create_fn, marker))
+            )
+        )
+        self.assertFalse(
+            guard.is_equivalent_to(
+                self._make_guard(functools.partial(create_fn, Payload()))
+            )
+        )
+
+    def test_guard_check_spec_default_sources(self):
+        def metadata(guard, value):
+            return type(value)
+
+        def evaluate(value, expected):
+            return type(value) is expected
+
+        handler = GuardCheckSpec(metadata, evaluate)
+        decorated = register_guard_check_spec(metadata, evaluate)(
+            lambda builder, guard: None
+        )
+        self.assertEqual(decorated.guard_check_spec, handler)
+        self.assertIsNone(handler.get_extra_sources_fn)
+        guard = self._make_guard(GuardBuilder.TYPE_MATCH)
+        expected = handler.get_metadata_fn(guard, 42)
+        self.assertIs(expected, int)
+        self.assertTrue(handler.eval_fn(100, expected))
+        self.assertFalse(handler.eval_fn("hello", expected))
+
+    def test_guard_check_spec_explicit_source_tuple(self):
+        other = AttrSource(LocalSource("other"), "value")
+
+        def metadata(guard, values):
+            return values[0] is values[1], values[0] is values[2]
+
+        def evaluate(values, expected):
+            return (values[0] is values[1], values[0] is values[2]) == expected
+
+        decorated = register_guard_check_spec(
+            metadata,
+            evaluate,
+            get_extra_sources_fn=lambda guard: (other, guard.originating_source),
+        )(lambda builder, guard: None)
+        handler = decorated.guard_check_spec
+        guard = self._make_guard(GuardBuilder.TYPE_MATCH)
+        extras = handler.get_extra_sources_fn(guard)
+        self.assertEqual(extras, (other, guard.originating_source))
+        self.assertEqual(
+            list(guard.source_dependencies((*extras, other))),
+            [guard.originating_source, other, other.base],
+        )
+        first, second = object(), object()
+        expected = handler.get_metadata_fn(guard, (first, second, first))
+        self.assertEqual(expected, (False, True))
+        self.assertTrue(handler.eval_fn((second, first, second), expected))
+        self.assertFalse(handler.eval_fn((first, first, second), expected))
 
     def test_type_match(self):
         from torch._dynamo.guards import GuardBuilder
