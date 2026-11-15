@@ -1,0 +1,2013 @@
+"""Runs of a basic block compiled by a graph backend.
+
+With ``torch.cfg_compile(fn, backend="inductor")`` the VM hands the tensor work
+of each basic block to AOTAutograd and Inductor. The unit is a *region*: a run
+of consecutive instructions of one block that have no effect a trace cannot
+capture (calls, arithmetic, attribute reads, building containers). A region is
+compiled lazily:
+
+- the first calls run its instructions as they are;
+- then the instructions are run once more on fake tensors under ``make_fx``,
+  with what they call left to the interpreter, which gives one ATen graph of
+  everything the region does, the functions it calls included. Parameters and
+  buffers of the modules the region takes are inputs of that graph;
+- the graph goes to the backend. For Inductor that is
+  ``torch._inductor.compile``: AOTAutograd traces the backward of the graph
+  ahead of time and both directions are compiled, so a region that runs with
+  gradients enabled returns tensors whose ``grad_fn`` is one compiled autograd
+  function.
+
+Regions are tried from the outside in. The region around ``model(x)`` in the
+function the user compiled is tried first; if all of it traces, nothing below
+it is looked at again. If an instruction does not trace (it branches on the
+value of a tensor, calls ``backward``, sets an attribute of a module, touches a
+tensor the region was not given, ...), the region is split around that
+instruction, which then runs in the VM as before, so that the blocks of what it
+calls get their turn. Control flow that depends on data therefore stays control
+flow of the VM, at whatever depth it occurs, with compiled regions in between.
+
+A trace runs the instructions a second time and a compiled region does not run
+them at all, so a region may only hold instructions without an effect on
+Python objects. For the instructions of the region itself that is checked on
+the values they are about to run on, before each one runs (``_problem``): a
+call must be of a module, a function, a method of a tensor or of a module, or
+a builtin that only reads; and unless it is a known pure builtin it must
+involve a tensor or a module, so that ``time.time()`` or ``opt.step()`` stay
+with the VM. For what those instructions call, it is the assumption every
+tracer of PyTorch programs makes, with the usual offenders turned into errors
+while the trace runs (``_traps``).
+
+The inputs of a region are tensors, modules, plain values, functions and
+classes, and tuples, lists, dicts and pytree nodes of those. An instruction
+that takes anything else from before the region, say a cache object, stays
+with the VM: a trace could change such an object without anyone noticing. What
+a region gives back may also be an object it made itself, which every call
+then makes again from the results of the graph (``_Recipes``).
+
+The last region of a block does not end with the block. Its trace goes on into
+the blocks that follow, along the way the values of the trace take through
+them: a loop over a list of layers or a ``range``, a branch on a flag or on
+whether an argument is None, a statement that has no tensor in it. The graph
+is then the tensor work of that whole path, and the region tells the VM where
+in the function to go on (``Region.leap``): at the instruction that ended the
+path, which is one a region cannot hold, a branch on the data of a tensor, or
+the end of the function. What a branch on the way looked at is either an input
+of the region, which every call checks, or an attribute of a module or a
+global that the path read, which is checked along with them (``_Walk.guards``).
+
+A compiled region is valid for the inputs it was traced with. Every call
+compares the tensors (shape, dtype, device, ``requires_grad``, which of them
+are the same object), the values of numbers and strings, the identity of
+functions and classes, the modules (their submodules and ``training`` flags)
+and the grad and autocast modes; a new combination is traced and compiled as
+another variant. What the trace read from anywhere else, such as an attribute
+of a module that is not a tensor or a global that is rebound later, is not
+checked.
+"""
+
+import collections
+import contextlib
+import enum
+import random
+import sys
+import threading
+import time
+import types
+import weakref
+from collections.abc import Callable
+from typing import Any
+
+import torch
+from torch import nn
+from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
+from torch.utils import _pytree as pytree
+
+
+Backend = Callable[[torch.fx.GraphModule, list[torch.Tensor]], Callable[..., Any]]
+
+
+class Untraceable(Exception):
+    """What a region does at this point cannot be captured by a trace."""
+
+
+class _Failed(Exception):
+    # A region could not be compiled. `index` is the instruction to blame, or
+    # None if no single one is.
+    def __init__(self, index: int | None, reason: str) -> None:
+        super().__init__(reason)
+        self.index = index
+        self.reason = reason
+
+
+class _Opaque(Exception):
+    # An input of a region that cannot be an input of a graph.
+    def __init__(self, position: int, reason: str) -> None:
+        super().__init__(reason)
+        self.position = position
+        self.reason = reason
+
+
+class _State(threading.local):
+    # Regions that are running their instructions while it is still open
+    # whether they will be compiled.
+    pending = 0
+    # Ids of the modules whose tensors the trace in progress replaced, and
+    # what they held when it began.
+    traced: set[int] | None = None
+    watch: "_Watch | None" = None
+
+
+_state = _State()
+_runtime: Any = None
+
+# Instructions that can do tensor work. A region must contain one.
+_WORK = frozenset({"call", "call_ex", "binary", "unary", "compare", "get_item"})
+# Instructions that change their first operand.
+_MUTATORS = frozenset(
+    {"list_append", "list_extend", "dict_update", "dict_merge", "map_add"}
+)
+
+_VALUES = frozenset(
+    {
+        int,
+        float,
+        bool,
+        str,
+        bytes,
+        complex,
+        type(None),
+        type(...),
+        range,
+        slice,
+        torch.Size,
+        torch.dtype,
+        torch.device,
+        torch.layout,
+        torch.memory_format,
+    }
+)
+# Objects that are what they are: checked by identity, not looked into.
+_PLAIN = frozenset(
+    {
+        types.FunctionType,
+        types.ModuleType,
+        types.MethodDescriptorType,
+        types.WrapperDescriptorType,
+        type,
+        object,
+    }
+)
+_TENSORS = frozenset({torch.Tensor, nn.Parameter})
+_TENSOR_TYPES = tuple(_TENSORS)
+_HEAPTYPE = 1 << 9
+
+
+_CONTAINERS = frozenset(
+    {
+        list,
+        dict,
+        set,
+        bytearray,
+        collections.OrderedDict,
+        collections.defaultdict,
+        collections.deque,
+    }
+)
+# Methods of containers that leave them as they are.
+_READERS = frozenset(
+    {
+        "get",
+        "keys",
+        "values",
+        "items",
+        "copy",
+        "index",
+        "count",
+        "__getitem__",
+        "__contains__",
+        "__len__",
+        "__iter__",
+        "union",
+        "intersection",
+        "difference",
+        "symmetric_difference",
+        "issubset",
+        "issuperset",
+        "isdisjoint",
+    }
+)
+# Methods of tensors whose effect is not a tensor operation.
+_TENSOR_EFFECTS = frozenset(
+    {
+        "backward",
+        "register_hook",
+        "register_post_accumulate_grad_hook",
+        "retain_grad",
+        "requires_grad_",
+        "share_memory_",
+    }
+)
+# Methods and conversions that give the data of a tensor to Python: a graph
+# has no place for what Python then does with it.
+_TENSOR_READS = frozenset(
+    {"item", "tolist", "numpy", "__bool__", "__int__", "__float__", "__index__"}
+)
+_SCALARS = (bool, int, float, complex)
+_IMPURE_BUILTINS = frozenset(
+    {
+        "print",
+        "input",
+        "setattr",
+        "delattr",
+        "exec",
+        "eval",
+        "open",
+        "next",
+        "breakpoint",
+        "compile",
+        "globals",
+        "locals",
+        "vars",
+        "__import__",
+    }
+)
+# Where functions live that compute a value from their arguments and do
+# nothing else, whatever the arguments are.
+_PURE_MODULES = frozenset({"builtins", "math", "operator"})
+# The parts of torch itself that hold the tensor work of a model. The rest of
+# the library (the optimizers, the autograd front end, the plumbing around
+# operators) is Python that moves tensors about: regions there would be tried
+# one after the other for nothing.
+_TORCH = torch.__file__.rsplit("/", 1)[0] + "/"
+_TORCH_MODEL_CODE = (
+    "nn/",
+    "functional.py",
+    "_tensor.py",
+    "distributions/",
+    "_functorch/",
+    "func/",
+)
+
+
+def _wants_regions(filename: str) -> bool:
+    if not filename.startswith(_TORCH):
+        return True
+    return filename[len(_TORCH) :].startswith(_TORCH_MODEL_CODE)
+
+
+# ----------------------------------------------------------------------
+# Which instructions a region may hold
+# ----------------------------------------------------------------------
+
+
+def _involves_tensor(obj: Any, depth: int = 3) -> bool:
+    if isinstance(obj, (torch.Tensor, nn.Module)):
+        return True
+    if depth == 0:
+        return False
+    if isinstance(obj, (tuple, list)):
+        return any(_involves_tensor(item, depth - 1) for item in obj)
+    if isinstance(obj, dict):
+        return any(_involves_tensor(item, depth - 1) for item in obj.values())
+    receiver = getattr(obj, "__self__", None)
+    return receiver is not None and isinstance(receiver, (torch.Tensor, nn.Module))
+
+
+def _is_outside_tensor(value: Any, depth: int = 2) -> bool:
+    """Whether a value a trace came by is, or holds, a tensor that is not of
+    the trace: one that existed before it and was not handed to it."""
+    if type(value) in _TENSORS:
+        return True
+    if depth and type(value) in (tuple, list):
+        return any(_is_outside_tensor(item, depth - 1) for item in value)
+    if depth and type(value) is dict:
+        return any(_is_outside_tensor(item, depth - 1) for item in value.values())
+    return False
+
+
+def _receiver_problem(receiver: Any, name: str, local: dict[int, Any]) -> str | None:
+    cls = type(receiver)
+    if isinstance(receiver, torch.Tensor):
+        if name in _TENSOR_READS:
+            return "reads the data of a tensor"
+        return (
+            f"Tensor.{name} has an effect a graph does not hold"
+            if name in _TENSOR_EFFECTS
+            else None
+        )
+    if (
+        isinstance(receiver, (nn.Module, type, types.ModuleType, tuple, frozenset))
+        or cls in _VALUES
+    ):
+        return None
+    if cls in _CONTAINERS:
+        if id(receiver) in local or name in _READERS:
+            return None
+        return f"changes a {cls.__name__} from before the region"
+    return f"a method of a {cls.__name__}, which may have effects"
+
+
+def _callee_problem(callee: Any, local: dict[int, Any]) -> str | None:
+    """Why a region cannot hold a call of ``callee``, or None if it can."""
+    cls = type(callee)
+    if cls is types.FunctionType or isinstance(callee, (nn.Module, type)):
+        return None
+    if cls is types.MethodType:
+        return _receiver_problem(callee.__self__, callee.__func__.__name__, local)
+    if cls is types.BuiltinFunctionType:
+        receiver = callee.__self__
+        if receiver is None or type(receiver) is types.ModuleType:
+            impure = (
+                callee.__module__ == "builtins" and callee.__name__ in _IMPURE_BUILTINS
+            )
+            return f"{callee.__name__} has an effect" if impure else None
+        return _receiver_problem(receiver, callee.__name__, local)
+    if cls is types.MethodWrapperType:
+        return _receiver_problem(callee.__self__, callee.__name__, local)
+    if cls is types.MethodDescriptorType or cls is types.WrapperDescriptorType:
+        owner = callee.__objclass__
+        if owner in _CONTAINERS and callee.__name__ not in _READERS:
+            return f"changes a {owner.__name__}"
+        return None
+    if isinstance(callee, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
+        return None
+    return f"calls a {cls.__name__}, which may have effects"
+
+
+def _is_pure(callee: Any) -> bool:
+    if type(callee) is types.BuiltinFunctionType or isinstance(callee, type):
+        return getattr(callee, "__module__", None) in _PURE_MODULES
+    return False
+
+
+def _problem(
+    inst: dict[str, Any], env: dict[int, Any], local: dict[int, Any]
+) -> str | None:
+    """Why a region cannot hold this instruction, on the values it is about
+    to run on, or None if it can."""
+    op = inst["op"]
+    if op == "call" or op == "call_ex":
+        uses = inst["uses"]
+        callee = env.get(uses[0])
+        reason = _callee_problem(callee, local)
+        if reason is not None:
+            return reason
+        if any(callee is scalar for scalar in _SCALARS):
+            if any(isinstance(env.get(v), torch.Tensor) for v in uses[1:]):
+                return "reads the data of a tensor"
+        if not _is_pure(callee) and not any(_involves_tensor(env.get(v)) for v in uses):
+            return "no tensor or module involved"
+    elif op == "to_bool" or (op == "unary" and inst["text"].split()[1] == "not"):
+        if isinstance(env.get(inst["uses"][0]), torch.Tensor):
+            return "branches on the data of a tensor"
+    elif op == "binary" and inst["text"].split()[1].endswith("="):
+        target = env.get(inst["uses"][0])
+        if type(target) in _CONTAINERS and id(target) not in local:
+            return f"changes a {type(target).__name__} from before the region"
+    return None
+
+
+def _note_local(
+    inst: dict[str, Any], env: dict[int, Any], local: dict[int, Any]
+) -> None:
+    # Containers the region itself made: changing those is no effect.
+    op = inst["op"]
+    made = op in ("build_list", "build_map", "build_set")
+    if op == "call":
+        callee = env.get(inst["uses"][0])
+        made = any(callee is maker for maker in (list, dict, set, sorted))
+    if made and inst["dst"] is not None:
+        value = env.get(inst["dst"])
+        local[id(value)] = value
+
+
+# ----------------------------------------------------------------------
+# Modules: what they hold, and noticing when that changes
+# ----------------------------------------------------------------------
+
+# Hooks are code that runs at a call of a module and is not in its forward: a
+# graph of the call would not hold what they do.
+_HOOK_DICTS = (
+    "_forward_hooks",
+    "_forward_pre_hooks",
+    "_backward_hooks",
+    "_backward_pre_hooks",
+)
+_HOOK_REGISTRATIONS = (
+    "register_forward_hook",
+    "register_forward_pre_hook",
+    "register_full_backward_hook",
+    "register_full_backward_pre_hook",
+    "register_backward_hook",
+)
+_GLOBAL_HOOK_DICTS = tuple(
+    getattr(torch.nn.modules.module, "_global" + name) for name in _HOOK_DICTS
+)
+# What an RNN computes from its parameters and keeps: its weights in a list,
+# with weak references to notice when one is replaced. It rebuilds both when
+# that happens, as it does in a trace.
+_DERIVED = (sys.intern("_flat_weights"), sys.intern("_flat_weight_refs"))
+
+
+# The dicts of a module that are changed in place.
+_MODULE_DICTS = ("_parameters", "_buffers", "_modules", *_HOOK_DICTS)
+# The methods that change a module. A trace of a region that was given the
+# module must not run one: the instructions will, when they run for real.
+_MODULE_CHANGES = {
+    getattr(nn.Module, name).__code__: name
+    for name in (
+        "__setattr__",
+        "__delattr__",
+        "register_buffer",
+        "register_parameter",
+        "add_module",
+        *_HOOK_REGISTRATIONS,
+    )
+}
+# The tool of sys.monitoring that sees them start: -1 if there is none to
+# have, None before the first trace.
+_monitor: int | None = None
+
+
+def _module_change_started(code: types.CodeType, offset: int) -> None:
+    traced = _state.traced
+    if traced is None:
+        return
+    arguments = sys._getframe(1).f_locals
+    module = arguments.get("self")
+    if id(module) not in traced:
+        return
+    name = _MODULE_CHANGES[code]
+    if name == "__setattr__" and isinstance(module, nn.RNNBase):
+        if arguments.get("name") in _DERIVED:
+            # Derived from the parameters, which the trace replaced: put
+            # back when the trace is over (see ``_Watch``).
+            return
+    raise Untraceable(f"{name} on a module the region was given")
+
+
+def _watch_module_changes(on: bool) -> None:
+    """Has the methods that change a module report to the trace, or stops it.
+
+    The methods themselves stay what they are: replacing them on nn.Module,
+    even for the time of a trace, takes the caches of attribute lookups from
+    every module class, and what else runs in the process (torch.compile
+    traces Module.__setattr__) would find something it does not know.
+    """
+    global _monitor
+    monitoring: Any = getattr(sys, "monitoring", None)
+    if monitoring is None:
+        return
+    if _monitor is None:
+        _monitor = -1
+        for tool in (4, 3):
+            try:
+                monitoring.use_tool_id(tool, "torch.cfg_compile")
+            except ValueError:
+                continue
+            start = monitoring.events.PY_START
+            monitoring.register_callback(tool, start, _module_change_started)
+            _monitor = tool
+            break
+    if _monitor >= 0:
+        events = monitoring.events.PY_START if on else 0
+        for code in _MODULE_CHANGES:
+            monitoring.set_local_events(_monitor, code, events)
+
+
+class _Watch:
+    """What the modules of a trace hold, to see whether a step of the trace
+    gave one of them something else, and to put everything back.
+
+    A trace runs code on the modules themselves. An attribute it stores, a
+    buffer it registers or a hook it adds would be there twice once the
+    instructions run for real, and is not in the graph. The methods that do
+    such things report to the trace (``_watch_module_changes``); this is
+    for what is done without them, and for what they are allowed to do.
+    """
+
+    def __init__(self, modules: dict[int, nn.Module]) -> None:
+        self.modules = list(modules.values())
+        self.saved: list[tuple[dict[Any, Any], dict[Any, Any]]] = []
+        for module in self.modules:
+            for m in module.modules():
+                attributes = vars(m)
+                self.saved.append((attributes, dict(attributes)))
+                for name in _MODULE_DICTS:
+                    held = attributes.get(name)
+                    if isinstance(held, dict):
+                        self.saved.append((held, dict(held)))
+        self.saved.extend((held, dict(held)) for held in _GLOBAL_HOOK_DICTS)
+        self.before = self.stamp()
+
+    def stamp(self) -> tuple[int, ...]:
+        hooks = [len(held) for held in _GLOBAL_HOOK_DICTS]
+        return (*(_runtime.module_identity(m, _DERIVED) for m in self.modules), *hooks)
+
+    def changed(self) -> bool:
+        return self.stamp() != self.before
+
+    def restore(self) -> None:
+        for held, saved in self.saved:
+            same = len(held) == len(saved) and all(
+                held.get(key, self) is value for key, value in saved.items()
+            )
+            if not same:
+                held.clear()
+                held.update(saved)
+
+
+class _ModuleState:
+    """The tensors of a module and of its submodules, for one stamp."""
+
+    __slots__ = ("accessors", "hooked", "ids", "module", "stamp", "token")
+
+    def __init__(self, module: nn.Module, stamp: int) -> None:
+        self.module = weakref.ref(module)
+        self.refresh(module, stamp)
+
+    def refresh(self, module: nn.Module, stamp: int) -> None:
+        self.stamp = stamp
+        # Where each tensor is kept: the dicts are read again on every call,
+        # so a parameter that was replaced by another tensor is picked up.
+        self.accessors: list[tuple[Any, Any]] = []
+        ids, training = [], []
+        # Whether the module or one inside it has a hook.
+        self.hooked = False
+        for m in module.modules():
+            ids.append(id(m))
+            training.append(m.training)
+            self.hooked = self.hooked or any(getattr(m, name) for name in _HOOK_DICTS)
+            for store in (m._parameters, m._buffers):
+                for name, tensor in store.items():
+                    if tensor is not None:
+                        self.accessors.append((store, name))
+            # Tensors kept as plain attributes, or in a list that is one (as
+            # the weights of an RNN are, next to being its parameters).
+            attributes = vars(m)
+            for name, value in attributes.items():
+                if type(value) in _TENSORS:
+                    self.accessors.append((attributes, name))
+                elif type(value) is list:
+                    for i, item in enumerate(value):
+                        if type(item) in _TENSORS:
+                            self.accessors.append((value, i))
+        self.ids = frozenset(ids)
+        shape = (tuple(ids), tuple(training), tuple(n for _, n in self.accessors))
+        # A small number that stands for the shape in the key of a variant.
+        self.token = _tokens.setdefault(shape, len(_tokens))
+
+
+_tokens: dict[Any, int] = {}
+_module_states: dict[int, _ModuleState] = {}
+
+
+def _forget_module(key: int) -> None:
+    _module_states.pop(key, None)
+
+
+def _module_state(module: nn.Module) -> _ModuleState:
+    # What is known about a module holds while its stamp is what it was: a
+    # parameter, buffer, submodule or hook more or less, a tensor attribute
+    # that was none, another training flag all change it.
+    stamp = _runtime.module_stamp(module, _TENSOR_TYPES)
+    state = _module_states.get(id(module))
+    if state is None or state.module() is not module:
+        state = _module_states[id(module)] = _ModuleState(module, stamp)
+        weakref.finalize(module, _forget_module, id(module))
+    elif state.stamp != stamp:
+        state.refresh(module, stamp)
+    return state
+
+
+# ----------------------------------------------------------------------
+# Inputs of a region
+# ----------------------------------------------------------------------
+
+
+def _describe(obj: Any, flat: list[torch.Tensor], seen: dict[int, int]) -> Any:
+    """What a compiled region depends on in ``obj``, as something hashable.
+
+    The tensors found on the way are appended to ``flat``, each object once.
+    """
+    cls = type(obj)
+    if cls in _TENSORS:
+        position = seen.get(id(obj))
+        if position is None:
+            position = seen[id(obj)] = len(flat)
+            flat.append(obj)
+        return position
+    if cls in _VALUES:
+        return (cls, obj)
+    if cls in _PLAIN:
+        return ("object", id(obj))
+    if cls is tuple or cls is list:
+        return (cls, tuple([_describe(item, flat, seen) for item in obj]))
+    if cls is dict or cls is collections.OrderedDict:
+        for key in obj:
+            if type(key) not in _VALUES:
+                raise _Opaque(0, "a dict with keys that are not plain values")
+        values = tuple([_describe(item, flat, seen) for item in obj.values()])
+        return (cls, tuple(obj), values)
+    if cls is set or cls is frozenset:
+        if all(type(item) in _VALUES for item in obj):
+            return (cls, frozenset(obj))
+        raise _Opaque(0, "a set of things that are not plain values")
+    if cls is types.CellType:
+        # A variable that a nested function shares: what it holds.
+        try:
+            return ("cell", _describe(obj.cell_contents, flat, seen))
+        except ValueError:
+            raise _Opaque(0, "a variable that has no value yet") from None
+    if isinstance(obj, nn.Module):
+        state = _module_state(obj)
+        if state.hooked or any(_GLOBAL_HOOK_DICTS):
+            raise _Opaque(
+                0, "a module with hooks, which run code a graph does not hold"
+            )
+        try:
+            for store, name in state.accessors:
+                tensor = store[name]
+                if id(tensor) not in seen:
+                    if type(tensor) not in _TENSORS:
+                        raise _Opaque(0, "a module that holds a tensor subclass")
+                    seen[id(tensor)] = len(flat)
+                    flat.append(tensor)
+        except LookupError:
+            # Changed since the stamp was taken.
+            state.refresh(obj, _runtime.module_stamp(obj, _TENSOR_TYPES))
+            return _describe(obj, flat, seen)
+        return ("module", id(obj), state.token)
+    if cls is types.MethodType:
+        return ("method", id(obj.__func__), _describe(obj.__self__, flat, seen))
+    if cls is types.BuiltinFunctionType:
+        receiver = obj.__self__
+        if receiver is None or type(receiver) is types.ModuleType:
+            return ("object", id(obj))
+        if type(receiver) in _CONTAINERS:
+            raise _Opaque(
+                0, f"a method of a {type(receiver).__name__} from before the region"
+            )
+        return ("method", obj.__name__, _describe(receiver, flat, seen))
+    if isinstance(obj, tuple):
+        # Named tuples and the like.
+        return (cls, tuple([_describe(item, flat, seen) for item in obj]))
+    node = pytree.SUPPORTED_NODES.get(cls)
+    if node is not None:
+        children, context = node.flatten_fn(obj)
+        return (
+            cls,
+            repr(context),
+            tuple([_describe(item, flat, seen) for item in children]),
+        )
+    if isinstance(
+        obj, (type, enum.Enum, torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+    ):
+        return ("object", id(obj))
+    # Anything else may have state that a trace would change.
+    raise _Opaque(0, f"a {cls.__name__} from before the region")
+
+
+def _acceptable(obj: Any) -> str | None:
+    """Why ``obj`` cannot be an input of a region, or None if it can."""
+    try:
+        _describe(obj, [], {})
+    except _Opaque as e:
+        return e.reason
+    return None
+
+
+def _rebuild(obj: Any, fakes: dict[int, torch.Tensor], copies: list[Any]) -> Any:
+    """``obj`` with its tensors replaced by the ones the trace runs on.
+
+    Containers are built anew, so that a trace that changes one changes a
+    copy; ``copies`` collects them with what they started as.
+    """
+    cls = type(obj)
+    if cls in _TENSORS:
+        return fakes[id(obj)]
+    if cls is tuple:
+        return tuple([_rebuild(item, fakes, copies) for item in obj])
+    if cls is list:
+        copy = [_rebuild(item, fakes, copies) for item in obj]
+        copies.append((copy, list(copy)))
+        return copy
+    if cls is dict or cls is collections.OrderedDict:
+        copy = cls((k, _rebuild(v, fakes, copies)) for k, v in obj.items())
+        copies.append((copy, dict(copy)))
+        return copy
+    if cls is set:
+        copy = set(obj)
+        copies.append((copy, set(copy)))
+        return copy
+    if cls is types.CellType:
+        contents = _rebuild(obj.cell_contents, fakes, copies)
+        copy = types.CellType(contents)
+        copies.append((copy, contents))
+        return copy
+    if cls is types.MethodType:
+        receiver = _rebuild(obj.__self__, fakes, copies)
+        return (
+            obj
+            if receiver is obj.__self__
+            else types.MethodType(obj.__func__, receiver)
+        )
+    if cls is types.BuiltinFunctionType:
+        receiver = _rebuild(obj.__self__, fakes, copies)
+        return obj if receiver is obj.__self__ else getattr(receiver, obj.__name__)
+    if isinstance(obj, tuple) and not isinstance(obj, torch.Size):
+        items = [_rebuild(item, fakes, copies) for item in obj]
+        return cls(*items) if hasattr(cls, "_fields") else cls(items)
+    node = pytree.SUPPORTED_NODES.get(cls)
+    if node is not None and not isinstance(obj, nn.Module):
+        children, context = node.flatten_fn(obj)
+        children = [_rebuild(item, fakes, copies) for item in children]
+        copy = node.unflatten_fn(children, context)
+        copies.append((copy, children))
+        return copy
+    return obj
+
+
+def _unchanged(copy: Any, before: Any) -> bool:
+    """Whether a copy a trace ran on still holds what it started with."""
+    if isinstance(copy, set):
+        return copy == before
+    if isinstance(copy, types.CellType):
+        return copy.cell_contents is before
+    if isinstance(copy, list):
+        now = copy
+    elif isinstance(copy, dict) and isinstance(before, dict):
+        if list(copy) != list(before):
+            return False
+        now, before = list(copy.values()), list(before.values())
+    else:
+        now = pytree.SUPPORTED_NODES[type(copy)].flatten_fn(copy)[0]
+    return len(now) == len(before) and all(a is b for a, b in zip(now, before))
+
+
+def _identities(obj: Any, modules: dict[int, nn.Module], others: list[Any]) -> None:
+    """The modules in an input of a region, and the other objects that
+    ``_describe`` names by their id."""
+    if isinstance(obj, nn.Module):
+        modules[id(obj)] = obj
+    elif isinstance(obj, (tuple, list)):
+        for item in obj:
+            _identities(item, modules, others)
+    elif isinstance(obj, dict):
+        for item in obj.values():
+            _identities(item, modules, others)
+    elif type(obj) in (types.MethodType, types.BuiltinFunctionType):
+        others.append(obj)
+        _identities(obj.__self__, modules, others)
+    elif type(obj) is types.CellType:
+        _identities(obj.cell_contents, modules, others)
+    elif type(obj) in pytree.SUPPORTED_NODES:
+        for item in pytree.SUPPORTED_NODES[type(obj)].flatten_fn(obj)[0]:
+            _identities(item, modules, others)
+    elif not isinstance(obj, torch.Tensor) and type(obj) not in _VALUES:
+        others.append(obj)
+
+
+def _same_but_values(a: Any, b: Any) -> bool:
+    """Whether two keys of variants differ in numbers and strings only."""
+    if type(a) is not tuple or type(b) is not tuple:
+        return a == b
+    if len(a) != len(b):
+        return False
+    if len(a) == 2 and a[0] is b[0] and a[0] in (int, float, str, bool):
+        return True
+    return all(_same_but_values(x, y) for x, y in zip(a, b))
+
+
+def _modes() -> tuple[Any, ...]:
+    return (
+        torch.is_grad_enabled(),
+        torch.is_inference_mode_enabled(),
+        torch.is_autocast_enabled("cuda"),
+        torch.is_autocast_enabled("cpu"),
+        torch.get_default_dtype(),
+    )
+
+
+# ----------------------------------------------------------------------
+# Tracing
+# ----------------------------------------------------------------------
+
+
+_GRAD_READERS = ("torch/_subclasses/meta_utils.py", "torch/_tensor.py")
+
+
+def _refuse(what: str) -> Callable[..., Any]:
+    def refused(*args: Any, **kwargs: Any) -> Any:
+        raise Untraceable(what)
+
+    return refused
+
+
+class _NoEngine:
+    # Stands in for the autograd engine while a trace runs.
+    def __getattr__(self, name: str) -> Any:
+        raise Untraceable("runs the autograd engine")
+
+
+def _set_grad_enabled_checked(mode: bool) -> None:
+    # The graph does not say where gradients were switched off, so the
+    # backward that is derived from it would run through such a stretch.
+    if bool(mode) != torch.is_grad_enabled():
+        raise Untraceable("changes whether gradients are recorded")
+
+
+@contextlib.contextmanager
+def _traps(modules: dict[int, nn.Module]) -> Any:
+    """Turns what a trace would silently get wrong into an error."""
+    python_random = random.getstate()
+    numpy = sys.modules.get("numpy")
+    numpy_random = numpy.random.get_state() if numpy is not None else None
+    torch_random = torch.get_rng_state()
+    reachable: set[int] = set()
+    for module in modules.values():
+        reachable |= _module_state(module).ids
+    # Nothing of torch.Tensor or nn.Module is replaced: see
+    # ``_watch_module_changes``.
+    patches = [
+        (torch.autograd, "backward", _refuse("calls torch.autograd.backward")),
+        (torch.autograd, "grad", _refuse("calls torch.autograd.grad")),
+        (torch.autograd.Variable, "_execution_engine", _NoEngine()),
+        (torch._C, "_set_grad_enabled", _set_grad_enabled_checked),
+    ]
+    saved = [(owner, name, owner.__dict__.get(name)) for owner, name, _ in patches]
+    watch: _Watch | None = None
+    refuse_grad = _refuse("reads or sets the .grad of a tensor")
+    real_grad = torch._C.TensorBase.grad.__get__  # type: ignore[attr-defined]
+
+    def read_grad(tensor: torch.Tensor) -> Any:
+        # Making a fake tensor of a real one looks at its grad; that is the
+        # machinery of the trace, not the program.
+        if sys._getframe(1).f_code.co_filename.endswith(_GRAD_READERS):
+            return real_grad(tensor)
+        return refuse_grad()
+
+    try:
+        for owner, name, replacement in patches:
+            setattr(owner, name, replacement)
+        # Shadows the attribute of torch.Tensor for the tensors of the trace.
+        FakeTensor.grad = property(read_grad, refuse_grad, refuse_grad)  # type: ignore[assignment,method-assign]
+        _state.traced = reachable
+        _state.watch = watch = _Watch(modules)
+        _watch_module_changes(True)
+        # Library code that asks torch.compiler.is_compiling() takes the path
+        # it takes under torch.compile.
+        with torch.compiler._compile_session_context():
+            yield
+    finally:
+        _state.traced = None
+        _state.watch = None
+        _watch_module_changes(False)
+        if watch is not None:
+            # Also what a module derives from its parameters and keeps, as an
+            # RNN does with its weights.
+            watch.restore()
+        if "grad" in vars(FakeTensor):
+            del FakeTensor.grad
+        for owner, name, original in saved:
+            if original is None:
+                delattr(owner, name)
+            else:
+                setattr(owner, name, original)
+    # A trace is an extra run: the generators are put back where they were,
+    # and a region that drew from one that a graph does not know is no region.
+    torch.set_rng_state(torch_random)
+    if random.getstate() != python_random:
+        random.setstate(python_random)
+        raise Untraceable("draws from Python's random module")
+    if numpy_random is not None:
+        now = sys.modules["numpy"].random.get_state()
+        if numpy_random[2] != now[2] or (numpy_random[1] != now[1]).any():
+            sys.modules["numpy"].random.set_state(numpy_random)
+            raise Untraceable("draws from numpy's global random state")
+
+
+@contextlib.contextmanager
+def _swapped(modules: dict[int, nn.Module], fakes: dict[int, torch.Tensor]) -> Any:
+    """Puts the tensors of the trace in place of the modules' own."""
+    originals = []
+    try:
+        for module in modules.values():
+            for store, name in _module_state(module).accessors:
+                tensor = store[name]
+                if id(tensor) in fakes:
+                    originals.append((store, name, tensor))
+                    store[name] = fakes[id(tensor)]
+        yield
+    finally:
+        for store, name, tensor in originals:
+            store[name] = tensor
+
+
+def _static_output(leaf: Any, reachable: set[int]) -> bool:
+    """Whether a compiled region may return ``leaf`` itself on every call."""
+    cls = type(leaf)
+    if cls is types.BuiltinFunctionType or cls is types.MethodType:
+        # A method is as good as what it is bound to: not one of a tensor of
+        # the trace, or of the copy of a list the trace ran on.
+        receiver = leaf.__self__
+        if receiver is None or type(receiver) is types.ModuleType:
+            return True
+        return type(receiver) not in _CONTAINERS and _static_output(receiver, reachable)
+    if cls in _VALUES or cls in _PLAIN or cls in _TENSORS:
+        return True
+    if isinstance(leaf, nn.Module):
+        return id(leaf) in reachable
+    return isinstance(leaf, (type, enum.Enum))
+
+
+def _is_plain_instance(obj: Any) -> bool:
+    """Whether ``obj`` is its class and its ``__dict__`` and nothing more, as
+    ``copy.copy`` assumes of an object that does not say otherwise."""
+    cls = type(obj)
+    if isinstance(obj, (nn.Module, BaseException, type)) or not hasattr(
+        obj, "__dict__"
+    ):
+        return False
+    for base in cls.__mro__[:-1]:
+        if not base.__flags__ & _HEAPTYPE or vars(base).get("__slots__"):
+            return False
+    return (
+        cls.__reduce_ex__ is object.__reduce_ex__
+        and cls.__reduce__ is object.__reduce__
+        and cls.__getstate__ is object.__getstate__
+        and not hasattr(cls, "__setstate__")
+    )
+
+
+class _Recipes:
+    """How to make the outputs of a trace again from the results of its graph.
+
+    A recipe is a list ``[kind, dynamic, ...]``: ``result`` (a tensor the
+    graph returns), ``same`` (the object itself, on every call), ``sequence``,
+    ``dict``, ``node`` (a pytree node) or ``instance`` (an object the region
+    made: a new one of its class with the same attributes). ``dynamic`` says
+    whether a result is somewhere inside.
+    """
+
+    def __init__(self, reachable: set[int], given: set[int]) -> None:
+        self.reachable = reachable
+        # Copies of the containers the region was given: not its to return.
+        self.given = given
+        self.results: list[torch.Tensor] = []
+        self.memo: dict[int, list[Any]] = {}
+
+    def of(self, obj: Any, depth: int = 0) -> list[Any]:
+        known = self.memo.get(id(obj))
+        if known is not None:
+            return known
+        if id(obj) in self.given:
+            raise Untraceable("gives back a list or dict it was given")
+        if depth > 40:
+            raise Untraceable("gives an object that is nested too deeply")
+        cls = type(obj)
+        children: list[Any] | None = None
+        recipe: list[Any]
+        if is_fake_tensor(obj):
+            recipe = ["result", True, len(self.results)]
+            self.results.append(obj)
+        elif _static_output(obj, self.reachable):
+            recipe = ["same", False, obj]
+        elif cls in (tuple, list, set, frozenset):
+            recipe = ["sequence", False, cls]
+            children = list(obj)
+        elif cls is dict or cls is collections.OrderedDict:
+            recipe = ["dict", False, cls, list(obj)]
+            children = list(obj.values())
+        elif cls in pytree.SUPPORTED_NODES:
+            children, context = pytree.SUPPORTED_NODES[cls].flatten_fn(obj)
+            recipe = ["node", False, pytree.SUPPORTED_NODES[cls].unflatten_fn, context]
+        elif isinstance(obj, tuple) and hasattr(cls, "_fields"):
+            recipe = ["sequence", False, cls._make]
+            children = list(obj)
+        elif _is_plain_instance(obj):
+            recipe = ["instance", False, cls, list(vars(obj))]
+            children = list(vars(obj).values())
+        else:
+            raise Untraceable(f"gives a {cls.__name__}, which a graph cannot return")
+        # Before its parts, so that an object that refers to itself ends.
+        self.memo[id(obj)] = recipe
+        if children is not None:
+            parts = [self.of(child, depth + 1) for child in children]
+            recipe.append(parts)
+            recipe[1] = any(part[1] for part in parts)
+            if recipe[0] == "instance" and not recipe[1]:
+                # Nothing of the graph in it: an object from before.
+                recipe[:] = ["same", False, obj]
+        return recipe
+
+
+def _build(recipe: list[Any], results: Any, built: dict[int, Any]) -> Any:
+    kind = recipe[0]
+    if kind == "result":
+        return results[recipe[2]]
+    if kind == "same":
+        return recipe[2]
+    value = built.get(id(recipe))
+    if value is not None:
+        return value
+    if kind == "instance":
+        value = built[id(recipe)] = object.__new__(recipe[2])
+        for name, part in zip(recipe[3], recipe[4]):
+            value.__dict__[name] = _build(part, results, built)
+        return value
+    parts = [_build(part, results, built) for part in recipe[-1]]
+    if kind == "sequence":
+        value = recipe[2](parts)
+    elif kind == "dict":
+        value = recipe[2](zip(recipe[3], parts))
+    else:
+        value = recipe[2](parts, recipe[3])
+    built[id(recipe)] = value
+    return value
+
+
+class _Variant:
+    """A region compiled for one combination of inputs."""
+
+    __slots__ = (
+        "compiled",
+        "direct",
+        "guards",
+        "keep",
+        "leap",
+        "ops",
+        "proven",
+        "recipes",
+    )
+
+    def __init__(
+        self, compiled: Callable[..., Any], recipes: list[Any], ops: int, keep: Any
+    ) -> None:
+        self.compiled = compiled
+        # One per output of the region.
+        self.recipes = recipes
+        # The outputs are exactly the results of the graph, in order.
+        self.direct = all(r[0] == "result" and r[2] == i for i, r in enumerate(recipes))
+        self.ops = ops
+        self.keep = keep
+        # Whether it has run once without an error.
+        self.proven = False
+        # For a region that goes on into other blocks: where the VM goes on
+        # (block, instruction), the values the recipes are of, and the ones
+        # that are unset there; and what the path read that is no input.
+        self.leap: tuple[int, int, list[int], list[int]] | None = None
+        self.guards: list[tuple[str, Any, str, Any]] = []
+
+    def run(self, flat: list[torch.Tensor]) -> Any:
+        results = self.compiled(*flat)
+        if self.direct:
+            return tuple(results)
+        built: dict[int, Any] = {}
+        made = [_build(recipe, results, built) for recipe in self.recipes]
+        if self.leap is None:
+            return tuple(made)
+        block, index, values, unset = self.leap
+        return (block, index, dict(zip(values, made)), unset)
+
+    def holds(self) -> bool:
+        """Whether what the path read is still what it was."""
+        for kind, owner, name, value in self.guards:
+            now = (
+                getattr(owner, name, self) if kind == "attr" else owner.get(name, self)
+            )
+            if now is not value and (type(now) is not type(value) or now != value):
+                return False
+        return True
+
+
+class _Region:
+    """A run of instructions of a block; what the VM calls in their place."""
+
+    def __init__(self, plan: "_Plan", lo: int, hi: int) -> None:
+        self.plan = plan
+        self.lo = lo
+        self.hi = hi
+        self.inputs, self.outputs = plan.replay.io(lo, hi)
+        # None: these inputs run the instructions as they are.
+        self.variants: dict[Any, _Variant | None] = {}
+        self.hot = False
+        # Whether the instructions were checked on real values.
+        self.surveyed = False
+        self.calls = 0
+        # Graphs given to the backend, and the time traces and backend took.
+        self.compiles = 0
+        self.seconds = 0.0
+
+    def __call__(self, *args: Any) -> Any:
+        if not self.hot:
+            return self.cold(args)
+        flat: list[torch.Tensor] = []
+        try:
+            key = self.key(args, flat)
+        except _Opaque:
+            return self.decline(args)
+        variant = self.variants.get(key, self)
+        if variant is self or (variant is not None and not variant.holds()):  # type: ignore[union-attr]
+            variant = self.specialize(key, args, flat)
+        if variant is None:
+            return self.decline(args)
+        if variant.proven:  # type: ignore[union-attr]
+            return variant.run(flat)  # type: ignore[union-attr]
+        return self.first_run(key, variant, args, flat)  # type: ignore[arg-type]
+
+    def install(self, region: Any) -> bool:
+        """Puts the region into the block a pass is working on."""
+        return region.fuse(self.lo, self.hi, self)
+
+    def bind(self, args: tuple[Any, ...]) -> dict[int, Any]:
+        """The values the instructions start from."""
+        return dict(zip(self.inputs, args))
+
+    def give(self, env: dict[int, Any]) -> Any:
+        """What the VM gets after the instructions ran on ``env``."""
+        return tuple([env[value] for value in self.outputs])
+
+    def decline(self, args: tuple[Any, ...]) -> Any:
+        """For inputs there is no graph for: the instructions as they are."""
+        return self.replay(args)
+
+    def first_run(
+        self,
+        key: Any,
+        variant: "_Variant",
+        args: tuple[Any, ...],
+        flat: list[torch.Tensor],
+    ) -> tuple[Any, ...]:
+        """Runs a variant that has not run yet. What a backend made can fail
+        where the instructions would not (or would with another error): then
+        they run instead, this time and from now on."""
+        generator = torch.get_rng_state()
+        try:
+            outputs = variant.run(flat)
+        except Exception as e:
+            torch.set_rng_state(generator)
+            self.variants[key] = None
+            if not any(self.variants.values()):
+                self.hot = False
+                reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
+                self.plan.split(self, None, f"the compiled graph failed: {reason}")
+            return self.decline(args)
+        variant.proven = True
+        return outputs
+
+    def key(self, args: tuple[Any, ...], flat: list[torch.Tensor]) -> Any:
+        seen: dict[int, int] = {}
+        parts = []
+        for position, arg in enumerate(args):
+            try:
+                parts.append(_describe(arg, flat, seen))
+            except _Opaque as e:
+                raise _Opaque(position, e.reason) from None
+        tensors = [(t.shape, t.dtype, t.device, t.requires_grad) for t in flat]
+        return (tuple(parts), tuple(tensors), _modes())
+
+    def replay(self, args: tuple[Any, ...]) -> Any:
+        env = self.bind(args)
+        self.plan.replay.run(self.lo, self.hi, env)
+        return self.give(env)
+
+    def cold(self, args: tuple[Any, ...]) -> Any:
+        # An enclosing region or block that has not made up its mind may
+        # still take all of this one in.
+        ready = (
+            self.calls >= self.plan.options.warmup
+            and _state.pending == 0
+            and _state.traced is None
+            and _runtime.profiling_depth() == 0
+        )
+        if ready and self.surveyed:
+            self.decide(args)
+            if self.hot:
+                return self(*args)
+        self.calls += 1
+        _state.pending += 1
+        try:
+            if not ready or self.surveyed:
+                return self.replay(args)
+            outputs = self.survey(args)
+            if self.surveyed and self in self.plan.regions:
+                # Nothing to take out: compiled now, for the next call.
+                self.decide(args)
+            return outputs
+        finally:
+            _state.pending -= 1
+
+    def survey(self, args: tuple[Any, ...]) -> Any:
+        """Runs the instructions one by one and takes those out of the plan
+        that a region cannot hold, on the values of this call."""
+        plan = self.plan
+        env = self.bind(args)
+        local: dict[int, Any] = {}
+        bad: dict[int, str] = {}
+        tensors = 0
+        refused = {v: _acceptable(arg) for v, arg in zip(self.inputs, args)}
+        for i in range(self.lo, self.hi):
+            inst = plan.insts[i]
+            reason = _problem(inst, env, local)
+            if reason is None and inst["op"] != "hold":
+                reason = next(
+                    (refused[v] for v in inst["uses"] if refused.get(v)), None
+                )
+                reason = reason and "takes " + reason
+            if reason is not None:
+                bad[i] = reason
+            elif inst["op"] in _WORK:
+                tensors += any(_involves_tensor(env.get(v)) for v in inst["uses"])
+            plan.replay.run(i, i + 1, env)
+            _note_local(inst, env, local)
+        outputs = self.give(env)
+        if bad:
+            plan.split(self, bad)
+        elif tensors == 0:
+            plan.split(self, None, "no tensor or module involved")
+        else:
+            self.surveyed = True
+        return outputs
+
+    def decide(self, args: tuple[Any, ...]) -> None:
+        """Compiles the region for the first time, or takes it out of the plan."""
+        flat: list[torch.Tensor] = []
+        try:
+            key = self.key(args, flat)
+        except _Opaque as e:
+            value = self.inputs[e.position]
+            users = [
+                i
+                for i in range(self.lo, self.hi)
+                if value in self.plan.insts[i]["uses"]
+                and self.plan.insts[i]["op"] != "hold"
+            ]
+            reason = "takes " + e.reason
+            self.plan.split(
+                self, dict.fromkeys(users, reason) if users else None, reason
+            )
+            return
+        try:
+            self.variants[key] = self.compile(key, args, flat)
+            self.hot = True
+        except _Failed as e:
+            self.plan.split(
+                self, None if e.index is None else {e.index: e.reason}, e.reason
+            )
+
+    def specialize(
+        self, key: Any, args: tuple[Any, ...], flat: list[torch.Tensor]
+    ) -> _Variant | None:
+        """Another variant of a region that has one, for inputs not seen yet."""
+        if len(self.variants) >= 3 and all(
+            _same_but_values(key, k) for k in self.variants
+        ):
+            # A loop counter, say: there is no end to these, and every one
+            # would be a graph of its own.
+            self.hot = False
+            self.plan.split(self, None, "its inputs take ever new values")
+            return None
+        if (
+            key not in self.variants
+            and len(self.variants) >= self.plan.options.max_variants
+        ):
+            return None
+        try:
+            variant: _Variant | None = self.compile(key, args, flat)
+        except _Failed:
+            # These inputs do what the first ones did not: they run the
+            # instructions as they are.
+            variant = None
+        self.variants[key] = variant
+        return variant
+
+    def compile(
+        self, key: Any, args: tuple[Any, ...], flat: list[torch.Tensor]
+    ) -> _Variant:
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        start = time.perf_counter()
+        modules: dict[int, nn.Module] = {}
+        # What the key names by id is kept alive, so the ids stay theirs. Not
+        # the tensors: a variant must not hold on to the batch it was made on.
+        keep: list[Any] = []
+        for arg in args:
+            _identities(arg, modules, keep)
+        keep.extend(modules.values())
+        reachable: set[int] = set()
+        for module in modules.values():
+            reachable |= _module_state(module).ids
+        found: dict[str, Any] = {}
+
+        def region(*fake: torch.Tensor) -> tuple[torch.Tensor, ...]:
+            fakes = {id(real): f for real, f in zip(flat, fake)}
+            copies: list[Any] = []
+            env = dict(zip(self.inputs, [_rebuild(arg, fakes, copies) for arg in args]))
+            grads = [f.requires_grad for f in fake]
+            local: dict[int, Any] = {}
+            insts, replay = self.plan.insts, self.plan.replay
+            with _swapped(modules, fakes), _traps(modules):
+                for i in range(self.lo, self.hi):
+                    reason = _problem(insts[i], env, local)
+                    if reason is not None:
+                        raise _Failed(i, reason)
+                    replay.run(i, i + 1, env, True)
+                    if _state.watch is not None and _state.watch.changed():
+                        raise _Failed(i, "changes a module the region was given")
+                    _note_local(insts[i], env, local)
+                    if _is_outside_tensor(env.get(insts[i]["dst"])):
+                        # Read from a global, a closure or a plain object. Left
+                        # to the VM, it is an input of the next region.
+                        raise _Failed(i, "gives a tensor from outside the region")
+            if not all(_unchanged(copy, before) for copy, before in copies):
+                raise _Failed(None, "changes a list or dict it was given")
+            if grads != [f.requires_grad for f in fake]:
+                raise _Failed(None, "changes requires_grad of a tensor it was given")
+            recipes = _Recipes(reachable, {id(copy) for copy, _ in copies})
+            found["recipes"] = []
+            for value in self.outputs:
+                try:
+                    found["recipes"].append(recipes.of(env[value]))
+                except Untraceable as e:
+                    raise _Failed(self.definition(value), str(e)) from None
+            return tuple(recipes.results)
+
+        try:
+            graph = make_fx(region, tracing_mode="fake")(*flat)
+        except _Failed:
+            raise
+        except Exception as e:
+            reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
+            raise _Failed(getattr(e, "cfg_index", None), reason) from None
+        ops = self.ops_of(graph)
+        variant = _Variant(self.finish(graph, flat, key), found["recipes"], ops, keep)
+        self.seconds += time.perf_counter() - start
+        _runtime.plan_changed()
+        return variant
+
+    @staticmethod
+    def ops_of(graph: torch.fx.GraphModule) -> int:
+        return sum(1 for node in graph.graph.nodes if node.op == "call_function")
+
+    def finish(
+        self, graph: torch.fx.GraphModule, flat: list[torch.Tensor], key: Any
+    ) -> Any:
+        """Hands a traced graph to the backend, unless it has seen it."""
+        options = self.plan.options
+        ops = self.ops_of(graph)
+        if ops < options.min_ops:
+            raise _Failed(None, f"{ops} tensor operations, not worth a graph")
+        _views_to_reshapes(graph)
+        # The parameters are inputs, so the layers of a model that are built
+        # alike give the same graph: it is compiled once. A graph that holds a
+        # tensor of its own is not looked up, the code does not say which.
+        same = None
+        if not any(node.op == "get_attr" for node in graph.graph.nodes):
+            same = (graph.code, key[1], key[2])
+        compiled = options.compiled.get(same)
+        if compiled is None:
+            try:
+                compiled = options.backend(graph, list(flat))
+            except Exception as e:
+                reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
+                raise _Failed(None, f"the backend failed: {reason}") from None
+            if same is not None:
+                options.compiled[same] = compiled
+            self.compiles += 1
+        return compiled
+
+    def definition(self, value: int) -> int | None:
+        """The instruction of the region that defines a value."""
+        for i in range(self.lo, self.hi):
+            if self.plan.insts[i]["dst"] == value:
+                return i
+        return None
+
+    def __repr__(self) -> str:
+        return f"{self.plan.name}[{self.lo}:{self.hi}]"
+
+
+class _Retry(Exception):
+    # The trace of a path has to be made again: over fewer blocks, or with
+    # other inputs.
+    def __init__(
+        self, limit: int | None = None, positions: list[int] | None = None
+    ) -> None:
+        super().__init__()
+        self.limit = limit
+        self.positions = positions
+
+
+# How many instructions a path may run: a loop over plain values has no end
+# that a trace would notice.
+_PATH_STEPS = 20000
+
+
+class _Walk:
+    """Takes a region on from its block: runs the instructions of the path
+    the values of a trace take through the function, one by one, until one
+    comes that a region cannot hold or that the trace cannot decide."""
+
+    def __init__(
+        self, region: "_Path", env: dict[int, Any], refused: set[int], limit: int | None
+    ) -> None:
+        self.region = region
+        self.plan = region.plan
+        self.env = env
+        # Values from before the region that cannot be inputs of a graph.
+        self.refused = refused
+        # How many blocks to go on into: None for as far as it gets, -1 to
+        # stop where the region ends in its own block.
+        self.limit = limit
+        self.block = self.plan.block
+        self.index = region.lo
+        self.entered = 0
+        self.steps = 0
+        self.given = set(env) | refused
+        # Of the values from before: the ones the path looked at.
+        self.used: set[int] = set()
+        # What the path defined, and how many blocks in it was (None: among
+        # the instructions of the region itself).
+        self.born: dict[int, int | None] = {}
+        self.local: dict[int, Any] = {}
+        self.guards: list[tuple[str, Any, str, Any]] = []
+
+    def read(self, value: int) -> None:
+        if value in self.given and value not in self.born:
+            self.used.add(value)
+
+    def run(self) -> tuple[int, int]:
+        """Returns where the path ends: a block and an instruction of it."""
+        region, env = self.region, self.env
+        while True:
+            insts = self.plan.insts_of(self.block)
+            while self.index < len(insts):
+                inst = insts[self.index]
+                inside = self.entered == 0 and self.index < region.hi
+                if inside:
+                    reason = _problem(inst, env, self.local)
+                    if reason is not None:
+                        raise _Failed(self.index, reason)
+                elif (self.limit == -1 and self.entered == 0) or self.stops(inst):
+                    return self.block, self.index
+                before = dict(env)
+                receiver = (
+                    env.get(inst["uses"][0]) if inst["op"] == "load_attr" else None
+                )
+                try:
+                    self.plan.replay.step(
+                        self.block, self.index, self.index + 1, env, True
+                    )
+                    outside = _is_outside_tensor(env.get(inst["dst"]))
+                except Exception:
+                    if inside:
+                        raise
+                    outside = True
+                watch = _state.watch
+                if watch is not None and watch.changed():
+                    if inside:
+                        raise _Failed(
+                            self.index, "changes a module the region was given"
+                        )
+                    watch.restore()
+                    outside = True
+                if outside:
+                    if inside:
+                        raise _Failed(
+                            self.index, "gives a tensor from outside the region"
+                        )
+                    # The VM runs this one: the path ends before it.
+                    env.clear()
+                    env.update(before)
+                    return self.block, self.index
+                if inst["op"] != "hold":
+                    for value in inst["uses"]:
+                        self.read(value)
+                if inst["dst"] is not None:
+                    self.born[inst["dst"]] = None if inside else self.entered
+                self.note(inst, receiver)
+                self.index += 1
+                self.steps += 1
+            if not self.leave():
+                return self.block, self.index
+
+    def stops(self, inst: dict[str, Any]) -> bool:
+        """Whether the path ends in front of an instruction."""
+        op, uses, env = inst["op"], inst["uses"], self.env
+        if not inst["steppable"] or op in ("frame_enter", "frame_leave"):
+            return True
+        if self.steps >= _PATH_STEPS:
+            return True
+        if op == "hold":
+            return False
+        if any(value in self.refused or value not in env for value in uses):
+            return True
+        if op == "iter_next" or op == "set_item" or op in _MUTATORS:
+            # Only on what the path made itself.
+            return id(env[uses[0]]) not in self.local
+        return _problem(inst, env, self.local) is not None
+
+    def note(self, inst: dict[str, Any], receiver: Any) -> None:
+        op, value = inst["op"], self.env.get(inst["dst"])
+        _note_local(inst, self.env, self.local)
+        if op == "make_cell" or (
+            op == "get_iter" and value is not self.env.get(inst["uses"][0])
+        ):
+            self.local[id(value)] = value
+        elif type(value) in _VALUES:
+            # A flag of a module or a global: no input of the region, so it
+            # is checked on its own.
+            if op == "load_attr" and isinstance(
+                receiver, (nn.Module, types.ModuleType)
+            ):
+                self.guards.append(
+                    ("attr", receiver, inst["text"].split("'")[1], value)
+                )
+            elif op == "load_global":
+                name = inst["text"].split("'")[1]
+                if name in self.plan.globals:
+                    self.guards.append(("global", self.plan.globals, name, value))
+
+    def leave(self) -> bool:
+        """Goes on into the block the values choose; False if they cannot."""
+        kind, value, targets = self.plan.terminator(self.block)
+        env = self.env
+        if kind == "jump":
+            successor = targets[0]
+        elif kind == "br":
+            if type(env.get(value, self)) not in _VALUES:
+                return False
+            successor = targets[0] if env[value] else targets[1]
+        elif kind == "br_null":
+            successor = targets[0] if value not in env else targets[1]
+        else:
+            return False
+        if self.limit is not None and self.entered >= self.limit:
+            return False
+        if self.steps >= _PATH_STEPS:
+            return False
+        if value is not None:
+            self.read(value)
+        moves, kills = self.plan.replay.edge(self.block, successor)
+        self.entered += 1
+        # The phis of the block: all at once.
+        arriving = [
+            (to, env.get(source, self) if source is not None else self)
+            for to, source in moves
+        ]
+        for _, source in moves:
+            if source is not None:
+                self.read(source)
+        for to, arrived in arriving:
+            self.born[to] = self.entered
+            if arrived is self:
+                env.pop(to, None)
+            else:
+                env[to] = arrived
+        for dead in kills:
+            env.pop(dead, None)
+        self.block, self.index = successor, 0
+        return True
+
+
+class _Path(_Region):
+    """The last region of a block, which goes on into the blocks after it.
+
+    The VM calls it in front of its instructions, with every value that is
+    needed from there on, and gets None (it runs the instructions itself) or
+    where to go on and with what (see ``Region.leap``).
+    """
+
+    def __init__(self, plan: "_Plan", lo: int, hi: int) -> None:
+        super().__init__(plan, lo, hi)
+        self.inputs = plan.replay.live(plan.block, lo)
+        # Which of the inputs the variants are keyed on: the ones a path
+        # looked at. None before the first trace.
+        self.positions: tuple[int, ...] | None = None
+
+    def install(self, region: Any) -> bool:
+        return region.leap(self.lo, self) == self.inputs
+
+    def bind(self, args: tuple[Any, ...]) -> dict[int, Any]:
+        undefined = _runtime.UNDEFINED
+        return {v: arg for v, arg in zip(self.inputs, args) if arg is not undefined}
+
+    def give(self, env: dict[int, Any]) -> Any:
+        values = {value: env[value] for value in self.outputs if value in env}
+        return (self.plan.block, self.hi, values, [])
+
+    def decline(self, args: tuple[Any, ...]) -> Any:
+        return None
+
+    def key(
+        self, args: tuple[Any, ...], flat: list[torch.Tensor], positions: Any = None
+    ) -> Any:
+        seen: dict[int, int] = {}
+        parts = []
+        for position in positions if positions is not None else self.positions or ():
+            try:
+                parts.append(_describe(args[position], flat, seen))
+            except _Opaque as e:
+                raise _Opaque(position, e.reason) from None
+        tensors = [(t.shape, t.dtype, t.device, t.requires_grad) for t in flat]
+        return (tuple(parts), tuple(tensors), _modes())
+
+    def decide(self, args: tuple[Any, ...]) -> None:
+        try:
+            key, variant = self.follow(args)
+        except _Failed as e:
+            self.plan.split(
+                self, None if e.index is None else {e.index: e.reason}, e.reason
+            )
+            return
+        self.variants[key] = variant
+        self.hot = True
+
+    def compile(
+        self, key: Any, args: tuple[Any, ...], flat: list[torch.Tensor]
+    ) -> _Variant:
+        # The key is made again: the path may look at other inputs.
+        self.variants.pop(key, None)
+        key, variant = self.follow(args)
+        self.variants[key] = variant
+        return variant
+
+    def specialize(
+        self, key: Any, args: tuple[Any, ...], flat: list[torch.Tensor]
+    ) -> _Variant | None:
+        variant = super().specialize(key, args, flat)
+        if variant is None:
+            self.variants.pop(key, None)
+        return variant
+
+    def follow(self, args: tuple[Any, ...]) -> tuple[Any, _Variant]:
+        """Traces the path these inputs take and compiles its graph."""
+        start = time.perf_counter()
+        undefined = _runtime.UNDEFINED
+        refused = {
+            self.inputs[p]
+            for p, arg in enumerate(args)
+            if arg is not undefined and _acceptable(arg) is not None
+        }
+        positions = [
+            p
+            for p, arg in enumerate(args)
+            if arg is not undefined and self.inputs[p] not in refused
+        ]
+        limit: int | None = None
+        for _ in range(8):
+            flat: list[torch.Tensor] = []
+            key = self.key(args, flat, positions)
+            try:
+                graph, found, keep = self.trace(args, flat, positions, refused, limit)
+            except _Retry as again:
+                limit = again.limit if again.limit is not None else limit
+                positions = (
+                    again.positions if again.positions is not None else positions
+                )
+                continue
+            # Keyed on what some path looked at, and on nothing else.
+            wanted = sorted(set(found["used"]) | set(self.positions or ()))
+            if wanted != positions:
+                narrowed: list[torch.Tensor] = []
+                self.key(args, narrowed, wanted)
+                same = len(narrowed) == len(flat) and all(
+                    a is b for a, b in zip(narrowed, flat)
+                )
+                positions = wanted
+                if not same:
+                    continue
+            break
+        else:
+            raise _Failed(None, "the path of the region does not settle")
+        if tuple(positions) != self.positions:
+            self.positions = tuple(positions)
+            self.variants.clear()
+        key = self.key(args, [])
+        variant = _Variant(
+            self.finish(graph, flat, key), found["recipes"], self.ops_of(graph), keep
+        )
+        variant.direct = False
+        variant.leap = found["leap"]
+        variant.guards = found["guards"]
+        self.seconds += time.perf_counter() - start
+        _runtime.plan_changed()
+        return key, variant
+
+    def trace(
+        self,
+        args: tuple[Any, ...],
+        flat: list[torch.Tensor],
+        positions: list[int],
+        refused: set[int],
+        limit: int | None,
+    ) -> tuple[Any, dict[str, Any], list[Any]]:
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        plan = self.plan
+        undefined = _runtime.UNDEFINED
+        modules: dict[int, nn.Module] = {}
+        keep: list[Any] = []
+        for position in positions:
+            _identities(args[position], modules, keep)
+        keep.extend(modules.values())
+        reachable: set[int] = set()
+        for module in modules.values():
+            reachable |= _module_state(module).ids
+        found: dict[str, Any] = {}
+        keyed = set(positions)
+
+        def path(*fake: torch.Tensor) -> tuple[torch.Tensor, ...]:
+            fakes = {id(real): f for real, f in zip(flat, fake)}
+            copies: list[Any] = []
+            env: dict[int, Any] = {}
+            for position, (value, arg) in enumerate(zip(self.inputs, args)):
+                if position in keyed:
+                    env[value] = _rebuild(arg, fakes, copies)
+                elif arg is not undefined and value in refused:
+                    # There for the instructions that only hold it.
+                    env[value] = arg
+            grads = [f.requires_grad for f in fake]
+            walk = _Walk(
+                self,
+                env,
+                refused | {v for p, v in enumerate(self.inputs) if p not in keyed},
+                limit,
+            )
+            try:
+                with _swapped(modules, fakes), _traps(modules):
+                    block, index = walk.run()
+            except Untraceable as e:
+                if walk.entered and getattr(e, "cfg_index", None) is None:
+                    # One of the generators moved somewhere on the path.
+                    raise _Retry(limit=-1) from None
+                raise
+            if walk.entered == 0 and index < self.hi:
+                raise _Failed(index, "the trace ends inside the region")
+            rest = plan.insts_of(block)[index:]
+            if walk.entered and index and any(inst["op"] in _WORK for inst in rest):
+                # More to compile in that block: it is left whole, to its own
+                # regions.
+                raise _Retry(limit=walk.entered - 1)
+            if not all(_unchanged(copy, before) for copy, before in copies):
+                raise _Failed(None, "changes a list or dict it was given")
+            if grads != [f.requires_grad for f in fake]:
+                raise _Failed(None, "changes requires_grad of a tensor it was given")
+            recipes = _Recipes(reachable, {id(copy) for copy, _ in copies})
+            live = [v for v in plan.replay.live(block, index) if v in walk.born]
+            # What an instruction reads from there on is made. What a block
+            # only keeps alive to the end of its scope is not: it would be a
+            # result of the graph for nothing.
+            read = set(plan.replay.live(block, index, True))
+            values = [v for v in live if v in env and v in read]
+            found["recipes"] = []
+            for value in values:
+                try:
+                    found["recipes"].append(recipes.of(env[value]))
+                except Untraceable as e:
+                    # The path ends before what cannot be handed back: an
+                    # iterator half way through, say.
+                    born = walk.born[value]
+                    if born is None:
+                        raise _Failed(self.definition(value), str(e)) from None
+                    raise _Retry(limit=born - 1) from None
+            found["leap"] = (block, index, values, [v for v in live if v not in values])
+            found["guards"] = walk.guards
+            found["used"] = [
+                p for p, v in enumerate(self.inputs) if v in walk.used and p in keyed
+            ]
+            return tuple(recipes.results)
+
+        try:
+            graph = make_fx(path, tracing_mode="fake")(*flat)
+        except (_Failed, _Retry):
+            raise
+        except Exception as e:
+            reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
+            raise _Failed(getattr(e, "cfg_index", None), reason) from None
+        return graph, found, keep
+
+
+class _Plan:
+    """The regions of one basic block. Kept on the block as its note."""
+
+    def __init__(
+        self, options: "Regions", replay: Any, insts: list[dict[str, Any]]
+    ) -> None:
+        self.options = options
+        self.replay = replay
+        self.name = replay.name
+        self.block = replay.block
+        self.globals = replay.globals
+        self.insts = insts
+        # The other blocks of the function, as a path comes by them.
+        self.blocks: dict[int, list[dict[str, Any]]] = {self.block: insts}
+        self.ends: dict[int, Any] = {}
+        # Instructions that stay with the VM, and why.
+        self.bad: dict[int, str] = {}
+        # Runs that are not worth a region, and why.
+        self.skipped: dict[tuple[int, int], str] = {}
+        self.regions: list[_Region] = []
+        self.lay_out(None)
+
+    def lay_out(self, parent: _Region | None) -> None:
+        """Maximal runs of instructions that can be replayed, as regions."""
+        existing = {(r.lo, r.hi): r for r in self.regions}
+        self.regions = []
+        start = None
+        defined: set[int] = set()
+        for i, inst in enumerate(self.insts):
+            usable = inst["replayable"] and i not in self.bad
+            if usable and inst["op"] in _MUTATORS and inst["uses"][0] not in defined:
+                # Changes a container from before the run.
+                usable = False
+            if usable:
+                if start is None:
+                    start, defined = i, set()
+                if inst["dst"] is not None:
+                    defined.add(inst["dst"])
+                continue
+            if start is not None:
+                self.add(start, i, existing, parent)
+            start = None
+        if start is not None:
+            self.add(start, len(self.insts), existing, parent)
+        self.extend()
+
+    def extend(self) -> None:
+        """Lets the last region go on into the blocks after this one, if all
+        that comes after it in the block is something a path can run."""
+        if not self.regions or not self.replay.leaps:
+            return
+        last = self.regions[-1]
+        rest = range(last.hi, len(self.insts))
+        open_end = all(self.insts[i]["steppable"] and i not in self.bad for i in rest)
+        if open_end == isinstance(last, _Path) or last.hot:
+            return
+        other = (_Path if open_end else _Region)(self, last.lo, last.hi)
+        other.calls, other.surveyed = last.calls, last.surveyed
+        self.regions[-1] = other
+
+    def insts_of(self, block: int) -> list[dict[str, Any]]:
+        if block not in self.blocks:
+            self.blocks[block] = self.replay.instructions_of(block)
+        return self.blocks[block]
+
+    def terminator(self, block: int) -> Any:
+        if block not in self.ends:
+            self.ends[block] = self.replay.terminator(block)
+        return self.ends[block]
+
+    def add(
+        self,
+        lo: int,
+        hi: int,
+        existing: dict[tuple[int, int], _Region],
+        parent: _Region | None,
+    ) -> None:
+        # Loads and constants at either end are as well off in the VM, and
+        # what they give is then an input, which every call checks.
+        while lo < hi and self.insts[lo]["op"] not in _WORK:
+            lo += 1
+        while hi > lo and self.insts[hi - 1]["op"] not in _WORK:
+            hi -= 1
+        if lo == hi or (lo, hi) in self.skipped:
+            return
+        region = existing.get((lo, hi))
+        if region is None:
+            region = _Region(self, lo, hi)
+            if parent is not None and parent.lo <= lo and hi <= parent.hi:
+                # What was checked on the whole was checked on the part.
+                region.calls, region.surveyed = parent.calls, True
+        self.regions.append(region)
+
+    def split(
+        self, region: _Region, bad: dict[int, str] | None, reason: str = ""
+    ) -> None:
+        """Takes instructions of a region, or all of it, out of the plan."""
+        if bad is None:
+            self.skipped[(region.lo, region.hi)] = reason
+        else:
+            self.bad.update(bad)
+        self.lay_out(region)
+        # The block is specialized again, around the regions that are left.
+        self.replay.settle(self)
+        _runtime.plan_changed()
+
+
+class Regions:
+    """The pass that puts regions into a block. One per compiled function."""
+
+    __name__ = "regions"
+
+    def __init__(
+        self, backend: Backend, min_ops: int, max_variants: int, warmup: int
+    ) -> None:
+        self.backend = backend
+        self.min_ops = min_ops
+        self.max_variants = max_variants
+        self.warmup = warmup
+        self.plans: list[_Plan] = []
+        # What the backend made of each graph, by the code of the graph and
+        # what its inputs are like.
+        self.compiled: dict[Any, Callable[..., Any]] = {}
+
+    def __call__(self, region: Any) -> bool:
+        insts = region.instructions()
+        if any(inst["op"] in ("call_object", "leap") for inst in insts):
+            return False
+        plan = region.note
+        if plan is None:
+            if not _wants_regions(region.filename):
+                return False
+            if not any(inst["replayable"] and inst["op"] in _WORK for inst in insts):
+                return False
+            plan = _Plan(self, region.replayer(0, len(insts)), insts)
+            region.note = plan
+            self.plans.append(plan)
+        changed = False
+        for part in reversed(plan.regions):
+            changed |= part.install(region)
+        return changed
+
+    def report(self) -> list[dict[str, Any]]:
+        """One entry per region and per instruction that was left to the VM."""
+        entries: list[dict[str, Any]] = []
+        for plan in self.plans:
+            for part in plan.regions:
+                variants = [v for v in part.variants.values() if v is not None]
+                entries.append(
+                    {
+                        "where": repr(part),
+                        "state": "compiled" if part.hot else "waiting",
+                        "variants": len(variants),
+                        "compiles": part.compiles,
+                        "ends": sorted({v.leap[:2] for v in variants if v.leap}),
+                        "ops": max((v.ops for v in variants), default=0),
+                        "seconds": part.seconds,
+                    }
+                )
+            for index, reason in plan.bad.items():
+                where = f"{plan.name}[{index}]"
+                entries.append(
+                    {
+                        "where": where,
+                        "state": "vm",
+                        "reason": reason,
+                        "text": plan.insts[index]["text"],
+                    }
+                )
+            for (lo, hi), reason in plan.skipped.items():
+                entries.append(
+                    {
+                        "where": f"{plan.name}[{lo}:{hi}]",
+                        "state": "vm",
+                        "reason": reason,
+                    }
+                )
+        return entries
+
+
+def _views_to_reshapes(graph: torch.fx.GraphModule) -> None:
+    """A trace records a reshape as the view it was for the tensor at hand.
+    What the backend makes of the operations before it may lay that tensor
+    out otherwise, and then the view is no longer one: a reshape is the view
+    wherever there is one."""
+    views = (torch.ops.aten.view.default, torch.ops.aten._unsafe_view.default)
+    changed = False
+    for node in graph.graph.nodes:
+        if node.op == "call_function" and node.target in views:
+            node.target = torch.ops.aten.reshape.default
+            changed = True
+    if changed:
+        graph.recompile()
+
+
+def _inductor(graph: torch.fx.GraphModule, inputs: list[Any]) -> Callable[..., Any]:
+    return torch._inductor.compile(graph, inputs)
+
+
+def _aot_eager(
+    graph: torch.fx.GraphModule, inputs: list[torch.Tensor]
+) -> Callable[..., Any]:
+    # AOTAutograd without a compiler behind it: the same graphs and the same
+    # compiled autograd function, run by the eager kernels.
+    from torch._dynamo.backends.debugging import aot_eager
+
+    return aot_eager(graph, inputs)
+
+
+_BACKENDS: dict[str, Backend] = {"inductor": _inductor, "aot_eager": _aot_eager}
+
+
+def make_pass(
+    runtime: Any, backend: str | Backend, min_ops: int, max_variants: int, warmup: int
+) -> Regions:
+    global _runtime
+    if isinstance(backend, str):
+        if backend not in _BACKENDS:
+            raise ValueError(f"unknown backend {backend!r}; known: {sorted(_BACKENDS)}")
+        backend = _BACKENDS[backend]
+    _runtime = runtime
+    return Regions(backend, min_ops, max_variants, warmup)
