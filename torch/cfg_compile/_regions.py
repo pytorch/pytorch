@@ -76,6 +76,7 @@ about them (see "Sizes" below).
 """
 
 import ast
+import builtins
 import collections
 import contextlib
 import enum
@@ -127,6 +128,10 @@ class _State(threading.local):
     # what they held when it began.
     traced: set[int] | None = None
     watch: "_Watch | None" = None
+    # The trace in progress, if it leaves sizes open, and how deep torch's
+    # own code is in making text of a size.
+    opening: "_Open | None" = None
+    texting = 0
 
 
 _state = _State()
@@ -272,6 +277,7 @@ _PURE_MODULES = frozenset({"builtins", "math", "operator"})
 # operators) is Python that moves tensors about: regions there would be tried
 # one after the other for nothing.
 _TORCH = torch.__file__.rsplit("/", 1)[0] + "/"
+_OWN = __file__.rsplit("/", 1)[0] + "/"
 _TORCH_MODEL_CODE = (
     "nn/",
     "functional.py",
@@ -280,6 +286,14 @@ _TORCH_MODEL_CODE = (
     "_functorch/",
     "func/",
 )
+
+
+def _knows_sizes(code: types.CodeType) -> bool:
+    """Whether code is torch's own, which knows that a size may be a symbol
+    in a trace. What the VM steps through for a trace is the model's code,
+    though it runs from here."""
+    filename = code.co_filename
+    return filename.startswith(_TORCH) and not filename.startswith(_OWN)
 
 
 def _wants_regions(filename: str) -> bool:
@@ -405,6 +419,12 @@ def _problem(
         if any(callee is scalar for scalar in _SCALARS):
             if any(isinstance(env.get(v), torch.Tensor) for v in uses[1:]):
                 return "reads the data of a tensor"
+        if callee is type and len(uses) == 2 and type(env.get(uses[1])) in _SYMS:
+            # Not what it is when the instruction runs for real: the trace
+            # is made again with that size closed.
+            if _state.opening is not None:
+                _state.opening.close(env[uses[1]])
+            return "asks for the type of a size"
         if not _is_pure(callee) and not any(_involves_tensor(env.get(v)) for v in uses):
             return "no tensor or module involved"
     elif op == "to_bool" or (op == "unary" and inst["text"].split()[1] == "not"):
@@ -531,6 +551,7 @@ def _watch_module_changes(on: bool) -> None:
                 continue
             start = monitoring.events.PY_START
             monitoring.register_callback(tool, start, _module_change_started)
+            monitoring.register_callback(tool, monitoring.events.CALL, _type_asked)
             _monitor = tool
             break
     if _monitor >= 0:
@@ -1183,6 +1204,14 @@ def _differing(a: bytes, b: bytes) -> set[int]:
     return {i for i in range(min(len(x), len(y))) if x[i] != y[i]}
 
 
+class _Close(Exception):
+    # A trace with open numbers found that some of them have to be the
+    # numbers they are: it is made again without them.
+    def __init__(self, slots: set[int]) -> None:
+        super().__init__()
+        self.slots = slots
+
+
 class _Untranslated(Exception):
     pass
 
@@ -1282,6 +1311,89 @@ def _is_open(value: Any) -> bool:
     return type(value) is torch.SymInt and value.node.maybe_as_int() is None
 
 
+# What a size is asked to be taken for in a trace that leaves it open.
+_NUMBERS = {torch.SymInt: 0, torch.SymFloat: 0.0, torch.SymBool: False}
+_isinstance = isinstance
+_SYM_TEXTS = [
+    (cls, name, vars(cls).get(name), getattr(cls, name))
+    for cls in _SYMS
+    for name in ("__str__", "__repr__", "__format__")
+]
+_size_traps = 0
+_size_traps_lock = threading.Lock()
+
+
+def _isinstance_of_size(obj: Any, classinfo: Any) -> bool:
+    """``isinstance`` while a trace with open sizes runs. A size is a symbol
+    there, and code of a model that asks whether it is an int is told what
+    it will be told when it runs for real. torch's own code knows symbols."""
+    if obj.__class__ in _SYMS and _state.opening is not None:
+        if not _knows_sizes(sys._getframe(1).f_code):
+            if _isinstance(_NUMBERS[obj.__class__], classinfo):
+                return True
+    return _isinstance(obj, classinfo)
+
+
+def _sym_text(method: Callable[..., str]) -> Callable[..., str]:
+    """Text of a size, made by code that is not torch's own: the text of the
+    number it stands for is wanted, so the size cannot stay open."""
+
+    def text(self: Any, *args: Any) -> str:
+        opening = _state.opening
+        if opening is None:
+            return method(self, *args)
+        if _state.texting or _knows_sizes(sys._getframe(1).f_code):
+            # One of these makes its text with another (``format`` with
+            # ``str``): who asked is who asked the first.
+            _state.texting += 1
+            try:
+                return method(self, *args)
+            finally:
+                _state.texting -= 1
+        opening.close(self)
+        raise Untraceable("makes text of a size")
+
+    return text
+
+
+def _type_asked(code: types.CodeType, offset: int, callee: Any, arg: Any) -> Any:
+    # A call, while a trace with open sizes runs. ``type(size)`` is not what
+    # it is when the code runs for real, and cannot be made to be.
+    if callee is not type:
+        return sys.monitoring.DISABLE
+    opening = _state.opening
+    if opening is None or arg.__class__ not in _SYMS:
+        return None
+    if code.co_filename.startswith((_TORCH, _OWN)):
+        # torch's own code, this file included: what the VM steps through
+        # for a trace does not come by here (see ``_problem``).
+        return None
+    opening.close(arg)
+    raise Untraceable("asks for the type of a size")
+
+
+def _trap_sizes(on: bool) -> None:
+    """Has code that would take an open size for what it is not answer to
+    the trace, for as long as one runs: see ``_Open.watching``."""
+    global _size_traps
+    monitoring: Any = sys.monitoring
+    with _size_traps_lock:
+        _size_traps += 1 if on else -1
+        if on and _size_traps == 1:
+            builtins.isinstance = _isinstance_of_size
+            for cls, name, _, method in _SYM_TEXTS:
+                setattr(cls, name, _sym_text(method))
+            monitoring.set_events(_monitor, monitoring.events.CALL)
+        elif not on and _size_traps == 0:
+            monitoring.set_events(_monitor, 0)
+            builtins.isinstance = _isinstance
+            for cls, name, original, _ in _SYM_TEXTS:
+                if original is None:
+                    delattr(cls, name)
+                else:
+                    setattr(cls, name, original)
+
+
 class _Open:
     """The inputs of a trace that leaves numbers of a call open.
 
@@ -1303,6 +1415,9 @@ class _Open:
         self.slots = _slots(key[1])
         self.opened = opened
         self.env = ShapeEnv(duck_shape=False)
+        # Places a trace found it cannot leave open after all.
+        self.closing: set[int] = set()
+        self.lost = False
         mode = FakeTensorMode(shape_env=self.env)
         dims: dict[int, set[int]] = {}
         for slot in sorted(opened):
@@ -1311,6 +1426,9 @@ class _Open:
         static, dynamic = DimDynamic.STATIC, DimDynamic.DYNAMIC
         self.fakes: list[torch.Tensor] = []
         self.sources: list[Any] = []
+        # The symbol of each open place.
+        self.symbols: dict[Any, int] = {}
+        index = {slot: i for i, slot in enumerate(self.slots)}
         for t, tensor in enumerate(inputs.flat):
             source = LocalSource(f"t{t}")
             mine = dims.get(t, ())
@@ -1327,11 +1445,39 @@ class _Open:
                 view_base_context=base,
             )
             fake = mode.from_tensor(tensor, source=source, symbolic_context=context)
+            for d in mine:
+                size: Any = fake.shape[d]
+                if type(size) is torch.SymInt:
+                    self.symbols[size.node.expr] = index[("size", t, d)]
             self.fakes.append(fake)
             self.sources.append(source)
 
     def example(self) -> list[Any]:
         return list(self.fakes)
+
+    def close(self, value: Any) -> None:
+        """Notes that the places ``value`` was computed from cannot be open."""
+        for symbol in value.node.expr.free_symbols:
+            slot = self.symbols.get(symbol)
+            if slot is None:
+                self.lost = True
+            else:
+                self.closing.add(slot)
+
+    @contextlib.contextmanager
+    def watching(self) -> Any:
+        """Runs a trace on these inputs. Code of a model that would take a
+        symbol for something else than the number it stands for is told the
+        truth (``isinstance``) or, where there is no telling it, reports
+        here (``type``, and making text of a size): the trace is then made
+        again with that size closed."""
+        _trap_sizes(True)
+        _state.opening = self
+        try:
+            yield
+        finally:
+            _state.opening = None
+            _trap_sizes(False)
 
     def left(self) -> set[int]:
         """The numbers that are open by now: the trace, and then the
@@ -1398,7 +1544,7 @@ class _Open:
         return shape, kept, left
 
 
-def _trace(fn: Callable[..., Any], example: list[Any]) -> Any:
+def _trace(fn: Callable[..., Any], example: list[Any], opening: _Open | None) -> Any:
     """The graph of what ``fn`` does to tensors like ``example``."""
     from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -1411,12 +1557,20 @@ def _trace(fn: Callable[..., Any], example: list[Any]) -> Any:
     gc.collect(0)
     gc.disable()
     try:
-        graph = make_fx(fn, tracing_mode="fake")(*example)
+        if opening is None:
+            graph = make_fx(fn, tracing_mode="fake")(*example)
+        else:
+            with opening.watching():
+                graph = make_fx(fn, tracing_mode="fake")(*example)
     except Exception as e:
         error = e
     finally:
         if collecting:
             gc.enable()
+    if opening is not None and (opening.closing or opening.lost):
+        if opening.lost:
+            raise _Failed(None, "needs to know a number that is no size it was given")
+        raise _Close(opening.closing)
     if error is None:
         return graph
     if isinstance(error, (_Failed, _Retry)):
@@ -2053,6 +2207,9 @@ class _Region:
         known.last = key[2]
         if known.static or len(known.open) >= _MOST_OPEN:
             return set()
+        if _monitor is None or _monitor < 0:
+            # Nothing would tell a trace that code asks what type a size is.
+            return set()
         slots = _slots(key[1])
         now = memoryview(key[2]).cast("q")
         # A size of 0 or 1 is not like the others (it broadcasts): a tensor
@@ -2082,6 +2239,8 @@ class _Region:
             known = self.sizes[_kind(key)]
             try:
                 return self.build(key, args, inputs, opening)
+            except _Close as close:
+                known.fixed |= close.slots
             except _Failed:
                 # What a trace on symbols cannot do, one on numbers may.
                 known.static = True
@@ -2137,7 +2296,7 @@ class _Region:
             found["effects"] = _effects_of(copies, recipes, stored)
             return tuple(recipes.results)
 
-        graph = _trace(region, opening.example() if opening else list(flat))
+        graph = _trace(region, opening.example() if opening else list(flat), opening)
         ops = self.ops_of(graph)
         compiled, conditions = self.finish(graph, inputs, key, opening)
         variant = _Variant(compiled, found["recipes"], ops, keep)
@@ -2298,7 +2457,12 @@ class _Walk:
                     )
                     outside = _is_outside_tensor(env.get(inst["dst"]))
                 except Exception:
-                    if inside:
+                    opening = _state.opening
+                    if inside or (
+                        opening is not None and (opening.closing or opening.lost)
+                    ):
+                        # The trace is over: it is the region that fails, or
+                        # a size that has to be closed.
                         raise
                     outside = True
                     began = inst["op"] not in _READS
@@ -2518,6 +2682,9 @@ class _Path(_Region):
                     again.positions if again.positions is not None else positions
                 )
                 continue
+            except _Close as close:
+                self.sizes[_kind(key)].fixed |= close.slots
+                continue
             except _Failed:
                 if opening is None:
                     raise
@@ -2645,7 +2812,7 @@ class _Path(_Region):
             ]
             return tuple(recipes.results)
 
-        graph = _trace(path, opening.example() if opening else list(flat))
+        graph = _trace(path, opening.example() if opening else list(flat), opening)
         return graph, found, keep
 
 
