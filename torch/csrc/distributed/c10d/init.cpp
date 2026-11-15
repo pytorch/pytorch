@@ -1279,20 +1279,19 @@ Example:
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
 
-  const auto signal_ops = ::c10d::nvshmem_extension::shmem_signal_ops();
+  const auto shmem_ops = ::c10d::nvshmem_extension::shmem_ops();
   py::enum_<::c10d::nvshmem_extension::ShmemSignalOp>(module, "_ShmemSignalOp")
-      .value("SET", signal_ops.set)
-      .value("ADD", signal_ops.add);
+      .value("SET", shmem_ops.signal_set)
+      .value("ADD", shmem_ops.signal_add);
 
-  const auto compare_ops = ::c10d::nvshmem_extension::shmem_compare_ops();
   py::enum_<::c10d::nvshmem_extension::ShmemCompareOp>(
       module, "_ShmemCompareOp")
-      .value("EQ", compare_ops.eq)
-      .value("NE", compare_ops.ne)
-      .value("GT", compare_ops.gt)
-      .value("GE", compare_ops.ge)
-      .value("LT", compare_ops.lt)
-      .value("LE", compare_ops.le);
+      .value("EQ", shmem_ops.cmp_eq)
+      .value("NE", shmem_ops.cmp_ne)
+      .value("GT", shmem_ops.cmp_gt)
+      .value("GE", shmem_ops.cmp_ge)
+      .value("LT", shmem_ops.cmp_lt)
+      .value("LE", shmem_ops.cmp_le);
 
   // Check if NVSHMEM is available on current system.
   module.def(
