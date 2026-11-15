@@ -1,4 +1,5 @@
 #include <torch/csrc/cfg/cfg.h>
+#include <torch/csrc/cfg/workspace.h>
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/ScalarOps.h>
@@ -1804,6 +1805,13 @@ int32_t isTracing() {
   return torch::jit::tracer::isTracing();
 }
 
+constexpr const char* kWorkspaceCapsule = "torch._C._cfg_workspace";
+
+void workspaceCapsuleFree(PyObject* capsule) {
+  torch::cfg::workspaceFree(static_cast<torch::cfg::Workspace*>(
+      PyCapsule_GetPointer(capsule, kWorkspaceCapsule)));
+}
+
 const TcfgApi api_table = {
     TCFG_API_VERSION,
     &captureBegin,
@@ -1843,6 +1851,29 @@ void initCfgBindings(PyObject* module) {
     auto* api = const_cast<TcfgApi*>(&api_table);
     return py::reinterpret_steal<py::object>(
         PyCapsule_New(api, "torch._C._cfg_c_api", nullptr));
+  });
+
+  // A workspace for a compiled function (workspace.h), or None if the
+  // process has another CPU allocator than PyTorch's default.
+  m.def("_cfg_workspace", []() -> py::object {
+    auto* workspace = workspaceNew();
+    if (workspace == nullptr) {
+      return py::none();
+    }
+    return py::reinterpret_steal<py::object>(
+        PyCapsule_New(workspace, kWorkspaceCapsule, &workspaceCapsuleFree));
+  });
+  m.def("_cfg_workspace_stats", [](const py::capsule& capsule) {
+    const auto stats = workspaceStats(static_cast<Workspace*>(
+        PyCapsule_GetPointer(capsule.ptr(), kWorkspaceCapsule)));
+    py::dict result;
+    result["calls"] = stats.calls;
+    result["hits"] = stats.hits;
+    result["misses"] = stats.misses;
+    result["kept"] = stats.kept;
+    result["live"] = stats.live;
+    result["peak"] = stats.peak;
+    return result;
   });
 
   // Runs fn under a dispatch capture and returns (result, records) where
