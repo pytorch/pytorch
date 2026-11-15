@@ -26,7 +26,11 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode, maybe_clear_fake_constant
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    FakeTensorMode,
+    maybe_clear_fake_constant,
+)
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -345,7 +349,7 @@ def while_loop_autograd(
 
 
 def _create_unbacked_symint(
-    fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
+    fake_mode: FakeTensorMode | CppFakeTensorMode, ignore_fresh_unbacked_symbols: bool
 ) -> torch.SymInt:
     if fake_mode is None or fake_mode.shape_env is None:
         raise AssertionError("Must provide a fake_mode with shape_env.")
@@ -416,7 +420,7 @@ def while_loop_tracing(
         #   users to be >= 0 (either before while_loop or inside body_fn) and it increments by 1 in each
         #   iteration. Ideally, we should know that the final output is >= 0 but we didn't constrain the
         #   unbacked symint output of subgraph as of today because this requires a smart range analysis.
-        fake_mode: FakeTensorMode = _find_or_create_fake_mode()
+        fake_mode = _find_or_create_fake_mode()
 
         def _unspecialize_carried_inputs(x):
             if isinstance(x, (int, torch.SymInt)):
