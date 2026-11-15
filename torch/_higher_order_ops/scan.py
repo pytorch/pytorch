@@ -44,6 +44,7 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import (
+    fake_mode_cls,
     FakeTensorMode,
     is_fake_tensor,
     maybe_clear_fake_constant,
@@ -98,7 +99,7 @@ def _build_empty_output_for_length_zero(
 ) -> pytree.PyTree:
     """Probe combine_fn(init, None) to learn the output structure for length==0."""
     leaves = pytree.tree_leaves(init)
-    fake_mode = detect_fake_mode(leaves) or FakeTensorMode()
+    fake_mode = detect_fake_mode(leaves) or fake_mode_cls()()
     with fake_mode:
         fake_init = pytree.tree_map(
             lambda t: fake_mode.from_tensor(t)
