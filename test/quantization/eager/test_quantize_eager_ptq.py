@@ -63,7 +63,11 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
 )
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 hu.assert_deadline_disabled()
@@ -1217,6 +1221,53 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             self.assertTrue(
                 prepared_model.self_attn.batch_first == model.self_attn.batch_first
             )
+
+
+@instantiate_parametrized_tests
+class TestMultiheadAttentionBiasConversion(QuantizationTestCase):
+    @skipIfNoFBGEMM
+    @parametrize("bias_scales", [(0.01, 50.0), (50.0, 0.01), (0.25, 0.25)])
+    @parametrize("batch_first", [False, True])
+    def test_mha_bias_qparams(self, bias_scales, batch_first):
+        with override_quantized_engine("fbgemm"):
+            observed = torch.ao.nn.quantizable.MultiheadAttention(
+                8, 2, add_bias_kv=True, batch_first=batch_first
+            ).eval()
+            values = torch.arange(-4, 4, dtype=torch.float32).reshape(1, 1, 8)
+            with torch.no_grad():
+                observed.bias_k.copy_(values * bias_scales[0])
+                observed.bias_v.copy_(values * bias_scales[1])
+            biases = [observed.bias_k.detach().clone(), observed.bias_v.detach().clone()]
+            observed.qconfig = default_qconfig
+            observed = prepare(observed, inplace=False)
+            x = torch.arange(48, dtype=torch.float32).reshape(3, 2, 8) / 48
+            if batch_first:
+                x = x.transpose(0, 1)
+            with torch.no_grad():
+                observed(x, x, x)
+                converted = nnq.MultiheadAttention.from_observed(observed)
+            for actual, original in zip([converted.bias_k, converted.bias_v], biases):
+                scale, zero_point = torch._choose_qparams_per_tensor(original, reduce_range=False)
+                expected = torch.quantize_per_tensor(original, scale, zero_point, torch.quint8)
+                self.assertEqual(actual, expected)
+                self.assertEqual(actual.q_scale(), scale)
+                self.assertEqual(actual.q_zero_point(), zero_point)
+                self.assertLessEqual((actual.dequantize() - original).abs().max().item(), scale / 2 + 1e-5)
+            self.assertEqual(observed.bias_k, biases[0])
+            self.assertEqual(observed.bias_v, biases[1])
+
+    @skipIfNoFBGEMM
+    def test_mha_without_bias_kv(self):
+        with override_quantized_engine("fbgemm"):
+            observed = torch.ao.nn.quantizable.MultiheadAttention(8, 2).eval()
+            observed.qconfig = default_qconfig
+            observed = prepare(observed, inplace=False)
+            x = torch.ones(3, 2, 8)
+            with torch.no_grad():
+                observed(x, x, x)
+                converted = nnq.MultiheadAttention.from_observed(observed)
+            self.assertIsNone(converted.bias_k)
+            self.assertIsNone(converted.bias_v)
 
 
 @skipIfNoFBGEMM
