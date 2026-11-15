@@ -420,6 +420,10 @@ class MixOrderReductionTest(TestBase):
             return x.sum(dim=-1), x.sum(dim=0)
 
         M = 32768 * 1024 if torch.version.hip is not None else 32768 * 256
+        # The split size grows with M / num_sm. On devices with few SMs
+        # (e.g. a 14-SM MIG slice) a large M only needs a 2 layer split.
+        num_sm = DeviceProperties.create(torch.device(GPU_TYPE)).multi_processor_count
+        M = min(M, 262144 * num_sm)
         x = torch.randn(M, 2, dtype=torch.float, device=GPU_TYPE)
         self.check_numeric(f, (x,))
         # We don't do mix order reduction for split redutions

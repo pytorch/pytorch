@@ -168,7 +168,13 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
             cached = cache.get(source)
             if cached is not None:
                 if tx.output.current_tracer.parent is not None:
-                    tx.output.current_tracer.traced_sources.add(source)
+                    from ..guards import record_lexical_alias
+
+                    tracer = tx.output.current_tracer
+                    tracer.traced_sources.add(source)
+                    record_lexical_alias(
+                        tracer.lexical_sources, source, cached.unwrap().source
+                    )
                 return cached
             vt = LazyVariableTracker(LazyCache(value, source), source=source)
             cache[source] = vt

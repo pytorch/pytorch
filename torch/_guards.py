@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import dis
     from collections.abc import Callable, Generator, Iterator
-    from types import CodeType
+    from types import CodeType, FunctionType
 
     import sympy
 
@@ -250,6 +250,24 @@ class ShapeGuard(NamedTuple):
     size_oblivious: bool
 
 
+def _guard_payloads_equivalent(a: Any, b: Any) -> bool:
+    if a is b:
+        return True
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, Source) or type(a) in (str, int, bool, bytes, type(None)):
+        return a == b
+    if type(a) is tuple:
+        return len(a) == len(b) and all(
+            _guard_payloads_equivalent(x, y) for x, y in zip(a, b)
+        )
+    if type(a) is dict:
+        return a.keys() == b.keys() and all(
+            _guard_payloads_equivalent(a[k], b[k]) for k in a
+        )
+    return False
+
+
 @dataclasses.dataclass(slots=True)
 class Guard:
     # originating_source is the source that called the make_guard method to
@@ -359,7 +377,9 @@ class Guard:
             return self
         return self.with_source(source, create_fn=create_fn)
 
-    def source_dependencies(self) -> OrderedSet[Source]:
+    def source_dependencies(
+        self, extra_sources: tuple[Source, ...] = ()
+    ) -> OrderedSet[Source]:
         """Explicit sources, including ancestors and source-valued partial payloads."""
         sources: OrderedSet[Source] = OrderedSet()
 
@@ -376,6 +396,7 @@ class Guard:
                     collect(item)
 
         collect(self.originating_source)
+        collect(extra_sources)
         if isinstance(self.create_fn, functools.partial):
             collect(self.create_fn.args)
             collect(tuple(self.create_fn.keywords.values()))
@@ -384,30 +405,15 @@ class Guard:
     def is_equivalent_to(self, other: Guard, /) -> bool:
         """Prove equivalence for known payload types; keep unfamiliar payloads distinct."""
 
-        def same_payload(a: Any, b: Any) -> bool:
-            if a is b:
-                return True
-            if type(a) is not type(b):
-                return False
-            if isinstance(a, Source) or type(a) in (str, int, bool, bytes, type(None)):
-                return a == b
-            if type(a) is tuple:
-                return len(a) == len(b) and all(
-                    same_payload(x, y) for x, y in zip(a, b)
-                )
-            if type(a) is dict:
-                return a.keys() == b.keys() and all(same_payload(a[k], b[k]) for k in a)
-            return False
-
         if (
             self.originating_source != other.originating_source
             or self._force_dict_keys_match != other._force_dict_keys_match
             or self.inner_create_fn() is not other.inner_create_fn()
         ):
             return False
-        return same_payload(
+        return _guard_payloads_equivalent(
             getattr(self.create_fn, "args", ()), getattr(other.create_fn, "args", ())
-        ) and same_payload(
+        ) and _guard_payloads_equivalent(
             getattr(self.create_fn, "keywords", {}),
             getattr(other.create_fn, "keywords", {}),
         )
@@ -961,6 +967,9 @@ class InvokeSubgraphReuseCondition:
 
     # Order annotations required by guard source chains and additional dependencies.
     guard_on_key_order: set[Source] = dataclasses.field(default_factory=set)
+    lexical_sources: set[tuple[Source, int]] = dataclasses.field(default_factory=set)
+    tensor_sources: tuple[Source, ...] = ()
+    aliases: tuple[int, ...] = ()
 
 
 class InvokeSubgraphCache(HopSubgraphCache):
@@ -975,10 +984,10 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.effects_cache: dict[
             str, set
         ] = {}  # Maps identifier -> set of effect types
-        # fn.__code__ → list of (condition, cache_entry) pairs. Walked linearly
+        # Function identity distinguishes closures and globals sharing one code object. Walked linearly
         # on lookup; first matching condition wins.
         self.subgraph_reuse_cache: dict[
-            CodeType,
+            FunctionType | CodeType,
             list[tuple[InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry]],
         ] = defaultdict(list)
         # fn_code → {hash_key → cache_entry}. Used by user-provided
@@ -1054,7 +1063,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def add_reuse_entry(
         self,
-        fn_code: CodeType,
+        fn_code: CodeType | FunctionType,
         condition: InvokeSubgraphReuseCondition,
         entry: InvokeSubgraphReuseEntry,
         max_reuse_entries: int = 8,
@@ -1075,7 +1084,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def find_reuse_entry(
         self,
-        fn_code: CodeType,
+        fn_code: CodeType | FunctionType,
         evaluator: Callable[
             [InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry], bool
         ],
@@ -1206,6 +1215,35 @@ class InlinedCodeCache:
     instructions: list[Any]
     indexof: dict[Any, int]
     code_options: CodeOptions
+
+
+class _CurrentFrame:
+    """Context manager behind TracingContext.current_frame. Hand-written
+    rather than @contextmanager because it is entered on every inlined call
+    and generator resume."""
+
+    __slots__ = ("frame_summary", "old", "old_positions", "tc")
+
+    def __init__(self, frame_summary: traceback.FrameSummary | None) -> None:
+        self.frame_summary = frame_summary
+
+    def __enter__(self) -> None:
+        tc = self.tc = TracingContext.get()
+        if self.frame_summary is not None:
+            tc.frame_summary_stack.append(self.frame_summary)
+        self.old = tc.loc_in_frame
+        self.old_positions = tc.loc_in_frame_positions
+        tc.loc_in_frame = None
+        tc.loc_in_frame_positions = None
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        tc = self.tc
+        if isinstance(exc, Exception) and not hasattr(exc, "real_stack"):
+            exc.real_stack = tc.extract_stack()  # pyrefly: ignore [missing-attribute]
+        if self.frame_summary is not None:
+            tc.frame_summary_stack.pop()
+        tc.loc_in_frame = self.old
+        tc.loc_in_frame_positions = self.old_positions
 
 
 class TracingContext:
@@ -1371,30 +1409,12 @@ class TracingContext:
                 raise
 
     @staticmethod
-    @contextlib.contextmanager
     def current_frame(
         frame_summary: traceback.FrameSummary | None,
-    ) -> Generator[None, None, None]:
+    ) -> _CurrentFrame:
         # frame_summary can be None to solely take advantage of real_stack
         # attachment to thrown exceptions
-        tc = TracingContext.get()
-        if frame_summary is not None:
-            tc.frame_summary_stack.append(frame_summary)
-        old = tc.loc_in_frame
-        old_positions = tc.loc_in_frame_positions
-        tc.loc_in_frame = None
-        tc.loc_in_frame_positions = None
-        try:
-            yield
-        except Exception as e:
-            if not hasattr(e, "real_stack"):
-                e.real_stack = tc.extract_stack()  # type: ignore[attr-defined]
-            raise
-        finally:
-            if frame_summary is not None:
-                tc.frame_summary_stack.pop()
-            tc.loc_in_frame = old
-            tc.loc_in_frame_positions = old_positions
+        return _CurrentFrame(frame_summary)
 
     @staticmethod
     @contextlib.contextmanager
@@ -1751,7 +1771,7 @@ def require_python_fake_mode(
     Returns mode unchanged if it is a FakeTensorMode or None.
 
     Use it on a fake mode that must be a Python FakeTensorMode, for example to
-    call from_tensor or is_our_fake on it or to pass it on to code typed for
+    get Python FakeTensors from it or to pass it on to code typed for
     FakeTensorMode: a result of detect_fake_mode, active_fake_mode or
     maybe_get_fake_mode, or a mode the caller was given. Callers narrow the
     lookups with it so that they keep getting a Python FakeTensorMode when a
