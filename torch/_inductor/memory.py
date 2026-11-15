@@ -1043,6 +1043,68 @@ def prepare_planning_info(
     return estimated_peak_memory, name_to_freeable_input_buf
 
 
+def sink_nodes_that_free_nothing(
+    order: list[BaseSchedulerNode], graph_outputs: OrderedSet[str]
+) -> list[BaseSchedulerNode]:
+    """``order`` with each node that frees no memory where it runs moved to just
+    before its first successor. A greedy order such as lpmf can schedule a node
+    early because it allocates little (e.g. a small subgraph call whose inputs
+    are all graph inputs), and its outputs then stay alive until their consumer
+    runs; deferring the node shortens their lifetime. Moving a node later can
+    instead make it the last reader of an input and extend that input's
+    lifetime, so the result is only a candidate, kept if its estimate is lower.
+    """
+    pos = {node: i for i, node in enumerate(order)}
+    last_user: dict[SchedulerBuffer | FreeableInputBuffer, BaseSchedulerNode] = {}
+    for node in order:
+        for buf in node.mpi_node.pred_buffers:
+            last_user[buf] = node
+
+    def frees(node: BaseSchedulerNode) -> bool:
+        return any(
+            last_user[buf] is node
+            and buf.mpi_buffer.size_free > 0
+            and buf.get_name() not in graph_outputs
+            for buf in node.mpi_node.pred_buffers
+        )
+
+    def multi_outputs(node: BaseSchedulerNode) -> list[BaseSchedulerNode]:
+        if not any(
+            isinstance(b.node.layout, MultiOutputLayout) for b in node.get_outputs()
+        ):
+            return []
+        return sorted(node.mpi_node.succ_nodes, key=pos.__getitem__)
+
+    # A deferred node sorts just before the successor it lands in front of (one
+    # level lower), and deferred nodes keep their relative order. A multi-output
+    # node's MultiOutputs stay right after it: its tuple keeps every output
+    # alive until the last of them reads it, which the estimate doesn't model.
+    key: dict[BaseSchedulerNode, tuple[int, int, int, int]] = {}
+    for node in reversed(order):
+        succs = [key[succ] for succ in node.mpi_node.succ_nodes]
+        if succs and not frees(node):
+            succ_pos, level, _, _ = min(succs)
+            key[node] = (succ_pos, level - 1, pos[node], 0)
+        else:
+            key[node] = (pos[node], 0, pos[node], 0)
+        for i, part in enumerate(multi_outputs(node), 1):
+            key[part] = (*key[node][:3], i)
+    return sorted(order, key=key.__getitem__)
+
+
+def topological_sort_lpmf_sink(
+    nodes: list[BaseSchedulerNode],
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
+    name_to_buf: dict[str, SchedulerBuffer],
+    graph_outputs: OrderedSet[str],
+) -> list[BaseSchedulerNode]:
+    """topological_sort_lpmf, then sink_nodes_that_free_nothing."""
+    order = topological_sort_lpmf(
+        nodes, name_to_freeable_input_buf, name_to_buf, graph_outputs
+    )
+    return sink_nodes_that_free_nothing(order, graph_outputs)
+
+
 def reorder_for_peak_memory(
     nodes: list[BaseSchedulerNode],
     name_to_buf: dict[str, SchedulerBuffer],
@@ -1053,6 +1115,7 @@ def reorder_for_peak_memory(
         topological_sort_lpmf,
         topological_sort_bfs,
         topological_sort_dfs,
+        topological_sort_lpmf_sink,
     ],
 ) -> list[BaseSchedulerNode]:
     """
@@ -1099,7 +1162,7 @@ def reorder_for_peak_memory(
     # other methods
     for method in methods:
         try:
-            if method is topological_sort_lpmf:
+            if method in (topological_sort_lpmf, topological_sort_lpmf_sink):
                 order = method(
                     nodes, name_to_freeable_input_buf, name_to_buf, graph_outputs
                 )
