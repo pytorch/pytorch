@@ -4,11 +4,12 @@
 import gc
 import importlib.util
 import logging
+import os
 import subprocess
 import sys
 import unittest
 from dataclasses import dataclass
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import torch
 import torch.distributed as dist
@@ -1965,6 +1966,170 @@ class TokenSwitchCompileTest(MultiProcContinuousTest):
             del graph
             gc.collect()
             switch.close()
+
+
+def _quantized_rows(rank):
+    # Exact FP8 mantissas 1..8 and a per-row E8M0 exponent make each
+    # (payload byte, scale byte) pair unique per source row.
+    row = torch.arange(16, device="cuda")
+    payload = (row % 8 + 1).float()[:, None].expand(16, 512).to(torch.float8_e4m3fn)
+    scales = (127 + 2 * rank + row // 8).to(torch.uint8)[:, None].expand(16, 16)
+    return payload, scales.contiguous()
+
+
+def _row_keys(payload, scales):
+    keys = scales[:, 0].int() * 256 + payload.view(torch.uint8)[:, 0].int()
+    return keys[keys != 0].sort().values
+
+
+@requires_nccl_ep()
+class TokenSwitchMXFP8Test(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    def _switch(self, flow):
+        torch.cuda.set_device(self.rank)
+        switch = TokenSwitchNCCL(
+            dist.distributed_c10d._get_default_group(),
+            self.world_size,
+            16,
+            self.world_size * 16,
+            1024,
+            ht_flow=flow,
+        )
+        self.addCleanup(switch.close)
+        return switch
+
+    @skip_if_lt_x_gpu(2)
+    def test_quantized_fullgraph_changing_routes(self):
+        # The explicit SDK flow must override the environment's incompatible flow.
+        with patch.dict(os.environ, {"NCCL_EP_HT_PULL_PUSH": "1"}):
+            switch = self._switch("push_pull")
+        capacity = self.world_size * 16
+        ids = torch.full((16, 1), self.rank, device="cuda", dtype=torch.int32)
+        counts = torch.zeros(1, device="cuda", dtype=torch.int32)
+        routing = switch.create_routing(
+            ids, counts, layout="expert_major", alignment=32
+        )
+        payload, scales = _quantized_rows(self.rank)
+        weights = torch.arange(16, device="cuda", dtype=torch.float32).reshape(16, 1)
+        weights = weights / 1000 + self.rank / 17
+        initial_work_count = torch._C._distributed_c10d._get_work_registry_size()
+
+        def decode(data, scale):
+            factors = torch.exp2(scale.float() - 127).repeat_interleave(32, dim=1)
+            return (data.float() * factors).bfloat16()
+
+        expected = decode(payload, scales)
+
+        def protocol(payload, scales, weights, ids):
+            updated = switch.update_routing(routing, ids, counts)
+            received, scores, _, received_scales = switch.dispatch_quantized(
+                updated, payload, scales, weights, capacity
+            )
+            decoded = decode(received, received_scales)
+            combined = switch.combine_quantized(updated, decoded)
+            grad_data, grad_scales = switch.dispatch_backward_quantized(
+                updated, payload, scales, capacity
+            )
+            token_grads, score_grads = switch.combine_backward_quantized(
+                updated, decode(grad_data, grad_scales), scores
+            )
+            return (
+                combined,
+                token_grads,
+                score_grads,
+                decoded,
+                received,
+                received_scales,
+                grad_data,
+                grad_scales,
+            )
+
+        compiled = torch.compile(protocol, fullgraph=True)
+        warmup = torch.cuda.Stream()
+        warmup.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(warmup):
+            for _ in range(3):
+                compiled(payload, scales, weights, ids)
+        torch.cuda.current_stream().wait_stream(warmup)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            outputs = compiled(payload, scales, weights, ids)
+        for phase in range(self.world_size + 2):
+            destination = (
+                phase % self.world_size
+                if phase % 2
+                else (self.rank + phase) % self.world_size
+            )
+            ids.fill_(destination)
+            graph.replay()
+            (
+                combined,
+                token_grads,
+                score_grads,
+                decoded,
+                received,
+                received_scales,
+                grad_data,
+                grad_scales,
+            ) = outputs
+            torch.testing.assert_close(combined, expected, rtol=0, atol=0)
+            torch.testing.assert_close(token_grads, expected, rtol=0, atol=0)
+            torch.testing.assert_close(score_grads, weights, rtol=0, atol=0)
+            torch.testing.assert_close(
+                received.view(torch.uint8), grad_data.view(torch.uint8), rtol=0, atol=0
+            )
+            torch.testing.assert_close(received_scales, grad_scales, rtol=0, atol=0)
+            sources = [
+                source
+                for source in range(self.world_size)
+                if (
+                    phase % self.world_size
+                    if phase % 2
+                    else (source + phase) % self.world_size
+                )
+                == self.rank
+            ]
+            empty = torch.empty(0, dtype=torch.int32, device="cuda")
+            source_keys = [_row_keys(*_quantized_rows(source)) for source in sources]
+            expected_keys = torch.cat([empty, *source_keys])
+            self.assertEqual(
+                _row_keys(received, received_scales), expected_keys.sort().values
+            )
+            self.assertEqual(
+                decoded.float().sum(),
+                sum(
+                    decode(*_quantized_rows(source)).float().sum() for source in sources
+                ),
+                rtol=0,
+                atol=0,
+            )
+        self.assertEqual(
+            torch._C._distributed_c10d._get_work_registry_size(), initial_work_count
+        )
+        del graph
+        gc.collect()
+
+    @skip_if_lt_x_gpu(2)
+    def test_pull_push_rejects_mxfp8_combine(self):
+        switch = self._switch("pull_push")
+        ids = torch.full((16, 1), self.rank, device="cuda", dtype=torch.int64)
+        counts = torch.zeros(1, device="cuda", dtype=torch.int32)
+        routing = switch.create_routing(
+            ids, counts, layout="expert_major", alignment=32
+        )
+        expert_tokens = torch.zeros(
+            self.world_size * 16, 512, device="cuda", dtype=torch.bfloat16
+        )
+        # The library reports only a generic status; the BF16 combine on the same
+        # inputs is the control showing that only the MXFP8 recipe is rejected.
+        switch.combine(routing, expert_tokens)
+        with self.assertRaisesRegex(RuntimeError, "invalid argument"):
+            switch.combine_quantized(routing, expert_tokens)
 
 
 if __name__ == "__main__":
