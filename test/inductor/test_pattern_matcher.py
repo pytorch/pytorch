@@ -15,6 +15,7 @@ from torch._dynamo.source import ConstantSource
 from torch._dynamo.utils import count_calls, counters, detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._inductor import metrics
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.fx_passes.replace_random import replace_random_passes
 from torch._inductor.fx_utils import get_node_storage
@@ -1428,6 +1429,90 @@ class TestPatternMatcher(TestCase):
         self.assertNotIn(".sqrt(", code)
         self.assertEqual(result, fn(x))
         self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+    def test_one_hot_sum(self):
+        # sum(where(selector == arange(C), val, 0), 1, keepdim=True) folds into the
+        # selected term (no reduction) only for an integer selector, a zero
+        # background, an arange from 0 and keepdim=True.
+        def one_hot_sum(selector, val, start=0, background=0.0, keepdim=True):
+            classes = torch.arange(start, start + 1000, device=selector.device)
+            one_hot = torch.where(
+                selector[:, None] == classes, val[:, None], background
+            )
+            return one_hot.sum(1, keepdim=keepdim)
+
+        labels = torch.randint(-1, 1001, (64,), device=GPU_TYPE)
+        val = torch.randn(64, device=GPU_TYPE)
+        for kwargs, selector, folds in [
+            ({}, labels, True),
+            ({}, labels.int(), True),
+            ({}, labels.float() + 0.5, False),
+            ({"background": 1.0}, labels, False),
+            ({"keepdim": False}, labels, False),
+            ({"start": 1}, labels, False),
+        ]:
+            torch._dynamo.reset()
+
+            def fn(selector, val, kwargs=kwargs):
+                return one_hot_sum(selector, val, **kwargs)
+
+            result, (code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), selector, val
+            )
+            self.assertEqual(result, fn(selector, val))
+            # triton_heuristics.reduction( or .persistent_reduction(
+            self.assertEqual("reduction(" not in code, folds, msg=str(kwargs))
+
+        # A 0-dim where summed with keepdim=True is not a one-hot sum.
+        def scalar_sum(a, b, x):
+            return torch.where(a == b, x, 0.0).sum(0, keepdim=True)
+
+        a, b = torch.tensor(1, device=GPU_TYPE), torch.tensor(1, device=GPU_TYPE)
+        x = torch.tensor(2.0, device=GPU_TYPE)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(scalar_sum)(a, b, x), scalar_sum(a, b, x))
+
+        # Nor is an arange that only broadcasts to the summed dim.
+        def single_class(selector, val):
+            classes = torch.arange(1, device=selector.device)
+            return torch.where(selector == classes, val, 0.0).sum(0, keepdim=True)
+
+        selector = torch.zeros(1, 8, dtype=torch.int64, device=GPU_TYPE)
+        val = torch.randn(1, 8, device=GPU_TYPE)
+        torch._dynamo.reset()
+        self.assertEqual(
+            torch.compile(single_class)(selector, val), single_class(selector, val)
+        )
+
+        # Signed zeros, NaN and inf come out as from the sum (val == -0 gives
+        # the sum's +0). A low-precision val reaches the sum through an upcast,
+        # as in log_softmax_backward.
+        def upcast_sum(selector, val):
+            classes = torch.arange(1000, device=selector.device)
+            one_hot = torch.where(selector[:, None] == classes, val[:, None], 0.0)
+            return one_hot.float().sum(1, keepdim=True)
+
+        specials = torch.tensor(
+            [-0.0, 0.0, float("nan"), float("inf"), -float("inf"), 1.5, -0.0],
+            device=GPU_TYPE,
+        )
+        selector = torch.tensor([3, 3, 3, 3, 3, 3, -1], device=GPU_TYPE)
+        for val in (specials, specials.bfloat16()):
+            metrics.reset()
+            torch._dynamo.reset()
+            result, (code,) = run_and_get_code(torch.compile(upcast_sum), selector, val)
+            expected = upcast_sum(selector, val)
+            self.assertNotIn("reduction(", code)
+            self.assertEqual(metrics.num_matches_for_one_hot_sum, 1)
+            self.assertEqual(result, expected)
+            self.assertEqual(result.isnan(), expected.isnan())
+            self.assertEqual(result.signbit(), expected.signbit())
+
+        # config.optimize_one_hot_sum turns the rewrite off.
+        with inductor_config.patch(optimize_one_hot_sum=False):
+            torch._dynamo.reset()
+            _, (code,) = run_and_get_code(torch.compile(upcast_sum), selector, specials)
+            self.assertIn("reduction(", code)
 
     def test_splitwithsizes_cat(self):
         # Good case
