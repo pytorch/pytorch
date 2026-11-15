@@ -1,11 +1,18 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
+#include <string>
 #include <unordered_map>
+#include <utility>
 
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
@@ -263,6 +270,9 @@ class AOTInductorModelContainer {
     return pool_.get_stream_affinity_model_index(stream);
   }
 
+  // Callers can't capture this into a CUDA graph, e.g. with torch.cuda.graph,
+  // since checking out an instance may query events of earlier calls. Capture
+  // run_single_threaded() instead, or let run_with_lazy_cuda_graphs() capture.
   void run(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
@@ -273,52 +283,53 @@ class AOTInductorModelContainer {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    std::shared_lock model_lk(model_exec_mutex_);
-
-    auto& const_folded = active().fold_state;
-    if (const_folded == ConstantState::INITIALIZED) {
-      // Do NOT call get_available_model() before upgrading to exclusive lock.
-      // Holding a model across the upgrade causes a deadlock when another
-      // thread holds a shared lock and waits for the model.
-      model_lk.unlock();
-      std::unique_lock constants_folding_lk(model_exec_mutex_);
-      // Double locking to make sure constant folding is only ran once.
-      if (const_folded == ConstantState::INITIALIZED) {
-        auto* model = pool_.get_available_model();
-        try {
-          auto folded_const_map = model->run_const_fold(
-              stream, proxy_executor, /* initialization = */ true);
-          update_constant_buffer(
-              std::move(folded_const_map),
-              /* use_inactive = */ false,
-              /* validate_full_update = */ false);
-          const_folded = ConstantState::FOLDED;
-        } catch (...) {
-          pool_.return_model_to_available(model);
-          throw;
-        }
-        pool_.return_model_to_in_flight(model);
-      }
-      constants_folding_lk.unlock();
-      model_lk.lock();
-    } else {
-      AOTI_RUNTIME_CHECK(
-          const_folded == ConstantState::FOLDED,
-          "Unknown constant state: " + toStringConstantState(const_folded));
-    }
-
-    [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
-    auto* model = pool_.get_available_model(stream);
-
-    try {
-      model->run(input_handles, output_handles, stream, proxy_executor);
-    } catch (...) {
-      pool_.return_model_to_available(model);
-      throw;
-    }
-
-    pool_.return_model_to_in_flight(model);
+    run_on_available_model(
+        stream, proxy_executor, [&](AOTInductorModel* model) {
+          model->run(input_handles, output_handles, stream, proxy_executor);
+        });
   }
+
+#ifdef USE_CUDA
+  // Like run(), but runs the model as CUDA graphs; see
+  // AOTInductorModelContainerRunWithLazyCudaGraphs.
+  void run_with_lazy_cuda_graphs(
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor) {
+    AOTI_RUNTIME_CHECK(max_graphs_env_.error.empty(), max_graphs_env_.error);
+    // The checkout and its completion event can't be captured.
+    AOTI_RUNTIME_CHECK(
+        !is_stream_capturing(stream),
+        "run_with_lazy_cuda_graphs can't run inside a CUDA graph capture");
+    run_on_available_model(
+        stream, proxy_executor, [&](AOTInductorModel* model) {
+          // Set even if the call fails, as long as a graph was captured.
+          auto mark_captured = [&] {
+            if (model->has_cuda_graphs()) {
+              captured_cuda_graphs_ = true;
+            }
+          };
+          try {
+            model->run_with_lazy_cuda_graphs(
+                input_handles,
+                output_handles,
+                stream,
+                proxy_executor,
+                max_graphs_env_.value);
+          } catch (...) {
+            mark_captured();
+            throw;
+          }
+          mark_captured();
+        });
+  }
+#endif // USE_CUDA
 
   // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
   // environment :)
@@ -448,6 +459,9 @@ class AOTInductorModelContainer {
   }
 
   void update_constants_from_blob(const uint8_t* weight_blob_ptr) {
+    // Exclusive, so that no graph is captured between the check and the reload.
+    std::lock_guard unique_lk(model_exec_mutex_);
+    check_no_cuda_graphs();
     return pool_.primary_model().update_constants_from_blob(weight_blob_ptr);
   }
 
@@ -462,6 +476,8 @@ class AOTInductorModelContainer {
       // We would need to acquire a unique lock if we want to run constant
       // folding on the active buffer.
       std::unique_lock constants_folding_lk(model_exec_mutex_);
+      // Checked under the lock, which keeps graphs from being captured.
+      check_no_cuda_graphs();
       model = pool_.get_available_model();
       try {
         auto folded_const_map = model->run_const_fold(stream, proxy_executor);
@@ -654,6 +670,9 @@ class AOTInductorModelContainer {
       bool validate_full_update,
       bool user_managed = false,
       bool allow_h2d_copy = false) {
+    if (!use_inactive) {
+      check_no_cuda_graphs();
+    }
     auto& model = pool_.primary_model();
     if (validate_full_update) {
       assert_all_constants(constants_map);
@@ -922,6 +941,7 @@ class AOTInductorModelContainer {
 
   void swap_constant_buffer() {
     std::lock_guard unique_lk(model_exec_mutex_);
+    check_no_cuda_graphs();
 
     active_idx_ = 1 - active_idx_;
 
@@ -996,6 +1016,104 @@ class AOTInductorModelContainer {
     return buffers_[1 - active_idx_];
   }
 
+  // AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS, read once so every instance gets the
+  // same limit; a bad value fails run_with_lazy_cuda_graphs().
+  struct MaxGraphsEnv {
+    std::optional<int64_t> value;
+    std::string error;
+  };
+  static MaxGraphsEnv read_max_graphs_env() {
+    const char* env = std::getenv("AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS");
+    if (env == nullptr || env[0] == '\0') {
+      return {};
+    }
+    std::string value(env);
+    if (value.size() > 18 ||
+        !std::all_of(value.begin(), value.end(), [](unsigned char c) {
+          return std::isdigit(c);
+        })) {
+      return {
+          std::nullopt,
+          "AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS must be a non-negative integer, "
+          "got \"" +
+              value + "\""};
+    }
+    return {std::stoll(value), ""};
+  }
+  const MaxGraphsEnv max_graphs_env_ = read_max_graphs_env();
+
+  // Captured graphs keep reading the constants they were captured with.
+  void check_no_cuda_graphs() const {
+    AOTI_RUNTIME_CHECK(
+        !captured_cuda_graphs_,
+        "Can't change the active constants of a model that captured CUDA "
+        "graphs");
+  }
+  std::atomic<bool> captured_cuda_graphs_{false};
+
+  // Folds the active constants if their state is INITIALIZED (after the .so
+  // constants load, an update of the active buffer, or a swap to an updated
+  // buffer that wasn't folded), throws unless they are then FOLDED, and runs
+  // fn on a model instance checked out of the pool, holding model_exec_mutex_
+  // shared and the stream lock. fn must record the instance's run_finished_
+  // event after the work it enqueues, as AOTInductorModel::run() does: the
+  // pool reclaims an in-flight instance only through that event. If fn throws,
+  // the instance goes back to the pool without waiting for that work.
+  template <typename Fn>
+  void run_on_available_model(
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor,
+      Fn&& fn) {
+    std::shared_lock model_lk(model_exec_mutex_);
+
+    auto& const_folded = active().fold_state;
+    if (const_folded == ConstantState::INITIALIZED) {
+      // Do NOT call get_available_model() before upgrading to exclusive lock.
+      // Holding a model across the upgrade causes a deadlock when another
+      // thread holds a shared lock and waits for the model.
+      model_lk.unlock();
+      std::unique_lock constants_folding_lk(model_exec_mutex_);
+      // Double locking to make sure constant folding is only ran once.
+      if (const_folded == ConstantState::INITIALIZED) {
+        // A racing active update can pass its own check while a graph is
+        // captured; refolding would free the constants the graph reads.
+        check_no_cuda_graphs();
+        auto* model = pool_.get_available_model();
+        try {
+          auto folded_const_map = model->run_const_fold(
+              stream, proxy_executor, /* initialization = */ true);
+          update_constant_buffer(
+              std::move(folded_const_map),
+              /* use_inactive = */ false,
+              /* validate_full_update = */ false);
+          const_folded = ConstantState::FOLDED;
+        } catch (...) {
+          pool_.return_model_to_available(model);
+          throw;
+        }
+        pool_.return_model_to_in_flight(model);
+      }
+      constants_folding_lk.unlock();
+      model_lk.lock();
+    } else {
+      AOTI_RUNTIME_CHECK(
+          const_folded == ConstantState::FOLDED,
+          "Unknown constant state: " + toStringConstantState(const_folded));
+    }
+
+    [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
+    auto* model = pool_.get_available_model(stream);
+
+    try {
+      std::forward<Fn>(fn)(model);
+    } catch (...) {
+      pool_.return_model_to_available(model);
+      throw;
+    }
+
+    pool_.return_model_to_in_flight(model);
+  }
+
   // This mutex is used to protect execution of model.
   // We acquire the mutex in shared mode if we allow concurrent execution.
   // We acquire the mutex in unique mode when we want exclusive access of the
@@ -1006,9 +1124,9 @@ class AOTInductorModelContainer {
   // thread holding this mutex shared must not lock it again, and must not
   // block on work that needs another thread to take it: either deadlocks as
   // soon as a swap or fold is waiting. Waiting for threads that already hold
-  // it is fine. run() and the inactive-buffer branch of run_const_fold() rely
-  // on this when they block in pool_.get_available_model() for a model another
-  // holder has checked out.
+  // it is fine. run_on_available_model() and the inactive-buffer branch of
+  // run_const_fold() rely on this when they block in
+  // pool_.get_available_model() for a model another holder has checked out.
   WritePrioritySharedMutex model_exec_mutex_;
 };
 

@@ -3084,6 +3084,25 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         for ref_param, param in zip(ref_model.parameters(), model.parameters()):
             self.assertEqual(param.grad.to_local(), ref_param.grad)
 
+    @parametrize("hsdp", [False, True])
+    @parametrize("split_by", ["fp16_reduce", "force_sum"])
+    def test_singleton_split_divide_factor(self, split_by, hsdp):
+        # fp16 and forced-sum reductions split the divide factor into pre/post
+        # factors, so the singleton path must not divide by it again
+        model = nn.Linear(8, 4, bias=False, device=device)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        reduce_dtype = torch.float16 if split_by == "fp16_reduce" else None
+        mp_policy = MixedPrecisionPolicy(reduce_dtype=reduce_dtype)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+        model.set_gradient_divide_factor(4.0)
+        model.set_force_sum_reduction_for_comms(split_by == "force_sum")
+        inp = torch.ones(3, 8, device=device)
+        model(inp).sum().backward()
+        expected = torch.full_like(inp[:1].expand(4, -1), 3 / 4)
+        self.assertEqual(model.weight.grad.to_local(), expected)
+
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp
 
