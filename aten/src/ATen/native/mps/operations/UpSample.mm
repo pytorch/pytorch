@@ -139,6 +139,54 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
       njobs);
 }
 
+// Launch a (w, h, planes) grid over `owner`, the tensor each thread writes one
+// (y, x) of; the (n, c) planes that don't fit in the grid fold into per-thread loops.
+static void dispatch_plane_grid(const std::string& name,
+                                const Tensor& owner,
+                                const Tensor& a,
+                                const Tensor& b,
+                                const UpsampleParams<4>& params) {
+  const bool channels_last = owner.suggest_memory_format() == MemoryFormat::ChannelsLast;
+  const auto height = static_cast<NSUInteger>(owner.size(2));
+  const auto width = static_cast<NSUInteger>(owner.size(3));
+  const auto all_planes = static_cast<NSUInteger>(owner.size(0) * owner.size(1));
+  static const auto core_count = std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      const bool use_u32 = offsetsFitIn<int32_t>(a, b);
+      auto pso = lib.getPipelineStateForFunc(
+          fmt::format("upsample_{}_{}{}", name, scalarToMetalTypeString(a), mtlIdxSuffix(use_u32)));
+      const auto max_threads = [pso maxTotalThreadsPerThreadgroup];
+      const auto simd_width = [pso threadExecutionWidth];
+      // Grid threads before (n, c) planes fold into per-thread loops; fewer would starve the GPU.
+      const auto threads_in_flight = core_count * max_threads * PLANE_GRID_TGS_PER_CORE;
+      const auto planes =
+          std::min(all_planes, at::round_up(at::ceil_div(threads_in_flight, height * width), simd_width));
+      // channels_last keeps each simdgroup on adjacent channels (threads are numbered x-first), unless there are
+      // fewer planes than a simdgroup; then widen along x so threadgroups aren't just a handful of threads.
+      const auto tg_planes = std::min(planes, max_threads);
+      const auto cl_width = tg_planes < simd_width ? PLANE_GRID_MIN_TG_THREADS / tg_planes : 1;
+      const auto tg_width = std::min<NSUInteger>(width, channels_last ? cl_width : max_threads);
+      const auto threadgroup = MTLSizeMake(tg_width, 1, std::min(tg_planes, max_threads / tg_width));
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, a, b, params, c10::IntDivider<uint32_t>(owner.size(1)));
+      [encoder dispatchThreads:MTLSizeMake(width, height, planes) threadsPerThreadgroup:threadgroup];
+    }
+  });
+}
+
+static void upsample_nearest_out_template(const Tensor& input,
+                                          const Tensor& output,
+                                          std::initializer_list<std::optional<double>> scales,
+                                          const std::string& name) {
+  if (output.numel() == 0) {
+    return;
+  }
+  dispatch_plane_grid(name, output, input, output, UpsampleParams<4>(input, output, false, scales));
+}
+
 static void upsample_gather_backward_out_template(const Tensor& grad_input,
                                                   const Tensor& grad_output,
                                                   bool align_corners,
@@ -153,39 +201,14 @@ static void upsample_gather_backward_out_template(const Tensor& grad_input,
     return;
   }
   const UpsampleParams<4> params(grad_input, grad_output, align_corners, scales);
-  const bool channels_last = grad_input.suggest_memory_format() == MemoryFormat::ChannelsLast;
-  const auto height = static_cast<NSUInteger>(grad_input.size(2));
-  const auto width = static_cast<NSUInteger>(grad_input.size(3));
-  const auto all_planes = static_cast<NSUInteger>(grad_input.size(0) * grad_input.size(1));
-  static const auto core_count = std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
-  auto stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      const bool use_u32 = offsetsFitIn<int32_t>(grad_input, grad_output);
-      auto pso = lib.getPipelineStateForFunc(
-          fmt::format("upsample_{}_backward_{}{}", name, scalarToMetalTypeString(grad_input), mtlIdxSuffix(use_u32)));
-      const auto max_threads = [pso maxTotalThreadsPerThreadgroup];
-      const auto simd_width = [pso threadExecutionWidth];
-      // Grid threads before (n, c) planes fold into per-thread loops; fewer would starve the GPU.
-      const auto threads_in_flight = core_count * max_threads * GATHER_BACKWARD_TGS_PER_CORE;
-      const auto planes =
-          std::min(all_planes, at::round_up(at::ceil_div(threads_in_flight, height * width), simd_width));
-      const auto tg_width = std::min(width, max_threads);
-      const auto threadgroup = channels_last ? MTLSizeMake(1, 1, std::min(planes, max_threads))
-                                             : MTLSizeMake(tg_width, 1, std::min(planes, max_threads / tg_width));
-      auto encoder = stream->commandEncoder();
-      [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, grad_input, grad_output, params);
-      [encoder dispatchThreads:MTLSizeMake(width, height, planes) threadsPerThreadgroup:threadgroup];
-    }
-  });
+  dispatch_plane_grid(name + "_backward", grad_input, grad_input, grad_output, params);
 }
 
 } // anonymous namespace
 
 TORCH_IMPL_FUNC(upsample_nearest1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, std::optional<double> scale, const Tensor& output) {
-  upsample_kernel_out_template<3>(input, output_size, false, {scale}, output, "nearest1d");
+  upsample_nearest_out_template(input.unsqueeze(2), output.unsqueeze(2), {scale, std::nullopt}, "nearest2d");
 }
 
 TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_mps)
@@ -200,7 +223,7 @@ TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_mps)
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, std::optional<double> scale, const Tensor& output) {
-  upsample_kernel_out_template<3>(input, output_size, false, {scale}, output, "nearest_exact1d");
+  upsample_nearest_out_template(input.unsqueeze(2), output.unsqueeze(2), {scale, std::nullopt}, "nearest_exact2d");
 }
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact1d_backward_out_mps)
@@ -219,7 +242,7 @@ TORCH_IMPL_FUNC(upsample_nearest2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  upsample_kernel_out_template<4>(input, output_size, false, {scales_w, scales_h}, output, "nearest2d");
+  upsample_nearest_out_template(input, output, {scales_w, scales_h}, "nearest2d");
 }
 
 TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_mps)
@@ -238,7 +261,7 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  upsample_kernel_out_template<4>(input, output_size, false, {scales_w, scales_h}, output, "nearest_exact2d");
+  upsample_nearest_out_template(input, output, {scales_w, scales_h}, "nearest_exact2d");
 }
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)

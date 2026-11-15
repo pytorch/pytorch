@@ -540,72 +540,6 @@ kernel void upsample_bilinear2d(
   }
 }
 
-// Nearest source index: floor(scale * dst) for nearest, floor(scale * (dst +
-// 0.5)) for nearest-exact. scale is the input/output ratio, so truncation
-// (== floor for the non-negative product) matches the CPU reference. Computing
-// this directly in Metal (built with -fno-fast-math) is bit-stable across macOS
-// versions, unlike the MPSGraph resize which mis-rounds exact boundaries on
-// macOS 14.
-template <bool exact>
-inline long nearest_src_index(float scale, uint dst) {
-  return static_cast<long>(exact ? scale * (dst + 0.5f) : scale * dst);
-}
-
-template <typename T, bool exact>
-kernel void upsample_nearest1d(
-    device const T* inputData [[buffer(0)]],
-    device T* outputData [[buffer(1)]],
-    constant UpsampleParams<3>& params [[buffer(2)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  const auto input_strides = to_vec(params.input_strides);
-  const auto output_strides = to_vec(params.output_strides);
-  const auto input_sizes = to_vec(params.input_sizes);
-  const auto output_sizes = to_vec(params.output_sizes);
-  const float2 scales = float2(params.scales[0], 0.0f);
-  const auto output_x = thread_index;
-  const auto src_x = nearest_src_index<exact>(scales.x, output_x);
-  for (int n = 0; n < output_sizes.x; n++) {
-    for (int c = 0; c < output_sizes.y; c++) {
-      upsample_set_value(
-          outputData,
-          output_strides,
-          long3(n, c, output_x),
-          upsample_get_value_bounded<T>(
-              inputData, input_sizes, input_strides, long3(n, c, src_x)));
-    }
-  }
-}
-
-template <typename T, bool exact>
-kernel void upsample_nearest2d(
-    device const T* inputData [[buffer(0)]],
-    device T* outputData [[buffer(1)]],
-    constant UpsampleParams<4>& params [[buffer(2)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  const auto input_strides = to_vec(params.input_strides);
-  const auto output_strides = to_vec(params.output_strides);
-  const auto input_sizes = to_vec(params.input_sizes);
-  const auto output_sizes = to_vec(params.output_sizes);
-  const float2 scales = float2(params.scales[0], params.scales[1]);
-  const auto output_x = thread_index % static_cast<uint>(output_sizes.w);
-  const auto output_y = thread_index / static_cast<uint>(output_sizes.w);
-  const auto src_x = nearest_src_index<exact>(scales.x, output_x);
-  const auto src_y = nearest_src_index<exact>(scales.y, output_y);
-  for (int n = 0; n < output_sizes.x; n++) {
-    for (int c = 0; c < output_sizes.y; c++) {
-      upsample_set_value(
-          outputData,
-          output_strides,
-          long4(n, c, output_y, output_x),
-          upsample_get_value_bounded<T>(
-              inputData,
-              input_sizes,
-              input_strides,
-              long4(n, c, src_y, src_x)));
-    }
-  }
-}
-
 // The forward reads landing on an input index: their output run [lo, hi) and
 // tap weights. The first and last rows also take the reads clamped onto them.
 struct LinearSource {
@@ -648,8 +582,11 @@ template <bool exact>
 struct NearestSource {
   float scale;
   NearestSource(float scale_, bool) : scale(scale_) {}
-  // nearest_src_index with a 32-bit result; 64-bit conversions dominate the
-  // run search.
+  // floor(scale * dst) for nearest, floor(scale * (dst + 0.5)) for
+  // nearest-exact. scale is the input/output ratio, so truncation (== floor for
+  // the non-negative product) matches the CPU reference. Computing this in
+  // Metal (built with -fno-fast-math) is bit-stable across macOS versions,
+  // unlike the MPSGraph resize which mis-rounds exact boundaries on macOS 14.
   inline int operator()(int dst) const {
     return static_cast<int>(exact ? scale * (dst + 0.5f) : scale * dst);
   }
@@ -673,6 +610,42 @@ struct NearestSource {
   }
 };
 
+// A thread owns one (y, x) of the output and strides over the (n, c) planes
+// left out of the grid, like upsample_gather_backward.
+template <typename T, bool exact, typename index_t>
+kernel void upsample_nearest2d(
+    device const T* inputData [[buffer(0)]],
+    device T* outputData [[buffer(1)]],
+    constant UpsampleParams<4>& params [[buffer(2)]],
+    constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]],
+    uint3 thread_index [[thread_position_in_grid]],
+    uint3 grid_size [[threads_per_grid]]) {
+  const auto input_strides = vec<index_t, 4>(to_vec(params.input_strides));
+  const auto output_strides = vec<index_t, 4>(to_vec(params.output_strides));
+  const ::c10::IntDivider<uint> channels = channels_div;
+  const auto planes =
+      static_cast<uint>(params.output_sizes[0]) * channels.divisor;
+  const NearestSource<exact> source_x(params.scales[0], false);
+  const NearestSource<exact> source_y(params.scales[1], false);
+  const int x = thread_index.x;
+  const int y = thread_index.y;
+  const auto src_x =
+      min(source_x(x), static_cast<int>(params.input_sizes[3]) - 1);
+  const auto src_y =
+      min(source_y(y), static_cast<int>(params.input_sizes[2]) - 1);
+  device const auto* input =
+      inputData + src_y * input_strides.z + src_x * input_strides.w;
+  device auto* output =
+      outputData + y * output_strides.z + x * output_strides.w;
+  for (auto plane = thread_index.z; plane < planes; plane += grid_size.z) {
+    const auto nc = channels.divmod(plane);
+    const auto n = nc.div;
+    const auto c = nc.mod;
+    output[n * output_strides.x + c * output_strides.y] =
+        input[n * input_strides.x + c * input_strides.y];
+  }
+}
+
 // A thread owns one (y, x) of grad_input, strides over the (n, c) planes left
 // out of the grid and sums the grad_output run that read each element in float.
 template <typename T, typename Source, typename index_t>
@@ -680,6 +653,7 @@ kernel void upsample_gather_backward(
     device T* gradInputData [[buffer(0)]],
     device const T* gradOutputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
+    constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]],
     uint3 thread_index [[thread_position_in_grid]],
     uint3 grid_size [[threads_per_grid]]) {
   const auto input_strides = vec<index_t, 4>(to_vec(params.input_strides));
@@ -688,8 +662,8 @@ kernel void upsample_gather_backward(
   const auto output_sizes = to_vec(params.output_sizes);
   const int input_x = thread_index.x;
   const int input_y = thread_index.y;
-  const auto channels = static_cast<uint>(input_sizes.y);
-  const auto planes = static_cast<uint>(input_sizes.x) * channels;
+  const ::c10::IntDivider<uint> channels = channels_div;
+  const auto planes = static_cast<uint>(input_sizes.x) * channels.divisor;
   const Source source_x(params.scales[0], params.align_corners);
   const Source source_y(params.scales[1], params.align_corners);
   const auto x_run = source_x.run(input_x, input_sizes.w, output_sizes.w);
@@ -697,8 +671,9 @@ kernel void upsample_gather_backward(
   device auto* grad_input =
       gradInputData + input_y * input_strides.z + input_x * input_strides.w;
   for (auto plane = thread_index.z; plane < planes; plane += grid_size.z) {
-    const auto n = plane / channels;
-    const auto c = plane - n * channels;
+    const auto nc = channels.divmod(plane);
+    const auto n = nc.div;
+    const auto c = nc.mod;
     device const auto* grad_output =
         gradOutputData + n * output_strides.x + c * output_strides.y;
     float res = 0;
@@ -1051,15 +1026,16 @@ kernel void upsample_backward(
   INSTANTIATE_UPSAMPLE_BACKWARD(                                          \
       NAME, 4, (upsample_2d_aa_backward_impl<DTYPE, FUNCTOR>), DTYPE, SERIAL)
 
-#define INSTANTIATE_UPSAMPLE_GATHER_BACKWARD_IDX(            \
-    NAME, SOURCE, DTYPE, IDX, SUFFIX)                        \
-  template [[host_name("upsample_" #NAME "_backward_" #DTYPE \
-                       "_" #SUFFIX)]] kernel void            \
-  upsample_gather_backward<DTYPE, SOURCE, IDX>(              \
-      device DTYPE * gradInputData [[buffer(0)]],            \
-      device const DTYPE* gradOutputData [[buffer(1)]],      \
-      constant UpsampleParams<4>& params [[buffer(2)]],      \
-      uint3 thread_index [[thread_position_in_grid]],        \
+#define INSTANTIATE_UPSAMPLE_GATHER_BACKWARD_IDX(                   \
+    NAME, SOURCE, DTYPE, IDX, SUFFIX)                               \
+  template [[host_name("upsample_" #NAME "_backward_" #DTYPE        \
+                       "_" #SUFFIX)]] kernel void                   \
+  upsample_gather_backward<DTYPE, SOURCE, IDX>(                     \
+      device DTYPE * gradInputData [[buffer(0)]],                   \
+      device const DTYPE* gradOutputData [[buffer(1)]],             \
+      constant UpsampleParams<4>& params [[buffer(2)]],             \
+      constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]], \
+      uint3 thread_index [[thread_position_in_grid]],               \
       uint3 grid_size [[threads_per_grid]])
 
 #define INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(NAME, SOURCE, DTYPE)          \
@@ -1078,27 +1054,21 @@ kernel void upsample_backward(
       constant UpsampleParams<3>& params [[buffer(2)]],           \
       uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_UPSAMPLE_NEAREST_1D(NAME, EXACT, DTYPE)        \
-  template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
-  upsample_nearest1d<DTYPE, EXACT>(                                \
-      device const DTYPE* inputData [[buffer(0)]],                 \
-      device DTYPE* outputData [[buffer(1)]],                      \
-      constant UpsampleParams<3>& params [[buffer(2)]],            \
-      uint thread_index [[thread_position_in_grid]])
+#define INSTANTIATE_UPSAMPLE_NEAREST_IDX(NAME, EXACT, DTYPE, IDX, SUFFIX) \
+  template [[host_name("upsample_" #NAME "_" #DTYPE "_" #SUFFIX)]]        \
+  kernel void upsample_nearest2d<DTYPE, EXACT, IDX>(                      \
+      device const DTYPE* inputData [[buffer(0)]],                        \
+      device DTYPE* outputData [[buffer(1)]],                             \
+      constant UpsampleParams<4>& params [[buffer(2)]],                   \
+      constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]],       \
+      uint3 thread_index [[thread_position_in_grid]],                     \
+      uint3 grid_size [[threads_per_grid]])
 
-#define INSTANTIATE_UPSAMPLE_NEAREST_2D(NAME, EXACT, DTYPE)        \
-  template [[host_name("upsample_" #NAME "_" #DTYPE)]] kernel void \
-  upsample_nearest2d<DTYPE, EXACT>(                                \
-      device const DTYPE* inputData [[buffer(0)]],                 \
-      device DTYPE* outputData [[buffer(1)]],                      \
-      constant UpsampleParams<4>& params [[buffer(2)]],            \
-      uint thread_index [[thread_position_in_grid]])
-
-#define INSTANTIATE_UPSAMPLE_NEAREST(DTYPE)                      \
-  INSTANTIATE_UPSAMPLE_NEAREST_1D(nearest1d, false, DTYPE);      \
-  INSTANTIATE_UPSAMPLE_NEAREST_1D(nearest_exact1d, true, DTYPE); \
-  INSTANTIATE_UPSAMPLE_NEAREST_2D(nearest2d, false, DTYPE);      \
-  INSTANTIATE_UPSAMPLE_NEAREST_2D(nearest_exact2d, true, DTYPE)
+#define INSTANTIATE_UPSAMPLE_NEAREST(DTYPE)                                 \
+  INSTANTIATE_UPSAMPLE_NEAREST_IDX(nearest2d, false, DTYPE, int, u32);      \
+  INSTANTIATE_UPSAMPLE_NEAREST_IDX(nearest2d, false, DTYPE, long, u64);     \
+  INSTANTIATE_UPSAMPLE_NEAREST_IDX(nearest_exact2d, true, DTYPE, int, u32); \
+  INSTANTIATE_UPSAMPLE_NEAREST_IDX(nearest_exact2d, true, DTYPE, long, u64)
 
 #define INSTANTIATE_UPSAMPLE_3D(DTYPE)                                    \
   template [[host_name("upsample_nearest_3d_" #DTYPE)]] kernel void       \
@@ -1166,7 +1136,7 @@ INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(
     true);
 INSTANTIATE_UPSAMPLE_3D_BACKWARD(float, true);
 
-// Nearest 1d/2d forward is a pure gather, so cover every dtype the MPSGraph
+// Nearest forward is a pure gather, so cover every dtype the MPSGraph
 // path supported to avoid a coverage regression.
 INSTANTIATE_UPSAMPLE_NEAREST(float);
 INSTANTIATE_UPSAMPLE_NEAREST(half);
