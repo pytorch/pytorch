@@ -14,6 +14,7 @@ from torch._higher_order_ops.map import _unstack_pytree
 from torch._subclasses import UnsupportedFakeTensorException
 from torch._subclasses.fake_tensor import (
     CppFakeTensorMode,
+    fake_mode_cls,
     FakeTensorMode,
     is_fake_tensor,
     maybe_get_fake_constant,
@@ -498,7 +499,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     raise AssertionError("Multiple fake tensor mode detected.")
                 fake_tensor_mode = maybe_get_fake_mode(i)
         if fake_tensor_mode is None:
-            self.tracer.fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
+            self.tracer.fake_tensor_mode = fake_mode_cls()(allow_non_fake_inputs=True)
             fake_tensor_mode = nullcontext()  # type: ignore[assignment]
             dispatcher_mode = nullcontext()  # type: ignore[assignment]
         else:

@@ -43,7 +43,12 @@ from torch._export.serde.serialize import (
 from torch._export.utils import wrap_method
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._library.opaque_object import get_opaque_type_name, register_custom_class
-from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    FakeTensorMode,
+    is_fake_tensor,
+    maybe_get_fake_mode,
+)
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ShapeEnv, ValueRanges
@@ -52,6 +57,7 @@ from torch.testing._internal.common_device_type import (
     skipMPSIf,
 )
 from torch.testing._internal.common_utils import (
+    fake_tensor_modes,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -1092,6 +1098,24 @@ class _DeserializeGraphMixin:
                 serialized_artifact, expected_opset_version={"aten": 0}
             )
             deserialized_ep.graph.eliminate_dead_code()
+            for graph in (ep.graph, deserialized_ep.graph):
+                fake_vals = [
+                    val
+                    for node in graph.nodes
+                    if is_fake_tensor(val := node.meta.get("val"))
+                ]
+                self.assertTrue(fake_vals)
+                expected_mode = (
+                    CppFakeTensorMode
+                    if torch._dynamo.config.use_cpp_fake_tensor
+                    else FakeTensorMode
+                )
+                self.assertTrue(
+                    all(
+                        isinstance(maybe_get_fake_mode(val), expected_mode)
+                        for val in fake_vals
+                    )
+                )
 
             orig_outputs = ep.module()(*_deepcopy_inputs(inputs))
             loaded_outputs = deserialized_ep.module()(*_deepcopy_inputs(inputs))
@@ -1167,7 +1191,8 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
         self.assertFalse(is_concrete_int(loaded_constant.shape[0]))
         self.assertEqual(loaded_constant.shape[1], 3)
 
-    def test_optional_tuple(self):
+    @fake_tensor_modes
+    def test_optional_tuple(self, mode_cls):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo",
@@ -1188,7 +1213,10 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
                 def forward(self, a, b, c):
                     return torch.ops.mylib.foo(a, b, c)
 
-            self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
+            with torch._dynamo.config.patch(
+                use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
+            ):
+                self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
 
     def test_list_of_int_and_float_lists_custom_op(self):
         # Example program: a custom op that takes List[List[int]] and
@@ -1433,7 +1461,8 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
         )
         self.check_graph(MyModule(), inputs)
 
-    def test_basic(self) -> None:
+    @fake_tensor_modes
+    def test_basic(self, mode_cls) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1445,9 +1474,13 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
                 return x, x.clone()
 
         inputs = (torch.ones([512], requires_grad=True),)
-        self.check_graph(MyModule(), inputs)
+        with torch._dynamo.config.patch(
+            use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
+        ):
+            self.check_graph(MyModule(), inputs)
 
-    def test_dynamic(self) -> None:
+    @fake_tensor_modes
+    def test_dynamic(self, mode_cls) -> None:
         class DynamicShapeSimpleModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1463,7 +1496,10 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
         inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
         dim0_ac = torch.export.Dim("dim0_ac")
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
-        self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
+        with torch._dynamo.config.patch(
+            use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
+        ):
+            self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
     def test_sym_bool(self):
         class Module(torch.nn.Module):

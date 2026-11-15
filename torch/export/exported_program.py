@@ -20,7 +20,7 @@ from torch._subclasses.fake_impls import (
     _is_op_registered_to_fake_rule,
     register_op_impl,
 )
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import fake_mode_cls
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -353,7 +353,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
 ):
     from torch._export.passes.lift_constants_pass import _materialize_and_lift_constants
     from torch._functorch.aot_autograd import aot_export_module
-    from torch._guards import require_python_fake_mode
     from torch.export._trace import (
         _disable_custom_triton_op_functional_decomposition,
         _export_to_aten_ir,
@@ -402,9 +401,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
         }
 
         # TODO T204030333
-        fake_mode = require_python_fake_mode(_detect_fake_mode_from_gm(ep.graph_module))
+        fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
-            fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
+            fake_mode = fake_mode_cls()(shape_env=ShapeEnv(), export=True)
 
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec

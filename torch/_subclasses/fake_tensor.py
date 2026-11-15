@@ -531,8 +531,12 @@ def maybe_set_fake_constant(x: Any, constant: Tensor) -> None:
         # Python wrapper subclasses also carry an outer constant attribute.
         x.constant = constant
     elif isinstance(fake_mode, CppFakeTensorMode):
+        real_constant = (
+            maybe_get_fake_constant(constant) if is_fake_tensor(constant) else constant
+        )
         maybe_clear_fake_constant(x)
-        torch._C._set_fake_constant(x, constant)
+        if real_constant is not None and not is_fake(real_constant):
+            torch._C._set_fake_constant(x, real_constant)
 
 
 def maybe_clear_fake_constant(x: object) -> None:
@@ -1059,12 +1063,13 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         allow_fallback_kernels: bool = True,
         allow_non_fake_inputs: bool = False,
         static_shapes: bool | None = None,
+        export: bool = False,
     ) -> None:
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         super().__init__(
-            FakeTensorConverter(copy_data=copy_data, cpp_fakes=True),
+            FakeTensorConverter(copy_data=copy_data, export=export, cpp_fakes=True),
             shape_env,
             creation_traceback=CapturedTraceback.extract(),
         )
@@ -4448,7 +4453,7 @@ def _set_cache_key(
 # Just for use to allow copying a module to fake tensors,
 # does not apply elsewhere
 class FakeCopyMode(TorchFunctionMode):
-    def __init__(self, fake_mode: FakeTensorMode) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
         self.fake_mode = fake_mode
 
     def __torch_function__(
@@ -4457,7 +4462,7 @@ class FakeCopyMode(TorchFunctionMode):
         types: Sequence[type],
         args: Sequence[object] = (),
         kwargs: Mapping[str, object] | None = None,
-    ) -> FakeTensor:
+    ) -> Tensor:
         kwargs = kwargs if kwargs else {}
 
         # clone will get called in Parameter deepcopy
@@ -4473,7 +4478,7 @@ class FakeCopyMode(TorchFunctionMode):
                     f"Expected 2 args and 0 kwargs for __deepcopy__, got {len(args)} args and {len(kwargs)} kwargs"
                 )
             tensor = cast(Tensor, args[0])
-            memo = cast(dict[int, FakeTensor], args[1])
+            memo = cast(dict[int, Tensor], args[1])
 
             if id(tensor) in memo:
                 return memo[id(tensor)]
