@@ -1067,6 +1067,8 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("b_row_major", [False, True])
     @parametrize("max_autotune", [False, True])
     def test_grouped_gemm_compiled(self, device, op, a_row_major, b_row_major, max_autotune):
+        if max_autotune and torch.device(device).type == "xpu":
+            self.skipTest("XPU has no Triton grouped_mm template, only the ATEN kernel")
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
 
@@ -1082,8 +1084,6 @@ class TestMatmulCuda(InductorTestCase):
                     "max_autotune_gemm_backends": "TRITON",
                 }
             )
-            if torch.device(device).type == "xpu":
-                options["max_autotune_gemm_backends"] = "ATEN"
         f = torch.compile(
             f_ref,
             options=options,

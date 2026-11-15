@@ -50,9 +50,9 @@ inline bool check_valid_strides_and_return_transposed(const Tensor& mat) {
 }
 
 // Whether the grouped-gemm output has its last-dim stride padded to 16 bytes.
-// CUDA needs this for TMA stores; the CPU fallback and MPS share the layout so
-// eager / meta / inductor agree within one build. Backends whose kernels take
-// plain contiguous outputs (ROCm CK, XPU oneDNN) opt out.
+// CUDA needs this for TMA stores; the CPU fallback and MPS use the same layout.
+// Backends whose kernels take plain contiguous outputs (ROCm CK, XPU oneDNN)
+// opt out.
 inline bool grouped_mm_output_is_tma_padded(const Tensor& mat) {
   return !mat.is_xpu() && !at::Context::hasROCM();
 }
