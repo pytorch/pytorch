@@ -57,6 +57,7 @@ from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -4408,6 +4409,8 @@ class TestOpaqueGenerator(TestCase):
 
 class TestOpaqueGeneratorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(TestCase.setUp)
+    setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
 
     @onlyAccelerator
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5200")
