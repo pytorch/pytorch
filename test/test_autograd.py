@@ -12,6 +12,7 @@ import operator
 import os
 import pickle
 import random
+import re
 import subprocess
 import sys
 import tempfile
@@ -6331,6 +6332,56 @@ Done""",
                     out = MyFunc.apply(inp, inp, False)
                     out.backward()
             self.assertIn("MyFunc.apply", str(w[0].message))
+
+    def test_anomaly_detect_nan_reports_grad_metadata(self):
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.sum(0, keepdim=True).double(), inp.sum(0, keepdim=True)
+
+            @staticmethod
+            def backward(ctx, gO1, gO2):
+                gI = gO1.float().expand(10).clone()
+                gI[0] = float("nan")
+                return gI
+
+        inp = torch.rand(10, requires_grad=True)
+        out1, out2 = MyFunc.apply(inp)
+        msg = (
+            "Function 'MyFuncBackward' returned nan values in its 0th output.\n"
+            "  grad_outputs (inputs of the backward function): "
+            "[(shape=[1], dtype=Double, device=cpu), (shape=[1], dtype=Float, device=cpu)]\n"
+            "  grad_inputs (outputs of the backward function): "
+            "[(shape=[10], dtype=Float, device=cpu)]"
+        )
+        with self.assertRaisesRegex(RuntimeError, re.escape(msg)):
+            with detect_anomaly():
+                (out1.sum() + out2.sum()).backward()
+
+        # Undefined gradients are reported without dereferencing them
+        class MyFuncUndefined(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                ctx.set_materialize_grads(False)
+                return inp.sum(0, keepdim=True), inp.sum(0, keepdim=True)
+
+            @staticmethod
+            def backward(ctx, gO1, gO2):
+                gI = gO1.expand(10).clone()
+                gI[0] = float("nan")
+                return gI
+
+        inp = torch.rand(10, requires_grad=True)
+        out1, _ = MyFuncUndefined.apply(inp)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape(
+                "grad_outputs (inputs of the backward function): "
+                "[(shape=[1], dtype=Float, device=cpu), undefined]"
+            ),
+        ):
+            with detect_anomaly():
+                out1.sum().backward()
 
     def test_calculate_shape_util(self):
         out = torch.randn(10, 5, requires_grad=True)
