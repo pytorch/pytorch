@@ -70,6 +70,31 @@ pub fn tensor_key<'py>(
     ))
 }
 
+/// A number that changes when one of the tensors is another object, has its
+/// data somewhere else, or was written to in place: what a graph that has
+/// the contents of the tensors built into it is good for. None if one of
+/// them does not count its writes.
+#[pyfunction]
+pub fn tensor_stamp(tensors: &Bound<'_, PyList>) -> PyResult<Option<u64>> {
+    let api = capi::api()
+        .ok_or_else(|| PyRuntimeError::new_err("torch.cfg_compile is not initialized"))?;
+    let mut stamp: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |v: u64| stamp = (stamp ^ v).wrapping_mul(0x0000_0100_0000_01b3);
+    for tensor in tensors.iter() {
+        let mut info = TcfgTensorInfo::empty();
+        if unsafe { (api.tensor_info)(tensor.as_ptr(), &mut info) } == 0 {
+            return Err(PyTypeError::new_err("tensor_stamp takes plain tensors"));
+        }
+        if info.version == capi::TCFG_NO_VERSION {
+            return Ok(None);
+        }
+        mix(tensor.as_ptr() as u64);
+        mix(info.data as u64);
+        mix(info.version);
+    }
+    Ok(Some(stamp))
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Binary {
     Add,

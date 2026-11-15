@@ -71,7 +71,14 @@ import torch
 from . import _regions, _shortcuts
 
 
-__all__ = ["Pipeline", "Unsupported", "cfg_compile", "is_available", "regions"]
+__all__ = [
+    "Pipeline",
+    "Unsupported",
+    "cfg_compile",
+    "is_available",
+    "memory",
+    "regions",
+]
 
 Pass = str | Callable[[Any], bool]
 
@@ -197,6 +204,8 @@ def cfg_compile(
     region_max_variants: int = 32,
     max_versions: int = 4,
     max_respecializations: int = 6,
+    keep_memory: bool | None = None,
+    freeze: bool | None = None,
 ) -> Any:
     """Compiles ``fn`` to an SSA control-flow graph that runs in the cfg VM.
 
@@ -271,6 +280,28 @@ def cfg_compile(
         max_versions: how many specialized versions a block can have at once.
         max_respecializations: how many times a block may be profiled and
             specialized again before it settles on code without guards.
+        keep_memory: give the function a workspace: the memory of the CPU
+            tensors its calls make stays with it when they are freed, and
+            the next call uses it again instead of having the system map and
+            fault in the same pages. It holds about as much as one call has
+            in use at its peak; what a few calls in a row did not ask for is
+            given back. ``torch.cfg_compile.memory(fn)`` reports it. On by
+            default (``TORCH_CFG_COMPILE_KEEP_MEMORY=0`` turns it off).
+        freeze: with ``backend="inductor"``, build the parameters and buffers
+            of the modules a region reads into its graph when the call is
+            one of inference (no gradients recorded, every module in eval
+            mode), so that Inductor folds what follows from them alone (a
+            batch norm into the convolution before it) and lays convolution
+            weights out for the kernels. Such a graph is checked on every
+            call: a tensor that was written to since (in place, through
+            ``.data``, by an optimizer) or replaced makes the region compile
+            again with that tensor as an input of the graph. Not built in:
+            a tensor the region itself writes, the matrix of a matrix
+            product or of an embedding lookup (nothing folds, and it would
+            be a second copy), and memory PyTorch does not see the writes
+            to (shared with another process, or a NumPy array's).
+            ``regions()`` reports ``frozen`` per region. On by default
+            (``TORCH_CFG_COMPILE_FREEZE=0`` turns it off).
 
     Returns:
         A callable with the signature of ``fn``. It has ``dump()``, returning
@@ -278,6 +309,10 @@ def cfg_compile(
     """
     if demote is None:
         demote = os.environ.get("TORCH_CFG_COMPILE_DEMOTE", "1") != "0"
+    if keep_memory is None:
+        keep_memory = os.environ.get("TORCH_CFG_COMPILE_KEEP_MEMORY", "1") != "0"
+    if freeze is None:
+        freeze = os.environ.get("TORCH_CFG_COMPILE_FREEZE", "1") != "0"
     options: dict[str, Any] = {
         "pipeline": pipeline,
         "fallback": fallback,
@@ -294,6 +329,8 @@ def cfg_compile(
         "region_max_variants": region_max_variants,
         "max_versions": max_versions,
         "max_respecializations": max_respecializations,
+        "keep_memory": keep_memory,
+        "freeze": freeze,
     }
     if fn is None:
         return functools.partial(cfg_compile, **options)
@@ -313,7 +350,7 @@ def cfg_compile(
         if not specialize:
             raise ValueError("backend= needs specialize=True: regions are a pass")
         regions = _regions.make_pass(
-            runtime, backend, region_min_ops, region_max_variants, warmup=0
+            runtime, backend, region_min_ops, region_max_variants, 0, freeze
         )
         # First, while the instructions are still the ones of the block.
         pipeline = Pipeline([regions, *pipeline.passes])
@@ -331,6 +368,7 @@ def cfg_compile(
             demote=demote,
             max_versions=max_versions,
             max_respecializations=max_respecializations,
+            workspace=torch._C._cfg_workspace() if keep_memory else None,
         )
         if regions is not None:
             _region_passes[compiled] = regions
@@ -357,14 +395,32 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     ``state`` (``"compiled"``, or ``"waiting"`` for a region that has not been
     tried yet), ``variants``, ``compiles`` (how many of the variants went to
     the backend: the others had the graph of an earlier one), ``open`` (per
-    variant that leaves sizes open, the conditions it holds under), ``ops``
-    and ``seconds`` spent tracing and compiling; and one per instruction or
+    variant that leaves sizes open, the conditions it holds under),
+    ``frozen`` (how many of the variants have the tensors of their modules
+    built in, see ``freeze``), ``ops`` and ``seconds`` spent tracing and
+    compiling; and one per instruction or
     run of instructions that was left to the VM, with ``state`` ``"vm"`` and
     the ``reason``.
     """
     fn = getattr(fn, "__func__", fn)
     found = _region_passes.get(fn)
     return found.report() if found is not None else []
+
+
+def memory(fn: Any) -> dict[str, int] | None:
+    """What a compiled function keeps of the memory of its calls.
+
+    With ``keep_memory`` a compiled function has a workspace: while it runs,
+    the CPU tensors that are made get their memory from it and give it back
+    to it, so that the next call finds blocks of the sizes it needs instead
+    of asking the system for pages again. Returns ``calls``, ``hits`` and
+    ``misses`` (blocks found in the workspace, and blocks malloc had to
+    make), and in bytes ``kept`` (held for the next call), ``live`` (held
+    by tensors now) and ``peak``; or None for a function without one.
+    """
+    fn = getattr(fn, "__func__", fn)
+    workspace = getattr(fn, "workspace", None)
+    return None if workspace is None else torch._C._cfg_workspace_stats(workspace)
 
 
 class _CallableModule(types.ModuleType):

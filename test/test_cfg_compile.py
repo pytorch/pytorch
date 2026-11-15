@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     slowTest,
+    TEST_NUMPY,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -4052,6 +4053,154 @@ class RegionRandom(torch.nn.Module):
         return self.inner(x) * random.random()
 
 
+class RegionCounted(torch.nn.Module):
+    # Counts its calls in a buffer, whatever mode it is in.
+    def __init__(self):
+        super().__init__()
+        self.inner = RegionNet()
+        self.register_buffer("calls", torch.zeros((), dtype=torch.long))
+
+    def forward(self, x):
+        self.calls.add_(1)
+        return self.inner(x) * self.calls
+
+
+class RegionAlike(torch.nn.Module):
+    # Layers that are built alike, with data deciding what comes between.
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([RegionNormed() for _ in range(3)])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+            if x.sum() > 1e6:
+                x = x / 2
+        return x
+
+
+class RegionNormed(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 3, 3, padding=1)
+        self.bn = torch.nn.BatchNorm2d(3)
+
+    def forward(self, x):
+        return torch.tanh(torch.relu(self.bn(self.conv(x))) + x)
+
+
+def temporaries(x, steps):
+    # Every step frees what the step before it made.
+    for _ in range(steps):
+        x = torch.tanh(x * 1.5 + 0.25)
+    return x
+
+
+@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
+class TestCfgWorkspace(TestCase):
+    """The memory a compiled function keeps from one call to the next."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_tensors_outside_a_call_are_left_to_malloc(self):
+        before = torch.randn(1 << 16)
+        workspace = torch._C._cfg_workspace()
+        if workspace is None:
+            self.skipTest("the process has a CPU allocator of its own")
+        after = torch.randn(1 << 16)
+        self.assertEqual(before.sum() + after.sum(), after.sum() + before.sum())
+        # Made before and after PyTorch's allocator was replaced: both are
+        # freed by the one that made them.
+        del before, after
+        nothing = dict.fromkeys(("calls", "hits", "misses", "kept", "live", "peak"), 0)
+        self.assertEqual(torch._C._cfg_workspace_stats(workspace), nothing)
+
+    def test_memory_of_a_call_serves_the_next(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        x = torch.randn(64, 1024)
+        for _ in range(4):
+            self.assertEqual(compiled(x, 6), temporaries(x, 6), atol=0, rtol=0)
+        before = torch.cfg_compile.memory(compiled)
+        self.assertEqual(before["live"], 0)
+        self.assertGreaterEqual(before["kept"], x.numel() * 4)
+        compiled(x, 6)
+        after = torch.cfg_compile.memory(compiled)
+        # Every tensor of the call found its memory in the workspace.
+        self.assertEqual(after["misses"], before["misses"])
+        self.assertGreaterEqual(after["hits"] - before["hits"], 6)
+        self.assertEqual(after["calls"], before["calls"] + 1)
+
+    def test_result_holds_its_memory(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        x = torch.randn(64, 1024)
+        expected = temporaries(x, 3)
+        kept = [compiled(x, 3) for _ in range(3)]
+        self.assertEqual(torch.cfg_compile.memory(compiled)["live"], 3 * x.numel() * 4)
+        # The function goes first: its results still own their memory.
+        del compiled
+        gc.collect()
+        for result in kept:
+            self.assertEqual(result, expected, atol=0, rtol=0)
+
+    def test_result_freed_on_another_thread(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        x = torch.randn(64, 1024)
+        kept = [compiled(x, 2)]
+        thread = threading.Thread(target=kept.clear)
+        thread.start()
+        thread.join()
+        memory = torch.cfg_compile.memory(compiled)
+        self.assertEqual(memory["live"], 0)
+        self.assertGreaterEqual(memory["kept"], x.numel() * 4)
+
+    def test_small_tensors_are_left_to_malloc(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        x = torch.randn(16)
+        for _ in range(3):
+            self.assertEqual(compiled(x, 6), temporaries(x, 6), atol=0, rtol=0)
+        memory = torch.cfg_compile.memory(compiled)
+        self.assertEqual((memory["hits"], memory["misses"]), (0, 0))
+
+    def test_memory_not_asked_for_is_given_back(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        large, small = torch.randn(256, 1024), torch.randn(16)
+        for _ in range(3):
+            compiled(large, 6)
+        self.assertGreaterEqual(
+            torch.cfg_compile.memory(compiled)["kept"], large.numel() * 4
+        )
+        for _ in range(6):
+            compiled(small, 6)
+        self.assertEqual(torch.cfg_compile.memory(compiled)["kept"], 0)
+
+    def test_without_a_workspace(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False, keep_memory=False)
+        x = torch.randn(64, 1024)
+        self.assertEqual(compiled(x, 6), temporaries(x, 6), atol=0, rtol=0)
+        self.assertIsNone(torch.cfg_compile.memory(compiled))
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCH_CFG_COMPILE_KEEP_MEMORY": "0"}
+        ):
+            compiled = torch.cfg_compile(temporaries, fallback=False)
+        self.assertIsNone(torch.cfg_compile.memory(compiled))
+
+    def test_compiled_function_called_by_another(self):
+        inner = torch.cfg_compile(temporaries, fallback=False)
+
+        def outer(x):
+            return inner(x, 3) + 1
+
+        compiled = torch.cfg_compile(outer, fallback=False, callees=False)
+        x = torch.randn(64, 1024)
+        for _ in range(4):
+            self.assertEqual(compiled(x), temporaries(x, 3) + 1, atol=0, rtol=0)
+        # Back in the outer function, its own workspace is the one in use.
+        self.assertGreater(torch.cfg_compile.memory(inner)["hits"], 0)
+        self.assertGreater(torch.cfg_compile.memory(compiled)["hits"], 0)
+        self.assertEqual(torch.cfg_compile.memory(compiled)["live"], 0)
+        self.assertEqual(torch.cfg_compile.memory(inner)["live"], 0)
+
+
 @unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
 class TestCfgRegions(TestCase):
     """Runs of a block compiled as one graph by ``backend=``."""
@@ -5092,6 +5241,228 @@ class TestCfgRegions(TestCase):
             runtime.ShapeGuard(numbers, offsets, [], [("slot", 99)])
         with self.assertRaises(ValueError):
             runtime.ShapeGuard(numbers, offsets, [], [("power", size, size)])
+
+    def test_stamp_of_tensors(self):
+        stamp = importlib.import_module("torch._cfg_rs").tensor_stamp
+        a, b = torch.nn.Parameter(torch.randn(3)), torch.randn(3)
+        first = stamp([a, b])
+        self.assertEqual(stamp([a, b]), first)
+        self.assertNotEqual(stamp([b, a]), first)
+        self.assertNotEqual(stamp([a, b.clone()]), first)
+        b.add_(1)
+        second = stamp([a, b])
+        self.assertNotEqual(second, first)
+        # Not an operation on the tensor: other memory.
+        a.data = torch.randn(3)
+        self.assertNotEqual(stamp([a, b]), second)
+        with torch.inference_mode():
+            unversioned = torch.randn(3)
+        self.assertIsNone(stamp([a, unversioned]))
+
+    def test_product_with_one_row_becomes_a_reduction(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        regions = torch.cfg_compile._regions
+        aten = torch.ops.aten
+        row, matrix, bias = torch.randn(1, 640), torch.randn(640, 512), torch.randn(512)
+
+        def products(row, matrix, bias):
+            wide = torch.addmm(bias, row, matrix)
+            return wide, torch.mm(row, matrix), torch.mm(matrix[:2], matrix.t()[:, :2])
+
+        graph = make_fx(products)(row, matrix, bias)
+        regions._rows_to_reductions(graph)
+        targets = [node.target for node in graph.graph.nodes]
+        # The product of two rows is left as it is.
+        self.assertEqual(targets.count(aten.mm.default), 1)
+        self.assertNotIn(aten.addmm.default, targets)
+        self.assertEqual(targets.count(aten.sum.dim_IntList), 2)
+        for got, expected in zip(graph(row, matrix, bias), products(row, matrix, bias)):
+            self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
+
+        # A matrix BLAS is through with before threads would pay.
+        small = make_fx(products)(row[:, :64], matrix[:64], bias)
+        regions._rows_to_reductions(small)
+        self.assertNotIn(aten.sum.dim_IntList, [n.target for n in small.graph.nodes])
+
+    def building_in(self):
+        """Has ``aot_eager`` regions build weights in, as Inductor ones do."""
+        regions = torch.cfg_compile._regions
+        return unittest.mock.patch.dict(
+            regions._BUILDS_IN, {regions._aot_eager: regions._aot_eager}
+        )
+
+    def test_weights_are_built_into_the_graph_of_an_inference_call(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with self.building_in():
+            with torch.no_grad():
+                for _ in range(6):
+                    self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+            (region,) = self.compiled_regions(compiled)
+            self.assertEqual((region["variants"], region["frozen"]), (1, 1))
+            # A call that records gradients, and one of a model in training,
+            # take the weights.
+            self.assertTrue(compiled(model, x).requires_grad)
+            with torch.no_grad():
+                model.train()
+                compiled(model, x)
+            (region,) = self.compiled_regions(compiled)
+            self.assertEqual((region["variants"], region["frozen"]), (3, 1))
+            off = torch.cfg_compile(
+                region_infer, backend="aot_eager", fallback=False, freeze=False
+            )
+            with torch.no_grad():
+                model.eval()
+                for _ in range(6):
+                    self.assertEqual(off(model, x), model(x), atol=0, rtol=0)
+            (region,) = self.compiled_regions(off)
+            self.assertEqual((region["variants"], region["frozen"]), (1, 0))
+
+    @parametrize("write", ("in_place", "data", "data_swap", "optimizer", "load"))
+    def test_write_to_a_built_in_weight_is_seen(self, write):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+
+        def change():
+            if write == "in_place":
+                with torch.no_grad():
+                    model.conv.weight.mul_(1.5)
+            elif write == "data":
+                model.bn.running_mean.data.add_(0.5)
+            elif write == "data_swap":
+                model.conv.bias.data = torch.randn(4)
+            elif write == "optimizer":
+                opt = torch.optim.SGD(model.parameters(), lr=0.5)
+                model(x).sum().backward()
+                opt.step()
+            else:
+                model.load_state_dict(RegionNet().state_dict())
+
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with self.building_in():
+            # Compiled again with what changed as an input: for "load", all.
+            for compiles in (1, 2, 2, 2):
+                with torch.no_grad():
+                    for _ in range(6):
+                        self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+                (region,) = self.compiled_regions(compiled)
+                frozen = 0 if write == "load" and compiles > 1 else 1
+                seen = (region["variants"], region["compiles"], region["frozen"])
+                self.assertEqual(seen, (1, compiles, frozen))
+                change()
+
+    def test_buffer_a_region_writes_is_not_built_in(self):
+        torch.manual_seed(0)
+        model = RegionCounted().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with self.building_in():
+            with torch.no_grad():
+                for _ in range(8):
+                    x = torch.randn(2, 3, 6, 6)
+                    reference = copy.deepcopy(model)
+                    self.assertEqual(compiled(model, x), reference(x), atol=0, rtol=0)
+                    self.assertEqual(model.calls, reference.calls)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
+
+    def test_weights_that_were_only_moved_stay_built_in(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with self.building_in(), torch.no_grad():
+            for i in range(12):
+                if i in (7, 9):
+                    # Asks for pointers one could write through.
+                    for tensor in model.state_dict().values():
+                        tensor.data_ptr()
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+            (region,) = self.compiled_regions(compiled)
+            self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
+            # Watched as before.
+            model.conv.weight.data.mul_(2)
+            self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+            (region,) = self.compiled_regions(compiled)
+            self.assertEqual((region["compiles"], region["frozen"]), (2, 1))
+
+    @unittest.skipUnless(TEST_NUMPY, "needs NumPy")
+    def test_memory_of_a_numpy_array_is_not_built_in(self):
+        import numpy as np
+
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        array = np.random.rand(4, 3, 3, 3).astype(np.float32)
+        model.conv.weight = torch.nn.Parameter(torch.from_numpy(array))
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with self.building_in(), torch.no_grad():
+            for i in range(10):
+                if i >= 6:
+                    # Nothing PyTorch has says that this happened.
+                    array *= 1.5
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
+
+    def test_matrix_of_a_product_stays_an_input(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        regions = torch.cfg_compile._regions
+
+        def uses(weight, bias, table, positions, scale, ids, x):
+            h = torch.nn.functional.linear(x, weight, bias)
+            h = h + torch.nn.functional.embedding(ids, table)
+            return h * scale + torch.nn.functional.embedding(positions, table)
+
+        example = (
+            torch.randn(8, 8),
+            torch.randn(8),
+            torch.randn(5, 8),
+            torch.arange(4),
+            torch.randn(1, 8),
+            torch.tensor([0, 1, 2, 3]),
+            torch.randn(4, 8),
+        )
+        graph = make_fx(uses)(*example)
+        worth = regions._worth_building_in
+        # The table is also looked up at built-in positions: that folds.
+        self.assertEqual(worth(graph, [0, 1, 2, 3, 4]), [1, 2, 3, 4])
+        self.assertEqual(worth(graph, [0, 1, 2, 4]), [1, 4])
+
+    def test_layers_built_alike_share_a_graph_that_takes_their_weights(self):
+        torch.manual_seed(0)
+        model = RegionAlike().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with self.building_in(), torch.no_grad():
+            for _ in range(8):
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        regions = self.compiled_regions(compiled)
+        self.assertEqual(sum(r["variants"] for r in regions), 3)
+        # One for the first layer, one for all that came after it.
+        self.assertEqual(sum(r["compiles"] for r in regions), 2)
+        self.assertEqual(sum(r["frozen"] for r in regions), 1)
+
+    @slowTest
+    def test_inductor_folds_built_in_weights(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.cfg_compile(region_infer, backend="inductor", fallback=False)
+        with torch.no_grad():
+            model.bn.running_mean.uniform_(-1, 1)
+            model.bn.running_var.uniform_(0.5, 2)
+            for i in range(12):
+                if i == 8:
+                    model.bn.weight.data.mul_(3)
+                x = torch.randn(2, 3, 6, 6)
+                self.assertEqual(compiled(model, x), model(x), atol=1e-5, rtol=1e-5)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual((region["variants"], region["frozen"]), (1, 1))
+        self.assertEqual(region["compiles"], 2)
 
     @slowTest
     def test_inductor(self):
