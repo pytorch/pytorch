@@ -102,6 +102,7 @@ from torch._dynamo.source import (
     is_from_local_source,
     is_from_optimizer_source,
     is_from_skip_guard_source,
+    is_from_source,
     is_from_unspecialized_builtin_nn_module_source,
     TensorProperty,
     TensorPropertySource,
@@ -3862,13 +3863,13 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
+    # Multi-source guard (two inputs aliasing) — not expressible as a
+    # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, values: values[0] is values[1],
         eval_fn=lambda values, expected: (values[0] is values[1]) == expected,
-        get_extra_sources_fn=lambda guard: (
-            _guard_create_fn_keyword(guard, "source_b"),
-        ),
+        get_extra_sources_fn=lambda g: (_guard_create_fn_keyword(g, "source_b"),),
     )
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
         if is_from_skip_guard_source(
@@ -7546,6 +7547,24 @@ def unique(seq: Sequence[T]) -> Generator[T, None, None]:
         if x not in seen:
             yield x
             seen.add(x)
+
+
+def record_lexical_alias(
+    reads: set[tuple[Source, int]], source: Source | None, canonical: Source | None
+) -> None:
+    if not reads or source is None or canonical is None or source == canonical:
+        return
+    scopes = {
+        scope
+        for read, scope in reads
+        if is_from_source(source, read) or is_from_source(canonical, read)
+    }
+    if scopes:
+        endpoints = (source, canonical)
+        reads.update((s, scope) for s in endpoints for scope in scopes)
+        # Mixed local/global aliases have no DUPLICATE_INPUT guard.
+        if is_from_local_source(source) != is_from_local_source(canonical):
+            install_guard(*(s.make_guard(GuardBuilder.ID_MATCH) for s in endpoints))
 
 
 def make_dupe_guard(
