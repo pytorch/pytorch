@@ -3075,6 +3075,25 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         self.assertEqual(torch.signbit(result.imag), torch.signbit(expected.imag))
         self.assertIn("complex(-0.0, -1e-28)", gm.code)
 
+    def test_pow_negative_literal_base_codegen(self):
+        # Issue #197894: negative literal base of pow must be parenthesized in generated code
+        # because ** has higher precedence than unary minus in Python.
+        for base, exp, expected in [
+            (-2, 2, 4),
+            (-2, 3, -8),
+            (-0.5, 2, 0.25),
+            (-1, 2, 1),
+            (-1, 3, -1),
+        ]:
+            g = torch.fx.Graph()
+            x = g.placeholder("x")
+            g.output(g.call_function(operator.pow, (base, x)))
+            gm = torch.fx.GraphModule(torch.nn.Module(), g)
+
+            self.assertIn(f"({base}) ** x", gm.code)
+            self.assertEqual(gm(exp), expected)
+            self.assertEqual(torch.fx.Interpreter(gm).run(exp), expected)
+
     def test_sequential(self):
         m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1))
         gm = torch.fx.symbolic_trace(m)

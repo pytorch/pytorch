@@ -911,9 +911,16 @@ class CodeGen:
                         raise AssertionError(
                             f"Expected node.args to be tuple, got {type(node.args)}"
                         )
+                    args_repr = [_get_repr(a) for a in node.args]
+                    if (
+                        node.target.__name__ == "pow"
+                        and len(args_repr) >= 1
+                        and args_repr[0].startswith("-")
+                    ):
+                        args_repr[0] = f"({args_repr[0]})"
                     body.append(
                         f"{repr(node)}{maybe_type_annotation} = "
-                        f"{magic_methods[node.target.__name__].format(*(_get_repr(a) for a in node.args))}"
+                        f"{magic_methods[node.target.__name__].format(*args_repr)}"
                     )
                     return
 
