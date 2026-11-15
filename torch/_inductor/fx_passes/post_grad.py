@@ -1874,6 +1874,16 @@ def remove_noop_ops(graph: torch.fx.Graph):
         for n in graph.find_nodes(op="call_function", target=target)
     )
 
+    # replace_all_uses_with does not update users' meta["val"], so a view of an
+    # erased copy still reports the copy's storage. Map each erased copy's
+    # storage to the storage that replaced it and compare resolved storages.
+    replaced_storages: dict[int | None, int | None] = {}
+
+    def resolve(storage: int | None) -> int | None:
+        while storage in replaced_storages:
+            storage = replaced_storages[storage]
+        return storage
+
     for node in graph.nodes:
         if node.target in noop_registry:
             cond, src_index = noop_registry[node.target]
@@ -1905,8 +1915,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
             # Don't introduce new aliasing between inputs and outputs.
             # See fx_passes/README.md for a discussion of why this is
             # necessary.
-            node_storage = get_node_storage(node)
-            src_storage = get_node_storage(src)
+            node_storage = resolve(get_node_storage(node))
+            src_storage = resolve(get_node_storage(src))
             node_is_view = node_storage == src_storage
             if (
                 not node_is_view
@@ -1925,7 +1935,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 continue
 
             # Keep a real copy of a storage that is mutated in this graph.
-            if not node_is_view and src_storage in mutated_storages:
+            if not node_is_view and any(
+                resolve(storage) == src_storage for storage in mutated_storages
+            ):
                 continue
 
             is_valid, args, kwargs = get_fake_args_kwargs(node)
@@ -1947,6 +1959,12 @@ def remove_noop_ops(graph: torch.fx.Graph):
             ):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
+                if not node_is_view and node_storage is not None:
+                    replaced_storages[node_storage] = src_storage
+                # src now backs an output, so a later copy of src into another
+                # output must stay a copy or both outputs become one tensor.
+                if node_storage in output_storages:
+                    output_storages.add(src_storage)
 
 
 # We can potentially generalize to arbitrary view ops by validating

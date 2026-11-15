@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
     from torch.types import IntLikeType
 
 
@@ -490,6 +490,18 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 class StorageOverlap(GuardEnvExpr):
     overlapping_sources: list[Source]
     non_overlapping_sources: list[Source]
+
+
+@dataclasses.dataclass(frozen=True)
+class StorageOverlapPartition(GuardEnvExpr):
+    input_sources: list[Source]
+    overlapping_indices: tuple[tuple[int, ...], ...]
+
+    def __post_init__(self) -> None:
+        if len(set(self.input_sources)) != len(self.input_sources):
+            raise AssertionError(
+                f"input_sources must be unique, got {self.input_sources}"
+            )
 
 
 """
@@ -1088,6 +1100,35 @@ class InlinedCodeCache:
     code_options: CodeOptions
 
 
+class _CurrentFrame:
+    """Context manager behind TracingContext.current_frame. Hand-written
+    rather than @contextmanager because it is entered on every inlined call
+    and generator resume."""
+
+    __slots__ = ("frame_summary", "old", "old_positions", "tc")
+
+    def __init__(self, frame_summary: traceback.FrameSummary | None) -> None:
+        self.frame_summary = frame_summary
+
+    def __enter__(self) -> None:
+        tc = self.tc = TracingContext.get()
+        if self.frame_summary is not None:
+            tc.frame_summary_stack.append(self.frame_summary)
+        self.old = tc.loc_in_frame
+        self.old_positions = tc.loc_in_frame_positions
+        tc.loc_in_frame = None
+        tc.loc_in_frame_positions = None
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        tc = self.tc
+        if isinstance(exc, Exception) and not hasattr(exc, "real_stack"):
+            exc.real_stack = tc.extract_stack()  # pyrefly: ignore [missing-attribute]
+        if self.frame_summary is not None:
+            tc.frame_summary_stack.pop()
+        tc.loc_in_frame = self.old
+        tc.loc_in_frame_positions = self.old_positions
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -1251,30 +1292,12 @@ class TracingContext:
                 raise
 
     @staticmethod
-    @contextlib.contextmanager
     def current_frame(
         frame_summary: traceback.FrameSummary | None,
-    ) -> Generator[None, None, None]:
+    ) -> _CurrentFrame:
         # frame_summary can be None to solely take advantage of real_stack
         # attachment to thrown exceptions
-        tc = TracingContext.get()
-        if frame_summary is not None:
-            tc.frame_summary_stack.append(frame_summary)
-        old = tc.loc_in_frame
-        old_positions = tc.loc_in_frame_positions
-        tc.loc_in_frame = None
-        tc.loc_in_frame_positions = None
-        try:
-            yield
-        except Exception as e:
-            if not hasattr(e, "real_stack"):
-                e.real_stack = tc.extract_stack()  # type: ignore[attr-defined]
-            raise
-        finally:
-            if frame_summary is not None:
-                tc.frame_summary_stack.pop()
-            tc.loc_in_frame = old
-            tc.loc_in_frame_positions = old_positions
+        return _CurrentFrame(frame_summary)
 
     @staticmethod
     @contextlib.contextmanager
@@ -1548,19 +1571,21 @@ class ChainedSource(Source):
         return result
 
 
-def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
+def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | CppFakeTensorMode | None:
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
     heuristically detect the fake mode via the following sources, in order of
     priority:
 
-        - Currently active fake mode on stack
+        - Currently active fake mode, Python or C++
         - Fake mode associated with passed in tensors (inputs does not
           have to be flattened)
+
+    The result can be a CppFakeTensorMode; see Note [Fake mode lookups and
+    CppFakeTensorMode] in torch/_subclasses/fake_tensor.py.
     """
     from torch._subclasses.fake_tensor import (
-        FakeTensorMode,
         get_plain_tensors,
         is_fake_tensor,
         maybe_get_fake_mode,
@@ -1576,11 +1601,8 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
 
     fake_modes = []
 
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
-
-    for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
-        if isinstance(m, FakeTensorMode):
-            fake_modes.append((m, "active fake mode", i))
+    if (m := active_fake_mode()) is not None:
+        fake_modes.append((m, "active fake mode", 0))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
@@ -1612,16 +1634,41 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         return None
 
 
-def active_fake_mode() -> FakeTensorMode | None:
+def active_fake_mode() -> FakeTensorMode | CppFakeTensorMode | None:
     """
-    Inspects the dispatch mode stack for an active fake mode and returns it.
-    Returns None if no fake mode is active.
+    Returns the active fake mode, or None if no fake mode is active. It can be
+    a CppFakeTensorMode; see Note [Fake mode lookups and CppFakeTensorMode] in
+    torch/_subclasses/fake_tensor.py.
     """
-    from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+    # A FakeTensorMode is an infra mode, so it can only be in the FAKE slot;
+    # _get_dispatch_mode(FAKE) falls back to an installed C++ mode's
+    # CppFakeTensorMode when that slot is empty.
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
 
-    for _, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
-        if isinstance(m, FakeTensorMode):
-            return m
 
-    return None
+def require_python_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode | None,
+    /,
+) -> FakeTensorMode | None:
+    """
+    Returns mode unchanged if it is a FakeTensorMode or None.
+
+    Use it on a fake mode that must be a Python FakeTensorMode, for example to
+    get Python FakeTensors from it or to pass it on to code typed for
+    FakeTensorMode: a result of detect_fake_mode, active_fake_mode or
+    maybe_get_fake_mode, or a mode the caller was given. Callers narrow the
+    lookups with it so that they keep getting a Python FakeTensorMode when a
+    lookup finds a C++ mode.
+
+    Raises:
+        RuntimeError: if mode is a CppFakeTensorMode, which does not have all of
+            FakeTensorMode's interface.
+    """
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+    if isinstance(mode, CppFakeTensorMode):
+        raise RuntimeError(
+            "This needs a Python torch._subclasses.fake_tensor.FakeTensorMode; "
+            "a CppFakeTensorMode is not supported here yet"
+        )
+    return mode
