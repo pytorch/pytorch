@@ -51,7 +51,7 @@ def _prepare_nccl_extensions() -> None:
     if cuda_version is None:
         raise ImportError("TokenSwitchNCCL requires a CUDA build of PyTorch.")
     cuda_major = cuda_version.split(".")[0]
-    lib = os.path.join(ep_dir, "lib", f"cu{cuda_major}", "libnccl_ep.so")
+    lib = os.path.join(ep_dir, "lib", f"cu{cuda_major}", "libnccl_ep.so.0")
     if not os.path.isfile(lib):
         raise ImportError(
             f"nccl-extensions is missing the CUDA {cuda_major} library at {lib}. "
@@ -77,9 +77,9 @@ def _prepare_nccl_extensions() -> None:
         ):
             os.environ.setdefault("NCCL_HOME", nvidia_nccl)
 
-    # nccl-extensions ships libnccl_ep unversioned (libnccl_ep.so) while the
-    # extension's NEEDED entry is its SONAME libnccl_ep.so.0; load it by path to
-    # register that SONAME for the import below.
+    # The extension's RPATH does not cover nccl-extensions' per-CUDA lib/cu<N>
+    # directory; load libnccl_ep by path to register its SONAME
+    # (libnccl_ep.so.0, the extension's NEEDED entry) for the import below.
     _NCCL_EP_KEEPALIVE.append(ctypes.CDLL(lib, mode=ctypes.RTLD_LOCAL))
 
 
@@ -394,6 +394,14 @@ class TokenSwitchNCCL(TokenSwitch):
             max_recv_tokens_per_rank,
             max_token_bytes,
         )
+
+    def close(self) -> None:
+        """Release EP resources before destroying the process group.
+
+        Tear down captured graphs first. Closing synchronizes the CUDA device,
+        invalidates routing handles, and is idempotent.
+        """
+        self._group.close()
 
     @property
     def max_recv_tokens_per_rank(self) -> int:

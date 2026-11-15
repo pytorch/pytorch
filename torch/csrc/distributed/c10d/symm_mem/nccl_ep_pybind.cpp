@@ -31,7 +31,13 @@ PYBIND11_MODULE(_nccl_ep, m) {
       .value("EXPERT_MAJOR", NcclEpLayout::ExpertMajor)
       .value("RANK_MAJOR", NcclEpLayout::RankMajor);
 
+  py::enum_<NcclEpHtFlow>(m, "HtFlow")
+      .value("AUTO", NcclEpHtFlow::Auto)
+      .value("PUSH_PULL", NcclEpHtFlow::PushPull)
+      .value("PULL_PUSH", NcclEpHtFlow::PullPush);
+
   py::class_<NcclEpGroup, c10::intrusive_ptr<NcclEpGroup>>(m, "_NcclEpGroup")
+      .def("close", &NcclEpGroup::close)
       .def_static(
           "create",
           &nccl_ep_create_group,
@@ -39,7 +45,8 @@ PYBIND11_MODULE(_nccl_ep, m) {
           py::arg("num_experts"),
           py::arg("max_dispatch_tokens_per_rank"),
           py::arg("max_recv_tokens_per_rank"),
-          py::arg("max_token_bytes"));
+          py::arg("max_token_bytes"),
+          py::arg("ht_flow") = NcclEpHtFlow::Auto);
 
   py::class_<NcclEpHandle, c10::intrusive_ptr<NcclEpHandle>>(m, "_NcclEpHandle")
       .def_static(
@@ -48,8 +55,14 @@ PYBIND11_MODULE(_nccl_ep, m) {
           py::arg("group"),
           py::arg("topk_idx"),
           py::arg("recv_expert_counter") = py::none(),
-          py::arg("layout"))
-      .def("get_num_recv_tokens", &nccl_ep_handle_get_num_recv_tokens);
+          py::arg("layout"),
+          py::arg("alignment") = 1)
+      .def("get_num_recv_tokens", &nccl_ep_handle_get_num_recv_tokens)
+      .def(
+          "update",
+          &nccl_ep_update_handle,
+          py::arg("topk_idx"),
+          py::arg("recv_expert_counter") = py::none());
 
   m.def(
       "_nccl_ep_dispatch",
@@ -59,21 +72,24 @@ PYBIND11_MODULE(_nccl_ep, m) {
       py::arg("topk_weights"),
       py::arg("out_tokens"),
       py::arg("out_topk_weights"),
-      py::arg("out_topk_idx"));
+      py::arg("out_topk_idx"),
+      py::arg("async_op") = false);
 
   m.def(
       "_nccl_ep_dispatch_backward",
       &nccl_ep_dispatch_backward,
       py::arg("handle"),
       py::arg("grad_tokens"),
-      py::arg("out_tokens"));
+      py::arg("out_tokens"),
+      py::arg("async_op") = false);
 
   m.def(
       "_nccl_ep_combine",
       &nccl_ep_combine,
       py::arg("handle"),
       py::arg("expert_tokens"),
-      py::arg("out_tokens"));
+      py::arg("out_tokens"),
+      py::arg("async_op") = false);
 
   m.def(
       "_nccl_ep_combine_backward",
@@ -82,5 +98,6 @@ PYBIND11_MODULE(_nccl_ep, m) {
       py::arg("grad_tokens"),
       py::arg("grad_topk_weights"),
       py::arg("out_tokens"),
-      py::arg("out_topk_weights"));
+      py::arg("out_topk_weights"),
+      py::arg("async_op") = false);
 }
