@@ -31,10 +31,10 @@ hit gmem.
 ``TopKSpec.to_ord`` collapses NaN where applicable, applies the dtype's narrow
 ordinal transform, complements that field for ``largest=False``, and
 left-aligns it in a signed int32. ``from_ord`` reverses the alignment,
-complement, and
-dtype transform. NaN collapse is not injective, so the caller recognizes the
-recovered sentinel and re-reads gmem. Phase 1's xor by ``_RADIX_SIGN_BIT`` is
-separate: it puts the top byte in unsigned bin order for the scan.
+complement, and dtype transform. NaN collapse is not injective, so the caller
+recognizes the recovered sentinel and re-reads gmem. Phase 1's xor by
+``_RADIX_SIGN_BIT`` is separate: it puts the top byte in unsigned bin order for
+the scan.
 
 ``_make_topk_storage`` unions ``s_hist``, the phase-2 counters, ``s_scan``
 and ``s_keys`` - they alias, each live only within its phase. The phase-2
