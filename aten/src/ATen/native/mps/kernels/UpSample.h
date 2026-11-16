@@ -7,13 +7,13 @@
 #include <optional>
 #endif
 
-// Full threadgroups per core before the nearest forward and gather backward
-// fold the remaining (n, c) planes into per-thread loops; measured knee on
-// M-series GPUs.
+// Full threadgroups per core before the plane-grid kernels (nearest/bilinear
+// forward, gather backward) fold the remaining (n, c) planes into per-thread
+// loops; measured knee on M-series GPUs.
 C10_METAL_CONSTEXPR uint32_t PLANE_GRID_TGS_PER_CORE = 16;
 // Target threadgroup size when a channels_last plane grid has fewer planes than
 // a simdgroup and widens along x.
-C10_METAL_CONSTEXPR uint32_t PLANE_GRID_MIN_TG_THREADS = 256;
+C10_METAL_CONSTEXPR uint32_t PLANE_GRID_TARGET_TG_THREADS = 256;
 
 template <unsigned N = 5>
 struct UpsampleParams {

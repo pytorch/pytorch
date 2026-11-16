@@ -486,60 +486,6 @@ kernel void upsample_linear1d(
     }
   }
 }
-template <typename T>
-kernel void upsample_bilinear2d(
-    device const T* inputData [[buffer(0)]],
-    device T* outputData [[buffer(1)]],
-    constant UpsampleParams<4>& params [[buffer(2)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  const auto input_strides = to_vec(params.input_strides);
-  const auto output_strides = to_vec(params.output_strides);
-  const auto input_sizes = to_vec(params.input_sizes);
-  const auto output_sizes = to_vec(params.output_sizes);
-  const float2 scales = float2(params.scales[0], params.scales[1]);
-  const bool align_corners = params.align_corners;
-  auto output_x = thread_index % static_cast<uint>(output_sizes.w);
-  auto output_y = thread_index / static_cast<uint>(output_sizes.w);
-  auto real_x = area_pixel_compute_source_index(
-      scales.x, output_x, align_corners, /*cubic=*/false);
-  auto t_x = fract(real_x);
-  const auto input_x = static_cast<long>(floor(real_x));
-
-  auto real_y = area_pixel_compute_source_index(
-      scales.y, output_y, align_corners, /*cubic=*/false);
-  auto t_y = fract(real_y);
-  const auto input_y = static_cast<long>(floor(real_y));
-  for (int n = 0; n < output_sizes.x; n++) {
-    for (int c = 0; c < output_sizes.y; c++) {
-      auto i00 = upsample_get_value_bounded<T>(
-          inputData, input_sizes, input_strides, long4(n, c, input_y, input_x));
-      auto i01 = upsample_get_value_bounded<T>(
-          inputData,
-          input_sizes,
-          input_strides,
-          long4(n, c, input_y, input_x + 1));
-      auto i10 = upsample_get_value_bounded<T>(
-          inputData,
-          input_sizes,
-          input_strides,
-          long4(n, c, input_y + 1, input_x));
-      auto i11 = upsample_get_value_bounded<T>(
-          inputData,
-          input_sizes,
-          input_strides,
-          long4(n, c, input_y + 1, input_x + 1));
-      auto i0_l = linear_interp(i00, i01, t_x);
-      auto i1_l = linear_interp(i10, i11, t_x);
-      auto res = linear_interp(i0_l, i1_l, t_y);
-      upsample_set_value(
-          outputData,
-          output_strides,
-          long4(n, c, output_y, output_x),
-          static_cast<T>(res));
-    }
-  }
-}
-
 // The forward reads landing on an input index: their output run [lo, hi) and
 // tap weights. The first and last rows also take the reads clamped onto them.
 struct LinearSource {
@@ -643,6 +589,51 @@ kernel void upsample_nearest2d(
     const auto c = nc.mod;
     output[n * output_strides.x + c * output_strides.y] =
         input[n * input_strides.x + c * input_strides.y];
+  }
+}
+
+// Like upsample_nearest2d, with the four taps and their weights computed once
+// per (y, x) and reused for every plane.
+template <typename T, typename index_t>
+kernel void upsample_bilinear2d(
+    device const T* inputData [[buffer(0)]],
+    device T* outputData [[buffer(1)]],
+    constant UpsampleParams<4>& params [[buffer(2)]],
+    constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]],
+    uint3 thread_index [[thread_position_in_grid]],
+    uint3 grid_size [[threads_per_grid]]) {
+  const auto input_strides = vec<index_t, 4>(to_vec(params.input_strides));
+  const auto output_strides = vec<index_t, 4>(to_vec(params.output_strides));
+  const ::c10::IntDivider<uint> channels = channels_div;
+  const auto planes =
+      static_cast<uint>(params.output_sizes[0]) * channels.divisor;
+  const int x = thread_index.x;
+  const int y = thread_index.y;
+  const auto real_x = area_pixel_compute_source_index(
+      params.scales[0], x, params.align_corners, /*cubic=*/false);
+  const auto real_y = area_pixel_compute_source_index(
+      params.scales[1], y, params.align_corners, /*cubic=*/false);
+  const auto t_x = fract(real_x);
+  const auto t_y = fract(real_y);
+  const int max_x = params.input_sizes[3] - 1;
+  const int max_y = params.input_sizes[2] - 1;
+  const int x0 = static_cast<int>(floor(real_x));
+  const int y0 = static_cast<int>(floor(real_y));
+  const index_t col0 = clamp(x0, 0, max_x) * input_strides.w;
+  const index_t col1 = clamp(x0 + 1, 0, max_x) * input_strides.w;
+  device const T* row0 = inputData + clamp(y0, 0, max_y) * input_strides.z;
+  device const T* row1 = inputData + clamp(y0 + 1, 0, max_y) * input_strides.z;
+  device auto* output =
+      outputData + y * output_strides.z + x * output_strides.w;
+  for (auto plane = thread_index.z; plane < planes; plane += grid_size.z) {
+    const auto nc = channels.divmod(plane);
+    const index_t in_off = nc.div * input_strides.x + nc.mod * input_strides.y;
+    const auto i0 =
+        linear_interp(row0[in_off + col0], row0[in_off + col1], t_x);
+    const auto i1 =
+        linear_interp(row1[in_off + col0], row1[in_off + col1], t_x);
+    output[nc.div * output_strides.x + nc.mod * output_strides.y] =
+        static_cast<T>(linear_interp(i0, i1, t_y));
   }
 }
 
@@ -1064,6 +1055,21 @@ kernel void upsample_backward(
       uint3 thread_index [[thread_position_in_grid]],                     \
       uint3 grid_size [[threads_per_grid]])
 
+#define INSTANTIATE_UPSAMPLE_BILINEAR_IDX(DTYPE, IDX, SUFFIX)              \
+  template                                                                 \
+      [[host_name("upsample_bilinear2d_" #DTYPE "_" #SUFFIX)]] kernel void \
+      upsample_bilinear2d<DTYPE, IDX>(                                     \
+          device const DTYPE* inputData [[buffer(0)]],                     \
+          device DTYPE* outputData [[buffer(1)]],                          \
+          constant UpsampleParams<4>& params [[buffer(2)]],                \
+          constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]],    \
+          uint3 thread_index [[thread_position_in_grid]],                  \
+          uint3 grid_size [[threads_per_grid]])
+
+#define INSTANTIATE_UPSAMPLE_BILINEAR(DTYPE)          \
+  INSTANTIATE_UPSAMPLE_BILINEAR_IDX(DTYPE, int, u32); \
+  INSTANTIATE_UPSAMPLE_BILINEAR_IDX(DTYPE, long, u64)
+
 #define INSTANTIATE_UPSAMPLE_NEAREST(DTYPE)                                 \
   INSTANTIATE_UPSAMPLE_NEAREST_IDX(nearest2d, false, DTYPE, int, u32);      \
   INSTANTIATE_UPSAMPLE_NEAREST_IDX(nearest2d, false, DTYPE, long, u64);     \
@@ -1108,7 +1114,7 @@ kernel void upsample_backward(
   INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(                                   \
       bicubic2d_aa, BicubicFunctor, DTYPE, false);                       \
   INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE, false);             \
-  INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);                            \
+  INSTANTIATE_UPSAMPLE_BILINEAR(DTYPE);                                  \
   INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(bilinear2d, LinearSource, DTYPE); \
   INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(                                  \
       nearest2d, NearestSource<false>, DTYPE);                           \
@@ -1121,7 +1127,7 @@ kernel void upsample_backward(
   INSTANTIATE_UPSAMPLE_3D_BACKWARD(DTYPE, false);                        \
   INSTANTIATE_UPSAMPLE_3D(DTYPE)
 
-INSTANTIATE_UPSAMPLE_2D(bilinear2d, uchar);
+INSTANTIATE_UPSAMPLE_BILINEAR(uchar);
 INSTANTIATE_UPSAMPLE_3D(uchar);
 INSTANTIATE_UPSAMPLE_ALL(float);
 INSTANTIATE_UPSAMPLE_ALL(half);
@@ -1136,7 +1142,7 @@ INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(
     true);
 INSTANTIATE_UPSAMPLE_3D_BACKWARD(float, true);
 
-// Nearest forward is a pure gather, so cover every dtype the MPSGraph
+// Nearest 1d/2d forward is a pure gather, so cover every dtype the MPSGraph
 // path supported to avoid a coverage regression.
 INSTANTIATE_UPSAMPLE_NEAREST(float);
 INSTANTIATE_UPSAMPLE_NEAREST(half);
