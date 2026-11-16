@@ -206,6 +206,7 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
+    iter_mro_static_attrs,
     list_reverseiterator,
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
@@ -953,9 +954,9 @@ def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
             context=str(error),
             explanation="This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
             hints=[
-                "Snapshots are not implemented on Python 3.16+. On older free-threaded "
-                "Python, empty OrderedDicts remain supported; nonempty ones require "
-                "Python 3.14.1+. Keep unsupported inputs outside fullgraph capture.",
+                "On Python versions before 3.16, use a GIL-enabled build or free-threaded "
+                "Python 3.14.1+ for nonempty OrderedDicts. An unsupported snapshot runs "
+                "the frame eagerly or raises with fullgraph=True.",
             ],
             from_exc=error,
             skip_frame=True,
@@ -976,18 +977,71 @@ def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
         )
 
 
-def _build_dict_items(
-    value: dict[Any, Any],
-    build_key_value: Callable[[int, object, object], tuple[T, VariableTracker]],
-) -> dict[T, VariableTracker]:
+def _safe_ordered_dict_key(key: object) -> bool:
+    kind = type(key)
+    if type(key) is tuple or type(key) is frozenset or type(key) is torch.Size:
+        return all(_safe_ordered_dict_key(item) for item in key)
+    if any(
+        kind is t
+        for t in (
+            str,
+            int,
+            bool,
+            bytes,
+            float,
+            complex,
+            type(None),
+            type,
+            types.BuiltinMethodType,
+            torch.dtype,
+            torch.device,
+        )
+    ):
+        return True
+    return kind is torch.Tensor or (
+        type(kind) is type
+        and next(iter_mro_static_attrs(kind, "__hash__"), None) is object.__hash__
+        and next(iter_mro_static_attrs(kind, "__eq__"), None) is object.__eq__
+    )
+
+
+def _dict_items_and_order(
+    value: dict[Any, Any], source: Source
+) -> tuple[list[tuple[int, Any, Any]], bool]:
     snapshot = _dict_input_snapshot(value)
+    value_type: type[Any] = type(value)
+    if not issubclass(value_type, collections.OrderedDict):
+        return snapshot, False
+    reordered = any(i != position for i, (position, _, _) in enumerate(snapshot))
+    if not all(_safe_ordered_dict_key(key) for _, key, _ in snapshot):
+        if reordered:
+            # Rebuilding storage can change the order and number of key callbacks.
+            # Leave the entire frame eager before any keys are wrapped or hashed.
+            unimplemented(
+                gb_type="Reordered OrderedDict input with callback-sensitive keys",
+                context="OrderedDict input snapshot",
+                explanation="Dynamo cannot restore an OrderedDict's storage order without potentially invoking user key hashing or equality.",
+                hints=["Construct the OrderedDict inside the compiled function."],
+                skip_frame=True,
+                apply_to_code=False,
+            )
+        if not is_constant_source(source):
+            install_guard(source.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
+    return snapshot, reordered
+
+
+def _build_dict_items(
+    snapshot: list[tuple[int, Any, Any]],
+    build_key_value: Callable[[int, object, object], tuple[T, VariableTracker]],
+    *,
+    reordered: bool,
+) -> dict[T, VariableTracker]:
+    if not reordered:
+        return dict(build_key_value(i, key, item) for i, key, item in snapshot)
     entries = [
         (position, *build_key_value(position, key, item))
         for position, key, item in snapshot
     ]
-    value_type: type[Any] = type(value)
-    if not issubclass(value_type, collections.OrderedDict):
-        return {key: item for _, key, item in entries}
     # Preserve both dict storage order and OrderedDict iteration order.
     items = collections.OrderedDict(
         (key, item) for _, key, item in sorted(entries, key=lambda entry: entry[0])
@@ -1567,7 +1621,8 @@ class VariableBuilder:
             )
             if not (global_hooks and config.skip_nnmodule_hook_guards):
                 self.install_guards(GuardBuilder.TYPE_MATCH)
-            all_const = all(ConstantVariable.is_literal(k) for k in dict.keys(value))
+            snapshot, reordered = _dict_items_and_order(value, self.get_source())
+            all_const = all(ConstantVariable.is_literal(k) for _, k, _ in snapshot)
 
             # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
@@ -1609,7 +1664,7 @@ class VariableBuilder:
 
                 return key, res_value
 
-            result = _build_dict_items(value, build_key_value)
+            result = _build_dict_items(snapshot, build_key_value, reordered=reordered)
 
             if global_hooks:
                 flags_cls = (
@@ -2644,7 +2699,8 @@ class VariableBuilder:
 
                 return key, res_value
 
-            kv_items = _build_dict_items(value, build_key_value)
+            snapshot, reordered = _dict_items_and_order(value, self.get_source())
+            kv_items = _build_dict_items(snapshot, build_key_value, reordered=reordered)
 
             if issubclass(type(value), collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
