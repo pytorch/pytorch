@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import dataclasses
 import operator
-import struct
 from typing import Any, TYPE_CHECKING
 
 import sympy
 
 import torch
 import torch.fx as fx
+from torch._dynamo.utils import constant_bits
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
@@ -33,11 +33,8 @@ class _ScalarKey:
 def _normalize_cse_arg(val: Any) -> Any:
     # Python float hash/eq is not value-identity: nan != nan (hash(nan) is
     # id-based) while -0.0 == 0.0 and hashes equal. Key by bit pattern instead.
-    if type(val) is float:
-        return _ScalarKey("float", struct.pack(">d", val))
-    if type(val) is complex:
-        return _ScalarKey("complex", struct.pack(">dd", val.real, val.imag))
-    return val
+    bits = constant_bits(val)
+    return _ScalarKey(type(val).__name__, bits) if bits is not None else val
 
 
 def get_aten_target(node: fx.Node) -> OpOverloadPacket | Callable[..., Any] | str:
@@ -136,9 +133,7 @@ def fx_graph_cse(
     # live downstream view and reinplacing fails (mirrors the aten.empty
     # exclusion below). See pytorch/pytorch#170160.
     from torch._higher_order_ops.auto_functionalize import get_mutable_args
-    from torch._higher_order_ops.triton_kernel_wrap import (
-        triton_kernel_wrapper_functional,
-    )
+    from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
 
     def _add_base(node: Any, bases: set[fx.Node]) -> None:
         for b in node if isinstance(node, (list, tuple)) else (node,):
@@ -161,12 +156,11 @@ def fx_graph_cse(
         mutable_args_names, _ = get_mutable_args(mutable_op)
         for name in mutable_args_names:
             _add_base(n.kwargs.get(name), nodes_used_as_mutation_base)
-    for n in fx_g.find_nodes(
-        op="call_function", target=triton_kernel_wrapper_functional
-    ):
-        inner_kwargs = n.kwargs.get("kwargs", {})
-        for name in n.kwargs.get("tensors_to_clone", ()):
-            _add_base(inner_kwargs.get(name), nodes_used_as_mutation_base)
+    for user_kernel_hop in user_kernel_hop_infos():
+        for n in fx_g.find_nodes(op="call_function", target=user_kernel_hop.functional):
+            inner_kwargs = n.kwargs.get("kwargs", {})
+            for name in n.kwargs.get("tensors_to_clone", ()):
+                _add_base(inner_kwargs.get(name), nodes_used_as_mutation_base)
 
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new graph without change

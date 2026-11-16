@@ -36,6 +36,12 @@ class TORCH_API AOTIModelContainerRunner {
       std::vector<at::Tensor>&& inputs,
       void* stream_handle = nullptr);
 
+  // Runs the model as CUDA graphs; see
+  // AOTInductorModelContainerRunWithLazyCudaGraphs.
+  std::vector<at::Tensor> run_with_lazy_cuda_graphs(
+      const std::vector<at::Tensor>& inputs,
+      void* stream_handle = nullptr);
+
   std::unordered_map<std::string, std::string> getConstantNamesToOriginalFQNs()
       const;
   std::unordered_map<std::string, int32_t> getConstantNamesToDtypes() const;
@@ -70,6 +76,8 @@ class TORCH_API AOTIModelContainerRunner {
   void free_inactive_constant_buffer();
   void update_constant_buffer_from_blob(const std::string& weights_path);
   bool did_call_load_constants() const;
+  void set_use_stream_affinity(bool use_stream_affinity);
+  int64_t get_stream_affinity_model_index_for_testing(void* stream_handle);
 
   std::vector<std::string> get_call_spec();
 
@@ -138,12 +146,20 @@ class TORCH_API AOTIModelContainerRunner {
       std::vector<AtenTensorHandle>& input_handles,
       void* stream_handle);
 
+  virtual std::vector<at::Tensor> run_with_lazy_cuda_graphs_impl(
+      std::vector<AtenTensorHandle>& input_handles,
+      void* stream_handle);
+
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreateWithDevice) create_func_{nullptr};
   decltype(&AOTInductorModelContainerDelete) delete_func_{nullptr};
   decltype(&AOTInductorModelContainerGetNumOutputs) get_num_outputs_func_{
       nullptr};
   decltype(&AOTInductorModelContainerRun) run_func_{nullptr};
+  // Null for models built before
+  // AOTInductorModelContainerRunWithLazyCudaGraphs.
+  decltype(&AOTInductorModelContainerRunWithLazyCudaGraphs)
+      run_with_lazy_cuda_graphs_func_{nullptr};
   decltype(&AOTInductorModelContainerGetNumConstants) get_num_constants_func_{
       nullptr};
   decltype(&AOTInductorModelContainerGetConstantName) get_constant_name_func_{
@@ -189,11 +205,27 @@ class TORCH_API AOTIModelContainerRunner {
   }
 
  private:
+  const char* get_aoti_runtime_error() const;
+  // Calls a model C API function as call(), and on failure throws the error
+  // message the model recorded.
+  template <typename Call>
+  void call_model(const char* name, Call&& call) const;
+  // Calls a model run function as run_func(inputs, num_inputs, outputs,
+  // num_outputs) and returns the outputs it writes. The model steals the input
+  // handles; the ones it didn't steal are freed on every exit. name labels the
+  // call, e.g. "run_func_(...)", in the error thrown when the runtime reports
+  // no message.
+  template <typename RunFunc>
+  std::vector<at::Tensor> call_run_func(
+      std::vector<AtenTensorHandle>& input_handles,
+      const char* name,
+      RunFunc&& run_func);
   void load_aoti_symbols(
       const std::string& model_so_path,
       const std::string& device_str,
       bool run_single_threaded);
 
+  bool run_single_threaded_{false};
   std::unique_ptr<torch::aot_inductor::ProxyExecutor> proxy_executor_;
 
   // Private, not protected: the lifetime argument in set_observer() only holds

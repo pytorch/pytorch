@@ -54,7 +54,7 @@ INCLUDE_ROOTS = (REPO_ROOT, REPO_ROOT / "aten/src")
 # A comment naming the header the symbols below it come from, e.g.
 #   "# torch/headeronly/util/Half.h"
 # Other comments in the file are prose and do not change the attribution.
-HEADER_COMMENT = re.compile(r"^#\s*([\w/.]+\.h)\s*$")
+HEADER_COMMENT = re.compile(r"^#\s*([\w/.-]+\.h)\s*$")
 IDENTIFIER = re.compile(r"^[A-Za-z_]\w*$")
 INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
 

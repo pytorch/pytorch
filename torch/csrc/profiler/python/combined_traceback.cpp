@@ -1,9 +1,9 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 namespace py = pybind11;
 
 namespace torch {
@@ -196,7 +196,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
     // Convert Python list of strings to vector of strings
     Py_ssize_t size = PyList_Size(traceback);
     result.reserve(size);
-    for (Py_ssize_t i = 0; i < size; ++i) {
+    for (const auto i : c10::irange(size)) {
       PyObject* item = PyList_GetItem(traceback, i); // borrowed reference
       if (item && PyUnicode_Check(item)) {
         const char* str = PyUnicode_AsUTF8(item);

@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 #include <c10/core/Event.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 
 #include <fmt/format.h>
@@ -8,7 +9,6 @@
 #include <future>
 #include <mutex>
 #include <shared_mutex>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -25,10 +25,9 @@ class HandlerRegistry {
   void registerHandler(const std::string& name, HandlerFunc f) {
     std::unique_lock<std::shared_mutex> lock(handlersMutex_);
 
-    if (handlers_.contains(name)) {
-      throw std::invalid_argument(
-          fmt::format("Handler {} already registered", name));
-    }
+    TORCH_CHECK_VALUE(
+        !handlers_.contains(name),
+        fmt::format("Handler {} already registered", name));
 
     handlers_[name] = std::move(f);
   }
@@ -37,10 +36,8 @@ class HandlerRegistry {
     std::shared_lock<std::shared_mutex> lock(handlersMutex_);
 
     auto it = handlers_.find(name);
-    if (it == handlers_.end()) {
-      throw std::invalid_argument(
-          fmt::format("Failed to find handler {}", name));
-    }
+    TORCH_CHECK_VALUE(
+        it != handlers_.end(), fmt::format("Failed to find handler {}", name));
     return handlers_[name];
   }
 
@@ -71,9 +68,8 @@ RegisterHandler pingHandler{"ping", [](const Request&, Response& res) {
                             }};
 
 // Each hooked backend records into its own FlightRecorder instance, so the
-// caller says which one to read. Defaulting to the instance ProcessGroupGloo
-// records into keeps existing callers -- the debug server's "FlightRecorder
-// CPU" page among them -- seeing what they always did.
+// caller says which one to read. Defaults to gloo's instance, which existing
+// callers -- the debug server's "FlightRecorder CPU" page among them -- read.
 std::string frBackendParam(const Request& req) {
   auto backend = req.getParam("backend");
   return backend.empty() ? ::c10d::kDefaultFRBackend : backend;
@@ -102,16 +98,18 @@ RegisterHandler frDumpFileHandler(
         return;
       }
 
-      // Single-flight guard: a polling health check must not spawn one worker
-      // per request, all writing the same file. The previous future's state is
-      // the signal - once wait_for(0) reports ready the worker has exited, so
-      // reassigning cannot block on a join; otherwise a dump is still running
-      // and we coalesce into it.
+      // Single-flight guard per backend: a polling health check must not spawn
+      // one worker per request, all writing the same file. Different backends
+      // have different recorders and must be allowed to dump concurrently.
+      // The previous future's state is the signal - once wait_for(0) reports
+      // ready the worker has exited, so reassigning cannot block on a join;
+      // otherwise a dump is still running and we coalesce into it.
       static std::mutex dumpFutureMutex;
-      static std::future<void> dumpFuture;
+      static std::unordered_map<std::string, std::future<void>> dumpFutures;
 
       {
         std::lock_guard<std::mutex> lock(dumpFutureMutex);
+        auto& dumpFuture = dumpFutures[backend];
         if (dumpFuture.valid() &&
             dumpFuture.wait_for(std::chrono::seconds(0)) !=
                 std::future_status::ready) {
@@ -176,9 +174,7 @@ RegisterHandler pyspyHandler{
       std::array<char, 4096> buf{};
       std::string output;
       FILE* pipe = popen(cmd.c_str(), "r");
-      if (!pipe) {
-        throw std::runtime_error("Failed to start py-spy, not installed?");
-      }
+      TORCH_CHECK(pipe, "Failed to start py-spy, not installed?");
       while (fgets(buf.data(), buf.size(), pipe)) {
         output.append(buf.data());
       }
@@ -197,7 +193,7 @@ RegisterHandler pyspyHandler{
 } // namespace
 
 void registerHandler(const std::string& name, HandlerFunc f) {
-  return getHandlerRegistry().registerHandler(name, std::move(f));
+  getHandlerRegistry().registerHandler(name, std::move(f));
 }
 
 HandlerFunc getHandler(const std::string& name) {

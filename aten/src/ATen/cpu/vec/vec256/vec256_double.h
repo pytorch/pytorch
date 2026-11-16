@@ -123,6 +123,10 @@ class Vectorized<double> {
     }
     return loadu(tmp);
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<double> or_nan_if(const Vectorized<double>& mask) const {
+    return _mm256_or_pd(values, mask);
+  }
   Vectorized<double> abs() const {
     auto mask = _mm256_set1_pd(-0.f);
     return _mm256_andnot_pd(mask, values);
@@ -135,8 +139,7 @@ class Vectorized<double> {
     const auto nan_mask = _mm256_cmp_pd(not_nan_mask, zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm256_set1_pd(c10::pi<double>);
 
-    const auto neg_mask = _mm256_cmp_pd(values, zero_vec, _CMP_LT_OQ);
-    auto angle = _mm256_blendv_pd(zero_vec, pi, neg_mask);
+    auto angle = _mm256_blendv_pd(zero_vec, pi, values);
     angle = _mm256_blendv_pd(angle, nan_vec, nan_mask);
     return angle;
   }
@@ -296,6 +299,33 @@ class Vectorized<double> {
   }
   Vectorized<double> pow(const Vectorized<double>& b) const {
     return Vectorized<double>(Sleef_powd4_u10(values, b));
+  }
+  double reduce_add() const {
+    auto v = values;
+    // 128-bit shuffle
+    auto v1 = _mm256_permute2f128_pd(v, v, 0x1);
+    v = _mm256_add_pd(v, v1);
+    // 64-bit shuffle
+    v1 = _mm256_permute_pd(v, 0x5);
+    v = _mm256_add_pd(v, v1);
+    return _mm256_cvtsd_f64(v);
+  }
+  // Propagates NaN, matching maximum() and torch.max. MAXPD returns its second
+  // operand when either input is NaN, so the tree below does not merely drop a
+  // NaN, it displaces whatever the NaN was compared against -- a real maximum
+  // can fall out of the reduction. Test the inputs rather than the result.
+  double reduce_max() const {
+    auto v = values;
+    // 128-bit shuffle
+    auto v1 = _mm256_permute2f128_pd(v, v, 0x1);
+    v = _mm256_max_pd(v, v1);
+    // 64-bit shuffle
+    v1 = _mm256_permute_pd(v, 0x5);
+    v = _mm256_max_pd(v, v1);
+    const double m = _mm256_cvtsd_f64(v);
+    return _mm256_movemask_pd(_mm256_cmp_pd(values, values, _CMP_UNORD_Q))
+        ? std::numeric_limits<double>::quiet_NaN()
+        : m;
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN

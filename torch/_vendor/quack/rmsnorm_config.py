@@ -114,18 +114,21 @@ class RmsNormBwdConfig:
         dout_width: int,
         arch_major: Optional[int] = None,
         T_hint: int = 0,
+        num_acc: int = 1,
     ) -> "RmsNormBwdConfig":
         """Pick a launch config from the hand-tuned analytical heuristic.
 
         ``arch_major`` defaults to the current device's capability.
         ``arch_major >= 10`` selects the Blackwell heuristic; anything else
-        uses the legacy/default path tuned on Hopper. For autotuning, use
-        :func:`get_all_bwd_configs`.
+        uses the legacy/default path tuned on Hopper. ``num_acc`` is the
+        number of persistent fp32 row accumulators the kernel carries
+        (dw and/or db partials); it drives register-pressure decisions.
+        For autotuning, use :func:`get_all_bwd_configs`.
         """
         if arch_major is None:
             arch_major = _detect_arch_major()
         if arch_major >= 10:
-            return _for_blackwell_bwd(N, dtype_width, dout_width, T_hint)
+            return _for_blackwell_bwd(N, dtype_width, dout_width, T_hint, num_acc)
         return _for_hopper_bwd(N, dtype_width, arch_major)
 
 
@@ -163,7 +166,7 @@ def _for_hopper_bwd(N: int, dtype_width: int, arch_major: int) -> RmsNormBwdConf
 
 
 def _for_blackwell_bwd(
-    N: int, dtype_width: int, dout_width: int, T_hint: int = 0
+    N: int, dtype_width: int, dout_width: int, T_hint: int = 0, num_acc: int = 1
 ) -> RmsNormBwdConfig:
     """Pick a launch config for RMSNorm bwd on Blackwell.
 
@@ -225,8 +228,16 @@ def _for_blackwell_bwd(
 
     # TMA pays off when the cluster needs prefetch (cn>=4), and also for
     # fp32-class single-CTA wide rows where TMA's wider descriptors amortise
-    # setup. Pure bf16 single-CTA cases mostly don't benefit and can lose ~5%.
-    use_tma = cluster_n >= 4 or (max_bytes >= 4 and row_bytes >= 16 * 1024)
+    # setup. Pure bf16 single-CTA cases mostly don't benefit and can lose ~5% —
+    # EXCEPT when the kernel carries two persistent fp32 row accumulators
+    # (dw + db): their 2 * frag/4 registers plus cp.async's per-thread address
+    # registers spill at frag >= 64 B/thread (~9x slowdown at bf16 N=8k/16k);
+    # TMA frees the address registers and restores full bandwidth.
+    use_tma = (
+        cluster_n >= 4
+        or (max_bytes >= 4 and row_bytes >= 16 * 1024)
+        or (num_acc >= 2 and bytes_per_thread_frag >= 64)
+    )
     # reload_x: wide end of the cluster ladder, plus fp32-class single-CTA
     # cases where the wider X fragments crowd registers across the row
     # reduction barrier.
@@ -297,16 +308,37 @@ _AUTOTUNE_SMEM_STAGES = (2, 3)
 
 
 def _max_dynamic_smem_bytes() -> int:
-    """Per-CTA opt-in dynamic smem capacity for the current device.
+    """Per-CTA opt-in dynamic smem capacity for the target arch.
 
-    Returns 0 when CUDA is unavailable (callers should treat this as "no
-    smem-budget guard"). Falls back to ``shared_memory_per_block`` on older
-    PyTorch builds that lack the ``_optin`` field.
+    GPU-blind on purpose: resolves the capability via ``get_device_capacity``
+    (honors the ``QUACK_ARCH`` override) and looks the capacity up in the
+    DSL's per-arch table instead of querying the live device. This must not
+    call ``torch.cuda.get_device_properties``: the async-compile pool workers
+    evaluate this heuristic in forked GPU-blind children where any
+    ``torch.cuda._lazy_init`` raises "Cannot re-initialize CUDA in forked
+    subprocess" — an ``is_available()`` guard can't help, because the parent's
+    cached device count is inherited through the fork and defeats their
+    ``CUDA_VISIBLE_DEVICES=""`` (and on torch 2.13 a mere ``is_available()``
+    call in the parent poisons every later fork without initializing CUDA).
+
+    Returns 0 when no capability can be determined (callers treat this as
+    "no smem-budget guard").
     """
-    if not torch.cuda.is_available():
+    import os
+
+    if os.environ.get("QUACK_ARCH") is None and not torch.cuda.is_available():
         return 0
-    props = torch.cuda.get_device_properties(torch.cuda.current_device())
-    return getattr(props, "shared_memory_per_block_optin", props.shared_memory_per_block)
+    from cutlass.utils import SmemAllocator
+
+    from torch._vendor.quack.cute_dsl_utils import get_device_capacity
+
+    major, minor = get_device_capacity()
+    try:
+        # Matches torch's shared_memory_per_block_optin for all supported archs
+        # (e.g. sm_90/sm_100/sm_103: 232448, sm_120: 101376, sm_80: 166912).
+        return SmemAllocator.capacity_in_bytes(f"sm_{major}{minor}")
+    except ValueError:
+        return 0
 
 
 def _bump_cluster_n_for_smem(
@@ -342,12 +374,24 @@ def _bump_cluster_n_for_smem(
 def _detect_arch_major() -> int:
     """Return the major device capability of the current CUDA device.
 
+    Honors the ``QUACK_ARCH`` override (via ``get_device_capacity``) so
+    GPU-blind processes — compile-pool workers, CPU-only boxes — never
+    initialize CUDA here. This function runs at ``import quack`` time (the
+    module-level ``get_all_fwd_configs()`` call in ``rmsnorm.py``), so a raw
+    ``torch.cuda.current_device()`` would create a CUDA context on import,
+    which both slows imports and poisons forked children (torch's
+    "Cannot re-initialize CUDA in forked subprocess" guard).
+
     Falls back to 0 (no-cluster, no-TMA) when CUDA is unavailable so the
     autotune search space stays well-defined for CPU-only imports.
     """
-    if not torch.cuda.is_available():
+    import os
+
+    if os.environ.get("QUACK_ARCH") is None and not torch.cuda.is_available():
         return 0
-    return torch.cuda.get_device_capability(torch.cuda.current_device())[0]
+    from torch._vendor.quack.cute_dsl_utils import get_device_capacity
+
+    return get_device_capacity()[0]
 
 
 def _max_cluster_for(arch_major: int) -> int:

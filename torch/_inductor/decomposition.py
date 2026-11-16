@@ -20,6 +20,7 @@ from torch._decomp import (
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
     _index_add,
+    adaptive_max_pool3d as decomp_adaptive_max_pool3d,
     embedding_dense_backward as decomp_embedding_dense_backward,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
@@ -32,6 +33,7 @@ from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    make_contiguous_strides_for,
     suggest_memory_format,
     type_to_dtype,
 )
@@ -44,6 +46,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 from . import config, inductor_prims
 from .utils import (
+    is_bf16x9_matmul,
     is_gpu,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
@@ -66,7 +69,7 @@ inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
         aten.adaptive_max_pool2d,
-        aten.adaptive_max_pool3d,
+        aten.adaptive_max_pool3d.out,
         aten.index_select,
         aten.addmv,
         aten.arange,
@@ -159,6 +162,95 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition(aten.topk.default)
+def topk_small_k(self, k, dim=-1, largest=True, sorted=True):
+    """
+    Small-k topk as k rounds of argmax-and-remove over the last dim, which
+    Inductor fuses into a single persistent reduction instead of falling back
+    to ATen's radix-select/sort kernels.
+
+    Small k is common in MoE routers, where each token picks its top 1 to 16
+    experts (possibly after a group-limited selection), over short rows of
+    experts. A general radix select or sort is a poor fit there, so emitting
+    a selection specialized for small k pays off.
+
+    Each round must return a value and its index with a deterministic
+    tie-break, and must then remove the picked element. Removing it by
+    overwriting the value with -inf is not enough, because the row may already
+    hold -inf (MoE routers mask out experts with -inf), and a later round could
+    pick the same element again. Instead, each element gets an int32 order key
+    with the same ordering as its value: the bit pattern of a non-negative
+    float already sorts correctly as an integer, and flipping the magnitude
+    bits of negative floats reverses theirs. This is the same conversion
+    ATen's radix-select topk uses (TopKTypeConfig<float>::convert), and as
+    there NaN ranks above every number and +0 ranks above -0.
+
+    Each round takes argmax of the keys, which returns the lowest index among
+    equal keys, gathers the value from the input, and sets that key to
+    INT32_MIN. Every real key is above INT32_MIN: -inf maps to -2139095041,
+    and the only pattern that would map to INT32_MIN is a negative NaN, which
+    is canonicalized first. So a removed element is never picked again. Results
+    come out in descending order, so the decomposition also serves sorted=True.
+    """
+    if (
+        config.triton.decompose_sort_ops
+        or self.device.type != "cuda"
+        # Not measured on ROCm yet.
+        or torch.version.hip is not None
+        or self.dtype not in (torch.float16, torch.bfloat16, torch.float32)
+        or not largest
+        or self.dim() == 0
+    ):
+        return NotImplemented
+    dim = utils.canonicalize_dim(self.dim(), dim)
+    n = self.shape[dim]
+    # Only the last dim: over a non-last dim with few outputs, the rounds read
+    # strided columns and can be slower than ATen. k must be a plain int since
+    # it sets the number of rounds; a symbolic n decomposes only when it is
+    # known to be in range (e.g. bounded by an export Dim max).
+    if not (
+        dim == self.dim() - 1
+        and isinstance(k, int)
+        and 1 <= k <= 16
+        and statically_known_true(k <= n)
+        and statically_known_true(n <= 1024)
+    ):
+        return NotImplemented
+
+    x = self.float()
+    # One canonical (positive) NaN, so every NaN ranks highest.
+    x = torch.where(torch.isnan(x), float("nan"), x)
+    bits = x.view(torch.int32)
+    # Order-preserving float -> int: flip the magnitude bits of negatives.
+    key = torch.where(bits < 0, bits ^ 0x7FFFFFFF, bits)
+    index = torch.arange(n, device=self.device)
+
+    values, indices = [], []
+    for _ in range(k):
+        selected = key.argmax(dim, keepdim=True)
+        indices.append(selected)
+        # Take the value from the input so its original bits (e.g. a NaN
+        # payload) are returned.
+        values.append(torch.gather(self, dim, selected))
+        key = torch.where(index == selected, torch.iinfo(torch.int32).min, key)
+    return torch.cat(values, dim), torch.cat(indices, dim)
+
+
+@register_decomposition(aten.adaptive_max_pool3d.default)
+def adaptive_max_pool3d(input, output_size):
+    result = decomp_adaptive_max_pool3d(input, output_size)
+    if result is NotImplemented:
+        return NotImplemented
+    values, indices = result
+    values = inductor_prims.force_stride_order(
+        values, make_contiguous_strides_for(values.shape)
+    )
+    indices = inductor_prims.force_stride_order(
+        indices, make_contiguous_strides_for(indices.shape)
+    )
+    return values, indices
 
 
 @register_decomposition([aten.special_log_ndtr])
@@ -362,13 +454,18 @@ def index_add(
     *,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
-    # If we are not in fbcode and dtype is bfloat16
-    # fallback to index_add kernel
-    # see https://github.com/pytorch/pytorch/issues/137425 for details
     if not is_fbcode() and x.dtype == torch.bfloat16:
-        return NotImplemented
-    else:
-        return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
+        # Triton supports BF16 atomic add on ROCm and NVIDIA SM90 and newer.
+        if x.device.type != "cuda" or (
+            torch.version.hip is None
+            and torch.cuda.get_device_capability(x.device) < (9, 0)
+        ):
+            return NotImplemented
+    # The index_put lowering expects tensor indices to have at least one
+    # dimension. Normalizing a scalar index preserves index_add semantics.
+    if index.ndim == 0:
+        index = index.unsqueeze(0)
+    return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants
@@ -437,7 +534,24 @@ def round_dec(x: torch.Tensor, decimals: int = 0) -> torch.Tensor:
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
+def _preserve_bf16x9_matmul(arg_index, arg_name):
+    """Keep FP32 CUDA matmuls intact before opmath casts hide their dtype."""
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            mat = args[arg_index] if len(args) > arg_index else kwargs[arg_name]
+            if is_bf16x9_matmul(mat.device.type, mat.dtype):
+                return NotImplemented
+            return fn(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
 @register_decomposition([aten.bmm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def bmm(
     self: torch.Tensor,
@@ -471,6 +585,7 @@ def bmm(
 
 
 @register_decomposition([aten.addmm])
+@_preserve_bf16x9_matmul(1, "mat1")
 @pw_cast_for_opmath
 def addmm(
     self: torch.Tensor,
@@ -480,12 +595,23 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    if beta == 0 and mat1.device.type != "cuda":
+        # CPU and MPS eager check that self expands to the output even though
+        # beta == 0 ignores its values, XPU checks a looser broadcast and CUDA
+        # doesn't check. tuned_addmm drops self, so check here.
+        utils.check_same_device(self, mat1, allow_cpu_scalar_tensors=False)
+        self.expand(mat1.shape[0], mat2.shape[1])
+    # The rewrites below compute in the input dtype, so leave aten.addmm.dtype
+    # to the tuned_addmm lowering.
+    if out_dtype is not None:
+        return NotImplemented
+
     def add_input(out: torch.Tensor) -> torch.Tensor:
-        if alpha != 1:
-            out = alpha * out
-        if beta != 1:
-            return out + beta * self
-        return out + self
+        # Unconditional: `if alpha != 1` would guard on an unbacked alpha.
+        out = alpha * out
+        if beta == 0:
+            return out
+        return out + beta * self.expand(out.shape)
 
     if mat1.device.type not in ["cpu", "mps"]:
         if beta == 0 and mat1.device.type == "cuda":
@@ -507,7 +633,7 @@ def addmm(
             out = torch.sum(
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
-            return alpha * out + beta * self
+            return add_input(out)
         if (
             statically_known_true(mat1.size(0) == 1)
             and guard_or_false(mat2.size(0) <= 16)
@@ -515,11 +641,12 @@ def addmm(
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = (mat1.T * mat2).sum(dim=0, keepdim=True)
-            return alpha * out + beta * self
+            return add_input(out)
     return NotImplemented
 
 
 @register_decomposition([aten.mm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def mm(
     self: torch.Tensor,
@@ -644,7 +771,9 @@ def angle(x: torch.Tensor) -> torch.Tensor:
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
     pi = torch.scalar_tensor(math.pi, dtype=dtype, device=x.device)
-    ret = torch.where(x < 0, pi, 0.0)
+    # mps has no integer signbit and integers have no -0
+    is_neg = torch.signbit(x) if x.is_floating_point() else x < 0
+    ret = torch.where(is_neg, pi, 0.0)
     return torch.where(torch.isnan(x), float("nan"), ret)
 
 
@@ -1141,38 +1270,6 @@ def _foreach_lerp_scalarlist(
         aten._foreach_mul.ScalarList(
             aten._foreach_sub.List(end_tensors, start_tensors), scalars
         ),
-    )
-
-
-@aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
-@register_decomposition(aten.miopen_batch_norm)
-def miopen_batch_norm(
-    input: torch.Tensor,
-    weight: torch.Tensor,
-    bias: torch.Tensor | None,
-    running_mean: torch.Tensor | None,
-    running_var: torch.Tensor | None,
-    training: bool,
-    exponential_average_factor: float,
-    epsilon: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    a, b, c = aten.native_batch_norm(
-        input,
-        weight,
-        bias,
-        running_mean,
-        running_var,
-        training,
-        exponential_average_factor,
-        epsilon,
-    )
-
-    if training:
-        return (a, b, c)
-    return (
-        a,
-        weight.new_zeros((0,)),
-        weight.new_zeros((0,)),
     )
 
 

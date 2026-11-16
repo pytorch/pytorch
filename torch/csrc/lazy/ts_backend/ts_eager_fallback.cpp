@@ -30,7 +30,7 @@ std::vector<at::Tensor> _to_eager(
             options,
             /*non_blocking*/ false,
             /*copy*/ false);
-        eager_tensors.push_back(eager_tensor);
+        eager_tensors.push_back(std::move(eager_tensor));
       }
       return eager_tensors;
     }

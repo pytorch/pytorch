@@ -188,7 +188,8 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
 #endif
         );
         if (!std::holds_alternative<ErrorType>(result)) {
-          cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
+          cpu_dispatch_ptr.store(
+              std::get<void*>(result), std::memory_order_relaxed);
         }
       return result;
       }
@@ -313,7 +314,7 @@ DispatchResult DispatchStubImpl::try_choose_cpu_impl(
     // Quantization kernels have also been disabled on Windows
     // for AVX512 because some of their tests are flaky on Windows.
     // Ideally, we should have AVX512 kernels for all kernels.
-    if (C10_UNLIKELY(!AVX512)) {
+    if (!AVX512) [[unlikely]] {
       // dispatch to AVX2, since the AVX512 kernel is missing
       return AVX2 != nullptr ? DispatchResult(AVX2) : ErrorType::MissingDeviceKernel;
     } else {
@@ -338,13 +339,13 @@ DispatchResult DispatchStubImpl::try_choose_cpu_impl(
 #endif
 #ifdef HAVE_SVE_CPU_DEFINITION
   if (capability == static_cast<int>(CPUCapability::SVE128)) {
-    if (C10_UNLIKELY(!SVE128)) {
+    if (!SVE128) [[unlikely]] {
       return DEFAULT != nullptr ? DispatchResult(DEFAULT) : ErrorType::MissingDeviceKernel;
     }
     return DispatchResult(SVE128);
   }
   if (capability == static_cast<int>(CPUCapability::SVE256)) {
-    if (C10_UNLIKELY(!SVE256)) {
+    if (!SVE256) [[unlikely]] {
       return DEFAULT != nullptr ? DispatchResult(DEFAULT) : ErrorType::MissingDeviceKernel;
     }
     return DispatchResult(SVE256);
@@ -379,7 +380,7 @@ void* DispatchStubImpl::choose_cpu_impl(
     // Quantization kernels have also been disabled on Windows
     // for AVX512 because some of their tests are flaky on Windows.
     // Ideally, we should have AVX512 kernels for all kernels.
-    if (C10_UNLIKELY(!AVX512)) {
+    if (!AVX512) [[unlikely]] {
       // dispatch to AVX2, since the AVX512 kernel is missing
       TORCH_INTERNAL_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
       return AVX2;
@@ -408,14 +409,14 @@ void* DispatchStubImpl::choose_cpu_impl(
 #endif
 #ifdef HAVE_SVE_CPU_DEFINITION
   if (capability == static_cast<int>(CPUCapability::SVE128)) {
-    if (C10_UNLIKELY(!SVE128)) {
+    if (!SVE128) [[unlikely]] {
       TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
       return DEFAULT;
     }
     return SVE128;
   }
   if (capability == static_cast<int>(CPUCapability::SVE256)) {
-    if (C10_UNLIKELY(!SVE256)) {
+    if (!SVE256) [[unlikely]] {
       TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
       return DEFAULT;
     }

@@ -10,6 +10,7 @@ from torch.utils._ordered_set import OrderedSet
 from ..utils import get_max_numwarps
 from .hints import (
     InductorMeta,
+    is_valid_mix_order_reduction_config,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
     TRITON_MAX_BLOCK,
@@ -70,7 +71,7 @@ class CoordescTuner:
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
 
-        # Native matmul codegen assumes ZBLOCK=1 always.
+        # Native matmul codegen assumes Z0_BLOCK=1 always.
         # This is because 3d tl.dot is slow and so we want to tile y and x only.
         # tl.dot also does not support size smaller than 16; we put this restriction.
         self.is_native_matmul = is_native_matmul
@@ -121,12 +122,13 @@ class CoordescTuner:
         out: list[str] = [
             "XBLOCK",
             "YBLOCK",
-            "ZBLOCK",
+            "Z0_BLOCK",
             # NOTE: we should not tune R0_BLOCK for persistent reduction.
             # We rely on the fact that persistent reduction's triton.Config
             # does not have the R0_BLOCK field to guarantee that.
             "R0_BLOCK",
             "R1_BLOCK",
+            "R2_BLOCK",
             # the following 3 are for mm
             "BLOCK_M",
             "BLOCK_N",
@@ -139,7 +141,7 @@ class CoordescTuner:
             out.append("waves_per_eu")
         if self.is_native_matmul:
             out.append("num_stages")
-            out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
+            out.remove("Z0_BLOCK")  # Z0_BLOCK=1 always in native matmul
 
         if self.is_mix_order_reduction:
             # unlike TritonConfig.num_stages, this one is
@@ -264,11 +266,13 @@ class CoordescTuner:
 
     def is_valid_config(self, config) -> bool:
         if self.is_mix_order_reduction:
-            # Mix order reduction has an extra constraint that
-            # we should not tune XBLOCK beyond RSPLIT_SIZE
-            xblock = config.kwargs["XBLOCK"]
             split_size = config.kwargs["RSPLIT_SIZE"]
-            return xblock <= split_size
+            rnumel_hint = (
+                self.size_hints.get("r0_") if self.size_hints is not None else None
+            )
+            return is_valid_mix_order_reduction_config(
+                config.kwargs, split_size, rnumel_hint, self.inductor_meta
+            )
         if self.is_native_matmul:
             r0_block = None
             if "R0_BLOCK" not in config.kwargs:
@@ -436,7 +440,7 @@ class CoordescTuner:
             # improvement immediately so subsequent fields see the
             # updated working point.
             for field in self.tunable_fields:
-                # Some kernels don't have R0_BLOCK / YBLOCK / ZBLOCK,
+                # Some kernels don't have R0_BLOCK / YBLOCK / Z0_BLOCK,
                 # so the field may be absent from ``best_config``.
                 # Filter here so ``get_neighbour_configs`` can assume
                 # the field is present.
