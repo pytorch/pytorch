@@ -93,7 +93,6 @@ def is_pinned_impl(self: ComplexTensor, device: torch.device | None = None) -> b
 SIMPLE_OPS_LIST = [
     aten.slice,
     aten.flatten,
-    aten.view,
     aten.diagonal,
     aten.expand,
     aten.unsqueeze,
@@ -1354,3 +1353,39 @@ def _to_copy_out(
     )
     out.copy_(temp)
     return out
+
+@register_complex(aten.view.dtype)
+def view_dtype_impl(
+    self: ComplexTensor | InterleavedComplexTensor,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    if not dtype.is_complex:
+        if not isinstance(self, InterleavedComplexTensor):
+            raise RuntimeError("Cannot take a view of non-interleaved tensor.")
+
+        if self.is_conj():
+            raise RuntimeError("Cannot take a real view of conjugated tensor.")
+
+        data = self._data.view(dtype).reshape(self.shape[:-1] + (-1,))
+        if self.is_neg():
+            data = aten._neg_view(data)
+        return data
+
+    real_dtype = COMPLEX_TO_REAL[dtype]
+    if isinstance(self, InterleavedComplexTensor):
+        out_shape = self._data.shape[:-2] + (-1, 2)
+        out_data = self._data.view(real_dtype).reshape(out_shape)
+        out = InterleavedComplexTensor(torch.view_as_complex(out_data))
+        if self.is_neg():
+            out = _neg_view_impl(out)
+
+        if self.is_conj():
+            out = _conj_impl(out)
+
+        return out
+
+    re, im = split_complex_arg(self)
+    return ComplexTensor(
+        re.view(real_dtype),
+        im.view(real_dtype),
+    )
