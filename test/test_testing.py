@@ -3728,9 +3728,9 @@ class TestPruneSkipsAtCollection(TestCase):
 
 
 class TestTestParametrizationDeviceType(TestCase):
-    def test_preserves_non_test_descriptors(self, device):
-        device = self.device_type
+    hw_classification = HardwareClassification.ACCELERATOR
 
+    def test_preserves_non_test_descriptors(self, device):
         class TestParametrized(TestCase):
             @staticmethod
             def static_helper(x, y):
