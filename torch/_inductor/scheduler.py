@@ -13448,12 +13448,68 @@ class BaseScheduling:  # noqa: docstring_linter
         super().__init__()
         self.scheduler = scheduler
 
-    @classmethod
-    def lowers_native_matmul(cls, mat1: ir.IRNode, mat2: ir.IRNode) -> bool:
-        """Whether Inductor lowers mat1 @ mat2 to a dot reduction for this backend
-        to emit, as triton.native_matmul does for Triton. A backend registered with
-        register_backend_for_device, such as Helion's, returns True for the
-        matmuls it emits."""
+    def lowers_native_matmul(self, mat1: ir.IRNode, mat2: ir.IRNode) -> bool:
+        """Hook for a backend that emits matmuls itself, such as Helion's
+        (helion.inductor in pytorch/helion): whether to lower mat1 @ mat2 to a dot
+        reduction, as triton.native_matmul does for all matmuls, so that the
+        backend's kernel computes it instead of an extern kernel.
+
+        When to override it: the backend generates matmuls and wants them in its
+        kernels, fused with their epilogues. relu(a @ b + bias) is then one kernel
+        instead of an extern matmul and a pointwise kernel; Helion emits
+            for tile_y, tile_x in hl.tile([40, 136]):
+                acc = hl.zeros([tile_y, tile_x], dtype=torch.float32)
+                for tile_r in hl.tile(72):
+                    tmp0 = in0[tile_y, tile_r]
+                    tmp1 = in1[tile_r, tile_x]
+                    acc = torch.addmm(acc, tmp0, tmp1)
+                tmp2 = in2[tile_x].to(torch.float32)
+                tmp3 = acc + tmp2
+                tmp4 = torch.relu(tmp3)
+                out0[tile_y, tile_x] = tmp4.to(torch.bfloat16)
+
+        How: register a scheduling for the device with register_backend_for_device
+        and return True for the matmuls it emits. Each mm, bmm, addmm, baddbmm and
+        mm_plus_mm lowering asks an instance built with scheduler=None, as
+        get_backend_features() does, so a registered function works as well as a
+        class. mat1 and mat2 are the operands, [..., M, K] and [..., K, N]; their
+        sizes can be symbolic.
+
+        Contract:
+        - True asks for the lowering. use_native_matmul() also requires
+          config.triton.use_block_ptr off, and what it requires for
+          triton.native_matmul: a CUDA or XPU device whose backend is "triton";
+          int8, uint8, fp16, bf16 or fp32 operands, not a BF16x9 matmul; M, N and K
+          not known to be 1, without unbacked symbols. Otherwise, or with False, the
+          matmul keeps its usual lowering (extern kernel or template).
+        - A lowered matmul is a Reduction with reduction_type "dot" over K, whose
+          inner function is ops.dot(a, b) of the operands broadcast to
+          [..., M, K, N] (kernel/mm.py). SIMDScheduling fuses it with its epilogue
+          like any reduction, and dots share a kernel only if their [B, M, N]
+          ranges are equal. The backend's kernel handles ops.dot and the "dot"
+          reduction itself: ShapePropagationOpsHandler.dot asserts for every
+          kernel but TritonKernel.
+        - A dot that the backend's scheduling declines is emitted by Triton's
+          native matmul codegen, not extern_kernels.mm: the lowering already
+          happened. So decline here what the backend would decline later, e.g.
+          symbolic sizes for a backend whose kernels tile static shapes only.
+
+        Pitfalls:
+        - The FX graph cache key does not include the registered scheduling. If
+          the answer depends on the backend's settings, pass them as
+          register_backend_for_device(device_custom_config=...), which the key
+          includes.
+        - Replacing a device's registration drops what it dispatched on: CUDA's
+          is a function of config.cuda_backend ("triton", "halide", "pallas").
+          Register a function that returns the backend's scheduling only where
+          the replaced registration would return Triton's.
+        - With config.triton.use_block_ptr, the matmul keeps its usual lowering,
+          where triton.native_matmul raises: Triton's native matmul codegen
+          supports no block_ptr. triton.enable_persistent_tma_matmul is not
+          checked, since a natively lowered matmul uses no template.
+        - The instance is built on every matmul lowering, so __init__ must be
+          cheap with scheduler=None.
+        """
         return False
 
     def free_buffers_in_scheduler(self) -> None:

@@ -16,7 +16,6 @@ from ..codegen.common import get_scheduling_for_device
 from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
-from ..scheduler import BaseScheduling
 from ..utils import load_template, triton_type
 
 
@@ -194,14 +193,14 @@ def use_native_matmul(mat1, mat2):
         if use_block_ptr_enabled():
             raise AssertionError("native matmul doesn't support block_ptr codegen yet")
     elif not (
-        # A backend that emits matmuls itself opts in, e.g. Helion's. The built-in
-        # CUDA backend is registered as a function of config.cuda_backend.
-        isinstance(scheduling := get_scheduling_for_device(device_type), type)
-        and issubclass(scheduling, BaseScheduling)
-        and scheduling.lowers_native_matmul(mat1, mat2)
-        # Triton's native matmul codegen emits the dots such a backend declines
-        # when scheduling, and it supports no block_ptr.
-        and not use_block_ptr_enabled()
+        # Triton's native matmul codegen, which emits the dots that a backend
+        # declines when scheduling, supports no block_ptr.
+        not use_block_ptr_enabled()
+        # A backend that emits matmuls itself opts in; see
+        # BaseScheduling.lowers_native_matmul. The registration is a constructor,
+        # e.g. CUDA's is a function of config.cuda_backend, so ask an instance.
+        and (scheduling := get_scheduling_for_device(device_type)) is not None
+        and scheduling(None).lowers_native_matmul(mat1, mat2)
     ):
         return False
 

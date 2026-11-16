@@ -342,7 +342,9 @@ class TestTritonDotReduction(TestCase):
             with self.subTest(name):
                 args = [torch.randn(shape, device=GPU_TYPE) for shape in shapes]
                 torch._dynamo.reset()
-                actual = torch.compile(f)(*args)
+                actual, (code,) = run_and_get_code(torch.compile(f), *args)
+                # The native lowering, not an extern kernel.
+                self.assertNotRegex(code, r"extern_kernels\.\w+\(")
                 self.assertEqual(actual, f(*args), atol=1e-4, rtol=1e-4)
 
 
@@ -350,36 +352,38 @@ class TestTritonDotReduction(TestCase):
 class TestNativeMatmulBackend(TestCase):
     @inductor_config.patch(
         {
+            "triton.native_matmul": False,
+            "max_autotune": False,
             "force_disable_caches": True,
             "test_configs.force_filter_reduction_configs": True,
         }
     )
     def test_backend_lowers_native_matmul(self):
-        # Without triton.native_matmul, a backend registered with
-        # register_backend_for_device, such as Helion's, asks for the native
-        # lowering; Triton's native matmul codegen emits the dots it declines.
+        # A backend registered with register_backend_for_device, here as a
+        # function, asks for the native lowering of the matmuls it emits.
         class Scheduling(CUDACombinedScheduling):
-            @classmethod
-            def lowers_native_matmul(cls, mat1, mat2):
-                return True
+            def lowers_native_matmul(self, mat1, mat2):
+                return mat1.get_dtype() == torch.float32
 
         init_backend_registration()
         default = device_codegens[GPU_TYPE]
         self.addCleanup(device_codegens.__setitem__, GPU_TYPE, default)
         register_backend_for_device(
             GPU_TYPE,
-            Scheduling,
+            lambda scheduler: Scheduling(scheduler),
             default.wrapper_codegen,
             default.cpp_wrapper_codegen,
             default.fx_wrapper_codegen,
         )
-        a, b = (
-            torch.randn(40, 72, device=GPU_TYPE),
-            torch.randn(72, 136, device=GPU_TYPE),
-        )
-        actual, (code,) = run_and_get_code(torch.compile(torch.mm), a, b)
-        self.assertIn("tl.dot", code)
-        self.assertEqual(actual, a @ b, atol=1e-4, rtol=1e-4)
+        for dtype, native in ((torch.float32, True), (torch.bfloat16, False)):
+            with self.subTest(dtype=dtype):
+                a = torch.randn(40, 72, device=GPU_TYPE, dtype=dtype)
+                b = torch.randn(72, 136, device=GPU_TYPE, dtype=dtype)
+                torch._dynamo.reset()
+                actual, (code,) = run_and_get_code(torch.compile(torch.mm), a, b)
+                self.assertEqual("tl.dot" in code, native)
+                self.assertEqual("extern_kernels.mm(" in code, not native)
+                self.assertEqual(actual, a @ b, atol=1e-4, rtol=1e-4)
 
 
 @inductor_config.patch({"triton.native_matmul": True})
