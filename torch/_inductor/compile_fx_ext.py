@@ -26,11 +26,7 @@ from torch._inductor.output_code import (
     OutputCode,
 )
 from torch._inductor.utils import patch_subprocess_env
-from torch._subclasses.fake_tensor import (
-    CppFakeTensorMode,
-    fake_mode_cls,
-    FakeTensorMode,
-)
+from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -252,7 +248,7 @@ def _current_fake_mode() -> FakeTensorMode | CppFakeTensorMode:
         return fake_mode
 
     shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
-    return fake_mode_cls()(shape_env=shape_env)
+    return FakeTensorMode(shape_env=shape_env)
 
 
 @dataclass

@@ -43,14 +43,10 @@ class TestFindCompatibleOpOverload(common_utils.TestCase):
         self.assertEqual(overload, torch.ops.aten.where.ScalarOther)
 
 
-@common_utils.instantiate_parametrized_tests
 class TestTypePromotionONNXExport(common_utils.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    @common_utils.parametrize("use_cpp_fake_tensor", [False, True])
-    def test_where_with_bool_tensor_and_mixed_scalars_exports(
-        self, use_cpp_fake_tensor
-    ):
+    def test_where_with_bool_tensor_and_mixed_scalars_exports(self):
         class WhereModel(torch.nn.Module):
             def forward(self, condition):
                 return torch.where(condition, 0, -1000.0)
@@ -58,13 +54,12 @@ class TestTypePromotionONNXExport(common_utils.TestCase):
         model = WhereModel().eval()
         condition = torch.randn(1, 1, 4, 4) > 0
 
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            onnx_program = torch.onnx.export(
-                model,
-                (condition,),
-                dynamo=True,
-                verbose=False,
-            )
+        onnx_program = torch.onnx.export(
+            model,
+            (condition,),
+            dynamo=True,
+            verbose=False,
+        )
 
         self.assertIsNotNone(onnx_program)
 

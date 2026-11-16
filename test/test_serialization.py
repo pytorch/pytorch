@@ -31,7 +31,6 @@ from unittest.mock import patch
 import torch
 from torch.utils.serialization import config as serialization_config
 from torch._subclasses.fake_tensor import (
-    FakeTensorConverter,
     FakeTensorMode,
     is_fake_tensor,
 )
@@ -5281,7 +5280,8 @@ class TestSerializationAccelerator(TestCase):
             st = torch.sparse_coo_tensor(i, v, (2, 4))
         tt = TwoTensor(torch.randn(2, device=device), torch.randn(2, device=device))
 
-        mode, converter = FakeTensorMode(), FakeTensorConverter()
+        mode = FakeTensorMode()
+        converter = mode.fake_tensor_converter
 
         def fn(t):
             return converter.from_real_tensor(mode, t) if materialize_fake else t
