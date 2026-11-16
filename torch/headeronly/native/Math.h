@@ -1406,27 +1406,3 @@ inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
 HIDDEN_NAMESPACE_END(torch, headeronly)
 
 C10_CLANG_DIAGNOSTIC_POP()
-
-using torch::headeronly::calc_digamma;
-using torch::headeronly::calc_erfinv;
-using torch::headeronly::calc_i0;
-using torch::headeronly::calc_i0e;
-using torch::headeronly::calc_igamma;
-using torch::headeronly::calc_igammac;
-using torch::headeronly::chbevl;
-using torch::headeronly::chebyshev_coefficients_i0e_A;
-using torch::headeronly::chebyshev_coefficients_i0e_B;
-using torch::headeronly::exp2_impl;
-using torch::headeronly::polevl;
-#if defined(__CUDACC__) || defined(__HIPCC__)
-using torch::headeronly::i0e_string;
-#endif
-// Preserve unqualified access to helpers previously provided by
-// ATen/native/Math.h.
-using torch::headeronly::_igam_helper_asymptotic_series;
-using torch::headeronly::_igam_helper_fac;
-using torch::headeronly::_igam_helper_series;
-using torch::headeronly::_igamc_helper_continued_fraction;
-using torch::headeronly::_igamc_helper_series;
-using torch::headeronly::lanczos_sum_expg_scaled;
-using torch::headeronly::ratevl;
