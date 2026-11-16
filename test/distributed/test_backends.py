@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
-import unittest
 
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -19,12 +18,14 @@ common backend API tests
 
 class TestMiscCollectiveUtils(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+    _SUPPORTED_DEVICE_TYPES = ("cpu", "cuda", "mps", "xpu")
 
-    @classmethod
-    def setUpClass(cls):
-        if cls.device_type not in ("cpu", "cuda", "mps", "xpu"):
-            raise unittest.SkipTest(f"Unsupported device type: {cls.device_type}")
-        super().setUpClass()
+    def setUp(self):
+        if self.device_type not in self._SUPPORTED_DEVICE_TYPES:
+            self.skipTest(
+                f"test_backends only covers in-tree devices, got {self.device_type}"
+            )
+        super().setUp()
 
     def test_device_to_backend_mapping(self, device) -> None:
         """
