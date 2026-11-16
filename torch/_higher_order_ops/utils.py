@@ -74,7 +74,7 @@ def _find_or_create_fake_mode() -> FakeTensorMode | CppFakeTensorMode:
 
     fake_mode = detect_fake_mode()
     if fake_mode is None:
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        fake_mode = FakeTensorMode(_force_python=True, shape_env=ShapeEnv())
 
     return fake_mode
 
