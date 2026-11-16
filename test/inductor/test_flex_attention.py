@@ -32,7 +32,6 @@ from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
@@ -5961,6 +5960,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             _permute_strides,
             flex_attention_backward_fake_tensor_mode,
         )
+        from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import (
             DimDynamic,
             ShapeEnv,
