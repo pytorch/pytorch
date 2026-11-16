@@ -44,6 +44,7 @@
   approved_by:
   - huydhn
   - atalman
+  - malfet
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -57,6 +58,25 @@
   - georgehong
   - atalman
   - jathu
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / CI build scripts
+  patterns:
+  - .ci/pytorch/build.sh
+  - .ci/pytorch/common-build.sh
+  - .ci/pytorch/macos-build.sh
+  - .ci/pytorch/win-arm64-build.ps1
+  - .ci/pytorch/win-build.sh
+  approved_by:
+  - huydhn
+  - georgehong
+  - atalman
+  - jathu
+  - malfet
+  - zklaus
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -100,6 +120,8 @@
   approved_by:
   - atalman
   - huydhn
+  - malfet
+  - zklaus
   mandatory_checks_name:
   - EasyCLA
   - Lint
