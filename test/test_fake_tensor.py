@@ -259,7 +259,16 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         with FakeTensorMode():
             inputs = [torch.empty(2, 3, device=device) for device in input_devices]
             scalars = torch.empty(len(inputs), device=scalar_device)
-            with self.assertRaisesRegex(RuntimeError, "Expected scalars to be on CPU"):
+            allowed = "CPU"
+            if scalar_device.startswith(TEST_PRIVATEUSE1_DEVICE_TYPE):
+                allowed += (
+                    f" or on the same {TEST_PRIVATEUSE1_DEVICE_TYPE}"
+                    " device as all inputs"
+                )
+            message = (
+                f"Expected scalars to be on {allowed}, got {scalar_device} instead."
+            )
+            with self.assertRaisesRegex(RuntimeError, re.escape(message)):
                 getattr(aten, f"_foreach_{op_name}{'_' if inplace else ''}").Tensor(
                     self=inputs, tensor1=inputs, tensor2=inputs, scalars=scalars
                 )
