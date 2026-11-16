@@ -104,7 +104,11 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._logging import trace_structured
-from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    CppFakeTensorMode,
+    FakeTensorMode,
+)
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -952,7 +956,7 @@ def fake_tensor_prop(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
     force_allow_non_fake_inputs: bool = False,
-) -> torch._subclasses.FakeTensorMode:
+) -> FakeTensorMode | CppFakeTensorMode:
     """
     If we can not detect fake mode from the context of inputs, create one.
 
@@ -960,11 +964,9 @@ def fake_tensor_prop(
     """
     # Ensure that decomps that support symbolic shapes are used
     with enable_python_dispatcher():
-        fake_mode = torch._guards.require_python_fake_mode(
-            detect_fake_mode(example_inputs)
-        )
+        fake_mode = detect_fake_mode(example_inputs)
         if not fake_mode:
-            fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+            fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
         else:
             ctx = (
@@ -3240,9 +3242,7 @@ def compile_fx(
                 if isinstance(model_, GraphModule)
                 else example_inputs_
             )
-            fake_mode = torch._guards.require_python_fake_mode(
-                detect_fake_mode(inputs_)
-            )
+            fake_mode = detect_fake_mode(inputs_)
             with _fakify_script_objects(model_, inputs_, {}, fake_mode) as (
                 patched_mod,
                 fake_args,
@@ -3460,9 +3460,9 @@ def _compile_fx_main(
 
         bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
-        fake_mode = torch._guards.require_python_fake_mode(
-            detect_fake_mode(example_inputs_)
-        ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+        fake_mode = detect_fake_mode(example_inputs_) or FakeTensorMode(
+            allow_non_fake_inputs=True
+        )
         tracing_context = (
             torch._guards.TracingContext.try_get()
             or torch._guards.TracingContext(fake_mode)
@@ -3796,9 +3796,9 @@ def autograd_cache_key(
     #       torch._guards.tracing, compiled_autograd._disable,
     #       functorch_config.patch
 
-    fake_mode = torch._guards.require_python_fake_mode(
-        detect_fake_mode(example_inputs)
-    ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+    fake_mode = detect_fake_mode(example_inputs) or FakeTensorMode(
+        allow_non_fake_inputs=True
+    )
     tracing_context = (
         torch._guards.TracingContext.try_get()
         or torch._guards.TracingContext(fake_mode)
