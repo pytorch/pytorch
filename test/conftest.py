@@ -312,6 +312,14 @@ class _NodeReporterReruns(_NodeReporter):
     def _prepare_content(self, content: str, header: str) -> str:
         return content
 
+    def record_testreport(self, report: TestReport) -> None:
+        super().record_testreport(report)
+        cpp_fake = os.environ.get("CPP_FAKETENSOR")
+        if cpp_fake is not None:
+            suffix = f"[cpp_faketensor={cpp_fake}]"
+            if not self.attrs["classname"].endswith(suffix):
+                self.attrs["classname"] += suffix
+
     def _write_content(self, report: TestReport, content: str, jheader: str) -> None:
         if content == "":
             return

@@ -112,9 +112,13 @@ def identity(item: pytest.Item) -> report.TestId | None:
         ):
             declared_case_name = name
     cls = item.getparent(pytest.Class)
+    suite = cls.name if cls is not None else ""
+    cpp_fake = os.environ.get("CPP_FAKETENSOR")
+    if cpp_fake is not None:
+        suite += f"[cpp_faketensor={cpp_fake}]"
     return report.TestId(
         file=item.getparent(pytest.Module).nodeid,
-        suite=cls.name if cls is not None else "",
+        suite=suite,
         case_name=item.name,
         language="python",
         declared_case_name=declared_case_name,
