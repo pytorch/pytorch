@@ -199,6 +199,7 @@
   approved_by:
   - huydhn
   - atalman
+  - zxiiro
   mandatory_checks_name:
   - EasyCLA
   - Lint
