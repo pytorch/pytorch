@@ -119,7 +119,7 @@ class GraphModuleSerializableCallable(SerializableCallable):
 
         state = pickle.loads(data)
 
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        fake_mode = FakeTensorMode(_force_python=True, shape_env=ShapeEnv())
         state["graph_module"] = GraphPickler.loads(state["graph_module"], fake_mode)
         if not isinstance(state["graph_module"], torch.fx.GraphModule):
             raise AssertionError(
