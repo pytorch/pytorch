@@ -1031,6 +1031,19 @@ def get_native_stack_prs(
     return rc
 
 
+def check_native_stack_mergeability(
+    repo: GitRepo, pr: GitHubPR, stack: NativeStack
+) -> None:
+    """Build, without pushing them or touching the worktree, the commits that merging
+    `pr` would land from its GitHub-native `stack`; raises NativeStackError when the
+    stack cannot land."""
+    native_prs = get_native_stack_prs(repo, pr, stack)
+    base = repo.rev_parse(f"refs/remotes/{repo.remote}/{pr.default_branch()}")
+    landing = [(entry, lower) for _, entry, lower in native_prs]
+    commits = [(p.get_author(), p.get_title()) for p, _, _ in native_prs]
+    build_native_stack_commits(repo, base, landing, commits)
+
+
 def get_prs_to_merge(
     repo: GitRepo, pr: GitHubPR, native_stack: NativeStack | None = None
 ) -> list[GitHubPR]:
@@ -4120,14 +4133,16 @@ def main() -> None:
     native_stack: NativeStack | None = None
     if not pr.is_ghstack_pr() and pr.base_ref() != pr.default_branch():
         refusal = f"PR targets {pr.base_ref()} rather than {pr.default_branch()}, refusing merge request"
-        # merge_changes_locally, which --check-mergeability runs, cannot land stacks;
-        # forks need it, since only it pins the head to the merge comment
-        if not args.check_mergeability and not pr.is_cross_repo():
+        # Forks need merge_changes_locally, since only it pins the head to the merge
+        # comment, and it cannot land stacks
+        if not pr.is_cross_repo():
             try:
                 native_stack = get_native_stack(org, project, pr.pr_num)
             except Exception as e:
                 print(f"Failed to read the stack of PR #{pr.pr_num}: {e}")
                 traceback.print_exc()
+                if args.check_mergeability:
+                    raise
                 refusal = f"Could not read the stack of PR #{pr.pr_num}, refusing merge request: {e}"
         if native_stack is None or native_stack.base_ref != pr.default_branch():
             if native_stack is not None:
@@ -4135,18 +4150,26 @@ def main() -> None:
                     f"PR #{pr.pr_num} is in a stack based on {native_stack.base_ref} "
                     f"rather than {pr.default_branch()}, refusing merge request"
                 )
+            # A check run also covers PRs into other branches that never go through
+            # the merge bot, so it must not comment on them
+            if args.check_mergeability:
+                print(f"Not checking mergeability: {refusal}")
+                return
             post_pr_comment(
                 org,
                 project,
                 args.pr_num,
                 refusal,
-                status=None if args.check_mergeability else MERGE_FAILURE,
+                status=MERGE_FAILURE,
                 comment_id=args.comment_id,
                 dry_run=args.dry_run,
             )
             return
 
     if args.check_mergeability:
+        if native_stack is not None:
+            check_native_stack_mergeability(repo, pr, native_stack)
+            return
         if pr.is_ghstack_pr():
             get_ghstack_prs(repo, pr)  # raises error if out of sync
         pr.merge_changes_locally(
