@@ -2332,7 +2332,9 @@ def merge_view_inputs(
     *,
     # The autograd case currently has more restrictions than the inference case.
     is_inference: bool,
-) -> tuple[list[Any], list[AOTInput], list[int | tuple[int, torch.Tensor]] | None, set[int]]:
+) -> tuple[
+    list[Any], list[AOTInput], list[int | tuple[int, torch.Tensor]] | None, set[int]
+]:
     if fwd_inputs_descs is None:
         fwd_inputs_descs = [DummyAOTInput(i) for i in range(len(fwd_inputs))]
 
