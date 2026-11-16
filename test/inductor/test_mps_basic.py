@@ -177,6 +177,32 @@ class MPSBasicTests(TestCase):
         # are off, unset or advertise fusion.
         self.assertEqual(code.count("async_compile.metal("), 3)
 
+    def test_external_template_kernel_multi_output_returned_and_used(self):
+        source = (
+            f"def {Placeholder.KERNEL_NAME}(A, B):\n"
+            "    return torch.add(A, B), torch.sub(A, B)\n"
+        )
+        with torch.library._scoped_library("mps_test_ret_used", "FRAGMENT") as lib:
+            lib.define("add_sub_ret_used(Tensor a, Tensor b) -> (Tensor, Tensor)")
+            lib.impl(
+                "add_sub_ret_used",
+                lambda a, b: (a + b, a - b),
+                "CompositeExplicitAutograd",
+            )
+            add_sub = torch.ops.mps_test_ret_used.add_sub_ret_used.default
+
+            def f(a, b):
+                x, y = add_sub(a, b)
+                return x, x.relu()
+
+            a = torch.randn(64, device=self.device)
+            b = torch.randn(64, device=self.device)
+            with self._lower_to_external_template(
+                add_sub, source, multi_output=True, allow_fusion=False
+            ):
+                result, (code,) = run_and_get_code(torch.compile(f), a, b)
+            self.assertEqual(result, f(a, b))
+
     def test_external_template_kernel_reuse(self):
         def f(a, b, c, d):
             return (a + b) * (c + d)
