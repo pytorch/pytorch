@@ -1943,14 +1943,19 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
             # Tensor items, e.g. the 0-d tensors produced by torch.Size(tensor),
-            # are converted with __index__ as THPSize_pynew does. Unspecialized
-            # Python scalars are also TensorVariables but are ints in eager.
+            # are converted with __index__ as THPSize_pynew does. Python
+            # scalars and numpy arrays are TensorVariables in Dynamo too, but
+            # they have their own __index__, so they are left unchanged.
             items = [
                 item.torch_size_item(tx, i)
                 if isinstance(item, variables.TensorVariable)
                 and not isinstance(
                     item,
-                    (variables.UnspecializedPythonVariable, variables.FakeItemVariable),
+                    (
+                        variables.UnspecializedPythonVariable,
+                        variables.FakeItemVariable,
+                        variables.NumpyNdarrayVariable,
+                    ),
                 )
                 else item
                 for i, item in enumerate(tup.items)  # type: ignore[missing-attribute]

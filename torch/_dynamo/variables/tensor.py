@@ -1935,6 +1935,10 @@ class TensorVariable(VariableTracker):
         # Converts a tensor item of torch.Size(...) like THPSize_pynew, which
         # calls __index__ on it and replaces any error with its own message
         # naming the item's type.
+        msg = (
+            "torch.Size() takes an iterable of 'int' "
+            f"(item {item_index} is '{self.python_type_name()}')"
+        )
         if (
             self.dtype is None
             or self.dtype.is_floating_point
@@ -1942,14 +1946,13 @@ class TensorVariable(VariableTracker):
             or not self.valid_size()
             or not guard_or_false(product(self.size) == 1)
         ):
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    "torch.Size() takes an iterable of 'int' "
-                    f"(item {item_index} is '{self.python_type_name()}')"
-                ],
-            )
+            raise_type_error(tx, msg)
+        constant = maybe_get_fake_constant(self.proxy.node.meta.get("example_value"))
+        if isinstance(constant, torch.Tensor):
+            value = int(constant.item())
+            if not -(2**63) <= value < 2**63:
+                raise_type_error(tx, msg)
+            return ConstantVariable.create(value)
         if self.dtype is torch.uint64:
             unimplemented(
                 gb_type="Data-dependent uint64 tensor element in torch.Size",
@@ -1958,9 +1961,6 @@ class TensorVariable(VariableTracker):
                 "torch.uint64 value fits in torch.Size's signed int64 range.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        constant = maybe_get_fake_constant(self.proxy.node.meta.get("example_value"))
-        if isinstance(constant, torch.Tensor):
-            return ConstantVariable.create(int(constant.item()))
         item: VariableTracker = self
         if self.dtype is torch.bool:
             item = self.call_method(

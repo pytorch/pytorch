@@ -7099,14 +7099,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             any("Tensor.item()" in reason for reason in counters["graph_break"])
         )
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=False)
     def test_torch_size_from_constant_tensor(self):
         def fn(x):
             return x.reshape(torch.Size([torch.tensor(4), 64]))
 
         x = torch.randn(256)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        counters.clear()
+        opt_fn = torch.compile(fn, backend="eager")
 
         self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=False)
+    def test_torch_size_from_constant_uint64_tensor(self):
+        def small():
+            return torch.Size([torch.tensor(4, dtype=torch.uint64)])
+
+        def large():
+            try:
+                return torch.Size([torch.tensor(2**63, dtype=torch.uint64)])
+            except TypeError as e:
+                return str(e)
+
+        for fn in (small, large):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(), fn())
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @parametrize(
