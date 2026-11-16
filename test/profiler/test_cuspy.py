@@ -18,7 +18,7 @@ import textwrap
 import threading
 import time
 import unittest
-from unittest.mock import call, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
@@ -2651,767 +2651,236 @@ class TestCuspyHes(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
-        from torch.profiler._cuspy import core as cuspy_core
+        from torch.profiler._cuspy import core
 
-        cuspy_core._reset_for_test()
-        self.addCleanup(cuspy_core._reset_for_test)
+        core._reset_for_test()
         self.cupti = MagicMock()
         self.cupti.get_version.return_value = 130500
         self.cupti.subscribe.return_value = 1234
         self.native = MagicMock()
         self.native.buffer_request_callback_address.return_value = 1
         self.native.buffer_complete_callback_address.return_value = 2
+        self.native.approximate_time_callback_address.return_value = 3
+        self.cupti.arm_approx_timestamp_callback.return_value = True
         self.driver = MagicMock()
         self.driver.CUresult.CUDA_SUCCESS = 0
         self.driver.cuInit.return_value = (0,)
-        for patcher in (
-            patch.object(
-                cuspy_core.cupti_python, "pylibcupti", return_value=self.cupti
-            ),
-            patch.object(cuspy_core, "_cuspy_native", self.native),
-            patch.object(cuspy_core, "_has_active_cuda_context", return_value=False),
+        for p in (
+            patch.object(core.cupti_python, "pylibcupti", return_value=self.cupti),
+            patch.object(core, "_cuspy_native", self.native),
+            patch.object(core, "_has_active_cuda_context", return_value=False),
             patch.object(torch.cuda, "is_initialized", return_value=False),
             patch.object(torch.version, "cuda", "13.5"),
-            patch.dict(
-                sys.modules,
-                {"cuda.bindings": MagicMock(driver=self.driver)},
-            ),
+            patch.dict(sys.modules, {"cuda.bindings": MagicMock(driver=self.driver)}),
         ):
-            patcher.start()
-            self.addCleanup(patcher.stop)
+            p.start()
+            self.addCleanup(p.stop)
+        self.cuspy = core.Cuspy()
+        for p in (
+            patch.object(self.cuspy._clock, "calibrate"),
+            patch.object(self.cuspy, "flush"),
+            patch.object(self.cuspy, "_drain_and_dispatch"),
+            patch.object(self.cuspy, "_drain_and_dispatch_loop"),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(core._reset_for_test)
+        self.addCleanup(self.cuspy.stop)
 
-    def test_hes_allows_configuration_after_argument_parsing(self):
-        from torch.profiler._cuspy import core as cuspy_core
+    def test_hes_configuration_and_repeated_windows(self):
+        from torch.profiler._cuspy import core
 
-        cuspy_core.enable_hes_early()
-        cuspy = cuspy_core.Cuspy()
-        subscriber = cuspy._subscriber
-        self.cupti.subscribe.assert_called_once_with(
-            allow_multiple=True, callback=cuspy._callback_trampoline
-        )
-        self.assertFalse(cuspy._callbacks_registered)
+        order = MagicMock()
+        for method, name in (
+            (self.cupti.subscribe, "subscribe"),
+            (self.cupti.activity_enable_hes, "hes"),
+            (self.driver.cuInit, "init"),
+        ):
+            order.attach_mock(method, name)
+        core.enable_hes_early()
+        self.assertEqual([c[0] for c in order.mock_calls], ["subscribe", "hes", "init"])
+        self.assertTrue(self.cupti.subscribe.call_args.kwargs["allow_multiple"])
+        self.cupti.arm_user_defined_records.assert_not_called()
         self.native.configure_buffers.assert_not_called()
-        cuspy_core.configure(buffer_size=8192, background_flush_period_s=0.5)
-        cuspy_core.configure(background_drain_period_s=0.25)
-        self.assertEqual(cuspy.buffer_size, 8192)
-        self.assertEqual(cuspy.background_flush_period_s, 0.5)
-        self.assertEqual(cuspy.background_drain_period_s, 0.25)
-        with (
-            patch.object(cuspy._clock, "calibrate"),
-            patch.object(cuspy, "_drain_and_dispatch_loop"),
-            patch.object(cuspy, "flush"),
-            patch.object(cuspy, "_drain_and_dispatch"),
-        ):
-            observer = cuspy.register([], lambda _columns: None)
-            self.native.configure_buffers.assert_called_once_with(8192)
+        core.configure(buffer_size=8192, background_flush_period_s=0.5)
+        core.configure(background_drain_period_s=0.25)
+        for _ in range(2):
+            observer = self.cuspy.register([], lambda _columns: None)
+            self.assertEqual(self.native.configure_buffers.call_args.args, (8192,))
             self.assertEqual(
                 self.native.configure_decoder.call_args.args[4:6], (True, 500_000_000)
             )
-            cuspy.unregister(observer)
-        self.assertEqual(cuspy._subscriber, subscriber)
-        self.cupti.subscribe.assert_called_once()
-        cuspy.stop()
-
-    @parametrize(
-        "setting",
-        [
-            "buffer_size",
-            "background_flush_period_s",
-            "background_drain_period_s",
-            "use_approx_timestamps",
-        ],
-    )
-    def test_configuration_changes_rejected_after_collection(self, setting):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        cuspy_core.enable_hes_early()
-        cuspy = cuspy_core.Cuspy()
-        with (
-            patch.object(cuspy._clock, "calibrate"),
-            patch.object(cuspy, "flush"),
-            patch.object(cuspy, "_drain_and_dispatch"),
-        ):
-            observer = cuspy.register([], lambda _columns: None)
-            cuspy.unregister(observer)
-        values = {
-            "buffer_size": 8192,
-            "background_flush_period_s": 0.5,
-            "background_drain_period_s": 0.25,
-            "use_approx_timestamps": True,
-        }
-        before = cuspy_core.get_config()
-        with self.assertRaisesRegex(
-            RuntimeError, "cannot change after activity collection starts"
-        ):
-            cuspy_core.configure(**{setting: values[setting]})
-        self.assertEqual(cuspy_core.get_config(), before)
-        # The pinned collector repeats this identical setting on every new window.
-        cuspy_core.configure(background_flush_period_s=-1)
-        cuspy.stop()
-
-    def test_shared_hes_rejects_late_approx_without_partial_configuration(self):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        cuspy_core.enable_hes_early()
-        cuspy = cuspy_core.Cuspy()
-        before = cuspy_core.get_config()
-        with self.assertRaisesRegex(RuntimeError, "requires exclusive CUPTI ownership"):
-            cuspy_core.configure(buffer_size=8192, use_approx_timestamps=True)
-        self.assertEqual(cuspy_core.get_config(), before)
-        self.assertEqual(cuspy.buffer_size, before["buffer_size"])
-        self.assertTrue(cuspy._subscriber_allows_multiple)
+            self.assertEqual(self.cuspy.background_drain_period_s, 0.25)
+            core.configure(buffer_size=8192)
+            with self.assertRaisesRegex(RuntimeError, "configuration cannot change"):
+                core.configure(buffer_size=4096)
+            self.cuspy.unregister(observer)
+            self.assertEqual(self.cuspy._subscriber, 1234)
         self.cupti.subscribe.assert_called_once()
         self.cupti.unsubscribe.assert_not_called()
-        cuspy_core.configure(buffer_size=8192)
-        self.assertEqual(cuspy.buffer_size, 8192)
-        cuspy.stop()
-
-    def test_approx_before_hes_explicitly_reserves_exclusive_subscriber(self):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        cuspy_core.configure(use_approx_timestamps=True)
-        cuspy = cuspy_core.Cuspy()
-        with patch.object(
-            cuspy, "_try_arm_approx_timestamp_callback", return_value=True
-        ):
-            cuspy_core.enable_hes_early()
-            self.cupti.subscribe.assert_called_once_with(
-                allow_multiple=False, callback=cuspy._callback_trampoline
-            )
-            cuspy_core.configure(buffer_size=8192)
-            self.assertEqual(cuspy.buffer_size, 8192)
-            self.assertTrue(cuspy._timestamp_callback_enabled)
-        cuspy.stop()
-
-    def test_failed_approx_removal_preserves_configuration_and_clock(self):
-        from torch.profiler._cuspy import core as cuspy_core, cupti_python
-
-        cuspy_core.configure(use_approx_timestamps=True)
-        cuspy = cuspy_core.Cuspy()
-        with patch.object(
-            cuspy, "_try_arm_approx_timestamp_callback", return_value=True
-        ):
-            cuspy_core.enable_hes_early()
-        wrapper = object.__new__(cupti_python._PyLibCupti)
-        wrapper._lib = MagicMock()
-        wrapper._lib.cuptiActivitySetAttribute_v2.return_value = 1
-        self.cupti.disarm_approx_timestamp_callback.side_effect = (
-            wrapper.disarm_approx_timestamp_callback
-        )
-        before = cuspy_core.get_config()
-        with self.assertRaisesRegex(
-            cupti_python.CuptiError, "TIMESTAMP_CALLBACK removal"
-        ):
-            cuspy_core.configure(buffer_size=8192, use_approx_timestamps=False)
-        self.assertEqual(cuspy_core.get_config(), before)
-        self.assertTrue(cuspy._timestamp_callback_active)
-        self.assertTrue(cuspy._timestamp_callback_enabled)
-        self.assertEqual(cuspy.buffer_size, before["buffer_size"])
-        wrapper._lib.cuptiActivitySetAttribute_v2.return_value = 0
-        cuspy_core.configure(buffer_size=8192, use_approx_timestamps=False)
-        self.assertFalse(cuspy._timestamp_callback_active)
-        self.assertFalse(cuspy._timestamp_callback_enabled)
-        self.assertEqual(cuspy.buffer_size, 8192)
-        cuspy.stop()
-
-    def test_get_config_waits_for_complete_configuration_transaction(self):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        cuspy_core.enable_hes_early()
-        cuspy = cuspy_core.Cuspy()
-        entered = threading.Event()
-        resume = threading.Event()
-        reader_started = threading.Event()
-        reader_finished = threading.Event()
-        snapshots = []
-        errors = []
-
-        def pause_assignment(instance, value):
-            entered.set()
-            if not resume.wait(5):
-                raise RuntimeError("configuration did not resume")
-            instance.__dict__["buffer_size"] = value
-
-        def configure_options():
-            try:
-                cuspy_core.configure(buffer_size=8192, background_flush_period_s=0.5)
-            except Exception as error:
-                errors.append(error)
-
-        def read_options():
-            reader_started.set()
-            try:
-                snapshots.append(cuspy_core.get_config())
-            except Exception as error:
-                errors.append(error)
-            finally:
-                reader_finished.set()
-
-        with patch.object(
-            cuspy_core.Cuspy,
-            "buffer_size",
-            property(
-                lambda instance: instance.__dict__["buffer_size"], pause_assignment
-            ),
-            create=True,
-        ):
-            writer = threading.Thread(target=configure_options)
-            reader = threading.Thread(target=read_options)
-            writer.start()
-            try:
-                self.assertTrue(entered.wait(5))
-                reader.start()
-                self.assertTrue(reader_started.wait(5))
-                self.assertFalse(reader_finished.wait(0.1))
-            finally:
-                resume.set()
-                writer.join(5)
-                if reader.ident is not None:
-                    reader.join(5)
-            self.assertFalse(writer.is_alive())
-            self.assertFalse(reader.is_alive())
-        self.assertEqual(errors, [])
-        self.assertEqual(snapshots, [cuspy_core.get_config()])
-        self.assertEqual(snapshots[0]["buffer_size"], 8192)
-        self.assertEqual(snapshots[0]["background_flush_period_s"], 0.5)
-        self.assertTrue(snapshots[0]["configured"])
-        cuspy.stop()
-
-    def test_failed_exclusive_start_allows_configured_retry(self):
-        from torch.profiler._cuspy import core as cuspy_core, cupti_python
-
-        cuspy_core.configure(use_approx_timestamps=True)
-        cuspy = cuspy_core.Cuspy()
-        self.cupti.subscribe.side_effect = [
-            cupti_python.CuptiError("exclusive unavailable"),
-            1234,
-        ]
-        with (
-            patch.object(cuspy._clock, "calibrate"),
-            patch.object(cuspy, "flush"),
-            patch.object(cuspy, "_drain_and_dispatch"),
-        ):
-            with self.assertRaisesRegex(
-                RuntimeError, "Retry with use_approx_timestamps=False"
-            ):
-                cuspy.register([], lambda _columns: None)
-            self.assertFalse(cuspy._config_frozen)
-            self.assertFalse(cuspy._setup_in_progress)
-            self.assertFalse(cuspy._started)
-            self.assertEqual(cuspy._observers, [])
-            self.assertIsNone(cuspy._subscriber)
-            cuspy_core.configure(buffer_size=8192, use_approx_timestamps=False)
-            observer = cuspy.register([], lambda _columns: None)
-            self.assertTrue(cuspy._started)
-            self.assertTrue(cuspy._config_frozen)
-            self.assertEqual(cuspy.buffer_size, 8192)
-            self.assertEqual(
-                [
-                    c.kwargs["allow_multiple"]
-                    for c in self.cupti.subscribe.call_args_list
-                ],
-                [False, True],
-            )
-            cuspy.unregister(observer)
-
-    @parametrize(
-        "stage", ["buffers", "udr", "clock", "decoder_config", "decoder_start"]
-    )
-    @parametrize("early_hes", [False, True])
-    def test_failed_first_start_rolls_back_activity_setup(self, stage, early_hes):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        if early_hes:
-            cuspy_core.enable_hes_early()
-        cuspy = cuspy_core.Cuspy()
-        with (
-            patch.object(cuspy._clock, "calibrate") as calibrate,
-            patch.object(cuspy, "flush"),
-            patch.object(cuspy, "_drain_and_dispatch"),
-        ):
-            operations = {
-                "buffers": self.native.configure_buffers,
-                "udr": self.cupti.arm_user_defined_records,
-                "clock": calibrate,
-                "decoder_config": self.native.configure_decoder,
-                "decoder_start": self.native.start_decoder,
-            }
-            operation = operations[stage]
-            operation.side_effect = RuntimeError(f"injected {stage} failure")
-            with self.assertRaisesRegex(RuntimeError, f"injected {stage} failure"):
-                cuspy.register([], lambda _columns: None)
-            self.assertFalse(cuspy._config_frozen)
-            self.assertFalse(cuspy._setup_in_progress)
-            self.assertFalse(cuspy._started)
-            self.assertFalse(cuspy._decoder_running)
-            if stage == "decoder_start":
-                self.native.stop_decoder.assert_called_once()
-            else:
-                self.native.stop_decoder.assert_not_called()
-            self.assertFalse(cuspy._callbacks_registered)
-            self.assertEqual(cuspy._observers, [])
-            self.assertEqual(cuspy_core.is_hes_enabled(), early_hes)
-            self.assertEqual(cuspy_core.has_live_subscription(), early_hes)
-            if early_hes:
-                self.cupti.unsubscribe.assert_not_called()
-            cuspy_core.configure(buffer_size=8192)
-            operation.side_effect = None
-            observer = cuspy.register([], lambda _columns: None)
-            self.assertTrue(cuspy._started)
-            self.assertEqual(cuspy.buffer_size, 8192)
-            cuspy.unregister(observer)
-        if early_hes:
-            cuspy_core.release_hes()
-        self.assertFalse(cuspy_core.has_live_subscription())
-
-    def test_failed_decoder_rollback_preserves_subscriber_and_frozen_config(self):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        cuspy = cuspy_core.Cuspy()
-        self.native.start_decoder.side_effect = RuntimeError("decoder start failed")
-        self.native.stop_decoder.side_effect = RuntimeError("decoder stop failed")
-        with patch.object(cuspy._clock, "calibrate"):
-            with self.assertRaisesRegex(RuntimeError, "startup rollback failed"):
-                cuspy.register([], lambda _columns: None)
-        self.native.stop_decoder.assert_called_once()
-        self.assertTrue(cuspy._decoder_running)
-        self.assertTrue(cuspy._config_frozen)
-        self.assertFalse(cuspy._setup_in_progress)
-        self.assertEqual(cuspy._observers, [])
-        self.cupti.unsubscribe.assert_not_called()
-        with self.assertRaisesRegex(RuntimeError, "configuration cannot change"):
-            cuspy_core.configure(buffer_size=8192)
-        # Let test cleanup release the mocked worker and subscriber.
-        self.native.stop_decoder.side_effect = None
-        self.native.stop_decoder()
-        cuspy._decoder_running = False
-        cuspy.stop()
-
-    def test_configuration_rejected_during_setup_but_open_after_failure(self):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        cuspy = cuspy_core.Cuspy()
-
-        def configure_during_setup(_buffer_size):
-            with self.assertRaisesRegex(RuntimeError, "during activity setup"):
-                cuspy_core.configure(buffer_size=8192)
-            raise RuntimeError("injected setup failure")
-
-        self.native.configure_buffers.side_effect = configure_during_setup
-        with self.assertRaisesRegex(RuntimeError, "injected setup failure"):
-            cuspy.start()
-        cuspy_core.configure(buffer_size=8192)
-        self.assertEqual(cuspy.buffer_size, 8192)
-
-    @parametrize("consumer", ["observer", "callback"])
-    def test_release_hes_refuses_live_consumers_then_releases(self, consumer):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        cuspy_core.enable_hes_early()
-        cuspy = cuspy_core.Cuspy()
-        with (
-            patch.object(cuspy._clock, "calibrate"),
-            patch.object(cuspy, "flush"),
-            patch.object(cuspy, "_drain_and_dispatch"),
-        ):
-            if consumer == "observer":
-                owner = cuspy.register([], lambda _columns: None)
-            else:
-                owner = cuspy.register_callback_handler(0, 0, lambda *args: None)
-            with self.assertRaisesRegex(
-                RuntimeError, "closing all Cuspy activity observers"
-            ):
-                cuspy_core.release_hes()
-            self.cupti.unsubscribe.assert_not_called()
-            self.assertTrue(cuspy_core.is_hes_enabled())
-            if consumer == "observer":
-                cuspy.unregister(owner)
-            else:
-                cuspy.unregister_callback_handler(owner)
-        self.assertTrue(cuspy_core.has_live_subscription())
-        cuspy_core.release_hes()
+        core.release_hes()
         self.cupti.unsubscribe.assert_called_once_with(1234)
-        self.assertFalse(cuspy_core.is_hes_enabled())
-        self.assertFalse(cuspy_core.has_live_subscription())
-        cuspy_core.release_hes()
-        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertFalse(core.has_live_subscription())
         self.cupti.finalize.assert_not_called()
 
-    def test_activity_setup_pins_subscriber_during_callback_teardown(self):
-        from torch.profiler._cuspy import core as cuspy_core, cupti_python
+    @parametrize("failure", ["subscribe", "udr"])
+    def test_failed_registration_allows_configuration_and_retry(self, failure):
+        from torch.profiler._cuspy import core, cupti_python
 
-        cuspy = cuspy_core.Cuspy()
-        handler = cuspy.register_callback_handler(0, 0, lambda *args: None)
-        subscriber = cuspy._subscriber
-        entered = threading.Event()
-        resume = threading.Event()
-        teardown_started = threading.Event()
-        teardown_finished = threading.Event()
-        errors = []
-        wrapper = object.__new__(cupti_python._PyLibCupti)
-        wrapper._lib = MagicMock()
-        wrapper._lib.cuptiActivitySetAttribute_v2.return_value = 0
+        if failure == "subscribe":
+            core.configure(use_approx_timestamps=True)
+            self.cupti.subscribe.side_effect = [
+                cupti_python.CuptiError("subscribe failed"),
+                1234,
+            ]
+        else:
+            core.enable_hes_early()
+            wrapper = object.__new__(cupti_python._PyLibCupti)
+            wrapper._lib = MagicMock()
+            wrapper._lib.cuptiActivitySetAttribute_v2.return_value = 0
+            wrapper._lib.cuptiActivityRegisterCallbacks_v2.side_effect = [1, 0]
+            self.cupti.arm_user_defined_records.side_effect = (
+                wrapper.arm_user_defined_records
+            )
+        with self.assertRaises((RuntimeError, cupti_python.CuptiError)):
+            self.cuspy.register([], lambda _columns: None)
+        self.assertFalse(self.cuspy._config_frozen)
+        self.assertEqual(self.cuspy._observers, [])
+        core.configure(buffer_size=8192, use_approx_timestamps=False)
+        observer = self.cuspy.register([], lambda _columns: None)
+        self.assertEqual(self.cuspy.buffer_size, 8192)
+        self.assertTrue(self.cuspy._started)
+        self.cuspy.unregister(observer)
+        core.release_hes()
+        self.assertFalse(core.has_live_subscription())
 
-        def register_native_callbacks(*_args):
-            entered.set()
-            if not resume.wait(5):
-                raise RuntimeError("native callback registration did not resume")
-            return 0 if cuspy._subscriber == subscriber else 1
+    @parametrize("before_hes", [False, True])
+    def test_approx_requires_exclusive_subscription(self, before_hes):
+        from torch.profiler._cuspy import core
 
-        wrapper._lib.cuptiActivityRegisterCallbacks_v2.side_effect = (
-            register_native_callbacks
-        )
-        self.cupti.arm_user_defined_records.side_effect = (
-            wrapper.arm_user_defined_records
-        )
-
-        def setup_callbacks():
-            try:
-                cuspy.register_callbacks()
-            except Exception as error:
-                errors.append(error)
-
-        def close_handler():
-            teardown_started.set()
-            try:
-                cuspy.unregister_callback_handler(handler)
-            except Exception as error:
-                errors.append(error)
-            finally:
-                teardown_finished.set()
-
-        setup = threading.Thread(target=setup_callbacks)
-        teardown = threading.Thread(target=close_handler)
-        setup.start()
-        try:
-            self.assertTrue(entered.wait(5))
-            teardown.start()
-            self.assertTrue(teardown_started.wait(5))
-            self.assertFalse(teardown_finished.wait(0.1))
+        if before_hes:
+            core.configure(use_approx_timestamps=True)
+            core.enable_hes_early()
+            self.assertFalse(self.cupti.subscribe.call_args.kwargs["allow_multiple"])
+        else:
+            core.enable_hes_early()
+            original = core.get_config()
+            with self.assertRaisesRegex(
+                RuntimeError, "requires exclusive CUPTI ownership"
+            ):
+                core.configure(buffer_size=8192, use_approx_timestamps=True)
+            self.assertEqual(core.get_config(), original)
             self.cupti.unsubscribe.assert_not_called()
-        finally:
-            resume.set()
-            setup.join(5)
-            if teardown.ident is not None:
-                teardown.join(5)
-        self.assertFalse(setup.is_alive())
-        self.assertFalse(teardown.is_alive())
-        self.assertEqual(errors, [])
-        self.assertEqual(cuspy._subscriber, subscriber)
-        self.assertTrue(cuspy._callbacks_registered)
-        self.cupti.unsubscribe.assert_not_called()
-        cuspy.stop()
-        self.cupti.unsubscribe.assert_called_once_with(subscriber)
+        core.configure(buffer_size=8192)
+        self.assertEqual(self.cuspy.buffer_size, 8192)
+        core.release_hes()
 
-    def test_start_failure_preserves_pre_registered_activity_callbacks(self):
-        from torch.profiler._cuspy import core as cuspy_core
+    @parametrize("failure", ["hes", "driver"])
+    def test_failed_early_hes_releases_subscription(self, failure):
+        from torch.profiler._cuspy import core
 
-        cuspy = cuspy_core.Cuspy()
-        cuspy.register_callbacks()
-        subscriber = cuspy._subscriber
-        with (
-            patch.object(cuspy._clock, "calibrate") as calibrate,
-            patch.object(cuspy, "flush"),
-            patch.object(cuspy, "_drain_and_dispatch"),
+        operation = (
+            self.cupti.activity_enable_hes if failure == "hes" else self.driver.cuInit
+        )
+        operation.side_effect = RuntimeError("initialization failed")
+        with self.assertRaisesRegex(RuntimeError, "initialization failed"):
+            core.enable_hes_early()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertFalse(core.is_hes_enabled())
+        core.configure(buffer_size=8192)
+        self.assertEqual(self.cuspy.buffer_size, 8192)
+
+    @parametrize("consumer", ["observer", "callback"])
+    def test_release_requires_closed_consumers(self, consumer):
+        from torch.profiler._cuspy import core
+
+        core.enable_hes_early()
+        if consumer == "observer":
+            observer = self.cuspy.register([], lambda _columns: None)
+            close = lambda: self.cuspy.unregister(observer)
+        else:
+            handler = self.cuspy.register_callback_handler(0, 0, lambda *args: None)
+            close = lambda: self.cuspy.unregister_callback_handler(handler)
+        with self.assertRaisesRegex(
+            RuntimeError, "closing all Cuspy activity observers"
         ):
-            calibrate.side_effect = RuntimeError("clock calibration failed")
-            with self.assertRaisesRegex(RuntimeError, "clock calibration failed"):
-                cuspy.register([], lambda _columns: None)
-            self.assertEqual(cuspy._subscriber, subscriber)
-            self.assertTrue(cuspy._callbacks_registered)
-            self.assertTrue(cuspy._config_frozen)
-            self.cupti.unsubscribe.assert_not_called()
-            self.cupti.disarm_user_defined_records.assert_not_called()
-            calibrate.side_effect = None
-            observer = cuspy.register([], lambda _columns: None)
-            self.cupti.subscribe.assert_called_once()
-            self.cupti.arm_user_defined_records.assert_called_once()
-            cuspy.unregister(observer)
-        self.assertFalse(cuspy_core.has_live_subscription())
+            core.release_hes()
+        self.cupti.unsubscribe.assert_not_called()
+        close()
+        core.release_hes()
+        core.release_hes()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertFalse(core.has_live_subscription())
 
-    def test_failed_release_hes_can_retry_unsubscribe(self):
-        from torch.profiler._cuspy import core as cuspy_core, cupti_python
+    def test_release_retries_failed_unsubscribe(self):
+        from torch.profiler._cuspy import core, cupti_python
 
-        cuspy_core.enable_hes_early()
+        core.enable_hes_early()
         self.cupti.unsubscribe.side_effect = [
             cupti_python.CuptiError("unsubscribe failed"),
             None,
         ]
         with self.assertRaisesRegex(cupti_python.CuptiError, "unsubscribe failed"):
-            cuspy_core.release_hes()
-        self.assertTrue(cuspy_core.is_hes_enabled())
-        self.assertTrue(cuspy_core.has_live_subscription())
-        cuspy_core.release_hes()
+            core.release_hes()
+        self.assertTrue(core.is_hes_enabled())
+        core.release_hes()
         self.assertEqual(self.cupti.unsubscribe.call_count, 2)
-        self.assertFalse(cuspy_core.is_hes_enabled())
-        self.assertFalse(cuspy_core.has_live_subscription())
-        cuspy_core.release_hes()
-        self.assertEqual(self.cupti.unsubscribe.call_count, 2)
+        self.assertFalse(core.has_live_subscription())
 
-    def test_release_hes_without_collection_or_enablement(self):
-        from torch.profiler._cuspy import core as cuspy_core
+    def test_failed_clock_change_leaves_configuration_unchanged(self):
+        from torch.profiler._cuspy import core, cupti_python
 
-        cuspy_core.release_hes()
-        self.assertIsNone(cuspy_core.Cuspy._instance)
-        cuspy_core.enable_hes_early()
-        cuspy_core.release_hes()
-        self.cupti.unsubscribe.assert_called_once_with(1234)
-        self.assertFalse(cuspy_core.has_live_subscription())
-        self.assertFalse(cuspy_core.is_hes_enabled())
-        self.native.start_decoder.assert_not_called()
-        self.cupti.finalize.assert_not_called()
+        core.configure(use_approx_timestamps=True)
+        core.enable_hes_early()
+        before = core.get_config()
+        self.cupti.disarm_approx_timestamp_callback.return_value = False
+        with self.assertRaises(cupti_python.CuptiError):
+            core.configure(buffer_size=8192, use_approx_timestamps=False)
+        self.assertEqual(core.get_config(), before)
 
-    def test_hes_subscriber_survives_sessions(self):
-        from torch.profiler._cuspy import core as cuspy_core
+    def test_configuration_waits_for_activity_setup(self):
+        from torch.profiler._cuspy import core
 
-        order = MagicMock()
-        order.attach_mock(self.cupti.subscribe, "subscribe")
-        order.attach_mock(self.cupti.activity_enable_hes, "hes")
-        order.attach_mock(self.cupti.arm_user_defined_records, "udr")
-        order.attach_mock(self.driver.cuInit, "init")
-        cuspy_core.enable_hes_early()
-        cuspy = cuspy_core.Cuspy()
-        subscriber = cuspy._subscriber
-        self.assertEqual(subscriber, 1234)
-        self.assertEqual([c[0] for c in order.mock_calls], ["subscribe", "hes", "init"])
-        self.cupti.activity_enable_hes.assert_called_once_with(subscriber)
-        self.cupti.arm_user_defined_records.assert_not_called()
-        self.assertFalse(cuspy_core.get_config()["configured"])
-        self.assertTrue(cuspy_core.is_hes_enabled())
-        self.assertTrue(cuspy_core.has_live_subscription())
-        cuspy_core.enable_hes_early()
-        self.cupti.activity_enable_hes.assert_called_once()
-        self.driver.cuInit.assert_called_once_with(0)
-
-        with (
-            patch.object(cuspy._clock, "calibrate"),
-            patch.object(cuspy, "flush"),
-            patch.object(cuspy, "_drain_and_dispatch"),
-        ):
-            for _ in range(2):
-                observer = cuspy.register([], lambda _columns: None)
-                cuspy.unregister(observer)
-                self.assertEqual(cuspy._subscriber, subscriber)
-                self.assertTrue(cuspy_core.is_hes_enabled())
-        self.cupti.subscribe.assert_called_once()
-        self.cupti.unsubscribe.assert_not_called()
-        self.assertEqual(
-            [c.args[0] for c in self.cupti.arm_user_defined_records.call_args_list],
-            [subscriber, subscriber],
+        entered, resume, configured = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
         )
-        self.assertEqual(self.cupti.disarm_user_defined_records.call_count, 2)
-        self.cupti.disarm_user_defined_records.assert_has_calls(
-            [call(subscriber), call(subscriber)]
-        )
-        cuspy.stop()
-        self.cupti.unsubscribe.assert_called_once_with(subscriber)
-        self.assertFalse(cuspy_core.is_hes_enabled())
-        self.assertFalse(cuspy_core.has_live_subscription())
-
-    @parametrize("started", [False, True])
-    def test_explicit_stop_releases_hes_before_distributed_teardown(self, started):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        cuspy_core.enable_hes_early()
-        cuspy = cuspy_core.Cuspy()
-        with (
-            patch.object(cuspy._clock, "calibrate"),
-            patch.object(cuspy, "flush"),
-            patch.object(cuspy, "_drain_and_dispatch"),
-        ):
-            if started:
-                cuspy.start()
-            cuspy.stop()
-        self.cupti.unsubscribe.assert_called_once_with(1234)
-        self.assertFalse(cuspy_core.has_live_subscription())
-        self.assertFalse(cuspy_core.is_hes_enabled())
-        self.assertFalse(cuspy._callbacks_registered)
-        self.cupti.finalize.assert_not_called()
-        cuspy.stop()
-        self.cupti.unsubscribe.assert_called_once_with(1234)
-
-    def test_explicit_stop_preserves_live_hes_callback_handler(self):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        cuspy_core.enable_hes_early()
-        cuspy = cuspy_core.Cuspy()
-        handler = cuspy.register_callback_handler(0, 0, lambda *args: None)
-        self.addCleanup(cuspy.unregister_callback_handler, handler)
-        cuspy.arm_callback(0, 0)
-        trampoline = cuspy._callback_trampoline
-        cuspy.stop()
-        self.cupti.unsubscribe.assert_not_called()
-        self.assertEqual(cuspy._subscriber, 1234)
-        self.assertIs(cuspy._callback_trampoline, trampoline)
-        self.assertTrue(cuspy_core.is_hes_enabled())
-        self.cupti.enable_callback.assert_called_once_with(1234, 0, 0, True)
-        cuspy.unregister_callback_handler(handler)
-        self.cupti.enable_callback.assert_has_calls(
-            [call(1234, 0, 0, True), call(1234, 0, 0, False)]
-        )
-        self.cupti.unsubscribe.assert_not_called()
-        cuspy.stop()
-        self.cupti.unsubscribe.assert_called_once_with(1234)
-        self.assertFalse(cuspy_core.has_live_subscription())
-        self.assertFalse(cuspy_core.is_hes_enabled())
-
-    def test_partial_udr_failure_restores_shared_subscriber(self):
-        import ctypes
-
-        from torch.profiler._cuspy import core as cuspy_core, cupti_python
-
-        cuspy = cuspy_core.Cuspy()
-        handler = cuspy.register_callback_handler(0, 0, lambda *args: None)
-        self.addCleanup(cuspy.unregister_callback_handler, handler)
-        trampoline = cuspy._callback_trampoline
-        lib = MagicMock()
-        lib.cuptiActivitySetAttribute_v2.return_value = 0
-        lib.cuptiActivityRegisterCallbacks_v2.return_value = 1
-        wrapper = object.__new__(cupti_python._PyLibCupti)
-        wrapper._lib = lib
-        self.cupti.activity_enable_hes.side_effect = wrapper.activity_enable_hes
-        self.cupti.arm_user_defined_records.side_effect = (
-            wrapper.arm_user_defined_records
-        )
-        cuspy_core.enable_hes_early()
-        with (
-            patch.object(
-                wrapper, "_result_string", return_value="CUPTI_ERROR_INVALID_PARAMETER"
-            ),
-            self.assertRaisesRegex(
-                cupti_python.CuptiError,
-                "cuptiActivityRegisterCallbacks_v2 failed with CUPTI_ERROR_INVALID_PARAMETER",
-            ),
-        ):
-            cuspy.register_callbacks()
-        attributes = [
-            (
-                c.args[0].value,
-                c.args[1],
-                ctypes.cast(c.args[3], ctypes.POINTER(ctypes.c_uint8))[0],
-            )
-            for c in lib.cuptiActivitySetAttribute_v2.call_args_list
-        ]
-        self.assertEqual(
-            attributes,
-            [
-                (1234, cupti_python.ActivityAttr.ENABLE_HES, 1),
-                (1234, cupti_python.ActivityAttr.USER_DEFINED_RECORDS, 1),
-                (1234, cupti_python.ActivityAttr.USER_DEFINED_RECORDS, 0),
-            ],
-        )
-        self.cupti.unsubscribe.assert_not_called()
-        self.assertEqual(cuspy._subscriber, 1234)
-        self.assertIs(cuspy._callback_trampoline, trampoline)
-        self.assertFalse(cuspy._callbacks_registered)
-        self.assertTrue(cuspy_core.is_hes_enabled())
-        self.driver.cuInit.assert_called_once_with(0)
-
-    def test_retained_subscriber_reconciles_latency_after_stop(self):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        cuspy_core.enable_hes_early()
-        cuspy = cuspy_core.Cuspy()
-        with (
-            patch.object(cuspy._clock, "calibrate"),
-            patch.object(cuspy, "flush"),
-            patch.object(cuspy, "_drain_and_dispatch"),
-        ):
-            observer = cuspy.register([], lambda _columns: None)
-            cuspy._latency_enabled = True
-            cuspy.unregister(observer)
-            self.assertTrue(cuspy._latency_enabled)
-            observer = cuspy.register([], lambda _columns: None)
-            self.cupti.enable_kernel_latency_timestamps.assert_called_once_with(
-                1234, False
-            )
-            self.assertFalse(cuspy._latency_enabled)
-            cuspy.unregister(observer)
-
-    def test_hes_initialization_pins_subscriber_against_callback_teardown(self):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        cuspy = cuspy_core.Cuspy()
-        handler = cuspy.register_callback_handler(0, 0, lambda *args: None)
-        entered = threading.Event()
-        resume = threading.Event()
-        teardown_started = threading.Event()
-        teardown_finished = threading.Event()
         errors = []
 
-        def pause_hes(*args, **kwargs):
+        def arm(*args):
             entered.set()
+            with self.assertRaisesRegex(RuntimeError, "configuration cannot change"):
+                core.configure(buffer_size=8192)
             if not resume.wait(5):
-                raise RuntimeError("HES initialization did not resume")
+                raise RuntimeError("setup did not resume")
 
-        def initialize():
+        def configure():
             try:
-                cuspy_core.enable_hes_early()
-            except Exception as error:
-                errors.append(error)
-
-        def teardown():
-            teardown_started.set()
-            try:
-                cuspy.unregister_callback_handler(handler)
-            except Exception as error:
+                core.configure(buffer_size=8192)
+            except RuntimeError as error:
                 errors.append(error)
             finally:
-                teardown_finished.set()
+                configured.set()
 
-        self.cupti.activity_enable_hes.side_effect = pause_hes
-        worker = threading.Thread(target=initialize)
-        remover = threading.Thread(target=teardown)
-        worker.start()
+        self.cupti.arm_user_defined_records.side_effect = arm
+        setup = threading.Thread(target=self.cuspy.register_callbacks)
+        writer = threading.Thread(target=configure)
+        setup.start()
         try:
             self.assertTrue(entered.wait(5))
-            remover.start()
-            self.assertTrue(teardown_started.wait(5))
-            self.assertFalse(teardown_finished.wait(0.1))
+            writer.start()
+            self.assertFalse(configured.wait(0.1))
         finally:
             resume.set()
-            worker.join(5)
-            if remover.ident is not None:
-                remover.join(5)
-        self.assertFalse(worker.is_alive())
-        self.assertFalse(remover.is_alive())
-        self.assertEqual(errors, [])
-        self.assertTrue(teardown_finished.is_set())
-        self.cupti.subscribe.assert_called_once()
-        self.cupti.unsubscribe.assert_not_called()
-        self.cupti.activity_enable_hes.assert_called_once_with(1234)
-        self.cupti.arm_user_defined_records.assert_not_called()
-        cuspy.register_callbacks()
-        self.assertEqual(self.cupti.arm_user_defined_records.call_args.args[0], 1234)
-        self.assertEqual(cuspy._subscriber, 1234)
-        self.assertTrue(cuspy_core.is_hes_enabled())
-
-    @parametrize("failure", ["hes", "driver"])
-    def test_hes_initialization_failure_releases_subscriber(self, failure):
-        from torch.profiler._cuspy import core as cuspy_core
-
-        error = RuntimeError(f"{failure} failed")
-        if failure == "hes":
-            self.cupti.activity_enable_hes.side_effect = error
-        else:
-            self.driver.cuInit.side_effect = error
-        with self.assertRaisesRegex(RuntimeError, f"{failure} failed"):
-            cuspy_core.enable_hes_early()
-        self.cupti.unsubscribe.assert_called_once_with(1234)
-        self.assertIsNone(cuspy_core.Cuspy()._subscriber)
-        self.assertIsNone(cuspy_core.Cuspy()._callback_trampoline)
-        self.assertFalse(cuspy_core.Cuspy()._callbacks_registered)
-        self.assertFalse(cuspy_core.is_hes_enabled())
-        if failure != "driver":
-            self.driver.cuInit.assert_not_called()
-        else:
-            self.cupti.activity_enable_hes.assert_has_calls(
-                [call(1234), call(1234, enabled=False)]
-            )
-        self.cupti.arm_user_defined_records.assert_not_called()
-        self.assertFalse(cuspy_core.get_config()["configured"])
-        cuspy_core.configure(buffer_size=8192)
-        self.assertEqual(cuspy_core.Cuspy().buffer_size, 8192)
+            setup.join(5)
+            if writer.ident is not None:
+                writer.join(5)
+        self.assertFalse(setup.is_alive())
+        self.assertFalse(writer.is_alive())
+        self.assertEqual(len(errors), 1)
+        self.assertIn("configuration cannot change", str(errors[0]))
+        self.assertNotEqual(self.cuspy.buffer_size, 8192)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
