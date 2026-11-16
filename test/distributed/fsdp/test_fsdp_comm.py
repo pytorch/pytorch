@@ -91,10 +91,11 @@ class TestCommunication(FSDPCommTestBase):
         self,
         nested_model: bool,
         sharding_strategy: ShardingStrategy,
+        device_type: str,
     ):
         fsdp_kwargs = {
             "sharding_strategy": sharding_strategy,
-            "device_id": self._resolved_device_type(),
+            "device_id": device_type,
         }
         if nested_model:
             model = NestedWrappedModule.init(
@@ -263,7 +264,7 @@ class TestCommunication(FSDPCommTestBase):
         # Enable execution order checking
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         # Initialize the model and inputs
-        fsdp_model = self._init_model(nested_model, sharding_strategy)
+        fsdp_model = self._init_model(nested_model, sharding_strategy, device_type)
         batch = fsdp_model.module.get_input(device_type)
         # Count the number of FSDP instances that manage parameters since the
         # number of collectives are a function of this number
