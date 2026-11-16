@@ -4940,7 +4940,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         # Guard snapshots use pytype to represent arbitrary real tensor classes.
         # The Python fake is a metadata carrier here, independent of the mode
         # used to trace the graph; C++ from_meta_and_device cannot carry pytype.
-        fake_mode = torch._subclasses.FakeTensorMode()
+        fake_mode = torch._subclasses.FakeTensorMode(_force_python=True)
         ret = fake_mode.fake_tensor_converter.from_meta_and_device(
             fake_mode,
             meta_tensor,
