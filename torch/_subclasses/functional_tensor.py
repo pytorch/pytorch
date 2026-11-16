@@ -191,9 +191,14 @@ class FunctionalTensor(torch.Tensor):
         #     } else {
         #         return at::view_as_real(x);
         #     }
-        extra_dispatch_keys = (
-            FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
-        )
+        keys = torch._C._dispatch_keys(elem)
+        extra_dispatch_keys = FunctionalTensor._extra_dispatch_keys & keys
+        layout = elem.layout
+        if layout == torch._mkldnn and not keys.has(  # type: ignore[attr-defined]
+            torch._C._dispatch_key_parse("MkldnnCPU")
+        ):
+            # Fake MKLDNN tensors expose a logical layout over strided backing.
+            layout = torch.strided
 
         # Hand over the storage size instead of letting _make_wrapper_subclass
         # recompute it: computeStorageNbytes walks the dimensions doing symbolic
@@ -215,7 +220,7 @@ class FunctionalTensor(torch.Tensor):
             ),  # storage_offset
             None,  # memory_format
             elem.dtype,  # dtype
-            elem.layout,  # layout
+            layout,  # layout
             elem.device,  # device
             False,  # pin_memory
             elem.requires_grad,  # requires_grad
