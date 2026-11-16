@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import dataclasses
 import functools
-from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from types import ModuleType
-from typing import Any
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -19,7 +17,6 @@ import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._pytree import tree_leaves, tree_map_only
-from torch.utils.hooks import RemovableHandle
 
 from .bucket_comm import (
     begin_bucket_unshard,
@@ -28,7 +25,6 @@ from .bucket_comm import (
     ReduceGradHandle,
     UnshardHandle,
 )
-from .bucket_storage import ParamInfo, ShardedBucketStorage
 from .utils import (
     _get_bucket_storage_debug_fqn,
     _module_path_common_prefix,
@@ -36,6 +32,15 @@ from .utils import (
     _record_function_if_eager,
     alloc_grads_in_param_layout,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+    from types import ModuleType
+
+    from torch.utils.hooks import RemovableHandle
+
+    from .bucket_storage import ParamInfo, ShardedBucketStorage
 
 
 _EAGER_COMM_CONTEXTS_ATTR = "_flex_shard_eager_comm_contexts"
@@ -64,8 +69,9 @@ class ParamOwnerRef:
                     leaf_module = getattr(leaf_module, part)
             else:
                 leaf_module = child
-        if hasattr(leaf_module, "_checkpoint_wrapped_module"):
-            leaf_module = leaf_module._checkpoint_wrapped_module
+        wrapped = getattr(leaf_module, "_checkpoint_wrapped_module", None)
+        if isinstance(wrapped, nn.Module):
+            leaf_module = wrapped
         return cls(leaf_module, parts[-1])
 
     @property
@@ -458,7 +464,7 @@ class BucketCommContext:
         grads may not exist yet; outside backward (``finalize_backward``), they
         do."""
         buckets = (
-            reversed(sorted(self.buckets, key=lambda bucket: bucket.module_position))
+            sorted(self.buckets, key=lambda bucket: bucket.module_position)[::-1]
             if reverse_module_order
             else self.buckets
         )
@@ -659,9 +665,7 @@ class BucketRuntime:
                 BucketParam(
                     param_owner=param_owner,
                     param_info=info,
-                    sharded_param=param_owner.module._parameters[
-                        param_owner.param_name
-                    ],
+                    sharded_param=param_owner.param,
                     shared_owners=tuple(
                         ParamOwnerRef.resolve(bucket_storage._module, shared_fqn)
                         for shared_fqn in info.shared_fqns
@@ -704,9 +708,7 @@ class BucketRuntime:
         self.bucket_params = [
             replace(
                 bucket_param,
-                sharded_param=bucket_param.param_owner.module._parameters[
-                    bucket_param.param_owner.param_name
-                ],
+                sharded_param=bucket_param.param_owner.param,
             )
             for bucket_param in self.bucket_params
         ]
@@ -715,7 +717,8 @@ class BucketRuntime:
         """Take over the storage that replaced this bucket's before its first
         unshard (``relayout_bucket``): the same parameters, hooks and context,
         with the new storage's parameter infos and sharded parameters."""
-        assert self.unsharded_params is None and not self.is_unsharded
+        if self.unsharded_params is not None or self.is_unsharded:
+            raise AssertionError("Expected a bucket that was never unsharded")
         rebound = BucketRuntime.from_bucket_storage(bucket_storage, self.context)
         self.bucket_storage = rebound.bucket_storage
         self.bucket_params = rebound.bucket_params
@@ -865,6 +868,8 @@ class BucketRuntime:
             if result is None:
                 result = self.begin_unshard(on_current_stream=on_current_stream)
             self.finish_unshard(result)
+        if self.unsharded_params is None:
+            raise AssertionError("Expected unsharded params after the unshard")
         self._swap_in_params(self.unsharded_params)
 
     def finish_unshard(self, result: UnshardHandle) -> None:
@@ -948,6 +953,8 @@ class BucketRuntime:
 
     def _sync_requires_grad(self) -> None:
         """Follow the local shards' ``requires_grad``, as FSDP2 does per unshard."""
+        if self.unsharded_params is None:
+            raise AssertionError("Expected unsharded params")
         for bucket_param, unsharded_param in zip(
             self.bucket_params, self.unsharded_params, strict=True
         ):
@@ -955,11 +962,16 @@ class BucketRuntime:
             if unsharded_param.requires_grad != requires_grad:
                 unsharded_param.requires_grad_(requires_grad)
 
-    def _swap_in_params(self, params: list[torch.Tensor]) -> None:
+    def _swap_in_params(self, params: Sequence[torch.Tensor]) -> None:
         """Expose ``params`` through their modules' ``_parameters``."""
         for bucket_param, param in zip(self.bucket_params, params, strict=True):
             for owner in (bucket_param.param_owner, *bucket_param.shared_owners):
-                owner.module._parameters[owner.param_name] = param
+                # Not only Parameters: the compile branch exposes its unshard's
+                # outputs, so that autograd reaches the unshard
+                parameters = cast(
+                    dict[str, torch.Tensor | None], owner.module._parameters
+                )
+                parameters[owner.param_name] = param
 
     def reshard(self) -> None:
         """Swap the local shards back in and free the persistent storage."""
@@ -1229,7 +1241,7 @@ class BucketRuntime:
         # Zeros fill missing grads after resharding, so they never coexist
         # with the unsharded params, in the dtype autograd would produce, as
         # FSDP2's unsharded_zero_grad_data does.
-        grads = [
+        filled_grads = [
             torch.zeros(
                 param.shape, dtype=param.grad_dtype or param.dtype, device=param.device
             )
@@ -1237,10 +1249,11 @@ class BucketRuntime:
             else grad
             for grad, param in zip(grads, params, strict=True)
         ]
+        del grads
         # In the grad's dtype, which keeps autograd's upcast for these params,
         # before the copy-in casts to the reduce dtype, as FSDP2 redistributes a
         # Partial grad when it takes it.
-        for grad, info in zip(grads, infos, strict=True):
+        for grad, info in zip(filled_grads, infos, strict=True):
             if info.partial_grad_group is not None:
                 dist.all_reduce(grad, group=info.partial_grad_group)
         # After the zeros, which take the forward dtype while the upcast is
@@ -1249,7 +1262,7 @@ class BucketRuntime:
         # Per-parameter grad dtypes meet in the bucket's reduce dtype in the
         # placement's copy-in, which casts as it copies, rather than one cast
         # kernel per param here.
-        self.reduce_grads(grads, infos, sharded_params)
+        self.reduce_grads(filled_grads, infos, sharded_params)
 
     def _fsdp2_reduce_scatter_order(self) -> list[int]:
         """FSDP2's reduce-scatter order: the params grouped by sharded grad
@@ -1510,8 +1523,9 @@ class BucketRuntime:
             # would persist.
             base = value._base
             nodes = {value.grad_fn, None if base is None else base.grad_fn}
-            for node in nodes - {None}:
-                node.register_prehook(self.pre_backward_hook)
+            for node in nodes:
+                if node is not None:
+                    node.register_prehook(self.pre_backward_hook)
         if self.bucket_storage._reshard_after_forward:
             persistent = {_storage_ptr(buffer) for buffer in self.persistent_buffers}
             # An output viewing the persistent storage would see it freed.
@@ -1650,7 +1664,7 @@ class _BucketUnshard(torch.autograd.Function):
 
 
 def _promote_reduce_dtype_over_grads(
-    grads: list[torch.Tensor | None],
+    grads: Sequence[torch.Tensor | None],
     infos: list[ParamInfo],
     trainable: list[bool] | None = None,
 ) -> list[ParamInfo]:

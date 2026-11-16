@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from types import ModuleType
 from typing import TYPE_CHECKING
 
 import torch
@@ -18,6 +17,8 @@ from .placement_contract import PlacementPreparedUnshard, PlacementUnshardResult
 
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from torch.distributed.device_mesh import DeviceMesh
 
     from .bucket_storage import ParamInfo

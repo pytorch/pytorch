@@ -442,7 +442,12 @@ class Shard(Placement):
         if world_size > 1:
             tensors = list(tensors)
             for idx, (tensor, info) in enumerate(zip(tensors, infos, strict=True)):
-                if (shard_dim := info.placement.dim) == 0:
+                placement = info.placement
+                if not isinstance(placement, Shard):
+                    raise AssertionError(
+                        f"Expected Shard for {info.fqn}, got {placement!r}"
+                    )
+                if (shard_dim := placement.dim) == 0:
                     continue
                 if tensor.is_contiguous():
                     num_leading_dims[idx] = shard_dim

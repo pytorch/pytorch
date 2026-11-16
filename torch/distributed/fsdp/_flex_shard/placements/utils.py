@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import importlib.util
-from collections.abc import Sequence
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -15,6 +14,8 @@ import torch.distributed as dist
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..placement_contract import GradientReduceOp, GradientReduction
 
 
