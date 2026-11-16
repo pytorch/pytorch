@@ -3290,7 +3290,7 @@ class TestXPUMultiprocessing(TestCase):
     def _tensor_multiply_two(queue, ready, done):
         ready.set()
         with torch.xpu.Stream():
-            xpu_event, tensor = queue.get()
+            xpu_event, tensor = queue.get(timeout=30)
             xpu_event.wait()
             tensor.mul_(2)
             xpu_event.record()
@@ -3334,7 +3334,7 @@ class TestXPUMultiprocessing(TestCase):
                 }
             )
         queue.put((specs, tensors[2].data_ptr() - tensors[0].data_ptr()))
-        event.wait()
+        event.wait(timeout=60)
 
     @parametrize(
         "event_cls",
@@ -3435,18 +3435,23 @@ class TestXPUMultiprocessing(TestCase):
         )
         p.start()
 
-        ready.wait()
-        with torch.xpu.Stream():
-            tensor = torch.tensor([1, 1, 1, 1], device="xpu")
-            event = torch.xpu.Event(interprocess=True)
-            torch.xpu._sleep(200_000_000)
-            tensor.add_(1)
-            event.record()
-            queue.put((event, tensor))
-            self.assertTrue(done.wait(timeout=60))
-            event.synchronize()
-            self.assertEqual(list(tensor), [4, 4, 4, 4])
-        p.join()
+        try:
+            self.assertTrue(ready.wait(timeout=30))
+            with torch.xpu.Stream():
+                tensor = torch.tensor([1, 1, 1, 1], device="xpu")
+                event = torch.xpu.Event(interprocess=True)
+                torch.xpu._sleep(200_000_000)
+                tensor.add_(1)
+                event.record()
+                queue.put((event, tensor))
+                self.assertTrue(done.wait(timeout=60))
+                event.synchronize()
+                self.assertEqual(list(tensor), [4, 4, 4, 4])
+        finally:
+            p.join(30)
+            if p.is_alive():
+                p.kill()
+                p.join()
         self.assertEqual(p.exitcode, 0)
 
     @parametrize("expandable", [False, True])
