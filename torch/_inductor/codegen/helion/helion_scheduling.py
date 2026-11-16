@@ -10,6 +10,7 @@ from torch.utils._ordered_set import OrderedSet
 from ... import config
 from ...ir import ComputedBuffer, Reduction
 from ...loop_body import MemoryUsageType
+from ...ops_handler import OpsHandler
 from ...scheduler import SchedulerNode
 from ...utils import get_fused_kernel_name
 from ...virtualized import V
@@ -22,14 +23,12 @@ if TYPE_CHECKING:
     from ...scheduler import BaseSchedulerNode
 
 
-HELION_OPS = OrderedSet(
+# Python operators HelionOverrides inherits from OpOverrides (a + b, a < b, ~a),
+# which mean the same on torch tensors. Not every inherited spelling does:
+# OpOverrides.mod writes a % b, which floors on torch tensors (-7 % 2 == 1)
+# while Inductor's mod truncates (-1).
+INHERITED_OPS = OrderedSet(
     [
-        "load",
-        "store",
-        "store_reduction",
-        "reduction",
-        "output",
-        "dot",
         "add",
         "sub",
         "mul",
@@ -49,7 +48,20 @@ HELION_OPS = OrderedSet(
         "bitwise_xor",
         "bitwise_not",
     ]
-) | OrderedSet(name for name in vars(HelionOverrides) if not name.startswith("_"))
+)
+# Every op a Helion kernel emits: those HelionKernel (load, store, dot, ...) or
+# HelionOverrides (exp, where, ...) implements, the inherited operators,
+# SIMDKernel.store_reduction (which calls HelionKernel.store) and the body's output.
+HELION_OPS = (
+    OrderedSet(
+        name
+        for cls in (HelionKernel, HelionOverrides)
+        for name in vars(cls)
+        if not name.startswith("_") and name in vars(OpsHandler)
+    )
+    | INHERITED_OPS
+    | OrderedSet(["store_reduction", "output"])
+)
 MATMUL_DTYPES = OrderedSet([torch.float16, torch.bfloat16, torch.float32])
 
 
@@ -91,20 +103,24 @@ def is_helion_matmul(node: BaseSchedulerNode) -> bool:
     return False
 
 
-def helion_supports(node: BaseSchedulerNode) -> bool:
-    if not isinstance(node, SchedulerNode) or node.is_template():
-        return False
+def helion_supports(node: SchedulerNode) -> bool:
     reduction_type = cast(ComputedBuffer, node.node).get_reduction_type()
     body = node._body
     return (
+        # sign(x): HelionOverrides has no sign, so codegen raises NotImplementedError.
+        # Scatters (index_add_, index_put_(accumulate=True)) stop here on their
+        # indirect_indexing.
         not OrderedSet(body.op_counts) - HELION_OPS
+        # x.argmax(-1): "Helion kernels do not support argmax".
         and (
             reduction_type in (None, *REDUCTIONS)
             or (reduction_type == "dot" and is_helion_matmul(node))
         )
-        and not any(entry.mode for entry in body.memory_usage[MemoryUsageType.STORE])
-        # A CPU scalar would reach the kernel as a CPU tensor.
+        # x * torch.tensor(2.0): the kernel gets a CPU tensor, "Pointer argument
+        # cannot be accessed from Triton (cpu tensor?)".
         and not any(V.graph.is_unspec_arg(dep.name) for dep in node.read_writes.reads)
+        # x[:, :50] * 2 with a dynamic dim 1: the index holds that dim's stride,
+        # "Unsupported Helion index: s27*((xindex//50)) + ...".
         and all(
             index.free_symbols <= OrderedSet(body.var_ranges)
             for index in body.indexing_exprs.values()
