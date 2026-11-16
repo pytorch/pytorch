@@ -4305,7 +4305,7 @@ class TestFxGraphCacheHashing(TestCase):
         """
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
         pickler = FxGraphCachePickler(gm)
-        with torch._subclasses.FakeTensorMode():
+        with FakeTensorMode():
             # Verify that FakeTensors get pickled into a TensorMetadata:
             with mock.patch.object(
                 pickler,
