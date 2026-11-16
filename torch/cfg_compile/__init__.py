@@ -284,9 +284,10 @@ def cfg_compile(
         keep_memory: give the function a workspace: the memory of the CPU
             tensors its calls make stays with it when they are freed, and
             the next call uses it again instead of having the system map and
-            fault in the same pages. It holds about as much as one call has
-            in use at its peak; what a few calls in a row did not ask for is
-            given back. ``torch.cfg_compile.memory(fn)`` reports it. On by
+            fault in the same pages. It holds what the tensors of a call
+            hold at their peak and up to half as much again, 256 MB at
+            most; what a few calls in a row did not ask for is given back.
+            ``torch.cfg_compile.memory(fn)`` reports it. On by
             default (``TORCH_CFG_COMPILE_KEEP_MEMORY=0`` turns it off).
         freeze: with ``backend="inductor"``, build the parameters and buffers
             of the modules a region reads into its graph when the call is
