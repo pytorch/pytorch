@@ -551,8 +551,8 @@ class CleanDiv(FloorDiv):
     """
 
 
-# Don't use sympy ceiling/floor as they will attempt simplifications involving
-# frac
+# Don't use sympy ceiling/floor for symbolic expressions as they will attempt
+# simplifications involving frac.
 class CeilToInt(sympy.Function):
     is_integer = True
 
@@ -563,6 +563,8 @@ class CeilToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
+        if isinstance(number, sympy.Rational):
+            return sympy.ceiling(number)
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
         return None
@@ -583,6 +585,8 @@ class FloorToInt(sympy.Function):
             return -int_oo
         if isinstance(number, sympy.Integer):
             return number
+        if isinstance(number, sympy.Rational):
+            return sympy.floor(number)
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
         return None
