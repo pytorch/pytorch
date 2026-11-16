@@ -11,7 +11,7 @@ import torch
 from torch._guards import detect_fake_mode
 from torch._logging import LazyString
 from torch._ops import OpOverload
-from torch._subclasses.fake_tensor import fake_mode_cls
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._decompositions import DecompShardingStrategy
@@ -543,7 +543,7 @@ class ShardingPropagator:
         from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
         with ShardingPropagator._fake_mode_lock:
-            fake_mode = detect_fake_mode() or fake_mode_cls()()
+            fake_mode = detect_fake_mode() or FakeTensorMode()
             with fake_mode, disable_proxy_modes_tracing():
                 fake_args = op_schema.gen_fake_args()
                 fake_kwargs = op_schema.gen_fake_kwargs()

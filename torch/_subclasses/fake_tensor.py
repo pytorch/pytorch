@@ -321,12 +321,6 @@ def get_plain_tensors(
     return out
 
 
-def fake_mode_cls() -> type[FakeTensorMode | CppFakeTensorMode]:
-    from torch._dynamo import config
-
-    return CppFakeTensorMode if config.use_cpp_fake_tensor else FakeTensorMode
-
-
 def is_fake_tensor(x: object) -> TypeGuard[Tensor]:
     # True if x is itself a fake tensor: a Python FakeTensor, or a C++ fake.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
@@ -2756,6 +2750,21 @@ class FakeTensorMode(TorchDispatchMode):
             torch.nested._internal.nested_tensor._tensor_id_counter
         )
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+
+    @functools.wraps(__init__, assigned=(), updated=())
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        import torch._dynamo.config
+
+        if torch._dynamo.config.use_cpp_fake_tensor:
+            if cls is not FakeTensorMode:
+                raise NotImplementedError(
+                    "FakeTensorMode subclasses are not supported with "
+                    "use_cpp_fake_tensor=True"
+                )
+            # Returning an unrelated type skips FakeTensorMode.__init__.
+            # pyrefly: ignore [bad-return]
+            return CppFakeTensorMode(*args, **kwargs)
+        return super().__new__(cls)
 
     def reset_nt_tensor_id_counter(self) -> None:
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count

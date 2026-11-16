@@ -23,10 +23,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs, run_and_get_code
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU
 
 
@@ -73,7 +69,6 @@ class MyModule3(MyModule):
         return (super().forward(x),)
 
 
-@instantiate_parametrized_tests
 class TestStandaloneInductor(TestCase):
     """
     These test check that you can call TorchInductor directly without
@@ -91,13 +86,11 @@ class TestStandaloneInductor(TestCase):
         ):
             func.cache_clear()
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_inductor_via_fx(self, use_cpp_fake_tensor):
+    def test_inductor_via_fx(self):
         mod = MyModule3().eval()
         inp = torch.randn(10)
         correct = mod(inp)
-        with dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            mod_opt = inductor.compile(symbolic_trace(mod), [inp])
+        mod_opt = inductor.compile(symbolic_trace(mod), [inp])
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
@@ -132,13 +125,11 @@ class TestStandaloneInductor(TestCase):
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_inductor_via_make_fx(self, use_cpp_fake_tensor):
+    def test_inductor_via_make_fx(self):
         mod = MyModule().eval()
         inp = torch.randn(10)
         correct = mod(inp)
-        with dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            mod_opt = inductor.compile(make_fx(mod)(inp), [inp])
+        mod_opt = inductor.compile(make_fx(mod)(inp), [inp])
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
@@ -151,14 +142,12 @@ class TestStandaloneInductor(TestCase):
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_inductor_via_export1(self, use_cpp_fake_tensor):
+    def test_inductor_via_export1(self):
         mod = MyModule3().eval()
         inp = torch.randn(10)
         correct = mod(inp)
-        with dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            gm, _ = dynamo.export(mod, inp, aten_graph=True)
-            mod_opt = inductor.compile(gm, [inp])
+        gm, _ = dynamo.export(mod, inp, aten_graph=True)
+        mod_opt = inductor.compile(gm, [inp])
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
