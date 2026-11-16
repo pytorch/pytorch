@@ -361,7 +361,6 @@
   "test/inductor/test_compile_worker.py",
   "test/inductor/test_compiled_autograd.py",
   "test/inductor/test_compiled_optimizers.py",
-  "test/inductor/test_config.py",
   "test/inductor/test_constant_offload.py",
   "test/inductor/test_control_deps.py",
   "test/inductor/test_control_flow.py",
