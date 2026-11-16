@@ -445,13 +445,7 @@ class TestInlineAsmElementwiseInputValidation(TestCase):
                 dtype=torch.float32,
             )
 
-
-class TestInlineAsmElementwiseErrors(TestCase):
-    """CUDA-specific tests for error handling."""
-
-    hw_classification = HardwareClassification.CUDA
-
-    def test_error_cpu_tensor(self, device):
+    def test_error_cpu_tensor(self):
         x = torch.randn(100, dtype=torch.float32)
         with self.assertRaises(RuntimeError):
             inline_asm_elementwise(
@@ -460,6 +454,12 @@ class TestInlineAsmElementwiseErrors(TestCase):
                 constraints="=v,v" if torch.version.hip else "=f,f",
                 dtype=torch.float32,
             )
+
+
+class TestInlineAsmElementwiseErrors(TestCase):
+    """CUDA-specific tests for error handling."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_error_constraint_mismatch(self, device):
         x = torch.randn(100, device=device, dtype=torch.float32)
