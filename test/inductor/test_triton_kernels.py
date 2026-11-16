@@ -18,6 +18,7 @@ import torch._inductor.test_case
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from torch._dynamo import config as dynamo_config
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
     maybe_unpack_host_tma_descriptor,
@@ -337,7 +338,9 @@ class KernelTestsArgReductionSemantics(_KernelTestsBase):
     @inductor_config.patch(strict_signed_zero=True)
     def test_dim_max_min_reuse_argreduce_value(self, device):
         dtypes = [torch.float32, torch.float16]
-        if torch.cuda.is_bf16_supported(including_emulation=False):
+        if get_interface_for_device(device).is_bf16_supported(
+            including_emulation=False
+        ):
             dtypes.append(torch.bfloat16)
 
         for op, indexed_helper, value_helper, selected_value in (
@@ -7799,12 +7802,14 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     KernelTestsArgReductionSemantics,
     globals(),
-    only_for=("cuda",),
+    except_for=("cpu",),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     KernelTestsFloatingPointRewrites,
     globals(),
-    only_for=("cuda",),
+    except_for=("cpu",),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     KernelTestsInlineAsm,
@@ -7845,12 +7850,14 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     CustomOpTestsInterpretMode,
     globals(),
-    only_for=("cuda",),
+    except_for=("cpu",),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestUserKernelEpilogueFusion,
     globals(),
-    only_for=("cuda",),
+    except_for=("cpu",),
+    allow_xpu=True,
 )
 
 
