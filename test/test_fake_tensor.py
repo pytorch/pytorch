@@ -43,7 +43,6 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorConverter,
     FakeTensorDeviceMismatchError,
-    FakeTensorMode,
     in_kernel_invocation_manager,
     is_fake_tensor,
     maybe_get_fake_constant,
@@ -121,19 +120,9 @@ aten = torch.ops.aten
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
-# Follow the library switch so the test harness (N/A skips, cpp mode
-# construction, cpp-specific assertions) always matches how FakeTensorMode is
-# actually built, rather than reading the env var with a different default.
+# Use the same configuration for mode construction and native-only test skips.
 CPP_FAKETENSOR = torch._dynamo.config.use_cpp_fake_tensor
-
-if CPP_FAKETENSOR:
-
-    def FakeTensorMode(**kwargs):
-        return CppFakeTensorMode(**kwargs)
-
-    FakeTensorModeCls = CppFakeTensorMode
-else:
-    FakeTensorModeCls = FakeTensorMode
+FakeTensorMode = fake_mode_cls()
 
 _CPP_FAKE_DYNAMO_SKIP = "Dynamo does not support C++ fakes as inputs yet"
 
@@ -3829,7 +3818,11 @@ class TestFakeTensorConverter(TestCase):
     def test_memoized_conversion_from_meta(self, mode_cls, pytype):
         if mode_cls is CppFakeTensorMode and pytype is torch.nn.Parameter:
             self.skipTest("C++ fake tensors do not support Parameter pytype")
-        if TEST_WITH_TORCHDYNAMO and mode_cls is FakeTensorMode and pytype is not None:
+        if (
+            TEST_WITH_TORCHDYNAMO
+            and mode_cls is torch._subclasses.fake_tensor.FakeTensorMode
+            and pytype is not None
+        ):
             self.skipTest(
                 "Dynamo guards on pytype, which differs from the actual FakeTensor type"
             )
@@ -3844,7 +3837,7 @@ class TestFakeTensorConverter(TestCase):
         self.assertIs(maybe_get_fake_mode(fake), mode)
         self.assertEqual(fake.shape, x.shape)
         self.assertEqual(fake.device, torch.device("cpu"))
-        if mode_cls is FakeTensorMode:
+        if mode_cls is torch._subclasses.fake_tensor.FakeTensorMode:
             self.assertIs(fake.pytype, pytype)
         self.assertEqual(maybe_get_fake_dispatch_keys(fake), keys)
 
