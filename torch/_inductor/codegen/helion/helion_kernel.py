@@ -53,6 +53,33 @@ class HelionCSEProxy(CSEProxy):
     def dot(self, a: CSEVariable, b: CSEVariable) -> CSEVariable:
         return cast(HelionKernel, self.kernel).dot(a, b)
 
+    def to_dtype(
+        self,
+        x: CSEVariable,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype | None = None,
+        use_compute_types: bool = True,
+    ) -> CSEVariable:
+        kernel = cast(HelionKernel, self.kernel)
+        kwargs = {"src_dtype": src_dtype, "use_compute_types": use_compute_types}
+        if x not in kernel.dot_results:
+            return self._default("to_dtype", (x, dtype), kwargs)
+        # A bf16 matmul output saved for backward is rounded between the dot and
+        # its reduction. Emitted in the K loop, the rounding reads the running sum
+        # and the store after the loop cannot use it:
+        #     for tile_r in hl.tile(64):
+        #         acc = torch.addmm(acc, tmp1, tmp3)
+        #         tmp4 = acc.to(torch.bfloat16)
+        #         tmp5 = tmp4.to(torch.float32)
+        #     out0[tile_y, tile_x] = tmp5.to(torch.bfloat16)
+        # Helion: "Device value 'tmp5' cannot be carried between top-level loops".
+        # After the loop it rounds the final sum once, as eager does.
+        with kernel.swap_buffers(kernel.stores, kernel.stores, kernel.stores):
+            value = self._default("to_dtype", (x, dtype), kwargs)
+        kernel.dot_results.add(value)
+        kernel.outer_vars.add(value)
+        return value
+
 
 class HelionKernel(SIMDKernel[CSEVariable]):
     """A Helion kernel: pointwise range trees become one hl.tile loop and the
@@ -88,6 +115,8 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         self.load_masks: list[CSEVariable] = []
         self.accumulator_count = 0
         self.has_fp32_dot = False
+        # Dot accumulators and the casts of them that run after the K loop.
+        self.dot_results: OrderedSet[CSEVariable] = OrderedSet()
         # Values stored outside the current reduction loop; see disable_reduction().
         self.outer_stores: dict[str, CSEVariable] = {}
 
@@ -614,6 +643,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         acc = self.accumulator(0, torch.float32)
         op = "baddbmm" if "z0_" in self.numels else "addmm"
         self.compute.writeline(f"{acc} = torch.{op}({acc}, {lhs}, {rhs})")
+        self.dot_results.add(acc)
         return acc
 
     def reduction(

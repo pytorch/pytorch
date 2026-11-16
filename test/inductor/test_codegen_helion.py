@@ -130,6 +130,40 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         self.assertIn("in0[tile_y, tile_r]", source)
         self.assertIn("in1[tile_r, tile_x]", source)
 
+    def test_saved_bf16_output(self, device):
+        # silu's backward reads a @ b, so the bf16 product is saved and rounded.
+        fn = lambda a, b: torch.nn.functional.silu(a @ b)  # noqa: E731
+        a, b = randn(device, 40, 72), randn(device, 72, 136).requires_grad_()
+        (source,) = self.compile(fn, a, b, expected=fn(a, b), tol=2e-2)
+        self.assertExpectedInline(
+            source,
+            """\
+import torch
+import helion
+import helion.language as hl
+
+@helion.kernel(backend="triton", static_shapes=True, autotune_effort="none", dot_precision="ieee")
+def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch.Tensor) -> None:
+    for tile_y, tile_x in hl.tile([40, 136]):
+        acc = hl.zeros([tile_y, tile_x], dtype=torch.float32)
+        for tile_r in hl.tile(72):
+            tmp0 = in0[tile_y, tile_r]
+            tmp1 = tmp0.to(torch.float32)
+            tmp2 = in1[tile_r, tile_x]
+            tmp3 = tmp2.to(torch.float32)
+            acc = torch.addmm(acc, tmp1, tmp3)
+        tmp4 = acc.to(torch.bfloat16)
+        tmp5 = tmp4.to(torch.float32)
+        out0[tile_y, tile_x] = tmp5.to(torch.bfloat16)
+        tmp6 = -tmp5
+        tmp7 = torch.exp(tmp6)
+        tmp8 = hl.full([], 1.0, dtype=torch.float32)
+        tmp9 = tmp7 + tmp8
+        tmp10 = tmp5 / tmp9
+        out1[tile_y, tile_x] = tmp10.to(torch.bfloat16)
+""",
+        )
+
     def test_operand_view_of_dynamic_input(self, device):
         x = randn(device, 4, 40, 72)
         torch._dynamo.mark_dynamic(x, 0)
