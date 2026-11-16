@@ -1,4 +1,5 @@
-# .github/workflows/build-external.yml
+# Unused on main. Kept because _linux-build.yml on older merge bases references
+# it as @main, and GitHub resolves every action a job lists, even skipped ones.
 name: Build External packages
 
 description: build external packages for PyTorch

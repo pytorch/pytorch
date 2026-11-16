@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import math
 import numbers
 import operator
 import sys
@@ -239,6 +240,30 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 @out_wrapper("grad_input")
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, 0, grad_output)
+
+
+@register_decomposition(aten.softshrink_backward)
+@out_wrapper("grad_input")
+def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
+    # Like the ATen kernel, compute in the common dtype. The comparisons round
+    # lambd to it, as the kernel's lambd.to<scalar_t>() does.
+    dtype = torch.result_type(grad_output, self)
+    grad_output, self = grad_output.to(dtype), self.to(dtype)
+    # lambd.to<scalar_t>() also rejects finite values out of range
+    limit = torch.finfo(dtype).max
+    message = lambda: f"value cannot be converted to type {dtype} without overflow"  # noqa: E731
+    if isinstance(lambd, (torch.SymInt, torch.SymFloat)):
+        # math.isfinite would specialize lambd. Dynamo specializes inf and nan,
+        # so bounds suffice, except that an unbacked non-finite lambd (e.g.
+        # from .item()) can be rejected.
+        torch._check(lambd >= -limit, message)
+        torch._check(lambd <= limit, message)
+    else:
+        torch._check(not (math.isfinite(lambd) and abs(lambd) > limit), message)
+    if self.device.type == "cpu":
+        # Like the CPU vectorized path (but not the scalar path), NaN gets 0
+        return torch.where((self < -lambd) | (self > lambd), grad_output, 0)
+    return torch.where((self >= -lambd) & (self <= lambd), 0, grad_output)
 
 
 @register_decomposition(aten.leaky_relu_backward)
@@ -660,11 +685,18 @@ def binary_cross_entropy(
     weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
-    # We cannot currently model this without introducing data-dependent control flow
-    # TORCH_CHECK(
-    #     (input_val >= 0) && (input_val <= 1),
-    #     "all elements of input should be between 0 and 1"
-    # )
+    # The ATen kernels check the [0, 1] domain per element; a pointwise
+    # decomposition has to assert on the whole tensor instead. Without this the
+    # log terms below clamp to -100 and an out-of-domain value silently returns
+    # a finite loss. _assert_async is side-effectful and won't be DCE'd.
+    aten._assert_async.msg(
+        torch.all((self >= 0) & (self <= 1)),
+        "all elements of input should be between 0 and 1",
+    )
+    aten._assert_async.msg(
+        torch.all((target >= 0) & (target <= 1)),
+        "all elements of target should be between 0 and 1",
+    )
     loss = (target - 1) * torch.maximum(
         torch.log1p(-self), self.new_full((), -100)
     ) - target * torch.maximum(torch.log(self), self.new_full((), -100))
@@ -1650,7 +1682,9 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     # This is relying on TensorIterator's behavior that it takes higher precedence on the stride of first input.
     # Alternative, we can write `(beta * self + out).contiguous()`, but it introduces another copy in some cases.
     # This implementation is not ideal, and we should revisit this when we have a better solution.
-    return out + beta * self
+    # `expand_as` mirrors the expand_size() that addmm_out_cpu applies to `self`:
+    # `input` broadcasts *to* the mm result shape, it does not widen it.
+    return out + beta * self.expand_as(out)
 
 
 @register_decomposition([aten.addmm.dtype, aten.addmm.dtype_out])
@@ -1666,7 +1700,7 @@ def addmm_dtype(
     out = alpha * torch.mm(mat1, mat2, out_dtype=out_dtype)
     if beta == 0:
         return out
-    return out + beta * self.to(out_dtype)
+    return out + beta * self.to(out_dtype).expand_as(out)
 
 
 @register_decomposition(aten._addmm_activation)
@@ -1698,8 +1732,12 @@ def _addmv_impl(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: i
     if beta == 0:
         return out
     if out.numel() == 0:  # handle empty matrix
+        # Left as-is: for an empty result eager keeps `self`'s own size rather
+        # than expanding, e.g. addmv(ones(1), empty(0, 0), empty(0)) -> shape 1.
         return beta * self
-    return out + beta * self
+    # Same constraint as addmm: addmv_impl_cpu expands `self` to the mv result
+    # shape, so `self` broadcasts *to* it rather than widening it.
+    return out + beta * self.expand_as(out)
 
 
 @register_decomposition(aten.addmv)
@@ -2766,6 +2804,38 @@ def native_batch_norm_backward_out(
     return grad_input
 
 
+@aten.miopen_batch_norm.default.py_impl(DispatchKey.Autograd)
+@register_decomposition(aten.miopen_batch_norm)
+def miopen_batch_norm(
+    input: Tensor,
+    weight: Tensor,
+    bias: Tensor | None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    training: bool,
+    exponential_average_factor: float,
+    epsilon: float,
+) -> tuple[Tensor, Tensor, Tensor]:
+    a, b, c = aten.native_batch_norm(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        training,
+        exponential_average_factor,
+        epsilon,
+    )
+
+    if training:
+        return (a, b, c)
+    return (
+        a,
+        weight.new_zeros((0,)),
+        weight.new_zeros((0,)),
+    )
+
+
 @register_decomposition(aten.miopen_batch_norm_backward)
 @out_wrapper("out0", "out1", "out2")
 def miopen_batch_norm_backward(
@@ -2827,12 +2897,12 @@ def adaptive_avg_pool2d(input: Tensor, output_size: tuple[int, int]):
     device = input.device
     shape = input.shape
     ndim = len(shape)
-    torch._check(
+    torch._check_value(
         ndim in (3, 4),
         lambda: f"adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got {ndim}",
     )
     for d in input.shape[-2:]:
-        torch._check(
+        torch._check_value(
             d != 0,
             lambda: "adaptive_avg_pool2d(): Expected input to have non-zero size for "
             f"non-batch dimensions, but input has shape {tuple(shape)}.",
@@ -3557,7 +3627,26 @@ def _index_copy(
 def log_sigmoid_forward(self: Tensor) -> tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
-    if self.is_cuda or self.is_xpu:
+    # Note [log_sigmoid_forward buffer contract]: The buffer output is only
+    # consumed by the CPU backward kernel (log_sigmoid_backward_cpu). The
+    # CUDA and MPS forward kernels allocate an empty (0,) buffer and ignore
+    # it (log_sigmoid_forward_{cuda,mps}; the same NOTE also appears in some
+    # backward and out variants, e.g. log_sigmoid_backward_cuda and
+    # log_sigmoid_forward_out_mps). PrivateUse1 backends follow the
+    # accelerator semantics (verified on the registered torch_npu backend).
+    # Meta tensors follow the CPU branch: this op has no Meta kernel, and
+    # this decomposition is what activate_meta()
+    # (torch/_meta_registrations.py) registers as its Meta kernel, so it
+    # defines its own meta behavior. Backends not listed below keep the
+    # historical full-shape buffer.
+    if self.is_cpu or self.is_meta:
+        buffer = z
+    elif (
+        self.is_cuda
+        or self.is_xpu
+        or self.is_mps
+        or self.device.type == torch._C._get_privateuse1_backend_name()
+    ):
         buffer = self.new_zeros((0,))
     else:
         buffer = z
@@ -4571,6 +4660,72 @@ def upsample_trilinear3d(
     return _upsample_linear(
         input, output_size, align_corners, [scales_d, scales_h, scales_w]
     )
+
+
+def _canonicalize_trilinear(dims: list[int], total_dim: int) -> tuple[int, ...]:
+    canonical = utils.canonicalize_dims(total_dim, dims)
+    utils.validate_no_repeating_dims(canonical)
+    return canonical
+
+
+@register_decomposition([aten._trilinear.default, aten._trilinear.out])
+@out_wrapper(exact_dtype=True)
+def _trilinear(
+    i1: Tensor,
+    i2: Tensor,
+    i3: Tensor,
+    expand1: list[int],
+    expand2: list[int],
+    expand3: list[int],
+    sumdim: list[int],
+    unroll_dim: int = 1,
+) -> Tensor:
+    result_dtype = i1.dtype
+    total_dim = i1.dim() + len(expand1)
+    torch._check(
+        unroll_dim >= 0 and unroll_dim < total_dim,
+        lambda: f"unroll_dim must be in [0,{total_dim - 1}]",
+    )
+
+    _expand1, _expand2, _expand3, _sumdim = (
+        _canonicalize_trilinear(dims, total_dim)
+        for dims in (expand1, expand2, expand3, sumdim)
+    )
+
+    dims1 = [d for d in range(total_dim) if d not in _expand1]
+    dims2 = [d for d in range(total_dim) if d not in _expand2]
+    dims3 = [d for d in range(total_dim) if d not in _expand3]
+    out_dims = [d for d in range(total_dim) if d not in _sumdim]
+
+    all_expanded = set(_expand1) & set(_expand2) & set(_expand3)
+    if unroll_dim in all_expanded or any(d in all_expanded for d in out_dims):
+        sizes = [0] * total_dim
+        for t, dims in ((i1, dims1), (i2, dims2), (i3, dims3)):
+            for axis, d in enumerate(dims):
+                sizes[d] = t.shape[axis]
+        return i1.new_zeros([sizes[d] for d in out_dims])
+
+    promoted = torch.promote_types(torch.promote_types(i1.dtype, i2.dtype), i3.dtype)
+    torch._check(
+        utils.can_safe_cast_to(cast_to=result_dtype, cast_from=promoted),
+        lambda: f"result type {promoted} can't be cast to the desired output type {result_dtype}",
+    )
+
+    opmath_dtype = utils.get_computation_dtype(promoted)
+    compute_dtype = torch.float32 if promoted == torch.bool else opmath_dtype
+    i1, i2, i3 = (t.to(compute_dtype) for t in (i1, i2, i3))
+
+    dims12 = [
+        d
+        for d in range(total_dim)
+        if (d in dims1 or d in dims2) and not (d in _sumdim and d in _expand3)
+    ]
+    result = torch.einsum(i1, dims1, i2, dims2, dims12)
+    result = torch.einsum(result, dims12, i3, dims3, out_dims)
+
+    if result_dtype == torch.bool:
+        return result != 0
+    return result.to(result_dtype)
 
 
 def _compute_scale(in_size, out_size, align_corners, scale=None):
@@ -5720,6 +5875,7 @@ def multi_margin_loss(
     weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
+    orig_target_shape = target.shape
     input = torch.atleast_2d(input)
     target = torch.atleast_1d(target)
     nframe = input.shape[0]
@@ -5756,7 +5912,9 @@ def multi_margin_loss(
     elif reduction == Reduction.SUM.value:
         return z.sum() / z.shape[1]
     else:
-        return z.mean(dim=1)
+        # Like eager, an unreduced loss has the target's shape, so a 0-d
+        # target gives a 0-d loss.
+        return z.mean(dim=1).reshape(orig_target_shape)
 
 
 @register_decomposition(aten.multilabel_margin_loss_forward)
@@ -5958,10 +6116,17 @@ def squeeze_default(self: Tensor, dim: int | None = None):
 @register_decomposition(torch.ops.aten._weight_norm_interface)
 def _weight_norm_interface(v, g, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
-    keep_dim = tuple(i for i in range(len(v.shape)) if i != dim)
-    # align with cuda behavior, keep norm in 'float' when g is 'bfloat16'
-    norm_dtype = torch.float if g.dtype == torch.bfloat16 else None
-    norm = v.norm(2, keep_dim, keepdim=True, dtype=norm_dtype)
+    reduce_dims = tuple(i for i in range(len(v.shape)) if i != dim)
+    # match ATen: CPU/CUDA keep the norm in float when g is bfloat16/half, MPS keeps g.dtype
+    if g.dtype in (torch.bfloat16, torch.half) and v.device.type != "mps":
+        norm_dtype = torch.float
+    else:
+        norm_dtype = g.dtype
+    if reduce_dims:
+        norm = v.norm(2, reduce_dims, keepdim=True, dtype=norm_dtype)
+    else:
+        # dim=() reduces over all dims for any p, so a 1-D v needs per-element abs
+        norm = v.abs().to(norm_dtype)
     return v * (g / norm.to(g.dtype)), norm
 
 
