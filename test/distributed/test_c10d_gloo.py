@@ -54,6 +54,7 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_MACOS,
     retry_on_connect_failures,
     run_tests,
@@ -222,6 +223,8 @@ def simple_multi_input_reduce_tests(rank, world_size):
 
 
 class RendezvousTCPTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @retry_on_connect_failures
     def test_tcp_init(self):
         rendezvous_iterator = dist.rendezvous("tcp://127.0.0.1:0", rank=0, world_size=1)
@@ -233,6 +236,8 @@ class RendezvousTCPTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @requires_gloo()
     @retry_on_connect_failures
     def test_logging_init(self):
@@ -307,6 +312,8 @@ class RendezvousEnvTest(TestCase):
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @requires_gloo()
     @retry_on_connect_failures
     def test_default_store_timeout_gloo(self):
@@ -2975,6 +2982,8 @@ class ReducerModule(nn.Module):
 
 
 class ReducerTest(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def setUp(self):
         super().setUp()
         with tempfile.NamedTemporaryFile(delete=False) as f:
@@ -3441,11 +3450,7 @@ class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
         return super().tearDown()
 
 
-class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
-    @property
-    def device(self):
-        return "cpu"
-
+class CommTestBase(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         self._spawn_processes()
@@ -3488,20 +3493,13 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         if self.rank != root_rank:
             self.assertEqual(tensors, target)
 
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_broadcast_coalesced_gloo_cuda(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
-        )
-        process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device(f"cuda:{self.rank:d}")
-        backend = process_group._get_backend(device)
-        backend.create_device(interface=LOOPBACK)
-        ranks = list(range(self.world_size))
-        for root_rank in ranks:
-            self._test_broadcast_coalesced(process_group, device, root_rank)
+
+class CommTest(CommTestBase):
+    hw_classification = HardwareClassification.CPU
+
+    @property
+    def device(self):
+        return "cpu"
 
     @requires_gloo()
     def test_broadcast_coalesced_gloo_cpu(self):
@@ -3516,11 +3514,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_gloo_warn_not_in_group(self):
-        self._test_warn_not_in_group(backend="gloo")
 
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
@@ -3610,6 +3603,30 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         c10d.destroy_process_group()
 
 
+class CommTestCUDA(CommTestBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast_coalesced_gloo_cuda(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        process_group = c10d.distributed_c10d._get_default_group()
+        device = torch.device(f"cuda:{self.rank:d}")
+        backend = process_group._get_backend(device)
+        backend.create_device(interface=LOOPBACK)
+        ranks = list(range(self.world_size))
+        for root_rank in ranks:
+            self._test_broadcast_coalesced(process_group, device, root_rank)
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_gloo_warn_not_in_group(self):
+        self._test_warn_not_in_group(backend="gloo")
+
+
 class GlooProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
@@ -3652,6 +3669,8 @@ class GlooProcessGroupWithDispatchedCollectivesTests(
 
 
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    hw_classification = HardwareClassification.CPU
+
     def setUp(self):
         super().setUp()
         self._spawn_processes()
