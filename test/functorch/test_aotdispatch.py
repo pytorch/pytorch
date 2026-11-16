@@ -3484,6 +3484,37 @@ def forward(self, primals_1):
             test_mutation=True,
         )
 
+    def test_input_mutation_set_storage_next_to_synthetic_base(self):
+        def f(a, b, c, d):
+            with torch.no_grad():
+                a.set_(b)
+                b.mul_(2)
+                c.mul_(2)
+            return d.square() + a.sum()
+
+        def inp_callable():
+            a = torch.arange(4, dtype=torch.float32)
+            b = torch.arange(4, dtype=torch.float32) + 1
+            x = torch.arange(1, 9, dtype=torch.float32, requires_grad=True)
+            base = x * 2
+            return [a, b, x], [a, b, base[:5], base[2:7]]
+
+        def run(fn):
+            inputs, graph_inputs = inp_callable()
+            out = fn(*graph_inputs)
+            out.sum().backward()
+            return out, inputs, inputs[-1].grad
+
+        # Exercise synthetic-base metadata reconstruction directly, without
+        # Dynamo graph breaks around storage mutations.
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        self.assertEqual(run(f), run(compiled_f))
+
     def test_input_mutation_aliases_and_output_alias(self):
         def f(a, b):
             # Here, we need to take care:that because and b are aliased

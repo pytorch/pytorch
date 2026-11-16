@@ -196,10 +196,14 @@ def create_synthetic_base_metadata(
             else m.input_info[outer_indices[0]].mutates_metadata
         )
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
-        mutations_under_no_grad_or_inference_mode = mutates_data and all(
-            m.input_info[x].mutations_under_no_grad_or_inference_mode
-            for x in outer_indices
-            if m.input_info[x].mutates_data
+        mutations_under_no_grad_or_inference_mode = (
+            all(
+                m.input_info[x].mutations_under_no_grad_or_inference_mode
+                for x in outer_indices
+                if m.input_info[x].mutates_data
+            )
+            if len(outer_indices) > 1
+            else m.input_info[outer_indices[0]].mutations_under_no_grad_or_inference_mode
         )
 
         mutation_inductor_storage_resize = all(
