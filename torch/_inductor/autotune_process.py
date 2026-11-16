@@ -31,12 +31,11 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor import ir
 from torch._inductor.codecache import (
     CppCodeCache,
-    CUDACodeCache,
     DLLWrapper,
+    get_device_codecache,
     get_hash,
     PyCodeCache,
     write,
-    XPUCodeCache,
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.utils import (
@@ -1344,7 +1343,7 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self.hash_key: str = ""
         self.source_file: str = ""
         self.device_type = device_type
-        self.codecache_cls = XPUCodeCache if device_type == "xpu" else CUDACodeCache
+        self.codecache_cls = get_device_codecache(device_type)
         self.device_interface = get_interface_for_device(device_type)
         self.hash_key, self.source_file = self.codecache_cls.write(
             self.source_code, "so"

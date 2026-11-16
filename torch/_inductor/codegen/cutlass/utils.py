@@ -188,7 +188,13 @@ def try_import_cutlass() -> bool:
     return False
 
 
-def _normalize_xpu_arch(arch: str) -> str:
+def _normalize_xpu_arch(arch: str | None) -> str:
+    if arch is None:
+        raise RuntimeError(
+            "Unable to determine the XPU architecture to generate CUTLASS kernels "
+            "for: the device codename is not recognized. Run on an XPU device "
+            "(the codename is read from torch.xpu.get_device_capability)."
+        )
     if arch.startswith("Xe"):
         return arch[2:]
     if 12 <= int(arch) and int(arch) <= 50:
@@ -197,7 +203,16 @@ def _normalize_xpu_arch(arch: str) -> str:
         raise NotImplementedError(f"Unsupported xpu arch: {arch}")
 
 
-def _normalize_cuda_arch(arch: str) -> str:
+def _normalize_cuda_arch(arch: str | None) -> str:
+    if arch is None:
+        raise RuntimeError(
+            "Unable to determine the CUDA architecture to generate CUTLASS kernels "
+            "for. Set torch._inductor.config.cuda.arch or run on a CUDA device. "
+            "Note that the failed probe is cached by get_cuda_arch "
+            "(torch._inductor.codegen.cuda.cuda_env): after setting the knob, "
+            "re-run in a fresh process or use "
+            "torch._inductor.codecache.fresh_cache() to clear it."
+        )
     arch_num = arch
     if isinstance(arch, str):
         digits = "".join(ch for ch in arch if ch.isdigit())
@@ -233,23 +248,53 @@ def _normalize_cuda_arch(arch: str) -> str:
 @functools.lru_cache(8)
 def cutlass_arch(device_type: str) -> str:
     if device_type == "xpu":
-        arch = get_xpu_arch()
-        return _normalize_xpu_arch(arch)
-    else:
-        arch = get_cuda_arch()
-        return _normalize_cuda_arch(arch)
+        return _normalize_xpu_arch(get_xpu_arch())
+    if device_type == "cuda":
+        return _normalize_cuda_arch(get_cuda_arch())
+    raise NotImplementedError(
+        f"CUTLASS codegen is not implemented for device type {device_type!r}"
+    )
 
 
 @functools.lru_cache(1)
 def toolkit_version(device_type: str) -> str:
     if device_type == "xpu":
-        return get_xpu_version()
+        version = get_xpu_version()
+    elif device_type == "cuda":
+        version = get_cuda_version()
     else:
-        return get_cuda_version()
+        raise NotImplementedError(
+            f"CUTLASS codegen is not implemented for device type {device_type!r}"
+        )
+    if not version:
+        raise RuntimeError(
+            f"Unable to determine the {device_type} toolkit version to generate "
+            "CUTLASS kernels for. Run on a "
+            f"{device_type} device"
+            + (
+                " or set torch._inductor.config.cuda.version"
+                if device_type == "cuda"
+                else ""
+            )
+            + ". Note that a failed probe is cached by get_"
+            f"{device_type}_version (torch/_inductor/codegen/{device_type}/"
+            f"{device_type}_env.py): after setting the knob, re-run in a fresh "
+            "process or use torch._inductor.codecache.fresh_cache() to clear it."
+        )
+    return version
 
 
 def get_device_cutlass_config(device_type: str):
-    """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
+    """
+    Get device-specific CUTLASS config.
+
+    xpu has a dedicated config namespace (``config.xpu``, which copies the
+    ``config.cutlass`` defaults at class-creation time). Everything else -
+    including cuda - reads the general ``config.cutlass`` so that user
+    overrides like ``config.patch("cutlass.cutlass_max_profiling_configs",
+    ...)`` keep applying (``config.cuda`` is an independent copy and would
+    silently ignore them).
+    """
     if device_type == "xpu":
         return config.xpu
     from ...config import cutlass as inductor_cutlass_config
@@ -299,16 +344,6 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
         raise AssertionError("Failed to import CUTLASS library")
     import cutlass_library.generator as cutlass_generator
     import cutlass_library.manifest as cutlass_manifest
-
-    if arch is None or version is None:
-        log.error(
-            "Cannot detect cuda arch %s or version %s. "
-            "Will discard all cutlass ops. "
-            "Please consider setting _inductor.cuda.arch and _inductor.cuda.version configs.",
-            arch,
-            version,
-        )
-        return {}
 
     # Some architectures share generators, but the CUTLASS manifest must keep
     # their architecture-specific baseline.
@@ -570,7 +605,7 @@ def get_max_alignment(inductor_layout: Layout) -> int:
 
 class CUTLASSCompileSourceCapturingContext:
     # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
-    # Can be used to capture the sourcecode passed to CUDACodeCache.compile
+    # Can be used to capture the sourcecode passed to the device CodeCache's compile
 
     def __init__(self, device_type: str):
         self.sources = []
@@ -582,10 +617,8 @@ class CUTLASSCompileSourceCapturingContext:
 
         import torch._inductor.codecache
 
-        codecache_cls = (
-            torch._inductor.codecache.XPUCodeCache
-            if self.device_type == "xpu"
-            else torch._inductor.codecache.CUDACodeCache
+        codecache_cls = torch._inductor.codecache.get_device_codecache(
+            self.device_type
         )
         _compile_method_orig = codecache_cls.compile
 
@@ -593,10 +626,10 @@ class CUTLASSCompileSourceCapturingContext:
             self.sources.append(source_code)
             return _compile_method_orig(source_code, dst_file_ext)
 
+        # Patch the class object itself (not its module path) so custom
+        # CodeCache classes registered by out-of-tree backends work too.
         # pyrefly: ignore [bad-assignment]
-        self._compile_patch = mock.patch(
-            f"torch._inductor.codecache.{codecache_cls.__name__}.compile", my_compile
-        )
+        self._compile_patch = mock.patch.object(codecache_cls, "compile", my_compile)
         self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
         return self
 
@@ -611,13 +644,20 @@ def cutlass_standalone_runner_compile_command(
     # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
 
     extra_args = ["-DGENERATE_STANDALONE_RUNNER=1"]
-    if device_type != "xpu":
+    if device_type == "xpu":
+        cutlass_compile_command = (
+            torch._inductor.codegen.xpu.compile_utils.xpu_compile_command
+        )
+    elif device_type == "cuda":
+        cutlass_compile_command = (
+            torch._inductor.codegen.cuda.compile_utils.cuda_compile_command
+        )
         extra_args.append("-DCUTLASS_DEBUG_TRACE_LEVEL=1")
-    cutlass_compile_command = (
-        torch._inductor.codegen.xpu.compile_utils.xpu_compile_command
-        if device_type == "xpu"
-        else torch._inductor.codegen.cuda.compile_utils.cuda_compile_command
-    )
+    else:
+        raise NotImplementedError(
+            f"CUTLASS standalone runner is not implemented for device type "
+            f"{device_type!r}"
+        )
     compile_command = cutlass_compile_command(
         [str(srcpath)], str(exepath), "exe", extra_args=extra_args
     )

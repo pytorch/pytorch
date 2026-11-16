@@ -129,6 +129,60 @@ register_backend_for_device(
 torch.compile(model, options={"my_device.my_config_key": 1})
 ```
 
+### Registering a Device Code Cache
+
+Inductor compiles device kernels through a per-device-type CodeCache class.
+Out-of-tree backends that want to *override* the code cache used for an existing
+device type call `register_device_codecache` from their backend initialization
+hook (the `_inductor_backend_init` method described above, or the eager
+attribute-based registration path):
+
+```python
+from torch._inductor.codecache import register_device_codecache
+
+register_device_codecache("cuda", MyCodeCache)  # replaces CUDACodeCache
+```
+
+The registered class must satisfy `DeviceCodeCacheProtocol` (see its docstring
+in `torch/_inductor/codecache.py`): class-level `write`, `compile`, and `load`
+methods, a `cache_clear` classmethod, and an `aot_kernels_o` list copied and
+cleared by the AOTInductor link step after each linking (the link step
+instantiates the registered class and links its `aot_kernels_o` into the
+generated `.so`). `cache_clear` should also clear `aot_kernels_o` so
+`fresh_cache()` does not link stale `.o` files into the next AOTI `.so`; note
+that registration does not add the class to `fresh_cache()`'s bookkeeping --
+decorate the cache's entry points with `@clear_on_fresh_cache`
+(`torch._inductor.utils`) to have them cleared. Re-registration replaces the
+previous entry (last registration wins), and re-running the built-in backend
+registration never overwrites an out-of-tree entry.
+
+Note the scope of this extension point: it overrides the code cache *for the
+"cuda"/"xpu" device types*. It does not by itself make Inductor compile kernels
+for a new device type -- codegen emits `async_compile.<device_type>(...)` calls
+and only the cuda/xpu/rocm entry points exist. A full new-device integration
+uses `register_backend_for_device` (see above) with its own codegen classes.
+
+For the attribute-based registration path (a device module exposing
+`Scheduling` / `PythonWrapperCodegen` / `CppWrapperCodegen` directly), an
+optional `CodeCache` attribute on the device module is registered under the
+device's own name (the PrivateUse1 backend name, e.g. `"my_device"`). The
+class is validated against `DeviceCodeCacheProtocol` at registration time and
+a non-conforming class raises `TypeError` before the device is marked as
+registered, so the failure repeats on every registration attempt. Registered
+this way, the class serves callers that resolve a code cache by device type
+(for example the AOTInductor link step, which instantiates the class and links
+its `aot_kernels_o`); making async kernel compilation for the device emit
+`async_compile.<device_type>(...)` additionally requires the corresponding
+`AsyncCompile` entry point:
+
+```python
+class MyDeviceModule:
+    Scheduling = MyScheduling
+    PythonWrapperCodegen = MyWrapperCodegen
+    CppWrapperCodegen = MyCppWrapperCodegen
+    CodeCache = MyCodeCache  # optional, registered via register_device_codecache
+```
+
 ## Result
 
 After setting up the entry point and backend, build and install your backend. Now, we can use the new accelerator without explicitly importing it.

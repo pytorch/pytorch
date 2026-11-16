@@ -34,13 +34,11 @@ from torch._inductor.codecache import (
     CodeCacheFuture,
     CppCodeCache,
     CppPythonBindingsCodeCache,
-    CUDACodeCache,
+    get_device_codecache,
     HalideCodeCache,
     LambdaFuture,
-    ROCmCodeCache,
     StaticAutotunerFuture,
     torch_key,
-    XPUCodeCache,
 )
 from torch._inductor.compile_worker.subproc_pool import (
     AnyPool,
@@ -747,11 +745,18 @@ class AsyncCompile:
 
     def cuda(self, source_code, dst_file_ext, aot_compile=False):
         kernel_code_log.info("CUDA Kernel:\n%s", source_code)
-        return self.cutlass(CUDACodeCache, source_code, dst_file_ext, aot_compile)
+        # Route through the registry so a custom CodeCache registered for
+        # "cuda" is used consistently by async compilation and the AOTI link
+        # step (which reads aot_kernels_o from the registry class).
+        return self.cutlass(
+            get_device_codecache("cuda"), source_code, dst_file_ext, aot_compile
+        )
 
     def xpu(self, source_code, dst_file_ext, aot_compile=False):
         kernel_code_log.info("XPU Kernel:\n%s", source_code)
-        return self.cutlass(XPUCodeCache, source_code, dst_file_ext, aot_compile)
+        return self.cutlass(
+            get_device_codecache("xpu"), source_code, dst_file_ext, aot_compile
+        )
 
     def rocm(
         self,
@@ -760,14 +765,25 @@ class AsyncCompile:
         aot_compile=False,
     ):
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
+        # Route through the registry like cuda()/xpu() do: on a HIP build the
+        # "cuda" entry resolves to ROCmCodeCache, so a custom CodeCache
+        # registered for "cuda" applies uniformly here, in the other ROCm
+        # sites (rocm_benchmark_request, rocm_cpp_scheduling), and in the
+        # AOTI link step (which reads aot_kernels_o from the registry
+        # class) -- an override can no longer make the link step miss the
+        # .o files this entry point appended.
+        cache_cls = get_device_codecache("cuda")
+        generate_test_runner = config.rocm.generate_test_runner
 
         def task():
             if aot_compile:
-                output_path, *_ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
-                ROCmCodeCache.aot_kernels_o.append(output_path)
-            if config.rocm.generate_test_runner:
-                _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
-            return ROCmCodeCache.load(source_code, dst_file_ext)[0]
+                # We rely on JITInductor to compile the CUDA code,
+                # so that we can load it into AOTInductor.
+                output_path, *_ = cache_cls.compile(source_code, dst_file_ext="o")
+                cache_cls.aot_kernels_o.append(output_path)
+            if generate_test_runner:
+                _ = cache_cls.compile(source_code, dst_file_ext="exe")
+            return cache_cls.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 

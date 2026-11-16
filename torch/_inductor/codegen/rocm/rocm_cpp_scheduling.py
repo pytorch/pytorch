@@ -77,9 +77,12 @@ class ROCmCPPScheduling(BaseScheduling):
             # gains a descriptive prefix (rocm_fused_mm_<hash>), so the
             # exported symbol differs and we need a fresh compile.
             if V.graph.cpp_wrapper and not V.graph.aot_mode:
-                from ...codecache import ROCmCodeCache
+                from ...codecache import get_device_codecache
 
-                so_path, _, _ = ROCmCodeCache.compile(src_code, "so")
+                # Resolve through the registry ("cuda" entry, which is
+                # ROCmCodeCache on a HIP build) so a custom CodeCache
+                # registered for "cuda" applies uniformly.
+                so_path, _, _ = get_device_codecache("cuda").compile(src_code, "so")
                 wrapper.external_kernel_libs.add(so_path)
         return kernel_name
 
