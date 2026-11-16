@@ -131,10 +131,10 @@ class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
     _dp_tp_mesh: ClassVar[DeviceMesh | None] = None
 
     @classmethod
-    def _get_dp_tp_mesh(cls) -> DeviceMesh:
+    def _get_dp_tp_mesh(cls, device_type: str) -> DeviceMesh:
         if cls._dp_tp_mesh is None:
             cls._dp_tp_mesh = init_device_mesh(
-                cls._resolved_device_type(),
+                device_type,
                 (cls.world_size // 2, 2),
                 mesh_dim_names=("dp", "tp"),
             )
@@ -338,7 +338,7 @@ class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
             sharding_strategy=sharding_strategy,
             use_orig_params=use_orig_params,
         )
-        mesh_2d = self._get_dp_tp_mesh()
+        mesh_2d = self._get_dp_tp_mesh(torch.device(device).type)
         # Shard with TP and then wrap with FSDP
         sequence_parallelize_plan = {
             "net1": ColwiseParallel(input_layouts=Shard(0)),
@@ -417,7 +417,7 @@ class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
         """
         Tests TP + FSDP extension with correct gradient (i.e. no ACT)
         """
-        mesh_2d = self._get_dp_tp_mesh()
+        mesh_2d = self._get_dp_tp_mesh(torch.device(device).type)
 
         class TestModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -467,7 +467,7 @@ class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
 
     @requires_world_size(4)
     def test_fsdp_tp_sync_module_state(self, device):
-        mesh_2d = self._get_dp_tp_mesh()
+        mesh_2d = self._get_dp_tp_mesh(torch.device(device).type)
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
 
