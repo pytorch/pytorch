@@ -2102,7 +2102,7 @@ def forward(self, arg0_1):
     unfold_copy_1 = torch.ops.aten.unfold_copy.default(unfold_backward, 1, 2, 2);  unfold_copy_1 = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, unfold_backward);  arg0_1 = copy_ = None
     return unfold_backward
-    """,  # noqa: B950
+    """,
         )
 
         gapped = trace(make_f(1, 5))
