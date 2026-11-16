@@ -576,14 +576,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   checkAllSameGPU(__func__, targs);
 
   // Handle whether to use the Lt interface {
-  static bool persistent_disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device());
-  // if lt path fails, we recurse back into this function here and force the lt path to off
-  // we cannot update variable disable_addmm_cuda_lt from above since it is static and would be permanent
-  bool disable_addmm_cuda_lt = persistent_disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;
-  #ifdef USE_ROCM
-  // Conditioned on the device index, which is not persistent
-  disable_addmm_cuda_lt = disable_addmm_cuda_lt || isGloballyDisabledAddmmCudaLt(self.device());
-  #endif
+  // Not cached: on ROCm the answer depends on the device and on the preferred BLAS backend, which can change.
+  // If the lt path fails, we recurse back into this function with disable_addmm_cuda_lt_override set.
+  bool disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device()) || disable_addmm_cuda_lt_override;
   // Everything above is a property of the build/device rather than the inputs.
   // The distinct-C/D path applies its own input checks, so it keys off this.
   const bool disable_addmm_cuda_lt_for_device = disable_addmm_cuda_lt;
