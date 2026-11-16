@@ -4,16 +4,30 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import io
 import logging
 import os
+import warnings
+from unittest import mock
 
+import sympy
 from onnxscript import FLOAT, opset18 as op
 
 import torch
-from torch.onnx._internal.exporter import _testing as onnx_testing
+from torch._dynamo.source import LocalSource
+from torch.export.exported_program import _get_shape_env
+from torch.export.graph_signature import InputKind
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.onnx._internal.exporter import (
+    _registration,
+    _specialization,
+    _testing as onnx_testing,
+)
+from torch.onnx._internal.exporter._errors import DynamicShapeSpecializationWarning
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import HardwareClassification
+from torch.utils._sympy.functions import FloorDiv
 
 
 class SampleModel(torch.nn.Module):
@@ -603,6 +617,262 @@ class TestCustomTranslationTable(common_utils.TestCase):
         )
         # batch size is not fixed to 1
         self.assertNotEqual(op.model.graph.outputs[0].shape[0], 1)
+
+
+@common_utils.instantiate_parametrized_tests
+class TestDynamicShapeSpecialization(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_adaptive_max_pool2d(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.adaptive_max_pool2d(x, (2, 2))
+
+        with self.assertWarns(DynamicShapeSpecializationWarning) as caught:
+            torch.onnx.export(
+                Model(),
+                (torch.randn(1, 2, 6, 6),),
+                dynamic_shapes=(
+                    {2: torch.export.Dim.DYNAMIC, 3: torch.export.Dim.DYNAMIC},
+                ),
+                verbose=False,
+            )
+        message = str(caught.warning)
+        self.assertIn("x.size()[2]", message)
+        self.assertIn("x.size()[3]", message)
+        self.assertIn("aten.adaptive_max_pool2d", message)
+
+    def test_custom_specializing_decomposition(self):
+        with torch.library._scoped_library("specialization_test", "FRAGMENT") as lib:
+            lib.define(
+                "specialize(Tensor x) -> Tensor", tags=torch.Tag.pt2_compliant_tag
+            )
+            lib.impl("specialize", lambda x: x + x.shape[0] // 2, "CPU")
+            torch.library.register_fake(
+                "specialization_test::specialize",
+                lambda x: torch.empty_like(x),
+                lib=lib,
+            )
+            target = torch.ops.specialization_test.specialize.default
+
+            def decompose(x):
+                return x + int(x.shape[0] // 2)
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return target(x)
+
+            ep = torch.export.export(
+                Model(),
+                (torch.randn(6, 2),),
+                dynamic_shapes=({0: torch.export.Dim.DYNAMIC},),
+                strict=False,
+            )
+            with (
+                mock.patch.dict(torch._decomp.decomposition_table, {target: decompose}),
+                self.assertWarns(DynamicShapeSpecializationWarning) as caught,
+            ):
+                torch.onnx.export(ep, verbose=False)
+            message = str(caught.warning)
+            self.assertIn("x.size()[0]", message)
+            self.assertIn("specialization_test.specialize.default", message)
+            self.assertIn("Constraints added while decomposing", message)
+
+    @common_utils.parametrize(
+        "model_kind", ["resnet", "interpolate", "layer_norm", "static", "check"]
+    )
+    def test_no_specialization(self, model_kind):
+        class CheckedModel(torch.nn.Module):
+            def forward(self, x):
+                torch._check(x.shape[0] % 2 == 0)
+                return x.sin()
+
+        class LayerNorm(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.layer_norm(x, x.shape[-1:])
+
+        models = {
+            "resnet": torch.nn.Sequential(
+                torch.nn.Conv2d(2, 4, 3),
+                torch.nn.BatchNorm2d(4),
+                torch.nn.ReLU(),
+                torch.nn.AdaptiveAvgPool2d((1, 1)),
+            ).eval(),
+            "interpolate": torch.nn.Upsample(scale_factor=2, mode="bilinear"),
+            "layer_norm": LayerNorm(),
+            "static": torch.nn.ReLU(),
+            "check": CheckedModel(),
+        }
+        dynamic = torch.export.Dim.DYNAMIC
+        dynamic_shapes = ({2: dynamic, 3: dynamic},)
+        if model_kind == "static":
+            dynamic_shapes = None
+        elif model_kind == "check":
+            dynamic_shapes = ({0: dynamic},)
+        elif model_kind == "layer_norm":
+            dynamic_shapes = ({0: dynamic, 2: dynamic},)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", DynamicShapeSpecializationWarning)
+            torch.onnx.export(
+                models[model_kind],
+                (torch.randn(4, 2, 6, 6),),
+                dynamic_shapes=dynamic_shapes,
+                verbose=False,
+            )
+        self.assertEqual(
+            [
+                w
+                for w in caught
+                if issubclass(w.category, DynamicShapeSpecializationWarning)
+            ],
+            [],
+        )
+
+
+class TestSpecializationHelpers(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        self.shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        self.symbol = self.shape_env.create_symbol(6, LocalSource("x"))
+        self.before = _specialization._Snapshot(
+            n_guards=0,
+            deferred_asserts=set(),
+            replacements=set(),
+            var_to_range=tuple(self.shape_env.var_to_range.items()),
+            input_dims={self.symbol: "x.size()[0]"},
+            candidate_ops=("test.specialize.default",),
+        )
+        self.exported_program = mock.Mock()
+
+    def test_symbol_names_and_fallback(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        ep = torch.export.export(
+            Model(),
+            (torch.randn(6, 2),),
+            dynamic_shapes=({0: torch.export.Dim.DYNAMIC},),
+        )
+        shape_env = _get_shape_env(ep.graph_module)
+        names = _specialization._input_dim_names(ep, shape_env)
+        self.assertEqual(list(names.values()), ["x.size()[0]"])
+        with mock.patch.dict(shape_env.var_to_sources, clear=True):
+            self.assertEqual(
+                list(_specialization._input_dim_names(ep, shape_env).values()),
+                ["x.shape[0]"],
+            )
+        with mock.patch.object(
+            ep.graph_signature.input_specs[0], "kind", InputKind.PARAMETER
+        ):
+            self.assertEqual(_specialization._input_dim_names(ep, shape_env), {})
+
+    def test_snapshot_without_shape_env(self):
+        with mock.patch.object(_specialization, "_get_shape_env", return_value=None):
+            self.assertIsNone(
+                _specialization.snapshot(mock.Mock(), _registration.ONNXRegistry())
+            )
+            _specialization.warn_if_specialized(self.exported_program, self.before)
+        _specialization.warn_if_specialized(self.exported_program, None)
+
+    def test_drops_implied_constraints_without_using_new_axioms(self):
+        expr = sympy.Eq(FloorDiv(self.symbol, 2), 3)
+        self.shape_env.guard_or_defer_runtime_assert(expr, "specializing decomposition")
+        self.assertEqual(self.shape_env._maybe_evaluate_static(expr), sympy.true)
+        self.assertIsNone(
+            self.shape_env._maybe_evaluate_static(
+                expr, axioms=(), var_to_range=self.before.var_to_range
+            )
+        )
+        implied = sympy.Ge(self.symbol, 1)
+        self.assertEqual(
+            self.shape_env._maybe_evaluate_static(
+                implied, axioms=(), var_to_range=self.before.var_to_range
+            ),
+            sympy.true,
+        )
+        # Keep the redundant bound in the diff to exercise the helper's filter.
+        self.shape_env.deferred_runtime_asserts[None].append(mock.Mock(expr=implied))
+        with (
+            mock.patch.object(
+                _specialization, "_get_shape_env", return_value=self.shape_env
+            ),
+            self.assertWarns(DynamicShapeSpecializationWarning) as caught,
+        ):
+            _specialization.warn_if_specialized(self.exported_program, self.before)
+        self.assertIn(str(expr), str(caught.warning))
+        self.assertNotIn(str(implied), str(caught.warning))
+
+    def test_truncation_and_excluding_non_input_symbols(self):
+        constraints = [sympy.Eq(sympy.Mod(self.symbol, i), 0) for i in range(2, 14)]
+        unbacked = self.shape_env.create_unbacked_symint().node.expr
+        self.shape_env.deferred_runtime_asserts[None] = [
+            mock.Mock(expr=expr) for expr in [*constraints, sympy.Eq(unbacked, 7)]
+        ]
+        with (
+            mock.patch.object(
+                _specialization, "_get_shape_env", return_value=self.shape_env
+            ),
+            self.assertWarns(DynamicShapeSpecializationWarning) as caught,
+        ):
+            _specialization.warn_if_specialized(self.exported_program, self.before)
+        message = str(caught.warning)
+        self.assertIn("... and 2 more", message)
+        self.assertEqual(message.count("Eq("), 10)
+        self.assertNotIn(str(unbacked), message)
+
+    def test_warning_can_be_an_error(self):
+        expr = sympy.Eq(FloorDiv(self.symbol, 2), 3)
+        self.shape_env.guard_or_defer_runtime_assert(expr, "specializing decomposition")
+        with (
+            mock.patch.object(
+                _specialization, "_get_shape_env", return_value=self.shape_env
+            ),
+            warnings.catch_warnings(),
+        ):
+            warnings.simplefilter("error", DynamicShapeSpecializationWarning)
+            with self.assertRaises(DynamicShapeSpecializationWarning):
+                _specialization.warn_if_specialized(self.exported_program, self.before)
+
+    def test_mixed_input_and_unbacked_constraint_is_ignored(self):
+        unbacked = self.shape_env.create_unbacked_symint().node.expr
+        expr = unbacked < self.symbol
+        self.shape_env.deferred_runtime_asserts[None] = [mock.Mock(expr=expr)]
+        with (
+            mock.patch.object(
+                _specialization, "_get_shape_env", return_value=self.shape_env
+            ),
+            mock.patch.object(self.shape_env, "_maybe_evaluate_static") as evaluate,
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always", DynamicShapeSpecializationWarning)
+            _specialization.warn_if_specialized(self.exported_program, self.before)
+        evaluate.assert_not_called()
+        self.assertEqual(
+            [
+                w
+                for w in caught
+                if issubclass(w.category, DynamicShapeSpecializationWarning)
+            ],
+            [],
+        )
+
+    def test_missing_snapshot_range_keeps_constraint_without_evaluating(self):
+        expr = sympy.Eq(FloorDiv(self.symbol, 2), 3)
+        self.shape_env.deferred_runtime_asserts[None] = [mock.Mock(expr=expr)]
+        before = dataclasses.replace(self.before, var_to_range=())
+        with (
+            mock.patch.object(
+                _specialization, "_get_shape_env", return_value=self.shape_env
+            ),
+            mock.patch.object(self.shape_env, "_maybe_evaluate_static") as evaluate,
+            self.assertWarns(DynamicShapeSpecializationWarning) as caught,
+        ):
+            _specialization.warn_if_specialized(self.exported_program, before)
+        evaluate.assert_not_called()
+        self.assertIn(str(expr), str(caught.warning))
 
 
 if __name__ == "__main__":
