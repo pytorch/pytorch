@@ -39,6 +39,9 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Keep the snapshot key so Python composites can inspect the inner tensor's
   // logical layout before an autograd composite reads the wrapper's metadata.
   key_set_ = key_set_ - c10::functorch_transforms_ks - c10::DispatchKeySet(c10::DispatchKey::Python);
+  if (value_.is_fake()) {
+    key_set_ = key_set_.add(c10::DispatchKey::PythonTLSSnapshot);
+  }
   // Remove Fake when creating the wrapper: the wrapper is not a C++ FakeTensor,
   // only value_ is (similar to removing Python so the wrapper is not treated
   // as a tensor subclass). This matters because C++ FakeTensor is identified by
