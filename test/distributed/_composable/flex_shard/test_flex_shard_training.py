@@ -19,12 +19,8 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     CheckpointWrapper,
 )
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp._flex_shard import (
-    bucket_runtime,
-    BucketSpec,
-    flex_shard,
-    MixedPrecisionPolicy,
-)
+from torch.distributed.fsdp import CPUOffloadPolicy, MixedPrecisionPolicy
+from torch.distributed.fsdp._flex_shard import bucket_runtime, BucketSpec, flex_shard
 from torch.distributed.fsdp._flex_shard.checkpoint import get_flex_shard_global_layouts
 from torch.distributed.fsdp._flex_shard.placements.block_shard import (
     BlockShard,
@@ -1798,6 +1794,56 @@ class TestFlexShardTraining(FSDPTest):
         self.assertEqual(unsharded_param.grad_dtype, torch.float32)
 
     @skip_if_lt_x_gpu(2)
+    def test_cpu_offload(self):
+        # Offloaded buckets keep their shards and grads on the CPU and train as
+        # buckets on the accelerator do, also accumulating grads without sync
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+        args, model = make_transformer_model(device=device_type.type, vocab_size=15)
+        _init_params_deterministically(model)
+        models = []
+        for offload_policy in (None, CPUOffloadPolicy()):
+            sharded = copy.deepcopy(model)
+            specs = transformer_bucket_specs(
+                args.n_layers, mesh, reshard_after_forward=True
+            )
+            buckets = [
+                dataclasses.replace(
+                    spec, mp_policy=mp_policy, offload_policy=offload_policy
+                )
+                for spec in specs
+            ]
+            models.append(flex_shard(sharded, buckets=buckets))
+        on_device, offloaded = models
+        optims = [torch.optim.SGD(m.parameters(), lr=0.1) for m in models]
+        torch.manual_seed(42 + self.rank)
+        for _ in range(3):
+            for requires_gradient_sync in (False, True):
+                x = transformer_inputs(args, batch_size=2, device=device_type)
+                losses = []
+                for sharded in models:
+                    sharded.set_requires_gradient_sync(requires_gradient_sync)
+                    losses.append(sharded(x).sum())
+                    losses[-1].backward()
+                self.assertEqual(losses[0], losses[1])
+            for param, ref_param in zip(
+                offloaded.parameters(), on_device.parameters(), strict=True
+            ):
+                self.assertEqual(param.device.type, "cpu")
+                self.assertTrue(param.is_pinned())
+                self.assertEqual(param.grad.device.type, "cpu")
+                self.assertEqual(param.grad, ref_param.grad.cpu())
+            for optim in optims:
+                optim.step()
+                optim.zero_grad()
+        for param, ref_param in zip(
+            offloaded.parameters(), on_device.parameters(), strict=True
+        ):
+            self.assertEqual(param, ref_param.cpu())
+
+    @skip_if_lt_x_gpu(2)
     def test_rank_dependent_unused_params(self):
         # Ranks leave different params of a bucket, or a whole bucket's
         # outputs, without grads; every rank still reduce-scatters every
@@ -1857,6 +1903,7 @@ class TestFlexShardTraining(FSDPTest):
             del mesh
             return {fqn: (mixed_placement.shard0,) for fqn, _ in named_params}
 
+        full_weight = model.full_weight
         flex_shard(
             model,
             buckets=[
@@ -1866,7 +1913,10 @@ class TestFlexShardTraining(FSDPTest):
                     mesh=mesh,
                     mp_policy=MixedPrecisionPolicy(
                         param_dtype=torch.bfloat16,
-                        param_dtype_overrides={"full_weight": torch.float32},
+                        cast_forward_inputs=False,
+                        param_dtype_override_fn=lambda param: (
+                            torch.float32 if param is full_weight else None
+                        ),
                     ),
                     reshard_after_forward=False,
                 )

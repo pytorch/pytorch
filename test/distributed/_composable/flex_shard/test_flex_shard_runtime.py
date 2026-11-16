@@ -17,12 +17,12 @@ import torch.nn.functional as F
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
 )
+from torch.distributed.fsdp import MixedPrecisionPolicy
 from torch.distributed.fsdp._flex_shard import (
     bucket_runtime,
     BucketSpec,
     flex_shard,
     is_flex_shard_param,
-    MixedPrecisionPolicy,
 )
 from torch.distributed.fsdp._flex_shard.placements.block_shard import (
     BucketedBlockShard,

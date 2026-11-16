@@ -537,7 +537,7 @@ class TestBucketPlacementValidation(TestCase):
 
         with single_rank_cuda_mesh() as mesh:
             model = nn.Linear(4, 4)
-            with self.assertRaisesRegex(ValueError, "requires Shard placements"):
+            with self.assertRaisesRegex(ValueError, "collectives match FSDP2's"):
                 flex_shard(
                     model,
                     buckets=[
