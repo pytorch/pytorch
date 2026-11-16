@@ -1824,19 +1824,11 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
         * :func:`torch.Tensor.index_put` with ``accumulate=False``
-        * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on a CPU
-          tensor
-        * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on an MPS
-          tensor and the iterator can use 32-bit indexing
-        * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
-          tensor
-        * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on an MPS
-          tensor and the underlying iterator can use 32-bit indexing
+        * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on a CPU or MPS tensor
+        * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU or MPS tensor
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
         * :func:`torch.gather` when called on a CUDA tensor that requires grad
-        * :func:`torch.index_add` when called on CUDA tensor
-        * :func:`torch.index_add` when called on an MPS tensor and the underlying
-          iterator can use 32-bit indexing
+        * :func:`torch.index_add` when called on a CUDA or MPS tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
         * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
@@ -1892,9 +1884,6 @@ def use_deterministic_algorithms(
           :func:`torch.mv`, :func:`torch.addmv`, :func:`torch.baddbmm` and :func:`torch.hspmm`
           when called on sparse-dense tensors on ROCm, with the sparse layouts listed above, and
           :func:`torch.bmm` when called on a sparse CSR tensor on ROCm
-        * :func:`torch.Tensor.index_put` and :func:`torch.Tensor.put_` with ``accumulate=True``,
-          and :func:`torch.index_add`, when called on an MPS tensor with floating or complex
-          dtype and the underlying iterator cannot use 32-bit indexing
         * :func:`torch.kthvalue` when called on an MPS tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate an MPS tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate an MPS tensor
