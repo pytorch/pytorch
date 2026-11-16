@@ -66,14 +66,13 @@ if HAS_CPU and TRITON_HAS_CPU:
         hw_classification = HardwareClassification.CPU
 
         common = test_torchinductor.check_model
+        device = "cpu"
 
-    test_torchinductor.instantiate_device_type_tests_from_templates(
+    test_torchinductor.copy_tests(
+        test_torchinductor.CommonTemplate,
         CpuTritonTests,
-        globals(),
-        templates=(test_torchinductor.CommonTemplate,),
+        "cpu",
         xfail_prop="_expected_failure_triton_cpu",
-        class_name_overrides={"cpu": "CpuTritonTests"},
-        only_for="cpu",
     )
 
     for name in TRITON_CPU_SLOW_TESTS:
