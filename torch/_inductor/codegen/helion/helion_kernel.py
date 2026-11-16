@@ -40,6 +40,14 @@ TILE_AXES = {name: axis for axis, name in TILE_NAMES.items()}
 REDUCTIONS = OrderedSet(["sum", "prod", "max", "min"])
 
 
+def feeds_only_dots(node: torch.fx.Node | None) -> bool:
+    """Whether the value of loop-body `node` only reaches dots, through casts."""
+    return node is not None and all(
+        user.target == "dot" or (user.target == "to_dtype" and feeds_only_dots(user))
+        for user in node.users
+    )
+
+
 @dataclass(frozen=True)
 class HelionTensorArg:
     # Placeholder for the parameter, named by codegen_kernel().
@@ -62,6 +70,15 @@ class HelionCSEProxy(CSEProxy):
     ) -> CSEVariable:
         kernel = cast(HelionKernel, self.kernel)
         kwargs = {"src_dtype": src_dtype, "use_compute_types": use_compute_types}
+        node = getattr(V.interpreter, "current_node", None)
+        if use_compute_types and x.dtype == dtype and feeds_only_dots(node):
+            # A bf16 value that only reaches dots stays bf16. Upcast, as in
+            #     tmp1 = tmp0.to(torch.float32)
+            #     acc = torch.addmm(acc, tmp1, tmp3)
+            # it makes the dot an fp32 one (dot_precision="ieee"). The result is
+            # the same: bf16 values are exact in fp32 and tf32, and the dot
+            # accumulates in fp32 either way.
+            return x
         if x not in kernel.dot_results:
             return self._default("to_dtype", (x, dtype), kwargs)
         # A bf16 matmul output saved for backward is rounded between the dot and
