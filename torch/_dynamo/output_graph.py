@@ -73,6 +73,8 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    FakeTensorMode,
     maybe_get_fake_device,
     maybe_get_item_memo,
     maybe_set_fake_device,
@@ -844,7 +846,7 @@ class OutputGraph(OutputGraphCommon):
         import torch._functorch.config as _config
 
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            fake_mode = torch._subclasses.FakeTensorMode(
+            fake_mode = FakeTensorMode(
                 shape_env=shape_env,
                 # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
                 allow_non_fake_inputs=bool(self.export),
@@ -1717,7 +1719,7 @@ class OutputGraph(OutputGraphCommon):
         return self
 
     @property
-    def fake_mode(self) -> torch._subclasses.FakeTensorMode:
+    def fake_mode(self) -> torch._subclasses.FakeTensorMode | CppFakeTensorMode:
         if self.tracing_context.fake_mode is None:
             raise AssertionError("tracing_context.fake_mode must not be None")
         return self.tracing_context.fake_mode
@@ -3287,7 +3289,7 @@ class OutputGraph(OutputGraphCommon):
                     # from scratch when we go to AOTAutograd. But the ShapeEnv must be preserved as
                     # Dynamo made decisions about what is dynamic or not / guards from the user code
                     # that is not in graph.
-                    backend_fake_mode = torch._subclasses.FakeTensorMode(
+                    backend_fake_mode = type(old_fake_mode)(
                         shape_env=old_fake_mode.shape_env,
                     )
                 # TODO(voz): Ostensibly, this should be scoped and
