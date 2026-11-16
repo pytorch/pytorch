@@ -265,7 +265,11 @@ class FailingAllocator final : public Allocator {
  public:
   DataPtr allocate(size_t n) override {
     TORCH_CHECK(!fail, "injected allocation failure");
-    return GetDefaultCPUAllocator()->allocate(n);
+    return GetDefaultMobileCPUAllocator()->allocate(n);
+  }
+
+  bool is_simple_data_ptr(const DataPtr& ptr) const override {
+    return GetDefaultMobileCPUAllocator()->is_simple_data_ptr(ptr);
   }
 
   void copy_data(void* dest, const void* src, size_t count) const override {
@@ -280,6 +284,7 @@ TEST(materialize_test, allocation_failure_keeps_storage_valid) {
   StorageImpl source({}, 4, &allocator, false);
   std::memcpy(source.mutable_data(), "abcd", 4);
   auto clone = cow::lazy_clone_storage(source);
+  ASSERT_THAT(clone, testing::NotNull());
 
   allocator.fail = true;
   ASSERT_ANY_THROW(clone->mutable_data());

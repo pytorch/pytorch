@@ -108,6 +108,29 @@ bool registerGilChecker() {
 static bool registered = registerGilChecker();
 #endif // USE_C10D_NCCL
 
+#ifdef USE_C10D_GLOO
+
+std::optional<std::array<int64_t, 3>> get_python_gc_counts() {
+  if (!Py_IsInitialized()) {
+    return std::nullopt;
+  }
+  pybind11::gil_scoped_acquire gil;
+  py::tuple counts =
+      py::module_::import("gc").attr("get_count")().cast<py::tuple>();
+  return std::array<int64_t, 3>{
+      counts[0].cast<int64_t>(),
+      counts[1].cast<int64_t>(),
+      counts[2].cast<int64_t>()};
+}
+
+bool registerGcCountGetter() {
+  c10d::get_gc_count_getter() = &get_python_gc_counts;
+  return true;
+}
+
+static bool registered_gc_count_getter = registerGcCountGetter();
+#endif // USE_C10D_GLOO
+
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
 // TODO: move this somewhere more generally useful
 template <typename T>
@@ -312,6 +335,42 @@ auto init_nogil() {
         py::gil_scoped_release nogil{};
         return c10::make_intrusive<Trampoline>(std::forward<Args>(args)...);
       });
+}
+
+// Implements Backend.Options.__copy__ (memo is None) and __deepcopy__. C++
+// options are copied via clone(). For a Python subclass, this creates the same
+// type without calling its __init__ and (deep) copies the instance __dict__
+// and set __slots__. Unlike copy.copy, __getstate__/__setstate__ are not used.
+py::object copyBackendOptions(const py::object& self, const py::object& memo) {
+  auto opts = self.cast<c10::intrusive_ptr<::c10d::Backend::Options>>();
+  if (dynamic_cast<::c10d::PyBackendOptions*>(opts.get()) == nullptr) {
+    // Raises for C++ subclasses without a clone() override and for Python
+    // subclasses of C++ subclasses, which clone() would slice.
+    auto copy = py::cast(opts->clone());
+    ::c10d::PyBackendOptions::checkCopy(self, copy);
+    return copy;
+  }
+  auto cls = py::type::of(self);
+  auto copy = cls.attr("__new__")(cls);
+  py::type::of<::c10d::Backend::Options>().attr("__init__")(copy, self);
+  if (!memo.is_none()) {
+    memo[py::int_(reinterpret_cast<uintptr_t>(self.ptr()))] = copy;
+  }
+  auto copyValue = [&](const py::object& value) -> py::object {
+    if (memo.is_none()) {
+      return value;
+    }
+    return py::module_::import("copy").attr("deepcopy")(value, memo);
+  };
+  if (py::hasattr(self, "__dict__")) {
+    copy.attr("__dict__").attr("update")(copyValue(self.attr("__dict__")));
+  }
+  for (auto name : py::module_::import("copyreg").attr("_slotnames")(cls)) {
+    if (py::hasattr(self, name)) {
+      py::setattr(copy, name, copyValue(py::getattr(self, name)));
+    }
+  }
+  return copy;
 }
 
 // PythonStore is a pybind11 trampoline class to allow a Python
@@ -1047,6 +1106,10 @@ This class does not support ``__members__`` property.)");
             TORCH_CHECK(
                 self.op_ == ::c10d::ReduceOp::RedOpType::PREMUL_SUM,
                 "Only PREMUL_SUM supports accessing factor");
+            // `op` is writable, so a PREMUL_SUM may have no supplement.
+            TORCH_CHECK(
+                self.supplement_.defined(),
+                "PREMUL_SUM ReduceOp has no factor");
             const auto* preMulSupplement =
                 reinterpret_cast<::c10d::PreMulSumSupplement*>(
                     self.supplement_.get());
@@ -1538,7 +1601,10 @@ Returns:
 The operation a pre/post hook is firing for. Values mostly follow the
 dispatcher ops, so e.g. ``ALLGATHER_BASE`` (``all_gather_into_tensor``) is
 distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
-``recv`` from any source reports ``RECV``.)")
+``recv`` from any source reports ``RECV``. ``SPLIT``, ``NEW_WINDOW`` and
+``RECONFIGURE`` fire with no tensors; the post-hook ``work`` is ``None`` for
+``SPLIT`` and ``NEW_WINDOW``, which pass the new ``group`` or ``window``
+instead.)")
       .value("SEND", ::c10d::HookOpName::SEND)
       .value("RECV", ::c10d::HookOpName::RECV)
       .value("BROADCAST", ::c10d::HookOpName::BROADCAST)
@@ -1563,6 +1629,7 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
           "REDUCE_SCATTER_TENSOR_COALESCED",
           ::c10d::HookOpName::REDUCE_SCATTER_TENSOR_COALESCED)
       .value("ALLTOALL_BASE", ::c10d::HookOpName::ALLTOALL_BASE)
+      .value("RECONFIGURE", ::c10d::HookOpName::RECONFIGURE)
       .value("UNKNOWN", ::c10d::HookOpName::UNKNOWN);
 
   py::class_<::c10d::PreHookArgs>(
@@ -1593,11 +1660,19 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_readwrite(
           "op_id",
           &::c10d::PreHookArgs::op_id,
-          "Identifies the operation; the matching post-hook gets the same ``op_id``.");
+          "Identifies the operation; the matching post-hook gets the same ``op_id``.")
+      .def_readwrite(
+          "device",
+          &::c10d::PreHookArgs::device,
+          "Device type (index unset) the operation was dispatched for, set only for ``barrier``; ``None`` otherwise, including tensorless lifecycle ops.");
 
   py::class_<::c10d::PostHookArgs>(
       module,
       "PostHookArgs",
+#if PYBIND11_VERSION_MAJOR >= 3
+      // A kept copy may hold the last reference to a group or work.
+      py::release_gil_before_calling_cpp_dtor(),
+#endif
       "Arguments passed to a post-hook, see ``ProcessGroup.register_post_hook``.")
       .def(py::init<>())
       .def_readwrite(
@@ -1611,11 +1686,23 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_readwrite(
           "work",
           &::c10d::PostHookArgs::work,
-          "``Work`` handle of the issued operation; may be ``None``.")
+          "``Work`` handle of the issued operation; ``None`` for ``SPLIT`` and "
+          "``NEW_WINDOW`` and may be ``None`` for synchronous operations.")
       .def_readwrite(
           "op_id",
           &::c10d::PostHookArgs::op_id,
-          "Same ``op_id`` as the matching pre-hook call.");
+          "Same ``op_id`` as the matching pre-hook call.")
+      .def_readwrite(
+          "group",
+          &::c10d::PostHookArgs::group,
+          "New ``ProcessGroup`` for ``SPLIT``; ``None`` on ranks not in it and "
+          "for other operations. When created by ``torch.distributed.split_group``, "
+          "the hook runs before the group is registered, so lookups such as "
+          "``get_rank(group)`` or ``get_process_group_ranks`` fail on it.")
+      .def_readwrite(
+          "window",
+          &::c10d::PostHookArgs::window,
+          "New window for ``NEW_WINDOW``; ``None`` for other operations.");
 
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
@@ -1649,6 +1736,16 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_readonly("matrix", &::c10d::DMAConnectivity::matrix);
 
   module.def("_detect_dma_connectivity", ::c10d::detect_dma_connectivity);
+  module.def("_is_nccl_symmem_available", []() {
+  // On ROCm this reports the device API; host-only symmetric memory is
+  // available whenever NCCL_HAS_SYMMEM_SUPPORT is.
+#if defined(USE_C10D_NCCL) && defined(NCCL_HAS_SYMMEM_SUPPORT) && \
+    (!defined(USE_ROCM) || defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT))
+    return true;
+#else
+    return false;
+#endif
+  });
 
   using SymmetricMemory = ::c10d::symmetric_memory::SymmetricMemory;
   py::class_<SymmetricMemory, c10::intrusive_ptr<SymmetricMemory>>(
@@ -2405,7 +2502,15 @@ Arguments:
     wait_for_workers (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
-    use_libuv (bool, optional): If True, use libuv for ``TCPServer`` backend. Default is True.
+    use_libuv (bool, optional): Deprecated since 2.16 and ignored; ``TCPServer`` always uses libuv. ``False`` emits a ``FutureWarning``. Default is True.
+    tls_cert (str, optional): Path to a PEM certificate (chain). Enables TLS with mutual certificate authentication, which requires ``tls_cert``, ``tls_key`` and ``tls_ca`` and must be enabled on both client and server. If no ``tls_*`` option is set, the ``TORCH_TCPSTORE_TLS_CERT``, ``TORCH_TCPSTORE_TLS_KEY``, ``TORCH_TCPSTORE_TLS_CA``, ``TORCH_TCPSTORE_TLS_PSK`` and ``TORCH_TCPSTORE_TLS_PSK_FILE`` environment variables are used instead; TLS is disabled when all selected settings are empty or unset unless ``TORCH_TCPSTORE_TLS_REQUIRE=1`` is set; the require switch accepts only ``0`` or ``1`` and also applies to clones; otherwise empty values and paths containing NUL bytes raise an error. ``clone()`` preserves the resolved configuration, including disabled TLS, regardless of later environment changes. Certificate files are reloaded from the resolved paths, so prefer absolute paths; replacing them affects later clones. Reusing a ``multi_tenant`` server with a different TLS configuration raises. Keep the TLS environment variables stable while constructing stores. Fresh stores created internally, including by ``init_process_group`` with ``env://``, torchrun/the elastic agent, distributed debug, and the asynchronous checkpoint prefix-store helper, only enable TLS through the environment variables; explicit options on another store do not configure them. 64-bit Linux only; loads OpenSSL >= 1.1.1 (``libssl.so.3`` or ``libssl.so.1.1``) at runtime. TLS 1.2 permits only ECDHE with AEAD ciphers; TLS 1.3 uses its standard cipher suites. The server closes connections that do not finish their TLS handshake within 10 seconds. This protects only the TCPStore control channel, not Gloo/NCCL data traffic or other listeners. Any certificate signed by the CA is accepted; the hostname and subject are not checked, so use a dedicated CA. A certificate may be used for both server and client connections (rank 0 runs both), so it needs both the serverAuth and clientAuth extended key usages, or none; any extended key usage on CA certificates in the chain must also include both. Default is None.
+    tls_key (str, optional): Path to the unencrypted PEM private key, which may be the same file as ``tls_cert``. Default is None.
+    tls_ca (str, optional): Path to the PEM CA bundle used to verify the peer certificate. Default is None.
+    tls_psk (str, optional): The pre-shared key value, not a filename. An empty value disables TLS only if all selected TLS settings are empty or unset. Used verbatim as UTF-8 bytes (32 to 256 bytes, no NUL); no hex or base64 decoding is performed. Enables TLS 1.3 with pre-shared key authentication instead of certificates; it cannot be combined with ``tls_cert``, ``tls_key``, ``tls_ca`` or ``tls_psk_file``. Client and server must use the same key. Use a fresh key for each job and separate keys for different protocols (for example, derive them using HKDF with distinct context labels). The key must be random, with at least 128 bits of entropy, not a passphrase: a captured handshake allows offline guessing. For example, generate a value with ``secrets.token_hex(32)`` without printing it. The environment variable ``TORCH_TCPSTORE_TLS_PSK`` also contains the value directly; prefer ``tls_psk_file``/``TORCH_TCPSTORE_TLS_PSK_FILE`` when available. Secret values remain in process memory and may appear in core dumps. ``clone()`` reuses the resolved value, independent of later environment changes. 64-bit Linux only; the OpenSSL and internal-store notes for ``tls_cert`` apply. Any holder of the key can impersonate either endpoint and gets full read/write access to every key. Keep the value secret; avoid shell tracing and command-line arguments that expose it. Distribution is up to the user. Constructor ``TypeError`` diagnostics omit all argument values, including for plaintext stores; the original message, exception subtype, notes, and chaining are not preserved. This does not prevent user-defined conversion or representation methods from exposing values. Default is None.
+    tls_psk_file (str, optional): Preferred PSK source: an owner-only regular file containing the raw 32 to 256 key bytes. The file must be owned by the effective user, have no group or other permissions, and must not be a symlink. Contents are not stripped or decoded; NUL bytes are rejected. It is exclusive with all other TLS settings. If no ``tls_*`` option is set, ``TORCH_TCPSTORE_TLS_PSK_FILE`` supplies the path. The file is read once during construction; clones retain the resolved key. An empty path disables TLS only if all selected settings are empty or unset. Default is None.
+
+.. note:: The server limits keys (including any prefix) to 8 KiB, values to 8 MiB per request and multi-key requests to 128K keys; it disconnects clients that exceed them.
+
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
@@ -2426,7 +2531,27 @@ Example::
                       bool waitWorkers,
                       bool multiTenant,
                       std::optional<int> masterListenFd,
-                      bool useLibUV) {
+                      bool useLibUV,
+                      std::optional<std::string> tlsCert,
+                      std::optional<std::string> tlsKey,
+                      std::optional<std::string> tlsCa,
+                      std::optional<std::string> tlsPsk,
+                      std::optional<std::string> tlsPskFile) {
+            if (!useLibUV) {
+              static std::atomic<bool> warned{false};
+              if (!warned.load() || c10::WarningUtils::get_warnAlways()) {
+                if (PyErr_WarnEx(
+                        PyExc_FutureWarning,
+                        "TCPStore use_libuv=False (USE_LIBUV=0, ?use_libuv=0) is "
+                        "deprecated and ignored since PyTorch 2.16: libuv is the "
+                        "only backend. Remove the option to silence this warning.",
+                        1) != 0) {
+                  throw py::error_already_set();
+                }
+                warned.store(true);
+              }
+            }
+
             // gil_scoped_release is not safe as a call_guard in init.
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
@@ -2446,7 +2571,11 @@ Example::
                 .timeout = timeout,
                 .multiTenant = multiTenant,
                 .masterListenFd = masterListenFd,
-                .useLibUV = useLibUV};
+                .tlsCert = std::move(tlsCert),
+                .tlsKey = std::move(tlsKey),
+                .tlsCa = std::move(tlsCa),
+                .tlsPsk = std::move(tlsPsk),
+                .tlsPskFile = std::move(tlsPskFile)};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -2462,6 +2591,12 @@ Example::
           py::arg("multi_tenant") = false,
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = true,
+          py::kw_only(),
+          py::arg("tls_cert") = py::none(),
+          py::arg("tls_key") = py::none(),
+          py::arg("tls_ca") = py::none(),
+          py::arg("tls_psk") = py::none(),
+          py::arg("tls_psk_file") = py::none(),
           R"(Creates a new TCPStore.)")
       .def_property_readonly(
           "host",
@@ -2474,12 +2609,39 @@ Example::
       .def_property_readonly(
           "libuvBackend",
           &::c10d::TCPStore::isLibUvBackend,
-          R"(Returns True if it's using the libuv backend.)")
+          R"(Always True; libuv is the only ``TCPServer`` backend.)")
       .def(
           "__repr__",
           &::c10d::TCPStore::repr,
           R"(Returns a string representation of the TCPStore.)",
           py::call_guard<py::gil_scoped_release>());
+
+  // pybind's argument-mismatch errors echo every argument, including secrets.
+  // Forward through the original constructor to retain its conversion rules,
+  // but discard TypeError diagnostics before they can expose a PSK.
+  {
+    auto tcpStore = module.attr("TCPStore");
+    auto init = tcpStore.attr("__init__");
+    auto doc = init.attr("__doc__").cast<std::string>();
+    py::options options;
+    options.disable_function_signatures();
+    tcpStore.attr("__init__") = py::cpp_function(
+        [init](py::args args, py::kwargs kwargs) {
+          try {
+            init(*args, **kwargs);
+          } catch (const py::error_already_set& error) {
+            if (error.matches(PyExc_TypeError)) {
+              // @allow-raw-throw: Preserve TypeError without secret context.
+              throw py::type_error(
+                  "Invalid TCPStore arguments (values omitted to protect TLS secrets)");
+            }
+            throw;
+          }
+        },
+        py::is_method(tcpStore),
+        py::name("__init__"),
+        doc.c_str());
+  }
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
@@ -3022,7 +3184,8 @@ Arguments:
                 std::optional<std::chrono::milliseconds> timeout) {
                 ::c10d::AllToAllOptions opts;
                 opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                return self->all_to_all_single(output, input, outputSplitSizes, inputSplitSizes, opts);
+                return self->all_to_all_single(
+                    output, input, outputSplitSizes, inputSplitSizes, opts);
               },
               py::arg("output"),
               py::arg("input"),
@@ -3083,9 +3246,9 @@ Arguments:
             "barrier",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                 std::optional<std::chrono::milliseconds> timeout) {
-                    ::c10d::BarrierOptions opts;
-                    opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                    return self->barrier(opts);
+                ::c10d::BarrierOptions opts;
+                opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
+                return self->barrier(opts);
                 },
                 py::arg("timeout") = std::nullopt,
                 py::call_guard<py::gil_scoped_release>(),
@@ -3157,13 +3320,7 @@ This API is experimental and subject to change.)")
                  py::object backend_obj) {
                 std::optional<c10::intrusive_ptr<::c10d::Backend>> backend;
                 if (!backend_obj.is_none()) {
-                  backend =
-                      backend_obj.cast<c10::intrusive_ptr<::c10d::Backend>>();
-                  auto* pyobj =
-                      torch::utils::PyObjectPreservation::get_or_init(
-                          **backend,
-                          [&]() { return Py_NewRef(backend_obj.ptr()); });
-                  Py_DECREF(pyobj);
+                  backend = ::c10d::PyBackend::initSlotAndCast(backend_obj);
                 }
                 py::gil_scoped_release nogil{};
                 self->setBackend(device.type(), backendType, backend);
@@ -3207,8 +3364,9 @@ experimental and subject to breakage without warning.)")
                 // backend implementations and the latter cannot depend on
                 // python-related libs.
                 self->registerOnCompletionHook(
-                    [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
-                         hook))](const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
+                    [hookWrapper =
+                         ::c10d::PythonOnCompletionHook(std::move(hook))](
+                        const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
                       hookWrapper(workInfo);
                     });
               },
@@ -3341,10 +3499,6 @@ Args:
               &::c10d::ProcessGroup::unregisterAbortHook,
               py::arg("hook_id"),
               "Remove the abort hook registered with ``hook_id``.")
-          .def_property_readonly(
-              "supports_completion_hooks",
-              &::c10d::ProcessGroup::supportsCompletionHooks,
-              "Whether the default backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
@@ -3376,7 +3530,8 @@ Args:
 Register ``hook`` to be called with a ``PostHookArgs`` after each operation
 issued through this process group is issued, not when it completes; wait on
 ``PostHookArgs.work`` to observe completion. If a hook raises, the operation
-has already been issued but its ``Work`` is not returned to the caller.
+has already been issued but its result (``Work``, new group or window) is not
+returned to the caller.
 Otherwise behaves like ``register_pre_hook``.
 
 Args:
@@ -3390,12 +3545,13 @@ Args:
               py::arg("hook_id"),
               "Remove the post-hook registered with ``hook_id``.")
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
-            return torch::jit::toPyObject(c10::IValue(std::move(self)));
+                return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
           .def_static("unbox", [](py::object obj) {
-              auto typePtr = torch::getCustomClass("__torch__.torch.classes.c10d.ProcessGroup");
-              auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-              return ivalue.toCustomClass<::c10d::ProcessGroup>();
+                auto typePtr = torch::getCustomClass(
+                    "__torch__.torch.classes.c10d.ProcessGroup");
+                auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+                return ivalue.toCustomClass<::c10d::ProcessGroup>();
           });
 
   // Thread local process group manipulation
@@ -3577,10 +3733,6 @@ Args:
               &::c10d::Backend::unregisterAbortHook,
               py::arg("hook_id"),
               "Remove the abort hook registered with ``hook_id``.")
-          .def_property_readonly(
-              "supports_completion_hooks",
-              &::c10d::Backend::supportsCompletionHooks,
-              "Whether the backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -4042,7 +4194,17 @@ Args:
               &::c10d::Backend::getBoundDeviceId,
               &::c10d::Backend::setBoundDeviceId)
           .def_property_readonly(
-              "options", BACKEND_VIRTUAL_PROPERTY(getBackendOptions))
+              "options",
+              BACKEND_VIRTUAL_PROPERTY(getBackendOptions),
+              R"(The backend's ``Backend.Options``.
+
+Python subclasses may override this property and return ``None`` if they have no
+backend-specific options. ``split()`` and ``merge()`` then receive a plain
+``Backend.Options`` named after the backend, except that ``split()`` on the
+group's default backend receives a copy of the ``opts`` passed to
+``ProcessGroup.split_group`` (``pg_options`` for ``dist.split_group``), if any.
+A ``timeout`` passed to ``split_group`` or ``merge_remote_group`` overrides the
+received options' timeout.)")
           .def(
               "get_error",
               &::c10d::Backend::getError,
@@ -4054,25 +4216,58 @@ Args:
   // TODO: Maybe we can consider how to merge this with
   // `DistributedBackendOptions`.
   auto backendOptions =
-      intrusive_ptr_class_<::c10d::Backend::Options>(
+      py::class_<
+          ::c10d::Backend::Options,
+          c10::intrusive_ptr<::c10d::Backend::Options>,
+          ::c10d::PyBackendOptions>(
           backend,
           "Options",
           R"(
 Base class for all backend options implementations, such as the nccl
 options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
+
+Python subclasses of this class are supported. Copies made by ``copy.copy``
+and by ``split_group``/``merge_remote_group`` keep the subclass and a shallow
+copy of its instance ``__dict__`` and ``__slots__``; ``copy.deepcopy`` deep
+copies them. To customize copies made by ``copy.copy``, ``split_group`` and
+``merge_remote_group``, override ``__copy__`` and start from
+``super().__copy__()`` so the base fields are kept; ``copy.deepcopy`` does not
+call ``__copy__``. Python subclasses of other backends' options classes are not
+supported.
 )")
           .def(
-              py::init([](const std::string& backend,
-                          const std::chrono::milliseconds& timeout) {
-                // gil_scoped_release is not safe as a call_guard in init.
-                // https://github.com/pybind/pybind11/issues/5473
-                py::gil_scoped_release nogil{};
-
-                return c10::make_intrusive<::c10d::Backend::Options>(
-                    backend, timeout);
-              }),
+              init_nogil<
+                  ::c10d::Backend::Options,
+                  ::c10d::PyBackendOptions,
+                  const std::string&,
+                  const std::chrono::milliseconds&>(),
               py::arg("backend"),
               py::arg("timeout") = kProcessGroupDefaultTimeout)
+          // On GIL builds, holding the GIL serializes with Python writes to
+          // the source.
+          .def(
+              py::init(
+                  [](const ::c10d::Backend::Options& other) {
+                    return c10::make_intrusive<::c10d::Backend::Options>(other);
+                  },
+                  [](const ::c10d::Backend::Options& other)
+                      -> c10::intrusive_ptr<::c10d::Backend::Options> {
+                    return c10::make_intrusive<::c10d::PyBackendOptions>(other);
+                  }),
+              py::arg("other"),
+              py::pos_only(),
+              "Copy constructor; copies only the base Options fields.")
+          .def(
+              "__copy__",
+              [](const py::object& self) {
+                return copyBackendOptions(self, py::none());
+              })
+          .def(
+              "__deepcopy__",
+              [](const py::object& self, const py::dict& memo) {
+                return copyBackendOptions(self, memo);
+              },
+              py::arg("memo"))
           .def_readonly("backend", &::c10d::Backend::Options::backend)
           .def_readwrite("_timeout", &::c10d::Backend::Options::timeout)
           .def_readwrite(
@@ -4198,6 +4393,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::init(
                   [](const c10::intrusive_ptr<::c10d::Backend>& backend,
                      const c10::intrusive_ptr<::c10d::Backend>& gloo_backend) {
+                    // Keep the backend's Python object alive while the wrapper
+                    // holds it.
+                    ::c10d::PyBackend::initSlotAndCast(py::cast(backend));
                     // gil_scoped_release is not safe as a call_guard in init.
                     // https://github.com/pybind/pybind11/issues/5473
                     py::gil_scoped_release nogil{};
@@ -4458,6 +4656,27 @@ Attributes:
             group that never communicates allocates no NCCL resources. Such a
             group can't be split from until its first operation. Default is
             False.
+    encryption_psk (str, optional): nccl2 only. Pre-shared key NCCL uses to
+            encrypt and authenticate its built-in TCP sockets (bootstrap,
+            proxy, RAS, socket transport and InfiniBand connection setup)
+            with TLS 1.3. GPU data paths, external net plugins and the c10d
+            Store are not encrypted. The key is process-global and applies to
+            every NCCL user in the process: set it on the first nccl2 group,
+            identically on every rank, before any other NCCL communicator
+            exists (only earlier nccl2 groups are checked). Later groups must
+            pass the same key or none. Ranks with mismatched keys may hang
+            rather than error. NCCL requires at least 32 bytes; use a
+            uniformly random secret (e.g. ``secrets.token_hex(32)``), not a
+            passphrase. Requires NCCL 2.32.3+ built with
+            ``TLS_BACKEND=OPENSSL3`` with ``libcrypto.so.3`` and
+            ``libssl.so.3`` available at runtime; otherwise group or
+            communicator creation fails; ROCm is unsupported. Groups must not
+            be constructed concurrently while a key is being set. If None and
+            no key has been applied yet, the ``TORCH_NCCL_ENCRYPTION_PSK``
+            environment variable is used when non-empty, so setting it after
+            a keyless first group makes later group creation fail. The key
+            persists for the life of the process, across
+            ``destroy_process_group``. Default is None.
 
 Example::
     >>> import torch.distributed as dist
@@ -4481,6 +4700,8 @@ Example::
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
       .def_readwrite("lazy_init", &::c10d::ProcessGroupNCCL::Options::lazy_init)
+      .def_readwrite(
+          "encryption_psk", &::c10d::ProcessGroupNCCL::Options::encryption_psk)
       .def_readwrite(
           "use_pg_for_symm_mem_rendezvous",
           &::c10d::ProcessGroupNCCL::Options::use_pg_for_symm_mem_rendezvous)
@@ -4991,8 +5212,17 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                 Also, users can use ``fut.then(call_back_func)`` to register a callback function to be called
                 when the work is completed, without blocking the current thread.
 
-            .. warning ::
-                ``get_future_result`` API supports NCCL
+            Raises ``NotImplementedError`` if the backend's work does not support it.
+
+            Gloo send/recv works complete the future only in ``wait()``; it stays
+            pending until the work is waited on.
+
+            Python ``Work`` subclasses may override this to return a
+            ``torch.futures.Future``. FlightRecorder calls it once per op as
+            the op is issued, so overrides must be cheap and must not block.
+            FlightRecorder retires the op once the future completes
+            successfully; if it fails (e.g. ``set_exception``) the op stays
+            un-retired.
            )")
           .def(
               "get_future",
@@ -5079,56 +5309,12 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             return ivalue.toCustomClass<::c10d::Work>();
           });
 
-  auto fakeProcessGroup =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::FakeProcessGroup>(
-          module, "FakeProcessGroup", backend);
-  intrusive_ptr_class_<::c10d::FakeProcessGroup::Options>(
-      fakeProcessGroup, "Options", backendOptions)
-      .def(py::init())
-      .def_readwrite(
-          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option)
-      .def_readwrite(
-          "error_on_collective",
-          &::c10d::FakeProcessGroup::Options::error_on_collective)
-      .def_readwrite(
-          "simulate_uniform_ranks",
-          &::c10d::FakeProcessGroup::Options::simulate_uniform_ranks)
-      .def(
-          "__copy__",
-          [](const ::c10d::FakeProcessGroup::Options& self) {
-            return ::c10d::FakeProcessGroup::Options(self);
-          })
-      .def(
-          "__deepcopy__",
-          [](const ::c10d::FakeProcessGroup::Options& self,
-             const py::dict& memo) {
-            return ::c10d::FakeProcessGroup::Options(self);
-          },
-          py::arg("memo"));
-  fakeProcessGroup
-      .def_static(
-          "_create_internal",
-          [](int rank, int size) {
-            return ::c10d::FakeProcessGroup::_create_internal(rank, size);
-          },
-          py::arg("rank"),
-          py::arg("world_size"))
-      .def_static(
-          "_create_internal",
-          [](int rank,
-             int size,
-             c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
-            return ::c10d::FakeProcessGroup::_create_internal(
-                rank, size, std::move(options));
-          },
-          py::arg("rank"),
-          py::arg("world_size"),
-          py::arg("options"))
-      .def_property_readonly("options", &::c10d::FakeProcessGroup::getOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
           module, "FakeWork", work)
-          .def(py::init<>())
+          .def(
+              py::init<std::vector<at::Tensor>>(),
+              py::arg("result") = std::vector<at::Tensor>())
           .def_readwrite("seq_id", &::c10d::FakeWork::seq_id) // Expose seq_id
           .def("wait", &::c10d::FakeWork::wait, py::arg("timeout") = kNoTimeout)
           .def("getFuture", &::c10d::FakeWork::getFuture);
@@ -5425,8 +5611,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       R"(
 Records the operations of a process group into the flight recorder using
 pre/post hooks, for backends without a native flight recorder. Attached
-automatically to new process groups unless the buffer size
-(``TORCH_FR_BUFFER_SIZE``, or ``TORCH_NCCL_TRACE_BUFFER_SIZE``) is 0 or
+automatically to groups from init_process_group, new_group and
+torch.distributed.split_group (see attach) unless the buffer size
+(``TORCH_FR_BUFFER_SIZE``, or ``TORCH_NCCL_TRACE_BUFFER_SIZE``) is <= 0 or
 every backend of the group records natively.)")
       .def_static(
           "attach",
@@ -5436,9 +5623,17 @@ every backend of the group records natively.)")
           R"(
 Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
-with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
-backend has native FlightRecorder support. The hook detaches when remove()
-is called or the returned handle is garbage collected.
+with _dump_fr_trace / _dump_fr_trace_json), except those served by a backend
+that records natively: "nccl" (stock ProcessGroupNCCL, not nccl2) and "xccl".
+Groups from init_process_group, new_group and torch.distributed.split_group
+already have one attached, unless the default group provides its own
+new_group; attaching another records each op twice, under separate pg_ids.
+The hook detaches when remove() is called or the returned handle is garbage
+collected. If the backend times
+collectives the hook holds each Work (and its output tensors) until its
+result and the group's next collective; call remove() rather than dropping
+the handle, so pending result callbacks don't destroy it, with those Works,
+on a backend thread.
 
 global_ranks maps the group's ranks to world ranks; it names the per-rank
 dump file and is published as the group's membership. Leave it empty only
@@ -5505,7 +5700,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
         Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo".
         Returns:
                 Stringified json work traces.
                 Default settings return everything.
@@ -5531,7 +5726,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo".
             Returns:
                 Stringified pickle work traces.
                 Default settings return everything.

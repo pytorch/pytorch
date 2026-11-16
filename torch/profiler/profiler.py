@@ -10,8 +10,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
-from typing import Any, TYPE_CHECKING, TypeVar
-from typing_extensions import deprecated, Self
+from typing import Any, Self, TYPE_CHECKING, TypeVar
+from typing_extensions import deprecated
 from warnings import warn
 
 import torch
@@ -302,8 +302,9 @@ class _KinetoProfile:
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
 
-            .. deprecated::
+            .. deprecated:: 2.15
                 ``with_modules`` is deprecated and will be removed in a future version.
+                Passing it with any value, including ``False``, warns.
                 It only collects data for TorchScript models, which are themselves
                 deprecated, and does nothing in eager mode. Use ``with_stack=True``,
                 which records ``nn.Module`` events for eager models.
@@ -342,7 +343,7 @@ class _KinetoProfile:
         profile_memory: bool = False,
         with_stack: bool = False,
         with_flops: bool = False,
-        with_modules: bool = False,
+        with_modules: bool | None = None,
         experimental_config: _ExperimentalConfig | None = None,
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
@@ -358,7 +359,10 @@ class _KinetoProfile:
         self.with_flops = with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
-        self.with_modules = with_modules
+        if with_modules is not None:
+            # stacklevel 3 skips profile.__init__, which calls this through super().
+            warn(prof._WITH_MODULES_DEPRECATION_MSG, FutureWarning, stacklevel=3)
+        self.with_modules = bool(with_modules)
         if (
             experimental_config is not None
             and experimental_config.trace_only
@@ -512,7 +516,6 @@ class _KinetoProfile:
                 with_flops=self.with_flops,
                 profile_memory=self.profile_memory,
                 with_stack=self.with_stack,
-                with_modules=self.with_modules,
                 use_kineto=True,
                 experimental_config=self.experimental_config,
                 acc_events=self.acc_events,
@@ -521,6 +524,9 @@ class _KinetoProfile:
                 activity_filters=activity_filters or None,
                 _profiler_extensions=profiler_extensions,
             )
+            # Set after construction so the autograd profiler doesn't repeat the
+            # with_modules warning that __init__ already issued.
+            self.profiler.with_modules = self.with_modules
         if self._cuspy_config is not None:
             from torch.profiler._cuspy.observers.profiler import ProfilerObserver
 
@@ -653,6 +659,11 @@ class _KinetoProfile:
         package. Other paths are uncompressed (the ``cuspy`` backend defaults to
         gzip). Zstd is supported for Chrome JSON, not Cuspy's Perfetto format.
 
+        Raises :class:`RuntimeError` if Kineto cannot write the trace. Exports
+        that write the file from Python, such as compressed paths and
+        ``use_python_export``, raise :class:`OSError` instead, for example
+        :class:`FileNotFoundError` when the destination directory does not exist.
+
         ``cuda_graph_annotations`` bakes CUDA-graph kernel annotations into the trace:
         matching graphed work carries its annotation's fields in ``args``. Pass
         :func:`torch.cuda.graph_annotations.get_kernel_annotations` to use what
@@ -731,14 +742,34 @@ class _KinetoProfile:
                 default_stream=default_stream,
             )
         elif path.endswith((".gz", ".zst")):
-            with tempfile.TemporaryDirectory() as tmpdir:
-                trace_path = os.path.join(tmpdir, "trace.json")
-                self.profiler.export_chrome_trace(trace_path, self._trace_metadata)
+            output_dir, output_name = os.path.split(path)
+            trace_name = os.path.splitext(output_name)[0]
+            # Compress next to the destination, then rename into place: a bad path fails before Kineto
+            # saves and consumes the trace, and a failed export leaves any existing file untouched.
+            partial_path = path + ".tmp"
+            try:
                 with (
-                    open(trace_path, "rb") as fin,
-                    trace_file_opener(path, "wb") as fout,
+                    trace_file_opener(partial_path, "wb") as fout,
+                    tempfile.TemporaryDirectory() as tmpdir,
                 ):
-                    shutil.copyfileobj(fin, fout)
+                    trace_path = os.path.join(tmpdir, trace_name)
+                    self.profiler.export_chrome_trace(trace_path, self._trace_metadata)
+                    with open(trace_path, "rb") as fin:
+                        shutil.copyfileobj(fin, fout)
+                    # Kineto can write more files next to the JSON; move them out before `tmpdir` goes away.
+                    for name in os.listdir(tmpdir):
+                        src = os.path.join(tmpdir, name)
+                        dst = os.path.join(output_dir, name)
+                        # `shutil.move` nests its source inside a destination directory.
+                        is_dir = os.path.isdir(src) or os.path.isdir(dst)
+                        if name == trace_name or is_dir:
+                            continue
+                        shutil.move(src, dst)
+                os.replace(partial_path, path)
+            except BaseException:
+                if os.path.exists(partial_path):
+                    os.remove(partial_path)
+                raise
         else:
             self.profiler.export_chrome_trace(path, self._trace_metadata)
 
@@ -1129,8 +1160,9 @@ class profile(_KinetoProfile):
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
 
-            .. deprecated::
+            .. deprecated:: 2.15
                 ``with_modules`` is deprecated and will be removed in a future version.
+                Passing it with any value, including ``False``, warns.
                 It only collects data for TorchScript models, which are themselves
                 deprecated, and does nothing in eager mode. Use ``with_stack=True``,
                 which records ``nn.Module`` events for eager models.
@@ -1258,7 +1290,7 @@ class profile(_KinetoProfile):
         profile_memory: bool = False,
         with_stack: bool = False,
         with_flops: bool = False,
-        with_modules: bool = False,
+        with_modules: bool | None = None,
         experimental_config: _ExperimentalConfig | None = None,
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
