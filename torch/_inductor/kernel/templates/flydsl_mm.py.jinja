@@ -126,9 +126,9 @@ def {{kernel_name}}_precompile(
         env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
 
     with temporary_env(env_updates):
-        from torch._subclasses.fake_tensor import fake_mode_cls
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
-        with fake_mode_cls()():
+        with FakeTensorMode():
 
             def _fake_proxy(name):
                 return torch.empty_strided(

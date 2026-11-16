@@ -2,7 +2,6 @@
 # ruff: noqa: F841
 
 from torch.testing._internal.common_utils import (
-    fake_tensor_modes,
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
@@ -21,7 +20,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, skipOps, skip, xfail
 from torch.testing._internal.common_methods_invocations import op_db
-from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, fake_mode_cls, is_fake_tensor
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode, is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
@@ -42,10 +41,6 @@ from torch.fx.experimental.proxy_tensor import (
     snapshot_fake,
 )
 
-
-# Under the C++ fake configuration, explicit FakeTensorMode() calls in this
-# module construct a CppFakeTensorMode.
-FakeTensorMode = fake_mode_cls()
 
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
@@ -897,9 +892,8 @@ class TestFakeProxyTensor(TestCase):
         x = A(torch.randn(3, 3))
         self.assertRaisesRegex(TypeError, "Multiple dispatch failed", lambda: make_fx(f, tracing_mode="fake")())
 
-    @fake_tensor_modes
     @parametrize("propagate", [False, True])
-    def test_snapshot_fake_of_batched_tensor(self, mode_cls, propagate):
+    def test_snapshot_fake_of_batched_tensor(self, propagate):
         # A vmap wrapper is recorded as a view of the fake tensor it wraps, with
         # no real tensor. A value whose real tensor is kept keeps its wrapper,
         # which carries it.
@@ -909,7 +903,7 @@ class TestFakeProxyTensor(TestCase):
         functorch = torch._C._functorch
         real = torch.randn(4, 3, 5)[1:]
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=propagate):
-            mode = mode_cls()
+            mode = FakeTensorMode()
             fake = mode.from_tensor(real)
             with vmap_increment_nesting(3, "error") as level:
                 with mode:
@@ -931,14 +925,13 @@ class TestFakeProxyTensor(TestCase):
             if propagate:
                 self.assertIsNotNone(maybe_get_real_tensor(functorch.get_unwrapped(kept)))
 
-    @fake_tensor_modes
-    def test_snapshot_fake_of_grad_tracking_tensor(self, mode_cls):
+    def test_snapshot_fake_of_grad_tracking_tensor(self):
         # A grad tracking wrapper, as inside jvp, is recorded as a view of the
         # fake tensor it wraps, with the same layout.
         from torch._functorch.eager_transforms import grad_increment_nesting
 
         functorch = torch._C._functorch
-        mode = mode_cls()
+        mode = FakeTensorMode()
         fake = mode.from_tensor(torch.randn(4, 3, 5)[1:].transpose(0, 2))
         with grad_increment_nesting() as level:
             with mode:
@@ -954,12 +947,11 @@ class TestFakeProxyTensor(TestCase):
             (fake.shape, fake.stride(), fake.storage_offset()),
         )
 
-    @fake_tensor_modes
-    def test_snapshot_fake_of_sparse_batched_tensor(self, mode_cls):
+    def test_snapshot_fake_of_sparse_batched_tensor(self):
         from torch._functorch.vmap import vmap_increment_nesting
 
         functorch = torch._C._functorch
-        mode = mode_cls()
+        mode = FakeTensorMode()
         fake = mode.from_tensor(torch.eye(3).to_sparse())
         with vmap_increment_nesting(3, "error") as level:
             with mode:
@@ -1055,41 +1047,21 @@ def forward(self, x_1):
                 continue
             self.assertTrue('val' in n.meta)
 
-    @parametrize("use_cpp", [False, True])
-    @parametrize("tracing_mode", ["fake", "symbolic"])
-    @parametrize("pre_dispatch", [False, True])
-    def test_fake_tensor_mode_selection(self, use_cpp, tracing_mode, pre_dispatch):
-        from torch._guards import detect_fake_mode
-        from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode as PythonFakeTensorMode
-
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-            gm = make_fx(lambda x: x.cos(), tracing_mode=tracing_mode, pre_dispatch=pre_dispatch)(
-                torch.randn(3, 4)
-            )
-        vals = [n.meta["val"] for n in gm.graph.nodes if "val" in n.meta]
-        mode = detect_fake_mode(vals)
-        self.assertIsInstance(mode, CppFakeTensorMode if use_cpp else PythonFakeTensorMode)
-        self.assertTrue(all(mode.is_our_fake(v) for v in vals if isinstance(v, torch.Tensor)))
-        self.assertIsNone(detect_fake_mode())
-
-    @fake_tensor_modes
     @parametrize("tracing_mode", ["real", "fake", "symbolic"])
     @parametrize("ambient", [False, True])
-    def test_fake_tensor_mode(self, mode_cls, tracing_mode, ambient):
+    def test_fake_tensor_mode(self, tracing_mode, ambient):
         from contextlib import nullcontext
         from torch._guards import detect_fake_mode
-        from torch._subclasses.fake_tensor import CppFakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-        mode = mode_cls(shape_env=ShapeEnv())
+        mode = FakeTensorMode(shape_env=ShapeEnv())
         x = torch.randn(3, 4)
         if not ambient or tracing_mode == "real":
             x = mode.from_tensor(x)
-        # An existing mode takes precedence over the constructor configuration.
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=mode_cls is not CppFakeTensorMode):
-            with mode if ambient else nullcontext():
-                gm = make_fx(lambda x: x.cos(), tracing_mode=tracing_mode)(x)
-                self.assertIs(detect_fake_mode(), mode if ambient else None)
+        # Reuse the mode from the ambient context or fake inputs.
+        with mode if ambient else nullcontext():
+            gm = make_fx(lambda x: x.cos(), tracing_mode=tracing_mode)(x)
+            self.assertIs(detect_fake_mode(), mode if ambient else None)
         vals = [n.meta["val"] for n in gm.graph.nodes if "val" in n.meta]
         self.assertIs(detect_fake_mode(vals), mode)
         if tracing_mode == "symbolic":
