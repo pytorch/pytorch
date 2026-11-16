@@ -791,8 +791,8 @@ class _CollectivesMultiProcBase(DynamoDistributedMultiProcTestCase):
         return 2
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
-class TestCollectivesMultiProcGeneric(_CollectivesMultiProcBase):
+@unittest.skipUnless(c10d.is_available(), "requires distributed")
+class TestCollectivesMultiProcGeneric(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_c10d_functional_tagged_pt2_compliant(self):
@@ -1824,14 +1824,15 @@ class _CollectivesInductorBase(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(out, correct))
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
-@unittest.skipIf(not torch.accelerator.is_available(), "No accelerator is available")
-class TestCollectivesInductorGeneric(_CollectivesInductorBase):
+@unittest.skipUnless(c10d.is_available(), "requires distributed")
+class TestCollectivesInductorGeneric(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_meta(self):
         x = torch.rand((2, 3, 4), device="meta")
-        out = torch.ops.c10d_functional.all_reduce(x, "sum", **self.get_world_trs())
+        out = torch.ops.c10d_functional.all_reduce(
+            x, "sum", tag="", ranks=[0], group_size=1
+        )
         self.assertEqual(x.size(), out.size())
 
 
