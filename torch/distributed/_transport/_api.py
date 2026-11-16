@@ -5,6 +5,7 @@ import builtins
 import contextlib
 import numbers
 import operator
+import time
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from functools import partial
@@ -23,10 +24,12 @@ import torch
 import torch.distributed as dist
 from torch.distributed import Work
 
-from ._work import _validate_timeout, wait_all
+from ._work import _BatchWork, _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from ._cuda_stream import _CudaStreamOrdering
 
 
@@ -167,6 +170,17 @@ class Transport(ABC):
     ``read_async`` and ``write_async`` are asyncio coroutines. Cancellation or
     timeout may leave transfers pending. ``wait_all`` awaits their completion
     futures without blocking the event loop.
+
+    ``write_batch`` and ``read_batch`` transfer a sequence of ``(local view,
+    remote buffer)`` pairs as one operation, returning zero or one Work like
+    ``write``/``read``. Backends validate every pair before dispatching any, so
+    an invalid pair raises with nothing in flight. Pairs may name different
+    peers and complete in any order; zero-length pairs are skipped. The Work
+    completes only once every transfer is terminal and fails if any transfer
+    failed, in which case the contents of every destination range are
+    unspecified. If a transfer fails to start after others have, the Work waits
+    for those, then fails with that error. ``timeout`` bounds the wait for the
+    whole batch.
 
     Operations use byte ranges, not tensor shapes or dtypes. An endpoint may
     connect to multiple peers, and remote descriptors identify their peer. No
@@ -456,6 +470,70 @@ class Transport(ABC):
         transfer completes once it has been sent.
         """
 
+    def write_batch(
+        self,
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        *,
+        async_op: bool = False,
+        timeout: float | None = None,
+    ) -> int | Work:
+        """Write each local view to its remote buffer as one batch."""
+        return self._transfer_batch(
+            self.write, transfers, mutable=False, async_op=async_op, timeout=timeout
+        )
+
+    def read_batch(
+        self,
+        transfers: Sequence[tuple[MutableMemoryView, RemoteBuffer]],
+        *,
+        async_op: bool = False,
+        timeout: float | None = None,
+    ) -> int | Work:
+        """Read each remote buffer into its local view as one batch."""
+        return self._transfer_batch(
+            self.read, transfers, mutable=True, async_op=async_op, timeout=timeout
+        )
+
+    def _transfer_batch(
+        self,
+        transfer: Callable[..., int | Work],
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        *,
+        mutable: bool,
+        async_op: bool,
+        timeout: float | None,
+    ) -> int | Work:
+        _validate_timeout(timeout)
+        timeout = self._default_timeout if timeout is None else timeout
+        deadline = None if timeout is None else time.monotonic() + timeout
+
+        def remaining() -> float | None:
+            return None if deadline is None else max(0.0, deadline - time.monotonic())
+
+        transfers = list(transfers)
+        for local_buffer, remote_buffer in transfers:
+            self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
+        works: list[Work] = []
+        dispatch_error: Exception | None = None
+        for local_buffer, remote_buffer in transfers:
+            if local_buffer.size() == 0:
+                continue
+            try:
+                work = transfer(
+                    local_buffer, remote_buffer, async_op=True, timeout=remaining()
+                )
+            except Exception as error:
+                if not works:
+                    raise
+                dispatch_error = error
+                break
+            works.append(cast(Work, work))
+        batch = _BatchWork(works, dispatch_error, timeout if async_op else remaining())
+        if async_op:
+            return batch
+        batch.wait()
+        return 0
+
     def write_stream(
         self,
         local_buffer: MemoryView,
@@ -498,7 +576,7 @@ class Transport(ABC):
     def _check_transfer(  # noqa: B027
         self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool
     ) -> None:
-        """Validate a transfer before it is enqueued on a CUDA stream."""
+        """Validate a transfer before it is enqueued on a CUDA stream or batched."""
 
     def _cuda_stream(self, stream: torch.cuda.Stream) -> _CudaStreamOrdering:
         from ._cuda_stream import _CudaStreamOrdering
@@ -578,6 +656,42 @@ class Transport(ABC):
             None
             if timeout is None
             else max(0.0, timeout - (asyncio.get_running_loop().time() - started))
+        )
+        await wait_all((work,), timeout=remaining)
+
+    async def write_batch_async(
+        self,
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        """Write a batch, yielding to asyncio until every transfer finishes."""
+        await self._transfer_batch_async(self.write_batch, transfers, timeout)
+
+    async def read_batch_async(
+        self,
+        transfers: Sequence[tuple[MutableMemoryView, RemoteBuffer]],
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        """Read a batch, yielding to asyncio until every transfer finishes."""
+        await self._transfer_batch_async(self.read_batch, transfers, timeout)
+
+    async def _transfer_batch_async(
+        self,
+        transfer_batch: Callable[..., int | Work],
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        timeout: float | None,
+    ) -> None:
+        _validate_timeout(timeout)
+        timeout = self._default_timeout if timeout is None else timeout
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        # Dispatch may wait on backend locks, so keep it off the event loop.
+        dispatch = partial(transfer_batch, transfers, async_op=True, timeout=timeout)
+        work = cast(Work, await asyncio.to_thread(dispatch))
+        remaining = (
+            None if timeout is None else max(0.0, timeout - (loop.time() - started))
         )
         await wait_all((work,), timeout=remaining)
 

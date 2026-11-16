@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import math
 import threading
+import time
 import weakref
 from concurrent.futures import Future as _ThreadFuture, TimeoutError as _ThreadTimeout
 from datetime import timedelta
@@ -43,6 +44,14 @@ def _notify_listeners(future: _ThreadFuture[None]) -> None:
         listeners = list(_listeners.pop(future, {}).values())
     for listener in listeners:
         listener(future)
+
+
+def _future_error(future: torch.futures.Future[Any]) -> Exception | None:
+    try:
+        future.wait()
+    except Exception as error:
+        return error
+    return None
 
 
 def _complete(result: torch.futures.Future[Any], error: BaseException | None) -> None:
@@ -117,6 +126,107 @@ class _FutureWork(Work):
                 _listeners.get(self._future, {}).pop(key, None)
 
         return remove
+
+    def result(self) -> list[torch.Tensor]:
+        self.wait()
+        return []
+
+    def synchronize(self) -> None:
+        self.wait()
+
+
+class _BatchWork(Work):
+    """Work for a batch, terminal once every child Work is terminal."""
+
+    def __init__(
+        self,
+        works: list[Work],
+        dispatch_error: Exception | None,
+        timeout: float | None,
+    ) -> None:
+        super().__init__()
+        _validate_timeout(timeout)
+        self._works = works
+        self._dispatch_error = dispatch_error
+        self._timeout = timeout
+        self._result: torch.futures.Future[Any] | None = None
+        self._result_lock = threading.Lock()
+
+    def is_completed(self) -> bool:
+        return all(work.is_completed() for work in self._works)
+
+    def is_success(self) -> bool:
+        return self.is_completed() and self.exception() is None
+
+    def exception(self) -> BaseException | None:
+        if not self.is_completed():
+            return None
+        if self._dispatch_error is not None:
+            return self._dispatch_error
+        return next(
+            (error for work in self._works if (error := work.exception()) is not None),
+            None,
+        )
+
+    def wait(self, timeout: timedelta = timedelta(0)) -> bool:
+        seconds = timeout.total_seconds()
+        _validate_timeout(seconds)
+        seconds = seconds or self._timeout
+        deadline = None if seconds is None else time.monotonic() + seconds
+        error = None
+        for work in self._works:
+            # A zero timedelta selects the child's own default, so the time
+            # left is never passed down as zero.
+            remaining = timedelta(0)
+            if deadline is not None:
+                remaining = timedelta(seconds=max(deadline - time.monotonic(), 1e-6))
+            try:
+                if not work.wait(remaining):
+                    return False
+            except Exception:
+                # A failed child is terminal; keep waiting for the others.
+                if not work.is_completed():
+                    raise
+                if error is None:
+                    error = work.exception()
+        if self._dispatch_error is not None:
+            raise self._dispatch_error
+        if error is not None:
+            raise error
+        return True
+
+    def get_future(self) -> torch.futures.Future[list[torch.Tensor]]:
+        # Asked on every call: a child may drive its future from the calling
+        # event loop, as NIXL's does, and that driver dies with the loop.
+        futures = [work.get_future() for work in self._works]
+        with self._result_lock:
+            if self._result is not None:
+                return self._result
+            result = self._result = torch.futures.Future()
+        # torch.futures.collect_all completes as soon as a child future holds a
+        # C++ error, such as one raised in a then() callback, while other
+        # children may still be running. Count completions instead.
+        remaining = len(futures)
+        lock = threading.Lock()
+
+        def settle(_: torch.futures.Future[Any]) -> None:
+            nonlocal remaining
+            with lock:
+                remaining -= 1
+                if remaining > 0:
+                    return
+            error = self._dispatch_error
+            if error is None:
+                error = next(
+                    (e for f in futures if (e := _future_error(f)) is not None), None
+                )
+            _complete(result, error)
+
+        if not futures:
+            result.set_result([])
+        for future in futures:
+            future.add_done_callback(settle)
+        return result
 
     def result(self) -> list[torch.Tensor]:
         self.wait()

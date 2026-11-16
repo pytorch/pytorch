@@ -178,6 +178,63 @@ class TransportTestMixin:
             server.close()
             client.close()
 
+    def test_batch_transfers(self) -> None:
+        first, second = self.make_transport_pair()
+        try:
+            source = torch.arange(64, dtype=torch.uint8)
+            destination = torch.zeros_like(source)
+            read_target = torch.zeros_like(source)
+            view = first.register_memory(source).to_view()
+            read_view = first.register_memory(read_target).to_mutable_view()
+            remote = second.register_memory(destination).to_remote_buffer()
+            # Swapped halves catch a view paired with the wrong remote buffer.
+            writes = [(view[:32], remote[32:]), (view[32:], remote[:32])]
+            reads = [(read_view[:32], remote[:32]), (read_view[32:], remote[32:])]
+            swapped = source.roll(32)
+
+            self.assertEqual(first.write_batch([*writes, (view[:0], remote)]), 0)
+            self.assertEqual(destination, swapped)
+            work = first.read_batch(reads, async_op=True)
+            self.assertIsInstance(work, Work)
+            self.assertTrue(work.wait())
+            self.assertEqual(read_target, swapped)
+
+            destination.zero_()
+            read_target.zero_()
+            asyncio.run(first.write_batch_async(writes))
+            asyncio.run(first.read_batch_async(reads))
+            self.assertEqual(destination, swapped)
+            self.assertEqual(read_target, swapped)
+
+            self.assertEqual(first.write_batch([]), 0)
+            self.assertTrue(first.read_batch([], async_op=True).is_completed())
+            asyncio.run(first.write_batch_async([]))
+        finally:
+            first.close()
+            second.close()
+
+    def test_batch_validates_before_dispatch(self) -> None:
+        first, second = self.make_transport_pair()
+        try:
+            source = torch.arange(64, dtype=torch.uint8)
+            read_target = torch.zeros(32, dtype=torch.uint8)
+            destination = torch.zeros(32, dtype=torch.uint8)
+            view = first.register_memory(source).to_view()
+            read_view = first.register_memory(read_target).to_mutable_view()
+            remote = second.register_memory(destination).to_remote_buffer()
+
+            with self.assertRaisesRegex(ValueError, "does not fit"):
+                first.write_batch([(view[:32], remote), (view, remote)])
+            self.assertEqual(destination.count_nonzero(), 0)
+            destination.copy_(source[:32])
+            # A read into a read-only view must fail validation, not dispatch.
+            with self.assertRaises(TypeError):
+                first.read_batch([(read_view, remote), (view[:32], remote)])
+            self.assertEqual(read_target.count_nonzero(), 0)
+        finally:
+            first.close()
+            second.close()
+
     def _notification_pair(self):
         first, second = self.make_transport_pair()
         if not first.max_notification_size():
