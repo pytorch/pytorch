@@ -28,7 +28,10 @@ from types import ModuleType as _ModuleType
 from typing import (
     Any as _Any,
     get_origin as _get_origin,
+    LiteralString as _LiteralString,
+    Never as _Never,
     overload as _overload,
+    Self as _Self,
     TYPE_CHECKING,
     TypeAlias as _TypeAlias,
     TypeGuard as _TypeGuard,
@@ -36,10 +39,7 @@ from typing import (
 )
 from typing_extensions import (
     deprecated as _deprecated,
-    LiteralString as _LiteralString,
-    Never as _Never,
     ParamSpec as _ParamSpec,
-    Self as _Self,
     TypeIs as _TypeIs,
 )
 
@@ -209,6 +209,40 @@ if sys.platform == "win32":
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
         py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
+        cudnn_dll_path = th_dll_path
+        if cuda_version:
+            try:
+                # CUDA Pathfinder locates and loads the CUDA runtime DLLs installed
+                # by NVIDIA's PyPI packages on Windows.
+                from cuda.pathfinder import load_nvidia_dynamic_lib
+
+                for lib in (
+                    "cudart",
+                    "nvJitLink",
+                    "nvrtc",
+                    "cublas",
+                    "cublasLt",
+                    "cufft",
+                    "curand",
+                    "cusolver",
+                    "cusparse",
+                    "cupti",
+                    "cudnn",
+                ):
+                    try:
+                        loaded = load_nvidia_dynamic_lib(lib)
+                        if lib == "cudnn" and loaded.abs_path:
+                            cudnn_dll_path = os.path.dirname(loaded.abs_path)
+                    except Exception:
+                        warnings.warn(
+                            f"cuda-pathfinder is unable to find {lib} lib in the current python environment or sys PATH variable",
+                            stacklevel=2,
+                        )
+            except Exception:
+                warnings.warn(
+                    "cuda-pathfinder is not installed or is unable to find DLLs; falling back to CUDA DLLs from the torch package.",
+                    stacklevel=2,
+                )
 
         # When users create a virtualenv that inherits the base environment,
         # we will need to add the corresponding library directory into
@@ -262,12 +296,7 @@ if sys.platform == "win32":
         )
 
         kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
-        with_load_library_flags = hasattr(kernel32, "AddDllDirectory")
         prev_error_mode = kernel32.SetErrorMode(0x0001)
-
-        kernel32.LoadLibraryW.restype = ctypes.c_void_p
-        if with_load_library_flags:
-            kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
         for dll_path in dll_paths:
             os.add_dll_directory(dll_path)
@@ -287,32 +316,15 @@ if sys.platform == "win32":
                 ).strip()
             )
 
-        dlls = glob.glob(os.path.join(th_dll_path, "*.dll"))
-        path_patched = False
-        for dll in dlls:
-            is_loaded = False
-            if with_load_library_flags:
-                res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
-                last_error = ctypes.get_last_error()
-                if res is None and last_error != 126:
-                    err = ctypes.WinError(last_error)
-                    err.strerror += (
-                        f' Error loading "{dll}" or one of its dependencies.'
-                    )
-                    raise err
-                elif res is not None:
-                    is_loaded = True
-            if not is_loaded:
-                if not path_patched:
-                    os.environ["PATH"] = ";".join(dll_paths + [os.environ["PATH"]])
-                    path_patched = True
-                res = kernel32.LoadLibraryW(dll)
-                if res is None:
-                    err = ctypes.WinError(ctypes.get_last_error())
-                    err.strerror += (
-                        f' Error loading "{dll}" or one of its dependencies.'
-                    )
-                    raise err
+        # cudnn64_9.dll loads its sub-libraries (cudnn_graph64_9.dll, ...) by bare
+        # name on first use, which searches PATH. Preload them from the directory
+        # cudnn64_9.dll comes from (cuda-pathfinder's, else torch\lib) so a missing
+        # or different cuDNN on PATH is never used.
+        kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+        for dll in glob.glob(os.path.join(cudnn_dll_path, "cudnn*.dll")):
+            if kernel32.LoadLibraryExW(dll, None, 0x00001100) is None:
+                err = ctypes.WinError(ctypes.get_last_error()).strerror
+                warnings.warn(f'Failed to preload "{dll}": {err}', stacklevel=2)
 
         kernel32.SetErrorMode(prev_error_mode)
 
@@ -406,28 +418,15 @@ def _load_global_deps() -> None:
     # Determine the file extension based on the platform
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
     lib_name = f"libtorch_global_deps{lib_ext}"
-    here = os.path.abspath(__file__)
-    global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
-
-    # In scikit-build-core editable installs with redirect mode, native libs are
-    # installed to the dist package location rather than relative to __file__.
+    # get_file_path follows the compiled extension, which under a redirect-mode
+    # editable install lives beside the installed distribution, not __file__.
+    global_deps_lib_path = get_file_path("torch", "lib", lib_name)
     if not os.path.exists(global_deps_lib_path):
-        try:
-            from importlib.metadata import distribution
-
-            installed = distribution("torch").locate_file(
-                os.path.join("torch", "lib", lib_name)
-            )
-            # The importlib metadata SimplePath protocol was missing the exists
-            # method in older versions; however, the actual Path implementation
-            # has it and newer versions of importlib metadata have added it to
-            # the protocol, making the following ignore unnecessary from
-            # importlib_metadata 7.0.1 and Python 3.13 onwards.
-            # pyrefly: ignore[missing-attribute]
-            if installed.exists():
-                global_deps_lib_path = str(installed)
-        except Exception:
-            pass
+        # Handing a missing path to CDLL would surface as an unrelated dlopen
+        # failure through the CUDA-dependency retry below.
+        raise OSError(
+            f"{global_deps_lib_path} is missing; torch is not fully installed"
+        )
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -1810,7 +1809,18 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :func:`torch.nn.functional.interpolate` with ``mode='bilinear'`` and ``antialias=False``
+          when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on MPS tensor
+        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
+          when called on an MPS tensor with floating or complex dtype
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, :func:`torch.nn.AdaptiveMaxPool2d`,
+          :func:`torch.nn.AvgPool2d`, and :func:`torch.nn.AvgPool3d` when attempting to differentiate
+          an MPS tensor
+        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
+          in some cases
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1828,7 +1838,6 @@ def use_deterministic_algorithms(
           and one of the following modes is used:
 
           - ``linear``
-          - ``bilinear``
           - ``bicubic``
           - ``trilinear``
 
@@ -1844,21 +1853,13 @@ def use_deterministic_algorithms(
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
-        * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.Tensor.scatter_reduce` when called on CUDA or MPS tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on a CUDA tensor
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
           an MPS tensor with floating or complex dtype
-        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
-          when called on an MPS tensor with floating or complex dtype
         * :func:`torch.kthvalue` when called on an MPS tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate an MPS tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, and :func:`torch.nn.AvgPool3d`
-          when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
-          in some cases
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     In addition, several operations fill uninitialized memory when this setting
@@ -2063,6 +2064,12 @@ def set_float32_matmul_precision(precision: str) -> None:
         `torch.backends.cuda.matmul.allow_tf32 = True`. When "highest" (the default)
         is set then the float32 datatype is used for internal computations, equivalent
         to setting `torch.backends.cuda.matmul.allow_tf32 = False`.
+
+    .. note::
+
+        The implementation of "high" and "medium" precision in AMD Instinct MI300 series
+        devices uses 10 mantissa bits but always rounds down instead of rounding to nearest,
+        reducing accuracy slightly and introducing a downward bias. See :ref:`tf32_on_mi300`.
 
     Args:
         precision(str): can be set to "highest" (default), "high", or "medium" (see above).
@@ -2894,23 +2901,36 @@ class _TorchCompileInductorWrapper:
             return
 
         from torch._inductor import config
-
-        current_config: dict[str, _Any] = config.get_config_copy()
+        from torch._inductor.codegen.common import (
+            get_compile_option_owner,
+            init_backend_registration,
+        )
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
-            if attr_name not in current_config:
-                raise RuntimeError(
-                    f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
+            if attr_name in config._config:  # type: ignore[attr-defined]
+                # core inductor keys take precedence over device namespaces
+                owner_config, target_key = config, attr_name
+            else:
+                # a deferred privateuse1 backend may not have registered yet
+                init_backend_registration()
+                owner_config, target_key = get_compile_option_owner(attr_name) or (
+                    config,
+                    attr_name,
                 )
-            attr_type = config.get_type(attr_name)  # type: ignore[attr-defined]
+            if target_key not in owner_config._config:  # type: ignore[attr-defined]
+                raise RuntimeError(
+                    f"Unexpected optimization option {key}, known options are "
+                    f"{list(config.get_config_copy())}"
+                )
+            attr_type = owner_config.get_type(target_key)  # type: ignore[attr-defined]
             # Subscriptable generic types don't support isinstance so skip the type
             # check. There doesn't seem to be a good way of checking membership without
             # 3rd party libraries.
             if _get_origin(attr_type) is None:
                 if not isinstance(val, attr_type):
                     val_type_str = type(val).__name__
-                    expected_type_str = type(current_config[attr_name]).__name__
+                    expected_type_str = type(getattr(owner_config, target_key)).__name__
                     raise RuntimeError(
                         f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
                     )
@@ -2969,18 +2989,12 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         *,
         config_patches: dict[str, _Any] | None = None,
     ) -> _Any:
-        from contextlib import nullcontext
-        from unittest import mock
-
         from torch._guards import detect_fake_mode
         from torch._inductor.virtualized import V
+        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 
         fake_mode = detect_fake_mode(inputs_)
-        ctx = (
-            mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
-            if fake_mode
-            else nullcontext()
-        )
+        ctx = allow_non_fake_inputs_temporarily(fake_mode)
         with (
             V.set_aot_compilation(True),
             ctx,
@@ -2996,6 +3010,7 @@ class _TorchCompileWrapper:
         mode: str | None,
         options: dict[str, _Any] | None,
         dynamic: builtins.bool | None,
+        name: str | None = None,
     ) -> None:
         from torch._dynamo.backends.registry import lookup_backend
 
@@ -3006,6 +3021,7 @@ class _TorchCompileWrapper:
         else:
             self.compiler_name = str(backend)
         self.dynamic = dynamic
+        self.name = name
         self.compiler_fn = lookup_backend(backend)
         self.kwargs: dict[str, _Any] = {}
         # only pass the args if they non-empty
@@ -3013,6 +3029,8 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
+        if name:
+            self.kwargs["name"] = name
 
     def __eq__(self, other: object) -> builtins.bool:
         return (
@@ -3020,6 +3038,7 @@ class _TorchCompileWrapper:
             and self.compiler_fn == other.compiler_fn
             and self.kwargs == other.kwargs
             and self.dynamic == other.dynamic
+            and self.name == other.name
         )
 
     def __call__(self, model_: _Any, inputs_: _Any) -> _Any:
@@ -3209,8 +3228,8 @@ def compile(
     import sysconfig
 
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 15):
-        raise RuntimeError("torch.compile is not supported on Python 3.15+")
+    if sys.version_info >= (3, 16):
+        raise RuntimeError("torch.compile is not supported on Python 3.16+")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -3306,7 +3325,7 @@ def compile(
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
     else:
-        backend = _TorchCompileWrapper(backend, mode, options, dynamic)
+        backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 
     return torch._dynamo.optimize(
         backend=backend,
