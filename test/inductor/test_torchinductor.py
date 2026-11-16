@@ -14290,6 +14290,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
+    @skip_if_mps  # MPS uses the existing Inductor lowering.
     @parametrize(
         "kernel_size,ceil_mode",
         [
