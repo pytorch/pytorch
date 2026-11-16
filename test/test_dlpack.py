@@ -830,13 +830,15 @@ class TestTorchDlPackDevice(TestCase):
         # Load and compile the inline C++ test
         from torch.utils import cpp_extension
 
+        # `source` holds no device code, so leave `with_sycl` defaulted: asking
+        # for a SYCL build would invoke the DPC++ driver (icpx / dpclang++),
+        # which an XPU runtime-only install does not ship.
         module = cpp_extension.load_inline(
             name="test_dlpack_exchange_api",
             cpp_sources=[source],
             functions=["test_dlpack_exchange_api"],
             verbose=False,
             with_cuda=device.startswith("cuda"),
-            with_sycl=device.startswith("xpu"),
         )
 
         # Run the comprehensive C++ test
@@ -903,13 +905,14 @@ class TestTorchDlPackDevice(TestCase):
 
         from torch.utils import cpp_extension
 
+        # See test_dlpack_exchange_api: no device code here either, so no
+        # `with_sycl` and therefore no dependency on the DPC++ driver.
         module = cpp_extension.load_inline(
             name="test_sliced_dltensor",
             cpp_sources=[source],
             functions=["check_sliced_dltensor"],
             verbose=False,
             with_cuda=device.startswith("cuda"),
-            with_sycl=device.startswith("xpu"),
         )
         module.check_sliced_dltensor(base, sliced, api_capsule)
 
