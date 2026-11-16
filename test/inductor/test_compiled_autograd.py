@@ -302,8 +302,7 @@ main()
         ):
             raise AssertionError
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_basic(self, use_cpp_fake_tensor):
+    def test_basic(self):
         def fn():
             model = torch.nn.Sequential(
                 torch.nn.Linear(4, 4),
@@ -319,8 +318,7 @@ main()
             yield model[2].weight.grad
             yield model[2].bias.grad
 
-        with config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            self.check_output_and_recompiles(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_cache_hit(self):
         def fn():
@@ -361,8 +359,7 @@ main()
         with compiled_autograd._enable(compiler_fn):
             y.backward()
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_tensor_grad_hook1(self, use_cpp_fake_tensor):
+    def test_tensor_grad_hook1(self):
         def fn():
             for _ in range(3):
                 model = torch.nn.Sequential(
@@ -378,8 +375,7 @@ main()
                 yield model[0].weight.grad
                 yield model[0].bias.grad
 
-        with config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            self.check_output_and_recompiles(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_tensor_grad_hook2(self):
         def fn():
@@ -1472,8 +1468,7 @@ main()
         # Guarded by TensorArg id, mismatch on last MulBackward0
         self.check_output_and_recompiles(fn, 2)
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_dynamic_shapes(self, use_cpp_fake_tensor):
+    def test_dynamic_shapes(self):
         def fn():
             model = torch.nn.Sequential(
                 torch.nn.Linear(4, 4),
@@ -1493,8 +1488,7 @@ main()
                 yield model[2].bias.grad
                 model.zero_grad()
 
-        with config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            self.check_output_and_recompiles(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_dynamic_shapes_from_forward(self):
         class ToyModel(nn.Module):
@@ -1766,8 +1760,7 @@ main()
 
             eager_check()
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_custom_fn_saved_tensors(self, use_cpp_fake_tensor):
+    def test_custom_fn_saved_tensors(self):
         def fn():
             class MySin(torch.autograd.Function):
                 @staticmethod
@@ -1787,8 +1780,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        with config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            self.check_output_and_recompiles(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_custom_fn_saved_multiple_tensors(self):
         def fn():
@@ -5590,8 +5582,7 @@ known_graph_breaks_tests = {
     # DTensor backward calls torch._C helpers that dynamo skips
     # (_is_contiguous_or_false, _DTensor_compute_global_tensor_info), so these
     # graph break once compiled autograd traces the backward.
-    "test_dtensor_basic_use_cpp_fake_tensor_False",
-    "test_dtensor_basic_use_cpp_fake_tensor_True",
+    "test_dtensor_basic",
     "test_tp_linear_3d_input_dynamic_backward_style_colwise",
     "test_tp_linear_3d_input_dynamic_backward_style_rowwise",
     "test_dtensor_unbacked_rebuilt_sym_max_inductor",

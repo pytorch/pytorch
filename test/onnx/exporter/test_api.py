@@ -61,7 +61,6 @@ class SampleModelForDimOne(torch.nn.Module):
         return torch.cat((x, y), axis=1) + z
 
 
-@common_utils.instantiate_parametrized_tests
 class TestExportAPIDynamo(common_utils.TestCase):
     """Tests for the ONNX exporter API when dynamo=True."""
 
@@ -96,13 +95,11 @@ class TestExportAPIDynamo(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program, strategy=strategy)
         return onnx_program
 
-    @common_utils.parametrize("use_cpp_fake_tensor", [False, True])
-    def test_args_normalization_with_no_kwargs(self, use_cpp_fake_tensor):
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            self.assert_export(
-                SampleModelTwoInputs(),
-                (torch.randn(1, 1, 2), torch.randn(1, 1, 2)),
-            )
+    def test_args_normalization_with_no_kwargs(self):
+        self.assert_export(
+            SampleModelTwoInputs(),
+            (torch.randn(1, 1, 2), torch.randn(1, 1, 2)),
+        )
 
     def test_lower_opset_support(self):
         # First test that opset 18 (torchlib opset works)
@@ -280,50 +277,46 @@ class TestExportAPIDynamo(common_utils.TestCase):
             )
             self.assertTrue(os.path.exists(path))
 
-    @common_utils.parametrize("use_cpp_fake_tensor", [False, True])
-    def test_dynamic_shapes_with_fully_specified_axes(self, use_cpp_fake_tensor):
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            ep = torch.export.export(
-                SampleModelForDynamicShapes(),
-                (
-                    torch.randn(2, 2, 3),
-                    torch.randn(2, 2, 3),
-                ),
-                dynamic_shapes={
-                    "x": {
-                        0: torch.export.Dim("customx_dim_0"),
-                        1: torch.export.Dim("customx_dim_1"),
-                        2: torch.export.Dim("customx_dim_2"),
-                    },
-                    "b": {
-                        0: torch.export.Dim("customb_dim_0"),
-                        1: torch.export.Dim("customb_dim_1"),
-                        2: torch.export.Dim("customb_dim_2"),
-                    },
+    def test_dynamic_shapes_with_fully_specified_axes(self):
+        ep = torch.export.export(
+            SampleModelForDynamicShapes(),
+            (
+                torch.randn(2, 2, 3),
+                torch.randn(2, 2, 3),
+            ),
+            dynamic_shapes={
+                "x": {
+                    0: torch.export.Dim("customx_dim_0"),
+                    1: torch.export.Dim("customx_dim_1"),
+                    2: torch.export.Dim("customx_dim_2"),
                 },
-                strict=True,
-            )
-
-            self.assert_export(ep, strategy=None)
-
-    @common_utils.parametrize("use_cpp_fake_tensor", [False, True])
-    def test_partial_dynamic_shapes(self, use_cpp_fake_tensor):
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            self.assert_export(
-                SampleModelForDynamicShapes(),
-                (
-                    torch.randn(2, 2, 3),
-                    torch.randn(2, 2, 3),
-                ),
-                dynamic_shapes={
-                    "x": None,
-                    "b": {
-                        0: torch.export.Dim("customb_dim_0"),
-                        1: torch.export.Dim("customb_dim_1"),
-                        2: torch.export.Dim("customb_dim_2"),
-                    },
+                "b": {
+                    0: torch.export.Dim("customb_dim_0"),
+                    1: torch.export.Dim("customb_dim_1"),
+                    2: torch.export.Dim("customb_dim_2"),
                 },
-            )
+            },
+            strict=True,
+        )
+
+        self.assert_export(ep, strategy=None)
+
+    def test_partial_dynamic_shapes(self):
+        self.assert_export(
+            SampleModelForDynamicShapes(),
+            (
+                torch.randn(2, 2, 3),
+                torch.randn(2, 2, 3),
+            ),
+            dynamic_shapes={
+                "x": None,
+                "b": {
+                    0: torch.export.Dim("customb_dim_0"),
+                    1: torch.export.Dim("customb_dim_1"),
+                    2: torch.export.Dim("customb_dim_2"),
+                },
+            },
+        )
 
     def test_dynamic_shapes_supports_nested_input_model_with_input_names_assigned(self):
         # kwargs can still be renamed as long as it's in order

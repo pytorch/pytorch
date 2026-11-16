@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import (
-    fake_mode_cls,
+    FakeTensorMode,
     is_fake_tensor,
     maybe_get_fake_mode,
     MetadataMismatchError,
@@ -271,7 +271,7 @@ class CrossRefFakeMode(TorchDispatchMode):
 
             try:
                 # TODO: enable_python_dispatcher() here
-                with fake_mode_cls()(shape_env=ShapeEnv()) as fake_mode:
+                with FakeTensorMode(shape_env=ShapeEnv()) as fake_mode:
                     fake_args, fake_kwargs = pytree.tree_map_only(
                         torch.Tensor,
                         functools.partial(fake_mode.from_tensor, static_shapes=True),

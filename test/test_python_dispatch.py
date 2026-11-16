@@ -16,7 +16,6 @@ import torch._dynamo
 from torch import SymInt
 from torch._C import DispatchKey, DispatchKeySet
 from torch._subclasses.fake_tensor import (
-    CppFakeTensorMode,
     FakeTensorMode,
     maybe_get_fake_mode,
     unset_fake_temporarily,
@@ -32,7 +31,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
-    fake_tensor_modes,
     first_sample,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1671,10 +1669,7 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
             with BMode():
                 a + b
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_mode_with_make_subclass(self, use_cpp_fake_tensor):
-        from torch._subclasses.fake_tensor import fake_mode_cls
-
+    def test_mode_with_make_subclass(self):
         class SubTensor(torch.Tensor):
             @staticmethod
             def __new__(cls, elem):
@@ -1685,13 +1680,9 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
                 return func(*args, **kwargs)
 
         x = torch.randn(3)
-        with (
-            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor),
-            fake_mode_cls()(),
-            BasicMode(),
-        ):
+        with FakeTensorMode(), BasicMode():
             y = SubTensor(x)
-            if use_cpp_fake_tensor:
+            if torch._dynamo.config.use_cpp_fake_tensor:
                 with torch._C._ForceDispatchKeyGuard(
                     torch._C._dispatch_tls_local_include_set().remove(DispatchKey.Fake),
                     torch._C._dispatch_tls_local_exclude_set(),
@@ -1946,17 +1937,13 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         "mode_type,dispatch",
         [
             ("infra", "direct"),
-            ("python_fake", "direct"),
-            ("cpp_fake", "direct"),
-            ("python_fake", "python_cia"),
-            ("cpp_fake", "python_cia"),
-            ("python_fake", "native_cia"),
-            ("cpp_fake", "native_cia"),
+            ("fake", "direct"),
+            ("fake", "python_cia"),
+            ("fake", "native_cia"),
         ],
     )
     @parametrize("active", [False, True])
     @parametrize("raises", [False, True])
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     def test_mode_detection(self, mode_type, dispatch, active, raises):
         from torch.utils._python_dispatch import _cpp_fake_mode_tls
 
@@ -1973,8 +1960,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
 
         mode_cls = {
             "infra": InfraMode,
-            "python_fake": FakeTensorMode,
-            "cpp_fake": CppFakeTensorMode,
+            "fake": FakeTensorMode,
         }[mode_type]
         mode = mode_cls()
         seen = []
@@ -2030,7 +2016,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
 
         before = state()
         with (
-            patch.object(mode_cls, "avoid_device_init", True)
+            patch.object(type(mode), "avoid_device_init", True)
             if mode_type != "infra"
             else contextlib.nullcontext(),
             _scoped_library("_test_mode_detection", "DEF") as lib,
@@ -2061,10 +2047,8 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         self.assertFalse(is_in_torch_dispatch_mode())
         self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
 
-    @fake_tensor_modes
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
-    def test_mode_detection_without_enter(self, mode_cls):
-        mode = mode_cls()
+    def test_mode_detection_without_enter(self):
+        mode = FakeTensorMode()
         fake_key = torch._C._TorchDispatchModeKey.FAKE
         self.assertFalse(is_in_torch_dispatch_mode())
         torch._C._set_dispatch_mode(mode)
@@ -2084,15 +2068,13 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         self.assertFalse(is_in_torch_dispatch_mode())
 
     @skipIfTorchDynamo("uses torch.compile")
-    @fake_tensor_modes
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
-    def test_mode_detection_compiles(self, mode_cls):
+    def test_mode_detection_compiles(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f():
             return is_in_torch_dispatch_mode()
 
         self.assertFalse(f())
-        with mode_cls():
+        with FakeTensorMode():
             self.assertTrue(f())
             with torch._dynamo.config.patch(error_on_recompile=True):
                 self.assertTrue(f())
