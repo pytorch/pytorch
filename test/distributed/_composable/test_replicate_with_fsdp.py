@@ -57,11 +57,11 @@ class ReplicateTest(MultiProcContinuousForInstantiateTest):
             torch.accelerator.set_device_index(rank)
         super()._init_pg(rank, world_size, rdvz_file)
 
-    def init_replicate_tp_mesh(self) -> DeviceMesh:
+    def init_replicate_tp_mesh(self, device: str) -> DeviceMesh:
         # Prefer to test with >=4 GPUs, but for 2 GPUs, use 2-way TP
         replicate_size = 2
         return init_device_mesh(
-            self.device_type,
+            torch.device(device).type,
             (replicate_size, 1, self.world_size // replicate_size),
             mesh_dim_names=("replicate", "shard", "tp"),
         )
@@ -209,7 +209,7 @@ class ReplicateTest(MultiProcContinuousForInstantiateTest):
             replicate_model.fc3,
         ]
 
-        global_mesh = self.init_replicate_tp_mesh()
+        global_mesh = self.init_replicate_tp_mesh(device)
         replicate_mesh = global_mesh["replicate"]
 
         for layer in layers:
@@ -277,7 +277,7 @@ class ReplicateTest(MultiProcContinuousForInstantiateTest):
         Args:
             device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
-        global_mesh = self.init_replicate_tp_mesh()
+        global_mesh = self.init_replicate_tp_mesh(device)
         run_subtests(
             self,
             {
