@@ -135,6 +135,22 @@ class PrivateUse1BackendTest(TestCase):
     def setupClass(cls):
         pass
 
+    def test_dlpack_device_after_backend_rename(self):
+        from torch.utils.dlpack import DLDeviceType
+
+        # _setup_privateuseone_for_python_backend("npy") above registers the
+        # PrivateUse1 backend under a public name before this test runs.
+        tensor = torch._C._acc.create_empty_tensor([3], torch.float32)
+        self.assertEqual(torch._C._get_privateuse1_backend_name(), "npy")
+        self.assertEqual(tensor.device.type, "npy")
+        expected_index = tensor.device.index if tensor.device.index is not None else 0
+        self.assertEqual(
+            tensor.__dlpack_device__(), (DLDeviceType.kDLExtDev, expected_index)
+        )
+        self.assertEqual(
+            torch.empty(0).__dlpack_device__(), (DLDeviceType.kDLCPU, 0)
+        )
+
     def test_accessing_is_pinned(self):
         a_cpu = torch.randn((2, 2))
         # Assert this don't throw:
