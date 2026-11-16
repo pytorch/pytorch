@@ -363,7 +363,6 @@
   "test/inductor/test_control_deps.py",
   "test/inductor/test_control_flow.py",
   "test/inductor/test_cooperative_reductions.py",
-  "test/inductor/test_coordinate_descent_tuner.py",
   "test/inductor/test_cpp_builder.py",
   "test/inductor/test_cpp_wrapper_asserts.py",
   "test/inductor/test_cpp_wrapper_custom_ops.py",
