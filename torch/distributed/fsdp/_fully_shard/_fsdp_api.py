@@ -289,8 +289,8 @@ class CPUOffloadPolicy(OffloadPolicy):
     pin_memory: bool = True
 
 
-# The extension payload type, defined with the engine's all-gather layout
-# contract, keeps its import path here
-from torch.distributed.fsdp._flex_shard.all_gather_layout import (  # noqa: E402
-    AllGatherInput as AllGatherInput,
+# The extension payload type moved to the engine and keeps its import path here.
+# Imported last: the engine imports this module's policies.
+from torch.distributed.fsdp._flex_shard.all_gather_layout import (  # noqa: F401
+    AllGatherInput,
 )
