@@ -11898,13 +11898,7 @@ class TestLinalgCudaOnly(TestCase):
         torch.backends.cuda.preferred_linalg_library("cusolver")
         for (b, s), make_input in product(shapes, make_input_methods):
             buffer = make_input(b, s, s)
-            # See https://github.com/pytorch/pytorch/pull/204630,
-            # rectangular dispatch only for nrows <= 1024.
-            if s <= 1024:
-                mat_shapes = [(s, s // 2), (s // 2, s), (s, s)]
-            else:
-                mat_shapes = [(s, s)]
-
+            mat_shapes = [(s, s // 2), (s // 2, s), (s, s)]
             for m, n in mat_shapes:
                 A = buffer[:, :m, :n]
                 residual = get_residual(A)
