@@ -5910,9 +5910,10 @@ def pad(
         mode: ``'constant'``, ``'reflect'``, ``'replicate'`` or ``'circular'``.
             Default: ``'constant'``
         value: fill value for ``'constant'`` padding. Default: ``0``.
-            Integer fill values are exact, except under ``torch.jit.script``,
-            ``torch.compile``, ``torch.export`` and the C++ API, where values
-            above ``2**53`` are rounded through ``double``.
+            For ``int64`` and ``uint64`` inputs an integer ``value`` is used
+            exactly. Under ``torch.jit.script``, ``torch.compile``,
+            ``torch.export`` and the C++ API it is converted to ``double``
+            first, so integers with magnitude above ``2**53`` are rounded.
 
     Examples::
 
@@ -5955,17 +5956,17 @@ def pad(
                 )._replication_pad(input, pad)
         if (
             value is not None
+            and input.dtype in (torch.int64, torch.uint64)
             and not torch.compiler.is_compiling()
             and isinstance(value, numbers.Integral)
             and mode == "constant"
-            and input.dtype in (torch.int64, torch.uint64)
         ):
             # _C._nn.pad takes value as a double, which rounds ints above 2**53.
             # constant_pad_nd takes a Scalar and keeps the int exact. Dynamo
             # reports a SymInt as an int and Inductor cannot lower a symbolic
-            # fill, so compiled code keeps using _C._nn.pad. The checks on
-            # value come before the ones on mode and input because fx tracing
-            # passes Proxy arguments there.
+            # fill, so compiled code keeps using _C._nn.pad. The dtype check
+            # comes first because it is the most selective one, and isinstance
+            # comes before int(value) so a non-integer value is never converted.
             fill = int(value)
             if abs(fill) > 2**53:
                 info = torch.iinfo(input.dtype)

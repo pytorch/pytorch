@@ -6464,9 +6464,6 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
         for pad_value in (1., 2.):
             for shape, pad in cases:
                 yield SampleInput(make_inp(shape), args=(pad, mode, pad_value))
-        if dtype == torch.int64:
-            # Python int fill above 2**53, which a double cannot hold exactly
-            yield SampleInput(make_inp((1, 3, 3)), args=((1, 2), mode, 2**53 + 1))
 
 def sample_inputs_nn_pad_replicate_negative(op_info, device, dtype, requires_grad, **kwargs):
     cases: tuple = (

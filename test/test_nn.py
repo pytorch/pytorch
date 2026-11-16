@@ -7399,21 +7399,31 @@ class TestNNDeviceType(NNTestCase):
         out_cpu.backward(grad.cpu())
         self.assertEqual(x.grad, ref_x.grad)
 
+    @dtypes(torch.int64, torch.uint64)
     @skipIfTorchDynamo("compiled F.pad converts the fill to double")
-    def test_pad_int64_fill_value_is_exact(self, device):
+    def test_pad_int_fill_value_is_exact(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/170798
-        x = torch.zeros(1, dtype=torch.int64, device=device)
-        for v in (2**53 + 1, -(2**53 + 1), torch.iinfo(torch.int64).max):
+        info = torch.iinfo(dtype)
+        x = torch.zeros(1, dtype=dtype, device=device)
+        values = [2**53 + 1, info.max]
+        if info.min < 0:
+            values.append(-(2**53 + 1))
+        for v in values:
             self.assertEqual(
                 F.pad(x, (0, 2), value=v),
-                torch.tensor([0, v, v], dtype=torch.int64, device=device),
+                torch.tensor([0, v, v], dtype=dtype, device=device),
             )
             self.assertEqual(
                 F.pad(x, (1, 1), mode="constant", value=v),
-                torch.tensor([v, 0, v], dtype=torch.int64, device=device),
+                torch.tensor([v, 0, v], dtype=dtype, device=device),
             )
-        with self.assertRaisesRegex(RuntimeError, "without overflow"):
-            F.pad(x, (0, 2), value=2**63)
+        # Fills outside the dtype's range keep raising.
+        out_of_range = [info.max + 1, 2**64]
+        if info.min == 0:
+            out_of_range.append(-(2**53 + 1))
+        for v in out_of_range:
+            with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                F.pad(x, (0, 2), value=v)
 
     @unittest.skipUnless(TEST_NUMPY, "requires numpy")
     @skipIfTorchDynamo("compiled F.pad converts the fill to double")
@@ -7423,18 +7433,10 @@ class TestNNDeviceType(NNTestCase):
         expected = torch.tensor([0, v, v], dtype=torch.int64, device=device)
         self.assertEqual(F.pad(x, (0, 2), value=np.int64(v)), expected)
 
-    @skipIfTorchDynamo("compiled F.pad converts the fill to double")
-    def test_pad_uint64_fill_value_is_exact(self, device):
-        x = torch.zeros(1, dtype=torch.uint64, device=device)
-        v = 2**64 - 1
-        expected = torch.tensor([0, v, v], dtype=torch.uint64, device=device)
-        self.assertEqual(F.pad(x, (0, 2), value=v), expected)
-        with self.assertRaisesRegex(RuntimeError, "without overflow"):
-            F.pad(x, (0, 2), value=-(2**53 + 1))
-
     def test_pad_int_fill_value_other_dtypes(self, device):
-        # None of these inputs reach the exact int path in F.pad: they guard
-        # its dtype and range filters, so the old behavior must be unchanged.
+        # These stay on the old path. Only the float32 and int32 cases with a
+        # fill above 2**53 get past the magnitude check and are stopped by the
+        # dtype filter in F.pad; the others never leave the magnitude check.
         for x, value, expected in (
             ([5], 3, [3, 5, 3]),
             ([False], True, [True, False, True]),
@@ -7445,6 +7447,8 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(F.pad(x, (1, 1), value=value), expected)
         with self.assertRaisesRegex(RuntimeError, "without overflow"):
             F.pad(torch.zeros(2, dtype=torch.uint8, device=device), (1, 1), value=-1)
+        with self.assertRaisesRegex(RuntimeError, "without overflow"):
+            F.pad(torch.zeros(2, dtype=torch.int32, device=device), (1, 1), value=2**60)
 
     @onlyAccelerator
     @skipMPS
