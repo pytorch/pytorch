@@ -102,11 +102,12 @@ non-default stream can show that a native handle was not hard-coded. Do not ask
 for exhaustive dtype, shape, device, numerical-edge, or error-case matrices
 unless the stable wrapper itself branches on those cases.
 
-Before approving, be able to state:
+## Before approving, be sure to state
 
 1. which unstable declaration or schema defines the contract;
 2. which shim or dispatcher overload implements the bridge;
 3. any intentional difference from the unstable API;
-4. the oldest supported runtime; and
-5. which test demonstrates each compatibility-sensitive seam introduced by the
+4. the minimum supported build-time version;
+5. the oldest supported runtime; and
+6. which test demonstrates each compatibility-sensitive seam introduced by the
    wrapper.
