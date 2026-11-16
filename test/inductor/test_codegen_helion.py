@@ -149,6 +149,21 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             self.code, r"reinterpret_tensor\(arg\d+_1, \(40, 72\), \(72, 1\), 0\)"
         )
 
+    @config.patch(nan_asserts=True)
+    def test_nan_asserts_check_the_tensor(self):
+        base = randn(5, 9, 150)
+        base[:, 8:] = float("nan")
+        # bias holds no NaN, but its flat operand view spans base's NaN rows.
+        bias = base[:, :8, :136]
+        self.compile(
+            lambda a, b, bias: (a @ b).reshape(5, 8, 136) + bias,
+            randn(40, 72),
+            randn(72, 136),
+            bias,
+        )
+        self.assertIn("reinterpret_tensor(arg2_1, (6586, ), (1, ), 0)", self.code)
+        self.assertIn("assert not arg2_1.isnan().any().item()", self.code)
+
     @parametrize("epilogue", [False, True])
     def test_horizontal(self, epilogue):
         def fn(a, b, c):

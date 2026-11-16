@@ -23,7 +23,7 @@ from ...ir import (
 )
 from ...utils import IndentedBuffer, sympy_subs, upcast_compute_type
 from ...virtualized import V
-from ..common import CSEProxy, CSEVariable, DeferredLine
+from ..common import CSEProxy, CSEVariable, DeferredLine, TensorArg
 from ..simd import SIMDKernel
 from .helion_op_overrides import HelionOverrides, HelionPrinter, literal
 
@@ -418,10 +418,15 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         return args
 
     def codegen_nan_check(self) -> None:
+        # Check each buffer, as Triton does, not call_args(): a flat operand is
+        # passed as a view of its whole storage span, which can include memory
+        # outside the tensor.
         wrapper = V.graph.wrapper_code
-        for arg in OrderedSet(self.call_args()):
-            wrapper.writeline(f"assert not {arg}.isnan().any().item()")
-            wrapper.writeline(f"assert not {arg}.isinf().any().item()")
+        _, call_args, signatures, _ = self.args.python_argdefs()
+        for arg, signature in zip(call_args, signatures):
+            if isinstance(signature, TensorArg):
+                wrapper.writeline(f"assert not {arg}.isnan().any().item()")
+                wrapper.writeline(f"assert not {arg}.isinf().any().item()")
 
     def call_kernel(
         self, name: str, node: IRNode | None = None, deallocate_ws: bool = True
