@@ -375,9 +375,7 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 # either case. CppFakeTensorMode is not a FakeTensorMode subclass and has little of
 # its interface yet. Its from_tensor does not support tensors with nested ints.
 # Its converter's from_real_tensor rejects constants that are fakes or not plain
-# tensors, and its converter's from_meta_and_device raises NotImplementedError
-# for a pytype other than Tensor. So a caller that needs a Python
-# FakeTensorMode narrows the result with
+# tensors. So a caller that needs a Python FakeTensorMode narrows the result with
 # torch._guards.require_python_fake_mode, which raises RuntimeError for a C++
 # mode.
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
@@ -565,6 +563,8 @@ def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
 def maybe_get_fake_pytype(x: object) -> type[Tensor] | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.pytype
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return getattr(x, "_fake_pytype", None)
     return None
 
 
@@ -1637,11 +1637,10 @@ class FakeTensorConverter:
         if maybe_memo is not None:
             return maybe_memo
         if isinstance(fake_mode, CppFakeTensorMode):
-            if pytype not in (None, torch.Tensor):
-                raise NotImplementedError(
-                    f"C++ fake tensors of type {pytype} are not supported yet"
-                )
             out = torch._C._from_meta_and_device(t, torch.device(device), fake_mode)
+            # Guard metadata belongs to this Python object, like FakeTensor.pytype;
+            # new tensors produced by detach/clone do not inherit it.
+            out._fake_pytype = pytype
             if dispatch_keys is not None:
                 torch._C._set_fake_dispatch_keys(out, dispatch_keys)
         else:

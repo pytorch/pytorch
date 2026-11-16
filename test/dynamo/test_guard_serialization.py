@@ -1874,8 +1874,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertNotIn(id(lstm.__dict__[name]), pickler.missing_values, name)
 
     @parametrize("use_cpp_fake_tensor", [False, True])
+    @parametrize("pytype", [torch.Tensor, torch.nn.Parameter, SubclassWithMeta])
     def test_fake_tensor_reduces_from_the_real_tensors_recorded_dispatch_keys(
-        self, use_cpp_fake_tensor
+        self, use_cpp_fake_tensor, pytype
     ):
         with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             # A guarded FakeTensor stands for a real tensor: the converter may have
@@ -1886,6 +1887,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 fake_mode_cls,
                 is_fake_tensor,
                 maybe_get_fake_dispatch_keys,
+                maybe_get_fake_pytype,
             )
 
             real = torch.randn(2)
@@ -1897,7 +1899,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 mode,
                 torch.empty_like(real, device="meta"),
                 real.device,
-                torch.Tensor,
+                pytype,
                 torch._C._dispatch_keys(real),
             )
             without_keys = mode.from_tensor(real)
@@ -1916,6 +1918,14 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 out = load_guards_state(buf.getvalue())["t"]
                 self.assertTrue(is_fake_tensor(out))
                 self.assertEqual(out.shape, real.shape)
+                expected_type = pytype if fake is with_keys else torch.Tensor
+                self.assertIs(maybe_get_fake_pytype(out), expected_type)
+                buf = io.BytesIO()
+                GuardsStatePickler({id(out): out}, {}, {}, {}, buf).dump(out)
+                self.assertIs(
+                    maybe_get_fake_pytype(load_guards_state(buf.getvalue())),
+                    expected_type,
+                )
             buf = io.BytesIO()
             GuardsStatePickler({id(with_keys): with_keys}, {}, {}, {}, buf).dump(
                 {"t": with_keys}
@@ -2068,6 +2078,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.shape, x.shape)
 
     def test_literal_on_a_fake_tensor_owned_name_is_not_a_guard_read(self):
+        from torch._subclasses.fake_tensor import maybe_get_fake_constant
+
         x = torch.randn(3)
         x._is_param = True
         x.constant = 2
@@ -2077,17 +2089,22 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x})
         out = load_guards_state(buf.getvalue())["x"]
         self.assertIs(out._is_param, True)
-        self.assertIsNone(out.constant)
+        self.assertIsNone(maybe_get_fake_constant(out))
 
     def test_fake_tensor_setter_names_are_owned(self):
+        from torch._subclasses.fake_tensor import (
+            maybe_get_fake_device,
+            maybe_get_item_memo,
+        )
+
         x = torch.randn(3)
         x.fake_device = torch.device("meta")
         x.item_memo = [5]
         buf = io.BytesIO()
         GuardsStatePickler({id(x): x}, {}, {}, {}, buf).dump({"x": x})
         out = load_guards_state(buf.getvalue())["x"]
-        self.assertEqual(out.fake_device, torch.device("cpu"))
-        self.assertIsNone(out.item_memo)
+        self.assertEqual(maybe_get_fake_device(out), torch.device("cpu"))
+        self.assertIsNone(maybe_get_item_memo(out))
         tree = {id(v): v for v in (x, x.item_memo)}
         with self.assertRaisesRegex(PackageError, "reads 'item_memo' off a tensor"):
             GuardsStatePickler(tree, {}, {}, {}, io.BytesIO()).dump({"x": x})
@@ -3719,23 +3736,26 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"f": bound, "x": x}, True)
         self._test_check_fn(ref, loaded, {"f": global_add, "x": x}, False)
 
-    def test_tensor_match(self):
-        def f(x: torch.Tensor):
-            return x + 1
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    @parametrize("tensor_type", [torch.Tensor, torch.nn.Parameter])
+    def test_tensor_match(self, use_cpp_fake_tensor, tensor_type):
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
 
-        ref, loaded = self._test_serialization(
-            "TENSOR_MATCH", f, torch.ones(2, dtype=torch.float32)
-        )
-        self._test_check_fn(
-            ref, loaded, {"x": torch.randn(2, dtype=torch.float32)}, True
-        )
-        self._test_check_fn(
-            ref, loaded, {"x": torch.randn(3, dtype=torch.float32)}, False
-        )
-        self._test_check_fn(
-            ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
-        )
-        self._test_check_fn(ref, loaded, {"x": None}, False)
+            def f(x: torch.Tensor):
+                return x + 1
+
+            ref, loaded = self._test_serialization(
+                "TENSOR_MATCH", f, tensor_type(torch.ones(2))
+            )
+            self._test_check_fn(ref, loaded, {"x": tensor_type(torch.randn(2))}, True)
+            self._test_check_fn(ref, loaded, {"x": tensor_type(torch.randn(3))}, False)
+            self._test_check_fn(
+                ref,
+                loaded,
+                {"x": tensor_type(torch.randn(2, dtype=torch.float64))},
+                False,
+            )
+            self._test_check_fn(ref, loaded, {"x": None}, False)
 
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):
@@ -5510,18 +5530,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with self.assertRaisesRegex(PackageError, "reads 'constant' off a tensor"):
             self._test_serialization("EQUALS_MATCH", fn, x)
 
-    def test_guard_reading_a_literal_fake_tensor_owned_name_warns(self):
-        def fn(x):
-            return x * x.constant
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_guard_reading_a_literal_fake_tensor_owned_name_warns(
+        self, use_cpp_fake_tensor
+    ):
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            attr = "_fake_pytype" if use_cpp_fake_tensor else "constant"
 
-        x = torch.randn(3)
-        x.constant = 2
-        with self.assertLogs("torch._dynamo.guards", "WARNING") as logs:
-            ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
-        self.assertIn("'constant' attribute holds 2", "\n".join(logs.output))
-        # The loaded guard compares against the FakeTensor's own constant.
-        self.assertTrue(ref.check({"x": x}))
-        self.assertFalse(loaded.check({"x": x}))
+            def fn(x):
+                return x * getattr(x, attr)
+
+            x = torch.randn(3)
+            setattr(x, attr, 2)
+            with self.assertLogs("torch._dynamo.guards", "WARNING") as logs:
+                ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+            self.assertIn(f"'{attr}' attribute holds 2", "\n".join(logs.output))
+            # The loaded guard compares against the fake's own metadata.
+            self.assertTrue(ref.check({"x": x, "attr": attr}))
+            self.assertFalse(loaded.check({"x": x, "attr": attr}))
 
     def test_dim_markings_round_trip(self):
         def fn(x):
