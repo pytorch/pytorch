@@ -1112,6 +1112,7 @@ const Operator& Node::getOperator() const {
   }
   er << "within the graph:\n";
   er << *owningGraph() << '\n';
+  // @allow-raw-throw: er is exactly ErrorReport, so nothing is sliced
   throw er;
 }
 

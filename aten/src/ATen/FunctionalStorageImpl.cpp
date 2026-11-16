@@ -5,6 +5,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <vector>
 
 namespace at::functionalization {
@@ -109,7 +110,7 @@ void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vec
   TORCH_CHECK(!frozen_, "cannot mutate tensors with frozen storage");
 
   if (metas.size() > 1) {
-    for (size_t i = 1; i < metas.size(); ++i) {
+    for (const auto i : c10::irange(1, metas.size())) {
       // Skipping this check for XLA. Would be good to add it back, but it is failing XLA CI
       TORCH_CHECK(updated_val.device().type() == c10::DeviceType::XLA || !metas[i]->is_as_strided,
 "During torch.compile, encountered a mutation on a view chain of length ", metas.size(), ", where view ", i,

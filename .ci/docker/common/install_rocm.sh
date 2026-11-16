@@ -8,6 +8,8 @@ install_ubuntu() {
     apt-get install -y --no-install-recommends kmod libc++1 libc++abi1
     # FIXME: Needed for rocSHMEM in ROCm7.14 since it had a dependency on libnuma.so
     apt-get install -y libnuma-dev
+    # AOTriton configure calls pkg_search_module(liblzma); liblzma-dev provides the .pc file.
+    apt-get install -y --no-install-recommends liblzma-dev
 
     install_rocm
 
@@ -74,6 +76,11 @@ install_rocm() {
 }
 
 install_almalinux() {
+    # repair_wheel.py copies libnuma.so.1 into torch/lib as libnuma.so so
+    # pre-10.0 rocSHMEM's dlopen("libnuma.so") resolves. The copy fails the
+    # wheel build if numactl-libs is missing.
+    yum install -y numactl-libs
+
     # The manywheel build intentionally uses only the common ROCm environment.
     # Its produced wheel resolves ROCm at runtime via RPATH (see repair_wheel.py),
     # so unlike Ubuntu CI it must not add ROCm to LD_LIBRARY_PATH.

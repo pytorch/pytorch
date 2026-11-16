@@ -1248,14 +1248,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         if epilogue_nodes or is_scaled_mm:
             if epilogue_nodes:
-                (
-                    input_names,
-                    output_names,
-                    var_name_to_buffer_name,
-                    evt_py_code,
-                ) = CutlassEVTCodegen.ir_to_evt_python_code(
+                epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                     Y.get_name(), epilogue_nodes, V.kernel.removed_buffers
                 )
+                input_names = epilogue.reads
+                output_names = epilogue.writes
+                var_name_to_buffer_name = epilogue.renames
+                evt_py_code = epilogue.source
+                if evt_py_code is None:
+                    raise AssertionError("expected EVT epilogue source")
 
                 # TODO: mlazos remove this by returning buffer metadata from
                 # ir_to_evt_python code
@@ -1659,7 +1660,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             op.tile_description,  # type: ignore[attr-defined]
             op.epilogue_schedule,  # type: ignore[attr-defined]
             {k: name_to_buffer[v] for k, v in var_name_to_buffer_name.items()},  # type: ignore[arg-type,misc]
-            V.graph.sizevars.guarding_hint_or_throw,
+            lambda e: int(V.graph.sizevars.guarding_hint_or_throw(e)),
             kernel_schedule=op.kernel_schedule,
             device_type=self.device_type,
         )

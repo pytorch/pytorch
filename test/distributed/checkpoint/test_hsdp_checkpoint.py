@@ -24,7 +24,9 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    _get_device_type,
+    DTensorContinuousTestBase,
+    NUM_DEVICES,
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
@@ -71,11 +73,16 @@ class SimpleModelUneven(torch.nn.Module):
         return torch.rand(4, 5, device=device_type)
 
 
-class TestHSDPCheckpoint(DTensorTestBase):
-    @property
-    def backend(self):
-        curr_backend = dist.get_default_backend_for_device(self.device_type)
-        return f"cpu:gloo,{self.device_type}:{curr_backend}"
+class TestHSDPCheckpoint(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
+    @classmethod
+    def backend_str(cls):
+        device_type = _get_device_type(cls.world_size)
+        if device_type == "cpu":
+            return "gloo"
+        curr_backend = dist.get_default_backend_for_device(device_type)
+        return f"cpu:gloo,{device_type}:{curr_backend}"
 
     @skip_if_lt_x_gpu(4)
     @with_comms
