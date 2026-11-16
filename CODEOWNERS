@@ -986,9 +986,43 @@
 /.github/ @pytorch/pytorch-dev-infra
 #
 # [infra_build_packaging]
+# label: module: ci, module: binaries
+# owner: @atalman @huydhn
+/.ci/docker/almalinux/ @atalman @huydhn
+/.ci/docker/manywheel/ @atalman @huydhn
+/.ci/flash-attention/ @atalman @huydhn
+/.ci/libtorch/ @atalman @huydhn
+/.ci/magma/ @atalman @huydhn
+/.ci/pytorch/binary_* @atalman @huydhn
+/.ci/pytorch/check_binary.sh @atalman @huydhn
+/.ci/pytorch/check_wheel_soabi.py @atalman @huydhn
+/.ci/pytorch/smoke_test/ @atalman @huydhn
+/.ci/pytorch/test_example_code/ @atalman @huydhn
+/.ci/wheel/ @atalman @huydhn
+/.github/actions/binary-docker-build/ @atalman @huydhn
+/.github/actions/test-pytorch-binary/ @atalman @huydhn
+/.github/regenerate.sh @atalman @huydhn
+/.github/scripts/build_triton_wheel.py @atalman @huydhn
+/.github/scripts/generate_binary_build_matrix.py @atalman @huydhn
+/.github/scripts/generate_ci_workflows.py @atalman @huydhn
+/.github/scripts/generate_docker_release_matrix.py @atalman @huydhn
+/.github/scripts/windows/ @atalman @huydhn
+/.github/templates/ @atalman @huydhn
+/.github/workflows/_binary-* @atalman @huydhn
+/.github/workflows/_build-triton-wheel-linux.yml @atalman @huydhn
+/.github/workflows/_upload-triton-wheel.yml @atalman @huydhn
+/.github/workflows/build-almalinux-images.yml @atalman @huydhn
+/.github/workflows/build-magma-* @atalman @huydhn
+/.github/workflows/build-manywheel-images* @atalman @huydhn
+/.github/workflows/build-triton-wheel.yml @atalman @huydhn
+/.github/workflows/create_release.yml @atalman @huydhn
+/.github/workflows/docker-builds.yml @atalman @huydhn
+/.github/workflows/docker-release.yml @atalman @huydhn
+/.github/workflows/generated-* @atalman @huydhn
+/.github/workflows/nightly-s3-uploads.yml @atalman @huydhn
+/.github/workflows/test-check-binary.yml @atalman @huydhn
 # label: module: build
-# owner: none
-# /.ci/wheel/
+# owner: @atalman @huydhn @malfet @zklaus
 # /.coveragerc
 # /.ctags.d/
 # /.dockerignore
