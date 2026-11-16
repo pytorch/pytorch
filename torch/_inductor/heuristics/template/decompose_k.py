@@ -20,6 +20,7 @@ from ...utils import get_k_splits, use_triton_blackwell_tma_template
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
+from .triton import BaseConfig, CUDAConfigHeuristic
 
 
 if TYPE_CHECKING:
@@ -89,19 +90,17 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             for k_split in exact_k_splits:
                 yield {"k_split": k_split, "bmm_backend": "aten"}
 
-        if "TRITON" not in bmm_backends:
+        # Return before the TMA checks below, which install guards.
+        if "TRITON" not in bmm_backends or not exact_k_splits:
             return
 
         mat1, mat2 = kernel_inputs.mat1mat2()
         layout = kernel_inputs.output_layout()
-        if not (
-            config.triton.enable_blackwell_decompose_k
-            and use_triton_blackwell_tma_template(
-                mat1,
-                mat2,
-                output_layout=layout,
-                add_guards=True,
-            )
+        if not use_triton_blackwell_tma_template(
+            mat1,
+            mat2,
+            output_layout=layout,
+            add_guards=True,
         ):
             return
 
@@ -121,6 +120,23 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         else:
             config_index = 2 if m_hint > 128 and n_hint > 128 else 0
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+        # Same opt-in shared-memory pruning as the mm heuristics.
+        if config.max_autotune_prune_choices_based_on_shared_mem:
+            exceeds_smem = CUDAConfigHeuristic()._get_exceeding_shared_memory_checker(
+                has_sm_layout_conversion=False, layout_conversion_byte_size=0
+            )
+            if exceeds_smem is not None and exceeds_smem(
+                BaseConfig(
+                    partial_config.block_m,
+                    partial_config.block_n,
+                    partial_config.block_k,
+                    partial_config.num_stages,
+                    partial_config.num_warps,
+                ),
+                mat1.get_dtype().itemsize,
+            ):
+                return
+
         for k_split in get_blackwell_decompose_k_splits(
             m_hint,
             n_hint,

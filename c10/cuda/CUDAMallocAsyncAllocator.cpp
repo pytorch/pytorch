@@ -6,6 +6,7 @@
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 
+#include <c10/util/irange.h>
 #include <unordered_set>
 #include <vector>
 
@@ -140,6 +141,11 @@ std::vector<size_t> pytorch_memory_limits;
 std::unordered_set<UsageStream, UsageStreamHash> capture_free_streams;
 bool capture_underway = false;
 
+// User MemPools are lifecycle-only because cudaMallocAsync keeps allocation
+// ownership in CUDA's default pool. Presence in this map also distinguishes a
+// pool context from a graph capture.
+ska::flat_hash_map<MempoolId_t, int, MempoolIdHash> pool_use_count;
+
 // Implementation functions
 
 // Assumes the caller holds general_mutex
@@ -206,7 +212,7 @@ inline void free_impl(PtrInfo::iterator& it) {
 
     C10_CUDA_CHECK(cudaFreeAsync(it->first, creation_stream.stream));
 
-    if (C10_UNLIKELY(capture_underway)) {
+    if (capture_underway) [[unlikely]] {
       // See Note [Avoid dangling free streams during CUDA graph capture]
       capture_free_streams.insert(creation_stream);
     }
@@ -257,7 +263,7 @@ inline void free_impl(PtrInfo::iterator& it) {
     // but this forces a potentially false dependency of creation_stream.stream
     // on all the recorded_streams.
 
-    if (C10_UNLIKELY(capture_underway)) {
+    if (capture_underway) [[unlikely]] {
       // See Note [Avoid dangling free streams during CUDA graph capture]
       capture_free_streams.emplace(
           dummy_unifying_free_stream.stream, dummy_unifying_free_stream.device);
@@ -277,7 +283,7 @@ void freeAsync(void* ptr) {
   auto it = ptr_info.find(ptr);
   TORCH_INTERNAL_ASSERT(it != ptr_info.end(), "ptr not found in ptr_info");
 
-  if (C10_UNLIKELY(capture_underway)) {
+  if (capture_underway) [[unlikely]] {
     if (!it->second.captured) {
       TORCH_WARN_ONCE(
           "freeAsync() was called on an uncaptured allocation during graph capture "
@@ -298,7 +304,7 @@ void freeAsync(void* ptr) {
       ungraphed_ptrs_defer_free_until_no_capture.push_back(ptr);
       return;
     }
-  } else if (C10_UNLIKELY(it->second.captured)) {
+  } else if (it->second.captured) [[unlikely]] {
     TORCH_WARN(
         "Attempting uncaptured free of a captured allocation with address ",
         ptr,
@@ -531,7 +537,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void emptyCache(/*unused*/ MempoolId_t mempool_id) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
-    for (int dev = 0; dev < device_count; dev++) {
+    for (const auto dev : c10::irange(device_count)) {
       if (devs_initialized_flags[dev]) {
         CUDAGuard g(static_cast<c10::DeviceIndex>(dev));
 
@@ -877,12 +883,18 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         "does not track individual blocks.)");
   }
 
-  // CUDAGraph interactions
   void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
       std::function<bool(cudaStream_t)> /*filter*/) override {
     std::lock_guard<std::mutex> lk(general_mutex);
+
+    // A user-pool context does not start graph capture.
+    auto it = pool_use_count.find(mempool_id);
+    if (it != pool_use_count.end()) {
+      ++it->second;
+      return;
+    }
 
     TORCH_INTERNAL_ASSERT(capture_free_streams.empty());
     TORCH_CHECK(
@@ -896,6 +908,11 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     assertValidDevice(device);
 
     std::lock_guard<std::mutex> lk(general_mutex);
+
+    // A user-pool context did not enter capture state.
+    if (pool_use_count.count(mempool_id)) {
+      return;
+    }
 
     TORCH_CHECK(
         capture_underway,
@@ -926,19 +943,51 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = false;
   }
 
-  void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) override {
-    // Q: Do we need to do anything special here, like clear long-lived
-    //    pointers created during the original capture (for example,
-    //    tensors intended as the graph's I/O surface) that might still
-    //    be resident in ptr_info?
-    // A: I don't think so.
-    //    Those allocations survived capture because the user held
-    //    explicit tensor references to them,
-    //    Those tensors' destructors will call freeAsync() on each pointer
-    //    when the user is done with them.
-    //    The freeAsync()s will probably incur
-    //    TORCH_WARN("Attempting uncaptured free of a captured allocation..."
-    //    but stale ptrs will not permanently leak into ptr_info.
+  void releasePool(c10::DeviceIndex /*device*/, MempoolId_t mempool_id)
+      override {
+    // User pools own no blocks on this backend.
+    std::lock_guard<std::mutex> lk(general_mutex);
+    auto it = pool_use_count.find(mempool_id);
+    if (it != pool_use_count.end()) {
+      TORCH_INTERNAL_ASSERT(it->second > 0); // matches native: never negative
+      if (--it->second == 0) {
+        pool_use_count.erase(it);
+      }
+    }
+  }
+
+  void createOrIncrefPool(
+      c10::DeviceIndex /*device*/,
+      MempoolId_t mempool_id,
+      std::shared_ptr<CUDAAllocator> /*allocator*/) override {
+    // cudaMallocAsync does not route allocations to custom pools.
+    TORCH_WARN_ONCE(
+        "For backend:cudaMallocAsync, torch.cuda.MemPool is lifecycle-only "
+        "and does not own or isolate CUDA device memory. Allocations inside "
+        "use_mem_pool use the default async pool, CUDA graph capture ignores "
+        "the user pool, and the MemPool's custom allocator is not invoked by "
+        "this backend.");
+    std::lock_guard<std::mutex> lk(general_mutex);
+    ++pool_use_count[mempool_id];
+  }
+
+  int getPoolUseCount(c10::DeviceIndex /*device*/, MempoolId_t mempool_id)
+      override {
+    std::lock_guard<std::mutex> lk(general_mutex);
+    auto it = pool_use_count.find(mempool_id);
+    return it == pool_use_count.end() ? 0 : it->second;
+  }
+
+  void setUseOnOOM(
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/,
+      bool /*use_on_oom*/) override {
+    // No per-pool OOM fallback.
+  }
+
+  void setNoSplit(c10::DeviceIndex /*device*/, MempoolId_t /*mempool_id*/)
+      override {
+    // No per-pool block splitting.
   }
 
   void* raw_alloc(size_t nbytes) override {
@@ -1001,8 +1050,12 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
            "udaMallocAsync";
   }
   void copy_data(void* dest, const void* src, std::size_t count) const final {
-    C10_CUDA_CHECK(
-        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
+    C10_CUDA_CHECK(cudaMemcpyAsync(
+        dest,
+        src,
+        count,
+        cudaMemcpyDeviceToDevice,
+        cuda::getCurrentCUDAStream()));
   }
 };
 
