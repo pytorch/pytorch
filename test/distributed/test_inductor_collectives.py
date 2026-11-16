@@ -234,6 +234,7 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
         )
 
     @unittest.skipUnless(HAS_GPU, "CUDA required")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
     def test_fused_all_gather_unpack_handles_mixed_dtypes(self):
         group_size = 2
         expected_bfloat16 = torch.arange(
