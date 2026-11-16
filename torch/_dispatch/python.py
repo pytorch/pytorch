@@ -127,7 +127,7 @@ def make_crossref_functionalize(
         return final_key
 
     def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        fake_mode = FakeTensorMode()
+        fake_mode = FakeTensorMode(_force_python=True)
 
         def fakeify_defun(t: _R) -> _R | torch._subclasses.fake_tensor.FakeTensor:
             if isinstance(t, torch.Tensor):
