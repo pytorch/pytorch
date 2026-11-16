@@ -376,7 +376,7 @@ def wrap_compiler_debug(
             # Copy the tensor attrs like shape, stride etc by converting to Fake Tensor
             # because inductor clears the tensor list in its codegen. And example_inputs
             # are available only for the first invocation.
-            fake_mode = FakeTensorMode()
+            fake_mode = FakeTensorMode(_force_python=True)
             copy_tensor_attrs = [
                 fake_mode.from_tensor(x) if isinstance(x, torch.Tensor) else x
                 for x in real_inputs
