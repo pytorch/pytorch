@@ -7281,7 +7281,7 @@ class TestTorchDeviceType(TestCase):
         # Whichever path zero_ takes has to survive being captured and replayed.
         base = torch.ones(64, 96, device=device)
         dev = torch.get_device_module(device)
-        graph = torch.accelerator.Graph()
+        graph = torch.cuda.CUDAGraph() if self.device_type == "cuda" else torch.accelerator.Graph()
         stream = dev.Stream()
         stream.wait_stream(dev.current_stream())
         with dev.stream(stream):
