@@ -1701,7 +1701,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                             )
                         )
                     lazy_ids = hooks_source is not None and name.startswith("_forward_")
-                    if lazy_ids and (
+                    if hooks_source is not None and (
                         not torch._dynamo.config.skip_nnmodule_hook_guards
                         or hooks_type is not dict
                         and hooks_type is not collections.OrderedDict
@@ -1772,9 +1772,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 value = LazyVariableTracker.create(v, source_value, tx=tx)
                 return key, value
 
-            from .builder import _build_dict_items
+            from .builder import _build_dict_items, _dict_items_and_order
 
-            result = _build_dict_items(hooks_dict, build_key_value)
+            snapshot, reordered = _dict_items_and_order(hooks_dict, hooks_dict_source)
+            result = _build_dict_items(snapshot, build_key_value, reordered=reordered)
 
             result_vt = _build_hooks_dict(
                 hooks_dict,
