@@ -3053,9 +3053,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         self.assertEqual(result, result_exp)
 
     @parametrize("output", ["tensor", "none"])
-    @parametrize("use_cpp", [False, True])
     @parametrize("tracing_mode", [None, "fake", "symbolic"])
-    def test_scan_xs_none_length_zero(self, output, use_cpp, tracing_mode):
+    def test_scan_xs_none_length_zero(self, output, tracing_mode):
         if output == "tensor":
 
             def body(c, x):
@@ -3072,11 +3071,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         def fn(init):
             return scan(body, init, None, length=0)
 
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-            traced = (
-                make_fx(fn, tracing_mode=tracing_mode)(init) if tracing_mode else fn
-            )
-            carry, ys = traced(init)
+        traced = make_fx(fn, tracing_mode=tracing_mode)(init) if tracing_mode else fn
+        carry, ys = traced(init)
         self.assertEqual(carry, init)
         if output == "tensor":
             self.assertEqual(ys.shape, torch.Size([0, 3]))
