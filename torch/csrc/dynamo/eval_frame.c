@@ -1,7 +1,5 @@
 #define PY_SSIZE_T_CLEAN
-#include <opcode.h>
 #include <signal.h>
-#include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
@@ -25,10 +23,94 @@ typedef struct {
   int active_dynamo_threads;
 } ModuleState;
 
-// static int active_dynamo_threads = 0;
-
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
-static int64_t current_isolate_recompiles_id = -1;
+
+// The flags below all describe "the Dynamo region this thread is currently
+// inside".  Stored as per-thread tagged pointers.
+static Py_tss_t isolate_recompiles_key = Py_tss_NEEDS_INIT; // int64_t
+static Py_tss_t skip_guard_eval_key = Py_tss_NEEDS_INIT; // bool
+static Py_tss_t fullgraph_count_key = Py_tss_NEEDS_INIT; // int64_t
+static Py_tss_t fullgraph_error_key = Py_tss_NEEDS_INIT; // bool
+
+// TSS slots hold a void*.  NULL means "never set on this thread" and that's the
+// default.  Scalars are stored biased by +2 so that no real value collides with
+// NULL.  Tagged scalars need no heap allocation, so reads and writes are
+// GIL-free and there is nothing to free at thread exit.
+
+static void* tag_int64(int64_t v) {
+  return (void*)(intptr_t)(v + 2);
+}
+
+static int64_t untag_int64(void* p) {
+  return (int64_t)(intptr_t)p - 2;
+}
+
+static void* tag_bool(bool b) {
+  return tag_int64((int64_t)b);
+}
+
+static bool untag_bool(void* p) {
+  return (bool)untag_int64(p);
+}
+
+static int64_t get_isolate_recompiles_id_raw(Py_tss_t* key) {
+  void* p = PyThread_tss_get(key);
+  return p == NULL ? -1 : untag_int64(p);
+}
+
+static void set_isolate_recompiles_id_raw(Py_tss_t* key, int64_t id) {
+  PyThread_tss_set(key, tag_int64(id));
+}
+
+static bool get_skip_guard_eval_raw(Py_tss_t* key) {
+  void* p = PyThread_tss_get(key);
+  return p == NULL ? false : untag_bool(p);
+}
+
+static void set_skip_guard_eval_raw(Py_tss_t* key, bool v) {
+  PyThread_tss_set(key, tag_bool(v));
+}
+
+// -1 means inactive, >= 0 means active with that many compiled frames.
+static int get_fullgraph_count_raw(Py_tss_t* key) {
+  void* p = PyThread_tss_get(key);
+  return p == NULL ? -1 : (int)untag_int64(p);
+}
+
+static void set_fullgraph_count_raw(Py_tss_t* key, int v) {
+  PyThread_tss_set(key, tag_int64((int64_t)v));
+}
+
+// When true and fullgraph_compiled_frame_count > 0, sub-frames under fullgraph
+// compilation will error (via get_fail_callback) instead of being silently
+// skipped.
+static bool get_fullgraph_error_raw(Py_tss_t* key) {
+  void* p = PyThread_tss_get(key);
+  return p == NULL ? false : untag_bool(p);
+}
+
+static void set_fullgraph_error_raw(Py_tss_t* key, bool v) {
+  PyThread_tss_set(key, tag_bool(v));
+}
+
+bool get_skip_guard_eval_unsafe(void) {
+  return get_skip_guard_eval_raw(&skip_guard_eval_key);
+}
+
+int get_fullgraph_compiled_frame_count(void) {
+  return get_fullgraph_count_raw(&fullgraph_count_key);
+}
+
+void bump_fullgraph_compiled_frame_count(void) {
+  void* p = PyThread_tss_get(&fullgraph_count_key);
+  if (p != NULL) {
+    PyThread_tss_set(&fullgraph_count_key, tag_int64(untag_int64(p) + 1));
+  }
+}
+
+bool get_fullgraph_error_on_nested_compile(void) {
+  return get_fullgraph_error_raw(&fullgraph_error_key);
+}
 
 static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -44,11 +126,11 @@ void eval_frame_callback_set(PyObject* obj) {
 }
 
 int64_t get_current_isolate_recompiles_id(void) {
-  return current_isolate_recompiles_id;
+  return get_isolate_recompiles_id_raw(&isolate_recompiles_key);
 }
 
 static void set_current_isolate_recompiles_id(int64_t id) {
-  current_isolate_recompiles_id = id;
+  set_isolate_recompiles_id_raw(&isolate_recompiles_key, id);
 }
 
 static PyObject* get_eval_frame_isolate_recompiles_id_py(
@@ -117,17 +199,12 @@ DECLARE_PYOBJ_ATTR(f_code)
 static PyObject* THPPyInterpreterFrame_f_lasti(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
-#if IS_PYTHON_3_11_PLUS
   return PyLong_FromLong(_PyInterpreterFrame_LASTI(self->frame));
-#else
-  return PyLong_FromLong(self->frame->f_lasti);
-#endif // IS_PYTHON_3_11_PLUS
 }
 
 static PyObject* THPPyInterpreterFrame_f_lineno(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
-#if IS_PYTHON_3_11_PLUS
   if (!self->frame->frame_obj) {
     return PyLong_FromLong(F_CODE(self->frame)->co_firstlineno);
   }
@@ -136,47 +213,22 @@ static PyObject* THPPyInterpreterFrame_f_lineno(
     Py_RETURN_NONE;
   }
   return PyLong_FromLong(lineno);
-#else
-  return PyLong_FromLong(self->frame->f_lineno);
-#endif // IS_PYTHON_3_11_PLUS
 }
 
 static PyObject* THPPyInterpreterFrame_f_back(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
-#if IS_PYTHON_3_11_PLUS
   if (!self->frame->frame_obj) {
     Py_RETURN_NONE;
   }
   return (PyObject*)PyFrame_GetBack(self->frame->frame_obj);
-#else
-  return Py_XNewRef(self->frame->f_back);
-#endif // IS_PYTHON_3_11_PLUS
 }
 
 static PyObject* THPPyInterpreterFrame_closure(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
-#if IS_PYTHON_3_11_PLUS
   PyObject* closure = FUNC(self->frame)->func_closure;
   return closure == NULL ? PyTuple_New(0) : Py_XNewRef(closure);
-#else
-  PyCodeObject* code = self->frame->f_code;
-  // Why this check? See
-  // https://github.com/python/cpython/blob/5f24da9d75bb0150781b17ee4706e93e6bb364ea/Objects/frameobject.c#L1058-L1065
-  if (code->co_flags & CO_OPTIMIZED) {
-    int size = PyTuple_GET_SIZE(code->co_freevars);
-    PyObject* freevars = PyTuple_New(size);
-    int ncells = PyTuple_GET_SIZE(code->co_cellvars);
-    PyObject** freevarArr =
-        self->frame->f_localsplus + code->co_nlocals + ncells;
-    for (int i = 0; i < size; i++) {
-      PyTuple_SET_ITEM(freevars, i, Py_XNewRef(freevarArr[i]));
-    }
-    return freevars;
-  }
-  return PyTuple_New(0);
-#endif // IS_PYTHON_3_11_PLUS
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
@@ -293,8 +345,6 @@ static PyObject* dynamo_eval_custom_code_impl(
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
 
-#if IS_PYTHON_3_11_PLUS
-
   // Generate Python function object and _PyInterpreterFrame in a way similar to
   // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/ceval.c#L1130
   PyFunctionObject* old_func = FUNC(frame);
@@ -347,23 +397,6 @@ static PyObject* dynamo_eval_custom_code_impl(
   }
 #endif
 
-#else
-
-  THP_EVAL_API_FRAME_OBJECT* shadow =
-      PyFrame_New(tstate, code, frame->f_globals, NULL);
-  if (shadow == NULL) {
-    return NULL;
-  }
-
-  PyObject** fastlocals_old = frame->f_localsplus;
-  PyObject** fastlocals_new = shadow->f_localsplus;
-  Py_ssize_t n_old = F_CODE(frame)->co_nlocals +
-      PyCode_GetNFreevars(F_CODE(frame)) + PyCode_GetNCellvars(F_CODE(frame));
-  Py_ssize_t n_new =
-      code->co_nlocals + PyCode_GetNFreevars(code) + PyCode_GetNCellvars(code);
-
-#endif
-
   // ============== Initialize new frame from old frame ============
   // Python internal for executing a function:
   //  1. CPython interpreter first creates an empty frame according to the code
@@ -383,17 +416,13 @@ static PyObject* dynamo_eval_custom_code_impl(
   // |   args   |   new_locals    |    cell_variables |   free_variables    |
   // | <--- from left to right, index from 0 to n - 1 ---> |
   // code.co_varnames == args + new_locals, code.co_nlocals ==
-  // len(code.co_varnames) code.co_freevars == free_variables In Python 3.10 and
-  // lower, `n == code.co_nlocals + len(code.co_cellvars) +
-  // len(code.co_freevars)` (Python expression) In Python 3.11 and higher, `n <=
+  // len(code.co_varnames) code.co_freevars == free_variables, and `n <=
   // code.co_nlocals + len(code.co_cellvars) + len(code.co_freevars)` (Python
   // expression). There is an extra field in Python C-API: `n ==
   // code->co_nlocalsplus` (C expression) to retrieve the length of array. The
   // complexity happens if an argument becomes a cell variable:
-  //  In Python 3.10 and lower, `code.co_cellvars == cell_variables`, and the
-  //  corresponding slot in args becomes `NULL`. In Python 3.11 and higher,
-  //  `code.co_cellvars > cell_variables`, that cell variable is still stored in
-  //  args, with a flag set in corresponding item's `co_localspluskinds` .
+  // `code.co_cellvars > cell_variables`, that cell variable is still stored in
+  // args, with a flag set in corresponding item's `co_localspluskinds` .
   //
   // ideally, we need to look up new localsplus from old localsplus by name:
   // for i, name, value in enumerate(localsplusnames_old):
@@ -450,23 +479,12 @@ static PyObject* dynamo_eval_custom_code_impl(
   for (Py_ssize_t i = n_old - nfrees_old - 1, j = n_new - nfrees_old - 1;
        i >= total_argcount_old;
        i--, j--) {
-    // conditional test to tell if a variable is not a cell variable
-    // this is straightforward in Python 3.11 and higher, as there are bit flags
-    // in `co_localspluskinds` to tell if a variable is a cell variable. in
-    // Python 3.10 and lower, essentially we are checking if a variable is a new
-    // local variable (because of the layout mentioned above, the first variable
-    // that is not cell variable is the first new local variable). the
-    // corresponding slot in `flocalsplus` is NULL for new local variables.
-#if IS_PYTHON_3_11_PLUS
+    // conditional test to tell if a variable is not a cell variable, using the
+    // bit flags in `co_localspluskinds`.
     if (!(_PyLocals_GetKind(F_CODE(frame)->co_localspluskinds, i) &
           CO_FAST_CELL)) {
       break;
     }
-#else
-    if (fastlocals_old[i] == NULL) {
-      break;
-    }
-#endif
 
     dup_obj(&fastlocals_new[j], fastlocals_old[i]);
   }
@@ -483,17 +501,13 @@ static PyObject* dynamo_eval_custom_code_impl(
   // frame is cleared by caller
   Py_DECREF(func);
 
-#elif IS_PYTHON_3_11_PLUS
+#else
 
   // In 3.11, shadow has is_entry set to true, so _PyEvalFrameClearAndPop is not
   // called, so we manually clear and pop the shadow frame.
   THP_PyFrame_Clear(shadow);
   THP_PyThreadState_PopFrame(tstate, shadow);
   Py_DECREF(func);
-
-#else
-
-  Py_DECREF(shadow);
 
 #endif
 
@@ -675,8 +689,10 @@ static PyObject* set_skip_guard_eval_unsafe(
     PyErr_SetString(PyExc_TypeError, "expected True/False");
     return NULL;
   }
-  bool old_skip_guard_eval_unsafe = is_skip_guard_eval_unsafe;
-  is_skip_guard_eval_unsafe = Py_IsTrue(skip_guard_unsafe_flag);
+  bool old_skip_guard_eval_unsafe =
+      get_skip_guard_eval_raw(&skip_guard_eval_key);
+  set_skip_guard_eval_raw(
+      &skip_guard_eval_key, Py_IsTrue(skip_guard_unsafe_flag));
   if (old_skip_guard_eval_unsafe) {
     Py_RETURN_TRUE;
   }
@@ -765,16 +781,6 @@ static int clear_state(PyObject* module) {
   return -1;
 }
 
-bool is_skip_guard_eval_unsafe = false;
-
-// -1 means inactive, >= 0 means active with that many compiled frames.
-int fullgraph_compiled_frame_count = -1;
-
-// When true and fullgraph_compiled_frame_count > 0, sub-frames under fullgraph
-// compilation will error (via get_fail_callback) instead of being silently
-// skipped.
-bool fullgraph_error_on_nested_compile = false;
-
 // Set the fullgraph compiled frame counter and return the old value.
 // If setting to >= 0 (activating) and already active, no-op.
 static PyObject* set_fullgraph_compiled_frame_count_py(
@@ -784,11 +790,11 @@ static PyObject* set_fullgraph_compiled_frame_count_py(
   if (val == -1 && PyErr_Occurred()) {
     return NULL;
   }
-  int old = fullgraph_compiled_frame_count;
+  int old = get_fullgraph_count_raw(&fullgraph_count_key);
   if (val >= 0 && old >= 0) {
     // Already active, no-op.
   } else {
-    fullgraph_compiled_frame_count = (int)val;
+    set_fullgraph_count_raw(&fullgraph_count_key, (int)val);
   }
   return PyLong_FromLong(old);
 }
@@ -801,8 +807,8 @@ static PyObject* set_fullgraph_error_on_nested_compile_py(
     PyErr_SetString(PyExc_TypeError, "expected True/False");
     return NULL;
   }
-  bool old = fullgraph_error_on_nested_compile;
-  fullgraph_error_on_nested_compile = Py_IsTrue(arg);
+  bool old = get_fullgraph_error_raw(&fullgraph_error_key);
+  set_fullgraph_error_raw(&fullgraph_error_key, Py_IsTrue(arg));
   if (old) {
     Py_RETURN_TRUE;
   }
@@ -863,6 +869,23 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   PyObject* module = PyModule_Create(&_module);
   if (module == NULL) {
     return NULL;
+  }
+
+  Py_tss_t* keys[] = {
+      &isolate_recompiles_key,
+      &skip_guard_eval_key,
+      &fullgraph_count_key,
+      &fullgraph_error_key};
+  for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+    if (PyThread_tss_create(keys[i]) != 0) {
+      for (size_t j = 0; j < i; j++) {
+        PyThread_tss_delete(keys[j]);
+      }
+      Py_DECREF(module);
+      PyErr_SetString(
+          PyExc_RuntimeError, "dynamo: unable to create TSS key");
+      return NULL;
+    }
   }
 
 #ifdef Py_GIL_DISABLED

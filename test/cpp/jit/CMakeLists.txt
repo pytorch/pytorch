@@ -26,8 +26,7 @@ add_library(backend_with_compiler SHARED
         ${BACKEND_WITH_COMPILER_SRCS}
         )
 if(USE_KINETO)
-  set_target_properties(backend_with_compiler PROPERTIES COMPILE_FLAGS
-  "-DUSE_KINETO")
+  target_compile_definitions(backend_with_compiler PRIVATE "USE_KINETO")
 endif()
 target_link_libraries(backend_with_compiler torch)
 

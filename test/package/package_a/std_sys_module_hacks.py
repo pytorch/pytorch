@@ -1,10 +1,13 @@
 import os
 import os.path
 import typing
-import typing.io
-import typing.re  # noqa: F401
 
 import torch
+
+
+if hasattr(typing, "io"):
+    import typing.io
+    import typing.re
 
 
 class Module(torch.nn.Module):
