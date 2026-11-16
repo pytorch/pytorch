@@ -108,16 +108,14 @@ def _is_pow2(x: int) -> bool:
     return x > 0 and (x & (x - 1)) == 0
 
 
-def _radix_n_range(
-    k: int, dtype: torch.dtype = torch.float32
-) -> tuple[int, int] | None:
+def _radix_n_range(k: int, dtype: torch.dtype) -> tuple[int, int] | None:
     for (k_min, k_max), dtype_ranges in _RADIX_GATE_RANGES:
         if k_min <= k <= k_max:
             return dtype_ranges.get(dtype)
     return None
 
 
-def _kernel_for(k: int, n: int, dtype: torch.dtype = torch.float32) -> str | None:
+def _kernel_for(k: int, n: int, dtype: torch.dtype) -> str | None:
     register_range = _REGISTER_N_BOUNDS.get(dtype)
     if register_range is not None:
         register_min, register_max = register_range
@@ -256,7 +254,7 @@ def _run_out(
         self_2d = flatten_last_dim(self)
         values_2d = _flatten_topk_out(values, k)
         indices_2d = _flatten_topk_out(indices, k)
-        kernel = _kernel_for(k, self_2d.shape[-1])
+        kernel = _kernel_for(k, self_2d.shape[-1], self.dtype)
         if kernel == "register":
             topk_register_out(self_2d, k, values_2d, indices_2d, largest=largest)
         else:
