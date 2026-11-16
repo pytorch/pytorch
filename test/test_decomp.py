@@ -38,9 +38,11 @@ from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
+    subtest,
     suppress_warnings,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
@@ -232,6 +234,8 @@ op_assert_ref_tol_table = {
     # eager operator, causing a significant difference on float16
     (torch.bfloat16, torch.ops.aten.addcmul.default): 1e-5,
     (torch.float16, torch.ops.aten.addcmul.default): 1e-5,
+    (torch.float16, torch.ops.aten._trilinear.default): 2e-3,
+    (torch.bfloat16, torch.ops.aten._trilinear.default): 1e-2,
 }
 
 
@@ -1292,6 +1296,106 @@ class DecompOneOffTests(TestCase):
                     torch.ops.aten.softshrink_backward(grad, x, lambd)
                 with self.assertRaisesRegex(RuntimeError, "overflow"):
                     softshrink_backward(grad, x, lambd)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "shapes, dims",
+        [
+            # normal trilinear operations
+            subtest(
+                ([(4, 3), (5, 3, 6), (4, 6)], ([1, 3], [0], [1, 2], [2, 3], 1)),
+                name="bilinear",
+            ),
+            # negative dimension indices
+            subtest(
+                ([(4, 3), (5, 3, 6), (4, 6)], ([-3, -1], [0], [1, -2], [2, 3], 2)),
+                name="neg_dims",
+            ),
+            # no dimensions to sum
+            subtest(
+                ([(2, 3), (3, 4), (2, 4)], ([2], [0], [1], [], 0)), name="no_sumdim"
+            ),
+            # zero size input dimensions
+            subtest(
+                ([(0, 3), (5, 3, 6), (0, 6)], ([1, 3], [0], [1, 2], [2, 3], 1)),
+                name="zero_size",
+            ),
+        ],
+    )
+    def test_trilinear(self, device, shapes, dims):
+        from torch._decomp.decompositions import _trilinear
+
+        inputs = [torch.randn(s, device=device) for s in shapes]
+        args = (*inputs, *dims)
+
+        actual = _trilinear(*args)
+        expected = torch._trilinear(*args)
+
+        self.assertEqual(actual, expected)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "dims",
+        [
+            subtest(([0], [0], [0], [2], 1), name="out_dim"),
+            subtest(([0], [0], [0], [0], 0), name="unroll_dim"),
+        ],
+    )
+    def test_trilinear_dim_expanded_by_all_inputs(self, device, dims):
+        from torch._decomp.decompositions import _trilinear
+
+        x = torch.randn(2, 3, device=device)
+
+        actual = _trilinear(x, x, x, *dims)
+        expected = torch._trilinear(x, x, x, *dims)
+
+        self.assertEqual(actual, expected)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "dtypes",
+        [
+            subtest((torch.float32, torch.float64, torch.float32), name="f32_f64"),
+            subtest((torch.float64, torch.float32, torch.float32), name="f64_f32"),
+            subtest((torch.bool, torch.bool, torch.bool), name="bool"),
+            subtest((torch.float32, torch.int64, torch.int64), name="f32_i64"),
+        ],
+    )
+    @parametrize("sumdim", [[], [1]])
+    def test_trilinear_dtypes(self, device, dtypes, sumdim):
+        from torch._decomp.decompositions import _trilinear
+
+        a, b, c = (torch.randn(2, 3, device=device).to(dt) for dt in dtypes)
+        args = (a, b, c, [], [], [], sumdim, 1)
+
+        actual = _trilinear(*args)
+        expected = torch._trilinear(*args)
+
+        self.assertEqual(actual, expected, exact_dtype=True)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "dtypes",
+        [
+            subtest((torch.int64, torch.float32), name="i64_f32"),
+            subtest((torch.bool, torch.float32), name="bool_f32"),
+            subtest((torch.float32, torch.complex64), name="f32_c64"),
+        ],
+    )
+    def test_trilinear_unsafe_cast(self, device, dtypes):
+        from torch._decomp.decompositions import _trilinear
+
+        a, b = (torch.randn(2, 3, device=device).to(dt) for dt in dtypes)
+        args = (a, b, b, [], [], [], [1], 1)
+
+        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+            torch._trilinear(*args)
+        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+            _trilinear(*args)
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
