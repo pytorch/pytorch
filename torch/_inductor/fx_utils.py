@@ -27,7 +27,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._higher_order_ops.user_kernel_hop import is_user_kernel_mutation_hop
 from torch._inductor.fx_passes.control_dependencies import control_deps
 from torch._library.utils import zip_schema
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import fake_mode_cls
 from torch.fx.experimental.proxy_tensor import (
     _coor_device_index_is_current,
     _coor_enabled,
@@ -1262,7 +1262,7 @@ def count_flops_fx(node: torch.fx.Node) -> int | None:
         if fake_mode is not None and fake_mode.shape_env is not None
         else contextlib.nullcontext()
     )
-    with guards_ctx, FakeTensorMode(allow_non_fake_inputs=True):
+    with guards_ctx, fake_mode_cls()(allow_non_fake_inputs=True):
         if success:
             # flex_attention HOPs have registered formulas, but invoking them
             # here can require tracing-only context, e.g. TransformGetItemToIndex.
