@@ -14,6 +14,8 @@ capabilities to setup and run operations on GPU.
 To get started, simply move your Tensor and Module to the `mps` device:
 
 ```python
+import torch
+
 # Check that MPS is available
 if not torch.backends.mps.is_available():
     if not torch.backends.mps.is_built():
@@ -34,8 +36,9 @@ else:
     # Any operation happens on the GPU
     y = x * 2
 
-    # Move your model to mps just like any other device
-    model = YourFavoriteNet()
+    # Move your model to mps just like any other device. Any torch.nn.Module
+    # works; a small one is used here so that this example runs as written.
+    model = torch.nn.Linear(5, 2)
     model.to(mps_device)
 
     # Now every call runs on the GPU
