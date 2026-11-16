@@ -113,6 +113,9 @@ from torch._dynamo.utils import (
     CompileEventLogger,
     get_metrics_context,
     get_type_dict_no_user_code,
+    has_custom_metaclass_accessor,
+    iter_mro_static_attrs,
+    iter_mro_static_dicts,
 )
 from torch._guards import (
     CompileContext,
@@ -1734,6 +1737,7 @@ class GuardBuilder(GuardBuilderBase):
         self.no_tensor_aliasing_names: list[str] = []
         self.no_tensor_aliasing_sources: list[Source] = []
         self.no_tensor_aliasing_guard_managers: list[GuardManager] = []
+        self.has_metadata_only_tensor = False
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
@@ -2060,7 +2064,7 @@ class GuardBuilder(GuardBuilderBase):
             self.save_guards
             and guard_manager_enum == GuardManagerType.DICT_GUARD_MANAGER
         ):
-            # Include implicit module dictionaries without retaining their values.
+            # Only the manager identity is needed to filter key-order metadata.
             self.dict_guard_manager_ids.add(id(example_value))
         return guard_manager_enum
 
@@ -2609,7 +2613,7 @@ class GuardBuilder(GuardBuilderBase):
         # code_parts in a function object which is then passed on to the leaf
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        _guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
+        _, pycode = _cached_guard_function(tuple(code_parts), make_guard_fn_args)
         out: dict[str, Any] = {}
         # The dict the C++ globals tree is rooted at, so a G['NAME'] in a lambda
         # guard and in an accessor guard read the same scope on a loaded artifact.
@@ -2718,6 +2722,9 @@ class GuardBuilder(GuardBuilderBase):
         )
 
         base_manager = self.get_guard_manager_from_source(source)
+        # An exact dict has no instance attributes and its manager checks its type.
+        if isinstance(base_manager, DictGuardManager) and type(self.get(guard)) is dict:
+            return
         if val:
             # Just install a getattr manager. GetAttrGuardAccessor itself
             # acts as hasattr guard.
@@ -4603,6 +4610,9 @@ class GuardBuilder(GuardBuilderBase):
                 metadata = output_graph.input_source_to_sizes_strides[
                     guard.originating_source
                 ]
+                self.has_metadata_only_tensor |= metadata.get(
+                    "needs_alias_check", False
+                )
                 size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
                 device_index_is_current = _guard_device_index_is_current(
@@ -5000,22 +5010,49 @@ def _get_unsupported_types() -> tuple[type, ...]:
     return ret
 
 
-def _has_default_pickle_protocol(value: object, *, ordered: bool = False) -> bool:
-    """Whether pickle restores storage without user construction or state hooks."""
+class _PickleState(enum.Enum):
+    DEFAULT = enum.auto()
+    MEMBERS = enum.auto()
+    OPAQUE = enum.auto()
+
+
+@functools.lru_cache(maxsize=32)
+def _namedtuple_pickle_code(
+    fields: tuple[str, ...],
+) -> tuple[types.CodeType, types.CodeType]:
+    template = cast(Any, collections.namedtuple)("_Record", fields, rename=True)
+    return template.__new__.__code__, template.__getnewargs__.__code__
+
+
+def _pickle_state(value: object, *, ordered: bool = False) -> _PickleState:
+    """Which state reconstruction can inspect beyond explicitly guarded values."""
     cls = type(value)
-    if type(cls) is not type or cls in copyreg.dispatch_table:
-        return False
-    for base_cls in cls.__mro__:
-        namespace = get_type_dict_no_user_code(base_cls)
+    meta = type(cls)
+    if meta is not type and (
+        next(iter_mro_static_attrs(meta, "__eq__"), None) is not object.__eq__
+        or has_custom_metaclass_accessor(cls, "__dict__")
+        or has_custom_metaclass_accessor(cls, "__mro__")
+        or (
+            ordered
+            and next(iter_mro_static_attrs(meta, "__call__")) is not type.__call__
+        )
+    ):
+        return _PickleState.OPAQUE
+    if any(cls is registered for registered in copyreg.dispatch_table):
+        return _PickleState.OPAQUE
+    for base_cls, namespace in iter_mro_static_dicts(cls):
         if "__dict__" not in namespace:
             continue
         descriptor = namespace["__dict__"]
         if (
             type(descriptor) is not types.GetSetDescriptorType
             or descriptor.__name__ != "__dict__"
-            or descriptor.__objclass__ not in (object, base_cls)
+            or (
+                descriptor.__objclass__ is not object
+                and descriptor.__objclass__ is not base_cls
+            )
         ):
-            return False
+            return _PickleState.OPAQUE
     protocols = (
         (
             "__reduce__",
@@ -5024,15 +5061,13 @@ def _has_default_pickle_protocol(value: object, *, ordered: bool = False) -> boo
         ("__reduce_ex__", object.__reduce_ex__),
         ("__getstate__", getattr(object, "__getstate__", None)),
         ("__setstate__", None),
-        ("__getnewargs__", None),
         ("__getnewargs_ex__", None),
-        ("__getattr__", None),
     )
     if (
         inspect.getattr_static(cls, "__slots__", None) is not None
         and inspect.getattr_static(cls, "__setattr__") is not object.__setattr__
     ):
-        return False
+        return _PickleState.OPAQUE
     if issubclass(cls, dict):
         base = collections.OrderedDict if ordered else dict
         methods = (
@@ -5044,11 +5079,40 @@ def _has_default_pickle_protocol(value: object, *, ordered: bool = False) -> boo
             inspect.getattr_static(cls, name) is not inspect.getattr_static(base, name)
             for name in methods
         ):
-            return False
-    return is_generic_getattr(cls) and all(
-        inspect.getattr_static(value, name, None) is expected
-        for name, expected in protocols
-    )
+            return _PickleState.OPAQUE
+    if any(
+        inspect.getattr_static(value, name, None) is not attr
+        for name, attr in protocols
+    ):
+        return _PickleState.OPAQUE
+    # Attribute hooks can synthesize __setstate__ on the new instance.
+    if (
+        not is_generic_getattr(cls)
+        or inspect.getattr_static(value, "__getattr__", None) is not None
+    ):
+        return _PickleState.OPAQUE
+    if (newargs := inspect.getattr_static(value, "__getnewargs__", None)) is not None:
+        # A generated namedtuple only repacks fields. A custom constructor
+        # can instead inspect a field, even via an implicit call like bool().
+        new = inspect.getattr_static(cls, "__new__")
+        fields = inspect.getattr_static(cls, "_fields", None)
+        if (
+            type(fields) is tuple
+            and all(type(field) is str for field in fields)
+            and type(newargs) is types.FunctionType
+            and newargs.__globals__ is vars(collections)
+            and all(cell.cell_contents is tuple for cell in newargs.__closure__ or ())
+            and type(new) is staticmethod
+            and type(func := new.__func__) is types.FunctionType
+            and dict.get(func.__globals__, "_tuple_new") is tuple.__new__
+            and inspect.getattr_static(cls, "__iter__", None) is tuple.__iter__
+            and inspect.getattr_static(cls, "__len__", None) is tuple.__len__
+        ):
+            new_code, args_code = _namedtuple_pickle_code(fields)
+            if func.__code__ == new_code and newargs.__code__ is args_code:
+                return _PickleState.MEMBERS
+        return _PickleState.OPAQUE
+    return _PickleState.DEFAULT
 
 
 def _is_shared_constant(value: Any) -> bool:
@@ -5084,7 +5148,7 @@ def _can_prune_dict_values(value: object) -> bool:
     ordered = issubclass(cls, collections.OrderedDict)
     if (
         not issubclass(cls, dict)
-        or not _has_default_pickle_protocol(value, ordered=ordered)
+        or _pickle_state(value, ordered=ordered) is not _PickleState.DEFAULT
         or inspect.getattr_static(cls, "__slots__", None) is not None
     ):
         return False
@@ -5105,6 +5169,16 @@ def _can_prune_dict_values(value: object) -> bool:
 _NN_MODULE_STATE_ATTRS = frozenset(
     {"_parameters", "_buffers", "_modules", "_non_persistent_buffers_set"}
 )
+
+
+class _DictionaryItemsSnapshot:
+    """Let pickle memoize the replacement dict before writing its items."""
+
+    def __init__(self, items: collections.abc.Iterator[tuple[Any, Any]]) -> None:
+        self.items = tuple(items)
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return dict, (), None, None, iter(self.items)
 
 
 class GuardsStatePickler(FunctionPicklerBase):
@@ -5162,7 +5236,16 @@ class GuardsStatePickler(FunctionPicklerBase):
         # Hold references as __tensor_flatten__ may build its ctx afresh.
         self._whole_compared_values: dict[int, Any] = {}
         self._pruned_dictionary_ids: set[int] = set()
+        self._dict_snapshots: dict[int, _DictionaryItemsSnapshot] = {}
         self._collect_required_state()
+
+    @classmethod
+    def _is_user_instance(cls, value: object) -> bool:
+        typ = type(value)
+        if issubclass(typ, cls._STATE_LEAF_TYPES):
+            return False
+        module = get_type_dict_no_user_code(typ).get("__module__")
+        return type(module) is str and module.partition(".")[0] != "torch"
 
     def _collect_required_state(self) -> None:
         """Retain whole-compared state, custom pickle state and inner tensors."""
@@ -5173,23 +5256,27 @@ class GuardsStatePickler(FunctionPicklerBase):
             for value in self.guard_tree_values.values()
             if pytree.is_constant_class(type(value))
             or is_opaque_constant_type(type(value))
-            or (
-                not issubclass(type(value), self._STATE_LEAF_TYPES)
-                and issubclass(
-                    type(
-                        module_name := get_type_dict_no_user_code(type(value)).get(
-                            "__module__"
-                        )
-                    ),
-                    str,
-                )
-                and str.partition(cast(str, module_name), ".")[0] != "torch"
-                and not _has_default_pickle_protocol(
-                    value, ordered=issubclass(type(value), collections.OrderedDict)
-                )
-                and type(value) is not collections.defaultdict
-            )
         ]
+        # Constructors and state hooks can consume unguarded dictionary items.
+        # Protect those references from dictionary pruning. A nested guarded
+        # object's own default reducer may still prune its unused attributes.
+        for value in self.guard_tree_values.values():
+            if (
+                not self._is_user_instance(value)
+                or type(value) is collections.defaultdict
+            ):
+                continue
+            ordered = issubclass(type(value), collections.OrderedDict)
+            policy = _pickle_state(value, ordered=ordered)
+            if policy is _PickleState.OPAQUE:
+                stack.append(value)
+            elif policy is _PickleState.MEMBERS:
+                # A namedtuple passes the member objects to its constructor, but
+                # their independently guarded attributes may still be pruned.
+                for arg in gc.get_referents(value):
+                    self._verbatim_elements.add(id(arg))
+                    if type(arg) is dict:
+                        self._verbatim_elements.update(map(id, arg.values()))
         subclasses = [
             value
             for value in self.guard_tree_values.values()
@@ -5467,12 +5554,10 @@ class GuardsStatePickler(FunctionPicklerBase):
             if not _can_prune_dict_values(value):
                 continue
             self._pruned_dictionary_ids.add(id(value))
-            # Subclasses have an item reducer below: substitute only that slot,
-            # so an alias in another object's constructor or state stays real.
-            if type(value) in (dict, collections.defaultdict):
-                for item in dict.values(value):
-                    if self._can_prune_value(item):
-                        self.missing_values[id(item)] = item
+            if type(value) is dict:
+                self._dict_snapshots[id(value)] = _DictionaryItemsSnapshot(
+                    self._dictionary_items(value)
+                )
 
     def _can_prune_value(self, value: object) -> bool:
         return (
@@ -5492,7 +5577,13 @@ class GuardsStatePickler(FunctionPicklerBase):
 
     def prune_local_scope(self, local_scope: dict[str, Any]) -> None:
         """Prune unused pytree leaves, retaining dictionaries' key dependencies."""
-        for leaf in pytree.tree_leaves(local_scope):
+        # An item discarded from a dictionary still exists in other objects.
+        # Do not register its id as missing while traversing that same dict.
+        for leaf in pytree.tree_leaves(
+            local_scope, is_leaf=lambda value: id(value) in self._pruned_dictionary_ids
+        ):
+            if id(leaf) in self._pruned_dictionary_ids:
+                continue
             if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
                 base = leaf.__self__
                 if not self._keep(base):
@@ -5688,7 +5779,14 @@ class GuardsStatePickler(FunctionPicklerBase):
     # than as the sentinel, and this hook keeps that precedence.
     _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
 
-    def persistent_id(self, obj: object) -> int | str | None:
+    def persistent_id(self, obj: object) -> _DictionaryItemsSnapshot | str | None:
+        # CPython bypasses reducer_override for an exact dict. All references
+        # use the same snapshot, including back-references in its own items.
+        if (
+            type(obj) is dict
+            and (snapshot := self._dict_snapshots.get(id(obj))) is not None
+        ):
+            return snapshot
         if (
             type(obj) in self._PRUNED_CONTAINER_TYPES
             and id(obj) in self.missing_values
@@ -5780,10 +5878,19 @@ class GuardsStatePickler(FunctionPicklerBase):
                 type(self)._restore_ordered_dict_state,
             )
 
-        if id(obj) in self._pruned_dictionary_ids and type(obj) not in (
-            dict,
-            collections.defaultdict,
+        if (
+            id(obj) in self._pruned_dictionary_ids
+            and type(obj) is collections.defaultdict
         ):
+            return (
+                collections.defaultdict,
+                (obj.default_factory,),
+                None,
+                None,
+                self._dictionary_items(obj),
+            )
+
+        if id(obj) in self._pruned_dictionary_ids:
             reduced = obj.__reduce_ex__(_GUARDS_PROTOCOL)
             state = reduced[2]
             if (
@@ -6083,15 +6190,11 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         if (
             id(obj) in self.guard_tree_values
-            and hasattr(obj, "__dict__")
-            and not inspect.isclass(obj)
-            and not inspect.ismodule(obj)
-            and not inspect.isroutine(obj)
-            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
-            and type(obj).__module__.partition(".")[0] != "torch"
-            and _has_default_pickle_protocol(obj)
-            and not hasattr(type(obj), "__slots__")
+            and self._is_user_instance(obj)
             and id(obj) not in self._whole_compared_values
+            and _pickle_state(obj) is _PickleState.DEFAULT
+            and inspect.getattr_static(type(obj), "__slots__", None) is None
+            and hasattr(obj, "__dict__")
         ):
             # A guarded user object (a train pipeline, a wrapper holding a
             # dataloader) would otherwise be pickled whole, so one unguarded
@@ -6185,7 +6288,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         What an nn.Module itself reads back at load stays: the containers in
         _NN_MODULE_STATE_ATTRS. Precondition: the caller has checked that
         unpickling obj reads nothing but its ``__dict__`` back (nn.Module's
-        __setstate__, or ``_has_default_pickle_protocol``), since any other hook may read
+        __setstate__, or the default pickle protocol), since any other hook may read
         anything.
         """
         unguarded = {}
@@ -6311,7 +6414,7 @@ def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
         return None
 
 
-_PORTABLE_FUNCTION_GUARD_TYPES = ("CLOSURE_MATCH", "ID_MATCH")
+_PORTABLE_FUNCTION_GUARD_TYPES = ("BUILTIN_MATCH", "CLOSURE_MATCH", "ID_MATCH")
 
 
 def _portable_function_metadata(
@@ -6418,7 +6521,6 @@ def pickle_guards_state(
                     break
                 source = source.base
                 value = builder.get(source)
-        # Prune unused dictionary values while retaining keys and length.
         for value in state.output_graph.local_scope.values():
             if issubclass(type(value), dict):
                 required_dicts[id(value)] = cast(dict[Any, Any], value)
@@ -7049,7 +7151,19 @@ class CheckFunctionManager:
         check_tensors_fn = None
         check_tensors_verbose_fn = None
 
-        if len(no_tensor_aliasing_names) > 1:
+        aliases = ()
+        if builder.has_metadata_only_tensor:
+            # A metadata-only source can share an input without VariableBuilder deduplication.
+            tensors = map(builder.get, builder.no_tensor_aliasing_sources)
+            aliases = _receiver_alias_pattern(tuple(tensors))
+        if aliases and len(set(aliases)) != len(aliases):
+            code = (
+                f"check tensor alias pattern {aliases} for {no_tensor_aliasing_names}"
+            )
+            install_object_alias_pattern_guard(
+                builder.no_tensor_aliasing_guard_managers, aliases, [code], None
+            )
+        elif len(no_tensor_aliasing_names) > 1:
             # Install tensor aliasing guard. TENSOR_MATCH guards are already
             # installed for cpp guard manager.
             install_no_tensor_aliasing_guard(
@@ -7279,6 +7393,11 @@ def build_guard_function(code_parts: list[str], closure_args: str) -> tuple[str,
         make_guard_fn.writeline("return guard")
 
     return guard_body.getvalue(), make_guard_fn.getvalue()
+
+
+@functools.lru_cache(32)
+def _cached_guard_function(parts: tuple[str, ...], args: str) -> tuple[str, str]:
+    return build_guard_function(list(parts), args)
 
 
 def is_recompiles_enabled() -> bool:
