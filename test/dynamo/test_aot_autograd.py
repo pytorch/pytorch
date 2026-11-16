@@ -95,6 +95,36 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         aot_result = aot_mod(*args)
         self.assertTrue(torch._dynamo.testing.same(eager_result, aot_result))
 
+    def test_native_batch_norm_legit_out(self):
+        # https://github.com/pytorch/pytorch/issues/138264
+        def make_args():
+            return (
+                torch.rand(5, 5, 5),
+                torch.rand(5),
+                torch.rand(5),
+                torch.rand(5),
+                torch.rand(5),
+                True,
+                0.5,
+                0.6,
+            )
+
+        eager_args = make_args()
+        aot_args = tuple(
+            a.clone() if isinstance(a, torch.Tensor) else a for a in eager_args
+        )
+        eager_out = (torch.empty(5, 5, 5), torch.empty(5), torch.empty(5))
+        aot_out = tuple(t.clone() for t in eager_out)
+
+        eager_res = torch._native_batch_norm_legit(*eager_args, out=eager_out)
+        aot_fn = torch.compile(torch._native_batch_norm_legit, backend="aot_eager")
+        aot_res = aot_fn(*aot_args, out=aot_out)
+
+        self.assertEqual(eager_res, aot_res)
+        self.assertEqual(eager_out, aot_out)
+        # running_mean and running_var are updated in place
+        self.assertEqual(eager_args[3:5], aot_args[3:5])
+
     def test_mutation(self):
         # https://github.com/pytorch/torchdynamo/issues/1301
         def fn(param, y):

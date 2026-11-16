@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -555,40 +556,58 @@ def wrap_propagate_mutations_and_return(
     f: NativeFunction, functional_op: NativeFunction, inner_return_var: str
 ) -> str:
     mutable_arg_names = f.func.arguments.mutable_arg_names()
-    (
-        aliased_outer_rets,
-        non_aliased_outer_rets,
-    ) = get_mutable_redispatch_return_names(f, inner_return_var)
+    aliased_return_names = f.func.aliased_return_names()
     _, non_aliased_inner_rets = get_mutable_redispatch_return_names(
         functional_op, inner_return_var
     )
-    # The outer function may have a mix of aliased and non-aliased outputs,
-    # But the inner functional op that we're transforming to should only have non-aliased outputs
-    if len(mutable_arg_names) + len(non_aliased_outer_rets) != len(
-        non_aliased_inner_rets
-    ):
-        raise AssertionError(
-            f"Expected {len(mutable_arg_names)} + {len(non_aliased_outer_rets)} == {len(non_aliased_inner_rets)}"
+    # The functional op returns the original returns first, followed by the updated value of every
+    # mutable argument that the outer op does not return. FunctionSchema.signature() builds the
+    # trailing returns in the order (self, out, post_self_positional), so mirror it here.
+    args = f.func.arguments
+    mutable_args_not_returned = [
+        a.name
+        for a in itertools.chain(
+            [args.self_arg.argument] if args.self_arg is not None else [],
+            args.out,
+            args.post_self_positional,
         )
+        if a.annotation is not None
+        and a.annotation.is_write
+        and a.name not in aliased_return_names
+    ]
+    num_outer_rets = len(f.func.returns)
+    if num_outer_rets + len(mutable_args_not_returned) != len(non_aliased_inner_rets):
+        raise AssertionError(
+            f"Expected {num_outer_rets} + {len(mutable_args_not_returned)} == {len(non_aliased_inner_rets)}"
+        )
+
+    # The inner return holding the updated value of each mutable argument. A mutable argument that
+    # the outer op returns is updated by the inner return at the position of that return.
+    updated_arg_to_inner_ret = dict(
+        zip(mutable_args_not_returned, non_aliased_inner_rets[num_outer_rets:])
+    )
 
     # First, take all of the newly created outputs from the inner call and wrap them into functional tensors
     updates = []
-    non_aliased_wrapped_ret_names = []
-    for i, inner_ret in enumerate(
-        non_aliased_inner_rets[: len(non_aliased_outer_rets)]
-    ):
-        ret_name = f"output_{i}"
+    outer_ret_names = []
+    num_wrapped = 0
+    for ret_alias, inner_ret in zip(aliased_return_names, non_aliased_inner_rets):
+        if ret_alias is not None:
+            updated_arg_to_inner_ret[ret_alias] = inner_ret
+            outer_ret_names.append(ret_alias)
+            continue
+        ret_name = f"output_{num_wrapped}"
+        num_wrapped += 1
         updates.append(
             f"""\
-  auto output_{i} = at::functionalization::impl::to_functional_tensor({inner_ret});"""
+  auto {ret_name} = at::functionalization::impl::to_functional_tensor({inner_ret});"""
         )
-        non_aliased_wrapped_ret_names.append(ret_name)
+        outer_ret_names.append(ret_name)
 
     # Next, take all of the mutated outputs from the inner call corresponding to mutated inputs,
     # and propagate the mutations
-    for outer_arg, inner_ret in zip(
-        mutable_arg_names, non_aliased_inner_rets[len(non_aliased_outer_rets) :]
-    ):
+    for outer_arg in mutable_arg_names:
+        inner_ret = updated_arg_to_inner_ret[outer_arg]
         updates.append(
             f"""\
   auto {outer_arg}_inner = at::functionalization::impl::from_functional_tensor({outer_arg});
@@ -599,12 +618,10 @@ def wrap_propagate_mutations_and_return(
   at::functionalization::impl::propagate_xla_data_direct({outer_arg}_inner, {outer_arg}_inner_updated);"""
         )
 
-    # Finally, we return:
-    # - Any mutable arguments that also returns
-    # - Any immutable returns that were created wrapping the output from the inner call
-    returns_str = return_str(
-        f.func.returns, aliased_outer_rets + non_aliased_wrapped_ret_names
-    )
+    # Finally, we return the returns of the outer op in schema order:
+    # - Mutable arguments that are also returns
+    # - Immutable returns that were created wrapping the output from the inner call
+    returns_str = return_str(f.func.returns, outer_ret_names)
     updates_str = "\n".join(updates)
     return f"""\
 {updates_str}
