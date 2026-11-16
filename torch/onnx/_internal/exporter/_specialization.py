@@ -73,6 +73,7 @@ def snapshot(
         for node in exported_program.graph.nodes
         if node.op == "call_function"
         and isinstance(node.target, torch._ops.OpOverload)
+        and not node.target._schema.is_mutable
         and node.target not in implemented
         and not node.target._schema.name.startswith(
             ("aten::_assert_scalar", "aten::sym_constrain_range")

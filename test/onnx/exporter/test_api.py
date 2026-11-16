@@ -800,6 +800,30 @@ class TestSpecializationHelpers(common_utils.TestCase):
         ):
             self.assertEqual(_specialization._input_dim_names(ep, shape_env), {})
 
+    def test_vgg_style_candidates_exclude_mutable_ops(self):
+        model = torch.nn.Sequential(
+            torch.nn.Conv2d(2, 2, 3, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.AdaptiveMaxPool2d((2, 2)),
+        ).eval()
+        ep = torch.export.export(
+            model,
+            (torch.randn(1, 2, 6, 6),),
+            dynamic_shapes=(
+                {2: torch.export.Dim.DYNAMIC, 3: torch.export.Dim.DYNAMIC},
+            ),
+            strict=False,
+        )
+        targets = {node.target for node in ep.graph.nodes if node.op == "call_function"}
+        self.assertIn(torch.ops.aten.relu_.default, targets)
+        before = _specialization.snapshot(ep, _registration.ONNXRegistry())
+        self.assertIsNotNone(before)
+        self.assertIn("aten.adaptive_max_pool2d.default", before.candidate_ops)
+        self.assertNotIn("aten.relu_.default", before.candidate_ops)
+        self.assertFalse(
+            any(op.split(".")[1].endswith("_") for op in before.candidate_ops)
+        )
+
     def test_snapshot_without_shape_env(self):
         with mock.patch.object(_specialization, "_get_shape_env", return_value=None):
             self.assertIsNone(
