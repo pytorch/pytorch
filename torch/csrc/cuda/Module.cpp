@@ -35,10 +35,10 @@
 #endif
 #include <c10/util/irange.h>
 
-#include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/cuda/CudaIPCTypes.h>
 #include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
