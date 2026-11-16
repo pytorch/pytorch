@@ -175,23 +175,33 @@ def scale_mm_epilogue():
 
 
 def use_native_matmul(mat1, mat2):
-    if (
-        is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
-        or not config.triton.native_matmul
-    ):
+    if is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype()):
         return False
 
-    # If tma matmul is on, don't do native matmul
-    if (
-        config.triton.enable_persistent_tma_matmul
-        and torch.utils._triton.has_triton_tma_device()
-    ):
-        raise AssertionError("native matmul doesn't support tma codegen yet")
+    if config.triton.native_matmul:
+        # If tma matmul is on, don't do native matmul
+        if (
+            config.triton.enable_persistent_tma_matmul
+            and torch.utils._triton.has_triton_tma_device()
+        ):
+            raise AssertionError("native matmul doesn't support tma codegen yet")
 
-    # Currently only enable native matmul for default indexing.
-    # TODO: support block ptr
-    if use_block_ptr_enabled():
-        raise AssertionError("native matmul doesn't support block_ptr codegen yet")
+        # Currently only enable native matmul for default indexing.
+        # TODO: support block ptr
+        if use_block_ptr_enabled():
+            raise AssertionError("native matmul doesn't support block_ptr codegen yet")
+    elif not (
+        # Helion matmuls (codegen/helion) use this lowering too. Their kernels
+        # need CUDA and the Python wrapper, and Triton's native matmul codegen,
+        # which emits the matmuls Helion declines, supports no TMA or block_ptr.
+        config.helion.enabled
+        and config.helion.native_matmul
+        and mat1.get_device().type == "cuda"
+        and not (V.graph.cpp_wrapper or V.graph.fx_wrapper)
+        and not config.triton.enable_persistent_tma_matmul
+        and not use_block_ptr_enabled()
+    ):
+        return False
 
     # Currently only enable native matmul for triton on GPU.
     device_type = mat1.get_device().type
