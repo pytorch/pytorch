@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, cast, ClassVar, Literal, TYPE_CHECKING, TypeAlias
+from typing import Any, cast, ClassVar, Literal, Protocol, TYPE_CHECKING, TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
     from .bucket_runtime import ParamRepresentation
     from .bucket_storage import ParamInfo
+    from .param_homing import ParamHoming
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,15 @@ def compose_global_layouts(outer: GlobalLayout, inner: GlobalLayout) -> GlobalLa
 GradientReduceOp: TypeAlias = Literal["avg", "sum"] | dist.ReduceOp.RedOpType
 
 
+class BucketState(Protocol):
+    """What a placement keeps for one bucket across unshards (see
+    ``Placement.new_bucket_state``)."""
+
+    def reset(self) -> None:
+        """Drop what the unshards kept, e.g. after the parameters' dtypes
+        changed, keeping the bucket's settings."""
+
+
 @dataclass(frozen=True)
 class GradientReduction:
     """What a bucket's gradient reduction must produce, from its ``BucketSpec``.
@@ -234,6 +244,15 @@ class Placement(ABC):
     #: offloaded bucket keeps on the CPU onto its ``device`` (``CPUOffloadPolicy``).
     supports_cpu_offload: ClassVar[bool] = False
 
+    #: Whether a bucket of this placement can hold parameters that keep
+    #: storage of their own and give their own all-gather inputs (tensor
+    #: subclasses, all-gather extensions; see ``ParamHoming``).
+    supports_own_param_storage: ClassVar[bool] = False
+
+    #: Whether parameters of equal unsharded dtype must be adjacent in the
+    #: bucket's layout, e.g. for one storage span per dtype.
+    requires_dtype_grouped_layout: ClassVar[bool] = False
+
     def _api_placement(self) -> Placement | DTensorPlacement:
         """The placement that flex_shard's API takes and reports for this one."""
         return self
@@ -243,8 +262,11 @@ class Placement(ABC):
         return self
 
     def new_bucket_state(
-        self, infos: list[ParamInfo], representation: ParamRepresentation
-    ) -> object | None:
+        self,
+        infos: list[ParamInfo],
+        representation: ParamRepresentation,
+        homing: ParamHoming | None,
+    ) -> BucketState | None:
         """State that this placement keeps for one bucket across unshards, or
         None. The bucket's runtime creates it once and passes it to every eager
         ``prepare_unshard_bucket`` as ``bucket_state``."""

@@ -235,11 +235,7 @@ def _bucket(patterns, mesh, reshard_after_forward, placement_fn=per_param_placem
 
 
 def _buckets(model: nn.Module):
-    return [
-        bucket
-        for context in model._flex_shard_eager_comm_contexts.values()
-        for bucket in context.buckets
-    ]
+    return model._runtimes()
 
 
 class TestFlexShardEagerRuntime(TestCase):
@@ -616,9 +612,9 @@ class TestFlexShardEagerRuntime(TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "injected backward failure"):
             model(x).sum().backward()
-        with self.assertRaisesRegex(RuntimeError, "a previous backward raised"):
+        with self.assertRaisesRegex(RuntimeError, "previous backward raised"):
             model(x)
-        with self.assertRaisesRegex(RuntimeError, "a previous backward raised"):
+        with self.assertRaisesRegex(RuntimeError, "previous backward raised"):
             model.reshard()
 
     def test_reshard_after_forward_holds_one_bucket(self):

@@ -132,15 +132,16 @@ device_module = torch.get_device_module(device)
 
 class TestFullyShardCustomAllReduceErrors(TestCase):
     def test_invalid_parameter_groups(self):
+        no_replicas = MagicMock(bucket_storage=MagicMock(_replicate_group=None))
         cases = [
             ([], None),
             ([MagicMock(), MagicMock()], "multiple param groups"),
-            ([MagicMock(mesh_info=MagicMock(replicate_info=None))], "replication mesh"),
+            ([no_replicas], "replication mesh"),
         ]
-        for groups, message in cases:
+        for runtimes, message in cases:
             with self.subTest(message=message):
                 model = MagicMock(spec=FSDPModule)
-                model._get_fsdp_state.return_value._fsdp_param_groups = groups
+                model._get_fsdp_state.return_value.runtimes = runtimes
                 if message:
                     with self.assertRaisesRegex(ValueError, message):
                         FSDPModule.set_custom_all_reduce(model, DefaultAllReduce())

@@ -459,6 +459,59 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
         model(inp).sum().backward()
         self.assertTrue(all(param.grad is not None for param in model.parameters()))
 
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_module_to_dtype_after_forward(self):
+        torch.manual_seed(42)
+        model = MLP(8, device=device_type)
+        fully_shard(model)
+        reference = MLP(8, device=device_type)
+        reference.load_state_dict(
+            {k: v.full_tensor() for k, v in model.state_dict().items()}
+        )
+        inp = torch.randn(2, 8, device=device_type)
+        model(inp).sum().backward()
+        model.zero_grad(set_to_none=True)
+
+        model.to(torch.float64)
+        reference.to(torch.float64)
+        self.assertEqual(model(inp.double()), reference(inp.double()))
+        for param in model.parameters():
+            self.assertEqual(param.dtype, torch.float64)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_params_left_on_meta_must_be_replaced_before_forward(self):
+        def make() -> nn.Module:
+            return nn.Sequential(
+                nn.Linear(8, 8, device=device_type), nn.Linear(8, 8, device="meta")
+            )
+
+        inp = torch.randn(2, 8, device=device_type)
+        model = make()
+        fully_shard(model)
+        with self.assertRaisesRegex(
+            RuntimeError, r"still on meta device: \['1.weight', '1.bias'\]"
+        ):
+            model(inp)
+
+        model = make()
+        fully_shard(model)
+        full = {
+            "1.weight": torch.arange(64.0, device=device_type).view(8, 8) / 64,
+            "1.bias": torch.arange(8.0, device=device_type) / 8,
+        }
+        mesh = model[0].weight.device_mesh
+        model.load_state_dict(
+            {k: distribute_tensor(v, mesh, [Shard(0)]) for k, v in full.items()},
+            strict=False,
+            assign=True,
+        )
+        reference = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8)).to(device_type)
+        reference.load_state_dict(
+            {k: v.full_tensor() for k, v in model.state_dict().items()}
+        )
+        self.assertEqual(reference[1].weight, full["1.weight"])
+        self.assertEqual(model(inp), reference(inp))
+
     @skip_if_lt_x_gpu(1)
     def test_rank0_offload_full_state_dict(self):
         # Construct a reference unsharded model on all ranks
