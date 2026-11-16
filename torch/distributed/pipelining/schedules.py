@@ -3562,7 +3562,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         for stage in self._stages:
             if not isinstance(stage.submod, FSDPModule):
                 continue
-            comm_ctx_id = id(stage.submod._get_fsdp_state()._comm_ctx)
+            state = stage.submod._get_fsdp_state()
+            # share_comm_ctx gives the stages it shares one engine context
+            context = state._engine_context or state._shared_engine_context
+            if context is None:
+                continue
+            comm_ctx_id = id(context)
             previous_stage = comm_ctx_to_stage.get(comm_ctx_id)
             if previous_stage is not None:
                 raise ValueError(

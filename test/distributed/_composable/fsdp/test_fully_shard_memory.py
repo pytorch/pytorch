@@ -329,12 +329,12 @@ class TestFullyShardMemory(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_unsharded_grads_freed_after_copy_in(self):
-        from torch.distributed.fsdp._fully_shard import _fsdp_collectives
+        from torch.distributed.fsdp._flex_shard.placements import shard
 
         model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 32)).to(device_type)
         fully_shard(model)
-        copy_in = _fsdp_collectives.foreach_reduce_scatter_copy_in
-        cast_and_view = _fsdp_collectives._cast_and_view_sharded_grads
+        copy_in = shard._reduce_scatter_copy_in
+        reduce_scatter = shard.reduce_scatter_grads
         grad_refs: list[weakref.ref] = []
         num_alive_grads: list[int] = []
 
@@ -342,23 +342,17 @@ class TestFullyShardMemory(FSDPTest):
             grad_refs[:] = [weakref.ref(grad) for grad in grads]
             copy_in(grads, *args)
 
-        def counting_cast_and_view(*args):
+        def counting_reduce_scatter(*args, **kwargs):
             num_alive_grads.append(sum(ref() is not None for ref in grad_refs))
-            return cast_and_view(*args)
+            return reduce_scatter(*args, **kwargs)
 
         with (
-            mock.patch.object(
-                _fsdp_collectives, "foreach_reduce_scatter_copy_in", recording_copy_in
-            ),
-            mock.patch.object(
-                _fsdp_collectives,
-                "_cast_and_view_sharded_grads",
-                counting_cast_and_view,
-            ),
+            mock.patch.object(shard, "_reduce_scatter_copy_in", recording_copy_in),
+            mock.patch.object(shard, "reduce_scatter_grads", counting_reduce_scatter),
         ):
             model(torch.randn(4, 16, device=device_type)).sum().backward()
-        # Clearing foreach_reduce's list after the copy-in must free the
-        # unsharded gradients before the reduce allocates its outputs
+        # The unsharded gradients are freed once copied in, before the
+        # reduce-scatter allocates its output
         self.assertEqual(num_alive_grads, [0])
 
     def _get_peak_active_memory_mb(self) -> int:
@@ -395,9 +389,8 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
 
     These tests exercise cases where the AR output buffer could be reclaimed
     too early by the caching allocator — specifically when `reduce_dtype !=
-    orig_dtype`, so the dtype cast at `_fsdp_collectives.py:_to_dtype_if_needed`
-    materializes a new tensor and makes the original AR buffer refless inside
-    `foreach_reduce`.
+    orig_dtype`, so the dtype cast of the reduced gradients materializes a new
+    tensor and leaves the original AR buffer referenced only by the reduction.
     """
 
     @property
@@ -414,7 +407,7 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
         Mechanism: under HSDP+AR when `reduce_dtype != orig_dtype`, the cast
         at `_to_dtype_if_needed(reduce_output, orig_dtype)` materializes a
         new tensor and leaves the original (bf16 / fp16) AR output buffer
-        reachable only through `all_reduce_input` inside `foreach_reduce`.
+        reachable only through the reduction's own buffers.
         PR #140044's `_all_reduce_state` holds that ref across layers — which
         keeps the buffer off the caching allocator's free list. Without it,
         the allocator deterministically reuses the same physical block for

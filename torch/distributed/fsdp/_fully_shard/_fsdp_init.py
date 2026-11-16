@@ -446,23 +446,26 @@ def _init_param_group(
     Initialize FSDP param groups for the given state.
 
     Params are grouped by their process group (derived from ``mesh_info`` via
-    ``shard_placement_fn``). Each group becomes a separate ``FSDPParamGroup``.
+    ``shard_placement_fn``). Each group becomes a separate engine bucket
+    (``FullyShardBucket``).
     When ``shard_placement_fn`` is ``None`` or returns the same mesh for all
     params, this creates a single group.
     """
     # Import here to avoid circular imports
     from ._fsdp_common import FSDPMeshInfo, resolve_shard_placement
-    from ._fsdp_param_group import FSDPParamGroup
+    from ._fsdp_engine import FullyShardBucket
 
     if not params:
         return
+
+    groups = state._fsdp_param_groups
 
     if shard_placement_fn is None:
         # No shard_placement_fn means all params use the same mesh_info,
         # so no grouping is needed. This also handles DDPMeshInfo from
         # replicate_with_fsdp, which doesn't have shard_process_group.
-        state._fsdp_param_groups.append(
-            FSDPParamGroup(
+        groups.append(
+            FullyShardBucket(
                 params,
                 modules,
                 mesh_info,
@@ -511,7 +514,7 @@ def _init_param_group(
                 )
             pg_to_group[key][1].append(param)
 
-    # Create a FSDPParamGroup per process group
+    # Create a bucket per process group
     for group_mesh_info, group_params in pg_to_group.values():
         if group_mesh_info is not mesh_info:
             group_post_forward = _get_post_forward_mesh_info(
@@ -519,8 +522,8 @@ def _init_param_group(
             )
         else:
             group_post_forward = post_forward_mesh_info
-        state._fsdp_param_groups.append(
-            FSDPParamGroup(
+        groups.append(
+            FullyShardBucket(
                 group_params,
                 modules,
                 group_mesh_info,
