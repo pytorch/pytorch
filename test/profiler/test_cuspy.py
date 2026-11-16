@@ -26,7 +26,6 @@ from torch._utils import try_import
 from torch.profiler import profile, ProfilerActivity, record_function
 from torch.profiler._cuspy.observers.observation_window import WindowFinalizerMixin
 from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
     SM100OrLater,
     TEST_CUDA,
     TEST_CUDA_GRAPH_TOOLS_ID,
@@ -4268,10 +4267,6 @@ cuspy_core.enable_hes_early()
         self.assertIn("OK", p.stdout)
 
     @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
-    @unittest.skipIf(
-        _get_torch_cuda_version()[:2] == (13, 5),
-        "CUDA 13.5 HES initialization fails; see pytorch/pytorch#204724",
-    )
     def test_cuspy_kineto_parity(self):
         # In a FRESH process (clean CUPTI), profile a couple of representative models
         # under stock (Kineto) and then the cuspy backend, eager AND graphed,
@@ -4442,14 +4437,17 @@ cuspy_core.enable_hes_early()
             print("OK")
             """
         )
-        # Run parity once with HES off and once with it on (the HES child self-skips
-        # via SKIP_HES when the platform doesn't support hardware events). Each child
+        # Run parity once with HES off and, on SM100+, once with it on. The HES child
+        # self-skips via SKIP_HES when hardware events are unavailable. Each child
         # prints its Cuspy metadata after RESULT; the HES-on Cuspy must match the
         # HES-off Cuspy (which already matched stock above).
         import json
 
         captured = {}
-        for hes in (False, True):
+        # Run HES only on SM100+; on L4, the unsupported-HES fallback
+        # raises CUPTI_ERROR_NOT_COMPATIBLE.
+        # Tracking: https://github.com/pytorch/pytorch/issues/204831
+        for hes in (False, True) if SM100OrLater else (False,):
             env = dict(os.environ)
             if hes:
                 env["PARITY_HES"] = "1"
