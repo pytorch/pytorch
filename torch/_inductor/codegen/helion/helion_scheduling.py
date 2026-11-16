@@ -117,11 +117,7 @@ def helion_supports(node: SchedulerNode) -> bool:
     reduction_type = cast(ComputedBuffer, node.node).get_reduction_type()
     body = node._body
     return (
-        # sign(x): HelionOverrides has no sign, so codegen raises NotImplementedError.
-        # Scatters (index_add_, index_put_(accumulate=True)) stop here on their
-        # indirect_indexing.
         not OrderedSet(body.op_counts) - HELION_OPS
-        # x.argmax(-1): "Helion kernels do not support argmax".
         and (
             reduction_type in (None, *REDUCTIONS)
             or (reduction_type == "dot" and is_helion_matmul(node))
