@@ -2754,7 +2754,7 @@ def _compute_reduction_shape(self, dims, keepdim):
 # when running meta kernels. Here, access the "fake device" of FakeTensor if it
 # exists so meta kernels which have diverge per device will be more
 # accurate when run with FakeTensors
-def device_hint(tensor) -> "str":
+def device_hint(tensor, default: str = "cuda") -> "str":
     fake_device = torch._subclasses.fake_tensor.maybe_get_fake_device(tensor)
     if fake_device is not None:
         return fake_device.type
@@ -2764,10 +2764,13 @@ def device_hint(tensor) -> "str":
         and tensor.device.type != "meta"
     ):
         return tensor.device.type
-    elif (accelerator := torch.accelerator.current_accelerator()) is not None:
-        return accelerator.type
     else:
-        return "cuda"  # default to cuda
+        return default
+
+
+def current_accelerator_hint() -> str:
+    acc = torch.accelerator.current_accelerator()
+    return acc.type if acc is not None else "cuda"
 
 
 def calc_conv_nd_return_shape(
@@ -6576,7 +6579,8 @@ def meta__scaled_dot_product_flash_attention(
     # are going to use cudagraphs or not, so we return meta tensors here
     # it's possible we'll need to have some special handling in inductor for sdpa
     # See [Note] BC breaking change to flash seed/offset
-    if torch.version.hip and torch.cuda.is_available() or device_hint(query) == "xpu":
+    device = device_hint(query, default=current_accelerator_hint())
+    if (torch.version.hip and torch.cuda.is_available()) or device == "xpu":
         # Maintain old path on AMD
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
@@ -7086,7 +7090,8 @@ def meta__flash_attention_forward(
     # See Note [Seed and Offset]
     # See [Note] BC breaking change to flash seed/offset
     seed, offset = None, None
-    if torch.version.hip and torch.cuda.is_available() or device_hint(query) == "xpu":
+    device = device_hint(query, default=current_accelerator_hint())
+    if (torch.version.hip and torch.cuda.is_available()) or device == "xpu":
         # Maintain old path on AMD
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
