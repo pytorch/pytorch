@@ -169,6 +169,8 @@ class TestCheckpointableTensorDistributed(DTensorTestBase):
 
 
 class TestTensorPropertiesStrides(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_create_from_tensor_populates_strides(self):
         tensor = torch.rand(4, 8)  # shape [4, 8], strides (8, 1)
         props = TensorProperties.create_from_tensor(tensor)
