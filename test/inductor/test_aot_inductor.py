@@ -13327,8 +13327,6 @@ MPS_TEST_FAILURES = {
     "test_fp8_view_of_param": fail_mps(),
     # cannot initialize a parameter of type 'double' with an rvalue of type 'std::nullptr_t'
     "test_fallback_kernel_with_symexpr_output": fail_mps(),
-    # correctness issue
-    "test_index_put_with_none_index": fail_mps(),
     # Error device may not be nil
     "test_zero_size_weight": fail_mps(is_skip=True),
     # MPSGraph does not support tensor dims > INT_MAX
