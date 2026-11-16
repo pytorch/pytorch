@@ -2449,7 +2449,10 @@ class InstructionTranslatorBase(
             )
         cell = self._cellvar(inst.argval)
         contents_var = self.output.side_effects.load_cell(cell)
-        if inst.argval in self.f_code.co_freevars:
+        if (
+            self.output.current_tracer.tracks_lexical_sources
+            and inst.argval in self.f_code.co_freevars
+        ):
             self._record_lexical_source(
                 contents_var, cell.mutation_type.scope if cell.mutation_type else 0
             )
@@ -2601,11 +2604,7 @@ class InstructionTranslatorBase(
 
     def _record_lexical_source(self, value: VariableTracker, scope: int = 0) -> None:
         tracer = self.output.current_tracer
-        if (
-            tracer.parent is not None
-            and scope <= tracer.debug_level
-            and value.source is not None
-        ):
+        if scope <= tracer.debug_level and value.source is not None:
             tracer.lexical_sources.add((value.source, scope))
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
@@ -2614,7 +2613,8 @@ class InstructionTranslatorBase(
         if sys.version_info < (3, 13) and inst.arg % 2:
             self.PUSH_NULL(inst)
         self._load_global(inst)
-        self._record_lexical_source(self.stack[-1])
+        if self.output.current_tracer.tracks_lexical_sources:
+            self._record_lexical_source(self.stack[-1])
         if sys.version_info >= (3, 13) and inst.arg % 2:
             self.PUSH_NULL(inst)
 

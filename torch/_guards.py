@@ -953,7 +953,7 @@ class InvokeSubgraphReuseCondition:
     # handler is a pre-resolved GuardCheckSpec from GUARD_VALUE_DISPATCH.
     guards: list[tuple[Source, GuardCheckSpec, object, Guard]]
 
-    # Structural dependencies are shared across candidate checks, not runtime values.
+    # One structural source chain per guard, in the same order as guards.
     guard_dependencies: list[OrderedSet[Source]]
 
     # TreeSpec from pytree.tree_flatten of the (args, kwargs) structure.
@@ -967,7 +967,10 @@ class InvokeSubgraphReuseCondition:
 
     # Order annotations required by guard source chains and additional dependencies.
     guard_on_key_order: set[Source] = dataclasses.field(default_factory=set)
+    # Lexical reads and their defining depth. Stamp-out propagates only reads visible
+    # in the enclosing tracer; an explicit input must not replace a lexical alias.
     lexical_sources: set[tuple[Source, int]] = dataclasses.field(default_factory=set)
+    # The identity pattern covers explicit operands, then these captured tensor sources.
     tensor_sources: tuple[Source, ...] = ()
     aliases: tuple[int, ...] = ()
 
@@ -1086,16 +1089,16 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self,
         fn_code: CodeType | FunctionType,
         evaluator: Callable[
-            [InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry], bool
+            [InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry], T | None
         ],
-    ) -> InvokeSubgraphReuseEntry | None:
+    ) -> T | None:
         entries = self.subgraph_reuse_cache.get(fn_code, [])
         for i, (condition, entry) in enumerate(entries):
-            if evaluator(condition, entry):
+            if (match := evaluator(condition, entry)) is not None:
                 # MRU: move the hit entry to the front for faster future lookups
                 if i > 0:
                     entries.insert(0, entries.pop(i))
-                return entry
+                return match
         return None
 
     def find_reuse_entry_by_key(
