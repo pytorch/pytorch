@@ -51,17 +51,17 @@ constexpr uint comp_r1() {
 // k2] lands at v[(k2 + r2 k1) S]); tw holds W_R at stride ts
 template <uint R, uint S>
 inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
-  if (R == 2) {
+  if IF_CONSTEXPR (R == 2) {
     const float2 a = v[0], b = v[S];
     v[0] = a + b;
     v[S] = a - b;
-  } else if (R == 3) {
+  } else if IF_CONSTEXPR (R == 3) {
     const float2 s = v[S] + v[2 * S], d = v[S] - v[2 * S], t = v[0] - 0.5f * s;
     const float2 u = (inv ? kSin2Pi_3 : -kSin2Pi_3) * mul_i(d);
     v[0] = v[0] + s;
     v[S] = t + u;
     v[2 * S] = t - u;
-  } else if (R == 4) {
+  } else if IF_CONSTEXPR (R == 4) {
     const float2 a0 = v[0] + v[2 * S], a1 = v[0] - v[2 * S],
                  a2 = v[S] + v[3 * S];
     const float2 a3 = inv ? mul_i(v[S] - v[3 * S]) : -mul_i(v[S] - v[3 * S]);
@@ -69,7 +69,7 @@ inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
     v[2 * S] = a0 - a2;
     v[S] = a1 + a3;
     v[3 * S] = a1 - a3;
-  } else if (R == 5) {
+  } else if IF_CONSTEXPR (R == 5) {
     const float2 s1 = v[S] + v[4 * S], d1 = v[S] - v[4 * S],
                  s2 = v[2 * S] + v[3 * S], d2 = v[2 * S] - v[3 * S];
     const float sg = inv ? 1.0f : -1.0f;
@@ -83,7 +83,7 @@ inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
     v[4 * S] = t1 - u1;
     v[2 * S] = t2 + u2;
     v[3 * S] = t2 - u2;
-  } else if (R == 7) {
+  } else if IF_CONSTEXPR (R == 7) {
     const float2 s1 = v[S] + v[6 * S], d1 = v[S] - v[6 * S],
                  s2 = v[2 * S] + v[5 * S], d2 = v[2 * S] - v[5 * S];
     const float2 s3 = v[3 * S] + v[4 * S], d3 = v[3 * S] - v[4 * S];
@@ -102,7 +102,22 @@ inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
     v[5 * S] = t2 - u2;
     v[3 * S] = t3 + u3;
     v[4 * S] = t3 - u3;
-  } else if (comp_r1<R>() > 1) {
+  } else if IF_CONSTEXPR (R == 13) {
+    float2 s[R / 2 + 1], d[R / 2 + 1], v0 = v[0];
+    for (uint j = 1; j <= R / 2; j++) {
+      s[j] = v[j * S] + v[(R - j) * S];
+      d[j] = mul_i(inv ? v[(R - j) * S] - v[j * S] : v[j * S] - v[(R - j) * S]);
+    }
+    for (uint k = 0; k <= R / 2; k++) {
+      float2 t = v0, u = 0.0f;
+      for (uint j = 1; j <= R / 2; j++) {
+        t += tw[j * k % R * ts].x * s[j];
+        u += tw[j * k % R * ts].y * d[j];
+      }
+      v[k * S] = t + u;
+      v[(R - k) % R * S] = t - u;
+    }
+  } else if IF_CONSTEXPR (comp_r1<R>() > 1) {
     constexpr uint r1 = comp_r1<R>(), r2 = R / r1;
 
     for (uint n2 = 0; n2 < r2; n2++) {
@@ -129,10 +144,17 @@ inline uint opos(uint r) {
   return r1 == 1 ? r : (r % r1) * (R / r1) + r / r1;
 }
 
-inline int2 batch_off(constant FFTParams& p, uint y, uint z, uint d0) {
-  int2 off = int(y) * int2(p.in_strides[d0], p.out_strides[d0]);
+template <class index_t>
+inline vec<index_t, 2> batch_off(
+    constant FFTParams<index_t>& p,
+    uint y,
+    uint z,
+    uint d0) {
+  vec<index_t, 2> off =
+      index_t(y) * vec<index_t, 2>(p.in_strides[d0], p.out_strides[d0]);
   for (uint d = d0 + 1; d < p.ndim; z /= p.sizes[d++]) {
-    off += int(z % p.sizes[d]) * int2(p.in_strides[d], p.out_strides[d]);
+    off += index_t(z % p.sizes[d]) *
+        vec<index_t, 2>(p.in_strides[d], p.out_strides[d]);
   }
   return off;
 }
@@ -157,25 +179,23 @@ struct Bufs {
   uint i0; // four-step slice index
 };
 
-typedef constant FFTParams& Params;
-
 template <bool G, class I, class O> // Stage twiddle W^m (two-level table if G)
 inline float2 wget(Bufs<I, O> b, uint m) {
   return G ? twid(b.tt, m) : b.tw[m];
 }
 
-template <class I, class O, uint F, bool C>
-inline float2 load_pt(Bufs<I, O> b, Params p, uint e) {
-  const int s = C ? 1 : p.in_stride;
+template <class I, class O, uint F, bool C, class index_t>
+inline float2 load_pt(Bufs<I, O> b, constant FFTParams<index_t>& p, uint e) {
+  const index_t s = C ? 1 : p.in_stride;
   constexpr bool packed = F & kFFTPackedLoads;
 
-  if (!is_complex_v<I> && packed) {
-    const float2 x = cast_to<float2>(b.in[int(2 * e) * s]);
-    return float2(x.x, cast_to<float2>(b.in[int(2 * e + 1) * s]).x);
+  if IF_CONSTEXPR (!is_complex_v<I> && packed) {
+    const float2 x = cast_to<float2>(b.in[index_t(2 * e) * s]);
+    return float2(x.x, cast_to<float2>(b.in[index_t(2 * e + 1) * s]).x);
   }
 
-  if (!(F & kFFTExtendedLoads)) {
-    return cast_to<float2>(b.in[int(e) * s]);
+  if IF_CONSTEXPR (!(F & kFFTExtendedLoads)) {
+    return cast_to<float2>(b.in[index_t(e) * s]);
   }
 
   const uint i0e = p.ld_mul > 1 ? b.i0 : 0, f = e * p.ld_mul + i0e;
@@ -183,33 +203,44 @@ inline float2 load_pt(Bufs<I, O> b, Params p, uint e) {
     return 0.0f;
   }
 
-  const float2 x = cast_to<float2>(b.in[int(e) * s]);
+  const float2 x = cast_to<float2>(b.in[index_t(e) * s]);
   return b.cl ? mul(x, b.cl[f]) : x;
 }
 
-template <class I, class O, uint F, bool C>
-inline void store_pt(Bufs<I, O> b, Params p, uint k, float2 v, float2 w) {
+template <class I, class O, uint F, bool C, class index_t>
+inline void store_pt(
+    Bufs<I, O> b,
+    constant FFTParams<index_t>& p,
+    uint k,
+    float2 v,
+    float2 w) {
   constexpr bool extended = F & kFFTExtendedStores;
   v *= p.scale;
-  const int s = C ? 1 : p.out_stride;
+  const index_t s = C ? 1 : p.out_stride;
 
   v = (F & kFFTFourStepTwiddles) ? mul(v, (F & kFFTInverse) ? conj(w) : w) : v;
   const uint kf = extended && p.out_k_mul > 1 ? k * p.out_k_mul + b.i0 : k;
   if ((F & kFFTGlobalStage) || kf < p.n_out) {
-    b.out[int(k) * s] = cast_to<O>(extended && b.cs ? mul(v, b.cs[kf]) : v);
+    b.out[index_t(k) * s] = cast_to<O>(extended && b.cs ? mul(v, b.cs[kf]) : v);
   }
 
   if (extended && p.mirror_out && b.i0 && b.i0 != p.out_k_mul / 2 &&
       p.n_sig - kf < p.n_out) {
-    b.out[int(p.n_sig - kf - b.i0) * p.out_strides[p.i0_dim1]] =
+    b.out[index_t(p.n_sig - kf - b.i0) * p.out_strides[p.i0_dim1]] =
         cast_to<O>(conj(v));
   }
 }
 
 // Unpack z = (Z[k], Z[n-k]): X[k] = E + T, X[n-k] = conj(E - T), w = W_2n^k
-template <class I, class O, uint F, uint N, bool C>
-inline void unpack(Bufs<I, O> b, Params p, uint k, float2 w, float4 z) {
-  const uint n = N ? N : p.n, os = C ? 1 : p.out_stride;
+template <class I, class O, uint F, uint N, bool C, class index_t>
+inline void unpack(
+    Bufs<I, O> b,
+    constant FFTParams<index_t>& p,
+    uint k,
+    float2 w,
+    float4 z) {
+  const uint n = N ? N : p.n;
+  const index_t os = C ? 1 : p.out_stride;
   const float2 a = z.xy, c = z.zw;
   const bool two = n - k != k;
   const float2 e = 0.5f * (a + conj(c)), t = mul(w, -0.5f * mul_i(a - conj(c)));
@@ -219,29 +250,29 @@ inline void unpack(Bufs<I, O> b, Params p, uint k, float2 w, float4 z) {
   x = four_step ? mul(x, twid(b.tt, k * b.i0)) : x;
   y = four_step ? mul(y, twid(b.tt, (n - k) * b.i0)) : y;
 
-  b.out[int(k) * os] = cast_to<O>(x);
+  b.out[index_t(k) * os] = cast_to<O>(x);
   if (two && n - k < p.n_out) {
-    b.out[int(n - k) * os] = cast_to<O>(y);
+    b.out[index_t(n - k) * os] = cast_to<O>(y);
   }
 
   if (p.n_out > n + 1 && k) {
-    b.out[int(2 * n - k) * os] = cast_to<O>(conj(x));
+    b.out[index_t(2 * n - k) * os] = cast_to<O>(conj(x));
     if (two) {
-      b.out[int(n + k) * os] = cast_to<O>(conj(y));
+      b.out[index_t(n + k) * os] = cast_to<O>(conj(y));
     }
   }
 }
 
 template <bool P2, bool G>
 inline uint mod_ns(uint j, uint ns, float inv_ns) {
-  if (P2) {
+  if IF_CONSTEXPR (P2) {
     return j & (ns - 1);
   }
 
   int k = int(j) - int(ns) * int(float(j) * inv_ns);
   // Global stages reach j = 2^31, past float's exact integers: a second step
   // on the small remainder makes it exact
-  if (G) {
+  if IF_CONSTEXPR (G) {
     k -= int(ns) * int(float(k) * inv_ns);
   }
   k = k < 0 ? k + int(ns) : k;
@@ -251,8 +282,22 @@ inline uint mod_ns(uint j, uint ns, float inv_ns) {
 // The radix-R butterflies of stage s (Stockham stride Ns), `butterflies` per
 // thread; smem exchanges stages and holds the final real unpack. global: one
 // global-memory stage.
-template <uint R, bool P2, class I, class O, uint F, uint N, uint NS, bool C>
-inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
+template <
+    uint R,
+    bool P2,
+    class I,
+    class O,
+    uint F,
+    uint N,
+    uint NS,
+    bool C,
+    class index_t>
+inline void stage(
+    Bufs<I, O> b,
+    constant FFTParams<index_t>& p,
+    uint s,
+    uint lane,
+    bool valid) {
   constexpr bool global = F & kFFTGlobalStage;
   constexpr bool inverse = F & kFFTInverse;
   constexpr bool packed = F & kFFTPackedLoads;
@@ -260,24 +305,12 @@ inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
   constexpr bool unpack_real = !global && !is_complex_v<I> && packed;
   constexpr uint ept = global ? R : fft_points_per_thread(N, F);
   constexpr uint butterflies = (ept + R - 1) / R;
-  const uint n = N ? N : p.n, jt = N ? N / ept : p.jt, nR = n / R,
+  const uint n = N ? N : p.n, jt = N ? ceil_div(N, ept) : p.jt, nR = n / R,
              Ns = NS ? NS : p.ns[s],
              twstep = NS ? N / NS / R * (packed ? 2 : 1) : p.twstep[s],
              sh = C ? fft_contig_pad_shift(N) : p.padshift;
   const bool first = NS ? NS == 1 : s == 0,
              last = global || (NS ? NS * R == N : s + 1 == p.nstages);
-
-  if IF_CONSTEXPR (global && R == kFFTUnpackRadix) {
-    if (lane < n / 2 + 1) {
-      // The unpack twiddle W_2n^k from sincos, avoiding a large table read.
-      float wr, wi = precise::sincos(-float(lane) * (M_PI_F / float(n)), wr);
-      const float2 a = cast_to<float2>(b.in[int(lane) * p.in_stride]);
-      const float2 c =
-          cast_to<float2>(b.in[int(lane ? n - lane : 0) * p.in_stride]);
-      unpack<I, O, F, N, C>(b, p, lane, float2(wr, wi), float4(a, c));
-    }
-    return;
-  }
 
   // Pow2 plans keep nR, Ns multiples of 16: padded smem slots are affine in r
   const uint nRv = valid ? nR : 0;
@@ -355,6 +388,31 @@ inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
   threadgroup_barrier(mem_flags::mem_threadgroup);
 }
 
+template <uint R, bool P2, class I, class O, uint F, bool C, class index_t>
+inline void global_stage(
+    Bufs<I, O> b,
+    constant FFTParams<index_t>& p,
+    uint lane,
+    bool_constant<false>) {
+  stage<R, P2, I, O, F, 0, 0, C>(b, p, 0, lane, true);
+}
+
+template <uint R, bool P2, class I, class O, uint F, bool C, class index_t>
+inline void global_stage(
+    Bufs<I, O> b,
+    constant FFTParams<index_t>& p,
+    uint lane,
+    bool_constant<true>) {
+  if (lane < p.n / 2 + 1) {
+    // The unpack twiddle W_2n^k from sincos, avoiding a large table read.
+    float wr, wi = precise::sincos(-float(lane) * (M_PI_F / float(p.n)), wr);
+    const float2 a = cast_to<float2>(b.in[index_t(lane) * p.in_stride]);
+    const float2 c =
+        cast_to<float2>(b.in[index_t(lane ? p.n - lane : 0) * p.in_stride]);
+    unpack<I, O, F, 0, C>(b, p, lane, float2(wr, wi), float4(a, c));
+  }
+}
+
 // Same order as radices() in FastFourierTransform.mm: a power of two up to 16,
 // then 3, then 5
 constexpr uint first_radix(uint n) {
@@ -362,7 +420,7 @@ constexpr uint first_radix(uint n) {
   return p2 > 1 ? p2 : n % 3 == 0 ? 3 : n % 5 == 0 ? 5 : 1;
 }
 
-template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
+template <class I, class O, uint MASK, uint F, uint N, bool C, class index_t>
 [[max_total_threads_per_threadgroup(kFFTMaxThreads)]] kernel void fft_kernel(
     device const I* in,
     device O* out,
@@ -370,7 +428,7 @@ template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
     device const float2* cs,
     device const float2* tt,
     constant float2* tw,
-    constant FFTParams& p,
+    constant FFTParams<index_t>& p,
     threadgroup float2* buf [[threadgroup(0)]],
     uint tid [[thread_index_in_threadgroup]],
     uint3 tg [[threadgroup_position_in_grid]]) {
@@ -379,23 +437,25 @@ template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
   constexpr bool four_step = F & kFFTFourStepTwiddles;
   constexpr uint ept = fft_points_per_thread(N, F);
   const uint n = N ? N : p.n, tgb = C || global ? 1 : p.tgb,
-             jt = N ? N / ept : p.jt;
+             jt = N ? ceil_div(N, ept) : p.jt;
   const uint first_b = global ? 0 : tg.x * tgb,
              nb = min(tgb, p.sizes[0] - first_b);
 
   const bool nfast = C || p.in_stride == 1;
   const uint b = global ? 0 : nfast ? tid / jt : tid % tgb;
   const uint lane = global ? tg.x * jt + tid : nfast ? tid % jt : tid / tgb;
-  const int2 off = batch_off(p, tg.y, tg.z, global ? 0 : 1);
+  const vec<index_t, 2> off = batch_off(p, tg.y, tg.z, global ? 0 : 1);
   const bool valid = global || b < nb;
   const uint r0 = first_b + (valid ? b : 0), i0 = p.i0_dim1 ? tg.y : r0;
 
-  device const I* ib = in + off.x + int(r0) * p.in_strides[0];
-  device O* ob = out + off.y + int(r0) * p.out_strides[0];
+  device const I* ib = in + off.x + index_t(r0) * p.in_strides[0];
+  device O* ob = out + off.y + index_t(r0) * p.out_strides[0];
   const Bufs<I, O> bufs{ib, ob, cl, cs, tt, tw, buf + b * p.row, i0};
 
   if IF_CONSTEXPR (global) {
-    stage<__builtin_ctz(MASK), pow2, I, O, F, 0, 0, C>(bufs, p, 0, lane, valid);
+    constexpr uint r = __builtin_ctz(MASK);
+    constexpr bool unpacks = r == kFFTUnpackRadix;
+    global_stage<r, pow2, I, O, F, C>(bufs, p, lane, bool_constant<unpacks>{});
     return;
   }
 
@@ -433,7 +493,7 @@ template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
              ls = ofast ? tid % jt : tid / tgb;
   threadgroup const float2* rb = buf + bs * p.row;
   Bufs<I, O> bo = bufs;
-  bo.out = out + off.y + int(first_b + bs) * p.out_strides[0],
+  bo.out = out + off.y + index_t(first_b + bs) * p.out_strides[0],
   bo.i0 = p.i0_dim1 ? tg.y : first_b + bs;
 
   const uint es = C ? 1 : p.es, sh = C ? fft_contig_pad_shift(N) : p.padshift;
@@ -446,7 +506,7 @@ template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
 
   for (uint k = ls; k < (unpack_real ? n / 2 + 1 : n); k += jt) {
     const float2 a = rb[pad(k, sh) * es], c = rb[pad(k ? n - k : 0, sh) * es];
-    if (unpack_real) {
+    if IF_CONSTEXPR (unpack_real) {
       unpack<I, O, F, N, C>(bo, p, k, tw[k], float4(a, c));
     } else {
       store_pt<I, O, F, false>(bo, p, k, a, w);
@@ -455,14 +515,14 @@ template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
   }
 }
 
-#define FFT_ARGS(IN, OUT)                                                    \
+#define FFT_ARGS(IN, OUT, INDEX_T)                                           \
   device const IN*, device OUT*, device const float2*, device const float2*, \
-      device const float2*, constant float2*, constant FFTParams&
+      device const float2*, constant float2*, constant FFTParams<INDEX_T>&
 
-#define INST2(IN, OUT, F, MASK, NAME, N, C)                           \
+#define INST2(IN, OUT, F, MASK, NAME, N, C, INDEX_T)                  \
   template [[host_name("fft_" #IN "_" #OUT "_" NAME #F)]] kernel void \
-  fft_kernel<IN, OUT, MASK, F, N, C>(                                 \
-      FFT_ARGS(IN, OUT), threadgroup float2*, uint, uint3);
+  fft_kernel<IN, OUT, MASK, F, N, C, INDEX_T>(                        \
+      FFT_ARGS(IN, OUT, INDEX_T), threadgroup float2*, uint, uint3);
 
 #define INST1(...) INST2(__VA_ARGS__)
 #define UNPAREN(...) __VA_ARGS__
@@ -481,7 +541,8 @@ template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
 #define R_f float
 #define R_h half
 
-#define BASIC(_, X) _(C, C, 0, X) _(C, C, 1, X) _(R, C, 2, X)
+#define CPLX(_, X) _(C, C, 0, X) _(C, C, 1, X)
+#define BASIC(_, X) CPLX(_, X) _(R, C, 2, X)
 #define EXT1(_, X) _(C, C, 4, X) _(C, C, 5, X) _(C, C, 8, X) _(C, C, 9, X)
 #define EXT2(_, X) _(C, C, 20, X) _(C, C, 21, X) _(C, C, 24, X) _(R, C, 4, X)
 #define EXT3(_, X) _(R, C, 6, X) _(R, C, 20, X) _(R, C, 24, X)
@@ -489,25 +550,31 @@ template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
 #define PLAIN(_, X) BASIC(_, X) _(R, C, 0, X)
 
 // The smallest family factoring n (radix branches cost registers); p16 serves
-// lengths 1 and 16, which never take several passes
-#define FAMILY(MASK, NAME) \
-  PLAIN(INST, (MASK, NAME, 0, false)) EXT(INST_FP32, (MASK, NAME, 0, false))
-FAMILY(kFFTMaskP2, "p2_")
-FAMILY(kFFTMaskP235, "p235_")
-FAMILY(kFFTMaskP2357, "p2357_")
-PLAIN(INST, (kFFTMaskP16, "p16_", 0, false))
+// lengths 1 and 16, which never take several passes. The w kernels take 64-bit
+// offsets: smooth complex transforms spanning 2^31 elements, never chirped
+#define FAMILY(FIRST, MASK, NAME, N)              \
+  FIRST(INST, (MASK, NAME "_", N, false, int))    \
+  EXT(INST_FP32, (MASK, NAME "_", N, false, int)) \
+  CPLX(INST, (MASK, NAME "w_", N, false, long))   \
+  EXT1(INST_FP32, (MASK, NAME "w_", N, false, long))
+PLAIN(INST, (kFFTMaskP2, "p2_", 0, false, int))
+CPLX(INST, (kFFTMaskP2, "p2w_", 0, false, long))
+FAMILY(PLAIN, kFFTMaskP235, "p235", 0)
+FAMILY(PLAIN, kFFTMaskP2357, "p2357", 0)
+FAMILY(PLAIN, kFFTMaskP235713, "p235713", 0)
+PLAIN(INST, (kFFTMaskP16, "p16_", 0, false, int))
+CPLX(INST, (kFFTMaskP16, "p16w_", 0, false, long))
 
-#define FIXED_X(N) ((N & (N - 1) ? kFFTMaskP235 : kFFTMaskP2), #N "_", N, false)
-#define FIXED(N) BASIC(INST, FIXED_X(N)) EXT(INST_FP32, FIXED_X(N))
+#define FIXED(N) FAMILY(BASIC, (N & (N - 1) ? kFFTMaskP235 : kFFTMaskP2), #N, N)
 FFT_FIXED_SIZES(FIXED)
 
-#define CONTIG(N) BASIC(INST, (kFFTMaskP2, #N "c_", N, true))
+#define CONTIG(N) BASIC(INST, (kFFTMaskP2, #N "c_", N, true, int))
 FFT_CONTIG_SIZES(CONTIG)
 
 #define GLOBAL1(_, X) _(float2, float2, 32, X) _(float2, float2, 33, X)
 #define GLOBAL2(_, X) _(float, float2, 34, X)
-#define GLOBAL(R)                                   \
-  GLOBAL1(INSTF, ((1u << R), "g" #R "_", 0, false)) \
-  GLOBAL2(INSTF, ((1u << R), "g" #R "_", 0, false))
+#define GLOBAL(R)                                        \
+  GLOBAL1(INSTF, ((1u << R), "g" #R "_", 0, false, int)) \
+  GLOBAL2(INSTF, ((1u << R), "g" #R "_", 0, false, int))
 FFT_GLOBAL_RADICES(GLOBAL)
-INSTF(float2, float2, 32, ((1u << kFFTUnpackRadix), "g1_", 0, false))
+INSTF(float2, float2, 32, ((1u << kFFTUnpackRadix), "g1_", 0, false, int))

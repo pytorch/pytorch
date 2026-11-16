@@ -50,28 +50,34 @@ C10_METAL_CONSTEXPR uint32_t kFFTUnpackRadix = 1;
 
 // Global-memory stage radices, largest first: lengths factor in this order
 #define FFT_GLOBAL_RADICES(_) \
-  _(28) _(25) _(21) _(16) _(15) _(12) _(9) _(8) _(7) _(5) _(4) _(3) _(2)
+  _(28) _(25) _(21) _(16) _(15) _(13) _(12) _(9) _(8) _(7) _(5) _(4) _(3) _(2)
 
 #define FFT_FIXED_SIZES(_) \
-  _(64) _(128) _(200) _(240) _(256) _(512) _(1024) _(2048) _(4096)
+  _(10)                    \
+  _(32) _(64) _(128) _(160) _(200) _(240) _(256) _(640) FFT_CONTIG_SIZES(_)
 #define FFT_CONTIG_SIZES(_) _(512) _(1024) _(2048) _(4096)
 
 // Radix sets of the kernel families, one bit per radix (bit 1 is length 1);
-// the host names them p16, p2, p235 and p2357
+// the host names them p16, p2, p235, p2357 and p235713
 C10_METAL_CONSTEXPR uint32_t kFFTMaskP16 = (1u << 1) | (1u << 16);
 C10_METAL_CONSTEXPR uint32_t kFFTMaskP2 =
     kFFTMaskP16 | (1u << 2) | (1u << 4) | (1u << 8);
 C10_METAL_CONSTEXPR uint32_t kFFTMaskP235 = kFFTMaskP2 | (1u << 3) | (1u << 5);
 C10_METAL_CONSTEXPR uint32_t kFFTMaskP2357 = kFFTMaskP235 | (1u << 7);
+C10_METAL_CONSTEXPR uint32_t kFFTMaskP235713 = kFFTMaskP2357 | (1u << 13);
+// Length of the p16 family: its one radix-16 stage beats packing a real input
+C10_METAL_CONSTEXPR uint32_t kFFTP16Points = 16;
 
 // tgb transforms of n points per group, jt threads each. n_sig: full signal
 // (zero-padded beyond), n_out: outputs. Four-step: input e * ld_mul + i0,
 // output k * out_k_mul + i0, mirror_out adds conj X[k] at n_sig - k, i0_dim1
 // reads i0 from batch dim 1. Smem slot i of a row of `row` slots is at
 // i + (i >> padshift); tiles interleave by es.
+// index_t: the offset type, 64-bit where one transform spans 2^31 elements.
+template <typename index_t>
 struct FFTParams {
   uint32_t n, n_sig, n_out, tgb, jt, ndim, nstages;
-  int32_t in_stride, out_stride; // along the axis
+  index_t in_stride, out_stride; // along the axis
   float scale;
   uint32_t ld_mul, out_k_mul, row, padshift, es;
   bool mirror_out, i0_dim1, via_smem;
@@ -79,7 +85,7 @@ struct FFTParams {
       twstep; // ns: product so far
   ::c10::metal::array<float, kFFTMaxStages> inv_ns;
   ::c10::metal::array<uint32_t, ::c10::metal::max_ndim> sizes;
-  ::c10::metal::array<int32_t, ::c10::metal::max_ndim> in_strides, out_strides;
+  ::c10::metal::array<index_t, ::c10::metal::max_ndim> in_strides, out_strides;
 };
 
 #ifndef __METAL__
@@ -88,15 +94,20 @@ struct FFTParams {
 
 #define FFT_LIST_ENTRY(X) X,
 // Threadgroup stage radices, largest first
-constexpr int kFFTRadices[] = {16, 8, 4, 2, 3, 5, 7};
+constexpr int kFFTRadices[] = {16, 8, 4, 2, 3, 5, 7, 13};
 constexpr int kFFTGlobalRadices[] = {FFT_GLOBAL_RADICES(FFT_LIST_ENTRY)};
 constexpr int kFFTFixedSizes[] = {FFT_FIXED_SIZES(FFT_LIST_ENTRY)};
 constexpr int kFFTContigSizes[] = {FFT_CONTIG_SIZES(FFT_LIST_ENTRY)};
 #undef FFT_LIST_ENTRY
 static_assert(std::ranges::all_of(kFFTRadices, [](int r) {
-  return (kFFTMaskP2357 & (1u << r)) != 0;
+  return (kFFTMaskP235713 & (1u << r)) != 0;
 }));
 
+constexpr int64_t kFFTMaxTwoPassPoints = int64_t{kFFTMaxPoints} * kFFTMaxPoints;
+
+// A packed real transform has at least this many complex points: 2-point real
+// signals are not packed into 1-point transforms
+constexpr int64_t kFFTMinPackedPoints = 2;
 // Below this many elements, extra launches cost more than they save
 constexpr int64_t kFFTLongPoints = 1 << 17;
 // Past this length, tiles strided on both sides no longer coalesce
