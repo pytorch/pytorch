@@ -524,7 +524,7 @@ struct LinearSource {
   }
 };
 
-template <bool exact>
+template <bool exact, typename index_t = int>
 struct NearestSource {
   float scale;
   NearestSource(float scale_, bool) : scale(scale_) {}
@@ -533,8 +533,9 @@ struct NearestSource {
   // the non-negative product) matches the CPU reference. Computing this in
   // Metal (built with -fno-fast-math) is bit-stable across macOS versions,
   // unlike the MPSGraph resize which mis-rounds exact boundaries on macOS 14.
-  inline int operator()(int dst) const {
-    return static_cast<int>(exact ? scale * (dst + 0.5f) : scale * dst);
+  // The float to index_t cast saturates, so callers can clamp in index_t.
+  inline index_t operator()(int dst) const {
+    return static_cast<index_t>(exact ? scale * (dst + 0.5f) : scale * dst);
   }
   // Analytic inverse of [idx, idx + 1), moved a step to match the forward's
   // rounding.
@@ -571,14 +572,14 @@ kernel void upsample_nearest2d(
   const ::c10::IntDivider<uint> channels = channels_div;
   const auto planes =
       static_cast<uint>(params.output_sizes[0]) * channels.divisor;
-  const NearestSource<exact> source_x(params.scales[0], false);
-  const NearestSource<exact> source_y(params.scales[1], false);
+  const NearestSource<exact, index_t> source_x(params.scales[0], false);
+  const NearestSource<exact, index_t> source_y(params.scales[1], false);
   const int x = thread_index.x;
   const int y = thread_index.y;
   const auto src_x =
-      min(source_x(x), static_cast<int>(params.input_sizes[3]) - 1);
+      min(source_x(x), static_cast<index_t>(params.input_sizes[3]) - 1);
   const auto src_y =
-      min(source_y(y), static_cast<int>(params.input_sizes[2]) - 1);
+      min(source_y(y), static_cast<index_t>(params.input_sizes[2]) - 1);
   device const auto* input =
       inputData + src_y * input_strides.z + src_x * input_strides.w;
   device auto* output =
@@ -615,14 +616,16 @@ kernel void upsample_bilinear2d(
       params.scales[1], y, params.align_corners, /*cubic=*/false);
   const auto t_x = fract(real_x);
   const auto t_y = fract(real_y);
-  const int max_x = params.input_sizes[3] - 1;
-  const int max_y = params.input_sizes[2] - 1;
-  const int x0 = static_cast<int>(floor(real_x));
-  const int y0 = static_cast<int>(floor(real_y));
-  const index_t col0 = clamp(x0, 0, max_x) * input_strides.w;
-  const index_t col1 = clamp(x0 + 1, 0, max_x) * input_strides.w;
-  device const T* row0 = inputData + clamp(y0, 0, max_y) * input_strides.z;
-  device const T* row1 = inputData + clamp(y0 + 1, 0, max_y) * input_strides.z;
+  const index_t max_x = params.input_sizes[3] - 1;
+  const index_t max_y = params.input_sizes[2] - 1;
+  const auto x0 = static_cast<index_t>(floor(real_x));
+  const auto y0 = static_cast<index_t>(floor(real_y));
+  const index_t col0 = clamp(x0, index_t(0), max_x) * input_strides.w;
+  const index_t col1 = clamp(x0 + 1, index_t(0), max_x) * input_strides.w;
+  device const T* row0 =
+      inputData + clamp(y0, index_t(0), max_y) * input_strides.z;
+  device const T* row1 =
+      inputData + clamp(y0 + 1, index_t(0), max_y) * input_strides.z;
   device auto* output =
       outputData + y * output_strides.z + x * output_strides.w;
   for (auto plane = thread_index.z; plane < planes; plane += grid_size.z) {
