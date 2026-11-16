@@ -1262,7 +1262,7 @@ def count_flops_fx(node: torch.fx.Node) -> int | None:
         if fake_mode is not None and fake_mode.shape_env is not None
         else contextlib.nullcontext()
     )
-    with guards_ctx, FakeTensorMode(allow_non_fake_inputs=True):
+    with guards_ctx, FakeTensorMode(_force_python=True, allow_non_fake_inputs=True):
         if success:
             # flex_attention HOPs have registered formulas, but invoking them
             # here can require tracing-only context, e.g. TransformGetItemToIndex.
