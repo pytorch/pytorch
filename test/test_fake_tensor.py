@@ -1179,6 +1179,49 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(t.device, torch.device("cpu"))
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
+    @skipIfPropagateRealTensors("Propagate real tensor not supported")
+    @parametrize("symbolic", [False, True])
+    @parametrize("active", [False, True])
+    def test_mkldnn_functionalize(self, symbolic, active):
+        real = torch.randn(2, 3).to_mkldnn().requires_grad_()
+        mode = FakeTensorMode(shape_env=ShapeEnv() if symbolic else None)
+        fake = mode.from_tensor(real)
+        with mode if active else contextlib.nullcontext():
+            wrapped = torch._to_functional_tensor(fake)
+            self.assertTrue(wrapped.is_mkldnn)
+            self.assertEqual(wrapped.layout, torch._mkldnn)
+
+            dense = wrapped.to_dense()
+            self.assertTrue(torch._is_functional_tensor(dense))
+            self.assertFalse(dense.is_mkldnn)
+            self.assertEqual(dense.layout, torch.strided)
+            self.assertFalse(torch._from_functional_tensor(dense).is_mkldnn)
+
+            result = torch.func.functionalize(lambda x: x.to_dense())(fake)
+            self.assertIsNot(result, fake)
+            self.assertFalse(result.is_mkldnn)
+            self.assertEqual(result.layout, torch.strided)
+            self.assertEqual(result.shape, fake.shape)
+            self.assertEqual(result.stride(), (3, 1))
+            self.assertTrue(result.requires_grad)
+            (grad,) = torch.autograd.grad(result.sum(), fake)
+            self.assertEqual(grad.shape, fake.shape)
+            self.assertTrue(grad.is_mkldnn)
+            with torch.no_grad():
+                result = torch.func.functionalize(lambda x: x.to_dense())(fake)
+            self.assertFalse(result.requires_grad)
+
+            result = torch.func.functionalize(
+                lambda x: torch.ops.aten.to_dense.default(x, dtype=torch.bfloat16)
+            )(fake)
+            self.assertEqual(result.dtype, torch.bfloat16)
+            self.assertEqual(result.layout, torch.strided)
+
+            torch._functionalize_replace(wrapped, result)
+            self.assertFalse(wrapped.is_mkldnn)
+            self.assertEqual(wrapped.layout, torch.strided)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
     @parametrize("symbolic", [False, True])
     @parametrize("active", [False, True])
     def test_mkldnn_to_dense(self, symbolic, active):
