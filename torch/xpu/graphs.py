@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import typing
+import weakref
 from collections.abc import Callable
 from typing import overload, Self, TYPE_CHECKING, TypeAlias
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch import Tensor
+from torch.accelerator.graphs import _GraphRNGState
 
 
 if TYPE_CHECKING:
@@ -64,11 +66,21 @@ class XPUGraph(_XPUGraph):
             ``replay`` if ``instantiate`` was not already called. Calling
             ``instantiate`` manually before ``replay`` is recommended to
             prevent increased latency on the first call to ``replay``.
+        num_rng_states (int, optional): Number of RNG seed/offset pairs to
+            allocate before capture. Each distinct generator state first used
+            during capture takes one pair; repeated use shares that pair.
+            Exceeding this count raises an error. Unused pairs are released
+            after capture. Default: ``8``. Set to ``0`` for non-RNG graphs.
 
     """
 
-    def __new__(cls, keep_graph: bool = False) -> Self:
-        return super().__new__(cls, keep_graph)
+    def __new__(cls, keep_graph: bool = False, num_rng_states: int = 8) -> Self:
+        instance = super().__new__(cls, keep_graph, num_rng_states)
+        instance._rng_state = _GraphRNGState()
+        instance._rng_state_finalizer = weakref.finalize(
+            instance, instance._rng_state.release
+        )
+        return instance
 
     def capture_begin(self, pool: _POOL_HANDLE | None = None) -> None:
         r"""Begin capturing XPU work on the current xpu stream.
@@ -92,6 +104,7 @@ class XPUGraph(_XPUGraph):
         Use :class:`~torch.xpu.graph`, which call ``capture_end`` internally.
         """
         super().capture_end()
+        self._rng_state.buffers = self._get_rng_state_buffers()
 
     def instantiate(self) -> None:
         r"""Instantiate the XPU graph. Will be called by
@@ -103,12 +116,23 @@ class XPUGraph(_XPUGraph):
         super().instantiate()
 
     def replay(self) -> None:
-        r"""Replay the XPU work captured by this graph."""
+        r"""Replay the XPU work captured by this graph.
+
+        When replaying on a different stream, first make that stream wait for
+        any work queued on the capture stream before capture began.
+        """
+        self._rng_state.record_replay()
         super().replay()
 
     def reset(self) -> None:
-        r"""Delete the graph currently held by this instance."""
+        r"""Delete the graph currently held by this instance.
+
+        Synchronizes replay streams before releasing retained RNG buffers.
+        """
+        self._rng_state_finalizer()
         super().reset()
+        self._rng_state = _GraphRNGState()
+        self._rng_state_finalizer = weakref.finalize(self, self._rng_state.release)
 
     def pool(self) -> _POOL_HANDLE:
         r"""Return an opaque token representing the id of this graph's memory pool.
@@ -192,6 +216,7 @@ class graph:
         torch.xpu.synchronize()
 
         torch.xpu.empty_cache()
+        torch._C._host_emptyCache()
         self.stream_ctx.__enter__()
 
         self.xpu_graph.capture_begin(*self.pool)
@@ -211,6 +236,7 @@ def make_graphed_callables(
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
     pool: _POOL_HANDLE | None = None,
+    num_rng_states: int = 8,
 ) -> _ModuleOrCallable: ...
 
 
@@ -221,6 +247,7 @@ def make_graphed_callables(
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
     pool: _POOL_HANDLE | None = None,
+    num_rng_states: int = 8,
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
@@ -230,6 +257,7 @@ def make_graphed_callables(
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
     pool: _POOL_HANDLE | None = None,
+    num_rng_states: int = 8,
 ) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -261,6 +289,8 @@ def make_graphed_callables(
         pool (optional): Token (returned by :func:`~torch.xpu.graph_pool_handle` or
             :meth:`other_Graph_instance.pool()<torch.xpu.XPUGraph.pool>`) that hints this graph may share memory
             with the indicated pool.
+        num_rng_states (int, optional): Maximum number of distinct generator states
+            used by each forward or backward graph. Default: ``8``.
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
         that's expected for the corresponding real input in the training loop.
@@ -349,8 +379,12 @@ def make_graphed_callables(
         for i in range(len(callables))
     ]
 
-    fwd_graphs = [torch.xpu.XPUGraph() for _ in range(len(callables))]
-    bwd_graphs = [torch.xpu.XPUGraph() for _ in range(len(callables))]
+    fwd_graphs = [
+        torch.xpu.XPUGraph(num_rng_states=num_rng_states) for _ in range(len(callables))
+    ]
+    bwd_graphs = [
+        torch.xpu.XPUGraph(num_rng_states=num_rng_states) for _ in range(len(callables))
+    ]
 
     mempool = graph_pool_handle() if pool is None else pool
 

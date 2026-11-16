@@ -14472,9 +14472,10 @@ Generator.philox_state(increment) -> tuple[Tensor, Tensor, Tensor]
 Reserves ``increment`` values from this generator's Philox4x32-10 stream and
 returns the reserved position as ``(seed, offset, intragraph_offset)``, three
 1-element ``int64`` tensors. This is the same reservation protocol the
-built-in CUDA random kernels use (``PhiloxCudaState`` in C++), so kernels
+built-in CUDA and XPU random kernels use (``PhiloxCudaState`` and
+``PhiloxXpuState`` in C++), so kernels
 built on it draw from the same stream as, and compose with, the built-in
-random operations. Only Philox-based generators (currently CUDA) support this
+random operations. Only Philox-based generators (currently CUDA and XPU) support this
 method.
 
 **What the reservation grants.** With ``effective_offset =
@@ -14503,7 +14504,8 @@ protocol. Outside capture (``HostState``), ``seed`` and ``offset`` are CPU
 tensors holding the current values; ``.item()`` is cheap and does not
 synchronize, so callers pass the values as scalar kernel arguments. During
 capture (``DevState``, under :class:`torch.accelerator.Graph` or
-:class:`torch.cuda.CUDAGraph`), ``seed`` and ``offset`` are CUDA tensors
+:class:`torch.cuda.CUDAGraph` or :class:`torch.xpu.XPUGraph`), ``seed`` and
+``offset`` are device tensors
 aliasing generator state that each replay refills with the values current at
 replay time, so kernels must load them from device memory at run time.
 ``intragraph_offset`` is always a CPU tensor: 0 outside capture, and this
@@ -14528,7 +14530,7 @@ Returns:
     tuple[Tensor, Tensor, Tensor]: ``(seed, offset, intragraph_offset)``,
     each a 1-element ``int64`` tensor. ``seed`` and ``offset`` hold the
     generator's seed and the reserved stream position as uint64 bits (CPU
-    tensors outside capture, CUDA tensors aliasing generator state during
+    tensors outside capture, device tensors aliasing generator state during
     capture); ``intragraph_offset`` is always a CPU tensor holding this
     reservation's position within the capturing graph (0 outside capture).
 

@@ -19,7 +19,10 @@ void THXPGraph_init(PyObject* module) {
   torch_C_m.def("_xpu_graph_pool_handle", &::at::xpu::graph_pool_handle);
 
   shared_ptr_class_<::at::xpu::XPUGraph>(torch_C_m, "_XPUGraph")
-      .def(py::init<bool>(), py::arg("keep_graph") = false)
+      .def(
+          py::init<bool, int64_t>(),
+          py::arg("keep_graph") = false,
+          py::arg("num_rng_states") = 8)
       .def(
           "capture_begin",
           [](::at::xpu::XPUGraph& self,
@@ -50,6 +53,10 @@ void THXPGraph_init(PyObject* module) {
       .def(
           "replay",
           torch::wrap_pybind_function_no_gil(&at::xpu::XPUGraph::replay))
+      .def(
+          "_get_rng_state_buffers",
+          torch::wrap_pybind_function_no_gil(
+              &at::xpu::XPUGraph::get_rng_state_buffers))
       .def(
           "reset",
           torch::wrap_pybind_function_no_gil(&at::xpu::XPUGraph::reset))

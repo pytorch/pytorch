@@ -3,7 +3,6 @@
 #include <ATen/core/Generator.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/xpu/PhiloxXpuState.h>
-#include <c10/util/flat_hash_map.h>
 #include <mutex>
 
 namespace at {
@@ -20,7 +19,7 @@ struct XPUGeneratorCaptureState : public c10::intrusive_ptr_target {
   bool is_initialized() const {
     return seed_extragraph_.defined();
   }
-  void initialize();
+  void initialize(c10::DeviceIndex device);
   void increase(uint64_t increment);
   uint64_t finalize();
   void setup_for_replay(uint64_t seed, uint64_t offset);
@@ -29,8 +28,6 @@ struct XPUGeneratorCaptureState : public c10::intrusive_ptr_target {
 struct XPUGeneratorState : public c10::intrusive_ptr_target {
   uint64_t seed_;
   uint64_t philox_offset_per_thread_;
-  ska::flat_hash_map<size_t, c10::intrusive_ptr<XPUGeneratorCaptureState>>
-      capture_states_;
   mutable std::mutex mutex_;
 
   XPUGeneratorState(
@@ -39,12 +36,10 @@ struct XPUGeneratorState : public c10::intrusive_ptr_target {
       : seed_(seed), philox_offset_per_thread_(philox_offset_per_thread) {}
 
   void increase(uint64_t increment);
-  XPUGeneratorCaptureState* get_capture_state(
-      size_t capture_id,
-      bool create_if_not_found = false);
-  void remove_capture_state(size_t capture_id);
-  uint64_t capture_epilogue(size_t capture_id);
-  void replay_prologue(size_t capture_id, uint64_t wholegraph_increment);
+  XPUGeneratorCaptureState* get_capture_state(size_t capture_id);
+  void replay_prologue(
+      XPUGeneratorCaptureState& capture_state,
+      uint64_t wholegraph_increment);
 
   c10::intrusive_ptr<XPUGeneratorState> clone();
 };
@@ -69,6 +64,11 @@ struct TORCH_XPU_API XPUGeneratorImpl : public GeneratorImpl {
   void graphsafe_set_state(
       const c10::intrusive_ptr<GeneratorImpl>& state) override;
   c10::intrusive_ptr<c10::GeneratorImpl> graphsafe_get_state() const override;
+  void philox_state(
+      uint64_t increment,
+      at::Tensor& seed,
+      at::Tensor& offset,
+      at::Tensor& intragraph_offset) override;
 
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread() const;

@@ -5,6 +5,7 @@ namespace at::accelerator {
 
 struct TORCH_API Graph {
   Graph(bool keep_graph = false);
+  Graph(bool keep_graph, int64_t num_rng_states);
   ~Graph() = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(Graph);
@@ -35,6 +36,8 @@ struct TORCH_API Graph {
   void replay() {
     impl_->replay();
   }
+
+  std::vector<at::Tensor> get_rng_state_buffers() const;
 
   // After reset(), the instance may be reused for a new capture.
   void reset() {
