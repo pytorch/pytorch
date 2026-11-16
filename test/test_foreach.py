@@ -1836,6 +1836,31 @@ class TestForeachDevice(TestCase):
             torch._foreach_copy_(dst, src)
             self.assertEqual(dst, ref)
 
+    @onlyCUDA
+    @parametrize("op_name", ["add", "sub"])
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_binary_op_list_inplace_with_multi_dtypes(self, device, dtype, op_name):
+        foreach_op_ = getattr(torch, f"_foreach_{op_name}_")
+        ref_op_ = getattr(torch.Tensor, f"{op_name}_")
+        # 17 and 645 elements are not multiples of kILP (scalar path), 192 is
+        # vectorized, and 70000 spans two chunks.
+        sizes = ((17,), (64, 3), (5, 129), (70000,))
+        for other_dtype in floating_types_and(torch.half, torch.bfloat16):
+            if other_dtype == dtype:
+                continue
+            dsts = [make_tensor(s, dtype=dtype, device=device) for s in sizes]
+            others = [make_tensor(s, dtype=other_dtype, device=device) for s in sizes]
+            ref = [ref_op_(s.clone(), o, alpha=0.5) for s, o in zip(dsts, others)]
+            ForeachFuncWrapper(foreach_op_)(
+                (dsts, others),
+                device=device,
+                expect_fastpath=other_dtype != torch.float64,
+                alpha=0.5,
+            )
+            self.assertEqual(dsts, ref, atol=0, rtol=0)
+            with self.assertRaisesRegex(RuntimeError, "Boolean alpha"):
+                foreach_op_(dsts, others, alpha=True)
+
     @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     @decorateIf(

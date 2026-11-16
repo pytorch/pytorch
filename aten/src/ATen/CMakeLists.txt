@@ -931,11 +931,9 @@ endif()
       list(APPEND ATen_HIP_DEPENDENCY_LIBS torch::magma)
     endif(USE_ROCM)
     if(MSVC)
-      if($ENV{TH_BINARY_BUILD})
-        # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
-        # in caffe2/CMakeLists.txt
-        list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
-      endif($ENV{TH_BINARY_BUILD})
+      # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
+      # in caffe2/CMakeLists.txt
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
     endif(MSVC)
   endif(USE_MAGMA)
 
