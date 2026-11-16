@@ -46,7 +46,6 @@ from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCUDA,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -56,6 +55,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     getRocmVersion,
+    HardwareClassification,
     IS_FBCODE,
     IS_WINDOWS,
     isRocmArchAnyOf,
@@ -695,8 +695,9 @@ if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
 
 
 # XPU compiled-vs-eager numerics differ from CUDA/ROCm; tracked in
-# https://github.com/intel/torch-xpu-ops/issues/5168. test_batch_invariance is
-# still @onlyCUDA (it relies on cuBLASLt knobs), so there is no XPU entry for it.
+# https://github.com/intel/torch-xpu-ops/issues/5168. Like ROCm, XPU does not
+# apply the CUDA-only split-k / cuBLASLt knobs that test_batch_invariance relies
+# on, so nn.functional.linear is not batch invariant on XPU and is xfailed below.
 XPU_EAGER_EQUIV_XFAILS = {
     "aot_eager_decomp_partition": {
         "nn.functional.gelu": {fp32},
@@ -769,11 +770,28 @@ XPU_UNARY_NUMERICAL_XFAILS = {
 
 XPU_BINARY_NUMERICAL_XFAILS = {}
 
+# XPU, like ROCm, does not apply the CUDA-only split-k / cuBLASLt knobs that
+# test_batch_invariance relies on, so nn.functional.linear is not batch
+# invariant across batch sizes on XPU. Tracked in
+# https://github.com/intel/torch-xpu-ops/issues/5168.
+XPU_BATCH_INVARIANCE_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "nn.functional.linear": {ALL},
+    },
+    "inductor_default": {
+        "nn.functional.linear": {ALL},
+    },
+    "inductor_numerics": {
+        "nn.functional.linear": {ALL},
+    },
+}
+
 XPU_XFAIL_DICTS = {
     "eager_equivalence": XPU_EAGER_EQUIV_XFAILS,
     "determinism": XPU_DETERMINISM_XFAILS,
     "unary_numerical": XPU_UNARY_NUMERICAL_XFAILS,
     "binary_numerical": XPU_BINARY_NUMERICAL_XFAILS,
+    "batch_invariance": XPU_BATCH_INVARIANCE_XFAILS,
 }
 
 
@@ -813,7 +831,9 @@ def compile_fn(fn, backend):
 @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
 @unittest.skipIf(not HAS_GPU, "Requires GPU")
 class TestOpInfoProperties(TestCase):
-    """Test op properties under various inductor modes using OpInfo on CUDA."""
+    """Test op properties under various inductor modes using OpInfo on each accelerator."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -901,7 +921,7 @@ class TestOpInfoProperties(TestCase):
     # Batch Invariance Tests
     # =========================================================================
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfTorchDynamo("Test uses dynamo already")
     @ops(llm_ops, allowed_dtypes=DTYPES)
     @parametrize("backend", BACKENDS)
@@ -941,27 +961,34 @@ class TestOpInfoProperties(TestCase):
         # Disable split-k accumulation in GEMM to ensure batch-invariant results.
         # Split-k can produce different rounding based on how work is partitioned.
         # Disabling split-k requires the cuBLASLt backend, so we set it first.
-        prev_blas_library = torch.backends.cuda.preferred_blas_library()
-        torch.backends.cuda.preferred_blas_library("cublaslt")
+        # CUDA-only on purpose: ROCM_BATCH_INVARIANCE_XFAILS already expects
+        # nn.functional.linear to stay non-batch-invariant on ROCm, so applying
+        # hipBLASLt knobs there could XPASS those (strict) xfails.
+        prev_blas_library = None
+        prev_fp16 = None
+        prev_bf16 = None
+        if device_type == "cuda" and torch.version.hip is None:
+            prev_blas_library = torch.backends.cuda.preferred_blas_library()
+            torch.backends.cuda.preferred_blas_library("cublaslt")
 
-        # We need to save both the reduced precision and split_k settings.
-        prev_fp16 = (
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k,
-        )
-        prev_bf16 = (
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k,
-        )
-        # Disable both reduced precision and split-k
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-            False,
-            False,
-        )
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-            False,
-            False,
-        )
+            # We need to save both the reduced precision and split_k settings.
+            prev_fp16 = (
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k,
+            )
+            prev_bf16 = (
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k,
+            )
+            # Disable both reduced precision and split-k
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+                False,
+                False,
+            )
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+                False,
+                False,
+            )
 
         def run_test():
             tested_any = False
@@ -1035,13 +1062,14 @@ class TestOpInfoProperties(TestCase):
                 device_type, op.name, backend, "batch_invariance", dtype, run_test
             )
         finally:
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-                prev_fp16
-            )
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-                prev_bf16
-            )
-            torch.backends.cuda.preferred_blas_library(prev_blas_library)
+            if prev_fp16 is not None:
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+                    prev_fp16
+                )
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+                    prev_bf16
+                )
+                torch.backends.cuda.preferred_blas_library(prev_blas_library)
 
     # =========================================================================
     # Run-to-Run Determinism Tests
