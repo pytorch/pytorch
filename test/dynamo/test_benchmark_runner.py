@@ -500,9 +500,10 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
     )
     def test_invalid_options_rejected_before_launch(self, extra, message):
         runner = self.huggingface.HuggingfaceRunner()
+        launched = AssertionError("launched before validation")
         with (
-            mock.patch.object(common.mp, "spawn") as spawn,
-            mock.patch.object(common, "process_entry") as entry,
+            mock.patch.object(common.mp, "spawn", side_effect=launched),
+            mock.patch.object(common, "process_entry", side_effect=launched),
             self.assertRaisesRegex(ValueError, message),
         ):
             common.main(
@@ -514,8 +515,6 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
                     *extra,
                 ],
             )
-        spawn.assert_not_called()
-        entry.assert_not_called()
 
     def test_prefill_requires_inference_backend(self):
         runner = self.huggingface.HuggingfaceRunner()
@@ -527,6 +526,10 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         args.backend = None
         with self.assertRaisesRegex(ValueError, "requires --backend or --inductor"):
             runner.validate_args(args)
+        flags = ["--inference", "--inductor", "--hf-inference-mode=prefill"]
+        args = common.parse_args(["--performance", *flags])
+        self.assertEqual(args.backend, "inductor")
+        runner.validate_args(args)
 
     @parametrize("name", ("Qwen/Qwen3-0.6B", "Qwen/Qwen3.5-0.8B"))
     def test_prefill_honors_model_filter(self, name):
@@ -699,8 +702,18 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         )
 
     def test_prefill_operator_logging_prepares_cache(self):
+        from benchmarks.dynamo.microbenchmarks.operator_inp_utils import (
+            OperatorInputsMode,
+        )
+
         runner = self.huggingface.HuggingfaceRunner()
+        original_setup = runner.setup_prefill
         original_forward = runner.prefill_forward
+
+        def setup_prefill(model, example_inputs):
+            modes = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+            self.assertFalse(any(isinstance(m, OperatorInputsMode) for m in modes))
+            original_setup(model, example_inputs)
 
         def forward(model, example_inputs, collect_outputs=True):
             self.assertIsNotNone(model.cache)
@@ -711,7 +724,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             mock.patch.dict(vars(common)),
             mock.patch.dict(os.environ),
             mock.patch.object(
-                runner, "setup_prefill", wraps=runner.setup_prefill
+                runner, "setup_prefill", side_effect=setup_prefill
             ) as setup,
             mock.patch.object(
                 runner, "prefill_forward", side_effect=forward
@@ -887,6 +900,8 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
         ):
             status = runner.check_accuracy("tiny", model, inputs, optimize, None, None)
         self.assertEqual(status, "pass")
+        # The fp64 reference ran, rather than falling back to cosine similarity.
+        self.assertFalse(runner.args.cosine)
         self.assertEqual(compiled_functions, ["forward"])
 
     @onlyCUDA

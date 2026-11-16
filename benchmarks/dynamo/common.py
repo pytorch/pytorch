@@ -1837,11 +1837,16 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
 
 @dataclasses.dataclass(frozen=True)
 class BenchmarkWorkload:
+    # iter_fn(model, inputs, collect_outputs=True) runs one request.
     iter_fn: Callable
-    # Per-request setup stays outside the compiled and timed iteration.
+    # setup_fn(model, inputs) prepares each request outside the compiled and
+    # timed iteration.
     setup_fn: Callable | None = None
+    # Compile model.forward instead of iter_fn.
     compile_forward: bool = False
     report_eager_latency: bool = False
+    # CSV throughput columns mapped to tokens per request; the reported rate
+    # covers all --iterations-per-run requests.
     request_tokens: dict[str, int] | None = None
     # Performance warmup; measured iterations determine compilation latency.
     measure_iters: int = 5
@@ -5139,17 +5144,18 @@ def log_operator_inputs(
         model_fake = copy.deepcopy(model)
         example_inputs_fake = copy.deepcopy(example_inputs)
     try:
-        with fake_tensor_mode, operator_mode:
+        with fake_tensor_mode:
             if setup_fn is not None:
                 setup_fn(model_fake, example_inputs_fake)
-            model_iter_fn(model_fake, example_inputs_fake, collect_outputs=False)
+            with operator_mode:
+                model_iter_fn(model_fake, example_inputs_fake, collect_outputs=False)
     except Exception as e:
         print(f"{name} failed to run with fake tensors, trying real. Exception: {e}")
         operator_mode = OperatorInputsMode()
         try:
+            if setup_fn is not None:
+                setup_fn(model, example_inputs)
             with operator_mode:
-                if setup_fn is not None:
-                    setup_fn(model, example_inputs)
                 model_iter_fn(model, example_inputs, collect_outputs=False)
         except Exception as e2:
             print(f"{name} failed to run with real. Exception: {e2}")
