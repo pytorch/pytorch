@@ -16,11 +16,7 @@ from torch._dynamo.debug_utils import InputReader
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.choices import InductorChoices
-from torch._inductor.codegen.triton import (
-    FixedTritonConfig,
-    TritonKernel,
-    TritonScheduling,
-)
+from torch._inductor.codegen.triton import FixedTritonConfig, TritonScheduling
 from torch._inductor.runtime.hints import DeviceProperties, TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -2852,8 +2848,6 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
     @config.patch({"force_disable_caches": True})
     def test_tma_variants_that_cannot_join_the_pool_are_dropped(self):
         build_choices = TritonScheduling.create_kernel_choices
-        codegen_body = TritonScheduling.codegen_node_schedule_with_kernel
-        codegen_source = TritonKernel.codegen_kernel
         choice_counts = []
 
         def count_choices(scheduling, *args, **kwargs):
@@ -2861,52 +2855,19 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
             choice_counts.append(len(choices))
             return choices
 
-        def check_baseline_only(fn, x):
-            choice_counts.clear()
-            metrics.reset()
-            with mock.patch.object(
-                TritonScheduling, "create_kernel_choices", count_choices
-            ):
-                result, (code,) = run_and_get_code(torch.compile(fn), x)
-            self.assertEqual(result, fn(x), exact_device=True)
-            # The pool was built with a TMA choice, and only the baseline was emitted and counted.
-            self.assertEqual(choice_counts, [2])
-            FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
-            FileCheck().check_not("async_compile.multi_kernel").run(code)
-            self.assertEqual(metrics.generated_kernel_count, 1)
-
         # Bool has no tensor-map dtype, so the TMA choice repeats the baseline.
         flags = torch.randint(0, 2, (1024, 1024), dtype=torch.bool, device=GPU_TYPE)
-        check_baseline_only(torch.logical_not, flags)
-
-        def fail_body(scheduling, node_schedule, kernel):
-            if kernel.optional:
-                raise RuntimeError("injected codegen failure")
-            codegen_body(scheduling, node_schedule, kernel)
-
-        def add_call_arg(scheduling, node_schedule, kernel):
-            codegen_body(scheduling, node_schedule, kernel)
-            if kernel.optional:
-                outer = next(iter(kernel.args.input_buffers))
-                kernel.args.output_buffers[outer] = "injected_out_ptr"
-
-        def fail_source(kernel, *args, **kwargs):
-            if kernel.optional:
-                raise RuntimeError("injected codegen failure")
-            return codegen_source(kernel, *args, **kwargs)
-
-        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
-        # Only an Inductor bug fails codegen or changes call args, so no input reaches these drops.
+        metrics.reset()
         with mock.patch.object(
-            TritonScheduling, "codegen_node_schedule_with_kernel", fail_body
+            TritonScheduling, "create_kernel_choices", count_choices
         ):
-            check_baseline_only(torch.nn.functional.silu, x)
-        with mock.patch.object(
-            TritonScheduling, "codegen_node_schedule_with_kernel", add_call_arg
-        ):
-            check_baseline_only(torch.nn.functional.silu, x)
-        with mock.patch.object(TritonKernel, "codegen_kernel", fail_source):
-            check_baseline_only(torch.nn.functional.silu, x)
+            result, (code,) = run_and_get_code(torch.compile(torch.logical_not), flags)
+        self.assertEqual(result, torch.logical_not(flags), exact_device=True)
+        # The pool was built with a TMA choice, and only the baseline was emitted and counted.
+        self.assertEqual(choice_counts, [2])
+        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
+        FileCheck().check_not("async_compile.multi_kernel").run(code)
+        self.assertEqual(metrics.generated_kernel_count, 1)
 
 
 if __name__ == "__main__":

@@ -528,7 +528,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     sexpr: Callable[[sympy.Expr], str] = pexpr
     kexpr: Callable[[sympy.Expr], str]
     allow_block_ptr: bool = False
-    # Dropped from its MultiKernel instead of failing the compile if it fails, repeats a choice, or needs other args.
+    # Dropped from its MultiKernel instead of failing the compile if it repeats a choice or its Triton compile fails.
     optional: bool = False
     # pyrefly: ignore [bad-override]
     kernel_name: str
@@ -4710,14 +4710,8 @@ class SIMDScheduling(BaseScheduling):
             allow_tma_variants=True,
         )
         num_choices = len(kernels)
-        for kernel in list(kernels):
-            try:
-                self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-            except Exception:
-                if not kernel.optional:
-                    raise
-                log.warning("Dropping an optional kernel choice", exc_info=True)
-                kernels.remove(kernel)
+        for kernel in kernels:
+            self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
 
         # Collect config_patches from operations (e.g., decomposition ops with
@@ -4732,17 +4726,11 @@ class SIMDScheduling(BaseScheduling):
                 baseline_args,
                 baseline_types,
             ):
-                kernels.remove(kernel)
-                continue
-            try:
-                with V.set_kernel_handler(kernel), config.patch(**config_patches):
-                    src_code = kernel.codegen_kernel()
-            except Exception:
-                if not kernel.optional:
-                    raise
-                log.warning("Dropping an optional kernel choice", exc_info=True)
-                kernels.remove(kernel)
-                continue
+                raise AssertionError(
+                    f"optional kernel takes {call_args}, baseline takes {baseline_args}"
+                )
+            with V.set_kernel_handler(kernel), config.patch(**config_patches):
+                src_code = kernel.codegen_kernel()
             src_hash = code_hash(src_code)
             # A TMA choice whose accesses all fell back to tl.load repeats an earlier one.
             if kernel.optional and any(k.code_hash == src_hash for k in kernels):

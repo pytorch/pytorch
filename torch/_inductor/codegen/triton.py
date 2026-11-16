@@ -9549,7 +9549,7 @@ class TritonScheduling(SIMDScheduling):
             or config.deterministic
             or config.batch_invariant
             # These force a sub-kernel by index into multi_kernel's own order.
-            or config.triton.multi_kernel in (2, 3)
+            or config.triton.multi_kernel > 1
             # These wrappers do not support runtime multi-kernel dispatch.
             or config.cpp_wrapper
             or config.fx_wrapper
