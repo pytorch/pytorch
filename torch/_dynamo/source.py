@@ -383,14 +383,12 @@ class GenericAttrSource(ChainedSource):
 @dataclass_with_cached_hash(frozen=True)
 class TypeDictSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "dict"))
         codegen.add_push_null(
             lambda: codegen.load_import_from(
                 "torch._dynamo.utils", "get_type_dict_no_user_code"
             )
         )
         codegen(self.base)
-        codegen.extend_output(create_call_function(1, False))
         codegen.extend_output(create_call_function(1, False))
 
     def get_value(

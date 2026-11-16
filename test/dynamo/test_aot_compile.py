@@ -1147,7 +1147,9 @@ class ParentWithChildModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.lin = torch.nn.Linear(4, 4)
-        self.lin.register_forward_hook(identity_child_hook)
+        self.lin.register_forward_hook(
+            identity_child_hook
+        )  # retain the module-global alias
 
     def forward(self, x):
         # Dynamo records a __builtins_dict___N key on every artifact; referring

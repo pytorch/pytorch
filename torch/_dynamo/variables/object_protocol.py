@@ -32,7 +32,6 @@ from torch._C._dynamo import (
     PySequenceSlots,
     PyTypeSlots,
 )
-from torch._guards import TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 
 from .. import config, graph_break_hints, polyfills, variables
@@ -48,8 +47,10 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    ConstantSource,
     DictGetItemSource,
     GetItemSource,
+    GlobalSource,
     is_constant_source,
     is_from_skip_guard_source,
     Source,
@@ -2303,6 +2304,24 @@ def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     return GetItemSource(TypeMROSource(klass_source), idx)
 
 
+def guardable_mro_source(source: Source) -> Source:
+    # A constant result is installed as a global. Its class metadata can still change.
+    if is_constant_source(source):
+        return source.clone(
+            lambda s: GlobalSource(s.source_name)
+            if isinstance(s, ConstantSource)
+            else s
+        )
+    return source
+
+
+def _can_guard_mro(tx: "InstructionTranslatorBase", source: Source) -> bool:
+    return (
+        not tx.output.tracing_context.guards_context.skip_install
+        and not is_from_skip_guard_source(source)
+    )
+
+
 def guard_mro_absent(
     tx: "InstructionTranslatorBase",
     klass: type,
@@ -2311,8 +2330,7 @@ def guard_mro_absent(
     stop: int,
 ) -> None:
     """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[:stop]``."""
-    guards_context = tx.output.tracing_context.guards_context
-    if guards_context.skip_install or is_from_skip_guard_source(klass_source):
+    if not _can_guard_mro(tx, klass_source):
         return
     for idx in range(stop):
         absent_key = (id(klass), idx, name)
@@ -2343,12 +2361,10 @@ def mro_attr_source(
     Returns None on a complete miss; callers decide whether that is an error.
     """
     mro = get_type_mro_no_user_code(klass)
-    memoize = (
-        not TracingContext.get().guards_context.skip_install
-        and not is_from_skip_guard_source(klass_source)
-    )
+    klass_source = guardable_mro_source(klass_source)
+    can_guard = _can_guard_mro(tx, klass_source)
     if (
-        memoize
+        can_guard
         and not type_is_immutable(klass)
         and id(klass) not in tx.output.guarded_mro_type_ids
     ):
@@ -2392,20 +2408,18 @@ def mro_attr_source(
         # the descriptor: a descriptor shared by unrelated classes needs a
         # source through each one.
         cache_key = (id(base), name)
-        cached = tx.output.mro_source_cache.get(cache_key) if memoize else None
+        cached = tx.output.mro_source_cache.get(cache_key) if can_guard else None
         if cached is not None:
             return cached
 
         source = DictGetItemSource(
             TypeDictSource(_mro_entry_source(klass, klass_source, idx)), name
         )
-        if memoize:
+        if can_guard:
             tx.output.mro_source_cache[cache_key] = source
         return source
 
-    guard_mro_absent(
-        tx, klass, klass_source, name, len(get_type_mro_no_user_code(klass))
-    )
+    guard_mro_absent(tx, klass, klass_source, name, len(mro))
     return None
 
 
