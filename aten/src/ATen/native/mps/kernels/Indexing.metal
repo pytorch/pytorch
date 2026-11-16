@@ -8,7 +8,7 @@ using namespace metal;
 using namespace c10::metal;
 
 struct IndexAB {
-  constant int64_t* indexArray;
+  device const int64_t* indexArray;
 };
 
 uint3 index_get_offsets(
@@ -62,7 +62,7 @@ OffsetT index_apply_indices(
 template <typename T, typename OffsetT = ulong>
 kernel void index_select(
     device T* output,
-    constant T* input,
+    device const T* input,
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* output_strides,
@@ -101,7 +101,7 @@ kernel void index_select(
 template <typename T, typename OffsetT = ulong>
 inline void index_put_impl(
     device T* output,
-    constant T* input,
+    device const T* input,
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* output_strides,
@@ -139,7 +139,7 @@ inline void index_put_impl(
 template <typename T, typename OffsetT = ulong>
 kernel void index_put(
     device T* output,
-    constant T* input,
+    device const T* input,
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* output_strides,
@@ -168,7 +168,7 @@ kernel void index_put(
 template <typename T, typename OffsetT = ulong>
 kernel void index_put_serial(
     device T* output,
-    constant T* input,
+    device const T* input,
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* output_strides,
@@ -200,7 +200,7 @@ kernel void index_put_serial(
 template <typename T, typename OffsetT = ulong>
 kernel void index_put_accumulate(
     device T* output,
-    constant T* input,
+    device const T* input,
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* output_strides,
@@ -242,8 +242,8 @@ kernel void index_put_accumulate(
   template [[host_name("index_" #OP_NAME "_" #SUFFIX)]] kernel void \
       index_##OP_NAME<DTYPE>(                                       \
           device DTYPE * output,                                    \
-          constant DTYPE * input,                                   \
-          constant IndexAB * indices,                               \
+          device const DTYPE* input,                                \
+          constant IndexAB* indices,                                \
           constant int64_t* sizes,                                  \
           constant int64_t* output_strides,                         \
           constant int64_t* input_strides,                          \
@@ -289,29 +289,28 @@ struct IndexReduceOp {
 
   template <typename T>
   static T amin(T a, T b) {
-    return min(a, b);
+    return ::c10::metal::min(a, b);
   }
 
   template <typename T>
   static T amax(T a, T b) {
-    return max(a, b);
+    return ::c10::metal::max(a, b);
   }
 };
 
 template <typename T, typename IT, T (*ReduceOp)(T, T)>
-kernel void index_reduce(
-    device AtomicType_t<T>* self [[buffer(0)]],
-    device IT* index [[buffer(1)]],
-    device T* source [[buffer(2)]],
-    constant IndexReduceParams<>& params [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  uint32_t tid_ = tid;
+inline void index_reduce_impl(
+    device AtomicType_t<T>* self,
+    device IT* index,
+    device T* source,
+    constant IndexReduceParams<>& params,
+    uint32_t source_idx) {
   long source_offset = 0;
   long self_offset = 0;
 
   for (int32_t dim = params.ndim - 1; dim >= 0; dim--) {
     auto source_size = params.source_sizes[dim];
-    auto dim_idx = tid_ % source_size;
+    auto dim_idx = source_idx % source_size;
 
     source_offset += dim_idx * params.source_strides[dim];
 
@@ -323,7 +322,7 @@ kernel void index_reduce(
       self_offset += dim_idx * params.self_strides[dim];
     }
 
-    tid_ /= source_size;
+    source_idx /= source_size;
   }
 
   T source_elem = source[source_offset];
@@ -331,20 +330,45 @@ kernel void index_reduce(
   AtomicType<T>::atomic_binary_op(self, self_offset, source_elem, ReduceOp);
 }
 
-#define REGISTER_INDEX_REDUCE_OP(ReduceOp, T, IT)                  \
-  template [[host_name("index_reduce_" #ReduceOp "_" #T "_" #IT)]] \
-  kernel void index_reduce<T, IT, IndexReduceOp::ReduceOp<T>>(     \
-      device AtomicType_t<T> * self [[buffer(0)]],                 \
-      device IT * index [[buffer(1)]],                             \
-      device T * source [[buffer(2)]],                             \
-      constant IndexReduceParams<> & params [[buffer(3)]],         \
+template <typename T, typename IT, T (*ReduceOp)(T, T), bool serial>
+kernel void index_reduce(
+    device AtomicType_t<T>* self [[buffer(0)]],
+    device IT* index [[buffer(1)]],
+    device T* source [[buffer(2)]],
+    constant IndexReduceParams<>& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  if IF_CONSTEXPR (!serial) {
+    index_reduce_impl<T, IT, ReduceOp>(self, index, source, params, tid);
+    return;
+  }
+  uint32_t inner_size = 1;
+  for (int32_t dim = params.reduce_dim + 1; dim < params.ndim; dim++) {
+    inner_size *= params.source_sizes[dim];
+  }
+  const uint32_t reduce_size = params.source_sizes[params.reduce_dim];
+  const uint32_t source_idx_base =
+      (tid / inner_size) * (inner_size * reduce_size) + (tid % inner_size);
+  for (uint32_t pos = 0; pos < reduce_size; pos++) {
+    index_reduce_impl<T, IT, ReduceOp>(
+        self, index, source, params, source_idx_base + pos * inner_size);
+  }
+}
+
+#define REGISTER_INDEX_REDUCE_OP(ReduceOp, T, IT, SERIAL)                    \
+  template[[host_name("index_reduce_" #ReduceOp "_" #T                       \
+                      "_" #IT C10_METAL_SERIAL_SUFFIX(SERIAL))]] kernel void \
+  index_reduce<T, IT, IndexReduceOp::ReduceOp<T>, SERIAL>(                   \
+      device AtomicType_t<T> * self [[buffer(0)]],                           \
+      device IT * index [[buffer(1)]],                                       \
+      device T * source [[buffer(2)]],                                       \
+      constant IndexReduceParams<> & params [[buffer(3)]],                   \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_INDEX_REDUCE_OP_ALL_REDUCE_TYPES(T, IT) \
-  REGISTER_INDEX_REDUCE_OP(amax, T, IT);                 \
-  REGISTER_INDEX_REDUCE_OP(mean, T, IT);                 \
-  REGISTER_INDEX_REDUCE_OP(amin, T, IT);                 \
-  REGISTER_INDEX_REDUCE_OP(prod, T, IT);
+  REGISTER_INDEX_REDUCE_OP(amax, T, IT, false);          \
+  REGISTER_INDEX_REDUCE_OP(mean, T, IT, false);          \
+  REGISTER_INDEX_REDUCE_OP(amin, T, IT, false);          \
+  REGISTER_INDEX_REDUCE_OP(prod, T, IT, false);
 
 #define REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(T)  \
   REGISTER_INDEX_REDUCE_OP_ALL_REDUCE_TYPES(T, int); \
@@ -357,6 +381,8 @@ REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(int);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(short);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(char);
 REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(uchar);
+REGISTER_INDEX_REDUCE_OP(mean, float, long, true);
+REGISTER_INDEX_REDUCE_OP(prod, float, long, true);
 
 // index_add is index_reduce with a sum reduction plus an alpha scale on the
 // source. Accumulation happens directly in the output dtype via atomic add,
@@ -424,6 +450,62 @@ REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(uchar);
 REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(bool);
 REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(float2);
 REGISTER_INDEX_ADD_OP_ALL_INDEX_TYPES(half2);
+
+template <typename T>
+kernel void flip_direct(
+    device void* output [[buffer(0)]],
+    const device void* input [[buffer(1)]],
+    constant int* output_strides [[buffer(2)]],
+    constant int* input_strides [[buffer(3)]],
+    uint3 tid [[thread_position_in_grid]]) {
+  const int output_offset = int(tid.x) * output_strides[0] +
+      int(tid.y) * output_strides[1] + int(tid.z) * output_strides[2];
+  const int input_offset = int(tid.x) * input_strides[0] +
+      int(tid.y) * input_strides[1] + int(tid.z) * input_strides[2];
+  ref_at_offs<T>(output, long(output_offset)) =
+      val_at_offs<T>(input, long(input_offset));
+}
+
+template <typename T>
+kernel void flip(
+    device void* output [[buffer(0)]],
+    const device void* input [[buffer(1)]],
+    constant uint* sizes [[buffer(2)]],
+    constant int* output_strides [[buffer(3)]],
+    constant int* input_strides [[buffer(4)]],
+    constant uint& ndim [[buffer(5)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint linear_idx = tid;
+  int output_offset = 0;
+  int input_offset = 0;
+
+  for (uint dim = 0; dim < ndim; dim++) {
+    const uint size = sizes[dim];
+    const uint coord = safe_mod(linear_idx, size);
+    linear_idx /= size;
+    output_offset += coord * output_strides[dim];
+    input_offset += coord * input_strides[dim];
+  }
+
+  ref_at_offs<T>(output, output_offset) = val_at_offs<T>(input, input_offset);
+}
+
+#define REGISTER_FLIP_OP(SUFFIX, T)                                           \
+  template [[host_name("flip_direct_" #SUFFIX)]] kernel void flip_direct<T>(  \
+      device void*, const device void*, constant int*, constant int*, uint3); \
+  template [[host_name("flip_" #SUFFIX)]] kernel void flip<T>(                \
+      device void*,                                                           \
+      const device void*,                                                     \
+      constant uint*,                                                         \
+      constant int*,                                                          \
+      constant int*,                                                          \
+      constant uint&,                                                         \
+      uint);
+
+REGISTER_FLIP_OP(8bit, char);
+REGISTER_FLIP_OP(16bit, short);
+REGISTER_FLIP_OP(32bit, int);
+REGISTER_FLIP_OP(64bit, long);
 
 // Dim-based index_select gather: output[..., j, ...] = input[..., index[j],
 // ...] along reduce_dim. One thread per output element; templated by element
@@ -562,43 +644,10 @@ kernel void index_select_dim_dense(
 REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(int);
 REGISTER_INDEX_SELECT_DIM_DENSE_OP_ALL_SIZES(long);
 
-template <typename StridesT, typename DataT>
-kernel void kernel_index_offsets(
-    constant StridesT* strides [[buffer(0)]],
-    device DataT* data_offsets [[buffer(1)]],
-    constant uint* iter_shape [[buffer(2)]],
-    constant uint& num_dimensions [[buffer(3)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  data_offsets[thread_index] = 0;
-  uint32_t idx = thread_index;
-  for (uint32_t dim = 0; dim < num_dimensions; dim++) {
-    uint32_t remainder = idx % iter_shape[dim];
-    idx /= iter_shape[dim];
-
-    data_offsets[thread_index] += remainder * DataT(strides[dim]);
-  }
-}
-
-template [[host_name("kernel_index_offsets_32")]] kernel void
-kernel_index_offsets<packed_uint3, uint3>(
-    constant packed_uint3* strides [[buffer(0)]],
-    device uint3* data_offsets [[buffer(1)]],
-    constant uint* iter_shape [[buffer(2)]],
-    constant uint& num_dimensions [[buffer(3)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template [[host_name("kernel_index_offsets_64")]] kernel void
-kernel_index_offsets<packed_uint3, ulong3>(
-    constant packed_uint3* strides [[buffer(0)]],
-    device ulong3* data_offsets [[buffer(1)]],
-    constant uint* iter_shape [[buffer(2)]],
-    constant uint& num_dimensions [[buffer(3)]],
-    uint thread_index [[thread_position_in_grid]]);
-
 template <typename T>
 kernel void masked_fill_scalar_dense(
     device T* input,
-    constant bool* mask,
+    device const bool* mask,
     constant T& val,
     uint thread_index [[thread_position_in_grid]]) {
   if (mask[thread_index]) {
@@ -609,7 +658,7 @@ kernel void masked_fill_scalar_dense(
 template <typename T>
 kernel void masked_fill_scalar_broadcast(
     device T* input,
-    constant bool* mask,
+    device const bool* mask,
     constant T& val,
     constant uint& mask_numel,
     uint thread_index [[thread_position_in_grid]]) {
@@ -621,12 +670,12 @@ kernel void masked_fill_scalar_broadcast(
 template <typename T>
 kernel void masked_fill_scalar_strided(
     device T* input,
-    constant bool* mask,
+    device const bool* mask,
     constant T& val,
     constant long* sizes,
     constant long* input_strides,
     constant long* mask_strides,
-    device uint& ndim,
+    constant uint& ndim,
     uint thread_index [[thread_position_in_grid]]) {
   int pos[max_ndim];
   pos_from_thread_index(int(thread_index), pos, sizes, ndim);
@@ -638,8 +687,8 @@ kernel void masked_fill_scalar_strided(
 template <typename T, typename index_t, typename OffsetT>
 kernel void index_copy_dense(
     device T* output,
-    constant T* source,
-    constant index_t* indices,
+    device const T* source,
+    device const index_t* indices,
     constant long& dim_size,
     constant long& inner,
     constant long& indices_numel,
@@ -655,8 +704,8 @@ kernel void index_copy_dense(
 template <typename T, typename index_t, typename OffsetT>
 kernel void index_copy_strided(
     device T* output,
-    constant T* source,
-    constant index_t* indices,
+    device const T* source,
+    device const index_t* indices,
     constant long& dim_size,
     constant long& dim_out_stride, // result.stride(dim)
     constant long& dim_source_stride, // source.stride(dim)
@@ -691,7 +740,7 @@ kernel void index_copy_strided(
 template <typename T>
 kernel void index_fill_dense(
     device T* output,
-    constant long* indices,
+    device const long* indices,
     constant T& fill_val,
     constant long& dim_size,
     constant long&
@@ -715,7 +764,7 @@ kernel void index_fill_dense(
 template <typename T>
 kernel void index_fill_strided(
     device T* output,
-    constant long* indices,
+    device const long* indices,
     constant T& fill_val,
     constant long& dim_size,
     constant long& dim_out_stride, // output.stride(dim)
@@ -755,7 +804,7 @@ kernel void index_fill_zero_mask(
 
 kernel void index_fill_set_mask(
     device bool* mask,
-    constant long* indices,
+    device const long* indices,
     constant long& dim_size,
     constant long& indices_stride,
     uint thread_index [[thread_position_in_grid]]) {
@@ -774,7 +823,7 @@ kernel void index_fill_set_mask(
 template <typename T>
 kernel void index_fill_dense_from_mask(
     device T* output,
-    constant bool* mask,
+    device const bool* mask,
     constant T& fill_val,
     constant uint& dim_size,
     constant uint& inner_size,
@@ -792,7 +841,7 @@ kernel void index_fill_dense_from_mask(
 template <typename T>
 kernel void index_fill_strided_from_mask(
     device T* output,
-    constant bool* mask,
+    device const bool* mask,
     constant T& fill_val,
     constant long* sizes,
     constant long* out_strides,
@@ -811,7 +860,7 @@ kernel void index_fill_strided_from_mask(
   template [[host_name("index_fill_dense_" #T)]]   \
   kernel void index_fill_dense<T>(                 \
       device T*,                                   \
-      constant long*,                              \
+      device const long*,                          \
       constant T&,                                 \
       constant long&,                              \
       constant long&,                              \
@@ -820,7 +869,7 @@ kernel void index_fill_strided_from_mask(
   template [[host_name("index_fill_strided_" #T)]] \
   kernel void index_fill_strided<T>(               \
       device T*,                                   \
-      constant long*,                              \
+      device const long*,                          \
       constant T&,                                 \
       constant long&,                              \
       constant long&,                              \
@@ -835,8 +884,8 @@ kernel void index_fill_strided_from_mask(
   template [[host_name("index_copy_dense_" #T "_" #index_t "_" #OBITS)]]   \
   kernel void index_copy_dense<T, index_t, OffsetT>(                       \
       device T*,                                                           \
-      constant T*,                                                         \
-      constant index_t*,                                                   \
+      device const T*,                                                     \
+      device const index_t*,                                               \
       constant long&,                                                      \
       constant long&,                                                      \
       constant long&,                                                      \
@@ -845,8 +894,8 @@ kernel void index_fill_strided_from_mask(
   template [[host_name("index_copy_strided_" #T "_" #index_t "_" #OBITS)]] \
   kernel void index_copy_strided<T, index_t, OffsetT>(                     \
       device T*,                                                           \
-      constant T*,                                                         \
-      constant index_t*,                                                   \
+      device const T*,                                                     \
+      device const index_t*,                                               \
       constant long&,                                                      \
       constant long&,                                                      \
       constant long&,                                                      \
@@ -866,19 +915,23 @@ kernel void index_fill_strided_from_mask(
   template [[host_name("masked_fill_scalar_strided_" #SIZE)]] kernel void   \
   masked_fill_scalar_strided<DTYPE>(                                        \
       device DTYPE*,                                                        \
-      constant bool*,                                                       \
+      device const bool*,                                                   \
       constant DTYPE&,                                                      \
       constant long*,                                                       \
       constant long*,                                                       \
       constant long*,                                                       \
-      device uint&,                                                         \
+      constant uint&,                                                       \
       uint);                                                                \
   template [[host_name("masked_fill_scalar_dense_" #SIZE)]] kernel void     \
   masked_fill_scalar_dense<DTYPE>(                                          \
-      device DTYPE*, constant bool*, constant DTYPE&, uint);                \
+      device DTYPE*, device const bool*, constant DTYPE&, uint);            \
   template [[host_name("masked_fill_scalar_broadcast_" #SIZE)]] kernel void \
   masked_fill_scalar_broadcast<DTYPE>(                                      \
-      device DTYPE*, constant bool*, constant DTYPE&, constant uint&, uint)
+      device DTYPE*,                                                        \
+      device const bool*,                                                   \
+      constant DTYPE&,                                                      \
+      constant uint&,                                                       \
+      uint)
 
 REGISTER_MASKED_FILL_SCALAR(64bit, long);
 REGISTER_MASKED_FILL_SCALAR(32bit, int);
@@ -924,7 +977,7 @@ INSTANTIATE_INDEX_FILL(half2);
   template [[host_name("index_fill_dense_from_mask_" #T)]]   \
   kernel void index_fill_dense_from_mask<T>(                 \
       device T*,                                             \
-      constant bool*,                                        \
+      device const bool*,                                    \
       constant T&,                                           \
       constant uint&,                                        \
       constant uint&,                                        \
@@ -932,7 +985,7 @@ INSTANTIATE_INDEX_FILL(half2);
   template [[host_name("index_fill_strided_from_mask_" #T)]] \
   kernel void index_fill_strided_from_mask<T>(               \
       device T*,                                             \
-      constant bool*,                                        \
+      device const bool*,                                    \
       constant T&,                                           \
       constant long*,                                        \
       constant long*,                                        \
@@ -954,9 +1007,9 @@ INSTANTIATE_INDEX_FILL_FROM_MASK(half2)
 
 // Nonzero kernel implementation using prefix-sum + scatter approach.
 //
-// Step 1 (count_nonzero_prefix_sum): Each threadgroup computes an exclusive
-// prefix sum of the nonzero flags over its chunk. Per-threadgroup totals are
-// written to block_sums.
+// Step 1 (count_nonzero_prefix_sum): Each threadgroup computes a block-local
+// prefix sum of the nonzero flags over its chunk and writes its per-block
+// total to block_sums.
 //
 // Step 2 (prefix_sum_blocks_uint): A single threadgroup computes the exclusive
 // prefix sum of block_sums → block_offsets and writes the total nonzero count
@@ -965,7 +1018,8 @@ INSTANTIATE_INDEX_FILL_FROM_MASK(half2)
 //
 // Step 3 (scatter_nonzero_indices): Each thread with a nonzero element writes
 // its multi-dimensional indices into the output at the position determined by
-// block_offsets[tgid] + prefix[tid].
+// block_offsets[tgid] plus an intra-block prefix recomputed in threadgroup
+// memory.
 
 template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
 inline bool is_nonzero(T val) {
@@ -989,14 +1043,14 @@ inline bool is_nonzero(T val) {
 // (Metal 3.x cannot simd_shuffle 64-bit integers, so the i64 path scans in
 // threadgroup memory.) The input flat index is a separate concern, widened via
 // the index_t template parameter (see scatter_nonzero_indices).
+
 template <typename T, typename index_t>
 [[max_total_threads_per_threadgroup(1024)]]
 kernel void count_nonzero_prefix_sum(
     const device T* input [[buffer(0)]],
-    device uint* prefix [[buffer(1)]],
-    device uint* block_sums [[buffer(2)]],
-    constant ulong& flat_base [[buffer(3)]],
-    constant uint& block_base [[buffer(4)]],
+    device uint* block_sums [[buffer(1)]],
+    constant ulong& flat_base [[buffer(2)]],
+    constant uint& block_base [[buffer(3)]],
     uint tid [[thread_position_in_grid]],
     uint lid [[thread_position_in_threadgroup]],
     uint tgsize [[threads_per_threadgroup]],
@@ -1015,6 +1069,7 @@ kernel void count_nonzero_prefix_sum(
 
   // Inclusive prefix sum within SIMD group using shuffle
   uint val = flag;
+
   for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
     uint other = simd_shuffle_and_fill_up(val, 0u, static_cast<ushort>(offset));
     val += other;
@@ -1051,10 +1106,6 @@ kernel void count_nonzero_prefix_sum(
     simdgroup_offsets[simd_lane_id] = exclusive;
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  uint exclusive_val = val - flag + simdgroup_offsets[simd_group_id];
-
-  prefix[gid] = exclusive_val;
 
   if (lid == tgsize - 1) {
     block_sums[block_base + tgid] =
@@ -1203,27 +1254,73 @@ kernel void prefix_sum_blocks_ulong(
 // The output position and its address arithmetic are 64-bit: the nonzero count
 // (hence pos) can exceed UINT32_MAX for a large dense input, and pos * ndim can
 // exceed it even when pos and ndim individually fit in uint32.
+
 template <typename T, typename index_t>
 [[max_total_threads_per_threadgroup(1024)]]
 kernel void scatter_nonzero_indices(
     const device T* input [[buffer(0)]],
-    const device uint* prefix [[buffer(1)]],
-    device int64_t* output [[buffer(2)]],
-    constant int& ndim [[buffer(3)]],
-    constant int64_t* sizes [[buffer(4)]],
-    constant long* block_offsets [[buffer(5)]],
-    constant long& max_entries [[buffer(6)]],
-    constant ulong& flat_base [[buffer(7)]],
-    constant uint& block_base [[buffer(8)]],
+    device int64_t* output [[buffer(1)]],
+    constant int& ndim [[buffer(2)]],
+    constant int64_t* sizes [[buffer(3)]],
+    constant long* block_offsets [[buffer(4)]],
+    constant long& max_entries [[buffer(5)]],
+    constant ulong& flat_base [[buffer(6)]],
+    constant uint& block_base [[buffer(7)]],
     uint tid [[thread_position_in_grid]],
-    uint tgid [[threadgroup_position_in_grid]]) {
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tgsize [[threads_per_threadgroup]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
+  uint num_simds = (tgsize + simdgroup_size - 1) / simdgroup_size;
   // Chunked dispatch: map chunk-local tid/tgid to the global element/block.
   ulong gid = flat_base + tid;
-  if (!is_nonzero(input[gid]))
+  uint flag = is_nonzero(input[gid]) ? 1u : 0u;
+
+  // Recompute the intra-block exclusive prefix (same scan as step 1) instead
+  // of loading it from a numel-sized device buffer. All threads participate —
+  // zero elements contribute 0-flags and must reach both barriers before any
+  // early exit.
+  uint val = flag;
+  for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
+    uint other = simd_shuffle_and_fill_up(val, 0u, static_cast<ushort>(offset));
+    val += other;
+  }
+
+  threadgroup uint simdgroup_totals[32];
+  bool is_last_lane_in_simd;
+  if (simd_group_id < num_simds - 1) {
+    is_last_lane_in_simd = (simd_lane_id == simdgroup_size - 1);
+  } else {
+    uint lanes_in_last = tgsize - simd_group_id * simdgroup_size;
+    is_last_lane_in_simd = (simd_lane_id == lanes_in_last - 1);
+  }
+  if (is_last_lane_in_simd) {
+    simdgroup_totals[simd_group_id] = val;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  threadgroup uint simdgroup_offsets[32];
+  if (simd_group_id == 0) {
+    uint sg_val =
+        (simd_lane_id < num_simds) ? simdgroup_totals[simd_lane_id] : 0u;
+    for (uint offset = 1; offset < simdgroup_size; offset <<= 1) {
+      uint other =
+          simd_shuffle_and_fill_up(sg_val, 0u, static_cast<ushort>(offset));
+      sg_val += other;
+    }
+    uint exclusive =
+        simd_shuffle_and_fill_up(sg_val, 0u, static_cast<ushort>(1));
+    simdgroup_offsets[simd_lane_id] = exclusive;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // Past both barriers — zero elements may now leave.
+  if (flag == 0u)
     return;
 
+  uint exclusive_val = val - flag + simdgroup_offsets[simd_group_id];
   ulong pos =
-      static_cast<ulong>(block_offsets[block_base + tgid]) + prefix[gid];
+      static_cast<ulong>(block_offsets[block_base + tgid]) + exclusive_val;
   if (pos >= static_cast<ulong>(max_entries))
     return;
 
@@ -1240,17 +1337,16 @@ kernel void scatter_nonzero_indices(
 }
 
 // IDX (uint/ulong) is the flat-index width; it also names the registered
-// kernel. The buffers themselves are IDX-independent (prefix/block_sums stay
+// kernel. The buffers themselves are IDX-independent (block_sums stays
 // uint32, block_offsets/output stay int64), so only the template arg varies.
 #define REGISTER_NONZERO_KERNELS_FOR_IDX(DTYPE, IDX)          \
   template [[host_name("count_nonzero_prefix_sum_" #DTYPE     \
                        "_" #IDX)]] [[kernel]] void            \
   count_nonzero_prefix_sum<DTYPE, IDX>(                       \
       const device DTYPE* input [[buffer(0)]],                \
-      device uint* prefix [[buffer(1)]],                      \
-      device uint* block_sums [[buffer(2)]],                  \
-      constant ulong& flat_base [[buffer(3)]],                \
-      constant uint& block_base [[buffer(4)]],                \
+      device uint* block_sums [[buffer(1)]],                  \
+      constant ulong& flat_base [[buffer(2)]],                \
+      constant uint& block_base [[buffer(3)]],                \
       uint tid [[thread_position_in_grid]],                   \
       uint lid [[thread_position_in_threadgroup]],            \
       uint tgsize [[threads_per_threadgroup]],                \
@@ -1262,16 +1358,18 @@ kernel void scatter_nonzero_indices(
                        "_" #IDX)]] [[kernel]] void            \
   scatter_nonzero_indices<DTYPE, IDX>(                        \
       const device DTYPE* input [[buffer(0)]],                \
-      const device uint* prefix [[buffer(1)]],                \
-      device int64_t* output [[buffer(2)]],                   \
-      constant int& ndim [[buffer(3)]],                       \
-      constant int64_t* sizes [[buffer(4)]],                  \
-      constant long* block_offsets [[buffer(5)]],             \
-      constant long& max_entries [[buffer(6)]],               \
-      constant ulong& flat_base [[buffer(7)]],                \
-      constant uint& block_base [[buffer(8)]],                \
+      device int64_t* output [[buffer(1)]],                   \
+      constant int& ndim [[buffer(2)]],                       \
+      constant int64_t* sizes [[buffer(3)]],                  \
+      constant long* block_offsets [[buffer(4)]],             \
+      constant long& max_entries [[buffer(5)]],               \
+      constant ulong& flat_base [[buffer(6)]],                \
+      constant uint& block_base [[buffer(7)]],                \
       uint tid [[thread_position_in_grid]],                   \
-      uint tgid [[threadgroup_position_in_grid]])
+      uint tgid [[threadgroup_position_in_grid]],             \
+      uint tgsize [[threads_per_threadgroup]],                \
+      uint simd_lane_id [[thread_index_in_simdgroup]],        \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]])
 
 #define REGISTER_NONZERO_KERNELS(DTYPE)          \
   REGISTER_NONZERO_KERNELS_FOR_IDX(DTYPE, uint); \

@@ -2305,12 +2305,6 @@ TEST_F(ModulesTest, CosineSimilarity) {
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
-
-  // keepdim=true should preserve the reduced dimension
-  CosineSimilarity cos_keepdim(CosineSimilarityOptions().dim(1).keepdim(true));
-  auto out_keepdim = cos_keepdim->forward(input1.detach(), input2.detach());
-  ASSERT_EQ(out_keepdim.sizes(), torch::IntArrayRef({2, 1}));
-  ASSERT_TRUE(out_keepdim.squeeze(1).allclose(expected, 1e-04));
 }
 
 TEST_F(ModulesTest, SoftMarginLossDefaultOptions) {
@@ -3199,6 +3193,33 @@ TEST_F(ModulesTest, PoissonNLLLoss) {
     ASSERT_TRUE(torch::allclose(
         torch::mean(component_wise_loss), loss->forward(input, target)));
   }
+}
+
+TEST_F(ModulesTest, MultiheadAttentionZeroNumHeads) {
+  // num_heads == 0 used to reach `embed_dim / num_heads` and crash the process
+  // with an integer division by zero. See gh-106700.
+  ASSERT_THROWS_WITH(
+      MultiheadAttention(MultiheadAttentionOptions(4, 0)),
+      "num_heads must be greater than 0");
+
+  auto query = torch::randn({2, 1, 4});
+  ASSERT_THROWS_WITH(
+      torch::nn::functional::multi_head_attention_forward(
+          query,
+          query,
+          query,
+          torch::nn::functional::MultiheadAttentionForwardFuncOptions(
+              /*embed_dim_to_check=*/4,
+              /*num_heads=*/0,
+              /*in_proj_weight=*/torch::randn({12, 4}),
+              /*in_proj_bias=*/torch::zeros({12}),
+              /*bias_k=*/torch::Tensor(),
+              /*bias_v=*/torch::Tensor(),
+              /*add_zero_attn=*/false,
+              /*dropout_p=*/0.0,
+              /*out_proj_weight=*/torch::randn({4, 4}),
+              /*out_proj_bias=*/torch::zeros({4}))),
+      "num_heads must be greater than 0");
 }
 
 TEST_F(ModulesTest, MarginRankingLoss) {
@@ -5132,11 +5153,10 @@ TEST_F(ModulesTest, PrettyPrintSoftMarginLoss) {
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
   ASSERT_EQ(
       c10::str(CosineSimilarity()),
-      "torch::nn::CosineSimilarity(dim=1, eps=1e-08, keepdim=false)");
+      "torch::nn::CosineSimilarity(dim=1, eps=1e-08)");
   ASSERT_EQ(
-      c10::str(CosineSimilarity(
-          CosineSimilarityOptions().dim(0).eps(0.5).keepdim(true))),
-      "torch::nn::CosineSimilarity(dim=0, eps=0.5, keepdim=true)");
+      c10::str(CosineSimilarity(CosineSimilarityOptions().dim(0).eps(0.5))),
+      "torch::nn::CosineSimilarity(dim=0, eps=0.5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {

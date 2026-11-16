@@ -20,7 +20,11 @@ import types
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+    xfailIfPy314Plus,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +216,8 @@ class RaisesDuringIter:
 
 class _ContainsBase:
     """Base test class for __contains__ protocol with parameterized types."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     thetype = None  # Override in subclass
     data = [1, 2, 3]
@@ -461,6 +467,8 @@ class RangeContainsTest(_ContainsBase, torch._dynamo.test_case.TestCase):
 class ContainsNonBoolReturnTest(torch._dynamo.test_case.TestCase):
     """Test __contains__ that returns non-bool truthy/falsy values."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -490,6 +498,8 @@ class ContainsNonBoolReturnTest(torch._dynamo.test_case.TestCase):
 class NoIterNoContainsTest(torch._dynamo.test_case.TestCase):
     """Tests for objects with neither __iter__ nor __contains__"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -516,6 +526,8 @@ class NoIterNoContainsTest(torch._dynamo.test_case.TestCase):
 
 class RaisesDuringIterTest(torch._dynamo.test_case.TestCase):
     """Tests for iterators that raise exceptions during iteration"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -545,6 +557,8 @@ class RaisesDuringIterTest(torch._dynamo.test_case.TestCase):
 class ContainsRaisesTypeErrorTest(torch._dynamo.test_case.TestCase):
     """Tests for __contains__ that raises TypeError"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -573,6 +587,8 @@ class ContainsRaisesTypeErrorTest(torch._dynamo.test_case.TestCase):
 
 class RangeContainsMiscTest(torch._dynamo.test_case.TestCase):
     """Specific tests for range __contains__ protocol"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -660,6 +676,8 @@ class SetInSetTest(torch._dynamo.test_case.TestCase):
     not hashable.  Ref: Objects/setobject.c::set_contains.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -716,6 +734,8 @@ class ContainsOrderTest(torch._dynamo.test_case.TestCase):
     must be observable.  Ref: Objects/listobject.c::list_contains.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -751,6 +771,8 @@ class DictViewContainsTest(torch._dynamo.test_case.TestCase):
     - values: linear scan comparing each stored value (PySequence_Contains).
     Ref: Objects/dictobject.c.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @make_dynamo_test
     def test_keys_contains(self):
@@ -798,6 +820,61 @@ class DictViewContainsTest(torch._dynamo.test_case.TestCase):
         d = {1: StopCompares()}
         with self.assertRaises(DoNotTestEq):
             _ = 0 in d.values()
+
+
+class ContainsNoneWithIter:
+    """__contains__ = None blocks the slot even though __iter__ exists."""
+
+    __contains__ = None
+
+    def __iter__(self):
+        return iter([1, 2, 3])
+
+
+class ContainsPropertyAttrError:
+    """Pre-3.14 slot_sq_contains PROPAGATES a bind-time AttributeError
+    (unlike slot_tp_iter, which blanket-clears lookup errors)."""
+
+    @property
+    def __contains__(self):  # noqa: PLE0302
+        raise AttributeError("gone")
+
+    def __iter__(self):
+        return iter([1, 2, 3])
+
+
+class ContainsNonBool:
+    def __contains__(self, item):
+        return 2
+
+
+@torch._dynamo.config.patch(enable_trace_unittest=True)
+class TestSpecialMethodContainsRegressions(torch._dynamo.test_case.TestCase):
+    """slot_sq_contains lookup semantics (Objects/typeobject.c)."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    @make_dynamo_test
+    def test_contains_none_is_not_a_container(self):
+        raised = False
+        try:
+            _ = 1 in ContainsNoneWithIter()
+        except TypeError as e:
+            raised = True
+            self.assertIn("is not a container", str(e))
+        self.assertTrue(raised)
+
+    # 3.14 slot_sq_contains clears a bind-time AttributeError and falls back to
+    # iteration; <3.14 propagates it. Dynamo does not model the 3.14 clearing yet.
+    @xfailIfPy314Plus
+    @make_dynamo_test
+    def test_contains_property_attribute_error_propagates(self):
+        with self.assertRaises(AttributeError):
+            _ = 1 in ContainsPropertyAttrError()
+
+    @make_dynamo_test
+    def test_contains_nonbool_return_coerced_to_bool(self):
+        self.assertIs(1 in ContainsNonBool(), True)
 
 
 if __name__ == "__main__":

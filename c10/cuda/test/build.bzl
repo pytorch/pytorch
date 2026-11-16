@@ -9,10 +9,50 @@ dsa_tests = [
 ]
 
 def define_targets(rules, gtest_deps):
+    rules.cuda_library(
+        name = "type_index_test",
+        srcs = ["util/TypeIndex_test.cu"],
+        target_compatible_with = rules.requires_cuda_enabled(),
+        deps = ["//c10/util:base", "@cuda"],
+    )
+
     rules.cc_test(
         name = "test",
         srcs = [
             "impl/CUDATest.cpp",
+        ],
+        target_compatible_with = rules.requires_cuda_enabled(),
+        deps = [
+            "//c10/cuda",
+        ] + gtest_deps,
+    )
+
+    rules.cc_test(
+        name = "expandable_segment_reserve_test",
+        srcs = [
+            "impl/CUDACachingAllocatorReserveTest.cpp",
+        ],
+        target_compatible_with = rules.requires_cuda_enabled(),
+        deps = [
+            "//c10/cuda",
+        ] + gtest_deps,
+    )
+
+    rules.cc_test(
+        name = "expandable_segment_reserve_device_test",
+        srcs = [
+            "impl/CUDACachingAllocatorReserveDeviceTest.cpp",
+        ],
+        target_compatible_with = rules.requires_cuda_enabled(),
+        deps = [
+            "//c10/cuda",
+        ] + gtest_deps,
+    )
+
+    rules.cc_test(
+        name = "expandable_segment_ipc_reserve_test",
+        srcs = [
+            "impl/CUDACachingAllocatorIpcReserveTest.cpp",
         ],
         target_compatible_with = rules.requires_cuda_enabled(),
         deps = [
