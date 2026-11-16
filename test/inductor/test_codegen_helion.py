@@ -432,6 +432,12 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
             sources = self.compile(fn, x, tol=1e-4, helion=helion)
         self.assertEqual(len(sources), int(helion))
 
+    @config.patch({"helion.fast_math": True})
+    def test_fast_math(self, device):
+        fn = torch.nn.functional.gelu
+        (source,) = self.compile(fn, torch.randn(64, 100, device=device), tol=1e-4)
+        self.assertIn("fast_math=True", source)
+
 
 instantiate_device_type_tests(TestHelion, globals(), only_for=GPU_TYPE)
 

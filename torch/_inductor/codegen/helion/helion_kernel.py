@@ -428,6 +428,8 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         if self.has_fp32_dot:
             tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
             settings += f', dot_precision="{"tf32" if tf32 else "ieee"}"'
+        if config.helion.fast_math:
+            settings += ", fast_math=True"
         code.writeline(f"@helion.kernel({settings})")
         names = self.kernel_arg_names()
         signature = ", ".join(f"{name}: torch.Tensor" for name in names.values())

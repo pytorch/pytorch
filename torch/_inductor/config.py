@@ -3289,6 +3289,9 @@ class helion:
     native_matmul: bool = os.getenv("TORCHINDUCTOR_HELION_NATIVE_MATMUL", "1") == "1"
     backend: Literal["triton", "cute"] = "triton"
     autotune_effort: Literal["none", "quick", "full"] = "quick"
+    # Helion's fast_math: approximate fp32 division, exp, erf and rsqrt. Off, as in
+    # Triton kernels.
+    fast_math: bool = False
 
 
 # create a directory containing lots of debug information
