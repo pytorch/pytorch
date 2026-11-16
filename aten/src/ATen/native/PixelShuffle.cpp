@@ -3,7 +3,6 @@
 #include <ATen/native/cpu/PixelShuffleKernel.h>
 #include <ATen/native/PixelShuffle.h>
 
-#include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

@@ -12,6 +12,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
@@ -270,7 +271,7 @@ def _single_tensor_rmsprop(
     momentum_buffer_list: list[Tensor],
     state_steps: list[Tensor],
     *,
-    lr: float,
+    lr: float | Tensor,
     alpha: float,
     eps: float,
     weight_decay: float,
@@ -334,9 +335,9 @@ def _single_tensor_rmsprop(
             if is_complex_param:
                 buf = torch.view_as_real(buf)
             buf.mul_(momentum).addcdiv_(grad, avg)
-            param.add_(buf, alpha=-lr)
+            param.add_(buf, alpha=-lr)  # type: ignore[arg-type]
         else:
-            param.addcdiv_(grad, avg, value=-lr)
+            param.addcdiv_(grad, avg, value=-lr)  # type: ignore[arg-type]
 
 
 def _multi_tensor_rmsprop(
@@ -347,7 +348,7 @@ def _multi_tensor_rmsprop(
     momentum_buffer_list: list[Tensor],
     state_steps: list[Tensor],
     *,
-    lr: float,
+    lr: float | Tensor,
     alpha: float,
     eps: float,
     weight_decay: float,
@@ -460,7 +461,7 @@ def _multi_tensor_rmsprop(
                 momentum_lr = torch._foreach_mul(grouped_momentum_buffer_list, -lr)
                 torch._foreach_add_(grouped_params, momentum_lr)
             else:
-                torch._foreach_add_(
+                torch._foreach_add_(  # type: ignore[arg-type]
                     grouped_params, grouped_momentum_buffer_list, alpha=-lr
                 )
         else:
@@ -470,7 +471,9 @@ def _multi_tensor_rmsprop(
                 torch._foreach_div_(avg, -lr)
                 torch._foreach_addcdiv_(grouped_params, grouped_grads, avg)
             else:
-                torch._foreach_addcdiv_(grouped_params, grouped_grads, avg, value=-lr)
+                torch._foreach_addcdiv_(  # type: ignore[arg-type]
+                    grouped_params, grouped_grads, avg, value=-lr
+                )
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_rmsprop)
@@ -489,17 +492,13 @@ def rmsprop(
     capturable: bool = False,
     has_complex: bool = False,
     *,
-    lr: float,
+    lr: float | Tensor,
     alpha: float,
     eps: float,
     weight_decay: float,
     momentum: float,
     centered: bool,
 ) -> None:
-    r"""Functional API that performs rmsprop algorithm computation.
-
-    See :class:`~torch.optim.RMSProp` for details.
-    """
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
     if not torch.compiler.is_compiling() and not all(
@@ -540,3 +539,6 @@ def rmsprop(
         differentiable=differentiable,
         has_complex=has_complex,
     )
+
+
+rmsprop.__doc__ = _functional_api_doc.format(optimizer="RMSprop")

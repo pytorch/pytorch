@@ -1,8 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/Resize.h>
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/native/ResizeCommon.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -96,7 +95,7 @@ const Tensor& resize_cuda_(
     self_->empty_tensor_restride(memory_format);
   }
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+  if (at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory()) [[unlikely]] {
     at::native::fill_resize_deterministic_(self, static_cast<int64_t>(old_storage_nbytes));
   }
   return self;

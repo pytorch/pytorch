@@ -1,20 +1,29 @@
 # Owner(s): ["oncall: quantization"]
 
-import torch
 import unittest
-from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
+
+import torch
 from torch.ao.quantization.experimental.fake_quantize import APoTFakeQuantize
-from torch.ao.quantization.experimental.fake_quantize_function import fake_quantize_function
+from torch.ao.quantization.experimental.fake_quantize_function import (
+    fake_quantize_function,
+)
+from torch.ao.quantization.experimental.observer import APoTObserver
+from torch.ao.quantization.experimental.quantizer import dequantize_APoT, quantize_APoT
+from torch.testing._internal.common_utils import HardwareClassification
+
+
 forward_helper = fake_quantize_function.forward
 backward = fake_quantize_function.backward
 from torch.autograd import gradcheck
+
 
 class TestFakeQuantize(unittest.TestCase):
     r""" Tests fake quantize calculate_qparams() method
          by comparing with result from observer calculate_qparams.
          Uses hard-coded values: alpha=1.0, b=4, k=2.
     """
+    hw_classification = HardwareClassification.GENERIC
+
     def test_fake_calc_qparams(self):
         apot_fake = APoTFakeQuantize(b=4, k=2)
         apot_fake.activation_post_process.min_val = torch.tensor([0.0])

@@ -35,10 +35,11 @@ class SymT(Enum):
     # Inductor: An indexing variable i0 in loops IR which ranges over non-reduced
     # dim in the loop
     INDEX = auto()
-    # Inductor: A reduction indexing (r0, r1) variables in loops IR which ranges over
+    # Inductor: Reduction indexing (r0, r1, r2) variables in loops IR which range over
     # reduced dim(s) in the loop
     R0_INDEX = auto()
     R1_INDEX = auto()
+    R2_INDEX = auto()
     # Inductor: In templated kernels torch._inductor.kernel, we have a hook to
     # store the final output and append epilogue fusions.  To do this, we must
     # know what the indexes the outputs range over.  NB: These will also
@@ -47,7 +48,7 @@ class SymT(Enum):
     # Inductor: iteration domain for blockIdx.x/blockIdx.y
     XBLOCK = auto()
     YBLOCK = auto()
-    ZBLOCK = auto()
+    Z0_BLOCK = auto()
     # Inductor: this is used solely for dynamic_reshape_indexer
     VIEW = auto()
     # Alternate (non-modular) indexing used in halide kernels
@@ -69,10 +70,11 @@ prefix_str = {
     SymT.INDEX: "i",
     SymT.R0_INDEX: "r0_",
     SymT.R1_INDEX: "r1_",
+    SymT.R2_INDEX: "r2_",
     SymT.TEMPLATE_INDEX: "idx",
     SymT.XBLOCK: "x",
     SymT.YBLOCK: "y",
-    SymT.ZBLOCK: "z",
+    SymT.Z0_BLOCK: "z0_",
     SymT.INDIRECT: "indirect",  # false aliasing?
     SymT.VIEW: "view",
     SymT.HALIDE: "h",

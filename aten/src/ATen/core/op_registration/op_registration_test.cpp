@@ -16,7 +16,6 @@
 #include <ATen/core/Tensor.h>
 #include <functional>
 
-#include <ATen/core/LegacyTypeDispatch.h>
 
 #include <algorithm>
 
@@ -2209,6 +2208,24 @@ Tensor symint_op3(const Tensor& self, const c10::SymInt& length) {
   return self.clone();
 }
 
+Tensor symint_array_ref_op(
+    const Tensor& self,
+    const c10::SymIntArrayRef& sizes) {
+  return self.clone();
+}
+
+Tensor optional_symint_op(
+    const Tensor& self,
+    const std::optional<c10::SymInt>& length) {
+  return self.clone();
+}
+
+Tensor optional_symint_array_ref_op(
+    const Tensor& self,
+    const at::OptionalSymIntArrayRef& sizes) {
+  return self.clone();
+}
+
 TEST(OperatorRegistrationTest, TestSymSymRefCompatibility) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("_test::symint_op(Tensor self, SymInt length) -> Tensor");
@@ -2217,6 +2234,46 @@ TEST(OperatorRegistrationTest, TestSymSymRefCompatibility) {
   expectThrows<c10::Error>([&] {
     m_cpu.impl("symint_op", c10::DispatchKey::CPU, TORCH_FN(symint_op3));
   }, "doesn't match the expected function schema");
+}
+
+TEST(OperatorRegistrationTest, TestSymIntArrayRefErrorExplainsSupportedSignature) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::symint_array_ref_op(Tensor self, SymInt[] sizes) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+
+  expectThrows<c10::Error>([&] {
+    m_cpu.impl(
+        "symint_array_ref_op",
+        c10::DispatchKey::CPU,
+        TORCH_FN(symint_array_ref_op));
+  }, "pass SymInt and std::optional<SymInt> by value, and SymIntArrayRef and OptionalSymIntArrayRef directly (not as const references)");
+}
+
+TEST(OperatorRegistrationTest, TestOptionalSymIntErrorExplainsSupportedSignature) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::optional_symint_op(Tensor self, SymInt? length) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+
+  expectThrows<c10::Error>([&] {
+    m_cpu.impl(
+        "optional_symint_op",
+        c10::DispatchKey::CPU,
+        TORCH_FN(optional_symint_op));
+  }, "std::optional<SymInt> by value");
+}
+
+TEST(OperatorRegistrationTest, TestOptionalSymIntArrayRefErrorExplainsSupportedSignature) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def(
+      "_test::optional_symint_array_ref_op(Tensor self, SymInt[]? sizes) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+
+  expectThrows<c10::Error>([&] {
+    m_cpu.impl(
+        "optional_symint_array_ref_op",
+        c10::DispatchKey::CPU,
+        TORCH_FN(optional_symint_array_ref_op));
+  }, "OptionalSymIntArrayRef directly");
 }
 
 }

@@ -6,6 +6,7 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
+#include <c10/util/irange.h>
 
 namespace at::functorch {
 
@@ -32,8 +33,11 @@ static Tensor padRight(const Tensor& tensor, std::optional<int64_t> has_bdim, in
   if (tensor_logical_rank >= logical_rank) {
     return tensor;
   }
-  VmapDimVector new_sizes(tensor.sizes().begin(), tensor.sizes().end());
-  for (int64_t i = 0; i < logical_rank - tensor_logical_rank; i++) {
+  const auto tensor_sizes = tensor.sizes();
+  VmapDimVector new_sizes;
+  new_sizes.reserve(tensor_sizes.size() + logical_rank - tensor_logical_rank);
+  new_sizes.append(tensor_sizes.begin(), tensor_sizes.end());
+  for ([[maybe_unused]] const auto _ : c10::irange(logical_rank - tensor_logical_rank)) {
     new_sizes.push_back(1);
   }
   return tensor.view(new_sizes);

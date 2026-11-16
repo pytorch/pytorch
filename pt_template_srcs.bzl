@@ -4,7 +4,11 @@
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
-load(":build_variables.bzl", "aten_native_source_list")
+load(
+    ":build_variables.bzl",
+    "aten_native_source_list",
+    "aten_native_xnnpack_source_list",
+)
 load(
     ":ufunc_defs.bzl",
     "aten_ufunc_generated_cpu_kernel_sources",
@@ -13,10 +17,12 @@ load(
 
 # Files in this list are supposed to be built separately for each app,
 # for different operator allow lists.
-TEMPLATE_SOURCE_LIST = [
-    "torch/csrc/jit/runtime/register_prim_ops.cpp",
-    "torch/csrc/jit/runtime/register_special_ops.cpp",
-] + aten_native_source_list
+TEMPLATE_SOURCE_LIST = (
+    [
+        "torch/csrc/jit/runtime/register_prim_ops.cpp",
+        "torch/csrc/jit/runtime/register_special_ops.cpp",
+    ] + aten_native_source_list + aten_native_xnnpack_source_list
+)
 
 # For selective build, we can lump the CPU and CPU kernel sources altogether
 # because there is only ever one vectorization variant that is compiled

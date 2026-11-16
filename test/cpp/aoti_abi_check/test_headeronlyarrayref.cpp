@@ -2,6 +2,7 @@
 
 #include <torch/headeronly/util/HeaderOnlyArrayRef.h>
 
+#include <sstream>
 #include <vector>
 
 using torch::headeronly::HeaderOnlyArrayRef;
@@ -35,8 +36,7 @@ TEST(TestHeaderOnlyArrayRef, TestAPIs) {
 
 TEST(TestHeaderOnlyArrayRef, TestFromInitializerList) {
   std::vector<int> vec = {1, 2, 3, 4, 5, 6, 7};
-  std::initializer_list<int> il = {1, 2, 3, 4, 5, 6, 7};
-  HeaderOnlyArrayRef<int> arr(il);
+  HeaderOnlyArrayRef<int> arr({1, 2, 3, 4, 5, 6, 7});
   auto res_vec = arr.vec();
   for (size_t i = 0; i < vec.size(); i++) {
     EXPECT_EQ(vec[i], res_vec[i]);
@@ -85,4 +85,12 @@ TEST(TestHeaderOnlyArrayRef, TestEqualityOperators) {
   EXPECT_FALSE(diff_vec == arr);
   EXPECT_TRUE(arr != diff_vec);
   EXPECT_TRUE(diff_vec != arr);
+}
+
+TEST(TestHeaderOnlyArrayRef, TestStreamOperator) {
+  std::vector<int> vec = {1, 2, 3};
+  std::stringstream ss;
+  ss << HeaderOnlyArrayRef<int>() << HeaderOnlyArrayRef<int>(5)
+     << HeaderOnlyArrayRef<int>(vec);
+  EXPECT_EQ(ss.str(), "[][5][1, 2, 3]");
 }

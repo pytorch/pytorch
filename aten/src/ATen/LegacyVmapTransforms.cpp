@@ -65,7 +65,7 @@ VmapDimVector VmapPhysicalView::getPhysicalDims(OptionalIntArrayRef opt_logical_
       result.push_back(maybe_wrap_dim(dim, logical_ndim) + numBatchDims());
     }
   } else {
-    for (int64_t dim = 0; dim < logical_ndim; dim++) {
+    for (const auto dim : c10::irange(logical_ndim)) {
       result.push_back(dim + numBatchDims());
     }
   }
@@ -88,6 +88,7 @@ VmapDimVector VmapPhysicalView::getPhysicalShape(IntArrayRef logical_shape) cons
 
 static BatchDims computeFrontBatchDimsFromLevels(std::bitset<kVmapNumLevels> levels_bitset) {
   BatchDims bdims;
+  bdims.reserve(levels_bitset.count());
   int64_t dim = 0;
   for (const auto level : c10::irange(kVmapNumLevels)) {
     if (!levels_bitset[level]) {

@@ -274,7 +274,7 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 
 
 Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
-  TORCH_CHECK(self.is_floating_point(), "Only supports floating-point dtypes, but found: ", self.scalar_type());
+  TORCH_CHECK_TYPE(self.is_floating_point(), "Only supports floating-point dtypes, but found: ", self.scalar_type());
   auto input_sizes = self.sizes();
   DimVector out_sizes(input_sizes.begin(), input_sizes.end());
   auto last_dim = dim.back();
@@ -289,10 +289,12 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
                    self.const_data_ptr<float>(),
                    tensor_cdata<float>(out), compute_fct<float>(self, dim, normalization));
-  } else {
+  } else if (self.scalar_type() == kDouble) {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
                    self.const_data_ptr<double>(),
                    tensor_cdata<double>(out), compute_fct<double>(self, dim, normalization));
+  } else {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "real-to-complex FFT is not implemented for ", self.scalar_type(), " on CPU");
   }
 
   if (!onesided) {
@@ -355,7 +357,7 @@ static DftiDescriptor _plan_mkl_fft(
     switch (c10::toRealValueType(dtype)) {
       case ScalarType::Float: return DFTI_SINGLE;
       case ScalarType::Double: return DFTI_DOUBLE;
-      default: TORCH_CHECK(false, "MKL FFT doesn't support tensors of type: ", dtype);
+      default: TORCH_CHECK_NOT_IMPLEMENTED(false, "MKL FFT doesn't support tensors of type: ", dtype);
     }
   }();
   // signal type
@@ -381,8 +383,22 @@ static DftiDescriptor _plan_mkl_fft(
   TORCH_CHECK(in_strides[0] <= MKL_LONG_MAX && out_strides[0] <= MKL_LONG_MAX);
   MKL_LONG idist = in_strides[0];
   MKL_LONG odist = out_strides[0];
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_INPUT_DISTANCE, idist));
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_OUTPUT_DISTANCE, odist));
+  // MKL 2026.2 deprecates DFTI_{INPUT,OUTPUT}_{DISTANCE,STRIDES} in favor of the
+  // forward/backward domain names. The input of a forward transform is in the
+  // forward domain and its output is in the backward domain, and vice versa.
+#if INTEL_MKL_VERSION >= 20260200
+  const DFTI_CONFIG_PARAM in_distance_param = forward ? DFTI_FWD_DISTANCE : DFTI_BWD_DISTANCE;
+  const DFTI_CONFIG_PARAM out_distance_param = forward ? DFTI_BWD_DISTANCE : DFTI_FWD_DISTANCE;
+  const DFTI_CONFIG_PARAM in_strides_param = forward ? DFTI_FWD_STRIDES : DFTI_BWD_STRIDES;
+  const DFTI_CONFIG_PARAM out_strides_param = forward ? DFTI_BWD_STRIDES : DFTI_FWD_STRIDES;
+#else
+  const DFTI_CONFIG_PARAM in_distance_param = DFTI_INPUT_DISTANCE;
+  const DFTI_CONFIG_PARAM out_distance_param = DFTI_OUTPUT_DISTANCE;
+  const DFTI_CONFIG_PARAM in_strides_param = DFTI_INPUT_STRIDES;
+  const DFTI_CONFIG_PARAM out_strides_param = DFTI_OUTPUT_STRIDES;
+#endif
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), in_distance_param, idist));
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), out_distance_param, odist));
 
   // signal strides
   // first val is offset, set to zero (ignored)
@@ -392,8 +408,8 @@ static DftiDescriptor _plan_mkl_fft(
     mkl_istrides[i] = in_strides[i];
     mkl_ostrides[i] = out_strides[i];
   }
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_INPUT_STRIDES, mkl_istrides.data()));
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_OUTPUT_STRIDES, mkl_ostrides.data()));
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), in_strides_param, mkl_istrides.data()));
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), out_strides_param, mkl_ostrides.data()));
   // if conjugate domain of real is involved, set standard CCE storage type
   // this will become default in MKL in future
   if (!complex_input || !complex_output) {
@@ -425,6 +441,13 @@ static DftiDescriptor _plan_mkl_fft(
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
 static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
                          IntArrayRef dim, int64_t normalization, bool forward) {
+  // MKL DFTI rejects zero-element batches ("Inconsistent configuration
+  // parameters"). An empty batch has nothing to transform, so skip planning and
+  // execution and return the output in its expected (empty) shape.
+  if (out.numel() == 0) {
+    out.resize_(out_sizes, MemoryFormat::Contiguous);
+    return out;
+  }
   const auto ndim = self.dim();
   const int64_t signal_ndim = dim.size();
   const auto batch_dims = ndim - signal_ndim;
@@ -547,7 +570,7 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 
 // n-dimensional real to complex FFT
 Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
-  TORCH_CHECK(self.is_floating_point(), "Only supports floating-point dtypes, but found: ", self.scalar_type());
+  TORCH_CHECK_TYPE(self.is_floating_point(), "Only supports floating-point dtypes, but found: ", self.scalar_type());
   auto input_sizes = self.sizes();
   DimVector out_sizes(input_sizes.begin(), input_sizes.end());
   auto last_dim = dim.back();

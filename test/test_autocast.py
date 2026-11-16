@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyMPS,
+    skipCPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -155,27 +156,6 @@ class TestAutocastCPU(TestAutocast):
             self._run_autocast_outofplace(
                 op, args2, torch.float32, device="cpu", amp_dtype=torch.float16
             )
-
-    def test_autocast_rnn(self):
-        if (
-            torch.backends.mkldnn.is_available()
-            and torch.ops.mkldnn._is_mkldnn_bf16_supported()
-        ):
-            x = torch.randn(1, 2, 1)
-            hx = torch.randn(2, 2, 1)
-            cx = torch.randn(2, 2, 1)
-
-            m = torch.nn.LSTM(1, 1, 2).to(torch.bfloat16)
-
-            # Raise ValueError when autocast is not enabled
-            with self.assertRaisesRegex(
-                ValueError, r"RNN input dtype .* does not match weight dtype"
-            ):
-                m(x, (hx, cx))
-
-            # Should be able to run the below case with autocast
-            with torch.amp.autocast(device_type="cpu"):
-                m(x, (hx, cx))
 
     def test_autocast_disabled_with_fp32_dtype(self):
         with torch.autocast(device_type="cpu", dtype=torch.float32, enabled=False):
@@ -326,6 +306,28 @@ class TestAutocastDevice(TestCase):
             result = torch.mm(x, y)
             self.assertEqual(result.dtype, torch.bfloat16)
 
+    @skipCPUIf(
+        not torch.backends.mkldnn.is_available()
+        or not torch.ops.mkldnn._is_mkldnn_bf16_supported(),
+        "need MKLDNN with bfloat16 support",
+    )
+    def test_autocast_rnn(self, device):
+        x = torch.randn(1, 2, 1, device=device)
+        hx = torch.randn(2, 2, 1, device=device)
+        cx = torch.randn(2, 2, 1, device=device)
+
+        m = torch.nn.LSTM(1, 1, 2, device=device).to(torch.bfloat16)
+
+        # Raise ValueError when autocast is not enabled
+        with self.assertRaisesRegex(
+            ValueError, r"RNN input dtype .* does not match weight dtype"
+        ):
+            m(x, (hx, cx))
+
+        # Should be able to run the below case with autocast
+        with torch.amp.autocast(device_type=device):
+            m(x, (hx, cx))
+
 
 class TestTorchAutocast(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -474,8 +476,10 @@ class TestTorchAutocastDevice(TestCase):
             (out2.mean() + out4.mean()).backward()
 
 
-instantiate_device_type_tests(TestAutocastDevice, globals(), allow_mps=True)
-instantiate_device_type_tests(TestTorchAutocastDevice, globals())
+instantiate_device_type_tests(
+    TestAutocastDevice, globals(), allow_mps=True, allow_xpu=True
+)
+instantiate_device_type_tests(TestTorchAutocastDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

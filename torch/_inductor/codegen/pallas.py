@@ -888,7 +888,7 @@ class _BufferIndexing:
 class _BroadcastedIterVar:
     """Encapsulates information needed to codegen a broadcasted iteration var"""
 
-    # index of this var in `self.range_tree_nodes.items()``
+    # index of this var in `self.range_tree_nodes.items()`
     idx: int
     var_sym: sympy.Symbol
     entry: IterationRangesEntry
@@ -3332,7 +3332,7 @@ class PallasKernel(SIMDKernel):
 
         # Determine if this is a partial reduction (has pointwise dimensions)
         # or a full reduction to scalar
-        pointwise_prefixes = OrderedSet(["x", "y", "z"])
+        pointwise_prefixes = OrderedSet(["x", "y", "z0_"])
         has_pointwise = any(p in self.numels for p in pointwise_prefixes)
         pointwise_numel: int | None = self._compute_prefix_numel(pointwise_prefixes)
         reduction_numel: int | None = self._compute_reduction_numel()
