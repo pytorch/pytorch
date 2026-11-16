@@ -312,18 +312,6 @@ inline void stage(
   const bool first = NS ? NS == 1 : s == 0,
              last = global || (NS ? NS * R == N : s + 1 == p.nstages);
 
-  if IF_CONSTEXPR (global && R == kFFTUnpackRadix) {
-    if (lane < n / 2 + 1) {
-      // The unpack twiddle W_2n^k from sincos, avoiding a large table read.
-      float wr, wi = precise::sincos(-float(lane) * (M_PI_F / float(n)), wr);
-      const float2 a = cast_to<float2>(b.in[index_t(lane) * p.in_stride]);
-      const float2 c =
-          cast_to<float2>(b.in[index_t(lane ? n - lane : 0) * p.in_stride]);
-      unpack<I, O, F, N, C>(b, p, lane, float2(wr, wi), float4(a, c));
-    }
-    return;
-  }
-
   // Pow2 plans keep nR, Ns multiples of 16: padded smem slots are affine in r
   const uint nRv = valid ? nR : 0;
   const uint es = C ? 1 : p.es, rs = (nR + (nR >> sh)) * es,
@@ -400,6 +388,31 @@ inline void stage(
   threadgroup_barrier(mem_flags::mem_threadgroup);
 }
 
+template <uint R, bool P2, class I, class O, uint F, bool C, class index_t>
+inline void global_stage(
+    Bufs<I, O> b,
+    constant FFTParams<index_t>& p,
+    uint lane,
+    bool_constant<false>) {
+  stage<R, P2, I, O, F, 0, 0, C>(b, p, 0, lane, true);
+}
+
+template <uint R, bool P2, class I, class O, uint F, bool C, class index_t>
+inline void global_stage(
+    Bufs<I, O> b,
+    constant FFTParams<index_t>& p,
+    uint lane,
+    bool_constant<true>) {
+  if (lane < p.n / 2 + 1) {
+    // The unpack twiddle W_2n^k from sincos, avoiding a large table read.
+    float wr, wi = precise::sincos(-float(lane) * (M_PI_F / float(p.n)), wr);
+    const float2 a = cast_to<float2>(b.in[index_t(lane) * p.in_stride]);
+    const float2 c =
+        cast_to<float2>(b.in[index_t(lane ? p.n - lane : 0) * p.in_stride]);
+    unpack<I, O, F, 0, C>(b, p, lane, float2(wr, wi), float4(a, c));
+  }
+}
+
 // Same order as radices() in FastFourierTransform.mm: a power of two up to 16,
 // then 3, then 5
 constexpr uint first_radix(uint n) {
@@ -440,7 +453,9 @@ template <class I, class O, uint MASK, uint F, uint N, bool C, class index_t>
   const Bufs<I, O> bufs{ib, ob, cl, cs, tt, tw, buf + b * p.row, i0};
 
   if IF_CONSTEXPR (global) {
-    stage<__builtin_ctz(MASK), pow2, I, O, F, 0, 0, C>(bufs, p, 0, lane, valid);
+    constexpr uint r = __builtin_ctz(MASK);
+    constexpr bool unpacks = r == kFFTUnpackRadix;
+    global_stage<r, pow2, I, O, F, C>(bufs, p, lane, bool_constant<unpacks>{});
     return;
   }
 

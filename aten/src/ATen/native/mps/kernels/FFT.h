@@ -103,6 +103,11 @@ static_assert(std::ranges::all_of(kFFTRadices, [](int r) {
   return (kFFTMaskP235713 & (1u << r)) != 0;
 }));
 
+constexpr int64_t kFFTMaxTwoPassPoints = int64_t{kFFTMaxPoints} * kFFTMaxPoints;
+
+// A packed real transform has at least this many complex points: 2-point real
+// signals are not packed into 1-point transforms
+constexpr int64_t kFFTMinPackedPoints = 2;
 // Below this many elements, extra launches cost more than they save
 constexpr int64_t kFFTLongPoints = 1 << 17;
 // Past this length, tiles strided on both sides no longer coalesce

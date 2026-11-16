@@ -15573,7 +15573,9 @@ class TestCommon(TestCase):
         self.assertEqual(torch._fft_c2c(x, [-1], 0, True), torch.fft.fft(x))
         self.assertEqual(torch._fft_r2c(x.real[:, :0], [-1], 0, True), torch.zeros(3, 1, dtype=x.dtype, device=device))
 
+    @serialTest()
     @parametrize("n", [1 << 16, 176400, 16 * 3**6 * 13, 3**15, 25 * 13**5, 1 << 25])
+    @largeTensorTest("3GB")
     def test_rfft_long(self, device, n):
         # Packed four-step, global passes (packed radix 13 first), odd lengths without a two-pass split, above 2^24
         x = torch.randn(2, n)
@@ -15607,8 +15609,10 @@ class TestCommon(TestCase):
         reference = op(x.cpu().to(torch.complex128), dim=dim, norm="ortho")
         self.assertEqual(op(x, dim=dim, norm="ortho").cpu(), reference.to(torch.complex64))
 
+    @serialTest()
     @parametrize("n", [1009, 1031, 2062, 1 << 16, 2 * 8388617])
     @parametrize("dim", [0, 1])
+    @largeTensorTest("3GB")
     def test_fft_real_two_sided(self, device, n, dim):
         # Bluestein lengths (all but 1009 mirror on the host, the last past two tile passes) and a packed four-step
         x, kwargs = torch.randn((n, 3) if dim == 0 else (3, n)), {"dim": dim, "norm": "ortho"}

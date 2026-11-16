@@ -360,18 +360,22 @@ bool fits_one_pass(const Batch& b, int64_t n, bool chirped) {
   return n <= kFFTMaxPoints && !both;
 }
 
+int64_t pass_points(const Tensor& in, int64_t n) {
+  const int64_t m = !in.is_complex() && n % 2 == 0 && n != kFFTP16Points ? n / 2 : n;
+  return m >= kFFTMinPackedPoints && m <= kFFTMaxPoints ? m : n;
+}
+
 // n-point transforms of the batch: x.n_out outputs
 void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
   const auto n_sig = x.n_sig ? x.n_sig : n;
   const auto n_out = x.n_out ? x.n_out : n;
   const bool real = !b.in.is_complex();
   const int64_t m = real && n % 2 == 0 ? n / 2 : n;
-  const bool packed = !x.cl && !x.cs && n > 2 && m < n && m <= kFFTMaxPoints && n != kFFTP16Points;
-  const int64_t pass_n = packed ? m : n;
+  const int64_t pass_n = x.cl || x.cs ? n : pass_points(b.in, n);
   if (fits_one_pass(b, pass_n, x.cs.has_value())) {
     Pass p = x;
     p.tw = table(Table::W, n);
-    run([&](auto enc) { launch(enc, b, pass_n, inv, packed, p); });
+    run([&](auto enc) { launch(enc, b, pass_n, inv, pass_n < n, p); });
     return;
   }
 
@@ -424,7 +428,7 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
     if (n % d || !is_smooth(d) || !is_smooth(q)) {
       continue;
     }
-    nr = q <= kFFTMaxPoints && d % 2 == 0 && d > 2 && d <= 2 * kFFTMaxPoints ? d : nr;
+    nr = q <= kFFTMaxPoints && d % 2 == 0 && d / 2 >= kFFTMinPackedPoints && d / 2 <= kFFTMaxPoints ? d : nr;
     n1 = (q <= kFFTMaxPoints || nest) && (!nest || d <= kFFTMaxNestedColumns) ? d : n1;
   }
   r2c = r2c && nr;
@@ -526,7 +530,7 @@ void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool 
   auto tmp = at::empty(sizes, in.options().dtype(kComplexFloat)); // Several passes always run in fp32
   tmp = last ? tmp.movedim(-1, dim) : std::move(tmp);
   // Two tile passes fold every chirp into the kernels
-  if (M <= kFFTMaxPoints * kFFTMaxPoints) {
+  if (M <= kFFTMaxTwoPassPoints) {
     fft_pass(in, tmp, dim, M, false, {.n_sig = n, .scale = x.scale / M, .cl = c, .cs = B});
     return fft_pass(tmp, out, dim, M, true, {.n_out = n_out, .cs = c});
   }
@@ -539,10 +543,9 @@ void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool 
 
 // fp16 partials overflow and lose precision between passes, so transforms taking more than one pass run in fp32
 bool needs_fp32(const Tensor& in, const Tensor& out, IntArrayRef dim, int64_t n) {
-  const bool packed = !in.is_complex() && n % 2 == 0 && n > 2;
   return c10::toRealValueType(in.scalar_type()) == kHalf &&
       (dim.size() > 1 || !is_smooth(n) ||
-       !fits_one_pass(collapse(in, out, maybe_wrap_dim(dim.back(), in.dim())), packed ? n / 2 : n, false));
+       !fits_one_pass(collapse(in, out, maybe_wrap_dim(dim.back(), in.dim())), pass_points(in, n), false));
 }
 
 // Real lengths two tile passes cannot take run as complex transforms: powers of two and odd lengths above 2^24,
@@ -552,7 +555,7 @@ bool beyond_real_passes(int64_t n, bool onesided) {
   while (d <= kFFTMaxPoints && n % d) {
     d++;
   }
-  return n > kFFTMaxPoints * kFFTMaxPoints ? !(n & (n - 1)) || n % 2 : d > kFFTMaxPoints;
+  return n > kFFTMaxTwoPassPoints ? !(n & (n - 1)) || n % 2 : d > kFFTMaxPoints;
 }
 
 double norm_scale(int64_t normalization, const Tensor& t, IntArrayRef dims) {
@@ -591,12 +594,14 @@ Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
     out_sizes[last_dim] = out_sizes[last_dim] / 2 + 1;
   }
   at::native::resize_output_symint(out, out_sizes);
+  at::assert_no_internal_overlap(out);
   if (self.numel() == 0) {
     return out.zero_();
   }
 
   const auto n = self.size(last_dim);
-  if (needs_fp32(self, out, dim, n)) {
+  const bool overlap = out.is_alias_of(self) && at::get_overlap_status(out, self) != MemOverlapStatus::No;
+  if (overlap || needs_fp32(self, out, dim, n)) {
     return out.copy_(_fft_r2c_mps(self.to(kFloat), dim, normalization, onesided));
   }
   // The kernels with 64-bit offsets only take complex inputs
