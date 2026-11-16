@@ -91,13 +91,14 @@ JOB_RE = re.compile(
     r"(?P<job_name>test(?:-osdc)?) \((?P<config>[^,]+),\s*(?P<shard>\d+),\s*(?P<num_shards>\d+),\s*(?P<runner>[^)]+)\)"
 )
 
+TP_PERF_CONFIG = "inductor_huggingface_tp_perf"
 PERF_CONFIGS = re.compile(
-    r"inductor_(huggingface|timm|torchbench)_perf|inductor_huggingface_tp"
+    rf"inductor_(huggingface|timm|torchbench)_perf|{TP_PERF_CONFIG}"
 )
 
-# Tensor-parallel Hugging Face CSVs append the TP degree and phase to the config,
-# e.g. inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp2_decode.
-TP_CONFIG_SUFFIX = re.compile(r"_tp(?P<tp_size>\d+)_(?P<phase>prefill|decode)$")
+# Tensor-parallel Hugging Face CSVs append the phase and TP degree to the config,
+# e.g. inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2.
+TP_CONFIG_SUFFIX = re.compile(r"_(?P<phase>prefill|decode)_tp(?P<tp_size>\d+)$")
 
 SUITE_ALIASES = {
     "hf": "huggingface",
@@ -206,9 +207,7 @@ class ModelResult:
 
     @property
     def workload(self) -> tuple[int | None, ...]:
-        if TP_CONFIG_SUFFIX.search(self.config):
-            return self.batch_size, self.prompt_length, self.decode_length
-        return ()
+        return self.batch_size, self.prompt_length, self.decode_length
 
     @property
     def short_config(self) -> str:
@@ -310,19 +309,12 @@ def get_run_jobs(run_id: int) -> list[dict]:
 
 def get_perf_jobs(jobs: list[dict]) -> list[dict]:
     perf_jobs = []
-    separate_tp_perf = any(
-        (match := JOB_RE.search(job["name"]))
-        and match["config"] == "inductor_huggingface_tp_perf"
-        for job in jobs
-    )
     for job in jobs:
         m = JOB_RE.search(job["name"])
         if not m:
             continue
         config = m.group("config")
         if not PERF_CONFIGS.match(config):
-            continue
-        if separate_tp_perf and config == "inductor_huggingface_tp":
             continue
         if job.get("conclusion") != "success":
             continue
@@ -428,12 +420,17 @@ def parse_csvs(csv_pairs: list[tuple[str, str]], device: str = "") -> list[PerfD
     for csv_name, content in csv_pairs:
         # csv_name like: inductor_with_cudagraphs_huggingface_amp_training_cuda_performance.csv
         config = csv_name.replace("_performance.csv", "")
+        # TP comparisons pair rows with the same workload dimensions.
+        dimensions = ("batch_size", "prompt_length", "decode_length")
+        if not TP_CONFIG_SUFFIX.search(config):
+            dimensions = ()
         reader = csv.DictReader(io.StringIO(content))
         for row in reader:
             try:
                 speedup = float(row.get("speedup", 0))
             except (ValueError, TypeError):
                 continue
+            workload = {key: int(row[key]) for key in dimensions if row.get(key)}
             grouped[config].append(
                 ModelResult(
                     name=row.get("name", "?"),
@@ -445,14 +442,7 @@ def parse_csvs(csv_pairs: list[tuple[str, str]], device: str = "") -> list[PerfD
                     dynamo_peak_mem=float(row.get("dynamo_peak_mem", 0) or 0),
                     config=config,
                     device=device,
-                    **(
-                        {
-                            key: int(row[key]) if row.get(key) else None
-                            for key in ("batch_size", "prompt_length", "decode_length")
-                        }
-                        if TP_CONFIG_SUFFIX.search(config)
-                        else {}
-                    ),
+                    **workload,
                 )
             )
 
@@ -907,8 +897,11 @@ def resolve_runs(branch: str, devices: list[str]) -> dict[str, int]:
     return result
 
 
-def resolve_baseline(head_run_id: int) -> int:
-    """Find a main run with successful matching perf jobs, skipping the head."""
+def resolve_baseline(head_run_id: int) -> tuple[int, int]:
+    """Find a main run with successful matching perf jobs, skipping the head.
+
+    Returns the run ID and its latest attempt, the one whose jobs were checked.
+    """
     run_data = gh(
         "run",
         "view",
@@ -928,7 +921,7 @@ def resolve_baseline(head_run_id: int) -> int:
         tp_jobs = {
             (job["config"], job["runner"])
             for job in get_perf_jobs(get_run_jobs(head_run_id))
-            if job["config"].startswith("inductor_huggingface_tp")
+            if job["config"] == TP_PERF_CONFIG
         }
     if nightly_id is None:
         print(
@@ -951,7 +944,7 @@ def resolve_baseline(head_run_id: int) -> int:
         "--limit",
         "50" if periodic else "5",
         "--json",
-        "databaseId,createdAt,headBranch",
+        "databaseId,createdAt,headBranch,attempt",
         json_output=True,
     )
     # Skip the head run itself to avoid comparing a run to itself
@@ -967,7 +960,7 @@ def resolve_baseline(head_run_id: int) -> int:
                     continue
             created = run["createdAt"][:10]
             print(f"Baseline: run {baseline_id} (main, {created})")
-            return baseline_id
+            return baseline_id, run.get("attempt", 1)
 
     print(
         "No suitable baseline run found on main; use --baseline RUN_ID.",
@@ -1061,11 +1054,7 @@ def fetch_run_perf(
         sys.exit(1)
     jobs_by_device = defaultdict(list)
     for job in perf_jobs:
-        identity = (
-            job["runner"]
-            if job["config"].startswith("inductor_huggingface_tp")
-            else device
-        )
+        identity = job["runner"] if job["config"] == TP_PERF_CONFIG else device
         jobs_by_device[identity].append(job)
     results = []
     for identity, device_jobs in jobs_by_device.items():
@@ -1370,8 +1359,9 @@ def cmd_summary(args):
         base_perf: list[PerfData] = []
 
         for device, head_run_id in head_run_ids.items():
+            base_attempt = attempt
             if args.baseline == "latest":
-                baseline_id = resolve_baseline(head_run_id)
+                baseline_id, base_attempt = resolve_baseline(head_run_id)
             else:
                 try:
                     baseline_id = int(args.baseline)
@@ -1381,7 +1371,7 @@ def cmd_summary(args):
             print(f"Fetching baseline run {baseline_id} ({device})...")
             base_data = fetch_run_perf(
                 baseline_id,
-                attempt,
+                base_attempt,
                 args.no_cache,
                 device=device,
                 allow_empty=auto_discovered,
