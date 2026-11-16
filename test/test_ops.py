@@ -2997,6 +2997,29 @@ fake_op_db = [
     and "sparse" not in op.full_name
     and "jiterator" not in op.full_name
 ]
+# CPU OpInfos whose samples are supported by the initial C++ fake fallback.
+cpp_fake_ops = {
+    "abs",
+    "acos",
+    "add",
+    "ceil",
+    "clone",
+    "cos",
+    "exp",
+    "floor",
+    "isinf",
+    "log",
+    "mean",
+    "mul",
+    "neg",
+    "nn.functional.silu",
+    "sin",
+    "sqrt",
+    "sub",
+    "t",
+    "transpose",
+    "view_as_real",
+}
 
 
 @unMarkDynamoStrictTest
@@ -3020,6 +3043,11 @@ class TestFakeTensor(TestCase):
         self.addCleanup(cache_crosscheck.stop)
 
     def _test_fake_helper(self, device, dtype, op, context):
+        if torch._dynamo.config.use_cpp_fake_tensor:
+            if TEST_WITH_TORCHDYNAMO:
+                self.skipTest("Dynamo does not support C++ fakes as inputs yet")
+            if torch.device(device).type != "cpu" or op.name not in cpp_fake_ops:
+                self.skipTest("not yet covered by the C++ fake fallback tests")
         name = op.name
         if op.variant_test_name:
             name += "." + op.variant_test_name
