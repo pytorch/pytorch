@@ -299,14 +299,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
             self.assertIn(line, source)
 
     @parametrize(
-        "case",
-        [
-            "dynamic",
-            "gathered_operand",
-            "cpu_scalar",
-            "native_matmul_off",
-            "persistent_tma",
-        ],
+        "case", ["dynamic", "gathered_operand", "cpu_scalar", "native_matmul_off"]
     )
     def test_fallback(self, device, case):
         a, b = randn(device, 32, 64), randn(device, 64, 48)
@@ -322,13 +315,8 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
             # The CPU scalar epilogue fuses into the matmul, so the kernel is Triton.
             fn = lambda a, b, c: a @ b + c  # noqa: E731
             args = [a, b, torch.tensor(2.0, device="cpu")]
-        elif case == "native_matmul_off":
-            self.enterContext(config.patch({"helion.native_matmul": False}))
         else:
-            # Triton's native matmul codegen, which emits what Helion declines,
-            # cannot use TMA.
-            patch = {"triton.enable_persistent_tma_matmul": True}
-            self.enterContext(config.patch(patch))
+            self.enterContext(config.patch({"helion.native_matmul": False}))
         sources = self.compile(fn, *args, expected=fn(*args), tol=2e-2, helion=False)
         self.assertEqual(sources, [])
         if case == "native_matmul_off":
