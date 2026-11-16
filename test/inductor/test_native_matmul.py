@@ -294,6 +294,21 @@ class TestTritonDotReduction(TestCase):
             "tl.arange(0, R0_BLOCK)[None, None, None, :]"
         ).run(code)
 
+    def test_out_dtype(self):
+        x = torch.randn(40, 72, device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn(72, 136, device=GPU_TYPE, dtype=torch.bfloat16)
+        for f, args in [
+            (lambda x, y: torch.mm(x, y, out_dtype=torch.float32), (x, y)),
+            (
+                lambda x, y: torch.bmm(x, y, out_dtype=torch.float32),
+                (x.expand(3, 40, 72), y.expand(3, 72, 136)),
+            ),
+        ]:
+            torch._dynamo.reset()
+            actual = torch.compile(f)(*args)
+            self.assertEqual(actual.dtype, torch.float32)
+            self.assertEqual(actual, f(*args), atol=1e-4, rtol=1e-4)
+
     def test_zero_alpha_beta(self):
         M, K, N = 40, 72, 136
         cases = {

@@ -176,6 +176,12 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
         (source,) = self.compile(fn, a, b, tol=1e-3)
         self.assertIn("in0[tile_y, tile_r].to(torch.float32)", source)
 
+    def test_out_dtype(self, device):
+        fn = lambda a, b: torch.mm(a, b, out_dtype=torch.float32)  # noqa: E731
+        a, b = randn(device, 40, 72), randn(device, 72, 136)
+        (source,) = self.compile(fn, a, b, tol=1e-3)
+        self.assertIn("out0[tile_y, tile_x] = acc\n", source)
+
     def test_operand_view_of_dynamic_input(self, device):
         x = randn(device, 4, 40, 72)
         torch._dynamo.mark_dynamic(x, 0)
