@@ -8,11 +8,15 @@ import tempfile
 import typing_extensions
 import warnings
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
+
+
+if TYPE_CHECKING:
+    from torch._functorch._aot_autograd.utils import CompiledGraphWrapper
 
 
 _T = TypeVar("_T")
@@ -224,6 +228,10 @@ def log_trace_structured_event(*args, **kwargs) -> None:
 
 def log_cache_bypass(*args, **kwargs) -> None:
     pass
+
+
+def get_compiled_graph_wrapper() -> "CompiledGraphWrapper | None":
+    return None
 
 
 def log_torchscript_usage(api: str, **kwargs):
