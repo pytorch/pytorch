@@ -571,10 +571,10 @@ ownership:
       - /.ci/docker/: [atalman, huydhn, malfet]
   - name: inductor_ci
     labels: ["module: ci", "module: inductor"]
-    owners: [Chillee, desertfire, eellison, jataylo, jeffdaily, jithunnair-amd, pruthvistony]
+    owners: [Chillee, desertfire, eellison, jataylo, jeffdaily, jithunnair-amd, pruthvistony, atalman, njriasan, warrendeng]
     section: infra_ci
     paths:
-      - /.ci/docker/ci_commit_pins/triton.txt: [desertfire, Chillee, eellison, jeffdaily, jataylo, jithunnair-amd, pruthvistony]
+      - /.ci/docker/ci_commit_pins/triton.txt: [desertfire, Chillee, eellison, jeffdaily, jataylo, jithunnair-amd, pruthvistony, atalman, njriasan, warrendeng]
   - name: github_automation_ci
     labels: ["module: ci", "module: github automation"]
     owners: [atalman, drisspg, huydhn, izaitsevfb, jeanschmidt]
