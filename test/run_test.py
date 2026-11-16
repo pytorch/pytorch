@@ -505,57 +505,6 @@ FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
 CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
-FAKETENSOR_TESTS = {
-    test
-    for test in TESTS
-    if test.startswith(
-        (
-            "dynamo/",
-            "inductor/",
-            "export/",
-            "functorch/",
-            "higher_order_ops/",
-            "onnx/exporter/",
-        )
-    )
-    or test
-    in {
-        "test_fake_tensor",
-        "test_python_dispatch",
-        "test_custom_ops",
-        "test_ops",
-        "test_proxy_tensor",
-        "test_fx",
-        "test_fx_experimental",
-        "test_fx_const_fold",
-        "test_fx_reinplace_pass",
-        "test_functionalization",
-        "test_decomp",
-        "test_dynamic_shapes",
-        "test_symbolic_shapes",
-        "test_precompile",
-        "test_serialization",
-        "onnx/test_fx_type_promotion",
-        "distributed/test_c10d_functional_native",
-        "distributed/test_aten_comm_compute_reordering",
-        "distributed/test_compute_comm_reordering",
-        "distributed/tensor/parallel/test_micro_pipeline_tp",
-        "distributed/_composable/fsdp/test_fully_shard_comm",
-        "distributed/_composable/fsdp/test_fully_shard_training",
-        "distributed/_composable/fsdp/test_fully_shard_state_dict",
-        "distributed/_composable/fsdp/test_fully_shard_frozen",
-        "distributed/_composable/fsdp/test_fully_shard_mixed_precision",
-        "distributed/_composable/fsdp/test_fully_shard_clip_grad_norm_",
-        "distributed/fsdp/test_fsdp_tp_integration",
-    }
-    or (
-        test.startswith("distributed/")
-        and (
-            any(part in test for part in ("compile", "dynamo", "inductor"))
-            or test.startswith("distributed/_tools/")
-        )
-    )
-}
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
 
@@ -1832,11 +1781,6 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--include-faketensor-tests",
-        action="store_true",
-        help="Run FakeTensor, tracing, and compiler integration tests.",
-    )
-    parser.add_argument(
         "--include-inductor-core-tests",
         "--include-inductor-core-tests",
         action="store_true",
@@ -2160,10 +2104,6 @@ def can_run_in_pytest(test):
 def get_selected_tests(options) -> list[str]:
     selected_tests = options.include
 
-    if options.include_faketensor_tests:
-        selected_tests = [test for test in selected_tests if test in FAKETENSOR_TESTS]
-        options.enable_td = False
-
     # filter if there's JIT only and distributed only test options
     if options.jit:
         selected_tests = list(
@@ -2257,7 +2197,7 @@ def get_selected_tests(options) -> list[str]:
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
     if options.onnx:
         selected_tests = onnx_tests
-    elif not options.include_faketensor_tests:
+    else:
         # Exclude all onnx tests otherwise
         options.exclude.extend(onnx_tests)
 
