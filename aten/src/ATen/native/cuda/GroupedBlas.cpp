@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <sstream>
@@ -1101,8 +1102,9 @@ static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_
 }
 
 // hipBLASLt runs one GEMM per expert, each with a fixed cost, but beats ck_tile's single persistent kernel once each
-// expert's GEMM is long: its compute time at the datasheet peak plus 5x its output write time at DRAM bandwidth (ck_tile's
-// per-tile epilogue cost) above 30.55 us. Fitted on the op benchmark's MoE shapes on MI300X and MI355X; GPUs without
+// expert is large: per-expert M * N * sqrt(K) of the forward GEMM above 3.165e-13 * (FLOP/s * bytes/s)^0.75, from the
+// GPU's datasheet TFLOPS for the dtype and DRAM bandwidth. Every call evaluates the forward GEMM's dims, so a layer's
+// forward, dX and dW pick the same backend. Fitted on the op benchmark's MoE shapes on MI300X and MI355X; GPUs without
 // datasheet numbers stay on hipBLASLt.
 static bool should_use_ck_tile_group_gemm(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
   const bool a_is_2d = mat_a.dim() == 2;
@@ -1113,13 +1115,17 @@ static bool should_use_ck_tile_group_gemm(const Tensor& mat_a, const Tensor& mat
   const double m = mat_a.size(-2) / (a_is_2d && !b_is_2d ? experts : 1);
   const double n = mat_b.size(-1) / (b_is_2d && !a_is_2d ? experts : 1);
   const double k = mat_a.size(-1) / (a_is_2d && b_is_2d ? experts : 1);
+  // The forward GEMM's K is this call's k in forward and its n in dX (row-major A and B) and dW (2D x 2D), matching
+  // group_gemm_ck_tile's layout canonicalization.
+  const bool b_row_major = !check_valid_strides_and_return_transposed(mat_b);
+  const bool grad = (a_is_2d && b_is_2d) || (!b_is_2d && b_row_major && (a_is_2d || !check_valid_strides_and_return_transposed(mat_a)));
+  const double forward_mn_sqrt_k = m * n * k / std::sqrt(grad ? n : k);
   const auto dtype = mat_a.scalar_type();
-  const auto seconds = at::hip::detail::ck_tile_group_gemm::with_device_info(at::cuda::getCurrentDeviceProperties()->name, [&](auto info) {
+  return at::hip::detail::ck_tile_group_gemm::with_device_info(at::cuda::getCurrentDeviceProperties()->name, [&](auto info) {
     using Info = decltype(info);
     const double tflops = dtype == at::kFloat ? Info::fp32_tflops : (dtype == at::kHalf ? Info::fp16_tflops : Info::bf16_tflops);
-    return 2 * m * n * k / (tflops * 1e12) + 5 * m * n * mat_a.element_size() / (Info::dram_bw_gbs * 1e9);
-  });
-  return seconds && *seconds <= 30.55e-6;
+    return forward_mn_sqrt_k <= 3.165e-13 * std::pow(tflops * 1e12 * Info::dram_bw_gbs * 1e9, 0.75);
+  }).value_or(false);
 }
 #endif
 
