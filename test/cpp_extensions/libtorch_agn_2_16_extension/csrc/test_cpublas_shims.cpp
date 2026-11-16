@@ -27,33 +27,6 @@ Tensor my_cpublas_brgemm(
   return c;
 }
 
-Tensor my_cpublas_gemm_no_downcast_stub_default(
-    const Tensor& a,
-    const Tensor& b,
-    Tensor c,
-    double alpha,
-    double beta) {
-  // The native GEMM stub uses column-major storage. Swap A and B to operate
-  // on row-major tensors, as the native brgemm fallback does.
-  auto gemm = cpublas::gemm_no_downcast_stub.DEFAULT;
-  gemm(
-      torch::headeronly::ScalarType::Float,
-      torch::headeronly::TransposeType::NoTranspose,
-      torch::headeronly::TransposeType::NoTranspose,
-      b.size(1),
-      a.size(0),
-      a.size(1),
-      alpha,
-      b.const_data_ptr<float>(),
-      b.stride(0),
-      a.const_data_ptr<float>(),
-      a.stride(0),
-      beta,
-      c.mutable_data_ptr<float>(),
-      c.stride(0));
-  return c;
-}
-
 Tensor my_cpublas_gemm_no_downcast_stub_cpu(
     const Tensor& a,
     const Tensor& b,
@@ -108,8 +81,6 @@ STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
       "my_cpublas_brgemm_f8e5m2(Tensor a, Tensor b, Tensor(a!) c, bool add_c) -> Tensor(a!)");
   m.def(
-      "my_cpublas_gemm_no_downcast_stub_default(Tensor a, Tensor b, Tensor(a!) c, float alpha, float beta) -> Tensor(a!)");
-  m.def(
       "my_cpublas_gemm_no_downcast_stub_cpu(Tensor a, Tensor b, Tensor(a!) c, float alpha, float beta) -> Tensor(a!)");
   m.def("my_cpublas_could_pack(Tensor input) -> bool");
   m.def("my_cpublas_brgemm_release() -> bool");
@@ -152,9 +123,6 @@ STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
                  torch::headeronly::Float8_e5m2,
                  torch::headeronly::Float8_e5m2,
                  float>)));
-  m.impl(
-      "my_cpublas_gemm_no_downcast_stub_default",
-      TORCH_BOX(&my_cpublas_gemm_no_downcast_stub_default));
   m.impl(
       "my_cpublas_gemm_no_downcast_stub_cpu",
       TORCH_BOX(&my_cpublas_gemm_no_downcast_stub_cpu));

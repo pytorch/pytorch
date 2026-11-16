@@ -304,45 +304,11 @@ inline void brgemm_release(bool is_vnni = true) {
 
 /// Stable C++ interface for the CPU GEMM dispatch stub.
 ///
-/// DEFAULT calls the baseline kernel; operator() uses device dispatch.
-/// Both call forms accept double alpha and beta only.
+/// Uses device dispatch and accepts double alpha and beta only.
 ///
 /// Minimum compatible version: PyTorch 2.16.
 /// Build time minimum version: PyTorch 2.16.
 struct GemmNoDowncastStub {
-  /// Function pointer to the default CPU kernel's stable shim wrapper.
-  static constexpr auto DEFAULT = +[](torch::headeronly::ScalarType dtype,
-                                      torch::headeronly::TransposeType transa,
-                                      torch::headeronly::TransposeType transb,
-                                      int64_t m,
-                                      int64_t n,
-                                      int64_t k,
-                                      double alpha,
-                                      const void* a,
-                                      int64_t lda,
-                                      const void* b,
-                                      int64_t ldb,
-                                      double beta,
-                                      void* c,
-                                      int64_t ldc) {
-    STABLE_TORCH_ERROR_CODE_CHECK(
-        torch_cpublas_gemm_no_downcast_default_alpha_beta_double(
-            static_cast<int32_t>(dtype),
-            static_cast<int32_t>(transa),
-            static_cast<int32_t>(transb),
-            m,
-            n,
-            k,
-            alpha,
-            a,
-            lda,
-            b,
-            ldb,
-            beta,
-            c,
-            ldc));
-  };
-
   void operator()(
       torch::headeronly::DeviceType device_type,
       torch::headeronly::ScalarType dtype,
