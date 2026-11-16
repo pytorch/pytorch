@@ -552,9 +552,10 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
     )
     def test_invalid_options_rejected_before_launch(self, extra, message):
         runner = self.huggingface.HuggingfaceRunner()
+        launched = AssertionError("launched before validation")
         with (
-            mock.patch.object(common.mp, "spawn") as spawn,
-            mock.patch.object(common, "process_entry") as entry,
+            mock.patch.object(common.mp, "spawn", side_effect=launched),
+            mock.patch.object(common, "process_entry", side_effect=launched),
             self.assertRaisesRegex(ValueError, message),
         ):
             common.main(
@@ -566,8 +567,6 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
                     *extra,
                 ],
             )
-        spawn.assert_not_called()
-        entry.assert_not_called()
 
     @parametrize("mode", ("prefill", "decode"))
     def test_phase_requires_inference_backend(self, mode):
@@ -580,6 +579,10 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
         args.backend = None
         with self.assertRaisesRegex(ValueError, "requires --backend or --inductor"):
             runner.validate_args(args)
+        flags = ["--inference", "--inductor", f"--hf-inference-mode={mode}"]
+        args = common.parse_args(["--performance", *flags])
+        self.assertEqual(args.backend, "inductor")
+        runner.validate_args(args)
 
     @parametrize("mode", ("prefill", "decode"))
     @parametrize("name", ("Qwen/Qwen3-0.6B", "Qwen/Qwen3.5-0.8B"))
@@ -632,8 +635,9 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
         args = self._runner_args(f"--decode-length={decode_length}", mode="decode")
         with self.assertRaisesRegex(ValueError, "must be between 1 and 1999"):
             runner.validate_args(args)
-        args.decode_length = 1999
-        runner.validate_args(args)
+        for valid in (1, 1999):
+            args.decode_length = valid
+            runner.validate_args(args)
 
     @parametrize("mode", ("prefill", "decode"))
     @parametrize("prompt_length", (None, 7))
@@ -762,6 +766,7 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
             torch._dynamo.config.patch(base_dir=tmp),
             # run() rebinds module globals such as output_filename and current_name.
             mock.patch.dict(vars(common)),
+            mock.patch.object(common, "output_signpost") as signpost,
             self._record_cache_lengths(mode) as cache_lengths,
             self._mock_pretrained(),
         ):
@@ -777,6 +782,7 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
                 mode=mode,
             )
             common.run(runner, args)
+            signpost.assert_called_once_with(mock.ANY, args, "huggingface")
             trace = os.path.join(tmp, f"eager_{mode}_Qwen_Qwen3-0.6B.json")
             self.assertTrue(os.path.exists(trace))
             with open(os.path.join(tmp, f"speedup_eager_{mode}.csv")) as f:
@@ -793,29 +799,42 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
         tokens_per_second = 2 * 2 * tokens / (float(row["abs_latency"]) / 1000)
         self.assertEqual(float(row[column]), tokens_per_second, rtol=1e-3, atol=0)
 
-    def test_prefill_operator_logging_prepares_cache(self):
+    @parametrize("mode", ("prefill", "decode"))
+    def test_operator_logging_prepares_cache(self, mode):
+        from benchmarks.dynamo.microbenchmarks.operator_inp_utils import (
+            OperatorInputsMode,
+        )
+
         runner = self.huggingface.HuggingfaceRunner()
-        phase = self.huggingface.INFERENCE_PHASES["prefill"]
+        phase = self.huggingface.INFERENCE_PHASES[mode]
+
+        def setup_fn(model, example_inputs):
+            modes = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+            self.assertFalse(any(isinstance(m, OperatorInputsMode) for m in modes))
+            phase.setup_fn(model, example_inputs)
 
         def forward(model, example_inputs, collect_outputs=True):
             self.assertIsNotNone(model.cache)
             return phase.iter_fn(model, example_inputs, collect_outputs)
 
-        setup = mock.Mock(wraps=phase.setup_fn)
+        setup = mock.Mock(side_effect=setup_fn)
         run_forward = mock.Mock(side_effect=forward)
         with (
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.dict(vars(common)),
             mock.patch.dict(os.environ),
-            self._patch_phase("prefill", setup_fn=setup, iter_fn=run_forward),
+            self._patch_phase(mode, setup_fn=setup, iter_fn=run_forward),
             self._mock_pretrained(),
         ):
+            extra = ("--decode-length=3",) if mode == "decode" else ()
             args = self._runner_args(
                 "--only=Qwen/Qwen3-0.6B",
                 "--batch-size=2",
                 "--prompt-length=7",
                 "--log-operator-inputs",
                 f"--output={tmp}/results.csv",
+                *extra,
+                mode=mode,
             )
             common.run(runner, args)
             self.assertGreaterEqual(run_forward.call_count, 2)
@@ -1012,6 +1031,8 @@ class TestHuggingFaceLLMPhasesDevice(HuggingFaceLLMPhaseTestCase):
         ):
             status = runner.check_accuracy("tiny", model, inputs, optimize, None, None)
         self.assertEqual(status, "pass")
+        # The fp64 reference ran, rather than falling back to cosine similarity.
+        self.assertFalse(runner.args.cosine)
         self.assertEqual(compiled_functions, ["forward"])
 
     @onlyCUDA

@@ -131,7 +131,9 @@ recompiles on every step.
 Each decode request prefills the prompt eagerly into the static cache outside
 the timed region, then times `--decode-length` (default 128, at most 1999)
 single-token compiled forwards. Decode feeds fixed random tokens rather than
-sampled ones and returns the last step's logits.
+sampled ones and returns the last step's logits. Profiler traces and the
+`eager_peak_mem`, `dynamo_peak_mem`, and `compression_ratio` columns include the
+eager prefill.
 
 Prefill and decode require `--inference` and a backend. They reject `--amp`,
 `--aot-precompile`, `--batch-invariant`, `--compare-backed-unbacked`, `--ddp`,
