@@ -55,9 +55,7 @@ class XPUAllocator : public DeviceAllocator {
 #endif
     // NEO page-aligns the advertised total (usable_fraction * KMD size):
     // https://github.com/intel/compute-runtime/blob/034eda04584302c2be0e227d186e33a7eba0d034/shared/source/device/device_caps.cpp#L78
-    // 4096 is NEO's MemoryConstants::pageSize, a fixed constant rather than
-    // the host page size:
-    // https://github.com/intel/compute-runtime/blob/034eda04584302c2be0e227d186e33a7eba0d034/shared/source/helpers/constants.h#L38
+    // Use 4096 here as the same with NEO's MemoryConstants::pageSize.
     const size_t umd_total = c10::llvm::alignDown(
         static_cast<uint64_t>(kDiscreteGpuUsableFraction * total), 4096);
     const size_t free_adjust = free + (total - umd_total);
