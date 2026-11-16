@@ -15602,6 +15602,61 @@ class TestComplex(TestCase):
 # Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
 @skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
+    @largeTensorTest("3GB")
+    @largeMPSBufferTest((1 << 31) + 128)
+    @parametrize("accumulate", [False, True])
+    def test_index_put_deterministic_split(self, device, accumulate):
+        if accumulate:
+            # Four float32 values span INT32_MAX bytes and split into two pairs.
+            stride = (1 << 29) // 3 + 1
+            values = torch.empty_strided(
+                (4,), (stride,), dtype=torch.float32, device=device
+            )
+            values.copy_(torch.tensor([1e20, 1, -1e20, 3], device=device))
+            indices = torch.zeros(4, dtype=torch.long, device=device)
+            expected = torch.tensor([3.0])
+        else:
+            count = 128
+            stride = (1 << 31) // (count - 1) + 1
+            values = torch.empty_strided(
+                (count,), (stride,), dtype=torch.uint8, device=device
+            )
+            values.copy_(torch.arange(count, dtype=torch.uint8, device=device))
+            indices = torch.arange(count, device=device) % 8
+            expected = torch.arange(count - 8, count, dtype=torch.uint8)
+        with DeterministicGuard(True):
+            for _ in range(5):
+                result = torch.zeros(
+                    expected.shape, dtype=expected.dtype, device=device
+                )
+                result.index_put_((indices,), values, accumulate=accumulate)
+                self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
+
+    @parametrize("destinations", [1, 257])
+    @parametrize("updates", [7, 8, 9, 15, 16, 17])
+    @parametrize("op", ["index_put_", "put_"])
+    @dtypes(torch.float32, torch.float16, torch.bfloat16, torch.complex64, torch.complex32)
+    def test_nonzero_output_rounding(self, device, dtype, destinations, updates, op):
+        large = 2 / torch.finfo(dtype).eps
+        initial = large * (1 + 1j) if dtype.is_complex else large
+        values_cpu = torch.tensor([1] * (updates - 2) + [-large, 3], dtype=dtype)
+        if dtype.is_complex:
+            values_cpu.imag.copy_(values_cpu.real)
+        values_cpu = values_cpu.repeat_interleave(destinations)
+        indices_cpu = torch.arange(destinations).repeat(updates)
+        expected = torch.full((destinations + 2,), initial, dtype=dtype)
+        with DeterministicGuard(True):
+            expected[1:-1].index_put_((indices_cpu,), values_cpu, accumulate=True)
+            indices = indices_cpu.to(device)
+            values = torch.stack((values_cpu, values_cpu), dim=1).to(device)[:, 1]
+            for _ in range(5):
+                result = torch.full((destinations + 2,), initial, device=device, dtype=dtype)
+                if op == "index_put_":
+                    result[1:-1].index_put_((indices,), values, accumulate=True)
+                else:
+                    result[1:-1].put_(indices, values, accumulate=True)
+                self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
+
     exact_dtype = True
 
     @parametrize("shape, dtype", [((2, 3, 4, 5, 6), torch.complex64), ((32, 8192), torch.complex64),
@@ -16176,139 +16231,6 @@ class TestMetalLibrary(TestCaseMPS):
             self.assertEqual(destination, source.permute(2, 3, 4, 1, 0))
 
 
-class TestDeterministicIndexAccumulation(TestCase):
-    @largeTensorTest("3GB", device="mps")
-    @largeMPSBufferTest((1 << 31) + 128, device="mps")
-    def test_index_put_serial_split(self, device):
-        count = 128
-        stride = (1 << 31) // (count - 1) + 1
-        values = torch.empty_strided((count,), (stride,), dtype=torch.uint8, device=device)
-        values.copy_(torch.arange(count, dtype=torch.uint8, device=device))
-        indices = torch.arange(count, device=device) % 8
-        expected = torch.arange(count - 8, count, dtype=torch.uint8)
-        with DeterministicGuard(True):
-            for _ in range(5):
-                result = torch.zeros(8, dtype=torch.uint8, device=device)
-                result.index_put_((indices,), values, accumulate=False)
-                self.assertEqual(result.cpu(), expected)
-
-    @parametrize("destinations", [1, 257])
-    @dtypes(torch.float32, torch.float16, torch.bfloat16, torch.complex64, torch.complex32)
-    def test_nonzero_output_rounding(self, device, dtype, destinations):
-        large = 2 / torch.finfo(dtype).eps
-        initial = large * (1 + 1j) if dtype.is_complex else large
-        values_cpu = torch.tensor([1] * 8 + [-large, 3], dtype=dtype)
-        if dtype.is_complex:
-            values_cpu.imag.copy_(values_cpu.real)
-        values_cpu = values_cpu.repeat_interleave(destinations)
-        indices_cpu = torch.arange(destinations).repeat(10)
-        expected = torch.full((destinations + 2,), initial, dtype=dtype)
-        with DeterministicGuard(True):
-            expected[1:-1].index_put_((indices_cpu,), values_cpu, accumulate=True)
-            indices, values = indices_cpu.to(device), values_cpu.to(device)
-            for _ in range(5):
-                result = torch.full((destinations + 2,), initial, device=device, dtype=dtype)
-                result[1:-1].index_put_((indices,), values, accumulate=True)
-                self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
-
-    @parametrize("updates", [7, 8, 9, 15, 16, 17])
-    @dtypes(torch.float32, torch.float16)
-    def test_strided_group_boundaries(self, device, dtype, updates):
-        indices_cpu = torch.arange(3).repeat(updates)
-        values_cpu = torch.arange(6 * updates, dtype=dtype).reshape(-1, 2)
-        expected = torch.ones(3, 2, dtype=dtype)
-        with DeterministicGuard(True):
-            expected[:, 1].index_put_((indices_cpu,), values_cpu[:, 1], accumulate=True)
-            indices, values = indices_cpu.to(device), values_cpu.to(device)
-            for _ in range(3):
-                result = torch.ones(3, 2, device=device, dtype=dtype)
-                result[:, 1].index_put_((indices,), values[:, 1], accumulate=True)
-                self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
-
-    def test_multi_index_and_noncontiguous_source(self, device):
-        row_cpu = torch.tensor([0, 3, -2, 0, 1, -1])
-        col_cpu = torch.tensor([1, 2, 0, 1, 2, 2])
-        values_cpu = torch.arange(24, dtype=torch.float32).reshape(6, 4)[:, ::2]
-        expected = torch.zeros(3, 4, 2).transpose(0, 1)
-        expected.index_put_((row_cpu, col_cpu), values_cpu, accumulate=True)
-        row, col = row_cpu.to(device), col_cpu.to(device)
-        values = torch.arange(24, dtype=torch.float32, device=device).reshape(6, 4)[:, ::2]
-        with DeterministicGuard(True):
-            result = torch.zeros(3, 4, 2, device=device).transpose(0, 1)
-            result.index_put_((row, col), values, accumulate=True)
-            self.assertEqual(result.cpu(), expected)
-
-    def test_misaligned_half_view(self, device):
-        idx_cpu = torch.tensor([0, 1, 1, 2, 2, 3])
-        values_cpu = torch.tensor([1., 2., 3., 4., 5., 6.], dtype=torch.float16)
-        expected = torch.zeros(6, dtype=torch.float16)
-        expected[1:5].index_put_((idx_cpu,), values_cpu, accumulate=True)
-        with DeterministicGuard(True):
-            result = torch.zeros(6, dtype=torch.float16, device=device)
-            result[1:5].index_put_((idx_cpu.to(device),), values_cpu.to(device), accumulate=True)
-            self.assertEqual(result.cpu(), expected)
-
-    @parametrize("destinations", [1, 1024])
-    @parametrize("dtype", [torch.float32, torch.float16])
-    def test_many_duplicate_indices(self, device, dtype, destinations):
-        generator = torch.Generator().manual_seed(34)
-        idx_cpu = torch.randint(destinations, (16384,), generator=generator)
-        values_cpu = torch.randn(16384, generator=generator).to(dtype)
-        idx, values = idx_cpu.to(device), values_cpu.to(device)
-        with DeterministicGuard(True):
-            expected = torch.zeros(destinations, dtype=dtype).index_put_((idx_cpu,), values_cpu, accumulate=True)
-            previous = None
-            for _ in range(5):
-                result = torch.zeros(destinations, device=device, dtype=dtype)
-                result.index_put_((idx,), values, accumulate=True)
-                self.assertEqual(result.cpu(), expected)
-                if previous is not None:
-                    self.assertEqual(result, previous, atol=0, rtol=0)
-                previous = result
-
-    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.complex64])
-    @parametrize("op", ["index_put_", "index_add_", "put_"])
-    def test_duplicate_indices(self, device, dtype, op):
-        idx_cpu = torch.tensor([0, 0, 1, 2, 2, 2])
-        src_cpu = torch.tensor([0.5, 1.25, -2, 0.25, 1.5, 2], dtype=dtype)
-        idx, src = idx_cpu.to(device), src_cpu.to(device)
-        expected = torch.zeros(3, dtype=dtype).index_put_((idx_cpu,), src_cpu, accumulate=True)
-        previous = None
-        with DeterministicGuard(True):
-            for _ in range(10):
-                t = torch.zeros(3, dtype=dtype, device=device)
-                if op == "index_put_":
-                    t.index_put_((idx,), src, accumulate=True)
-                elif op == "index_add_":
-                    t.index_add_(0, idx, src)
-                else:
-                    t.put_(idx, src, accumulate=True)
-                self.assertEqual(t.cpu(), expected)
-                if previous is not None:
-                    self.assertEqual(t, previous, atol=0, rtol=0)
-                previous = t
-
-    def test_noncontiguous_broadcast_and_backward(self, device):
-        idx_cpu = torch.tensor([2, 0, 2, -1, 1, 0])
-        values_cpu = torch.tensor([[0.5, -0.25]])
-        expected = torch.zeros(2, 3).t()
-        expected.index_put_((idx_cpu,), values_cpu, accumulate=True)
-        idx, values = idx_cpu.to(device), values_cpu.to(device)
-        previous = None
-        with DeterministicGuard(True):
-            for _ in range(10):
-                result = torch.zeros(2, 3, device=device).t()
-                result.index_put_((idx,), values, accumulate=True)
-                self.assertEqual(result.cpu(), expected)
-                if previous is not None:
-                    self.assertEqual(result, previous, atol=0, rtol=0)
-                previous = result
-
-            x = torch.randn(3, device=device, requires_grad=True)
-            x[torch.tensor([0, 0, 1, 1, 1], device=device)].sum().backward()
-            self.assertEqual(x.grad.cpu(), torch.tensor([2., 3., 0.]))
-
-
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
@@ -16318,7 +16240,6 @@ instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_f
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestInnerContiguous, globals(), allow_mps=True, only_for="mps")
-instantiate_device_type_tests(TestDeterministicIndexAccumulation, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestNondeterministic)
 instantiate_parametrized_tests(TestAutocastMPS)
