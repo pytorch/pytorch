@@ -30,7 +30,7 @@ from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_modul
 from torch._export.verifier import load_verifier
 from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
 from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
+from torch._subclasses.fake_tensor import fake_mode_cls, FakeTensor, is_fake_tensor
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.traceback import NodeSource
@@ -2951,7 +2951,7 @@ class GraphModuleDeserializer(metaclass=Final):
         try:
             log.debug("\n[deserialize]")
             self.shape_env = symbolic_shapes.ShapeEnv(assume_static_by_default=True)
-            self.fake_tensor_mode = FakeTensorMode(
+            self.fake_tensor_mode = fake_mode_cls()(
                 allow_fallback_kernels=False,
                 allow_non_fake_inputs=True,
                 shape_env=self.shape_env,
