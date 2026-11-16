@@ -155,6 +155,14 @@ static void index_put_accumulate_deterministic(TensorIterator& iter, IntArrayRef
   if (iter.numel() == 0) {
     return;
   }
+  if (!iter.can_use_32bit_indexing()) {
+    // Splits can share destinations. The MPS stream executes their dispatches
+    // in order so each split sees the previous split's writes.
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      index_put_accumulate_deterministic(sub_iter, index_size, index_stride);
+    }
+    return;
+  }
   auto offsets = at::empty({iter.numel()}, iter.tensor_base(0).options().dtype(kLong));
   dispatch_index_kernel(iter, index_size, index_stride, "index_put_offsets", false, offsets);
   Tensor sorted_offsets, order;
@@ -190,14 +198,9 @@ static void index_put_kernel_mps(TensorIterator& iter,
       const auto dtype = iter.tensor_base(0).scalar_type();
       const bool needs_determinism =
           at::globalContext().deterministicAlgorithms() && (at::isFloatingType(dtype) || at::isComplexType(dtype));
-      // Separate dispatches for split iterators can update the same output.
-      // Do not claim determinism for those until their ordering is guaranteed.
-      if (needs_determinism && iter.can_use_32bit_indexing()) {
+      if (needs_determinism) {
         index_put_accumulate_deterministic(iter, index_size, index_stride);
         return;
-      }
-      if (needs_determinism) {
-        at::globalContext().alertNotDeterministic("index_put_with_accumulate_mps");
       }
       dispatch_index_kernel(iter,
                             index_size,
