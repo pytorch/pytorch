@@ -38,7 +38,8 @@ and a container that goes over its limit is killed as a whole. No process is
 started while more than ``--memory-start`` of that memory is in use, and
 above ``--memory-stop`` the process that holds the most is stopped and run
 again later, alone. Every result has the most memory its process held
-(``peak_rss_mb``).
+(``peak_rss_mb``; for cfg_compile before torch.compile joins it for the
+paired calls, and ``process_peak_rss_mb`` with them).
 """
 
 import argparse
@@ -66,6 +67,10 @@ MODES = ("eager", "compile", "cfg")
 # ----------------------------------------------------------------------
 # One model, one test, one compiler: runs in its own process
 # ----------------------------------------------------------------------
+
+
+def peak_rss_mb():
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
 
 
 def infer(model, inputs):
@@ -313,6 +318,8 @@ def run_one(args):
                 if r["state"] == "vm" and not any(d in r["reason"] for d in dull)
             ][:6]
             out["demoted"] = bool(compiled.stats()["demoted"])
+            # Before torch.compile and its copy of the model share the process.
+            out["peak_rss_mb"] = peak_rss_mb()
             if args.paired and out["call_s"] <= args.paired_limit:
                 try:
                     # A copy of its own, also where calls do not change the
@@ -360,7 +367,8 @@ def run_one(args):
         out["error"] = (
             f"{type(e).__name__}: {text[0][:300]}" if text else type(e).__name__
         )
-    out["peak_rss_mb"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
+    out["process_peak_rss_mb"] = peak_rss_mb()
+    out.setdefault("peak_rss_mb", out["process_peak_rss_mb"])
     print(MARKER + json.dumps(out))
 
 
