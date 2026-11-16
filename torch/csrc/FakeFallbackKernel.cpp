@@ -76,10 +76,7 @@
 //
 // So that ops do not give results Python's FakeTensorMode would not, it raises
 // NotImplementedError where Python runs something other than these,
-// apart from the known divergences in the TODOs below:
-//  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors), or
-//  Any;
-//  - and the input checks below.
+// apart from the known divergences in the TODOs and input checks below.
 // Callers that need to tell these apart from other NotImplementedErrors match
 // the message unsupported() raises.
 //
@@ -115,27 +112,90 @@ namespace {
 using at::impl::may_turn_const;
 
 template <typename Fn>
+void for_each_tensor(const c10::IValue& value, const Fn& fn) {
+  if (value.isTensor()) {
+    fn(value.toTensor());
+  } else if (value.isList()) {
+    for (const auto& element : value.toListRef()) {
+      for_each_tensor(element, fn);
+    }
+  } else if (value.isTuple()) {
+    for (const auto& element : value.toTupleRef().elements()) {
+      for_each_tensor(element, fn);
+    }
+  } else if (value.isGenericDict()) {
+    for (const auto& entry : value.toGenericDict()) {
+      for_each_tensor(entry.value(), fn);
+    }
+  }
+}
+
+template <typename Fn>
 void for_each_tensor(
     torch::jit::Stack* stack,
     size_t begin,
     size_t count,
     const Fn& fn) {
   for (const auto idx : c10::irange(count)) {
-    const auto& ivalue = (*stack)[begin + idx];
-    if (ivalue.isTensor()) {
-      fn(ivalue.toTensor());
-    } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
-      for (const c10::IValue& element : ivalue.toListRef()) {
-        if (element.isTensor()) {
-          fn(element.toTensor());
-        }
-      }
-    }
+    for_each_tensor((*stack)[begin + idx], fn);
   }
 }
 
-// Copy tensor lists before replacing elements so caller-owned lists stay
+// Copy only containers with replaced leaves; caller-owned containers stay
 // intact.
+template <typename Fn>
+std::optional<c10::IValue> replace_each_tensor(
+    const c10::IValue& value,
+    const Fn& fn) {
+  if (value.isTensor()) {
+    if (auto out = fn(value.toTensor())) {
+      return std::move(*out);
+    }
+  } else if (value.isList()) {
+    std::optional<c10::List<c10::IValue>> copy;
+    const auto elements = value.toListRef();
+    for (const auto i : c10::irange(elements.size())) {
+      if (auto out = replace_each_tensor(elements[i], fn)) {
+        if (!copy) {
+          copy = value.toList().copy();
+        }
+        copy->set(i, std::move(*out));
+      }
+    }
+    if (copy) {
+      return std::move(*copy);
+    }
+  } else if (value.isTuple()) {
+    c10::intrusive_ptr<c10::ivalue::Tuple> copy;
+    const auto& elements = value.toTupleRef().elements();
+    for (const auto i : c10::irange(elements.size())) {
+      if (auto out = replace_each_tensor(elements[i], fn)) {
+        if (!copy) {
+          copy = c10::make_intrusive<c10::ivalue::Tuple>(value.toTupleRef());
+        }
+        copy->unsafeSetElement(i, std::move(*out));
+      }
+    }
+    if (copy) {
+      return std::move(copy);
+    }
+  } else if (value.isGenericDict()) {
+    std::optional<c10::impl::GenericDict> copy;
+    for (const auto& entry : value.toGenericDict()) {
+      if (auto out = replace_each_tensor(entry.value(), fn)) {
+        if (!copy) {
+          copy = value.toGenericDict().copy();
+        }
+        copy->insert_or_assign(entry.key(), std::move(*out));
+      }
+    }
+    if (copy) {
+      return std::move(*copy);
+    }
+  }
+  return std::nullopt;
+}
+
 template <typename Fn>
 void replace_each_tensor(
     torch::jit::Stack* stack,
@@ -144,27 +204,8 @@ void replace_each_tensor(
     const Fn& fn) {
   for (const auto idx : c10::irange(count)) {
     auto& ivalue = (*stack)[begin + idx];
-    if (ivalue.isTensor()) {
-      if (auto out = fn(ivalue.toTensor())) {
-        ivalue = std::move(*out);
-      }
-    } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
-      std::optional<c10::List<c10::IValue>> copy;
-      const auto elements = ivalue.toListRef();
-      for (const auto i : c10::irange(elements.size())) {
-        if (!elements[i].isTensor()) {
-          continue;
-        }
-        if (auto out = fn(elements[i].toTensor())) {
-          if (!copy.has_value()) {
-            copy = ivalue.toList().copy();
-          }
-          copy->set(i, std::move(*out));
-        }
-      }
-      if (copy.has_value()) {
-        ivalue = std::move(*copy);
-      }
+    if (auto out = replace_each_tensor(ivalue, fn)) {
+      ivalue = std::move(*out);
     }
   }
 }
@@ -236,6 +277,19 @@ bool has_symbolic_sizes(
           return has_symbolic_sizes(value, mode);
         });
   }
+  if (ivalue.isTuple()) {
+    const auto& elements = ivalue.toTupleRef().elements();
+    return std::any_of(
+        elements.begin(), elements.end(), [&](const auto& value) {
+          return has_symbolic_sizes(value, mode);
+        });
+  }
+  if (ivalue.isGenericDict()) {
+    const auto dict = ivalue.toGenericDict();
+    return std::any_of(dict.begin(), dict.end(), [&](const auto& entry) {
+      return has_symbolic_sizes(entry.value(), mode);
+    });
+  }
   return false;
 }
 
@@ -245,26 +299,6 @@ bool contains_tensor_types(const c10::TypePtr& type) {
   }
   const auto contained = type->containedTypes();
   return std::any_of(contained.begin(), contained.end(), contains_tensor_types);
-}
-
-// Whether type holds tensors other than as Tensor, Tensor?, Tensor[] or
-// Tensor?[], the forms for_each_tensor and the output wrapping visit. Any can
-// hide tensors, including inside otherwise tensor-free containers.
-bool has_nested_tensors(const c10::TypePtr& type) {
-  auto unwrap = [](const c10::TypePtr& t) {
-    const auto optional = t->cast<c10::OptionalType>();
-    return optional ? optional->getElementType() : t;
-  };
-  auto t = unwrap(type);
-  if (const auto list = t->cast<c10::ListType>()) {
-    t = unwrap(list->getElementType());
-  }
-  if (t->isSubtypeOf(*c10::TensorType::get())) {
-    return false;
-  }
-  const auto contained = t->containedTypes();
-  return t->kind() == c10::TypeKind::AnyType || contains_tensor_types(t) ||
-      std::any_of(contained.begin(), contained.end(), has_nested_tensors);
 }
 
 // Same as Python's _is_tensor_constructor in fake_impls.py
@@ -364,7 +398,9 @@ DEFINE_CACHED_PYTHON_IMPORT(
     get_fake_tensor_device_mismatch_error,
     py::module::import("torch._subclasses.fake_tensor")
         .attr("FakeTensorDeviceMismatchError"))
-
+DEFINE_CACHED_PYTHON_IMPORT(
+    get_tree_map,
+    py::module::import("torch.utils._pytree").attr("tree_map"))
 DEFINE_CACHED_PYTHON_IMPORT(
     get_dynamo_config,
     py::module::import("torch._dynamo.config"))
@@ -379,8 +415,7 @@ DEFINE_CACHED_PYTHON_IMPORT(
 //  - An already-fake output is kept as is, including its device.
 //  - A handler that needs a different device per output must return finalized
 //    fake tensors.
-//  - Only a returned tensor or the immediate elements of a returned tuple/list
-//    are converted, not arbitrary nested structures.
+//  - Tensor leaves in nested output containers are converted.
 // Any other tensor, e.g. a real CPU tensor, is an error.
 std::function<py::object(py::object)> make_fake_device_stamp(
     const c10::OperatorHandle& op,
@@ -415,30 +450,43 @@ std::function<py::object(py::object)> make_fake_device_stamp(
   };
 }
 
-// Apply `convert` to each returned tensor (tuple/list/single). Lists are
-// mutated in place (e.g. the _foreach_* ops hand back raw meta tensors to
-// stamp).
+// Apply `convert` to output leaves using Python's container semantics.
 py::object apply_output_convert(
     py::object result,
     const std::function<py::object(py::object)>& convert) {
   if (!convert) {
     return result;
   }
-  if (py::isinstance<py::tuple>(result)) {
-    py::tuple tup = result.cast<py::tuple>();
-    py::tuple converted(tup.size());
-    for (const auto i : c10::irange(tup.size())) {
-      converted[i] = convert(py::reinterpret_borrow<py::object>(tup[i]));
+  if (PyTuple_CheckExact(result.ptr())) {
+    auto tuple = result.cast<py::tuple>();
+    py::tuple converted(tuple.size());
+    for (const auto i : c10::irange(tuple.size())) {
+      converted[i] = apply_output_convert(
+          py::reinterpret_borrow<py::object>(tuple[i]), convert);
     }
     return converted;
   }
-  if (py::isinstance<py::list>(result)) {
-    py::list lst = result.cast<py::list>();
-    // NOLINTNEXTLINE(modernize-loop-convert)
-    for (const auto i : c10::irange(lst.size())) {
-      lst[i] = convert(py::reinterpret_borrow<py::object>(lst[i]));
+  if (PyList_CheckExact(result.ptr())) {
+    auto list = result.cast<py::list>();
+    py::list converted(list.size());
+    for (const auto i : c10::irange(list.size())) {
+      converted[i] = apply_output_convert(
+          py::reinterpret_borrow<py::object>(list[i]), convert);
     }
-    return result;
+    return converted;
+  }
+  if (PyDict_CheckExact(result.ptr())) {
+    py::dict converted;
+    for (auto entry : result.cast<py::dict>()) {
+      converted[entry.first] = apply_output_convert(
+          py::reinterpret_borrow<py::object>(entry.second), convert);
+    }
+    return converted;
+  }
+  if (py::isinstance<py::tuple>(result) || py::isinstance<py::list>(result) ||
+      py::isinstance<py::dict>(result)) {
+    // Preserve registered container subclasses, including named tuples.
+    return get_tree_map()(py::cpp_function(convert), result);
   }
   return convert(std::move(result));
 }
@@ -685,21 +733,12 @@ bool try_decomp(
         }
       };
       auto args = torch::jit::last(*stack, op.schema().arguments().size());
-      auto is_sparse_arg = [&](const c10::IValue& v) {
-        return v.isTensor() && v.toTensor().defined() &&
-            is_sparse(v.toTensor());
-      };
-      // isList() covers both Tensor[] and Tensor?[].
       for (const auto& arg : args) {
-        if (is_sparse_arg(arg) ||
-            (arg.isList() &&
-             std::any_of(
-                 arg.toListRef().begin(),
-                 arg.toListRef().end(),
-                 is_sparse_arg))) {
-          use_decomp = false;
-          break;
-        }
+        for_each_tensor(arg, [&](const at::Tensor& t) {
+          if (t.defined() && is_sparse(t)) {
+            use_decomp = false;
+          }
+        });
       }
     }
     if (use_decomp) {
@@ -964,15 +1003,7 @@ bool try_initial_constant(
     }
   };
   for (const auto& argument : arguments) {
-    if (argument.isTensor()) {
-      check_input(argument.toTensor());
-    } else if (argument.isTensorList() || argument.isOptionalTensorList()) {
-      for (const auto& element : argument.toListRef()) {
-        if (element.isTensor()) {
-          check_input(element.toTensor());
-        }
-      }
-    }
+    for_each_tensor(argument, check_input);
   }
   const auto may_be_plain_tensor = [](const at::Tensor& t) {
     return t.defined() && !t.is_fake() &&
@@ -1122,18 +1153,11 @@ void fakeFallback(
     return;
   }
 
-  for (const auto* arguments : {&schema.arguments(), &schema.returns()}) {
-    for (const auto& argument : *arguments) {
-      if (has_nested_tensors(argument.type())) {
-        unsupported(op, "nested containers of tensors or Any");
-      }
-    }
-  }
-
   bool has_mode_fakes = false;
   bool has_python_inputs = false;
+  const auto input_values = torch::jit::last(*stack, num_arguments);
   const bool symbolic_sizes = std::any_of(
-      stack->end() - num_arguments, stack->end(), [&](const auto& value) {
+      input_values.begin(), input_values.end(), [&](const auto& value) {
         return has_symbolic_sizes(value, mode);
       });
   for_each_tensor(
@@ -1162,8 +1186,8 @@ void fakeFallback(
       schema.name() == "aten::_to_copy" && schema.overload_name().empty();
   const auto avoiding_device_init = [&] {
     if (is_to_copy) {
-      const auto& device =
-          (*stack)[arguments_begin + *schema.argumentIndexWithName("device")];
+      const auto& device = (*stack)
+          [arguments_begin + schema.argumentIndexWithName("device").value()];
       return device.isDevice() && !device.toDevice().is_cpu() &&
           mode->avoid_device_init_;
     }
@@ -1245,7 +1269,7 @@ void fakeFallback(
        (schema.name() == "aten::detach_" && schema.overload_name().empty())) &&
       !avoiding_device_init() &&
       schema.name() != "aten::_nested_tensor_from_tensor_list") {
-    torch::jit::Stack outputs(stack->end() - num_arguments, stack->end());
+    torch::jit::Stack outputs(input_values.begin(), input_values.end());
     replace_each_tensor(
         &outputs,
         0,
