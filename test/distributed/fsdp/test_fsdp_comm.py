@@ -59,8 +59,6 @@ class FSDPCommTestBase(FSDPTestContinuous):
     ``TestExplicitUnshard``.
     """
 
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @classmethod
     def _resolved_device_type(cls) -> str:
         dt = cls.device_type
@@ -86,6 +84,8 @@ class FSDPCommTestBase(FSDPTestContinuous):
 
 class TestCommunication(FSDPCommTestBase):
     """Tests ``FullyShardedDataParallel``'s collective communication usage."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _init_model(
         self,
@@ -259,7 +259,7 @@ class TestCommunication(FSDPCommTestBase):
             sharding_strategy (Optional[ShardingStrategy]): Configures the
                 FSDP algorithm.
         """
-        device_type = torch.device(self._resolved_device_type())
+        device_type = torch.device(device).type
         # Enable execution order checking
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         # Initialize the model and inputs
@@ -324,6 +324,8 @@ class TestCommunication(FSDPCommTestBase):
 
 
 class TestExplicitUnshard(FSDPCommTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(_get_device_module(self.device_type).device_count(), 2)
@@ -331,7 +333,7 @@ class TestExplicitUnshard(FSDPCommTestBase):
     @requires_world_size(2)
     @parametrize("use_orig_params", [False, True])
     def test_unshard_async(self, device, use_orig_params: bool):
-        device_type = torch.device(self._resolved_device_type())
+        device_type = torch.device(device).type
 
         class ReduceModule(nn.Module):
             def __init__(self, dim: int, group: dist.ProcessGroup):
@@ -394,7 +396,7 @@ class TestExplicitUnshard(FSDPCommTestBase):
             model.mlps,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             auto_wrap_policy=ModuleWrapPolicy((MLP,)),
-            device_id=device_type.type,
+            device_id=device_type,
             use_orig_params=use_orig_params,
         )
         model.mlps.check_is_root()
@@ -426,18 +428,18 @@ class TestExplicitUnshard(FSDPCommTestBase):
         This is a regression test for issue #168947 where a Stream was
         incorrectly passed instead of an Event to UnshardHandle.
         """
-        device_type = torch.device(self._resolved_device_type())
+        device_type = torch.device(device).type
         model = nn.Sequential(
             MLP(dim=8),
-            nn.Linear(8, 4, device=device_type.type),
+            nn.Linear(8, 4, device=device_type),
         )
         model[0] = FSDP(
             model[0],
-            device_id=device_type.type,
+            device_id=device_type,
             use_orig_params=use_orig_params,
         )
 
-        inp = torch.randn(2, 8, device=device_type.type)
+        inp = torch.randn(2, 8, device=device_type)
         output = model(inp)
         loss = output.sum()
         loss.backward()
