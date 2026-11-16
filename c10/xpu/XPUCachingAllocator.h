@@ -16,6 +16,51 @@ class XPUAllocator : public DeviceAllocator {
   virtual void init(c10::DeviceIndex device_count) = 0;
   virtual void* raw_alloc(size_t size) = 0;
   virtual void raw_delete(void* ptr) = 0;
+  std::pair<size_t, size_t> getMemoryInfo(
+      c10::DeviceIndex device_index) override {
+    const auto& device = c10::xpu::get_raw_device(device_index);
+    const size_t total = device.get_info<sycl::info::device::global_mem_size>();
+    TORCH_CHECK(
+        device.has(sycl::aspect::ext_intel_free_memory),
+        "The device (",
+        device.get_info<sycl::info::device::name>(),
+        ") doesn't support querying the available free memory. ",
+        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
+        "to help us prioritize its implementation.");
+    const size_t free =
+        device.get_info<sycl::ext::intel::info::device::free_memory>();
+
+#if SYCL_COMPILER_VERSION >= 20260200
+    namespace syclex = sycl::ext::oneapi::experimental;
+    // Only Xe2+ discrete GPUs need adjustment; integrated GPUs already account
+    // for the headroom in the reported free memory.
+    if (device.has(sycl::aspect::ext_oneapi_is_integrated_gpu) ||
+        device.get_info<syclex::info::device::architecture>() <
+            syclex::architecture::intel_gpu_bmg_g21) {
+      return {free, total};
+    }
+    // See
+    // https://github.com/intel/compute-runtime/blob/master/programmers-guide/DEVICE_MEMORY_ACCOUNTING.md#umd-headroom.
+#ifdef _WIN32
+    constexpr double kDiscreteGpuUsableFraction = 0.98;
+#else
+    // Linux drivers > 1.18.40196 reserve the same headroom as Windows on Xe.
+    const auto version = device.get_info<sycl::info::device::driver_version>();
+    int major = 0, minor = 0, patch = 0;
+    const bool is_new_driver =
+        std::sscanf(version.c_str(), "%d.%d.%d", &major, &minor, &patch) == 3 &&
+        std::make_tuple(major, minor, patch) > std::make_tuple(1, 18, 40196);
+    const double kDiscreteGpuUsableFraction = is_new_driver ? 0.98 : 0.95;
+#endif
+    const size_t free_adjust =
+        free + static_cast<size_t>((1 - kDiscreteGpuUsableFraction) * total);
+    TORCH_CHECK(
+        free_adjust <= total, "Calculated free memory exceeds total memory.");
+    return {free_adjust, total};
+#else
+    return {free, total};
+#endif
+  }
 };
 
 C10_XPU_API extern std::atomic<XPUAllocator*> allocator;

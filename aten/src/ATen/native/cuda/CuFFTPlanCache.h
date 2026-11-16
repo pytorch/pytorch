@@ -111,7 +111,10 @@ public:
   const ::cufftHandle & get() const { return handle_; }
 
   ~CuFFTHandle() {
+// Not using fftDestroy() for rocFFT to work around double freeing of handles
+#if !defined(USE_ROCM)
     cufftDestroy(handle_);
+#endif
   }
 };
 
@@ -251,12 +254,7 @@ public:
     // use a flag to keep track throughout this function to see if we need to
     // input = input.clone();
 
-#if defined(USE_ROCM)
-    // clone input to avoid issues with hipfft clobering the input and failing tests
-    clone_input = true;
-#else
     clone_input = false;
-#endif
 
     // For half, base strides on the real part of real-to-complex and
     // complex-to-real transforms are not supported. Since our output is always

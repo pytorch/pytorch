@@ -4,10 +4,7 @@ Wraps NVIDIA's official nccl4py bindings to provide a Python NCCL backend for
 torch.distributed. Uses the PyBackend trampoline so that ProcessGroup dispatches
 collective calls into Python overrides in this class.
 
-Register with
-    dist.Backend.register_backend("nccl4py", _create_nccl4py_backend, devices=["cuda"])
-
-Or use
+Use with
     dist.init_process_group("nccl4py", ...)
 """
 
@@ -19,7 +16,7 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import Backend as C10DBackend, ReduceOp
+from torch._C._distributed_c10d import Backend as C10DBackend, ReduceOp, WorkResult
 from torch.distributed._watchdog import _get_watchdog, stream_complete, stream_timeout
 
 
@@ -38,9 +35,16 @@ class _NcclWork(dist._Work):
     of ProcessGroupNCCL(nccl2)'s coalesceWorks)
     """
 
-    def __init__(self, events, device, wd_handles=None, is_barrier=False):
+    def __init__(
+        self, events, device, backend, wd_handles=None, is_barrier=False, result=None
+    ):
         super().__init__()
         self._events = list(events)
+        # wait() clears _events; the result future still tracks the kernels.
+        self._kernel_events = tuple(self._events)
+        # Created on first use; a coalesced op's is completed by end_coalescing.
+        self._result = result
+        self._backend = backend
         self._device = device
         self._wd_handles = list(wd_handles) if wd_handles else []
         self._is_barrier = is_barrier
@@ -58,18 +62,42 @@ class _NcclWork(dist._Work):
         return True
 
     def get_future(self):
-        fut = torch.futures.Future(devices=[self._device])
-        if not self._events:
-            fut.set_result(True)
+        return self._complete_on_events(
+            torch.futures.Future(devices=[self._device]), True, self._events
+        )
+
+    def get_future_result(self):
+        if self._result is None:
+            # A CPU future, so it completes when the kernels finish rather
+            # than at enqueue.
+            self._result = self._complete_on_events(
+                torch.futures.Future(),
+                WorkResult.SUCCESS.value,
+                self._kernel_events,
+                skip_if_aborted=True,
+            )
+        return self._result
+
+    def _complete_on_events(self, fut, value, events, skip_if_aborted=False):
+        if not events:
+            fut.set_result(value)
             return fut
-        remaining = [len(self._events)]
+        remaining = [len(events)]
+        # Not self: the closure would keep the Work and its events alive on
+        # the watchdog thread.
+        backend = self._backend if skip_if_aborted else None
 
         def on_complete():
             remaining[0] -= 1
-            if remaining[0] == 0:
-                fut.set_result(True)
+            if remaining[0] != 0:
+                return
+            # Kernels cut short by abort() also complete their events; the
+            # result stays pending rather than claim success.
+            if backend is not None and backend._aborted:
+                return
+            fut.set_result(value)
 
-        for event in self._events:
+        for event in events:
             stream_complete(on_complete, event=event)
         return fut
 
@@ -79,7 +107,9 @@ class NCCL4PyBackend(C10DBackend):
 
     _UID_STORE_KEY = "nccl4py_uid"
 
-    def __init__(self, store, rank, size, timeout, *, comm=None, device=None):
+    def __init__(
+        self, store, rank, size, timeout, *, comm=None, device=None, options=None
+    ):
         if nccl is None:
             raise RuntimeError(
                 "nccl4py backend requires the 'nccl4py' package. "
@@ -87,12 +117,11 @@ class NCCL4PyBackend(C10DBackend):
             )
         super().__init__(rank, size)
         self._store = store
-        self._options = C10DBackend.Options("nccl4py", timeout=timeout)
-
-        # TODO (thisisatharva-rh): workaround. The basic creator API only passes the group-local
-        # rank, which is not a valid device index for a subgroup, so we recover
-        # the device from the default group. The proper fix is to migrate to the
-        # extended_api=True, which supplies the resolved device directly
+        self._options = (
+            options
+            if options is not None
+            else C10DBackend.Options("nccl4py", timeout=timeout)
+        )
 
         if device is not None:
             self._device = device
@@ -116,11 +145,13 @@ class NCCL4PyBackend(C10DBackend):
                 uid = nccl.UniqueId.from_bytes(bytes(store.get(self._UID_STORE_KEY)))
             comm = nccl.Communicator.init(nranks=size, rank=rank, unique_id=uid)
         self._comm = comm
+        self._aborted = False
 
         self._internal_stream = torch.cuda.Stream(device=self._device)
         self._barrier_tensor = torch.zeros(1, dtype=torch.float32, device=self._device)
         self._coalescing = False
         self._coalesced_streams = set()
+        self._coalesced_results = []
         _get_watchdog()
 
     @property
@@ -172,7 +203,9 @@ class NCCL4PyBackend(C10DBackend):
         # the op used; end_coalescing records the events after group_end.
         if self._coalescing:
             self._coalesced_streams.update(streams)
-            return _NcclWork((), self._device)
+            result = torch.futures.Future()
+            self._coalesced_results.append(result)
+            return _NcclWork((), self._device, self, result=result)
         events = []
         wd_handles = []
         for stream in streams:
@@ -181,7 +214,7 @@ class NCCL4PyBackend(C10DBackend):
             with torch.cuda.stream(stream):
                 wd_handles.append(stream_timeout(self._options._timeout))
             events.append(event)
-        return _NcclWork(events, self._device, wd_handles, is_barrier=is_barrier)
+        return _NcclWork(events, self._device, self, wd_handles, is_barrier=is_barrier)
 
     def _get_nccl_redop(self, reduce_op, tensor):
         """Returns (nccl_op, custom_op_or_None).
@@ -214,6 +247,7 @@ class NCCL4PyBackend(C10DBackend):
     def start_coalescing(self):
         self._coalescing = True
         self._coalesced_streams = set()
+        self._coalesced_results = []
         nccl.group_start()
 
     def end_coalescing(self):
@@ -223,7 +257,17 @@ class NCCL4PyBackend(C10DBackend):
         self._coalesced_streams = set()
         if not streams:
             streams = {torch.cuda.current_stream(self._device)}
-        return self._make_work(*streams)
+        work = self._make_work(*streams)
+        results, self._coalesced_results = self._coalesced_results, []
+        if not results:
+            return work
+
+        def complete(fut):
+            for result in results:
+                result.set_result(fut.value())
+
+        work.get_future_result().add_done_callback(complete)
+        return work
 
     def send(self, tensor_list, dst, tag=0):
         self._check_tensors(tensor_list)
@@ -451,6 +495,14 @@ class NCCL4PyBackend(C10DBackend):
 
     def split(self, store, ranks, opts):
         ranks_list = list(ranks)
+        if opts is None:
+            opts = C10DBackend.Options("nccl4py", timeout=self._options._timeout)
+        parent_ranks = self._options.global_ranks_in_group
+        opts.global_ranks_in_group = (
+            ranks_list
+            if len(parent_ranks) < self.size()
+            else [parent_ranks[rank] for rank in ranks_list]
+        )
         if self.rank() in ranks_list:
             color = min(ranks_list)
             key = ranks_list.index(self.rank())
@@ -463,13 +515,19 @@ class NCCL4PyBackend(C10DBackend):
         if self.rank() not in ranks_list:
             return None
 
-        timeout = opts._timeout if opts is not None else self._options._timeout
         child = NCCL4PyBackend(
-            store, key, len(ranks_list), timeout, comm=new_comm, device=self._device
+            store,
+            key,
+            len(ranks_list),
+            opts._timeout,
+            comm=new_comm,
+            device=self._device,
+            options=opts,
         )
-        if opts is not None:
-            child._options = opts
         return child
+
+    def perform_nocolor_split(self, _device):
+        self._comm.split(color=None, key=0)
 
     def shutdown(self):
         if self._comm is not None and self._comm.is_valid:
@@ -481,6 +539,7 @@ class NCCL4PyBackend(C10DBackend):
             self._comm = None
 
     def abort(self):
+        self._aborted = True
         if self._comm is not None and self._comm.is_valid:
             try:
                 self._comm.abort()
@@ -489,9 +548,63 @@ class NCCL4PyBackend(C10DBackend):
             self._comm = None
 
 
-def _create_nccl4py_backend(store, group_rank, group_size, timeout):
-    return NCCL4PyBackend(store, group_rank, group_size, timeout)
+def _nccl4py_device(opts):
+    process_group = opts.process_group
+    device = process_group.bound_device_id if process_group is not None else None
+    if device is not None:
+        return device
+
+    device_count = torch.cuda.device_count()
+    if device_count == 0:
+        raise RuntimeError("nccl4py requires at least one CUDA device")
+
+    global_rank = (
+        opts.global_ranks_in_group[opts.group_rank]
+        if opts.global_ranks_in_group
+        else opts.group_rank
+    )
+    device = torch.device(
+        "cuda", dist.get_node_local_rank(fallback_rank=global_rank) % device_count
+    )
+    if process_group is not None:
+        process_group.bound_device_id = device
+    return device
+
+
+def _nccl4py_options(opts, backend_options):
+    if backend_options is None:
+        backend_options = C10DBackend.Options("nccl4py", timeout=opts.timeout)
+    elif not isinstance(backend_options, C10DBackend.Options):
+        raise AssertionError(
+            "Expected backend_options argument to be of type Backend.Options"
+        )
+    backend_options._timeout = opts.timeout
+    backend_options.global_ranks_in_group = opts.global_ranks_in_group
+    backend_options.group_name = opts.group_id
+    backend_options.enable_reconfigure = opts.enable_reconfigure
+    return backend_options
+
+
+def _create_nccl4py_backend(opts, backend_options):
+    options = _nccl4py_options(opts, backend_options)
+    if opts.split_from:
+        if not isinstance(opts.split_from, NCCL4PyBackend):
+            raise AssertionError("Expected split_from to be NCCL4PyBackend")
+        return opts.split_from.split(opts.store, opts.global_ranks_in_group, options)
+    return NCCL4PyBackend(
+        opts.store,
+        opts.group_rank,
+        opts.group_size,
+        opts.timeout,
+        device=_nccl4py_device(opts),
+        options=options,
+    )
 
 
 def _register_nccl4py_backend():
-    dist.Backend.register_backend("nccl4py", _create_nccl4py_backend, devices=["cuda"])
+    dist.Backend.register_backend(
+        "nccl4py",
+        _create_nccl4py_backend,
+        extended_api=True,
+        devices=["cuda"],
+    )
