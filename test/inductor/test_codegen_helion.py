@@ -289,6 +289,20 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         )
         self.assertIn("for tile_x in hl.tile(6400):", source)
 
+    def test_inplace_reuse_chain(self):
+        def fn(x, w):
+            y = torch.nn.functional.conv2d(x, w, padding=1)
+            for i in range(32):
+                y = y * 0.999 + 0.001 * (i + 1)
+            return y + y.cos()
+
+        x = torch.randn(1, 1, 64, 128, device=GPU_TYPE)
+        w = torch.randn(1, 1, 3, 3, device=GPU_TYPE)
+        (source,) = self.compile(fn, x, w, tol=1e-4)
+        # The conv output buf0 becomes buf1, which becomes buf2, so buf0 is passed as buf2.
+        self.assertIn("buf2 = buf1; del buf1  # reuse", self.code)
+        self.assertRegex(self.code, r"helion_\w+\(reinterpret_tensor\(buf2, ")
+
     @parametrize("case", ["softmax", "layer_norm", "argmax", "dynamic"])
     def test_triton_fallback(self, case):
         x = torch.randn(64, 100, device=GPU_TYPE)

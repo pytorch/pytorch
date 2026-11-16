@@ -393,12 +393,18 @@ class HelionKernel(SIMDKernel[CSEVariable]):
 
     def call_args(self) -> list[str]:
         # An input whose storage an output took over is passed as that output.
+        # Reuse can chain inside one kernel: with buf1 reusing buf0 and buf2
+        # reusing buf1, the wrapper runs `buf1 = buf0; del buf0` and
+        # `buf2 = buf1; del buf1`, so buf0 is passed as buf2.
         reused = {inp: out for out, inp in self.inplace_update_buffers.items()}
         args = []
         for arg in self.kernel_args():
             operand = arg.operand
-            if operand.get_name() in reused:
-                target = V.graph.get_buffer(reused[operand.get_name()])
+            name = operand.get_name()
+            while name in reused:
+                name = reused[name]
+            if name != operand.get_name():
+                target = V.graph.get_buffer(name)
                 operand = ReinterpretView(data=target, layout=operand.get_layout())
             args.append(
                 operand.codegen_reference()
