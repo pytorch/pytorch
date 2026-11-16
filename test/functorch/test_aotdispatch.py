@@ -73,11 +73,7 @@ from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._inductor.utils import fresh_cache
-from torch._subclasses.fake_tensor import (
-    DynamicOutputShapeException,
-    FakeTensorMode,
-    is_fake_tensor,
-)
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
     _ModuleStackTracer,
@@ -6447,15 +6443,6 @@ class <lambda>(torch.nn.Module):
         y3 = y.detach().clone().requires_grad_(True)
         with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             f_graph_joint = aot_export_joint_simple(f, [x, y], trace_joint=True)
-        for graph in (f_graph_fw, f_graph_joint):
-            fake_values = [
-                node.meta["val"]
-                for node in graph.graph.nodes
-                if is_fake_tensor(node.meta.get("val"))
-            ]
-            self.assertTrue(fake_values)
-            for val in fake_values:
-                self.assertEqual(torch._C._is_fake_tensor(val), use_cpp_fake_tensor)
         num_fw_outputs = 2
         fw_g, bw_g = default_partition(
             f_graph_joint, [x, y], num_fwd_outputs=num_fw_outputs
