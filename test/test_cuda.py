@@ -83,6 +83,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     gcIfJetson,
     get_cycles_per_ms,
+    getRocmVersion,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_FBCODE,
@@ -872,11 +873,11 @@ print(t.is_pinned())
             props.shared_memory_per_block_optin, props.shared_memory_per_block
         )
 
-    @skipIfRocmVersionLessThan((7, 0))
     def test_cuda_xcc_count(self):
+        reported = TEST_WITH_ROCM and getRocmVersion() >= (7, 0)
         for device in range(torch.cuda.device_count()):
             xcc_count = torch.cuda.get_device_properties(device).xcc_count
-            if torch.version.hip is None:
+            if not reported:
                 self.assertIsNone(xcc_count)
             else:
                 self.assertIsInstance(xcc_count, int)
