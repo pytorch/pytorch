@@ -1,12 +1,13 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/MemoryOverlap.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/FFT.h>
 #include <algorithm>
+#include <list>
 #include <numeric>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,10 +23,10 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/fft_fft.h>
 #include <ATen/ops/imag.h>
+#include <ATen/ops/mul.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/polar.h>
 #include <ATen/ops/real.h>
-#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -55,16 +56,21 @@ bool is_smooth(int64_t n) {
 }
 
 // Cached MPS tables. W: W_n^k for k < n. W2, for long axes: W_n^b for b < 4096 then W_n^(4096 a). Chirp: Bluestein's
-// exp(-+ i pi k^2 / n), and ChirpFFT: the M-point FFT of its conjugate wrapped around zero, M a power of two >= 2n - 1
+// exp(-+ i pi k^2 / n), and ChirpFFT: the M-point FFT of its conjugate wrapped around zero
 enum class Table { W, W2, Chirp, ChirpFFT };
 
-Tensor table(Table kind, int64_t n, bool inverse = false) {
+Tensor table(Table kind, int64_t n, bool inverse = false, int64_t M = 0) {
+  using Key = std::tuple<Table, int64_t, bool, int64_t>;
+  constexpr size_t kMaxSize = 4096, kMaxBytes = 64 << 20;
   static std::mutex mutex;
-  static std::map<std::tuple<Table, int64_t, bool>, Tensor> cache;
+  static std::list<std::pair<Key, Tensor>> usage_list;
+  static std::map<Key, decltype(usage_list)::iterator> cache;
+  static size_t bytes = 0;
   std::lock_guard<std::mutex> guard(mutex);
-  auto& t = cache[{kind, n, inverse}];
-  if (t.defined()) {
-    return t;
+  const Key key{kind, n, inverse, M};
+  if (const auto it = cache.find(key); it != cache.end()) {
+    usage_list.splice(usage_list.begin(), usage_list, it->second);
+    return it->second->second;
   }
   const auto k = kind == Table::W2
       ? at::cat({at::arange(kFFTTwiddleBlock, at::kDouble), at::arange(0, n, kFFTTwiddleBlock, at::kDouble)})
@@ -73,11 +79,20 @@ Tensor table(Table kind, int64_t n, bool inverse = false) {
       ? k.mul(-2 * M_PI / n)
       : k.mul(k).remainder(2 * n).mul((inverse ? 1 : -1) * M_PI / n);
   const auto c = at::polar(at::ones_like(angle), angle);
-  const auto M = static_cast<int64_t>(std::bit_ceil<uint64_t>(2 * n - 1));
+  const auto head = c.slice(0, 0, M - n + 1).conj();
   const auto b = kind == Table::ChirpFFT
-      ? at::fft_fft(at::cat({c.conj(), at::zeros({M - 2 * n + 1}, c.options()), c.narrow(0, 1, n - 1).conj().flip(0)}))
+      ? at::fft_fft(at::cat({head, c.new_zeros(M - head.size(0) - n + 1), c.narrow(0, 1, n - 1).conj().flip(0)}))
       : c;
-  return t = b.to(at::device(kMPS).dtype(kComplexFloat));
+  const auto t = b.to(at::device(kMPS).dtype(kComplexFloat));
+  usage_list.emplace_front(key, t);
+  cache[key] = usage_list.begin();
+  bytes += t.nbytes();
+  while (usage_list.size() > kMaxSize || bytes > kMaxBytes) {
+    bytes -= usage_list.back().second.nbytes();
+    cache.erase(usage_list.back().first);
+    usage_list.pop_back();
+  }
+  return t;
 }
 
 struct Dim {
@@ -89,6 +104,7 @@ struct Batch {
   Tensor out;
   c10::SmallVector<Dim, c10::metal::max_ndim> dims; // Innermost first
   int64_t numel, si, so; // Transforms, and the element strides along the axis
+  bool wide = false; // Offsets need 64 bits
 };
 
 // Batch dims of a pass along `dim` (every other dim), innermost first, merged where both tensors allow it
@@ -133,16 +149,19 @@ struct Pass {
   bool i0_dim1 = false;
 };
 
-// Encodes n-point transforms of the batch (half: packed real pairs)
-void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool inv, bool half, const Pass& x) {
+// Encodes n-point transforms of the batch (packed: real pairs) with the kernels whose offsets are of type index_t
+template <typename index_t>
+void launch_as(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool inv, bool packed, const Pass& x) {
+  TORCH_CHECK_NOT_IMPLEMENTED(b.dims.size() <= c10::metal::max_ndim, "MPS FFT: too many batch dims: ", b.dims.size());
   const auto radix = x.global ? radices(x.global, kFFTGlobalRadices) : radices(n);
   const auto to_u32 = [](int64_t v) { return c10::checked_convert<uint32_t>(v, "uint32_t"); };
-  const auto to_i32 = [](int64_t v) { return c10::checked_convert<int32_t>(v, "int32_t"); };
+  const auto to_off = [](int64_t v) { return c10::checked_convert<index_t>(v, "offset"); };
   const uint32_t n_u32 = to_u32(n);
 
   // Kernel family: a global radix, a fixed length, or the smallest radix set factoring n (p16: lengths 1 and 16);
   // the names match the FAMILY instantiations in FFT.metal
-  const auto set = n % 7 == 0 ? "p2357" : n % 3 == 0 || n % 5 == 0 ? "p235" : n == 1 || n == 16 ? "p16" : "p2";
+  const auto pow2_set = n == 1 || n == kFFTP16Points ? "p16" : "p2";
+  const auto set = n % 13 == 0 ? "p235713" : n % 7 == 0 ? "p2357" : n % 3 == 0 || n % 5 == 0 ? "p235" : pow2_set;
   const auto has = [](const auto& list, int64_t v) { return std::ranges::find(list, v) != std::end(list); };
   const auto family = x.global ? "g" + std::to_string(x.global) : has(kFFTFixedSizes, n) ? std::to_string(n) : set;
 
@@ -151,10 +170,11 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
   const auto n_out = x.n_out ? x.n_out : n;
   const bool ld = x.cl || n_sig < n * x.ld_mul || (x.ld_mul > 1 && b.in.is_complex() && n_in < n_sig);
   const bool st = x.out_k_mul > 1 || x.cs;
-  const bool pairs = (half || x.global) && !b.out.is_complex();
+  const bool pairs = (packed || x.global) && !b.out.is_complex();
   const bool tw4 = x.tt && !x.global;
-  const uint32_t F = inv * kFFTInverse | half * kFFTPackedLoads | tw4 * kFFTFourStepTwiddles | st * kFFTExtendedStores |
-      ld * kFFTExtendedLoads | (x.global > 0) * kFFTGlobalStage | pairs * kFFTPackedRealStores;
+  const uint32_t F = inv * kFFTInverse | packed * kFFTPackedLoads | tw4 * kFFTFourStepTwiddles |
+      st * kFFTExtendedStores | ld * kFFTExtendedLoads | (x.global > 0) * kFFTGlobalStage |
+      pairs * kFFTPackedRealStores;
 
   const int64_t ept = fft_points_per_thread(n_u32, F);
   const int64_t rows = b.dims[0].size;
@@ -184,7 +204,7 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
   const bool pad = !strided && B * (padded - (B == 1)) <= kFFTMaxPoints;
   const int64_t row = strided ? 1 : pad ? padded - (B == 1) : n + (B > 1);
 
-  FFTParams params{
+  FFTParams<index_t> params{
       .n = n_u32,
       .n_sig = to_u32(n_sig),
       .n_in = to_u32(n_in),
@@ -193,9 +213,9 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
       .jt = to_u32(J),
       .ndim = to_u32(b.dims.size()),
       .nstages = to_u32(radix.size()),
-      .in_stride = to_i32(b.si),
-      .in_unit = to_i32(b.si / x.ld_mul),
-      .out_stride = to_i32(b.so),
+      .in_stride = to_off(b.si),
+      .in_unit = to_off(b.si / x.ld_mul),
+      .out_stride = to_off(b.so),
       .scale = static_cast<float>(x.scale),
       .ld_mul = to_u32(x.ld_mul),
       .out_k_mul = to_u32(x.out_k_mul),
@@ -211,19 +231,19 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
   for (uint32_t s = 0; s < radix.size(); s++) {
     params.radix[s] = radix[s];
     params.ns[s] = ns;
-    params.twstep[s] = n_u32 / radix[s] / ns * (half ? 2 : 1);
+    params.twstep[s] = n_u32 / radix[s] / ns * (packed ? 2 : 1);
     params.inv_ns[s] = 1.0f / ns;
     ns *= radix[s];
   }
 
   for (const auto d : c10::irange(b.dims.size())) {
     params.sizes[d] = to_u32(b.dims[d].size);
-    params.in_strides[d] = to_i32(b.dims[d].in_stride);
-    params.out_strides[d] = to_i32(b.dims[d].out_stride);
+    params.in_strides[d] = to_off(b.dims[d].in_stride);
+    params.out_strides[d] = to_off(b.dims[d].out_stride);
   }
 
   const bool contig = !strided && B == 1 && has(kFFTContigSizes, n) && !(F & kFFTMultiPass);
-  const auto suffix = contig ? "c"sv : ""sv;
+  const auto suffix = contig ? "c"sv : b.wide ? "w"sv : ""sv;
   const auto name = fmt::format(
       "fft_{}_{}_{}{}_{}", scalarToMetalTypeString(b.in), scalarToMetalTypeString(b.out), family, suffix, F);
   const int64_t ny = b.dims.size() > 1 ? b.dims[1].size : 1;
@@ -244,6 +264,10 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
   getMPSProfiler().endProfileKernel(pso, getCurrentMPSStream());
 }
 
+void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool inv, bool packed, const Pass& x) {
+  return b.wide ? launch_as<int64_t>(enc, b, n, inv, packed, x) : launch_as<int32_t>(enc, b, n, inv, packed, x);
+}
+
 // Encodes the launches of `encode` on the stream; tables and temps are made first, as ATen ops wait on its queue
 template <class F>
 void run(F encode) {
@@ -262,6 +286,11 @@ bool fits_one_pass(const Batch& b, int64_t n, bool chirped) {
   return n <= kFFTMaxPoints && !both;
 }
 
+int64_t pass_points(bool real, int64_t n) {
+  const int64_t m = real && n % 2 == 0 && n != kFFTP16Points ? n / 2 : n;
+  return m >= kFFTMinPackedPoints && m <= kFFTMaxPoints ? m : n;
+}
+
 // n-point transforms of the batch: x.n_in inputs (c2r: n/2+1, mirrored), x.n_out outputs
 void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
   const auto n_sig = x.n_sig ? x.n_sig : n;
@@ -269,12 +298,11 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
   const auto n_out = x.n_out ? x.n_out : n;
   const bool real = !b.in.is_complex() || !b.out.is_complex();
   const int64_t m = real && n % 2 == 0 ? n / 2 : n;
-  const bool half = !x.cl && !x.cs && n > 2 && m < n && m <= kFFTMaxPoints;
-  const int64_t pass_n = half ? m : n;
+  const int64_t pass_n = x.cl || x.cs ? n : pass_points(real, n);
   if (fits_one_pass(b, pass_n, x.cs.has_value())) {
     Pass p = x;
     p.tw = table(Table::W, n);
-    run([&](auto enc) { launch(enc, b, pass_n, inv, half, p); });
+    run([&](auto enc) { launch(enc, b, pass_n, inv, pass_n < n, p); });
     return;
   }
 
@@ -282,7 +310,7 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
   const bool plain = !x.cl && !x.cs && !x.n_sig;
   const bool packs = !real || n % 2 == 0;
   auto gplan = radices(m, kFFTGlobalRadices);
-  if (n >= kFFTLongPoints && (n & (n - 1)) && plain && packs && !gplan.empty()) {
+  if (n >= kFFTLongPoints && (n & (n - 1)) && plain && packs && !b.wide && !gplan.empty()) {
     gplan.resize(gplan.size() + !b.in.is_complex(), kFFTUnpackRadix);
     const auto tmp = at::empty({2, b.numel * m}, b.out.options().dtype(kComplexFloat));
     const Tensor temps[] = {tmp[0], tmp[1]};
@@ -302,11 +330,10 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
               {b.dims[d].size, first ? b.dims[d].in_stride : tstride, last ? b.dims[d].out_stride : tstride});
           tstride *= b.dims[d].size;
         }
-        const bool packed = first && real;
-        const Tensor& tw = packed ? tw2 : tw1;
+        const Tensor& tw = first && real ? tw2 : tw1;
         const Pass pass{
             .n_out = last ? n_out : m, .global = gplan[s], .ns = ns, .scale = last ? x.scale : 1, .tt = tt, .tw = tw};
-        launch(enc, bp, m, inv, packed, pass);
+        launch(enc, bp, m, inv, first && real, pass);
         ns *= gplan[s];
       }
     });
@@ -314,14 +341,14 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
   }
 
   // Four-step: n = n1*n2, temp [outer batch][n2][n1][inner batch]; pass 1 transforms strided n1-point columns
-  // times W_n^(k1*i0), pass 2 writes k1+n1*k2 (n1 <= kFFTMaxNestedColumns if it recurses). Real transforms halve one
-  // pass.
+  // times W_n^(k1*i0), pass 2 writes k1+n1*k2 (n1 <= kFFTMaxNestedColumns if it recurses). Real transforms pack one
+  // pass from kFFTLongPoints points: below, the passes are launch-bound and packing measured 1.1-1.2x slower.
   const bool big = plain && b.numel * n >= kFFTLongPoints;
   bool r2c = big && !b.in.is_complex();
   bool c2r = big && !b.out.is_complex();
   const bool nest = !x.cs && n_out == n && b.out.is_complex();
 
-  // n1: the largest smooth divisor <= sqrt(n) whose cofactor fits a pass; nr: with an even halved real pass
+  // n1: the largest smooth divisor <= sqrt(n) whose cofactor fits a pass; nr: with an even packed real pass
   int64_t n1 = 0;
   int64_t nr = 0;
   for (int64_t d = 1; d * d <= n; d++) {
@@ -330,7 +357,7 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
     if (n % d || !is_smooth(d) || !is_smooth(q)) {
       continue;
     }
-    nr = q <= kFFTMaxPoints && h % 2 == 0 && h > 2 && h <= 2 * kFFTMaxPoints ? d : nr;
+    nr = q <= kFFTMaxPoints && h % 2 == 0 && h / 2 >= kFFTMinPackedPoints && h / 2 <= kFFTMaxPoints ? d : nr;
     n1 = (q <= kFFTMaxPoints || nest) && (!nest || d <= kFFTMaxNestedColumns) ? d : n1;
   }
   r2c = r2c && nr;
@@ -345,6 +372,7 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
   const int64_t ninner = inner ? b.dims[0].size : 1;
   Batch b1{b.in, {}, {}, b.numel * rows, b.si * n2, ninner};
   Batch b2{{}, b.out, {}, b.numel * rl, rl * ninner, b.so * n1};
+  b1.wide = b2.wide = b.wide;
   int64_t t = 1;
   for (int64_t d = 0; d < static_cast<int64_t>(b.dims.size()); d++) {
     const int64_t ts = d < inner ? t : t * rows * rl; // The temp's stride of batch dim d
@@ -384,51 +412,87 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
   fft_batch(b2, n2, inv, {.scale = x.scale});
 }
 
+// One transform along `dim` spanning 2^31 elements takes the kernels with 64-bit offsets
+bool spans_wide(const Tensor& in, const Tensor& out, int64_t dim) {
+  const auto reach = [&](const Tensor& t) { return (t.size(dim) - 1) * t.stride(dim); };
+  return std::max(reach(in), reach(out)) >= std::numeric_limits<int32_t>::max();
+}
+
 // n-point transforms along `dim`; lengths with other prime factors use Bluestein's algorithm
 void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool inv, const Pass& x = {}) {
   dim = maybe_wrap_dim(dim, in.dim());
-  if (!canUse32BitIndexMath(in) || !canUse32BitIndexMath(out)) {
-    // Kernels index with 32 bits: halve the largest batch dim
-    int64_t d = dim == 0;
+  constexpr int64_t kMax = std::numeric_limits<int32_t>::max();
+  const bool wide = n < kMax && spans_wide(in, out, dim);
+  const auto points = std::min<int64_t>(n, kFFTMaxPoints);
+  const auto threads = out.numel() / out.size(dim) * at::ceil_div<int64_t>(points, fft_points_per_thread(points, 0));
+  if (wide ? threads > kMax : !canUse32BitIndexMath(in) || !canUse32BitIndexMath(out)) {
+    // Halve the batch dim spanning the most elements
+    const auto span = [&](int64_t i) { return (in.size(i) - 1) * std::max(in.stride(i), out.stride(i)); };
+    int64_t d = -1;
     for (const auto i : c10::irange(in.dim())) {
-      d = i != dim && in.size(i) > in.size(d) ? i : d;
+      d = i != dim && in.size(i) > 1 && (d < 0 || span(i) > span(d)) ? i : d;
     }
-    TORCH_CHECK_NOT_IMPLEMENTED(in.dim() > 1 && in.size(d) > 1,
-                                "MPS FFT: a transform must have fewer than 2^31 elements");
+    TORCH_CHECK_NOT_IMPLEMENTED(d >= 0, "MPS FFT: a transform must have fewer than 2^31 elements");
     const auto h = in.size(d) / 2;
     fft_pass(in.narrow(d, 0, h), out.narrow(d, 0, h), dim, n, inv, x);
     return fft_pass(in.narrow(d, h, in.size(d) - h), out.narrow(d, h, in.size(d) - h), dim, n, inv, x);
   }
   if (is_smooth(n)) {
-    return fft_batch(collapse(in, out, dim), n, inv, x);
+    auto b = collapse(in, out, dim);
+    b.wide = wide;
+    return fft_batch(b, n, inv, x);
   }
 
-  // Bluestein: X = c * IFFT_M(FFT_M(x * c) * B)[:n], M a power of two >= 2n - 1 (at most two tile passes, 2^24),
-  // chirps folded into the kernels
-  TORCH_CHECK_NOT_IMPLEMENTED(n <= 1 << 23, "MPS FFT: lengths with prime factors above 7 are limited to 2^23");
-  const auto c = table(Table::Chirp, n, inv), B = table(Table::ChirpFFT, n, inv);
-  const auto M = B.numel();
+  // Bluestein: X = c * IFFT_M(FFT_M(x * c) * B)[:n_out], M a power of two > n + n_out - 1 (never 16: no chirp kernels)
+  TORCH_CHECK_NOT_IMPLEMENTED(!wide, "MPS FFT: lengths with a prime factor of 11 or over 13 cannot span 2^31 elements");
+  const auto n_out = x.n_out ? x.n_out : n;
+  const auto M = static_cast<int64_t>(std::bit_ceil<uint64_t>(n + n_out));
+  if (!in.is_complex() && M / 2 >= n + n / 2 + 1) {
+    fft_pass(in, out, dim, n, inv, {.n_out = n / 2 + 1, .scale = x.scale});
+    out.narrow(dim, n / 2 + 1, (n - 1) / 2).copy_(out.narrow(dim, 1, (n - 1) / 2).flip(dim).conj());
+    return;
+  }
+  TORCH_CHECK_NOT_IMPLEMENTED(M < kMax, "MPS FFT: lengths with a prime factor of 11 or over 13 are limited to 2^29");
+  const auto c = table(Table::Chirp, n, inv), B = table(Table::ChirpFFT, n, inv, M);
+  // The temp's axis goes last where its transforms would otherwise span 2^31 elements
+  const bool last = (M - 1) * c10::multiply_integers(in.sizes().slice(dim + 1)) >= kMax;
   DimVector sizes(in.sizes());
   sizes[dim] = M;
+  std::rotate(sizes.begin() + dim, sizes.begin() + dim + last, sizes.end());
   auto tmp = at::empty(sizes, in.options().dtype(kComplexFloat)); // Several passes always run in fp32
-  fft_pass(in, tmp, dim, M, false, {.n_sig = n, .n_in = x.n_in ? x.n_in : n, .scale = x.scale / M, .cl = c, .cs = B});
-  fft_pass(tmp, out, dim, M, true, {.n_out = x.n_out ? x.n_out : n, .cs = c});
+  tmp = last ? tmp.movedim(-1, dim) : std::move(tmp);
+  // Two tile passes fold every chirp into the kernels
+  if (M <= kFFTMaxTwoPassPoints) {
+    fft_pass(in, tmp, dim, M, false, {.n_sig = n, .n_in = x.n_in ? x.n_in : n, .scale = x.scale / M, .cl = c, .cs = B});
+    return fft_pass(tmp, out, dim, M, true, {.n_out = n_out, .cs = c});
+  }
+  // Longer transforms nest and their stores fold none: B goes into the second transform's loads, c into a mul
+  fft_pass(in, tmp, dim, M, false, {.n_sig = n, .scale = x.scale / M, .cl = c});
+  fft_pass(tmp, tmp, dim, M, true, {.cl = B});
+  auto dst = out.narrow(dim, 0, n_out).movedim(dim, -1); // c broadcasts along the last dim
+  at::mul_out(dst, tmp.narrow(dim, 0, n_out).movedim(dim, -1), c.narrow(0, 0, n_out));
 }
 
 // fp16 partials overflow and lose precision between passes, so transforms taking more than one pass run in fp32
 bool needs_fp32(const Tensor& in, const Tensor& out, IntArrayRef dim, int64_t n) {
-  const bool halved = (!in.is_complex() || !out.is_complex()) && n % 2 == 0 && n > 2;
+  const bool real = !in.is_complex() || !out.is_complex();
   return c10::toRealValueType(in.scalar_type()) == kHalf &&
       (dim.size() > 1 || !is_smooth(n) ||
-       !fits_one_pass(collapse(in, out, maybe_wrap_dim(dim.back(), in.dim())), halved ? n / 2 : n, false));
+       !fits_one_pass(collapse(in, out, maybe_wrap_dim(dim.back(), in.dim())), pass_points(real, n), false));
 }
 
-// Real lengths beyond two tile passes (powers of two and odd lengths above 2^24) run as complex transforms
-bool beyond_real_passes(int64_t n) {
-  return n > kFFTMaxPoints * kFFTMaxPoints && (!(n & (n - 1)) || n % 2);
+// Real lengths two tile passes cannot take run as complex transforms: powers of two and odd lengths above 2^24,
+// and one-sided odd lengths no divisor splits into two passes
+bool beyond_real_passes(int64_t n, bool onesided) {
+  auto d = onesided && n % 2 && is_smooth(n) ? at::ceil_div<int64_t>(n, kFFTMaxPoints) : 1;
+  while (d <= kFFTMaxPoints && n % d) {
+    d++;
+  }
+  return n > kFFTMaxTwoPassPoints ? !(n & (n - 1)) || n % 2 : d > kFFTMaxPoints;
 }
 
 double norm_scale(int64_t normalization, const Tensor& t, IntArrayRef dims) {
+  TORCH_CHECK(normalization >= 0 && normalization <= 2, "Unsupported normalization type ", normalization);
   const auto n = std::accumulate(dims.begin(), dims.end(), 1.0, [&](double a, int64_t d) { return a * t.size(d); });
   return std::pow(n, -0.5 * normalization); // fft_norm_mode: none, by_root_n, by_n
 }
@@ -446,6 +510,9 @@ Tensor _fft_r2c_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 }
 
 Tensor _fft_c2c_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
+  if (dim.empty()) {
+    return self.clone();
+  }
   auto out = at::empty(self.sizes(), self.options());
   return _fft_c2c_mps_out(self, dim, normalization, forward, out);
 }
@@ -460,15 +527,18 @@ Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
     out_sizes[last_dim] = out_sizes[last_dim] / 2 + 1;
   }
   at::native::resize_output_symint(out, out_sizes);
+  at::assert_no_internal_overlap(out);
   if (self.numel() == 0) {
     return out.zero_();
   }
 
   const auto n = self.size(last_dim);
-  if (needs_fp32(self, out, dim, n)) {
+  const bool overlap = out.is_alias_of(self) && at::get_overlap_status(out, self) != MemOverlapStatus::No;
+  if (overlap || needs_fp32(self, out, dim, n)) {
     return out.copy_(_fft_r2c_mps(self.to(kFloat), dim, normalization, onesided));
   }
-  if (beyond_real_passes(n)) {
+  // The kernels with 64-bit offsets only take complex inputs
+  if (beyond_real_passes(n, onesided) || spans_wide(self, out, last_dim)) {
     const auto full = at::_fft_c2c(self.to(out.scalar_type()), dim, normalization, true);
     return out.copy_(full.narrow(last_dim, 0, out.size(last_dim)));
   }
@@ -493,11 +563,13 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
   SymDimVector out_sizes(self.sym_sizes().begin(), self.sym_sizes().end());
   out_sizes[last_dim] = last_dim_size;
   at::native::resize_output_symint(out, out_sizes);
+  at::assert_no_internal_overlap(out);
   if (out.numel() == 0) {
     return out;
   }
 
-  if (needs_fp32(self, out, dim, last_dim_size)) {
+  const bool overlap = out.is_alias_of(self) && at::get_overlap_status(out, self) != MemOverlapStatus::No;
+  if (overlap || needs_fp32(self, out, dim, last_dim_size)) {
     return out.copy_(_fft_c2r_mps(self.to(kComplexFloat), dim, normalization, last_dim_size));
   }
   const auto tmp = dim.size() > 1 ? at::empty(self.sizes(), self.options()) : self;
@@ -506,7 +578,9 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
   }
   const auto n = last_dim_size;
   const auto scale = norm_scale(normalization, out, dim);
-  if (beyond_real_passes(n)) {
+  // The kernels with 64-bit offsets and Bluestein's nested transforms only write complex outputs
+  const bool nests = !is_smooth(n) && 2 * n > kFFTMaxTwoPassPoints;
+  if (beyond_real_passes(n, true) || nests || spans_wide(tmp, out, last_dim)) {
     auto full = at::cat({tmp, tmp.narrow(last_dim, 1, n - n / 2 - 1).flip(last_dim).conj()}, last_dim);
     at::imag(full.select(last_dim, 0)).zero_(); // c2r reads DC and Nyquist as real
     at::imag(full.select(last_dim, n / 2)).mul_(n % 2);
@@ -520,14 +594,17 @@ Tensor& _fft_c2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
   TORCH_CHECK(self.is_complex());
   TORCH_CHECK(out.device() == self.device(), "Expected out tensor on ", self.device(), " but got ", out.device());
   at::native::resize_output_symint(out, self.sym_sizes());
+  at::assert_no_internal_overlap(out);
   if (out.numel() == 0) {
     return out;
   }
 
+  const auto status = at::get_overlap_status(out, self);
+  const bool overlap = out.is_alias_of(self) && status != MemOverlapStatus::Full && status != MemOverlapStatus::No;
   if (dim.empty()) {
-    return out.copy_(self);
+    return out.copy_(overlap ? self.clone() : self);
   }
-  if (needs_fp32(self, out, dim, self.size(dim.back()))) {
+  if (overlap || out.scalar_type() != self.scalar_type() || needs_fp32(self, out, dim, self.size(dim.back()))) {
     return out.copy_(_fft_c2c_mps(self.to(kComplexFloat), dim, normalization, forward));
   }
   const auto scale = norm_scale(normalization, self, dim);
