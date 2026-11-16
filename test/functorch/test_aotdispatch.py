@@ -74,11 +74,9 @@ from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._inductor.utils import fresh_cache
 from torch._subclasses.fake_tensor import (
-    CppFakeTensorMode,
     DynamicOutputShapeException,
     FakeTensorMode,
     is_fake_tensor,
-    maybe_get_fake_mode,
 )
 from torch.fx.experimental.proxy_tensor import (
     _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
@@ -6274,8 +6272,8 @@ def forward(self, arg0_1):
     return (sum_1,)""",
         )
 
-    @fake_tensor_modes
-    def test_aot_export_module_joint(self, mode_cls):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_aot_export_module_joint(self, use_cpp_fake_tensor):
         class ConvBatchnormRelu(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -6293,9 +6291,7 @@ def forward(self, arg0_1):
         mod.train()
         inp = torch.randn(1, 1, 3, 3)
         mod(inp)
-        with torch._dynamo.config.patch(
-            use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
-        ):
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             fx_g, signature = aot_export_module(
                 mod, [inp], trace_joint=True, output_loss_index=0
             )
@@ -6383,9 +6379,7 @@ class <lambda>(torch.nn.Module):
 
         # Also check the inference graph
         # Main important thing here is that there are 5 total outputs: 3 total mutated buffers (from batchnorm), 2 user outputs.
-        with torch._dynamo.config.patch(
-            use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
-        ):
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             fx_g_inference, signature_inference = aot_export_module(
                 mod, [inp], trace_joint=False
             )
@@ -6429,17 +6423,15 @@ class <lambda>(torch.nn.Module):
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
         # 9 outputs: 2 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
 
-    @fake_tensor_modes
-    def test_aot_export_simplified_basic(self, mode_cls):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_aot_export_simplified_basic(self, use_cpp_fake_tensor):
         def f(x, y):
             return x * y, y * y.detach()
 
         x = torch.randn(2, requires_grad=True)
         y = torch.randn(2, requires_grad=True)
 
-        with torch._dynamo.config.patch(
-            use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
-        ):
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             f_graph_fw = aot_export_joint_simple(f, [x, y], trace_joint=False)
         out_ref = f(x, y)
         # No calling convention changes necessary to invoke the traced graph
@@ -6453,9 +6445,7 @@ class <lambda>(torch.nn.Module):
         y2 = y.detach().clone().requires_grad_(True)
         x3 = x.detach().clone().requires_grad_(True)
         y3 = y.detach().clone().requires_grad_(True)
-        with torch._dynamo.config.patch(
-            use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
-        ):
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             f_graph_joint = aot_export_joint_simple(f, [x, y], trace_joint=True)
         for graph in (f_graph_fw, f_graph_joint):
             fake_values = [
@@ -6464,12 +6454,8 @@ class <lambda>(torch.nn.Module):
                 if is_fake_tensor(node.meta.get("val"))
             ]
             self.assertTrue(fake_values)
-            self.assertTrue(
-                all(
-                    isinstance(maybe_get_fake_mode(val), mode_cls)
-                    for val in fake_values
-                )
-            )
+            for val in fake_values:
+                self.assertEqual(torch._C._is_fake_tensor(val), use_cpp_fake_tensor)
         num_fw_outputs = 2
         fw_g, bw_g = default_partition(
             f_graph_joint, [x, y], num_fwd_outputs=num_fw_outputs
@@ -6840,17 +6826,15 @@ def forward(self, arg0_1):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
 
-    @fake_tensor_modes
-    def test_aot_export_unbacked_arg(self, mode_cls):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_aot_export_unbacked_arg(self, use_cpp_fake_tensor):
         class M(torch.nn.Module):
             def forward(self):
                 full = torch.full((), 11)
                 i0 = full.item()
                 return (torch.full((i0,), 0),)
 
-        with torch._dynamo.config.patch(
-            use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
-        ):
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             gm, _ = aot_export_module(
                 mod=M(), args=(), trace_joint=False, dynamic_shapes=True
             )
@@ -6864,8 +6848,8 @@ def forward(self):
     return (full_1,)""",
         )
 
-    @fake_tensor_modes
-    def test_aot_export_input_mutation(self, mode_cls):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_aot_export_input_mutation(self, use_cpp_fake_tensor):
         def f(x, buf):
             buf.add_(1)
             return buf * x
@@ -6873,9 +6857,7 @@ def forward(self):
         x = torch.randn(2, requires_grad=True)
         buf = torch.zeros(2, requires_grad=False)
 
-        with torch._dynamo.config.patch(
-            use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
-        ):
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             gm, _, _, _ = _aot_export_function(
                 f,
                 (x, buf),
@@ -11784,11 +11766,11 @@ class TestAOTModuleSimplified(AOTTestCase):
             shape_env.format_guards(),
             """\
  - Eq(s49, 20)
- - Eq(30, s70)"""
-            if mode_cls is CppFakeTensorMode
+ - Eq(s70, 30)"""
+            if mode_cls is FakeTensorMode
             else """\
  - Eq(s49, 20)
- - Eq(s70, 30)""",
+ - Eq(30, s70)""",
         )
 
         if not torch.allclose(ref[0], res[0]):
