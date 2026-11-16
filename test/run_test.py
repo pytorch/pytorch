@@ -1781,6 +1781,11 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--include-faketensor-tests",
+        action="store_true",
+        help="Run the tests enabled for FakeTensorMode CI.",
+    )
+    parser.add_argument(
         "--include-inductor-core-tests",
         "--include-inductor-core-tests",
         action="store_true",
@@ -2104,6 +2109,14 @@ def can_run_in_pytest(test):
 def get_selected_tests(options) -> list[str]:
     selected_tests = options.include
 
+    if options.include_faketensor_tests:
+        selection = REPO_ROOT / ".ci/pytorch/faketensor-tests.json"
+        with selection.open() as f:
+            enabled_tests = json.load(f)
+        selected_tests = [test for test in selected_tests if test in enabled_tests]
+        os.environ["PYTORCH_TEST_FAKETENSOR_SELECTION"] = str(selection)
+        options.enable_td = False
+
     # filter if there's JIT only and distributed only test options
     if options.jit:
         selected_tests = list(
@@ -2197,7 +2210,7 @@ def get_selected_tests(options) -> list[str]:
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
     if options.onnx:
         selected_tests = onnx_tests
-    else:
+    elif not options.include_faketensor_tests:
         # Exclude all onnx tests otherwise
         options.exclude.extend(onnx_tests)
 
