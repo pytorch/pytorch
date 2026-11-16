@@ -12,10 +12,11 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 from .. import config
-from ..codegen.helion.helion_scheduling import lowers_helion_matmul
+from ..codegen.common import get_scheduling_for_device
 from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
+from ..scheduler import BaseScheduling
 from ..utils import load_template, triton_type
 
 
@@ -176,7 +177,8 @@ def scale_mm_epilogue():
 
 
 def use_native_matmul(mat1, mat2):
-    if is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype()):
+    device_type = mat1.get_device().type
+    if is_bf16x9_matmul(device_type, mat1.get_dtype()):
         return False
 
     if config.triton.native_matmul:
@@ -191,14 +193,19 @@ def use_native_matmul(mat1, mat2):
         # TODO: support block ptr
         if use_block_ptr_enabled():
             raise AssertionError("native matmul doesn't support block_ptr codegen yet")
-    elif use_block_ptr_enabled() or not lowers_helion_matmul(mat1, mat2):
-        # Helion matmuls (codegen/helion) use this lowering too. Triton's native
-        # matmul codegen, which emits the dots Helion declines when scheduling,
-        # supports no block_ptr.
+    elif not (
+        # A backend that emits matmuls itself opts in, e.g. Helion's. The built-in
+        # CUDA backend is registered as a function of config.cuda_backend.
+        isinstance(scheduling := get_scheduling_for_device(device_type), type)
+        and issubclass(scheduling, BaseScheduling)
+        and scheduling.lowers_native_matmul(mat1, mat2)
+        # Triton's native matmul codegen emits the dots such a backend declines
+        # when scheduling, and it supports no block_ptr.
+        and not use_block_ptr_enabled()
+    ):
         return False
 
     # Currently only enable native matmul for triton on GPU.
-    device_type = mat1.get_device().type
     if not (
         device_type in ("cuda", "xpu") and get_current_backend(device_type) == "triton"
     ):

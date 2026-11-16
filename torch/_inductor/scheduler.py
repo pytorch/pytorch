@@ -13448,6 +13448,14 @@ class BaseScheduling:  # noqa: docstring_linter
         super().__init__()
         self.scheduler = scheduler
 
+    @classmethod
+    def lowers_native_matmul(cls, mat1: ir.IRNode, mat2: ir.IRNode) -> bool:
+        """Whether Inductor lowers mat1 @ mat2 to a dot reduction for this backend
+        to emit, as triton.native_matmul does for Triton. A backend registered with
+        register_backend_for_device, such as Helion's, returns True for the
+        matmuls it emits."""
+        return False
+
     def free_buffers_in_scheduler(self) -> None:
         if self.scheduler:
             self.scheduler.free_buffers()

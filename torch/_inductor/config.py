@@ -3281,26 +3281,6 @@ class halide:
     scan_kernels = False
 
 
-class helion:
-    # Emit the kernels codegen/helion supports as Helion, the rest as Triton. Helion
-    # compiles and autotunes a kernel on its first call, and its errors are not
-    # caught: they fail the compile or that call.
-    enabled: bool = os.getenv("TORCHINDUCTOR_HELION", "0") == "1"
-    # With enabled, lower matmuls natively, as triton.native_matmul does, and emit
-    # them as Helion. A matmul that Helion declines when lowering (dynamic shapes,
-    # the strict and deterministic modes, cpp_wrapper) keeps its extern kernel or
-    # template. One that Helion declines only when scheduling, e.g. with a gathered
-    # operand as in a[i] @ b, is already a native matmul, so Triton's native matmul
-    # codegen emits it instead of extern_kernels.mm; such cases shrink as
-    # codegen/helion supports more.
-    native_matmul: bool = os.getenv("TORCHINDUCTOR_HELION_NATIVE_MATMUL", "1") == "1"
-    backend: Literal["triton", "cute"] = "triton"
-    autotune_effort: Literal["none", "quick", "full"] = "quick"
-    # Helion's fast_math: approximate fp32 division, exp, erf and rsqrt. Off, as in
-    # Triton kernels.
-    fast_math: bool = False
-
-
 # create a directory containing lots of debug information
 def _get_debug_graph_format(format_env_name: str, legacy_svg_env_name: str) -> str:
     if format_env_name in os.environ:

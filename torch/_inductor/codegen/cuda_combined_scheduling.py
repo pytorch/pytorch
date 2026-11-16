@@ -6,7 +6,6 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
-from .. import config
 from ..ir import MultiTemplateBuffer
 from ..scheduler import (
     BaseSchedulerNode,
@@ -18,7 +17,6 @@ from ..scheduler import (
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
 from .flydsl.flydsl_scheduling import FlyDSLScheduling
-from .helion import HelionScheduling
 from .nv_universal_gemm.nv_universal_gemm_scheduling import (
     NVGemmVerticalFusionDecision,
     NVUniversalGemmScheduling,
@@ -57,10 +55,7 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
-        triton_scheduling = (
-            HelionScheduling if config.helion.enabled else TritonScheduling
-        )
-        self._triton_scheduling = triton_scheduling(scheduler)
+        self._triton_scheduling = TritonScheduling(scheduler)
         self._cutlass_scheduling = CUTLASSScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
         self._cutedsl_scheduling = CuteDSLScheduling(scheduler)

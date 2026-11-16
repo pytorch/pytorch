@@ -1,12 +1,19 @@
 # Owner(s): ["module: inductor"]
 
 
+import unittest
 from collections.abc import Callable
 
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, metrics
+from torch._inductor.codegen.common import (
+    device_codegens,
+    init_backend_registration,
+    register_backend_for_device,
+)
+from torch._inductor.codegen.cuda_combined_scheduling import CUDACombinedScheduling
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
     fresh_inductor_cache,
@@ -304,10 +311,12 @@ class TestTritonDotReduction(TestCase):
                 (x.expand(3, 40, 72), y.expand(3, 72, 136)),
             ),
         ]:
-            torch._dynamo.reset()
-            actual = torch.compile(f)(*args)
-            self.assertEqual(actual.dtype, torch.float32)
-            self.assertEqual(actual, f(*args), atol=1e-4, rtol=1e-4)
+            with self.subTest(len(args[0].shape)):
+                torch._dynamo.reset()
+                actual, (code,) = run_and_get_code(torch.compile(f), *args)
+                self.assertIn("tl.dot", code)
+                self.assertEqual(actual.dtype, torch.float32)
+                self.assertEqual(actual, f(*args), atol=1e-4, rtol=1e-4)
 
     def test_zero_alpha_beta(self):
         M, K, N = 40, 72, 136
@@ -335,6 +344,42 @@ class TestTritonDotReduction(TestCase):
                 torch._dynamo.reset()
                 actual = torch.compile(f)(*args)
                 self.assertEqual(actual, f(*args), atol=1e-4, rtol=1e-4)
+
+
+@unittest.skipIf(GPU_TYPE != "cuda", "registers a CUDA backend")
+class TestNativeMatmulBackend(TestCase):
+    @inductor_config.patch(
+        {
+            "force_disable_caches": True,
+            "test_configs.force_filter_reduction_configs": True,
+        }
+    )
+    def test_backend_lowers_native_matmul(self):
+        # Without triton.native_matmul, a backend registered with
+        # register_backend_for_device, such as Helion's, asks for the native
+        # lowering; Triton's native matmul codegen emits the dots it declines.
+        class Scheduling(CUDACombinedScheduling):
+            @classmethod
+            def lowers_native_matmul(cls, mat1, mat2):
+                return True
+
+        init_backend_registration()
+        default = device_codegens[GPU_TYPE]
+        self.addCleanup(device_codegens.__setitem__, GPU_TYPE, default)
+        register_backend_for_device(
+            GPU_TYPE,
+            Scheduling,
+            default.wrapper_codegen,
+            default.cpp_wrapper_codegen,
+            default.fx_wrapper_codegen,
+        )
+        a, b = (
+            torch.randn(40, 72, device=GPU_TYPE),
+            torch.randn(72, 136, device=GPU_TYPE),
+        )
+        actual, (code,) = run_and_get_code(torch.compile(torch.mm), a, b)
+        self.assertIn("tl.dot", code)
+        self.assertEqual(actual, a @ b, atol=1e-4, rtol=1e-4)
 
 
 @inductor_config.patch({"triton.native_matmul": True})
