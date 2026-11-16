@@ -304,6 +304,11 @@ def _make_topk_storage(sort_len: int, block_threads: int, spec: TopKSpec):
 def _build_radix_select_topk_module(
     n: int, k: int, deterministic: bool, arch: str, spec: TopKSpec
 ):
+    # FlyDSL 0.3.x omits captured dataclass fields from its JIT cache key:
+    # https://github.com/ROCm/FlyDSL/issues/1206
+    # Capture dtype/largest as a scalar token to keep specializations distinct.
+    # This is removable after upgrading to FlyDSL 0.5, which fixes the issue:
+    # https://github.com/ROCm/FlyDSL/pull/1338
     cache_tag = spec.cache_token()
     num_stages = (k - 1).bit_length()
     sort_len = 1 << num_stages
@@ -329,7 +334,7 @@ def _build_radix_select_topk_module(
         values: fx.Tensor,
         indices: fx.Tensor,
     ):
-        _ = cache_tag  # Scalar closure dependency for FlyDSL's artifact cache.
+        _ = cache_tag  # Keep the compatibility token in the kernel closure.
         row = fx.block_idx.x
         tid = fx.thread_idx.x
 
@@ -662,6 +667,11 @@ def _build_radix_select_topk_module(
 
 
 def _build_register_topk_module(n: int, k: int, arch: str, spec: TopKSpec):
+    # FlyDSL 0.3.x omits captured dataclass fields from its JIT cache key:
+    # https://github.com/ROCm/FlyDSL/issues/1206
+    # Capture dtype/largest as a scalar token to keep specializations distinct.
+    # This is removable after upgrading to FlyDSL 0.5, which fixes the issue:
+    # https://github.com/ROCm/FlyDSL/pull/1338
     cache_tag = spec.cache_token()
     threads_per_row = 32 if is_rdna_arch(arch) else 64
     block_threads = threads_per_row * _REGISTER_ROWS_PER_CTA
@@ -687,7 +697,7 @@ def _build_register_topk_module(n: int, k: int, arch: str, spec: TopKSpec):
         indices: fx.Tensor,
         rows_m: fx.Int32,
     ):
-        _ = cache_tag  # Scalar closure dependency for FlyDSL's artifact cache.
+        _ = cache_tag  # Keep the compatibility token in the kernel closure.
         tid = fx.thread_idx.x
         bid = fx.block_idx.x
         lane = tid % fx.Int32(threads_per_row)
