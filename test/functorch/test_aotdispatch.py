@@ -3460,6 +3460,31 @@ def forward(self, primals_1):
     return (as_strided_scatter, add_1)""",
         )
 
+    def test_input_mutation_aliases_other_input_no_grad(self):
+        def f(a, b):
+            with torch.no_grad():
+                a.mul_(3)
+            return b.square()
+
+        def inp_callable(req_grad):
+            x = torch.arange(1, 9, dtype=torch.float32, requires_grad=req_grad)
+            base = x * 2
+            a = base[:5]
+            b = base[2:7]
+            return [x], [a, b]
+
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable, req_grad=False),
+            test_mutation=True,
+        )
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable, req_grad=True),
+            test_mutation=True,
+            keep_inp_mutations=True,
+        )
+
     def test_input_mutation_aliases_and_output_alias(self):
         def f(a, b):
             # Here, we need to take care:that because and b are aliased
