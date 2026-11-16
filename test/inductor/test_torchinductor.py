@@ -3699,6 +3699,17 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(4, (4,)),))
 
+    def test_clamp_type_promotion_symfloat(self):
+        # A float bound traced as a SymFloat has to promote an integer input
+        # to the default float dtype, like a constant float bound does.
+        def fn(a, lo, hi):
+            return a.clamp(min=lo), a.clamp(max=hi), a.clamp(lo, hi)
+
+        a = torch.randint(-4, 4, (8,), dtype=torch.int8, device=self.device)
+        cfn = torch.compile(fn, dynamic=True, fullgraph=True)
+        for lo, hi in ((-1.5, 2.5), (0.5, 1.25)):
+            self.assertEqual(cfn(a, lo, hi), fn(a, lo, hi))
+
     @skip_if_device(
         lambda device: device == "mps",
         "MPS codegen doesn't upcast bf16 constants to float32",

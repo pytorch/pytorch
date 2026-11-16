@@ -64,8 +64,13 @@ def type_casts(
 ):
     @functools.wraps(f)
     def inner(*args, **kwargs):
+        # Symbolic scalars take part in type promotion like the Python numbers
+        # they stand for; skipping them would let an integer tensor clamped by
+        # a SymFloat keep its integer dtype.
         allowed_types = (
-            (Tensor, torch.types._Number) if include_non_tensor_args else (Tensor,)
+            (Tensor, *torch.types._Number, torch.SymInt, torch.SymFloat, torch.SymBool)
+            if include_non_tensor_args
+            else (Tensor,)
         )  # type: ignore[arg-type]
         flat_args = [
             x
