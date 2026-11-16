@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import HardwareClassification, TestCas
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, skipIfMPS, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
-    skipIfCrossRef, set_warn_always_context
+    skipIfCrossRef, set_warn_always_context, decorateIf
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
@@ -1976,6 +1976,10 @@ class TestSparse(TestSparseBase):
     @precisionOverride({torch.bfloat16: 5e-2, torch.float16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16, torch.float16)
     @dtypesIfMPS(torch.float32, torch.complex64, torch.bfloat16, torch.float16)
+    @decorateIf(
+        unittest.skip('addmm_sparse_cuda is not implemented for BFloat16 and Half'),
+        lambda p: (p['dtype'] is torch.bfloat16 or p['dtype'] is torch.float16) and p['device'].startswith('cuda'),
+    )
     def test_sparse_addmm(self, device, dtype, coalesced):
         if (dtype is torch.bfloat16 or dtype is torch.float16) and device.startswith("cuda"):
             self.skipTest('addmm_sparse_cuda is not implemented for BFloat16 and Half')
@@ -3481,6 +3485,10 @@ class TestSparse(TestSparseBase):
     @skipIfMPS
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @parametrize('requires_grad', (True, False))
+    @decorateIf(
+        unittest.skip('requires_grad=True requires a floating point or complex dtype'),
+        lambda p: p['requires_grad'] and (not (p['dtype'].is_floating_point or p['dtype'].is_complex)),
+    )
     def test_empty_full(self, device, dtype, requires_grad):
         if requires_grad and not (dtype.is_floating_point or dtype.is_complex):
             self.skipTest(f'requires_grad==True requires float or complex dtype, got {dtype}')
@@ -4330,6 +4338,19 @@ class TestSparse(TestSparseBase):
                 check(self, x, y)
                 # TODO: uncomment once supported
                 # check_autograd(x, y)
+                if sparse_dim:
+                    x0 = self._gen_sparse(sparse_dim, 0, (0,) + sub_shape[1:], dtype, device, coalesced)[0]
+                    y0 = self._gen_sparse(sparse_dim, 0, (0,) + new_shape[1:], dtype, device, coalesced)[0]
+                    check(self, x0, y0)
+
+        # prod(sparse sizes) overflows int32
+        i = torch.tensor([[0, 1], [0, 1]], device=device)
+        v = make_tensor((2, 3), dtype=dtype, device=device)
+        x = torch.sparse_coo_tensor(i, v, (2**16, 2**16, 3))
+        y = torch.sparse_coo_tensor(i, v[:, :1], (2**16, 2**16, 1))
+        res = (x * y).coalesce()
+        self.assertEqual(res.indices(), i)
+        self.assertEqual(res.values(), v * v[:, :1])
 
     @coalescedonoff
     @expectedFailureMPS
@@ -4526,6 +4547,7 @@ class TestSparseUnaryUfuncs(TestCase):
         self.assertEqual(_sparse_to_dense(output), expected)
 
     @_sparse_unary_ops
+    @decorateIf(unittest.skip("Skipped! Out not supported"), lambda p: not p["op"].supports_out)
     def test_out(self, device, dtype, op):
         if not op.supports_out:
             self.skipTest("Skipped! Out not supported")
@@ -4540,6 +4562,7 @@ class TestSparseUnaryUfuncs(TestCase):
         self.assertEqual(out, expect)
 
     @_sparse_unary_ops
+    @decorateIf(unittest.skip("Skipped! Out not supported"), lambda p: p["op"].inplace_variant is None)
     def test_inplace(self, device, dtype, op):
         if op.inplace_variant is None:
             self.skipTest("Skipped! Out not supported")
@@ -4578,7 +4601,7 @@ class TestSparseUnaryUfuncs(TestCase):
         actual = op(sparse_input)
         self.assertEqual(expect, _sparse_to_dense(actual))
 
-    @ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
+    @ops([op for op in sparse_unary_ufuncs if op.supports_autograd], dtypes=OpDTypes.supported,
          allowed_dtypes=[torch.double, torch.cdouble])
     def test_sparse_fn_grad(self, device, dtype, op):
         if not op.supports_autograd:
@@ -5545,6 +5568,10 @@ class TestSparseAny(TestCase):
     @suppress_warnings
     @ops(binary_ufuncs_with_sparse_support)
     @all_sparse_layouts('layout', include_strided=False)
+    @decorateIf(
+        unittest.skip('OpInfo does not support this sparse layout'),
+        lambda p: not p['op'].supports_sparse_layout(p['layout']),
+    )
     def test_binary_operation(self, layout, device, dtype, op):
         if not op.supports_sparse_layout(layout):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')

@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
-from torch._logging import trace_structured
+from torch._logging import trace_structured, warning_once
 from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
 from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
@@ -114,6 +114,11 @@ class GroupBatchFusionBase:
 
 PRE_GRAD_FUSIONS: dict[str, GroupBatchFusionBase] = {}
 POST_GRAD_FUSIONS: dict[str, GroupBatchFusionBase] = {}
+
+# Fusions whose option moved from pre_grad_fusion_options to
+# post_grad_fusion_options. The old key keeps working by forwarding the option
+# to the post-grad pass; see group_batch_fusion_passes.
+_PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD = OrderedSet(["batch_linear_lhs"])
 
 
 def register_fusion(name: str, pre_grad=True):
@@ -567,7 +572,38 @@ class BatchLinearLHSFusion(BatchFusion):
                         pending.append(user)
         return False
 
+    @staticmethod
+    def _reaches_raw_storage_op(node: torch.fx.Node) -> bool:
+        raw_storage_ops = (
+            aten.as_strided.default,
+            aten.as_strided_.default,
+            aten.as_strided_copy.default,
+            aten.as_strided_scatter.default,
+            aten.resize.default,
+            aten.resize_as.default,
+        )
+        pending = [node]
+        seen = OrderedSet([node])
+        while pending:
+            cur = pending.pop()
+            multi_output_view = _get_view_type(cur.target) is _ViewType.MultiOutputView
+            for user in cur.users:
+                if user.target in raw_storage_ops:
+                    return True
+                if _is_view_op(user.target) or (
+                    multi_output_view and user.target is operator.getitem
+                ):
+                    if user not in seen:
+                        seen.add(user)
+                        pending.append(user)
+        return False
+
     def match(self, node: torch.fx.Node):
+        devices = self.graph_search_options.get("devices")
+        if devices is not None:
+            value = node.meta.get("val")
+            if not (isinstance(value, torch.Tensor) and value.device.type in devices):
+                return None
         if CallFunctionVarArgs(aten.mm.default).match(node):
             input_m, weight_m = node.args
             bias_m = None
@@ -582,9 +618,10 @@ class BatchLinearLHSFusion(BatchFusion):
         # Replacing a mutated mm output with a split view can break autograd.
         if any(_is_mutable_node(user.target) for user in node.users):
             return None
-        # as_strided reinterprets the raw storage and would observe the wide
-        # GEMM row stride instead of the eager slice, so do not fuse across it.
-        if any(user.target is aten.as_strided.default for user in node.users):
+        # Raw-storage consumers reinterpret physical storage and would observe
+        # the wide GEMM row stride instead of the eager slice. Follow views so
+        # an aliased consumer such as t().as_strided() also blocks the fusion.
+        if self._reaches_raw_storage_op(node):
             return None
         weight_val = weight_m.meta["val"]  # type: ignore[union-attr]
         if not statically_known_true(weight_val.shape[1] > 0):
@@ -1803,14 +1840,19 @@ def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
             continue
         fusion_cls = registry.get(name)
         if fusion_cls is None:
-            log.warning(
-                "Skipping %s fusion option %s: not registered for this stage",
-                "pre-grad" if pre_grad else "post-grad",
-                name,
+            if pre_grad and name in _PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD:
+                # The post-grad pass honors this option; see
+                # group_batch_fusion_passes.
+                continue
+            other = (
+                "post_grad_fusion_options" if pre_grad else "pre_grad_fusion_options"
             )
-            continue
+            raise KeyError(
+                f"{name} is not a {'pre-grad' if pre_grad else 'post-grad'} "
+                f"fusion; set it in {other}."
+            )
         _options = graph_search_options.copy()
-        _options.update({k: v for k, v in options.items() if k != "devices"})
+        _options.update(options)
         fusions.append(fusion_cls(graph_search_options=_options))  # type: ignore[operator]
     return fusions
 
@@ -1829,21 +1871,32 @@ def group_batch_fusion_passes(
             pre_grad=True,
         )
     else:
+        post_grad_options = dict(config.post_grad_fusion_options)
+        # Keep the old pre-grad key working for fusions that moved post grad.
+        for name in _PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD:
+            if name in config.pre_grad_fusion_options and name not in post_grad_options:
+                warning_once(
+                    log,
+                    "Fusion option %s is post-grad; running it post grad. "
+                    "Move it from pre_grad_fusion_options to "
+                    "post_grad_fusion_options.",
+                    name,
+                )
+                post_grad_options[name] = config.pre_grad_fusion_options[name]
         fbgemm_fusion_keys = [
             x
-            for x in config.post_grad_fusion_options
+            for x in post_grad_options
             if (
                 x not in OPTIMUS_EXCLUDE_POST_GRAD
-                and config.post_grad_fusion_options[x].get("require_fbgemm", False)
+                and post_grad_options[x].get("require_fbgemm", False)
             )
         ]
         fbgemm_fusions = {
-            fusion: config.post_grad_fusion_options[fusion]
-            for fusion in fbgemm_fusion_keys
+            fusion: post_grad_options[fusion] for fusion in fbgemm_fusion_keys
         }
         non_fbgemm_fusions = {
-            fusion: config.post_grad_fusion_options[fusion]
-            for fusion in config.post_grad_fusion_options
+            fusion: post_grad_options[fusion]
+            for fusion in post_grad_options
             if fusion not in fbgemm_fusion_keys
         }
         fusions += generate_fusion_from_config(non_fbgemm_fusions, pre_grad=False)

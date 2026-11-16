@@ -1698,6 +1698,19 @@ class CPUReproTests(TestCase):
                 self.assertEqual("simd_vec_reduce_all" in code, enabled)
 
     @requires_vectorization
+    def test_vec_exp_u20(self):
+        def fn(x):
+            return torch.softmax(x, -1)
+
+        x = torch.randn(3, 24) * 10
+        for enabled in (False, True):
+            with config.patch({"cpp.vec_exp_u20": enabled}):
+                torch._dynamo.reset()
+                actual, code = run_and_get_cpp_code(torch.compile(fn), x)
+            self.assertEqual(".exp_u20()" in code, enabled)
+            self.assertEqual(actual, fn(x), atol=1e-6, rtol=1e-5)
+
+    @requires_vectorization
     def test_max_parallel_depth_sub_vector_width_loop(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/190757
         # A vectorized loop smaller than the vector width runs 1 iteration, not
