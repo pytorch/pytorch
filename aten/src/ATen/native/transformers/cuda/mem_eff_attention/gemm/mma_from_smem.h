@@ -537,6 +537,9 @@ class MmaPipelinedFromSharedMemory : public MmaBaseFromSharedMemory<
       int thread_idx,
       int problem_size_0_n) {}
 
+  CUTLASS_DEVICE
+  static void drain_cp_asyncs() {}
+
   /// Perform a threadblock-scoped matrix multiply-accumulate
   CUTLASS_DEVICE
   void operator()(
@@ -923,6 +926,15 @@ class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
         iterator_B1,
         (problem_size_0_n + Base::Shape::kK - 1) / Base::Shape::kK,
         smem_iterator_B1);
+  }
+
+  CUTLASS_DEVICE
+  static void drain_cp_asyncs() {
+    // commit and drain all pending and predicated cp.async pnz from the GEMM
+    // mainloop
+    cutlass::arch::cp_async_fence();
+    cutlass::arch::cp_async_wait<0>();
+    __syncthreads();
   }
 
   CUTLASS_DEVICE

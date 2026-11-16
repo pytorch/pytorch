@@ -60,8 +60,8 @@ def get_grouped_gemm_persistent_grid_size(
         return 1
 
     ab_smem_bytes = param.stages * (param.block_m + param.block_n)
-    ab_smem_bytes *= param.block_k * param.in_data_bytes
-    c_smem_bytes = param.block_m * param.block_n * param.out_data_bytes
+    ab_smem_bytes *= param.block_k * param.in_data_bits // 8
+    c_smem_bytes = param.block_m * param.block_n * param.out_data_bits // 8
     smem_bytes = max(ab_smem_bytes, c_smem_bytes)
     shared_memory_per_cu = device_properties.shared_memory_per_multiprocessor
     max_threads_per_cu = device_properties.max_threads_per_multi_processor
