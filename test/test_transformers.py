@@ -1094,6 +1094,7 @@ class TestTransformersAccelerator(NNTestCase):
             with cm:
                 _test(batch_first, training, enable_nested_tensor)
 
+    @xfailIfNoAcceleratorTriton
     @tf32_off()
     def test_transformer_encoder_layer_fwd_fake(self, device):
         model = torch.nn.TransformerEncoder(
@@ -1152,6 +1153,7 @@ class TestTransformersAccelerator(NNTestCase):
         # Without the fix this raises GuardOnDataDependentSymNode while tracing.
         make_fx(fn, tracing_mode="symbolic")(torch.tensor(3, device=device))
 
+    @xfailIfNoAcceleratorTriton
     def test_transformer_encoder_layer_fwd_noncontiguous(self, device):
         # The fused kernel always returns a contiguous tensor, so its meta rule
         # must not hand back the strides of a non-contiguous src: inductor asserts
