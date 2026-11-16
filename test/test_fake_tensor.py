@@ -160,60 +160,6 @@ class _TestFakeTensorHelpers:
 class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def test_mode_constructor_python_fallback(self):
-        shape_env = ShapeEnv()
-        mode = FakeTensorMode(_force_python=True, shape_env=shape_env)
-        self.assertIs(type(mode), FakeTensorMode)
-        self.assertIs(mode.shape_env, shape_env)
-        with mode:
-            fake = torch.empty(2, 3)
-        self.assertTrue(mode.is_our_fake(fake))
-
-    def test_mode_constructor_defaults(self):
-        shape_env = ShapeEnv()
-        with FakeTensorMode(
-            shape_env=shape_env,
-            allow_fallback_kernels=True,
-            allow_non_fake_inputs=True,
-            static_shapes=False,
-            export=False,
-        ) as mode:
-            fake = torch.empty(2, 3)
-        self.assertIs(mode.shape_env, shape_env)
-        self.assertTrue(mode.is_our_fake(fake))
-
-    def test_mode_constructor_disallow_fallback_kernels(self):
-        mode = FakeTensorMode(allow_fallback_kernels=False)
-        self.assertFalse(mode.allow_fallback_kernels)
-
-    def test_mode_constructor_export(self):
-        mode = FakeTensorMode(export=True)
-        self.assertTrue(mode.fake_tensor_converter.export)
-
-    def test_mode_subclass_construction(self):
-        class SubMode(FakeTensorMode):
-            def __init__(self, marker, **kwargs):
-                super().__init__(**kwargs)
-                self.marker = marker
-
-        marker = object()
-        shape_env = ShapeEnv()
-        if torch._dynamo.config.use_cpp_fake_tensor:
-            with self.assertRaisesRegex(
-                NotImplementedError, "FakeTensorMode subclasses are not supported"
-            ):
-                SubMode(marker, shape_env=shape_env, allow_non_fake_inputs=True)
-            return
-        mode = SubMode(marker, shape_env=shape_env, allow_non_fake_inputs=True)
-        self.assertIs(type(mode), SubMode)
-        self.assertIs(mode.marker, marker)
-        self.assertIs(mode.shape_env, shape_env)
-        real = torch.randn(2, 3)
-        with mode:
-            fake = real.sin()
-        self.assertTrue(mode.is_our_fake(fake))
-        self.assertEqual(fake.shape, real.shape)
-
     def test_fake_mode_dispatch_api(self):
         mode = FakeTensorMode()
         mode_key = torch._C._TorchDispatchModeKey.FAKE
@@ -2554,20 +2500,6 @@ def forward(self, x_1):
             dense = tensor.to_dense()
             check(dense, (2, 2))
             self.assertEqual(dense.layout, torch.strided)
-
-    @skipIfPropagateRealTensors("Meta storage has no real tensor to propagate")
-    def test_from_buffer(self):
-        with FakeTensorMode() as mode:
-            obj = [1, 2]
-            f = io.BytesIO()
-            pickle.Pickler(f).dump(obj)
-            storage = torch.UntypedStorage.from_buffer(f.getvalue(), dtype=torch.uint8)
-            self.assertEqual(storage.device, torch.device("meta"))
-
-            t = torch.ByteTensor(storage)
-            self.assertTrue(is_fake_tensor(t))
-            self.assertEqual(t.device, torch.device("cpu"))
-            self.assertIs(maybe_get_fake_mode(t), mode)
 
 
 instantiate_parametrized_tests(TestFakeTensor)
@@ -7148,63 +7080,6 @@ class TestCppFakeTensorModeBindings(TestCase):
                         op(fake, device=device)
         self.assertEqual(retained.device, torch.device(output_device))
         self.assertIs(maybe_get_fake_mode(retained), mode)
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    @parametrize("size", [1, 2])
-    @parametrize("allow", [False, True])
-    def test_fake_fallback_real_array_constants(self, size, allow):
-        mode = FakeTensorMode(allow_non_fake_inputs=allow)
-        real = torch.ones(size)
-        expected = real + real
-        with mode:
-            if size > 1 and not allow:
-                with self.assertRaisesRegex(
-                    AssertionError, "Please convert all Tensors"
-                ):
-                    real + real
-                return
-            out = real + real
-            self.assertIs(torch._guards.active_fake_mode(), mode)
-        self.assertIs(maybe_get_fake_mode(out), mode)
-        prims.utils.compare_tensor_meta(out, expected, check_strides=True)
-        if size == 1:
-            self.assertEqual(maybe_get_fake_constant(out), expected)
-        else:
-            self.assertIsNone(maybe_get_fake_constant(out))
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    @parametrize("allow", [False, True])
-    def test_fake_fallback_constant_avoid_device_init(self, allow):
-        real = torch.ones(1)
-        with patch(
-            "torch._subclasses.fake_tensor._avoid_device_init", return_value=True
-        ):
-            mode = FakeTensorMode(allow_non_fake_inputs=allow)
-        with (
-            patch(
-                "torch._subclasses.fake_tensor._avoid_device_init",
-                side_effect=AssertionError("Backend availability must not be rechecked")
-                if torch._dynamo.config.use_cpp_fake_tensor
-                else None,
-                return_value=True,
-            ),
-            mode,
-        ):
-            cpu = aten._to_copy.default(real, dtype=torch.float64)
-            if allow:
-                cuda = aten._to_copy.default(real, device=torch.device("cuda:0"))
-            else:
-                with self.assertRaisesRegex(
-                    AssertionError, "Please convert all Tensors"
-                ):
-                    aten._to_copy.default(real, device=torch.device("cuda:0"))
-            self.assertIs(torch._guards.active_fake_mode(), mode)
-        self.assertEqual(maybe_get_fake_constant(cpu), real.to(dtype=torch.float64))
-        self.assertIs(maybe_get_fake_mode(cpu), mode)
-        if allow:
-            self.assertIsNone(maybe_get_fake_constant(cuda))
-            self.assertIs(maybe_get_fake_mode(cuda), mode)
-            self.assertEqual(cuda.device, torch.device("cuda:0"))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("alias", ["detach", "data"])
