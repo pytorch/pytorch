@@ -49,6 +49,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
+    HAS_GPU_AND_TRITON,
     is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
@@ -2831,7 +2832,8 @@ class TestCvtE8M0Rceil(TestCase):
         self.assertEqual(compiled_result, expected)
 
 
-@unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
+@unittest.skipIf(not HAS_GPU_AND_TRITON, "Requires GPU + Triton")
+@unittest.skipIf(GPU_TYPE not in ("cuda", "xpu"), "Requires CUDA or XPU")
 @unittest.skipIf(
     utils.is_nvidia_sm100_or_later(),
     "Pre-NVIDIA-SM100 path: uses bit-manipulation fallback",
@@ -2858,7 +2860,7 @@ class TestE8M0Log2PatternBitManip(TestCase):
             return biased.to(torch.uint8)
 
         inp = torch.tensor(
-            [1.0, 2.0, 4.0, 3.0, 1.5, 0.5, 0.25], device="cuda", dtype=torch.float32
+            [1.0, 2.0, 4.0, 3.0, 1.5, 0.5, 0.25], device=GPU_TYPE, dtype=torch.float32
         )
         eager_result = fn(inp)
         compiled_result = torch.compile(fn)(inp)
@@ -2886,10 +2888,10 @@ class TestE8M0Log2PatternBitManip(TestCase):
             torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
             for p in powers
         ]
-        inp = torch.tensor(one_ulp_above, device="cuda", dtype=torch.float32)
+        inp = torch.tensor(one_ulp_above, device=GPU_TYPE, dtype=torch.float32)
 
         expected = torch.tensor(
-            [E8M0_BIAS + e + 1 for e in range(8)], dtype=torch.uint8, device="cuda"
+            [E8M0_BIAS + e + 1 for e in range(8)], dtype=torch.uint8, device=GPU_TYPE
         )
         compiled_result = torch.compile(fn)(inp)
         self.assertEqual(compiled_result, expected)
@@ -2928,11 +2930,11 @@ class TestE8M0Log2PatternBitManip(TestCase):
             torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
             for p in powers
         ]
-        inp = torch.tensor(one_ulp_above, device="cuda", dtype=torch.float32)
+        inp = torch.tensor(one_ulp_above, device=GPU_TYPE, dtype=torch.float32)
 
         # The correct e8m0 encoding for "1 ULP above 2^e" is E8M0_BIAS + (e+1)
         expected = torch.tensor(
-            [E8M0_BIAS + e + 1 for e in range(7)], dtype=torch.uint8, device="cuda"
+            [E8M0_BIAS + e + 1 for e in range(7)], dtype=torch.uint8, device=GPU_TYPE
         )
 
         torch._dynamo.reset()
@@ -2951,5 +2953,5 @@ instantiate_device_type_tests(TestE8M0ToFloat, globals(), only_for=("cpu", "cuda
 
 
 if __name__ == "__main__":
-    if HAS_CUDA_AND_TRITON or HAS_CPU:
+    if HAS_GPU_AND_TRITON or HAS_CPU:
         run_tests()

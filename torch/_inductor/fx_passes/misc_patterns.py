@@ -26,6 +26,8 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         if torch.cuda.is_available():
             # workaround https://github.com/pytorch/pytorch/issues/97894
             device = "cuda"
+        elif torch.xpu.is_available():
+            device = "xpu"
         else:
             device = "cpu"
 
@@ -131,7 +133,8 @@ def _misc_patterns_init(input_device: torch.device | None = None):
     )
 
     # Pattern: e8m0 extraction with ceiling rounding (for MX format scaling)
-    if device.startswith("cuda"):
+    if device.startswith(("cuda", "xpu")):
+        device_type = torch.device(device).type
 
         def e8m0_extra_check(match):
             inp = match.kwargs.get("inp")
@@ -140,11 +143,11 @@ def _misc_patterns_init(input_device: torch.device | None = None):
             inp_val = inp.meta.get("val")
             return (
                 inp_val is not None
-                and inp_val.device.type == "cuda"
+                and inp_val.device.type == device_type
                 and inp_val.dtype == torch.float32
             )
 
-        is_sm100_plus = is_nvidia_sm100_or_later()
+        is_sm100_plus = device_type == "cuda" and is_nvidia_sm100_or_later()
 
         if is_sm100_plus:
             from .. import inductor_prims
@@ -179,7 +182,7 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         # Pattern 2: log2 + ceil approach (used by torchao MX formats)
         # Matches: (clamp(ceil(log2(x)), -127, 127) + 127).to(uint8)
         #
-        # Registered on ALL CUDA hardware. On NVIDIA SM100+ uses the PTX instruction;
+        # Registered on all CUDA and XPU hardware. On NVIDIA SM100+ uses the PTX instruction;
         # on earlier hardware uses exact IEEE 754 bit-manipulation.
         #
         # The bit-manipulation replacement is preferred over the software
@@ -226,7 +229,7 @@ def _misc_patterns_init(input_device: torch.device | None = None):
             e8m0_rceil_log2_pattern,
             # pyrefly: ignore [bad-argument-type]
             e8m0_rceil_log2_replacement,
-            [torch.randn(32, device="cuda", dtype=torch.float32).abs() + 1e-10],
+            [torch.randn(32, device=device, dtype=torch.float32).abs() + 1e-10],
             # pyrefly: ignore [bad-argument-type]
             fwd_only,
             # pyrefly: ignore [bad-argument-type]
