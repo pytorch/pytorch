@@ -718,6 +718,124 @@ C10_HOST_DEVICE typename traits::result_type invoke(
   return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
 }
 
+#ifdef USE_ROCM
+// Non-contiguous iterators whose innermost dimension is unit-stride for every
+// operand (e.g. chunk/slice views) otherwise pay a full offset computation and
+// a 2-byte access per element, which is issue-bound for 16-bit types.
+template <int vec_size, int arg_index, typename args_t, typename array_t, typename offsets_t>
+__device__ __forceinline__ void inner_contiguous_load_arg(
+    args_t* args,
+    const array_t& data,
+    const offsets_t& offsets) {
+  using arg_t = std::tuple_element_t<arg_index, args_t>;
+  using vec_t = memory::aligned_vector<arg_t, vec_size>;
+  const vec_t v = *reinterpret_cast<const vec_t*>(
+      data[arg_index + 1] + offsets[arg_index + 1]);
+#pragma unroll
+  for (int j = 0; j < vec_size; j++) {
+    std::get<arg_index>(args[j]) = v.val[j];
+  }
+}
+
+template <int vec_size, typename args_t, typename array_t, typename offsets_t, size_t... I>
+__device__ __forceinline__ void inner_contiguous_load(
+    args_t* args,
+    const array_t& data,
+    const offsets_t& offsets,
+    std::index_sequence<I...>) {
+  (inner_contiguous_load_arg<vec_size, I>(args, data, offsets), ...);
+}
+
+template <int vec_size, typename func_t, typename array_t, typename offset_calc_t>
+C10_LAUNCH_BOUNDS_1(256)
+__global__ void inner_contiguous_elementwise_kernel(
+    int N,
+    func_t f,
+    array_t data,
+    offset_calc_t offset_calc) {
+  using traits = function_traits<func_t>;
+  using return_t = typename traits::result_type;
+  using args_t = typename traits::ArgsTuple;
+  using out_vec_t = memory::aligned_vector<return_t, vec_size>;
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= N) {
+    return;
+  }
+  const auto offsets = offset_calc.get(idx);
+  args_t args[vec_size];
+  inner_contiguous_load<vec_size>(
+      args, data, offsets, std::make_index_sequence<traits::arity>{});
+  out_vec_t out;
+#pragma unroll
+  for (int j = 0; j < vec_size; j++) {
+    out.val[j] = c10::guts::apply(f, args[j]);
+  }
+  *reinterpret_cast<out_vec_t*>(data[0] + offsets[0]) = out;
+}
+
+template <typename traits, size_t... I>
+constexpr bool inner_contiguous_all_16bit(std::index_sequence<I...>) {
+  return sizeof(typename traits::result_type) == 2 &&
+      ((sizeof(typename traits::template arg<I>::type) == 2) && ...);
+}
+
+// Returns false (nothing launched) unless every operand is unit-stride in the
+// innermost dim and all outer strides and pointers are 16-byte aligned.
+template <typename func_t, typename array_t>
+static bool try_launch_inner_contiguous_kernel(
+    const TensorIteratorBase& iter,
+    const func_t& f,
+    const array_t& data) {
+  using traits = function_traits<func_t>;
+  constexpr int ntensors = traits::arity + 1;
+  // Limited to 16-bit types: wider types are already bandwidth-bound on the
+  // generic path, and this bounds the number of extra kernel instantiations.
+  if constexpr (!inner_contiguous_all_16bit<traits>(
+                    std::make_index_sequence<traits::arity>{})) {
+    return false;
+  } else {
+    constexpr int vec_size = 8;
+    constexpr int64_t elem_size = 2;
+    constexpr int64_t vec_bytes = vec_size * elem_size;
+    const int ndim = iter.ndim();
+    if (ndim < 2 || iter.shape()[0] % vec_size != 0) {
+      return false;
+    }
+    for (int i = 0; i < ntensors; i++) {
+      const auto strides = iter.strides(i);
+      if (strides[0] != elem_size ||
+          reinterpret_cast<uintptr_t>(data[i]) % vec_bytes != 0) {
+        return false;
+      }
+      for (int d = 1; d < ndim; d++) {
+        if (strides[d] % vec_bytes != 0) {
+          return false;
+        }
+      }
+    }
+    c10::SmallVector<int64_t, 8> sizes(iter.shape().begin(), iter.shape().end());
+    sizes[0] /= vec_size;
+    std::array<c10::SmallVector<int64_t, 8>, ntensors> strides;
+    std::array<const int64_t*, ntensors> stride_ptrs;
+    for (int i = 0; i < ntensors; i++) {
+      strides[i].assign(iter.strides(i).begin(), iter.strides(i).end());
+      strides[i][0] = vec_bytes;
+      stride_ptrs[i] = strides[i].data();
+    }
+    const auto offset_calc = OffsetCalculator<ntensors, uint32_t>(
+        ndim, sizes.data(), stride_ptrs.data());
+    const int64_t N = iter.numel() / vec_size;
+    constexpr int threads = 256;
+    const int64_t grid = (N + threads - 1) / threads;
+    auto stream = at::cuda::getCurrentCUDAStream();
+    inner_contiguous_elementwise_kernel<vec_size>
+        <<<grid, threads, 0, stream>>>(N, f, data, offset_calc);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    return true;
+  }
+}
+#endif
+
 template <typename func_t>
 void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   using traits = function_traits<func_t>;
@@ -740,6 +858,11 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   if (contiguous) {
     return launch_vectorized_kernel(numel, f, data);
   }
+#ifdef USE_ROCM
+  if (try_launch_inner_contiguous_kernel(iter, f, data)) {
+    return;
+  }
+#endif
   auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
 #ifndef USE_ROCM
   constexpr int unroll_factor = sizeof(arg0_t) >= 4 ? 2 : 4;
