@@ -14,6 +14,7 @@
 - torch/_export/**
 - torch/_inductor/**
 - benchmarks/dynamo/**
+- test/dynamo/test_benchmark_runner.py
 - torch/_subclasses/fake_tensor.py
 - torch/_subclasses/fake_utils.py
 - torch/_subclasses/meta_utils.py
