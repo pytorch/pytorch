@@ -1758,9 +1758,8 @@ class TestAutograd(TestCase):
 
         log = []
         b.sum().backward(inputs=(b,))
-        self.assertEqual(log, [1, 2, 2])
-        # retains_grad hooks would not observe modifications by all pre hooks
-        # because they are executed after
+        # b.grad_fn is not executed, so only the tensor hook runs
+        self.assertEqual(log, [1])
         self.assertEqual(b.grad.item(), 3)
 
     def test_retains_grad_can_always_observe_tensor_prehook(self):
@@ -3034,6 +3033,51 @@ class TestAutograd(TestCase):
         x.grad = None
         y.grad = None
         x_nonleaf.grad = None
+
+    def test_backward_with_nonleaf_inputs_skips_input_grad_fn(self):
+        # https://github.com/pytorch/pytorch/issues/92331
+        counts = {"backward": 0, "pre_hook": 0, "post_hook": 0, "tensor_hook": 0}
+
+        class CountingIdentity(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                counts["backward"] += 1
+                return grad
+
+        def bump(name):
+            def hook(*args):
+                counts[name] += 1
+
+            return hook
+
+        x = torch.randn(3, requires_grad=True)
+        y = CountingIdentity.apply(x)
+        y.grad_fn.register_prehook(bump("pre_hook"))
+        y.grad_fn.register_hook(bump("post_hook"))
+        y.register_hook(bump("tensor_hook"))
+        out = (y * 2).sum()
+
+        # Only the gradient w.r.t. y is needed, so y.grad_fn must not run. The
+        # tensor hook still fires and y.grad is still populated.
+        out.backward(retain_graph=True, inputs=[y])
+        self.assertEqual(y.grad, torch.full_like(y, 2.0))
+        self.assertIsNone(x.grad)
+        self.assertEqual(
+            counts, {"backward": 0, "pre_hook": 0, "post_hook": 0, "tensor_hook": 1}
+        )
+
+        # y.grad_fn lies on the path to x, so it has to run to compute x.grad.
+        y.grad = None
+        out.backward(inputs=[x, y])
+        self.assertEqual(y.grad, torch.full_like(y, 2.0))
+        self.assertEqual(x.grad, torch.full_like(x, 2.0))
+        self.assertEqual(
+            counts, {"backward": 1, "pre_hook": 1, "post_hook": 1, "tensor_hook": 2}
+        )
 
     def test_dependent_backward(self):
         x = torch.randn(10, requires_grad=True)
