@@ -3648,8 +3648,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if name == "__new__":
             return self.tp_new_impl(tx, args, kwargs)
 
-        if args and isinstance(args[0], ConstDictVariable):
-            args[0].check_base_dict_mutation(tx, name)
         resolved_fn = getattr(dict, name, None)
         if isinstance(resolved_fn, types.WrapperDescriptorType):
             if not args:

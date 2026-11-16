@@ -36,6 +36,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
 from torch._dynamo import decorators, precompile_package, trace_rules
+from torch._dynamo.bytecode_transformation import cleaned_instructions
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.source import GetItemSource, SkipGuardSource, TypeMROSource
@@ -268,15 +269,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         def fn(x, method):
             return x + 1, method.__qualname__, method
 
-        receiver_type = collections.OrderedDict
-        receiver = receiver_type()
-        descriptors = (dict.__setitem__, receiver_type.__setitem__, dict.__delitem__)
+        receiver = collections.OrderedDict()
+        descriptors = (dict.__setitem__, type(receiver).__setitem__, dict.__delitem__)
         methods = [owner.__get__(receiver) for owner in descriptors]
 
         class Spoof(types.SimpleNamespace):
-            @property
-            def __class__(self):
-                return types.MethodWrapperType
+            __class__ = types.MethodWrapperType
 
         spoof = Spoof(
             __self__=receiver,
@@ -305,13 +303,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         items = [("a", 1), ("b", 3)]
         self.assertEqual(call(compiled, dict), (x + 1, items, ["a", "b"]))
         self.assertEqual(call(compiled, collections.OrderedDict), (x + 1, items, ["a"]))
+        fullgraph = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(
             Unsupported, "dict storage mutation on OrderedDict"
         ):
-            call(
-                torch.compile(fn, backend="eager", fullgraph=True),
-                collections.OrderedDict,
-            )
+            call(fullgraph, collections.OrderedDict)
 
     def test_prebound_base_slot_override_fallback(self):
         class Override(list):
@@ -334,11 +330,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         first, second = {}, {}
         bind = dict.__setitem__.__get__
-        cases = [
-            (bind(first), bind(first)),
-            (bind(first), bind(second)),
-            (bind(first), bind(first)),
-        ]
+        cases = [(bind(first), bind(other)) for other in (first, second, first)]
         compiled, counter = self._check_key_reuse(fn, cases)
         x = torch.ones(1)
         with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
@@ -7631,13 +7623,10 @@ class GraphModule(torch.nn.Module):
         def fn(x, pair):
             left, right = pair
             descriptor = receiver_type.__dict__["count"]
-            return x + (
-                descriptor.__get__(left, receiver_type)
-                == descriptor.__get__(right, receiver_type)
-            )
+            return x + (descriptor.__get__(left) == descriptor.__get__(right))
 
-        left = receiver_type(2) if receiver_type is range else receiver_type([1, 2])
-        right = receiver_type(2) if receiver_type is range else receiver_type([1, 2])
+        value = 2 if receiver_type is range else [1, 2]
+        left, right = receiver_type(value), receiver_type(value)
         pairs = ((left, right), (left, left), (right, right), (right, left))
         self._check_key_reuse(fn, pairs)
 
@@ -7664,9 +7653,7 @@ class GraphModule(torch.nn.Module):
             ):
                 call(torch.ones(1), receiver.count)
             return
-        methods = [
-            getattr(receiver, name) for name in (names[0], names[0], names[1], names[0])
-        ]
+        methods = [getattr(receiver, names[i]) for i in (0, 0, 1, 0)]
         if instance:
             methods.append([].count)
         self._check_method_bindings(
@@ -7743,14 +7730,10 @@ class GraphModule(torch.nn.Module):
         descriptor = tuple.__dict__["count"]
 
         def helper(receiver):
-            return descriptor.__get__(receiver, tuple) == descriptor.__get__(
-                (1, 2), tuple
-            )
+            return descriptor.__get__(receiver) == descriptor.__get__((1, 2))
 
         def fn(x, receiver):
-            if inline:
-                return x + helper((1, 2))
-            return x + helper(receiver)
+            return x + helper((1, 2) if inline else receiver)
 
         literal = next(value for value in fn.__code__.co_consts if type(value) is tuple)
         receivers = (None,) if inline else (literal, tuple(range(1, 3)), literal)
@@ -7865,20 +7848,21 @@ class GraphModule(torch.nn.Module):
                 return x + method.__self__, x + method(), len(mapping)
             return x + 1, descriptor.__get__(10001, int) == method
 
-        literal = next(value for value in fn.__code__.co_consts if value == 10001)
+        code = fn.__code__
+        cleaned_instructions(code)
+        constants = tuple(int("10001") if v == 10001 else v for v in code.co_consts)
+        fn.__code__ = code.replace(co_consts=constants)
+        literal = next(v for v in fn.__code__.co_consts if v == 10001)
         other = int("10001")
         self.assertIsNot(literal, other)
         values = (literal, 10002) if hash_first else (literal, other, literal)
         self._check_key_reuse(fn, values, frames=1 if hash_first else 2, dynamic=True)
 
     def test_prebound_method_key_ignores_receiver_contents(self):
-        class Payload:
-            pass
-
         def fn(x, method):
             return x + len({method}), method.__name__
 
-        payload = Payload()
+        payload = MyCls()
         receiver = {"payload": payload}
         refs = [weakref.ref(payload)]
 
@@ -7937,9 +7921,7 @@ class GraphModule(torch.nn.Module):
         method_type = type(method)
 
         class Spoof:
-            @property
-            def __class__(self):
-                return type(method)
+            __class__ = method_type
 
         self.assertTrue(is_function(method))
         self.assertFalse(is_function(Spoof()))
@@ -8249,16 +8231,11 @@ class GraphModule(torch.nn.Module):
             mapping = kind()
             key = Key(collision_hash)
             key.mapping, key.removed = mapping, False
-            if isinstance(mapping, dict):
-                mapping[key] = 1
-            else:
-                mapping.add(key)
-            first, second = receiver.count, [].count
-            if isinstance(mapping, dict):
-                mapping[first], mapping[second] = 7, 9
-            else:
-                mapping.add(first)
-                mapping.add(second)
+            for item, value in ((key, 1), (receiver.count, 7), ([].count, 9)):
+                if isinstance(mapping, dict):
+                    mapping[item] = value
+                else:
+                    mapping.add(item)
             return x + len(mapping), key.removed, mapping is key.mapping
 
         receiver = []
@@ -8300,10 +8277,7 @@ class GraphModule(torch.nn.Module):
             def fn(x, pair):
                 return region(x, fixed), region(x, pair)
 
-        pairs = [
-            Holder(left, right)
-            for left, right in ((a, b), (a, a), (c, d), (c, c), (b, a))
-        ]
+        pairs = [Holder(a, b), Holder(a, a), Holder(c, d), Holder(c, c), Holder(b, a)]
         self._check_key_reuse(fn, pairs, frames=1 if independent else 2)
 
     @parametrize(
@@ -8379,13 +8353,9 @@ class GraphModule(torch.nn.Module):
 
         a, b = [], []
         pairs = []
-        for method in ("key", a.count, a.index, b.index):
+        for owner, name in ((None, ""), (a, "count"), (a, "index"), (b, "index")):
             for obj in (b, a, b):
-                key = (
-                    method
-                    if isinstance(method, str)
-                    else getattr(method.__self__, method.__name__)
-                )
+                key = "key" if owner is None else getattr(owner, name)
                 for _ in range(depth):
                     key = wrap((key,))
                 mapping = {key} if op == "input_set" else {key: 3}
@@ -8395,6 +8365,10 @@ class GraphModule(torch.nn.Module):
     @parametrize("depth", (0, 1, 2))
     @parametrize("key_kind", ("metaclass", "plain_metaclass", "spoofed_method"))
     def test_builtin_method_input_key_custom_equality(self, depth, key_kind):
+        a, b = [], []
+        method = a.count
+        self.assertNotEqual(hash(method), hash(b.count))
+
         class BaseMeta(type):
             __hash__ = AlwaysEqualHashKey.__hash__
 
@@ -8405,21 +8379,14 @@ class GraphModule(torch.nn.Module):
                 return hash(other) == cls.hash_value
 
         class ClassKey(metaclass=BaseMeta if key_kind == "plain_metaclass" else Meta):
-            hash_value = 0
+            hash_value = hash(method)
 
         class Key(AlwaysEqualHashKey):
-            def __init__(self, method):
-                self.method = method
-                self.hash_value = hash(method)
-
-            @property
-            def __class__(self):
-                return types.BuiltinMethodType
-
+            __class__ = types.BuiltinMethodType
             __hash__ = AlwaysEqualHashKey.__hash__
 
             def __eq__(self, other):
-                return self.method == other
+                return method == other
 
         def fn(x, obj, mapping):
             method = list.count.__get__(obj, list)
@@ -8427,25 +8394,17 @@ class GraphModule(torch.nn.Module):
                 method = (method,)
             return x + mapping.get(method, -1)
 
-        a, b = [], []
-        self.assertNotEqual(hash(a.count), hash(b.count))
-        ClassKey.hash_value = hash(a.count)
-        key = Key(a.count) if key_kind == "spoofed_method" else ClassKey
+        key = Key(hash(method)) if key_kind == "spoofed_method" else ClassKey
         for _ in range(depth):
             key = (key,)
         mapping = {key: 3}
+        inputs = (b, a, b)
         if key_kind == "metaclass":
-            self._check_key_fallback(
-                fn,
-                (b, a, b),
-                "Builtin method keys with custom metaclass",
-                mapping,
-                positive_frames=True,
-            )
+            error = "Builtin method keys with custom metaclass"
+            self._check_key_fallback(fn, inputs, error, mapping, positive_frames=True)
         else:
-            self._check_key_reuse(
-                fn, (b, a, b), mapping, frames=1 if key_kind == "plain_metaclass" else 2
-            )
+            frames = 1 if key_kind == "plain_metaclass" else 2
+            self._check_key_reuse(fn, inputs, mapping, frames=frames)
 
     def test_builtin_method_keys_constant_receivers(self):
         def fn(x, receiver):
