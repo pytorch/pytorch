@@ -70,7 +70,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from torch._guards import Source
-    from torch._ops import OpOverload
+    from torch._ops import HigherOrderOperator, OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
 log = logging.getLogger(__name__)
@@ -1066,6 +1066,16 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     _maybe_infer_fake = _maybe_infer_fake
     _maybe_infer_fake_kernel_from_pytree_out = _maybe_infer_fake_kernel_from_pytree_out
 
+    def _prep_args_for_hash(
+        self,
+        result: list[object],
+        args: Mapping[str, object] | Sequence[object] | Iterable[object],
+        state: _CacheKeyState,
+        id_hashed_objects: list[object],
+    ) -> None:
+        # HOP backward caches reuse metadata hashing without the Python dispatch cache.
+        FakeTensorMode._prep_args_for_hash(self, result, args, state, id_hashed_objects)
+
     def can_run_unsafe_fallback(self, func: OpOverload) -> bool:
         return self.allow_fallback_kernels and (
             func.namespace in FakeTensorMode._can_run_unsafe_fallback_allowed_namespaces
@@ -1621,6 +1631,74 @@ class FakeTensorConverter:
             )
         self.set_tensor_memo(t, out)
         return out
+
+
+@overload
+def _validate_and_convert_non_fake_tensors(
+    fake_mode: FakeTensorMode,
+    func: OpOverload | HigherOrderOperator,
+    converter: FakeTensorConverter,
+    flat_args: Sequence[object],
+    args_spec: TreeSpec,
+) -> tuple[list[object], list[FakeTensor]]: ...
+
+
+@overload
+def _validate_and_convert_non_fake_tensors(
+    fake_mode: CppFakeTensorMode,
+    func: OpOverload | HigherOrderOperator,
+    converter: FakeTensorConverter,
+    flat_args: Sequence[object],
+    args_spec: TreeSpec,
+) -> tuple[list[object], list[Tensor]]: ...
+
+
+def _validate_and_convert_non_fake_tensors(
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload | HigherOrderOperator,
+    converter: FakeTensorConverter,
+    flat_args: Sequence[object],
+    args_spec: TreeSpec,
+) -> tuple[list[object], list[FakeTensor] | list[Tensor]]:
+    flat_arg_fake_tensors: list[Tensor] = []
+
+    def validate(x: T) -> T | Tensor:
+        if not isinstance(x, Tensor):
+            return x
+
+        if not fake_mode.is_our_fake(x):
+            if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags:
+                args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
+                raise AssertionError(
+                    f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
+                )
+            allow_non_fake_inputs = (
+                fake_mode.allow_non_fake_inputs
+                if fake_tensor_tls.allow_non_fake_inputs_override is None
+                else fake_tensor_tls.allow_non_fake_inputs_override
+            )
+            if not allow_non_fake_inputs:
+                if is_fake_tensor(x):
+                    x_fake_mode = maybe_get_fake_mode(x)
+                    if x_fake_mode is not fake_mode:
+                        raise AssertionError(
+                            f"Mixing fake modes NYI x.fake_mode={x_fake_mode} vs self={fake_mode}"
+                        )
+                args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
+                raise AssertionError(
+                    f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
+                    f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
+                )
+
+            out = converter.from_real_tensor(fake_mode, x)
+        else:
+            out = x
+
+        flat_arg_fake_tensors.append(out)
+        return out
+
+    validated_args = [validate(a) for a in flat_args]
+    return validated_args, flat_arg_fake_tensors
 
 
 @functools.cache
@@ -2283,7 +2361,7 @@ class TensorMetadata:
     def _flatten_into(
         self,
         result: list[object],
-        mode: FakeTensorMode,
+        mode: FakeTensorMode | CppFakeTensorMode,
         state: _CacheKeyState,
     ) -> None:
         # Flatten the TensorMetadata out into `result`.  Make sure to call
@@ -2960,7 +3038,7 @@ class FakeTensorMode(TorchDispatchMode):
             raise _BypassDispatchCache("CompositeImplicitAutograd")
 
     def _prep_args_for_hash(
-        self,
+        self: FakeTensorMode | CppFakeTensorMode,
         result: list[object],
         args: Mapping[str, object] | Sequence[object] | Iterable[object],
         state: _CacheKeyState,
@@ -3950,47 +4028,9 @@ class FakeTensorMode(TorchDispatchMode):
         If not, try to convert them to fake tensors.
         Returns the original args, kwargs, and a flattened list of (args, kwargs) that are fake tensors.
         """
-        flat_arg_fake_tensors: list[FakeTensor] = []
-
-        def validate(x: T) -> T | FakeTensor:
-            if not isinstance(x, Tensor):
-                return x
-
-            nonlocal flat_arg_fake_tensors
-            if not self.is_our_fake(x):
-                if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags:
-                    args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
-                    raise AssertionError(
-                        f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
-                    )
-                allow_non_fake_inputs = (
-                    self.allow_non_fake_inputs
-                    if fake_tensor_tls.allow_non_fake_inputs_override is None
-                    else fake_tensor_tls.allow_non_fake_inputs_override
-                )
-                if not allow_non_fake_inputs:
-                    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-                        # pyrefly: ignore [missing-attribute]
-                        x_fake_mode = x.fake_mode
-                        if x_fake_mode is not self:
-                            raise AssertionError(
-                                f"Mixing fake modes NYI x.fake_mode={x_fake_mode} vs self={self}"
-                            )
-                    args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
-                    raise AssertionError(
-                        f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
-                        f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
-                    )
-
-                out = converter.from_real_tensor(self, x)
-            else:
-                out = x
-
-            flat_arg_fake_tensors.append(out)
-            return out
-
-        validated_args = [validate(a) for a in flat_args]
-        return validated_args, flat_arg_fake_tensors
+        return _validate_and_convert_non_fake_tensors(
+            self, func, converter, flat_args, args_spec
+        )
 
     def wrap_meta_outputs_with_default_device_logic(
         self,

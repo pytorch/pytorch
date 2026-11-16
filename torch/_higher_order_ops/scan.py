@@ -11,7 +11,7 @@ import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._functorch.vmap import unwrap_batched, wrap_batched
-from torch._guards import detect_fake_mode, require_python_fake_mode
+from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
     do_auto_functionalize_v2,
@@ -23,6 +23,7 @@ from torch._higher_order_ops.partitioner import (
 )
 from torch._higher_order_ops.utils import (
     _batch_dims_as_last_for_scan,
+    _fake_mode_handler,
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     _move_batch_dims_to_last_for_scan,
@@ -97,9 +98,7 @@ def _build_empty_output_for_length_zero(
 ) -> pytree.PyTree:
     """Probe combine_fn(init, None) to learn the output structure for length==0."""
     leaves = pytree.tree_leaves(init)
-    fake_mode = require_python_fake_mode(detect_fake_mode(leaves)) or FakeTensorMode(
-        _force_python=True
-    )
+    fake_mode = detect_fake_mode(leaves) or FakeTensorMode(_force_python=True)
     with fake_mode:
         fake_init = pytree.tree_map(
             lambda t: fake_mode.from_tensor(t)
@@ -1128,6 +1127,9 @@ def scan_fake_tensor_mode(
             ),
         )
         return out
+
+
+scan_op.py_impl(DispatchKey.Fake)(_fake_mode_handler(scan_fake_tensor_mode))
 
 
 @scan_op.py_functionalize_impl
