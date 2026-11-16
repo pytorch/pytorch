@@ -8328,9 +8328,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     V.graph.get_current_device_or_throw()
                 ),
                 "constants": {},
-                "native_matmul": (
-                    "tl.dot" in str(self.body) or "tl.dot" in str(self.compute)
-                ),
+                "native_matmul": self.is_native_matmul,
                 **self.triton_meta_common(),
             },
         )
