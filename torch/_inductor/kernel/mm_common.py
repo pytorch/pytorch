@@ -193,13 +193,10 @@ def use_native_matmul(mat1, mat2):
         if use_block_ptr_enabled():
             raise AssertionError("native matmul doesn't support block_ptr codegen yet")
     elif not (
-        # Triton's native matmul codegen, which emits the dots that a backend
-        # declines when scheduling, supports no block_ptr.
-        not use_block_ptr_enabled()
-        # A backend that emits matmuls itself opts in; see
+        # A backend that generates matmuls itself opts in; see
         # BaseScheduling.lowers_native_matmul. The registration is a constructor,
         # e.g. CUDA's is a function of config.cuda_backend, so ask an instance.
-        and (scheduling := get_scheduling_for_device(device_type)) is not None
+        (scheduling := get_scheduling_for_device(device_type)) is not None
         and scheduling(None).lowers_native_matmul(mat1, mat2)
     ):
         return False

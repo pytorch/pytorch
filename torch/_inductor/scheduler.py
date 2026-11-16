@@ -13449,14 +13449,19 @@ class BaseScheduling:  # noqa: docstring_linter
         self.scheduler = scheduler
 
     def lowers_native_matmul(self, mat1: ir.IRNode, mat2: ir.IRNode) -> bool:
-        """Hook for a backend that emits matmuls itself, such as Helion's
-        (helion.inductor in pytorch/helion): whether to lower mat1 @ mat2 to a dot
-        reduction, as triton.native_matmul does for all matmuls, so that the
-        backend's kernel computes it instead of an extern kernel.
+        """Hook for a backend that generates matmuls itself, such as Helion's
+        (helion.inductor in pytorch/helion): return True to have Inductor lower
+        mat1 @ mat2 to a dot reduction that this backend's kernel computes.
 
-        When to override it: the backend generates matmuls and wants them in its
-        kernels, fused with their epilogues. relu(a @ b + bias) is then one kernel
-        instead of an extern matmul and a pointwise kernel; Helion emits
+        Why: say you write a backend for an accelerator with dedicated matmul
+        units. You want matmuls fused with their epilogues, and you would rather
+        generate them natively than maintain templates. By default you can't:
+        Inductor lowers every matmul to an extern kernel (cuBLAS) or a template
+        before your scheduling sees it, so in relu(a @ b + bias) the matmul is an
+        extern call and the epilogue a kernel of its own. Returning True asks for
+        the lowering that triton.native_matmul applies to all matmuls instead: the
+        matmul becomes a reduction, the scheduler fuses it with its epilogue, and
+        your kernel generates both. For relu(a @ b + bias), Helion emits
             for tile_y, tile_x in hl.tile([40, 136]):
                 acc = hl.zeros([tile_y, tile_x], dtype=torch.float32)
                 for tile_r in hl.tile(72):
@@ -13468,46 +13473,47 @@ class BaseScheduling:  # noqa: docstring_linter
                 tmp4 = torch.relu(tmp3)
                 out0[tile_y, tile_x] = tmp4.to(torch.bfloat16)
 
-        How: register a scheduling for the device with register_backend_for_device
-        and return True for the matmuls it emits. Each mm, bmm, addmm, baddbmm and
-        mm_plus_mm lowering asks an instance built with scheduler=None, as
-        get_backend_features() does, so a registered function works as well as a
-        class. mat1 and mat2 are the operands, [..., M, K] and [..., K, N]; their
-        sizes can be symbolic.
+        How: register your scheduling for the device with
+        register_backend_for_device, and override this to return True for the
+        matmuls your kernels can generate. Lowering each mm, bmm, addmm, baddbmm
+        and mm_plus_mm, use_native_matmul() asks an instance built with
+        scheduler=None, as get_backend_features() does, so a registered function
+        works as well as a class. mat1 is [..., M, K] and mat2 is [..., K, N];
+        their sizes can be symbolic.
 
-        Contract:
-        - True asks for the lowering. use_native_matmul() also requires
-          config.triton.use_block_ptr off, and what it requires for
-          triton.native_matmul: a CUDA or XPU device whose backend is "triton";
-          int8, uint8, fp16, bf16 or fp32 operands, not a BF16x9 matmul; M, N and K
-          not known to be 1, without unbacked symbols. Otherwise, or with False, the
-          matmul keeps its usual lowering (extern kernel or template).
-        - A lowered matmul is a Reduction with reduction_type "dot" over K, whose
+        What True promises, and what it does not:
+        - It is a request: the matmul is lowered natively only where
+          triton.native_matmul would lower it, i.e. on a CUDA or XPU device whose
+          backend is "triton", with int8, uint8, fp16, bf16 or fp32 operands
+          (not a BF16x9 matmul), and with M, N and K not known to be 1 and free
+          of unbacked symbols. Elsewhere, or on False, the matmul keeps its
+          extern kernel or template.
+        - Your kernel gets a Reduction with reduction_type "dot" over K, whose
           inner function is ops.dot(a, b) of the operands broadcast to
-          [..., M, K, N] (kernel/mm.py). SIMDScheduling fuses it with its epilogue
-          like any reduction, and dots share a kernel only if their [B, M, N]
-          ranges are equal. The backend's kernel handles ops.dot and the "dot"
-          reduction itself: ShapePropagationOpsHandler.dot asserts for every
-          kernel but TritonKernel.
-        - A dot that the backend's scheduling declines is emitted by Triton's
-          native matmul codegen, not extern_kernels.mm: the lowering already
-          happened. So decline here what the backend would decline later, e.g.
-          symbolic sizes for a backend whose kernels tile static shapes only.
+          [..., M, K, N] (kernel/mm.py), fused with what the scheduler fuses into
+          it; SIMDScheduling puts dots in one kernel only if their [B, M, N]
+          ranges are equal. Your kernel handles ops.dot and the "dot" reduction
+          itself: ShapePropagationOpsHandler.dot asserts for any kernel but
+          TritonKernel.
+        - Once the matmul is a dot there is no way back to the extern kernel: if
+          your scheduling declines it, Triton's native matmul codegen emits it.
+          So decline here what your kernels cannot generate, e.g. symbolic sizes
+          if they need static shapes.
 
         Pitfalls:
+        - Triton's own options are not checked here, e.g.
+          config.triton.use_block_ptr, which triton.native_matmul rejects. They
+          matter only for the dots that Triton's native matmul codegen emits
+          after your scheduling declines them.
         - The FX graph cache key does not include the registered scheduling. If
-          the answer depends on the backend's settings, pass them as
+          the answer depends on your settings, pass them as
           register_backend_for_device(device_custom_config=...), which the key
           includes.
         - Replacing a device's registration drops what it dispatched on: CUDA's
-          is a function of config.cuda_backend ("triton", "halide", "pallas").
-          Register a function that returns the backend's scheduling only where
-          the replaced registration would return Triton's.
-        - With config.triton.use_block_ptr, the matmul keeps its usual lowering,
-          where triton.native_matmul raises: Triton's native matmul codegen
-          supports no block_ptr. triton.enable_persistent_tma_matmul is not
-          checked, since a natively lowered matmul uses no template.
-        - The instance is built on every matmul lowering, so __init__ must be
+          picks a scheduling by config.cuda_backend ("triton", "halide",
+          "pallas"). Register a function that returns your scheduling only where
+          the replaced one would return Triton's.
+        - The instance is built for every matmul lowering, so keep __init__
           cheap with scheduler=None.
         """
         return False
