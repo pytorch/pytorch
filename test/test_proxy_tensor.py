@@ -945,6 +945,22 @@ class TestFakeProxyTensor(TestCase):
             (fake.shape, fake.stride(), fake.storage_offset()),
         )
 
+    def test_snapshot_fake_of_sparse_batched_tensor(self):
+        from torch._functorch.vmap import vmap_increment_nesting
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        functorch = torch._C._functorch
+        mode = FakeTensorMode()
+        fake = mode.from_tensor(torch.eye(3).to_sparse())
+        with vmap_increment_nesting(3, "error") as level:
+            with mode:
+                batched = functorch._add_batch_dim(fake, 0, level)
+                val = snapshot_fake(batched)
+            self.assertTrue(functorch.is_batchedtensor(val))
+            self.assertTrue(is_fake_tensor(functorch.get_unwrapped(val)))
+            self.assertEqual(val.layout, torch.sparse_coo)
+            self.assertEqual(val.shape, (3,))
+
     def test_use_fake_and_tensor(self):
         def f(x, y):
             z = torch.tensor([2.0, 3.0])
