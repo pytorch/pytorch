@@ -886,7 +886,7 @@ ownership:
       - /tools/amd_build/: [jeffdaily, jithunnair-amd]
   - name: lint
     labels: ["module: lint"]
-    owners: []
+    owners: [atalman, huydhn]
     section: infra_linting
     paths:
       - /.bc-linter.yml
@@ -909,8 +909,8 @@ ownership:
       - /scripts/codeowners/
       - /scripts/lint_urls.sh
       - /scripts/lint_xrefs.sh
-      - /scripts/lintrunner.py
-      - /tools/linter/
+      - /scripts/lintrunner.py: [huydhn, atalman]
+      - /tools/linter/: [huydhn, atalman]
   - name: autograd_codegen
     labels: ["module: codegen", "module: autograd"]
     owners: [albanD, soulitzer]
