@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
+from torch._subclasses.fake_tensor import fake_mode_cls, is_fake_tensor
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -124,7 +124,7 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
         self.multi_output_view_nodes = {}
         self.node_counter = -1
 
-        with FakeTensorMode() as mode:
+        with fake_mode_cls()() as mode:
             fake_args = [
                 mode.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args
             ]

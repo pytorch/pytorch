@@ -201,10 +201,11 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             buf.getvalue(),
         )
 
+    @parametrize("use_cpp_fake_tensor", [False, True])
     @parametrize("is_inference", (False, True))
     @parametrize("deferred", (False, True))
     def test_wrap_compiler_debug_preserves_is_inference_for_failures(
-        self, is_inference, deferred
+        self, is_inference, deferred, use_cpp_fake_tensor
     ):
         gm, args = _make_test_graph()
 
@@ -218,7 +219,11 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             return compiled
 
         with (
-            torch._dynamo.config.patch(repro_after="aot", repro_level=1),
+            torch._dynamo.config.patch(
+                repro_after="aot",
+                repro_level=1,
+                use_cpp_fake_tensor=use_cpp_fake_tensor,
+            ),
             patch.object(after_aot, "dump_compiler_graph_state") as dump,
             self.assertRaisesRegex(RuntimeError, "failure"),
         ):

@@ -2,6 +2,8 @@
 import torch
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TestCase,
 )
@@ -17,12 +19,18 @@ try:
 except Exception:
     HAS_FUNCTIONALIZATION = False
 
+@instantiate_parametrized_tests
 class TestReinplacePass(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def test_reinplace_basic(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_reinplace_basic(self, use_cpp_fake_tensor):
         # Basic test: the out-of-place add() call should be converted
         # into add_()
+        self.enterContext(
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor)
+        )
+
         def f(x):
             a = x.clone()
             b = a.add(1)
@@ -44,7 +52,12 @@ def forward(self, x_1):
     """)
 
 
-    def test_reinplace_with_view(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_reinplace_with_view(self, use_cpp_fake_tensor):
+        self.enterContext(
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor)
+        )
+
         def f(x):
             a = x.clone()
             a_view = a.view(-1)
@@ -97,7 +110,12 @@ def forward(self, a__1):
     return ge
     """)
 
-    def test_reinplace_overlapping_memory(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_reinplace_overlapping_memory(self, use_cpp_fake_tensor):
+        self.enterContext(
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor)
+        )
+
         def f(a_):
             a = a_.clone()
             b = a.expand(4, 4)

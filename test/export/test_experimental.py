@@ -33,7 +33,11 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.utils import _pytree as pytree
 
 
@@ -94,6 +98,7 @@ class GlobalContext:
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
+@instantiate_parametrized_tests
 class TestExperiment(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -288,7 +293,8 @@ def forward(self, args_0):
         ep = export(net, inputs, strict=True)
         ep = _export_forward_backward(ep)
 
-    def test_joint_loss_index(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_joint_loss_index(self, use_cpp_fake_tensor):
         class Foo(torch.nn.Module):
             def __init__(self, index):
                 super().__init__()
@@ -305,15 +311,17 @@ def forward(self, args_0):
 
         inputs = (torch.randn(4, 4),)
         for i in [0, 1]:
-            ep = export(Foo(i), inputs, strict=True)
-            ep_joint = _export_forward_backward(ep, joint_loss_index=i)
+            with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+                ep = export(Foo(i), inputs, strict=True)
+                ep_joint = _export_forward_backward(ep, joint_loss_index=i)
             for j, spec in enumerate(ep_joint.graph_signature.output_specs):
                 if i == j:
                     self.assertTrue(spec.kind == OutputKind.LOSS_OUTPUT)
                 else:
                     self.assertTrue(spec.kind != OutputKind.LOSS_OUTPUT)
 
-    def test_joint_buffer_input_mutations(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_joint_buffer_input_mutations(self, use_cpp_fake_tensor):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -331,8 +339,9 @@ def forward(self, args_0):
             torch.randn(4, 4),
             torch.randint(0, 4, (4,)),
         )
-        ep = export(Foo(), inputs)
-        ep_joint = _export_forward_backward(ep)
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            ep = export(Foo(), inputs)
+            ep_joint = _export_forward_backward(ep)
         self.assertEqual(len(ep_joint.graph_signature.output_specs), 5)
         self.assertEqual(
             ep_joint.graph_signature.output_specs[0].kind,
