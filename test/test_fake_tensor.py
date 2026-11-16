@@ -39,6 +39,7 @@ from torch._subclasses.fake_tensor import (
     CppFakeTensorMode,
     DynamicOutputShapeException,
     extract_tensor_metadata,
+    fake_mode_cls,
     FakeTensor,
     FakeTensorConverter,
     FakeTensorDeviceMismatchError,
@@ -4606,7 +4607,14 @@ class TestFakeTensorProp(TestCase):
                     failed = True
                 self.assertTrue(failed)
 
-    def test_fake_tensor_prop_on_nn_module_with_optional_args(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_fake_tensor_prop_on_nn_module_with_optional_args(
+        self, use_cpp_fake_tensor
+    ):
+        self.enterContext(
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor)
+        )
+
         class OptionalArgumentInBetween(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -4624,7 +4632,7 @@ class TestFakeTensorProp(TestCase):
                 value = value + another_value + another_optional_value
                 return value * value
 
-        fake_mode = FakeTensorMode(
+        fake_mode = fake_mode_cls()(
             allow_non_fake_inputs=True, allow_fallback_kernels=False
         )
         with fake_mode:

@@ -800,7 +800,7 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
 
             fake_tensor_mode = detect_fake_mode(val)
             if not fake_tensor_mode:
-                fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+                fake_tensor_mode = fake_mode_cls()(allow_fallback_kernels=True)
             with fake_tensor_mode:
                 return torch.empty_strided(
                     val.shape, val.stride(), device=val.device, dtype=val.dtype
