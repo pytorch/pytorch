@@ -82,7 +82,7 @@ class TestApply(FSDPTestContinuous):
     def test_nested_module_apply(self, device):
         """Tests that ``apply()`` modifies parameter values in-place on a
         non-FSDP-root nested FSDP-wrapped model."""
-        fsdp_kwargs = {"device_id": self.device_type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -95,7 +95,7 @@ class TestApply(FSDPTestContinuous):
     def test_transformer_module_apply(self, device):
         """Tests that ``apply()`` modifies parameter values in-place on an
         FSDP-wrapped transformer model with shared parameters."""
-        fsdp_kwargs = {"device_id": self.device_type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         transformer = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -108,7 +108,7 @@ class TestApply(FSDPTestContinuous):
     def test_apply_in_summon_raises_error(self, device):
         """Tests that calling ``apply()`` on an FSDP instance inside the
         ``summon_full_params()`` context raises an error."""
-        fsdp_kwargs = {"device_id": self.device_type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         transformer = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
