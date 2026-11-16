@@ -9,12 +9,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed._transport import new_transport, wait_all
 from torch.distributed._transport.nixl import NIXLRemoteBuffer
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _receive(connection):
@@ -23,10 +18,8 @@ def _receive(connection):
     return connection.recv_bytes()
 
 
-def _native_worker(rank, connection, progress_thread):
-    with new_transport(
-        "nixl", "cpu", timeout=5, enable_prog_thread=progress_thread
-    ) as transport:
+def _native_worker(rank, connection):
+    with new_transport("nixl", "cpu", timeout=5) as transport:
         connection.send_bytes(transport.bind())
         transport.connect(_receive(connection))
         source = torch.arange(1024, dtype=torch.float32) + rank
@@ -162,19 +155,15 @@ def _run_worker(worker, *args):
     worker(*args)
 
 
-@instantiate_parametrized_tests
 @unittest.skipUnless(
     os.environ.get("TORCH_TEST_NIXL") == "1",
     "set TORCH_TEST_NIXL=1 with NIXL/UCX installed",
 )
 class TestNIXLNative(TestCase):
-    @parametrize("progress_thread", [True, False])
-    def test_two_process_cpu_transfers(self, progress_thread):
+    def test_two_process_cpu_transfers(self):
         connections = multiprocessing.Pipe()
         self._spawn(
-            _native_worker,
-            [(connection, progress_thread) for connection in connections],
-            connections,
+            _native_worker, [(connection,) for connection in connections], connections
         )
 
     def test_three_process_cpu_multi_peer(self):
