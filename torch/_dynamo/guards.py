@@ -68,6 +68,7 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
@@ -79,6 +80,11 @@ from torch._C._dynamo.guards import (
     TypeDictGuardAccessor,
     TypeGuardAccessor,
     TypeMROGuardAccessor,
+)
+from torch._C._functorch import (
+    get_unwrapped,
+    is_batchedtensor,
+    is_functorch_wrapped_tensor,
 )
 from torch._dynamo.package import (
     _globals_module,
@@ -114,6 +120,7 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
+    StorageOverlapPartition,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
@@ -124,6 +131,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     is_fake_tensor,
     maybe_get_fake_dispatch_keys,
+    maybe_get_fake_pytype,
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
@@ -266,6 +274,8 @@ verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards"
 
 
 def _sequence_length(value: object) -> int:
+    if issubclass(type(value), dict):
+        return dict.__len__(cast(dict[Any, Any], value))
     if isinstance(value, set):
         return set.__len__(value)
     if isinstance(value, frozenset):
@@ -354,6 +364,32 @@ def _cow_tensor_matches(value: object, expected: object) -> bool:
         return False
     actual = _try_is_cow_tensor(value)
     return actual is not _COW_TENSOR_UNSUPPORTED and actual == expected
+
+
+def _has_tangent(value: object) -> bool:
+    """Whether `value`, or a functorch layer under it, holds a forward-AD tangent.
+
+    `_unpack_dual` has no batching rule and a BatchedTensor never holds the
+    tangent (under jvp(vmap(f)) it is on an inner layer), so batched layers are
+    skipped. A tensor that cannot be unpacked cannot hold a tangent either:
+    unpacking dispatches `aten.alias`, which a subclass's `__torch_dispatch__`
+    may reject with any exception.
+    """
+    while isinstance(value, torch.Tensor):
+        if not is_batchedtensor(value):
+            try:
+                dual = torch.autograd.forward_ad.unpack_dual(value, level=0)
+            except Exception:
+                pass
+            else:
+                if dual.tangent is not None:
+                    return True
+        value = get_unwrapped(value) if is_functorch_wrapped_tensor(value) else None
+    return False
+
+
+def _has_no_tangent(value: object) -> bool:
+    return not _has_tangent(value)
 
 
 dunder_attrs_assumed_constants = (
@@ -987,6 +1023,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
             "___cow_tensor_matches": _cow_tensor_matches,
+            "___has_no_tangent": _has_no_tangent,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -1898,17 +1935,17 @@ class GuardBuilder(GuardBuilderBase):
         | None,
     ) -> GuardManagerType:
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
+        example_type: type[object] = type(example_value)
         if self.requires_key_order_guarding(source):
-            # Fix this if condition
-            if isinstance(example_value, dict_keys):
+            if issubclass(example_type, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
-            elif isinstance(example_value, (set, frozenset)):
+            elif issubclass(example_type, (set, frozenset)):
                 # we don't need to guard on key order for set/frozenset
                 # but the if above will be true for these types as set is
                 # implemented using a dict in Dynamo
                 guard_manager_enum = GuardManagerType.GUARD_MANAGER
             else:
-                if not isinstance(example_value, dict):
+                if not issubclass(example_type, dict):
                     raise AssertionError(f"Expected dict, got {type(example_value)}")
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
         return guard_manager_enum
@@ -2639,15 +2676,7 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard)
-        if (
-            isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-                value, torch._subclasses.FakeTensor
-            )
-            and value.pytype
-        ):
-            t = value.pytype
-        else:
-            t = type(value)
+        t = maybe_get_fake_pytype(value) or type(value)
 
         if t.__qualname__ != t.__name__:
             # A local-scope type cannot be serialized; serialize_guards raises
@@ -2882,6 +2911,17 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_fake_tensor_match_guard(
             expected, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: None,
+        eval_fn=lambda value, metadata: _has_no_tangent(value),
+    )
+    def NO_TANGENT_MATCH(self, guard: Guard) -> None:
+        code = f"___has_no_tangent({self.arg_ref(guard)})"
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            _has_no_tangent, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     @register_guard_check_spec(
@@ -3571,12 +3611,14 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard)
         length = _sequence_length(value)
 
-        if not isinstance(value, dict):
+        if not issubclass(type(value), dict):
             # C++ DICT_LENGTH checks for type
             self.TYPE_MATCH(guard)
 
         code = []
-        if isinstance(value, set):
+        if issubclass(type(value), dict):
+            code.append(f"dict.__len__({ref}) == {length}")
+        elif isinstance(value, set):
             code.append(f"set.__len__({ref}) == {length}")
         elif isinstance(value, frozenset):
             code.append(f"frozenset.__len__({ref}) == {length}")
@@ -3586,7 +3628,7 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"len({ref}) == {length}")
 
         self._set_guard_export_info(guard, code)
-        if isinstance(value, dict):
+        if issubclass(type(value), dict):
             self.get_guard_manager(guard).add_dict_length_check_guard(
                 length,
                 get_verbose_code_parts(code, guard),
@@ -4257,11 +4299,9 @@ class GuardBuilder(GuardBuilderBase):
             dispatch_keys = maybe_get_fake_dispatch_keys(value)
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(value)
-            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-                value, torch._subclasses.FakeTensor
-            ):
-                if value.pytype is not None:
-                    pytype = value.pytype
+            fake_pytype = maybe_get_fake_pytype(value)
+            if fake_pytype is not None:
+                pytype = fake_pytype
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -6086,6 +6126,9 @@ class CheckFunctionManager:
                 for keep, g in zip(_guard_filter_fn(guards), guards):
                     if not keep:
                         ret.append(False)
+                    elif g.guard_type == "CLOSURE_MATCH":
+                        # Saving rewrites this guard or bypasses packaging.
+                        ret.append(True)
                     elif g.guard_type not in (
                         "TYPE_MATCH",
                         "BUILTIN_MATCH",
@@ -6093,7 +6136,6 @@ class CheckFunctionManager:
                         g.guard_type
                         in (
                             "ID_MATCH",
-                            "CLOSURE_MATCH",
                             "WEAKREF_ALIVE",
                             "DICT_VERSION",
                         )
@@ -6670,6 +6712,23 @@ class CheckFunctionManager:
                 install_storage_overlapping_guard(
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
+                    [code_part],
+                    None,
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOverlapPartition):
+                partition_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.input_sources
+                ]
+                code_part = (
+                    "___check_storage_overlap_partition("
+                    f"[{', '.join(source.name for source in guard.input_sources)}], "
+                    f"{guard.overlapping_indices})"
+                )
+                install_storage_overlap_partition_guard(
+                    partition_guard_managers,
+                    guard.overlapping_indices,
                     [code_part],
                     None,
                 )

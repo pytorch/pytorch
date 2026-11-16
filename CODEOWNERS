@@ -507,6 +507,7 @@
 # /test/simulate_nccl_errors.py
 # /test/slow_tests.json
 # /test/test_accelerator.py
+# /test/test_stream.py
 # /test/test_ao_sparsity.py
 # /test/test_appending_byte_serializer.py
 # /test/test_as_strided.py
@@ -760,11 +761,12 @@
 # /torch/utils/
 /torch/_vendor/quack/ @slayton58 @drisspg
 # label: module: dsl-native-ops
-# owner: @drisspg @pearu @slayton58
+# owner: @drisspg @pearu @slayton58 @vkuzo
 /torch/_native/ @slayton58 @drisspg
 /torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
 /test/python_native/test_lce_fused_grad_logits_kernel.py @slayton58 @pearu
 /test/python_native/test_linear_cross_entropy_override.py @slayton58 @pearu
+/torch/utils/_quantize_tensor_validation.py @vkuzo @slayton58
 # label: module: complex
 # owner: @amjames @hameerabbasi
 /torch/_subclasses/complex_tensor/ @hameerabbasi @amjames
@@ -790,7 +792,7 @@
 # owner: @albanD @jbschlosser
 /torch/nn/ @albanD @jbschlosser
 # label: module: dsl-native-ops, module: nn
-# owner: @drisspg @pearu @slayton58
+# owner: @drisspg @pearu @slayton58 @vkuzo
 /torch/nn/modules/linear_cross_entropy*.py @slayton58 @pearu
 # label: module: nn, module: nn.utils.parametrize
 # owner: @lezcano
@@ -1023,7 +1025,6 @@
 # [third_party_backend_deps]
 # label: module: third_party
 # owner: none
-# /third_party/NNPACK
 # /third_party/VulkanMemoryAllocator
 # /third_party/XNNPACK
 # /third_party/aiter
@@ -1084,6 +1085,13 @@
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
 /torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
+# label: oncall: distributed infra
+# owner: @d4l3k
+/test/distributed/checkpoint/test_pg_transport.py @d4l3k
+/test/distributed/test_transport_* @d4l3k
+/test/distributed/transport_test_utils.py @d4l3k
+/torch/distributed/_transport/ @d4l3k
+/torch/distributed/checkpoint/_pg_transport.py @d4l3k
 # label: module: fsdp
 # owner: @weifengpy
 /torch/csrc/distributed/fsdp/ @weifengpy
@@ -1150,6 +1158,7 @@
 # /test/benchmark_utils/
 # /test/hw_classification_testdata/
 # /test/junit_xml_testdata/
+# /test/prune_skips_testdata/
 # /test/scripts/
 # /test/spincli/
 # /test/strobelight/
