@@ -34,6 +34,7 @@ from torch.testing._internal.inductor_utils import (
     RUN_CPU,
     RUN_GPU,
 )
+from torch.testing._internal.logging_utils import logs_to_string
 
 
 if IS_WINDOWS and IS_CI:
@@ -270,6 +271,22 @@ class TestSubprocess(TestCase):
             self.assertGreater(_AsyncFxCompile._stat_eager_runs, 0)
             self.assertEqual(_AsyncFxCompile._stat_bg_started, 2)
             self.assertEqual(_AsyncFxCompile._stat_bg_finished, 2)
+
+    def test_artifact_logging_enabled_after_worker_start(self):
+        # Start the (reused) compile worker before enabling the artifacts so it
+        # can't pick them up from TORCH_LOGS at spawn time.
+        torch.compile(lambda x: x + 1)(torch.randn(4))
+
+        stream, ctx = logs_to_string("torch._inductor.compile_fx", "post_grad_graphs")
+        with ctx():
+            torch.compile(lambda x: x * 2)(torch.randn(4))
+        self.assertEqual(stream.getvalue().count("AFTER POST GRAD"), 1)
+
+        # ir_post_fusion is off by default, so enabling it also flips propagate.
+        stream, ctx = logs_to_string("torch._inductor.debug", "ir_post_fusion")
+        with ctx():
+            torch.compile(lambda x: x * 3)(torch.randn(4))
+        self.assertEqual(stream.getvalue().count("AFTER FUSION"), 1)
 
 
 if RUN_CPU:
