@@ -14524,6 +14524,58 @@ class TestAutogradDeviceType(TestCase):
                         )
 
     @dtypes(torch.double)
+    def test_cdist_euclidean_dist_forward_ad(self, device, dtype):
+        # compute_mode="use_mm_for_euclid_dist" routes p == 2 through
+        # _euclidean_dist, whose forward-mode formula is under test.
+        make = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
+        shape_pairs = [
+            ((4, 3), (5, 3)),  # unbatched
+            ((2, 4, 3), (2, 5, 3)),  # batched
+            ((1, 4, 3), (2, 5, 3)),  # broadcast batch
+        ]
+
+        def fn(a, b):
+            return torch.cdist(a, b, 2.0, compute_mode="use_mm_for_euclid_dist")
+
+        for s1, s2 in shape_pairs:
+            with self.subTest(shapes=(s1, s2)):
+                x1, x2 = make(s1), make(s2)
+                self.assertTrue(gradcheck(fn, (x1, x2), check_forward_ad=True))
+                self.assertTrue(
+                    gradgradcheck(
+                        fn,
+                        (x1, x2),
+                        check_fwd_over_rev=True,
+                        check_undefined_grad=not TEST_WITH_TORCHDYNAMO,
+                    )
+                )
+
+        # Coincident points have no gradient; forward mode uses the same zero
+        # subgradient as backward mode.
+        x1 = make((4, 3))
+        x2 = make((5, 3))
+        with torch.no_grad():
+            x2[1] = x1[2]
+        t1, t2 = torch.randn_like(x1), torch.randn_like(x2)
+        with fwAD.dual_level():
+            out = fn(fwAD.make_dual(x1, t1), fwAD.make_dual(x2, t2))
+            tangent = fwAD.unpack_dual(out).tangent
+            self.assertEqual(tangent[2, 1], torch.zeros((), device=device, dtype=dtype))
+            self.assertFalse(tangent.isnan().any())
+
+        # The use case from the issue: forward-over-reverse Hessian.
+        x1 = make_tensor((30, 3), device=device, dtype=dtype)
+        x2 = make_tensor((40, 3), device=device, dtype=dtype)
+
+        def loss(a):
+            return fn(a, x2).pow(2).sum()
+
+        self.assertEqual(
+            torch.func.hessian(loss)(x1),
+            torch.func.jacrev(torch.func.jacrev(loss))(x1),
+        )
+
+    @dtypes(torch.double)
     def test_pdist_gradgrad(self, device, dtype):
         make = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
         for p in [1.0, 1.5, 2.0, 2.5, 3.0, float("inf")]:
