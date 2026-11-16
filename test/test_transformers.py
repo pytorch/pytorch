@@ -727,10 +727,12 @@ class TestTransformersAccelerator(NNTestCase):
                 torch.backends.mha.set_fastpath_enabled(False)
                 out_ref, _ = mha(x, x, x, need_weights=False)
             if not uses_fused_sdpa:
-                # Without a fused SDPA backend the fast path falls back to fp16
-                # bmm/softmax, whose scores overflow for these inputs:
+                # When no fused SDPA backend is selected for these inputs the fast path
+                # falls back to fp16 bmm/softmax, whose scores overflow:
                 # https://github.com/pytorch/pytorch/issues/204062
-                self.assertFalse(torch.isfinite(out).all())
+                self.assertTrue(torch.isfinite(out_ref).all())
+                msg = "fast path is finite now; #204062 may be fixed, remove this branch"
+                self.assertFalse(torch.isfinite(out).all(), msg=msg)
                 return
             self.assertTrue(torch.isfinite(out).all())
             self.assertEqual(out, out_ref, atol=2e-2, rtol=8e-2)
