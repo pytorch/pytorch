@@ -3419,6 +3419,38 @@ class TestTorchDeviceType(TestCase):
             dst.copy_(src.conj())
             self.assertEqual(dst, src.conj_physical())
 
+    # Contiguous same-dtype copies on one device use hipMemcpyAsync, except on
+    # ROCm gfx1250 where copies of at least 8 MiB run an elementwise kernel
+    # (kGfx1250ElementwiseCopyMinBytes in Copy.cu). Check sizes around that
+    # gate, an unaligned src and dst, untouched neighbours, and a self copy.
+    @onlyCUDA
+    @dtypes(torch.uint8, torch.bfloat16, torch.float32, torch.complex64, torch.bool)
+    def test_copy_same_dtype_contiguous_sizes(self, device, dtype):
+        es = torch.empty((), dtype=dtype).element_size()
+        gate = 8 << 20  # bytes
+        pad = 64
+        for nbytes in (gate - es, gate, gate + es, gate + 4096 + es, 4 * gate):
+            n = nbytes // es
+            for offset in (0, 1):  # offset 1 breaks 16-byte alignment of src and dst
+                src_base = make_tensor((n + pad,), dtype=dtype, device=device)
+                src = src_base[offset:offset + n]
+                dst_base = torch.zeros((n + pad,), dtype=dtype, device=device)
+                dst_base_before = dst_base.clone()
+                dst = dst_base[offset:offset + n]
+                dst.copy_(src)
+                self.assertEqual(dst.cpu().view(torch.uint8), src.cpu().view(torch.uint8),
+                                 msg=f"nbytes={nbytes} offset={offset}")
+                # elements outside the destination slice are unchanged
+                self.assertEqual(dst_base[:offset].cpu(), dst_base_before[:offset].cpu())
+                self.assertEqual(dst_base[offset + n:].cpu(), dst_base_before[offset + n:].cpu())
+        # a self copy of a large tensor must be a no-op
+        t = make_tensor((gate // es,), dtype=dtype, device=device)
+        expected = t.cpu().clone()
+        t.copy_(t)
+        self.assertEqual(t.cpu().view(torch.uint8), expected.view(torch.uint8))
+        # clone() goes through the same path
+        self.assertEqual(t.clone().cpu().view(torch.uint8), expected.view(torch.uint8))
+
     # Exercises the tiled CUDA kernel for dense 2D transpose copies. The
     # shapes are deliberately larger than the 4 MB dispatch threshold, and
     # cover 1/2/4/8-byte elements plus non-multiple-of-32 extents.

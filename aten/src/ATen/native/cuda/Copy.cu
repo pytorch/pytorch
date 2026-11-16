@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -20,7 +21,11 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/irange.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+
+#include <mutex>
+#include <vector>
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 13000
 #include <cuda_fp8.h>
@@ -39,6 +44,34 @@ at::cuda::CUDAEventPool::Event getEventFromPool(const at::DeviceIndex device_idx
   static auto* event_pool = new at::cuda::CUDAEventPool(kInitialEventPoolSize);
   return event_pool->get(device_idx);
 }
+
+#ifdef USE_ROCM
+// On gfx1250, hipMemcpyAsync device-to-device is lowered to the ROCclr
+// copyBuffer blit, which streams at ~6.3 TB/s, while the vectorized
+// elementwise copy kernel reaches ~15.9 TB/s. The kernel has a higher fixed
+// cost (~4.5 us vs ~3.4 us per launch), so the blit still wins for small
+// copies. Measured on MI455X-A0 (gfx1250-strict) for contiguous bf16 copies
+// (memcpy time / kernel time, per-launch median with L2 flushed between
+// launches; back-to-back hot runs agree within a few percent):
+//    4 MiB: 1.01   8 MiB: 1.15   16 MiB: 1.32   64 MiB: 1.52   1 GiB: 1.95
+// and below 4 MiB the blit is 5-12% faster. Use the kernel from 8 MiB up,
+// the first size where it wins by more than measurement noise.
+constexpr int64_t kGfx1250ElementwiseCopyMinBytes = 8 << 20;
+
+bool is_gfx1250(at::DeviceIndex device_idx) {
+  static std::vector<char> is_gfx1250_by_device;
+  static std::once_flag init_flag;
+  std::call_once(init_flag, [] {
+    const auto device_count = at::cuda::device_count();
+    is_gfx1250_by_device.resize(device_count);
+    for (const auto i : c10::irange(device_count)) {
+      is_gfx1250_by_device[i] = at::detail::getCUDAHooks().isGPUArch(
+          {"gfx1250"}, static_cast<at::DeviceIndex>(i));
+    }
+  });
+  return is_gfx1250_by_device.at(device_idx) != 0;
+}
+#endif
 
 } // namespace
 
@@ -625,6 +658,17 @@ void copy_device_to_device(TensorIterator& iter,
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
 
+  // On gfx1250 a large same-device contiguous copy is faster as an
+  // elementwise kernel than as hipMemcpyAsync (see kGfx1250ElementwiseCopyMinBytes).
+  // Cross-device copies and self copies (a no-op below) keep the memcpy path.
+  bool use_elementwise_copy = false;
+#ifdef USE_ROCM
+  use_elementwise_copy = memcpy_eligible && src_device == dst_device &&
+      numel * iter.element_size(0) >= kGfx1250ElementwiseCopyMinBytes &&
+      iter.data_ptr(0) != iter.data_ptr(1) &&
+      is_gfx1250(src_device.index());
+#endif
+
   CUDAGuard device_guard(src_device);
 
   // We always perform the copy on the source device, using the current stream
@@ -650,7 +694,9 @@ void copy_device_to_device(TensorIterator& iter,
     dst_ready->block(copy_stream);
   }
 
-  if (memcpy_eligible) {
+  if (use_elementwise_copy) {
+    direct_copy_kernel_cuda(iter);
+  } else if (memcpy_eligible) {
     void *dst = iter.data_ptr(0);
     void *src = iter.data_ptr(1);
     size_t size = numel * iter.element_size(0);
