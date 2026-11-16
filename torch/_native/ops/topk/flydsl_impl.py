@@ -18,10 +18,11 @@ output, a contiguous last-axis reduction, enough rows for the kernel/dtype
 performance gate, and ``M * N <= 2**31 - 1`` so element indices fit signed
 int32. The input (``M * N * itemsize``) and indices (``M * K * 8``) byte
 spans must also fit the unsigned 32-bit range addressed by AMD buffer
-descriptors. The element bound is the limiting one for int8. Values are not
-checked separately because every supported dtype is at most 4 bytes, making
-the indices bound tighter. The N bounds are closed intervals - both kernels
-lose to aten again at large N; anything outside falls through.
+descriptors. The indices bound also guarantees that the values span
+(``M * K * itemsize``) fits because every supported dtype is at most 4 bytes.
+The element bound is the limiting one for int8. The N bounds are closed
+intervals - both kernels lose to aten again at large N; anything outside falls
+through.
 
 ``self`` is read through ``ConstTensorWrapper`` so a COW input dispatches
 without materialising; writable ``out=`` buffers materialise through
