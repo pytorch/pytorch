@@ -117,9 +117,7 @@ void validate_zip_member_path(
     const std::string& zip_member_name,
     const std::string& temp_dir) {
   // Reject empty member names
-  TORCH_CHECK(
-      !zip_member_name.empty(),
-      "Rejecting unsafe zip member: empty path");
+  TORCH_CHECK(!zip_member_name.empty(), "Rejecting unsafe zip member: empty path");
 
   // Normalize separator for checking
   std::string normalized = normalize_path_separator(zip_member_name);
@@ -157,8 +155,8 @@ void validate_zip_member_path(
   }
 
   // Reconstruct the final destination and verify it stays within temp_dir
-  std::string dest = normalize_path_separator(
-      temp_dir + k_separator + normalized);
+  std::string dest =
+      normalize_path_separator(temp_dir + k_separator + normalized);
   fs::path dest_path(dest);
   fs::path temp_path(normalize_path_separator(temp_dir));
 
@@ -168,8 +166,7 @@ void validate_zip_member_path(
   fs::path temp_resolved = temp_path.lexically_normal();
 
   TORCH_CHECK(
-      path_starts_with_directory(
-          resolved.string(), temp_resolved.string()),
+      path_starts_with_directory(resolved.string(), temp_resolved.string()),
       "Rejecting unsafe zip member (escapes temp directory): ",
       zip_member_name,
       " -> ",
@@ -1141,4 +1138,3 @@ void AOTIModelPackageLoader::update_constant_buffer(
 }
 } // namespace torch::inductor
 #endif
-
