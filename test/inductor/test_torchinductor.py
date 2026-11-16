@@ -14153,10 +14153,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             subtest(
                 ((2, 4, 6, 6), [2], [2], [0], [1], False),
                 name="single_value_args",
+                # MPS keeps the pre-PR Inductor lowering, which requires
+                # kernel_size/stride/padding/dilation to have length 2.
+                decorators=[skip_if_mps],
             ),
             subtest(
                 ((4, 5, 1), [2, 1], [2, 1], [0, 0], [1, 1], False),
                 name="unbatched_width_one",
+                # A 3D input with width 1 has stride[1] == 1, which the pre-PR
+                # Inductor lowering mistakes for 4D channels-last.
+                decorators=[skip_if_mps],
             ),
             subtest(
                 ((2, 4, 5, 7), [2, 2], [2, 2], [0, 0], [1, 1], True),
