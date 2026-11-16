@@ -3092,7 +3092,10 @@ def create_compiler_config_extra(
     Without example_inputs, the graph is assumed to have a backward.
     """
     dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
-    pre_aot_graph = gm if isinstance(gm, GraphModule) else gm.gm
+    pre_aot_graph = gm.gm if isinstance(gm, GmWrapper) else gm
+    if not isinstance(pre_aot_graph, GraphModule):
+        # inductor.compile also takes a bare nn.Module: no FX graph, so no regions.
+        pre_aot_graph = GraphModule(torch.nn.Module(), torch.fx.Graph())
     cudagraph_annotation = (
         dynamo_graph_metadata.get("cudagraph_annotation")
         if dynamo_graph_metadata is not None
@@ -3153,7 +3156,7 @@ def create_compiler_config_extra(
     # so a backward-only conflict cannot matter otherwise.
     may_have_backward = example_inputs is None or any(
         isinstance(x, torch.Tensor) and x.requires_grad
-        for x in itertools.chain(example_inputs, pre_aot_graph.parameters())
+        for x in itertools.chain(example_inputs, gm.parameters())
     )
     # Only an annotation that moves a direction's top-level value conflicts with
     # a region that differs in that direction; one that restates the ambient
