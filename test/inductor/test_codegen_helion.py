@@ -321,7 +321,9 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
             "argmax",
             "dynamic",
             "strict_reduction",
+            "strict_pointwise",
             "batch_invariant",
+            "deterministic",
         ],
     )
     def test_triton_fallback(self, case):
@@ -336,7 +338,9 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         # Without these modes, x.sum(-1) is a Helion kernel.
         modes = {
             "strict_reduction": {"numerics": "strict_reduction"},
+            "strict_pointwise": {"numerics": "strict_pointwise"},
             "batch_invariant": {"batch_invariant": True},
+            "deterministic": {"deterministic": True},
         }
         metrics.reset()
         with config.patch(modes.get(case, {})):
