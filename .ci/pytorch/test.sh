@@ -1373,6 +1373,11 @@ test_inductor_pallas() {
   assert_git_not_dirty
 }
 
+test_inductor_benchmark_runner() {
+  python test/run_test.py --include dynamo/test_benchmark_runner --verbose
+  assert_git_not_dirty
+}
+
 test_inductor_flydsl() {
   install_flydsl
   (
@@ -2682,7 +2687,7 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == "inductor_benchmark_runner" ]]; then
-  python test/run_test.py --include dynamo/test_benchmark_runner --verbose
+  test_inductor_benchmark_runner
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   setup_torch_trace
   test_inductor_distributed
