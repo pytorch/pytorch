@@ -163,7 +163,7 @@ class TestAOTIPackageDeviceValidation(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_aoti_load_uses_cpp_device_validation_before_device_info(self, device):
-        device_type = self.device_type
+        device_type = torch.device(device).type
         unavailable_msg = (
             f"Cannot load AOTInductor package for device '{device_type}' because "
             f"{device_type.upper()} is not available in this process."
@@ -189,7 +189,7 @@ class TestAOTIPackageDeviceValidation(TestCase):
             get_info.assert_not_called()
 
     def test_load_package_does_not_fallback_on_device_validation_error(self, device):
-        device_type = self.device_type
+        device_type = torch.device(device).type
         unavailable_msg = (
             f"Cannot load AOTInductor package for device '{device_type}' because "
             f"{device_type.upper()} is not available in this process."
