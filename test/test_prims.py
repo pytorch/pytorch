@@ -3,6 +3,7 @@
 from functools import partial
 from itertools import product
 import unittest
+import warnings
 
 import torch
 from torch.testing import make_tensor
@@ -394,6 +395,19 @@ instantiate_device_type_tests(
 
 class TestRefs(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_resize_output_warning_names_required_shape(self):
+        # The resize deprecation warning must interpolate the required shape,
+        # not render the literal "{str(shape)}" placeholder.
+        a = torch.ones(3)
+        out = torch.zeros(2, 2)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            refs.add(a, a, out=out)
+        msgs = [str(w.message) for w in caught if "resized" in str(w.message)]
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("[3]", msgs[0])
+        self.assertNotIn("{str(shape)}", msgs[0])
 
     @dtypes(torch.float32)
     def test_constant_pad_nd_memory_format(self, device, dtype):
