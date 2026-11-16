@@ -88,12 +88,13 @@ class HelionCSEProxy(CSEProxy):
         kwargs = {"src_dtype": src_dtype, "use_compute_types": use_compute_types}
         node = getattr(V.interpreter, "current_node", None)
         if use_compute_types and x.dtype == dtype and feeds_only_dots(node):
-            # A bf16 value that only reaches dots stays bf16. Upcast, as in
+            # A bf16 or fp16 value that only reaches dots keeps its dtype. Upcast,
+            # as in
             #     tmp1 = tmp0.to(torch.float32)
             #     acc = torch.addmm(acc, tmp1, tmp3)
             # it makes the dot an fp32 one (dot_precision="ieee"). The result is
-            # the same: bf16 values are exact in fp32 and tf32, and the dot
-            # accumulates in fp32 either way.
+            # the same: bf16 and fp16 values are exact in fp32 and tf32, and the
+            # dot accumulates in fp32 either way.
             return x
         if not (kernel.in_loop and x in kernel.dot_results):
             return self._default("to_dtype", (x, dtype), kwargs)
