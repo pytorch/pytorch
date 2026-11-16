@@ -5,6 +5,7 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 
 import torch
+from torch.utils._helion import has_helion
 from torch.utils._ordered_set import OrderedSet
 
 from ... import config
@@ -139,6 +140,9 @@ class HelionScheduling(TritonScheduling):
     as Triton."""
 
     def __init__(self, scheduler: Any) -> None:
+        # Fail here rather than with a ModuleNotFoundError when the output code loads.
+        if not has_helion():
+            raise RuntimeError("helion.enabled is set, but Helion is not installed")
         super().__init__(scheduler)
         # Only codegen_node_schedule() emits Helion kernels; fusion benchmarks
         # and combo kernels stay Triton.

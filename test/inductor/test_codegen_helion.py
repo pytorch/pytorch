@@ -10,6 +10,8 @@ import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
+from torch._inductor.codegen.cuda_combined_scheduling import CUDACombinedScheduling
+from torch._inductor.codegen.helion import helion_scheduling
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
@@ -256,6 +258,14 @@ class TestHelionDefaults(TestCase):
         (source,) = [s for s in SOURCE_RE.findall(code) if DOT_RE.search(s)]
         self.assertIn('autotune_effort="quick"', source)
         self.assertNotRegex(code, r"extern_kernels\.\w*mm\w*\(")
+
+    @config.patch({"helion.enabled": True})
+    def test_missing_helion(self):
+        with (
+            patch.object(helion_scheduling, "has_helion", lambda: False),
+            self.assertRaisesRegex(RuntimeError, "Helion is not installed"),
+        ):
+            CUDACombinedScheduling(None)
 
 
 @unittest.skipUnless(
