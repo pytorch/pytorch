@@ -5,6 +5,10 @@ from __future__ import annotations
 import torch.onnx.errors
 
 
+class DynamicShapeSpecializationWarning(UserWarning):
+    """Dynamic input dimensions were specialized before ONNX translation."""
+
+
 class TorchExportError(torch.onnx.errors.OnnxExporterError):
     """Error during graph capturing using torch.export."""
 
