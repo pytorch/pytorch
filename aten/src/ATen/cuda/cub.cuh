@@ -8,6 +8,14 @@
 
 #ifndef USE_ROCM
 #include <cuda/std/functional>
+#else
+// hipcub::Equality is deprecated in favor of hip::std::equal_to.
+#if defined(__has_include) && __has_include(<hip/std/functional>)
+#include <hip/std/functional>
+#define TORCH_HIPCUB_EQUAL_TO ::hip::std::equal_to<>()
+#else
+#define TORCH_HIPCUB_EQUAL_TO hipcub::Equality()
+#endif
 #endif
 
 #include <ATen/cuda/cub_definitions.cuh>
@@ -534,7 +542,7 @@ inline void inclusive_sum_by_key(KeysInputIteratorT keys, ValuesInputIteratorT i
       keys, input, output, num_items, NO_ROCM(::cuda)::std::equal_to<>(), at::cuda::getCurrentCUDAStream());
 #else
   CUB_WRAPPER(cub::DeviceScan::InclusiveSumByKey,
-      keys, input, output, num_items, hipcub::Equality(), at::cuda::getCurrentCUDAStream());
+      keys, input, output, num_items, TORCH_HIPCUB_EQUAL_TO, at::cuda::getCurrentCUDAStream());
 #endif
 }
 
@@ -547,9 +555,12 @@ inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT 
       keys, input, output, scan_op, num_items, NO_ROCM(::cuda)::std::equal_to<>(), at::cuda::getCurrentCUDAStream());
 #else
   CUB_WRAPPER(cub::DeviceScan::InclusiveScanByKey,
-      keys, input, output, scan_op, num_items, hipcub::Equality(), at::cuda::getCurrentCUDAStream());
+      keys, input, output, scan_op, num_items, TORCH_HIPCUB_EQUAL_TO, at::cuda::getCurrentCUDAStream());
 #endif
 }
+#ifdef USE_ROCM
+#undef TORCH_HIPCUB_EQUAL_TO
+#endif
 
 
 template <typename InputIteratorT, typename OutputIteratorT, typename NumSelectedIteratorT>

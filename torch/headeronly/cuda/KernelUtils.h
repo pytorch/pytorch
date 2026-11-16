@@ -18,6 +18,32 @@
 // ROCM_VERSION arrives as -DROCM_VERSION=FB_ROCM_VERSION and collapses to 0
 // wherever the tp2 toolchain does not substitute it, which selects this branch.
 #if ROCM_VERSION < 60400
+// __hip_atomic_{load,compare_exchange_strong} are deprecated.
+#if defined(__has_builtin) && __has_builtin(__scoped_atomic_load_n) && \
+    __has_builtin(__scoped_atomic_compare_exchange_n)
+#define TORCH_ROCM_AGENT_LOAD(ptr) \
+  __scoped_atomic_load_n((ptr), __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)
+#define TORCH_ROCM_AGENT_CAS_STRONG(ptr, expected, desired) \
+  __scoped_atomic_compare_exchange_n(                       \
+      (ptr),                                                \
+      (expected),                                           \
+      (desired),                                            \
+      false,                                                \
+      __ATOMIC_RELAXED,                                     \
+      __ATOMIC_RELAXED,                                     \
+      __MEMORY_SCOPE_DEVICE)
+#else
+#define TORCH_ROCM_AGENT_LOAD(ptr) \
+  __hip_atomic_load((ptr), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT)
+#define TORCH_ROCM_AGENT_CAS_STRONG(ptr, expected, desired) \
+  __hip_atomic_compare_exchange_strong(                     \
+      (ptr),                                                \
+      (expected),                                           \
+      (desired),                                            \
+      __ATOMIC_RELAXED,                                     \
+      __ATOMIC_RELAXED,                                     \
+      __HIP_MEMORY_SCOPE_AGENT)
+#endif
 __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
     __hip_bfloat162* address,
     __hip_bfloat162 value) {
@@ -38,17 +64,11 @@ __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
       unsigned int u32;
     };
     u_hold old_val, new_val;
-    old_val.u32 = __hip_atomic_load(
-        (unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    old_val.u32 = TORCH_ROCM_AGENT_LOAD((unsigned int*)address);
     do {
       new_val.h2r = __hadd2(old_val.h2r, value);
-    } while (!__hip_atomic_compare_exchange_strong(
-        (unsigned int*)address,
-        &old_val.u32,
-        new_val.u32,
-        __ATOMIC_RELAXED,
-        __ATOMIC_RELAXED,
-        __HIP_MEMORY_SCOPE_AGENT));
+    } while (!TORCH_ROCM_AGENT_CAS_STRONG(
+        (unsigned int*)address, &old_val.u32, new_val.u32));
     return old_val.h2r;
   }
 }
@@ -74,20 +94,16 @@ __device__ inline __half2 preview_unsafeAtomicAdd(
       unsigned int u32;
     };
     u_hold old_val, new_val;
-    old_val.u32 = __hip_atomic_load(
-        (unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    old_val.u32 = TORCH_ROCM_AGENT_LOAD((unsigned int*)address);
     do {
       new_val.h2r = __hadd2(old_val.h2r, value);
-    } while (!__hip_atomic_compare_exchange_strong(
-        (unsigned int*)address,
-        &old_val.u32,
-        new_val.u32,
-        __ATOMIC_RELAXED,
-        __ATOMIC_RELAXED,
-        __HIP_MEMORY_SCOPE_AGENT));
+    } while (!TORCH_ROCM_AGENT_CAS_STRONG(
+        (unsigned int*)address, &old_val.u32, new_val.u32));
     return old_val.h2r;
   }
 }
+#undef TORCH_ROCM_AGENT_LOAD
+#undef TORCH_ROCM_AGENT_CAS_STRONG
 #define ATOMICADD preview_unsafeAtomicAdd
 #else
 #define ATOMICADD unsafeAtomicAdd

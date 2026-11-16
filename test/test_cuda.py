@@ -202,8 +202,8 @@ def skip_unless_blas_library_selectable(backend):
 def get_wait_for_cpu_kernel():
     """Returns a compiled CUDA/HIP spin-wait kernel that blocks the GPU stream
     until the host sets a pinned int32 flag to non-zero. On NVIDIA, requires
-    SM70+ for the relaxed-system-scope PTX load. On AMD, uses
-    __hip_atomic_load with __HIP_MEMORY_SCOPE_SYSTEM (the AMDGCN equivalent).
+    SM70+ for the relaxed-system-scope PTX load. On AMD, uses a relaxed
+    system-scope atomic load.
 
     Usage::
 
@@ -224,7 +224,11 @@ def get_wait_for_cpu_kernel():
                 int flag = 0;
                 do {
             #ifdef __HIP_PLATFORM_AMD__
+            #if defined(__has_builtin) && __has_builtin(__scoped_atomic_load_n)
+                    flag = __scoped_atomic_load_n(pinned_cpu_flag, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+            #else
                     flag = __hip_atomic_load(pinned_cpu_flag, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+            #endif
             #else
                     asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
             #endif
