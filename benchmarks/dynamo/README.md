@@ -132,7 +132,9 @@ every step.
 Each decode request prefills the prompt eagerly into the static cache outside
 the timed region, then times `--decode-length` (default 128, at most 1999)
 single-token compiled forwards. Decode feeds fixed random tokens rather than
-sampled ones and returns the last step's logits.
+sampled ones and returns the last step's logits. Profiler traces and the
+`eager_peak_mem`, `dynamo_peak_mem`, and `compression_ratio` columns include the
+eager prefill.
 
 Prefill and decode require `--inference` and a backend. They reject `--amp`,
 `--aot-precompile`, `--batch-invariant`, `--compare-backed-unbacked`, `--ddp`,
@@ -176,13 +178,14 @@ Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen2.5-0.5B-Instruct`,
 
 Without torchrun, the script launches one `torchrun --standalone
 --nproc-per-node=N` worker group for each selected model (`--only`, or every
-supported model that passes `--filter`). A failed group gets a failure row if
-it did not already write a result; performance failures have zero metrics.
-The driver continues through the remaining models, then exits unsuccessfully
-if any group crashed, timed out, or produced missing or invalid results.
-Completed accuracy results are evaluated by `check_accuracy.py` against the
-expected CSV, so known accuracy failures can be recorded in the baseline.
-Performance results require positive speedup and latency values.
+supported model that passes `--filter`). The driver writes a failure row, with
+zero metrics in performance mode, for each group that leaves no result for its
+model, for example because it crashed or timed out. A group that writes
+several rows, an empty accuracy status, or a non-positive or non-finite speedup
+or latency keeps its rows but counts as failed. The driver continues through
+the remaining models, then exits unsuccessfully if any group failed. Reported
+accuracy statuses, including `fail_accuracy`, are results; judge them against a
+baseline with `check_accuracy.py`.
 It can also run as a torchrun worker directly, which
 requires `--only` and `WORLD_SIZE == N` on one node:
 
@@ -216,31 +219,35 @@ output names get a `_<phase>_tp<N>` suffix; profiler traces and memory
 snapshots get per-rank names.
 Accuracy runs agree on comparison outcomes across ranks. Exceptions during
 loading or execution, including the FP64 reference, terminate the worker
-immediately so torchrun can stop peers blocked in model collectives. These
-execution failures remain fatal even when an accuracy failure is expected.
+immediately so torchrun can stop peers blocked in model collectives, without
+writing a result row; the worker group exits non-zero. These execution failures
+remain fatal even when an accuracy failure is expected.
 The process-group timeout covers hangs that do not raise an exception.
 
 TP requires `--disable-cudagraphs` and rejects `--backend=cudagraphs` until CUDA
-graphs are validated with it.
+graphs are validated with it. It also rejects `--caching-precompile`,
+`--compare-model-outputs-with`, `--device-index`, `--diff-branch`,
+`--log-operator-inputs`, `--minify`, `--save-model-outputs-to`,
+`--warm-start-latency`, and multiple `--devices`.
 Multi-node runs, several TP groups, and other parallelism styles are
 unsupported. Inductor TP requires CUDA/NCCL. With a CPU-only PyTorch build,
 `-dcpu` supports TP diagnostics with `--backend=eager` or
-`--backend=aot_eager`. CPU Inductor TP is rejected because concurrent Gloo
-all-gathers can corrupt memory; this was reproduced without a model or
-compilation and is not specific to Qwen3.5.
+`--backend=aot_eager`.
 
 The periodic `inductor_huggingface_tp` CI job checks accuracy and runs the TP
-tests. A separate `inductor_huggingface_tp_perf` job measures performance, so
-accuracy or test failures do not hide successful performance results. Both use
-`--tp-size=2` and full-graph compilation on multi-GPU A10G runners.
+tests on GPUs. A separate `inductor_huggingface_tp_perf` job measures
+performance, so accuracy or test failures do not hide successful performance
+results; per-model failures are recorded in its CSVs without failing the job.
+Both use `--tp-size=2` and full-graph compilation on multi-GPU A10G runners.
 Accuracy checks require exactly one result matching the baseline for each
 supported model. Update both phase baselines with
 `python benchmarks/dynamo/ci_expected_accuracy/update_expected.py <commit-sha>`,
 using a SHA with completed `inductor-periodic` accuracy artifacts.
-Performance CSV names end in `_tp2_<phase>_performance.csv`.
+Performance CSV names end in `_<phase>_tp2_performance.csv`.
 Use the numeric periodic run ID with `perf_cli.py summary` or `repro`; branch
 discovery and `launch` still select the nightly workflows. Automatic baseline
 selection requires a successful TP performance job on the same runner hardware;
 unrelated failures elsewhere in the periodic workflow do not exclude that run.
-Comparisons pair the same hardware, phase, TP degree, model, batch size, prompt length, and
-decode length. Reproduction commands preserve those workload dimensions.
+Comparisons pair the same hardware, phase, TP degree, model, batch size, prompt
+length, and decode length. Reproduction commands preserve those workload
+dimensions.

@@ -33,6 +33,11 @@ skip:
   control_flow:
     - AllenaiLongformerBase
 
+  test:
+    training:
+      # Two eager runs with Adam state run out of memory on 24 GB GPUs.
+      - openai/whisper-large-v3-turbo
+
 batch_size:
   # TODO - Fails even after fake tensors
   divisors:
