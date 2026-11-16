@@ -59,13 +59,17 @@ from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    fake_mode_cls,
     FakeTensor,
     FakeTensorMode,
     get_plain_tensors,
     in_kernel_invocation_manager,
     is_fake,
     is_fake_tensor,
+    maybe_get_fake_dispatch_keys,
     maybe_get_fake_mode,
+    maybe_get_real_tensor,
     track_fake_tensor_for_export,
     unset_fake_temporarily,
 )
@@ -715,30 +719,40 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # have no storage and outlive their level. Record a view of the fake tensor
     # they wrap, with the sizes, strides and storage offset the wrapper reports,
     # so passes still see which storage it aliases. Functorch is disabled so
-    # that an outer jvp does not wrap the view again. A wrapped tensor subclass,
-    # such as DTensor, may not support that view, so it keeps its wrapper.
+    # that an outer jvp does not wrap the view again. Non-strided tensors and
+    # wrapped subclasses such as DTensor keep their wrapper.
     inner = _unwrap_functorch(val)
-    # The view below is built from a Python FakeTensor's fields, as fast_detach
-    # does, so a C++ fake keeps its wrapper.
-    fake = inner if isinstance(inner, FakeTensor) else None  # noqa: ISINSTANCE_FAKE_TENSOR
+    fake_mode = maybe_get_fake_mode(inner) if is_fake_tensor(inner) else None
     # A value whose real tensor is kept, such as a placeholder of a cond branch
     # inside vmap under real tensor propagation, keeps its wrapper as before,
     # which carries the real tensor. Its real view would need the real layout
     # at each functorch level, while the view below uses the fake one.
-    if fake is not None and not (include_real and fake.real_tensor is not None):
+    if (
+        fake_mode is not None
+        and inner.layout == torch.strided
+        and not (include_real and maybe_get_real_tensor(inner) is not None)
+    ):
         # The view is made on the meta tensor inside the fake tensor, as
         # fast_detach does, so real tensor propagation does not also run it on
         # the real tensor, which has no storage for it when the batch is empty.
         with torch._C._DisableFuncTorch():
-            with no_python_dispatcher(), in_kernel_invocation_manager(fake.fake_mode):
+            with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
                 view = torch.ops.aten.as_strided.default(
-                    torch.ops.aten.detach.default(fake),
+                    torch.ops.aten.detach.default(inner),
                     val.shape,
                     val.stride(),
                     val.storage_offset(),
                 )
+            dispatch_keys = maybe_get_fake_dispatch_keys(inner)
+            if isinstance(fake_mode, CppFakeTensorMode):
+                return fake_mode.fake_tensor_converter.from_meta_and_device(
+                    fake_mode, view, inner.device, dispatch_keys=dispatch_keys
+                )
             return FakeTensor(
-                fake.fake_mode, view, fake.device, dispatch_keys=fake.dispatch_keys
+                fake_mode,
+                view,
+                inner.device,
+                dispatch_keys=dispatch_keys,
             )
     return val.detach()
 
@@ -786,7 +800,7 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
 
             fake_tensor_mode = detect_fake_mode(val)
             if not fake_tensor_mode:
-                fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+                fake_tensor_mode = fake_mode_cls()(allow_fallback_kernels=True)
             with fake_tensor_mode:
                 return torch.empty_strided(
                     val.shape, val.stride(), device=val.device, dtype=val.dtype
@@ -3024,7 +3038,7 @@ class _MakefxTracer:
         # and configurations. After tracing, their states should be cleaned except for shape_env.
         # Remember to specify how to initialize it from user inputs and from parent tracer whenever
         # adding new modes in _MakefxTracer.
-        self.fake_tensor_mode: FakeTensorMode | None = None
+        self.fake_tensor_mode: FakeTensorMode | CppFakeTensorMode | None = None
         self.proxy_mode: nullcontext[None] | ProxyTorchDispatchMode = nullcontext()
         self.proxy_function_mode: nullcontext[None] | PreDispatchTorchFunctionMode = (
             nullcontext()
@@ -3074,7 +3088,7 @@ class _MakefxTracer:
 
     def _restore_modes(
         self,
-        prev_fake_tensor_mode: FakeTensorMode | None,
+        prev_fake_tensor_mode: FakeTensorMode | CppFakeTensorMode | None,
         prev_proxy_mode: nullcontext[None] | ProxyTorchDispatchMode,
         prev_proxy_function_mode: nullcontext[None] | PreDispatchTorchFunctionMode,
         prev_fx_tracer: PythonKeyTracer | None,
@@ -3113,14 +3127,13 @@ class _MakefxTracer:
             if self.tracing_mode == "fake":
                 import torch._dynamo
 
-                fake_tensor_mode = torch._guards.require_python_fake_mode(
-                    torch._dynamo.utils.detect_fake_mode(args)
-                )
+                fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
                 if fake_tensor_mode is None:
                     import torch._functorch.config as _config
 
+                    mode_cls = fake_mode_cls()
                     with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = FakeTensorMode(
+                        fake_tensor_mode = mode_cls(
                             allow_fallback_kernels=True,
                             allow_non_fake_inputs=self._allow_non_fake_inputs,
                             shape_env=ShapeEnv(),
@@ -3143,15 +3156,14 @@ class _MakefxTracer:
             elif self.tracing_mode == "symbolic":
                 import torch._dynamo
 
-                fake_tensor_mode = torch._guards.require_python_fake_mode(
-                    torch._dynamo.utils.detect_fake_mode(args)
-                )
+                fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
                 if fake_tensor_mode is None:
                     shape_env = ShapeEnv()
                     import torch._functorch.config as _config
 
+                    mode_cls = fake_mode_cls()
                     with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = FakeTensorMode(
+                        fake_tensor_mode = mode_cls(
                             allow_fallback_kernels=False,
                             allow_non_fake_inputs=self._allow_non_fake_inputs,
                             shape_env=shape_env,
@@ -3683,7 +3695,7 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
     fake_mode = typing.cast(
-        "FakeTensorMode | None",
+        "FakeTensorMode | CppFakeTensorMode | None",
         torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
     )
     if fake_mode and fake_mode.shape_env:

@@ -79,7 +79,11 @@ from torch._dynamo.types import (
 )
 from torch._export.utils import _compiling_state_context
 from torch._library.opaque_object import is_custom_class
-from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch._subclasses.fake_tensor import (
+    fake_mode_cls,
+    FakeTensorMode,
+    unset_fake_temporarily,
+)
 from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
     _combine_args,
@@ -1286,9 +1290,10 @@ class _TorchDynamoContext:
             try:
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
-                    if (
-                        tracing_context.fake_mode is not None
-                        and tracing_context.fake_mode.in_kernel_invocation
+                    if tracing_context.fake_mode is not None and (
+                        tracing_context.fake_mode.in_kernel_invocation
+                        if isinstance(tracing_context.fake_mode, FakeTensorMode)
+                        else torch._C._meta_in_tls_dispatch_include()
                     ):
                         return fn(*args, **kwargs)
                 # Skip nested compile during export (but not HOP internal compile)
@@ -2117,7 +2122,9 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
         matched_output_elements_positions: list[int],
         example_fake_inputs: list[torch.Tensor],
         flat_args_dynamic_dims: list[set[int]],
-        fake_mode: fake_tensor.FakeTensorMode | None = None,
+        fake_mode: fake_tensor.FakeTensorMode
+        | fake_tensor.CppFakeTensorMode
+        | None = None,
     ) -> None:
         super().__init__(m)
 
@@ -2328,7 +2335,7 @@ def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -
 def rewrite_signature(
     f_sig: inspect.Signature,
     graph: torch.fx.GraphModule,
-    fake_mode: fake_tensor.FakeTensorMode | None,
+    fake_mode: fake_tensor.FakeTensorMode | fake_tensor.CppFakeTensorMode | None,
     flat_args: list[Any],
     in_spec: pytree.TreeSpec,
     example_fake_inputs: list[Any],
@@ -2588,7 +2595,7 @@ def export(
             # potential outer ambient fake mode which the user provided.
             # example_inputs is always the user specified inputs, so they
             # would have the wrong fake mode attached to them
-            fake_mode = _guards.require_python_fake_mode(_guards.detect_fake_mode())
+            fake_mode = _guards.detect_fake_mode()
             example_inputs = inner_example_inputs
 
             def result_capturing_wrapper(*graph_inputs: Any) -> Any:
@@ -2604,12 +2611,7 @@ def export(
                 named_parameters = dict(graph.named_parameters(remove_duplicate=False))
                 named_buffers = dict(graph.named_buffers(remove_duplicate=False))
 
-                ambient_fake_mode = (
-                    _guards.require_python_fake_mode(
-                        _guards.detect_fake_mode(graph_inputs)
-                    )
-                    or fake_mode
-                )
+                ambient_fake_mode = _guards.detect_fake_mode(graph_inputs) or fake_mode
 
                 # We reran fake tensor propagation, but we didn't do
                 # anything with the resulting unbacked SymInts.  Drop them
@@ -2782,9 +2784,7 @@ def export(
             example_inputs = []
             graph_captured_input = ()
             graph_captured_result = ()
-            fake_mode = torch._subclasses.FakeTensorMode(
-                shape_env=ShapeEnv(), export=True
-            )
+            fake_mode = fake_mode_cls()(shape_env=ShapeEnv(), export=True)
             if out_guards is None:
                 out_guards = _guards.GuardsSet()
             if out_guards is None:  # suppress mypy error

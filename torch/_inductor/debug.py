@@ -1522,7 +1522,7 @@ def load_args_and_run_compile_fx_inner(path: str) -> Any:
         else:
             return x
 
-    fake_mode = torch._subclasses.FakeTensorMode(
+    fake_mode = torch._subclasses.fake_tensor.fake_mode_cls()(
         allow_non_fake_inputs=True, shape_env=shape_env
     )
     with fake_mode, config.patch("save_args", False):

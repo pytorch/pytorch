@@ -18,7 +18,7 @@ from torch import nn
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.variables.higher_order_ops import LocalMapWrappedHigherOrderVariable
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import fake_mode_cls, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -31,6 +31,8 @@ if torch.distributed.is_available():
 
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -216,6 +218,7 @@ def get_local_mapped_functions(mesh):
     return cp_decorated, cp_function
 
 
+@instantiate_parametrized_tests
 class TestLocalMap(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -248,8 +251,12 @@ class TestLocalMap(TestCase):
         if torch.distributed.is_available():
             torch.distributed.destroy_process_group()
 
+    @parametrize("use_cpp_fake_tensor", [False, True])
     @unittest.skipIf(*get_skip_reasons())
-    def test_simple(self):
+    def test_simple(self, use_cpp_fake_tensor):
+        self.enterContext(
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor)
+        )
         cp_decorated, cp_function = get_local_mapped_functions(self.mesh)
         bs = 8 * 1
         dim1 = 96
@@ -584,8 +591,13 @@ class GraphModule(torch.nn.Module):
         arg_names = [a.name if hasattr(a, "name") else a for a in hop_call.args]
         self.assertEqual(arg_names, ["subgraph_0", "l_args_0_", "l_args_1_"])
 
+    @parametrize("use_cpp_fake_tensor", [False, True])
     @unittest.skipIf(*get_skip_reasons())
-    def test_local_map_with_local_shapes_hop_tracing(self):
+    def test_local_map_with_local_shapes_hop_tracing(self, use_cpp_fake_tensor):
+        self.enterContext(
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor)
+        )
+
         def fn(x):
             if x.shape != (10, 80):
                 raise AssertionError("expected local shapes")
@@ -604,7 +616,7 @@ class GraphModule(torch.nn.Module):
             }
         }
 
-        with FakeTensorMode():
+        with fake_mode_cls()():
             global_tensor = torch.randn(80, 80, requires_grad=True)
         with torch._higher_order_ops.local_map.defer_inlining():
             out = torch._higher_order_ops.local_map_hop(gm, global_tensor)

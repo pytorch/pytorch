@@ -37,7 +37,6 @@ from torch._export.utils import (
     sequential_split,
 )
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import export
 from torch.export._remove_auto_functionalized_pass import (
     unsafe_remove_auto_functionalized_pass,
@@ -52,7 +51,9 @@ from torch.library import _scoped_library, impl
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    fake_tensor_modes,
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
@@ -381,6 +382,7 @@ def _sequential_split_inline_tests():
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
+@instantiate_parametrized_tests
 class TestPasses(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -657,7 +659,8 @@ def forward(self, obj_attr, x):
     return (takes_foo_default,)""",
         )
 
-    def test_fakify_script_objects(self):
+    @fake_tensor_modes
+    def test_fakify_script_objects(self, mode_cls):
         for m in [
             ModelsWithScriptObjectAttr.Simple(),
             ModelsWithScriptObjectAttr.SimpleWithAttrInContainer(),
@@ -665,7 +668,7 @@ def forward(self, obj_attr, x):
             ModelsWithScriptObjectAttr.MoreNestedWithAttrInContainer(),
         ]:
             constant_attrs = _gather_constant_attrs(m)
-            fake_mode = FakeTensorMode(
+            fake_mode = mode_cls(
                 shape_env=ShapeEnv(tracked_fakes=[]),
                 allow_non_fake_inputs=True,
             )
@@ -682,9 +685,10 @@ def forward(self, obj_attr, x):
 
     # TODO: _gather_constants doesn't recursively look into the pytree containers.
     @unittest.expectedFailure
-    def test_fakify_script_objects_properly_handle_containers(self):
+    @fake_tensor_modes
+    def test_fakify_script_objects_properly_handle_containers(self, mode_cls):
         m = ModelsWithScriptObjectAttr.SimpleWithAttrInContainer()
-        fake_mode = FakeTensorMode(
+        fake_mode = mode_cls(
             shape_env=ShapeEnv(tracked_fakes=[]),
             allow_non_fake_inputs=True,
         )
@@ -1105,7 +1109,8 @@ def forward(self, sin, cos):
             "wrap_with_autocast",
         )
 
-    def test_set_grad_pass_reads_nested_spec(self):
+    @fake_tensor_modes
+    def test_set_grad_pass_reads_nested_spec(self, mode_cls):
         # A pytree spec that lives on a submodule is read with a dotted
         # get_attr, before, inside and after the region.
         root = torch.nn.Module()
@@ -1127,7 +1132,7 @@ def forward(self, sin, cos):
         )
         graph.output((before, inside, after))
         gm = torch.fx.GraphModule(root, graph)
-        with FakeTensorMode() as mode:
+        with mode_cls() as mode:
             FakeTensorProp(gm, mode).propagate(mode.from_tensor(torch.ones(2)))
         new_gm, _ = replace_set_grad_with_hop_pass(gm, None)
         region = torch.ops.higher_order.wrap_with_set_grad_enabled
@@ -1149,7 +1154,8 @@ def forward(self, sin, cos):
         }
         self.assertEqual(spec_targets, {"sub.spec"})
 
-    def test_set_grad_pass_converts_dotted_graph_module(self):
+    @fake_tensor_modes
+    def test_set_grad_pass_converts_dotted_graph_module(self, mode_cls):
         # A graph module read under a dotted name, here a cond branch on a
         # submodule, gets its own regions converted and is written back there.
         branch = torch.fx.Graph()
@@ -1171,7 +1177,7 @@ def forward(self, sin, cos):
         out = graph.call_function(torch.ops.higher_order.cond, (pred, body, body, (x,)))
         graph.output((graph.call_function(operator.getitem, (out, 0)),))
         gm = torch.fx.GraphModule(root, graph)
-        with FakeTensorMode() as mode:
+        with mode_cls() as mode:
             fake_x = mode.from_tensor(torch.ones(2))
             FakeTensorProp(gm.sub.body, mode).propagate(fake_x)
             FakeTensorProp(gm, mode).propagate(fake_x)

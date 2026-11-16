@@ -3174,13 +3174,23 @@ static PyObject* THPVariable_is_sparse_csr(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+// Match FakeTensor's Python properties without changing native layout queries.
+static bool is_fake_mkldnn(const at::Tensor& tensor) {
+  if (!tensor.is_fake()) {
+    return false;
+  }
+  const auto keys = tensor.unsafeGetTensorImpl()->fake_dispatch_keys();
+  return keys.has_value() && keys->has_all(c10::mkldnn_ks);
+}
+
 static PyObject* THPVariable_is_mkldnn(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_mkldnn");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(self_.is_mkldnn());
+  return torch::autograd::utils::wrap(
+      self_.is_mkldnn() || is_fake_mkldnn(self_));
   END_HANDLE_TH_ERRORS
 }
 
@@ -3280,7 +3290,8 @@ static PyObject* THPVariable_layout(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "layout");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(self_.layout());
+  return torch::autograd::utils::wrap(
+      is_fake_mkldnn(self_) ? at::kMkldnn : self_.layout());
   END_HANDLE_TH_ERRORS
 }
 
