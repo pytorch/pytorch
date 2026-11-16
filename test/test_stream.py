@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipCUDANonDefaultStreamIf,
     TEST_ACCELERATOR,
+    TEST_CUDA,
     TestCase,
 )
 from torch.testing._internal.common_xpu import Xe2_Or_Later
@@ -28,6 +29,10 @@ if not TEST_ACCELERATOR:
     TestCase = NoTest
     # Skip because failing when run on cuda build with no GPU, see #150059 for example
     sys.exit()
+
+TEST_CUDAMALLOCASYNC = TEST_CUDA and (
+    torch.cuda.get_allocator_backend() == "cudaMallocAsync"
+)
 
 
 class TestStream(TestCase):
@@ -223,6 +228,46 @@ class TestStream(TestCase):
 
         self.assertEqual(r1, r1_check)
         self.assertEqual(r2, r2_check)
+
+    def test_record_stream(self, device):
+        m = torch.get_device_module(device)
+        cycles_per_ms = get_cycles_per_ms(device)
+
+        t = torch.tensor([1, 2, 3, 4], dtype=torch.float).pin_memory()
+        result = torch.empty(t.size(), dtype=torch.float, device=device)
+        stream = m.Stream()
+        ptr = [None]
+
+        # Performs the CPU->GPU copy in a background stream
+        def perform_copy():
+            with m.stream(stream):
+                tmp = t.to(device=device, non_blocking=True)
+                ptr[0] = tmp.data_ptr()
+            m.current_stream().wait_stream(stream)
+            tmp.record_stream(m.current_stream())
+            m._sleep(int(50 * cycles_per_ms))  # delay the copy
+            result.copy_(tmp)
+
+        perform_copy()
+        with m.stream(stream):
+            tmp2 = torch.empty(t.size(), dtype=torch.float, device=device)
+            tmp2.zero_()
+            self.assertNotEqual(
+                tmp2.data_ptr(), ptr[0], msg="allocation reused to soon"
+            )
+
+        self.assertEqual(result.tolist(), [1, 2, 3, 4])
+
+        if (
+            self.device_type == "cuda" and not TEST_CUDAMALLOCASYNC
+        ) or self.device_type == "mps":
+            # In the native CUDA allocator and MPS allocator, we expect "tmp"'s
+            # side-stream-tagged block will be reused in that side stream after
+            # result.copy_(tmp) in the main stream finishes.
+            m.current_stream().synchronize()
+            with m.stream(stream):
+                tmp3 = torch.empty(t.size(), dtype=torch.float, device=device)
+                self.assertEqual(tmp3.data_ptr(), ptr[0], msg="allocation not reused")
 
 
 instantiate_device_type_tests(

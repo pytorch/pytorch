@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 from contextlib import contextmanager
 
 import torch
 from torch._utils import _dummy_type
+
+from .event import Event
 
 
 # APIs defined in this file are public directly under `torch.mps`
@@ -42,6 +46,46 @@ class Stream(torch._C._MPSStreamBase):
                     raise ValueError(f"mps device index is invalid: {device.index}")
 
         return super().__new__(cls, **kwargs)
+
+    def wait_event(self, event: Event | torch.Event) -> None:
+        r"""Make all future work submitted to the stream wait for an event.
+
+        Args:
+            event (Event, torch.Event): an event to wait for.
+
+        .. note:: This function returns without waiting for :attr:`event`:. Only
+           future operations are affected.
+        """
+        event.wait(self)
+
+    def wait_stream(self, stream: Stream | torch.Stream) -> None:
+        r"""Synchronize with another stream.
+
+        All future work submitted to this stream will wait until all kernels
+        submitted to a given stream at the time of call complete.
+
+        Args:
+            stream (Stream, torch.Stream): a stream to synchronize.
+
+        .. note:: This function returns without waiting for currently enqueued
+           kernels. Only future operations are affected.
+        """
+        self.wait_event(stream.record_event())
+
+    def record_event(self, event: Event | torch.Event | None = None):
+        r"""Record an event.
+
+        Args:
+            event (Event, torch.Event, optional): event to record. If not given,
+                a new one will be allocated.
+
+        Returns:
+            Recorded event.
+        """
+        if event is None:
+            event = Event()
+        event.record(self)
+        return event
 
     def synchronize(self) -> None:
         r"""Wait for all the kernels in this stream to complete."""
