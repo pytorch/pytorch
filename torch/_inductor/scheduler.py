@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
 
+    from .codegen.multi_kernel import MultiKernel
     from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
     from .memory import FreeableInputBuffer
@@ -504,23 +505,13 @@ class MixOrderReduction:
             # fully cached by L2
             size_thres = 5 * 2**20
 
-            # Call evaluate_expr rather than statically_known_geq since nrow can
-            # have dynamic shape in real models.
             # Don't use hint directly since hint can be non-representative.
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow * ncol, size_thres),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
+            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow * ncol, size_thres)):
                 return False
 
             # Need enough rows to split the other reduction across; too few
             # gives insufficient parallelism to justify the fusion overhead.
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow, 4096),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
+            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow, 4096)):
                 return False
 
         # Equal groups can be true square inner+outer reductions, but also
@@ -632,6 +623,8 @@ class NestedReduction:
 
     MAX_INNER_R_GROUP_SIZE = 512
     MAX_NON_INNER_GROUP_SIZE = 128
+    # Persistent lane forwarding keeps each whole group tile live in registers.
+    MAX_PERSISTENT_LANE_GROUP = 128
 
     @staticmethod
     def _is_dependent_reduction_pair(
@@ -802,8 +795,6 @@ class NestedReduction:
         [Sub-parent reduction epilogues].
         """
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
-        if not cls._mutations_survive_hoisting(nodes):
-            return None
         if not all(isinstance(node, SchedulerNode) for node in nodes):
             return None
         scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
@@ -819,7 +810,25 @@ class NestedReduction:
             numel,
             rnumel,
         )
+        requires_persistent = grouping is None
+        if requires_persistent:
+            grouping = cls._persistent_lane_epilogue_candidates(
+                scheduler_nodes, numel, rnumel
+            )
         if grouping is None:
+            return None
+        if not requires_persistent:
+            if not cls._mutations_survive_hoisting(nodes):
+                return None
+        elif any(
+            not isinstance(owner := V.graph.get_buffer(alias), ir.ConcatKernel)
+            or not any(inp is buf.node for inp in owner.inputs)
+            for node in scheduler_nodes
+            for buf in node.get_outputs()
+            for alias in buf.get_aliases()
+        ):
+            # Persistent candidates have no mutations. Concat slices are disjoint
+            # and keep their own store indexing; other aliases are unsupported.
             return None
         output_groups = grouping.output_groups
         sub_parent_factor = grouping.factor
@@ -879,11 +888,16 @@ class NestedReduction:
         planned_source_names = OrderedSet(
             relation.source_accesses[0].name for relation in source_relations
         )
-        ordered_parent_nodes = cls._order_sub_parent_parent_nodes(
-            parent_nodes,
-            planned_source_names & parent_write_names,
-            numel,
-            rnumel,
+        # A persistent tile keeps every parent value live until the epilogue.
+        ordered_parent_nodes = (
+            OrderedParentNodes(parent_nodes, None)
+            if requires_persistent
+            else cls._order_sub_parent_parent_nodes(
+                parent_nodes,
+                planned_source_names & parent_write_names,
+                numel,
+                rnumel,
+            )
         )
         if ordered_parent_nodes is None:
             return None
@@ -910,6 +924,59 @@ class NestedReduction:
             required_post_reduction_index=(
                 ordered_parent_nodes.required_post_reduction_index
             ),
+            requires_persistent=requires_persistent,
+        )
+
+    @classmethod
+    def _persistent_lane_epilogue_candidates(
+        cls,
+        nodes: Sequence[SchedulerNode],
+        numel: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> SubParentEpilogueGrouping | None:
+        """Resolve reduced-width lane consumers using a complete persistent tile.
+
+        A reduced-width shape alone is insufficient: the caller must still prove
+        every fixed-lane source relation. Unlike the looped sub-parent path,
+        this stage may retain an internal value computed before the reduction.
+        """
+        if not config.triton.persistent_reductions or not isinstance(
+            rnumel, sympy.Integer
+        ):
+            return None
+        factor = int(rnumel)
+        if not 1 < factor <= cls.MAX_PERSISTENT_LANE_GROUP or not is_power_of_2(factor):
+            return None
+        # A single group gives epilogue nodes empty ranges, which the remapped
+        # pointwise codegen cannot split; there is also nothing to forward. A
+        # symbolic group count (dynamic K) can merge differently per node in
+        # Scheduler.merge_loops, after which codegen cannot re-derive the plan.
+        if V.graph.sizevars.statically_known_equals(numel, 1) or numel.has(FloorDiv):
+            return None
+        reductions = [node for node in nodes if node.is_reduction()]
+        if len(reductions) != 1 or any(
+            node.has_strict_reduction()
+            or any(buf.get_mutations() for buf in node.get_outputs())
+            for node in nodes
+        ):
+            return None
+        reduction = reductions[0]
+        # Leave reductions that the outer + grouped planner can own to it; it
+        # needs an upstream reduction over the same full domain.
+        full_numel = numel * rnumel
+        for name in reduction.ancestors:
+            upstream = reduction.scheduler.name_to_node.get(name)
+            if (
+                upstream is not None
+                and upstream.is_reduction()
+                and cls.is_candidate(upstream, reduction)
+                and V.graph.sizevars.statically_known_equals(
+                    sympy_product(upstream.group[1]), full_numel
+                )
+            ):
+                return None
+        return cls._sub_parent_epilogue_candidate_nodes(
+            nodes, numel, rnumel, persistent_factor=factor
         )
 
     @staticmethod
@@ -1010,11 +1077,14 @@ class NestedReduction:
         nodes: Sequence[SchedulerNode],
         numel: sympy.Expr,
         rnumel: sympy.Expr,
+        *,
+        persistent_factor: int | None = None,
     ) -> SubParentEpilogueGrouping | None:
         """Group lane-resolution consumers and choose their lane factor.
 
         Other members must fit the parent reduction, reduced-output, or
-        full-parent domain.
+        full-parent domain. With a proved persistent tile, reduced-width
+        consumers may instead select fixed lanes of that tile.
         """
         full_numel = V.graph.sizevars.simplify(numel * rnumel)
         candidates: list[SubParentEpilogueCandidate] = []
@@ -1027,9 +1097,12 @@ class NestedReduction:
                 ):
                     return None
                 continue
-            # REDUCED takes precedence when rnumel == factor and its shape is
-            # indistinguishable from SUB_PARENT; decline the ambiguous latter.
+            # A looped parent cannot retain its full tile for reduced consumers.
             if cls._pointwise_node_matches_domain(node, numel, (numel,)):
+                if persistent_factor is not None:
+                    candidates.append(
+                        SubParentEpilogueCandidate(node, persistent_factor, 1)
+                    )
                 continue
             if cls._pointwise_node_matches_domain(node, full_numel, (numel, rnumel)):
                 continue
@@ -1165,30 +1238,33 @@ class NestedReduction:
         )
 
     @classmethod
-    def _r_grouped_stage_accesses_match(
+    def _try_get_r_grouped_lane_accesses(
         cls,
         outer_node: BaseSchedulerNode,
         grouped_node: BaseSchedulerNode,
         domain_context: PointwiseDomainContext,
         pointwise_domains: Sequence[tuple[SchedulerNode, PointwiseDomain]],
-    ) -> bool:
-        """Check cross-stage forwarding in the grouped R coordinate frame.
+    ) -> tuple[SubParentAccessRelation, ...] | None:
+        """Prove grouped R accesses, returning required lane projections or None.
 
-        Codegen forwards internal values positionally. Reindex every ordinary
+        Codegen normally forwards internal values positionally. Reindex every ordinary
         grouped-stage internal read, and its producer's write, into one frame
         spanning the parent ``[X, R]`` and grouped ``[X, R/G, G]`` geometries,
-        and require them to address the same element. Sub-parent edges use the
+        and require them to address the same element, or record a proved
+        fixed-lane projection for a reduced consumer. Sub-parent edges use the
         separate lane and broadcast proofs in the sub-parent planner.
         """
         from .utils import sympy_index_symbol
 
+        lane_accesses: list[SubParentAccessRelation] = []
+
         if domain_context.grouped_axis is not cls.GroupedAxis.R:
-            return False
+            return None
         if not all(
             isinstance(node, SchedulerNode) and isinstance(node.node, ComputedBuffer)
             for node in (*outer_node.get_nodes(), *grouped_node.get_nodes())
         ):
-            return False
+            return None
 
         parent_numel, parent_rnumel = domain_context.parent_full_domain
         group_size = domain_context.group_size
@@ -1211,7 +1287,7 @@ class NestedReduction:
             grouped_values = (parent_x * group_count + group_r, local_r)
             reduced_values = (parent_x * group_count + group_r,)
         else:
-            return False
+            return None
 
         # A coordinate with a single element is always zero. Keep it out of the
         # comparison so a degenerate extent does not look like a stride.
@@ -1313,21 +1389,72 @@ class NestedReduction:
                 writers = writers_by_name[dep.name]
                 consumer_frame = frames_by_node.get(consumer)
                 if consumer_frame is None or len(writers) != 1:
-                    return False
+                    return None
                 writer_frame = frames_by_node.get(writers[0])
                 if writer_frame is None or writers[0] is consumer:
-                    return False
+                    return None
                 read = frame_index(consumer, dep, consumer_frame)
-                writes = [
-                    frame_index(writers[0], write, writer_frame)
+                source_writes = tuple(
+                    write
                     for write in read_writes(writers[0]).writes
                     if write.name == dep.name
+                )
+                writes = [
+                    frame_index(writers[0], write, writer_frame)
+                    for write in source_writes
                 ]
                 if read is None or not writes or any(w is None for w in writes):
-                    return False
-                if not any(cls._index_exprs_equal(read, write) for write in writes):
-                    return False
-        return True
+                    return None
+                if any(cls._index_exprs_equal(read, write) for write in writes):
+                    continue
+                # A reduced epilogue can select a fixed lane of a live
+                # parent tile. Require a unique, unit-stride write and
+                # prove that the read stays within that same local group.
+                # An unclassified outer writer belongs to an earlier pass.
+                if (
+                    domains_by_node.get(consumer) is not cls.PointwiseDomain.REDUCED
+                    or domains_by_node.get(writers[0])
+                    not in (
+                        cls.PointwiseDomain.LOCAL_REDUCTION_INPUT,
+                        cls.PointwiseDomain.PARENT_FULL,
+                    )
+                    or writers[0].is_reduction()
+                    or len(source_writes) != 1
+                    or not isinstance(dep, MemoryDep)
+                    or dep.mode is not None
+                    or not isinstance(source_writes[0], MemoryDep)
+                    or source_writes[0].mode is not None
+                ):
+                    return None
+                write = writes[0]
+                if write is None or write.diff(local_r) != 1:
+                    return None
+                base = write.subs(local_r, 0)
+                lane = V.graph.sizevars.simplify(read - base)
+                if (
+                    not isinstance(lane, sympy.Integer)
+                    or not 0 <= lane < group_size
+                    # Codegen recovers the lane as index mod G (_planned_lane).
+                    or not V.graph.sizevars.statically_known_multiple_of(
+                        base, group_size
+                    )
+                ):
+                    return None
+                if not cls._sub_parent_access_preserves_x_boundary(
+                    source_writes[0], parent_numel, parent_rnumel, {}
+                ) or not cls._sub_parent_access_preserves_x_boundary(
+                    dep, parent_numel, group_count, {}
+                ):
+                    return None
+                lane_accesses.append(
+                    SubParentAccessRelation(
+                        source_accesses=(source_writes[0],),
+                        consumer_access=dep,
+                        parent_lane=int(lane),
+                        requires_live_source=True,
+                    )
+                )
+        return tuple(lane_accesses)
 
     @staticmethod
     def _index_exprs_equal(left: sympy.Expr, right: sympy.Expr) -> bool:
@@ -1405,6 +1532,16 @@ class NestedReduction:
             return False
         active_vars = OrderedSet(dep.var_names) & dep.index.free_symbols
         if len(active_vars) <= 1:
+            return True
+        # A flat contiguous access over the whole frame splits at any boundary.
+        normalized = dep.normalize()
+        if (
+            len(normalized.var_names) == 1
+            and normalized.index == normalized.var_names[0]
+            and V.graph.sizevars.statically_known_equals(
+                sympy_product(normalized.size), parent_numel * rnumel
+            )
+        ):
             return True
         sizes = tuple(sympy_subs(size, extent_subs) for size in dep.size)
         for split in range(len(sizes) + 1):
@@ -1549,8 +1686,13 @@ class NestedReduction:
                 )
                 if lane_value is None:
                     return None
+                child_coordinate = (
+                    sympy.S.Zero
+                    if V.graph.sizevars.statically_known_equals(child_rnumel, 1)
+                    else child_r
+                )
                 expected = parent_index.subs(
-                    parent_r, sub_parent_factor * child_r + lane_value
+                    parent_r, sub_parent_factor * child_coordinate + lane_value
                 )
                 if not V.graph.sizevars.statically_known_equals(child_index, expected):
                     return None
@@ -2196,6 +2338,12 @@ class NestedReduction:
         # Splitting X forces a minimum XBLOCK and has consistently lost to the
         # unfused kernels. Keep nested codegen to one [X, R/G, G] geometry.
         if grouped_axis is not cls.GroupedAxis.R:
+            fusion_log.debug(
+                "nested reduction: grouped axis of %s is %s, not R (ranges %s)",
+                block_local_reduction.get_name(),
+                grouped_axis,
+                block_local_reduction.get_ranges(),
+            )
             return None
         iter_ranges, _ = block_local_reduction.get_ranges()
         if len(iter_ranges) == 2:
@@ -2279,9 +2427,10 @@ class NestedReduction:
         # the local nodes after a dependent parent node would reverse that edge.
         if any(node.ancestors & local_stage_names for node in parent_nodes):
             return None
-        if not cls._r_grouped_stage_accesses_match(
+        lane_accesses = cls._try_get_r_grouped_lane_accesses(
             outer_node, grouped_node, domain_context, pointwise_domains
-        ):
+        )
+        if lane_accesses is None:
             return None
         sub_parent_nodes = OrderedSet(
             node
@@ -2290,6 +2439,8 @@ class NestedReduction:
         )
         sub_parent_stages: tuple[SubParentEpilogueStage, ...] = ()
         if sub_parent_nodes:
+            if lane_accesses:
+                return None
             sub_parent_stage = cls._plan_nested_sub_parent_stage(
                 outer_node,
                 grouped_node.get_nodes(),
@@ -2315,6 +2466,7 @@ class NestedReduction:
                 grouped_nodes=grouped_stage_nodes,
                 domain_context=domain_context,
                 pointwise_domains=tuple(pointwise_domains),
+                lane_accesses=lane_accesses,
             ),
             sub_parent_stages=sub_parent_stages,
         )
@@ -2452,6 +2604,7 @@ class NestedReductionStage:
     grouped_nodes: tuple[BaseSchedulerNode, ...]
     domain_context: NestedReduction.PointwiseDomainContext
     pointwise_domains: tuple[tuple[SchedulerNode, NestedReduction.PointwiseDomain], ...]
+    lane_accesses: tuple[SubParentAccessRelation, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2561,6 +2714,7 @@ class StagedReductionPlan:
     sub_parent_stages: tuple[SubParentEpilogueStage, ...]
     # First parent node that must follow a completed reduction loop.
     required_post_reduction_index: int | None = None
+    requires_persistent: bool = False
 
     def __post_init__(self) -> None:
         if self.nested_stage is None and not self.sub_parent_stages:
@@ -5558,7 +5712,9 @@ def _occupancy_before_and_after_fusion(
     regs_per_block_unfused = unfused_n_regs * threads_per_block
     regs_per_block_fused = fused_n_regs * threads_per_block
 
-    blocks_unfused = regs_per_sm // regs_per_block_unfused
+    # Clamping blocks_fused as well would turn (fused=0, unfused=1) from 0/1
+    # (reject) into 1/1 (accept).
+    blocks_unfused = max(regs_per_sm // regs_per_block_unfused, 1)
     blocks_fused = regs_per_sm // regs_per_block_fused
 
     return blocks_unfused, blocks_fused
@@ -5790,6 +5946,40 @@ def _producer_fusion_enabled_inputs(
     return enabled
 
 
+def _required_producer_inputs(
+    multi_node: ir.MultiTemplateBuffer, fused_nodes: Sequence[BaseSchedulerNode]
+) -> OrderedSet[str]:
+    """The template inputs that ``fused_nodes`` produce. Computed for consumer
+    fusion too: a producer may already have been fused into the template in an
+    earlier fusion round."""
+    template_input_names = OrderedSet(
+        typing.cast(ir.IRNode, input_node).get_name()
+        for input_node in multi_node.inputs
+    )
+    return OrderedSet(
+        name
+        for fused_node in fused_nodes
+        for name in fused_node.get_buffer_names()
+        if name in template_input_names
+    )
+
+
+def _choice_supports_fusion(
+    template_node: BaseSchedulerNode,
+    choice: Any,
+    required_producer_inputs: OrderedSet[str],
+) -> bool:
+    """Whether ``choice`` is a Triton template choice that supports a producer
+    fused into each of ``required_producer_inputs``."""
+    if not isinstance(choice, torch._inductor.select_algorithm.TritonTemplateCaller):
+        return False
+    # Choices can support different inputs, e.g. persistent+TMA templates
+    # cannot fuse producers into TMA-loaded inputs.
+    return required_producer_inputs <= _producer_fusion_enabled_inputs(
+        template_node, choice
+    )
+
+
 def is_epilogue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return (
         node1.is_template()
@@ -5950,7 +6140,7 @@ class Scheduler:
             ]
         )
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
-        self.previous_node: BaseSchedulerNode | None = None
+        self.previous_nodes: list[BaseSchedulerNode] | None = None
         self.current_node: BaseSchedulerNode | None = None
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
@@ -5976,8 +6166,8 @@ class Scheduler:
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_real_name = {"buf0" : "buf1"}
-        # all subsequent uses of buf0 become buf1's usage in dependency graph
+        # mutation_real_name = {"buf1" : "buf0"}
+        # in codegen we only use buf0, never buf1
         self.mutation_real_name: dict[str, str] = {}
 
         # We handle mutation by renaming modified versions of the same
@@ -5986,8 +6176,8 @@ class Scheduler:
         #                   (changed once per mutation)
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_renames = {"buf1" : "buf0"}
-        # in codegen we only use buf0, never buf1
+        # mutation_renames = {"buf0" : "buf1"}
+        # all subsequent uses of buf0 become buf1's usage in dependency graph
         self.mutation_renames: dict[str, str] = {}
 
         self.seen_template_fusions: OrderedSet[
@@ -6017,6 +6207,8 @@ class Scheduler:
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
+        # Templates with a fused node whose device assert generated inputs could trip.
+        self.templates_with_unsafe_asserts = OrderedSet[str]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
 
@@ -7398,6 +7590,134 @@ class Scheduler:
 
         return (fut, mod)
 
+    def _compile_fused_template(
+        self,
+        multi_node: ir.MultiTemplateBuffer,
+        choice: torch._inductor.select_algorithm.TritonTemplateCaller,
+        node_list_fused: Sequence[BaseSchedulerNode],
+        consumer_fusion: bool,
+    ) -> bool:
+        """Whether the kernel fusing ``node_list_fused`` compiles with ``choice``
+        as ``multi_node``'s template."""
+        from torch._inductor.codegen.simd import CantSplit
+
+        with multi_node.swap_as_triton_caller(choice):
+            try:
+                future, mod_fused = self.compile_kernel(
+                    node_list_fused, hint_override=choice.hint_override
+                )
+                if future is not None:
+                    future.result()
+                else:
+                    mod_fused.triton_.precompile()
+            except CantSplit:
+                return False
+            # Ideally we would more narrowly catch Exceptions here but
+            # Triton will unpredictably error with valid producer fusions.
+            except Exception as e:
+                if fusion_log.isEnabledFor(logging.DEBUG):
+                    fusion_log.debug(
+                        "Exception in compiling %s: %s",
+                        "producer" if not consumer_fusion else "consumer",
+                        e,
+                    )
+                return False
+        return True
+
+    def _asserts_need_real_inputs(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
+        """Whether the kernel of ``nodes`` alone has a device assert that the
+        generated inputs of benchmarking could trip."""
+        standalone = PyCodeCache.load(
+            self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
+        )
+        return bool(standalone.triton_.inductor_meta.get("asserts_need_real_inputs"))
+
+    def _multi_template_fusion_decision(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> FusionResult | None:
+        """
+        Ask V.choices.multi_template_fusion_decision about a MultiTemplateBuffer
+        pair; None keeps the benchmark-based decision.
+
+        The decision is immediate: _try_fusion_pairs commits an accepted
+        immediate fusion right away, so the buffer is finalized only for a fusion
+        that is committed. Pending (competing) template fusions are not used.
+
+        An accepted decision still has to pass the checks the benchmark path
+        applies (layout conflicts, atomic-add producers, the chosen template's
+        support for every fused producer, and a fused kernel that compiles), and
+        needs a template: an explicit Triton template choice of this buffer, or,
+        without one, the template the buffer is already finalized to. Otherwise
+        the fusion is declined. An accepted fusion whose other side has a device
+        assert marks the buffer in templates_with_unsafe_asserts, as the
+        benchmark path does, so later fusions into it are not benchmarked.
+        """
+        if config.multi_kernel_hints:
+            return None
+        epilogue = isinstance(node1.get_template_node(), ir.MultiTemplateBuffer)
+        multi_node = (node1 if epilogue else node2).get_template_node()
+        if not isinstance(multi_node, ir.MultiTemplateBuffer):
+            return None
+        other = node2 if epilogue else node1
+        decision = V.choices.multi_template_fusion_decision(
+            self, multi_node, other.get_nodes(), epilogue
+        )
+        if decision is None:
+            return None
+        if not decision.fuse:
+            return FusionResult.fuse(False)
+
+        why = WhyNoFuse(node1, node2)
+        committed = multi_node._render_caller
+        choice = decision.choice
+        if choice is None:
+            if multi_node._render_kind != "triton" or committed is None:
+                why("fusion decision has no template choice for an unfinalized buffer")
+                return FusionResult.fuse(False)
+            choice = committed
+        if not isinstance(
+            choice, torch._inductor.select_algorithm.TritonTemplateCaller
+        ) or not any(choice is c for c in multi_node.choices):
+            why("fusion decision choice is not a Triton template choice of this buffer")
+            return FusionResult.fuse(False)
+        if (
+            choice.layout.size != multi_node.get_size()
+            or choice.layout.stride != multi_node.get_stride()
+        ):
+            why("fusion decision choice has a different output layout")
+            return FusionResult.fuse(False)
+        if committed is not None and committed is not choice:
+            why("buffer is already finalized to a different choice")
+            return FusionResult.fuse(False)
+        node_list_fused = [*node1.get_nodes(), *node2.get_nodes()]
+        if not epilogue and self._any_atomic_add(node_list_fused):
+            why("template choice does not support this producer fusion")
+            return FusionResult.fuse(False)
+        if not _choice_supports_fusion(
+            node1 if epilogue else node2,
+            choice,
+            _required_producer_inputs(multi_node, node_list_fused),
+        ):
+            why("template choice does not support a fused producer")
+            return FusionResult.fuse(False)
+        if self._has_layout_conflict_for_template(multi_node):
+            why("template would conflict with a buffer layout constraint")
+            return FusionResult.fuse(False)
+        if not self._compile_fused_template(
+            multi_node, choice, node_list_fused, consumer_fusion=epilogue
+        ):
+            why("fused kernel does not compile with the template choice")
+            return FusionResult.fuse(False)
+        template_name = multi_node.get_name()
+        if (
+            config.benchmark_template_fusion
+            and template_name not in self.templates_with_unsafe_asserts
+            and self._asserts_need_real_inputs(other.get_nodes())
+        ):
+            self.templates_with_unsafe_asserts.add(template_name)
+        multi_node.finalize_as_triton_caller(choice)
+        return FusionResult.fuse(True)
+
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> FusionResult:
@@ -7416,6 +7736,11 @@ class Scheduler:
         ) and _is_atomic_add_mutation_epilogue(node2, check_config=False)
         if atomic_add_template_epilogue and not config.epilogue_fusion_with_atomic_add:
             return FusionResult.fuse(False)
+
+        if is_multi_template:
+            decision = self._multi_template_fusion_decision(node1, node2)
+            if decision is not None:
+                return decision
 
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
@@ -7513,28 +7838,13 @@ class Scheduler:
                     "expected multi_node to be an ir.MultiTemplateBuffer"
                 )
             template_scheduler_node = node1 if consumer_fusion else node2
-            # Computed for consumer fusion too: a producer may already have been
-            # fused into the template in an earlier fusion round.
-            template_input_names = OrderedSet(
-                typing.cast(ir.IRNode, input_node).get_name()
-                for input_node in multi_node.inputs
-            )
-            required_producer_inputs = OrderedSet(
-                name
-                for fused_node in node_list_fused
-                for name in fused_node.get_buffer_names()
-                if name in template_input_names
+            required_producer_inputs = _required_producer_inputs(
+                multi_node, node_list_fused
             )
 
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
-                if not isinstance(
-                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                ):
-                    return False
-                # Choices can support different inputs, e.g. persistent+TMA
-                # templates cannot fuse producers into TMA-loaded inputs.
-                return required_producer_inputs <= _producer_fusion_enabled_inputs(
-                    template_scheduler_node, choice
+                return _choice_supports_fusion(
+                    template_scheduler_node, choice, required_producer_inputs
                 )
 
             # Check for layout conflicts before committing to Triton template
@@ -7542,6 +7852,22 @@ class Scheduler:
                 return FusionResult.fuse(False)
 
             from torch._inductor.codegen.simd import CantSplit
+
+            # Benchmarking launches kernels on generated inputs, which can trip a
+            # device assert and leave the device unusable. So a fusion whose
+            # standalone side, or an earlier fusion into the template, has such an
+            # assert is judged by estimate. With multi_kernel_hints the fused choice
+            # for each hint can only be picked by benchmarking, so it is not made.
+            template_name = multi_node.get_name()
+            needs_real_inputs = template_name in self.templates_with_unsafe_asserts
+            if not (needs_real_inputs or has_atomic_add) and (
+                config.benchmark_template_fusion or config.multi_kernel_hints
+            ):
+                needs_real_inputs = self._asserts_need_real_inputs(
+                    node_list_2 if consumer_fusion else node_list_1
+                )
+            if needs_real_inputs and config.multi_kernel_hints and not has_atomic_add:
+                return FusionResult.fuse(False)
 
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
@@ -7607,7 +7933,9 @@ class Scheduler:
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-            benchmark_template_fusion = config.benchmark_template_fusion
+            benchmark_template_fusion = (
+                config.benchmark_template_fusion and not needs_real_inputs
+            )
             num_fusible_callers = sum(
                 isinstance(c, (TritonTemplateCallerBase, NVUniversalGemmCaller))
                 for c in multi_node.choices
@@ -7634,30 +7962,6 @@ class Scheduler:
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
 
-            def compile_without_benchmarking(
-                choice: torch._inductor.select_algorithm.TritonTemplateCaller,
-            ) -> bool:
-                with multi_node.swap_as_triton_caller(choice):
-                    try:
-                        future, mod_fused = self.compile_kernel(
-                            node_list_fused, hint_override=choice.hint_override
-                        )
-                        if future is not None:
-                            future.result()
-                        else:
-                            mod_fused.triton_.precompile()
-                    except CantSplit:
-                        return False
-                    except Exception as e:
-                        if fusion_log.isEnabledFor(logging.DEBUG):
-                            fusion_log.debug(
-                                "Exception in compiling %s: %s",
-                                "producer" if not consumer_fusion else "consumer",
-                                e,
-                            )
-                        return False
-                return True
-
             if has_atomic_add:
                 if not consumer_fusion:
                     return FusionResult.fuse(False)
@@ -7674,7 +7978,9 @@ class Scheduler:
                             torch._inductor.select_algorithm.TritonTemplateCaller,
                             choice,
                         )
-                        if compile_without_benchmarking(triton_choice):
+                        if self._compile_fused_template(
+                            multi_node, triton_choice, node_list_fused, consumer_fusion
+                        ):
                             ms_fused_choice = triton_choice
                             break
                     if ms_fused_choice is None:
@@ -7895,6 +8201,8 @@ class Scheduler:
                     if benchmark_template_fusion:
                         # pyrefly: ignore [missing-attribute]
                         multi_node._choice_timings[None] = new_timings
+                    if needs_real_inputs:
+                        self.templates_with_unsafe_asserts.add(template_name)
                     return True
                 else:
                     return False
@@ -8091,8 +8399,9 @@ class Scheduler:
 
         while template_fusion_candidates:
             template_futures: list[Future] = []
-            future_to_pending_fusion: dict[
-                Future, tuple[PendingFusion, BaseSchedulerNode]
+            # Fusions that render identical kernel source share one compile future.
+            future_to_pending_fusions: dict[
+                Future, list[tuple[PendingFusion, BaseSchedulerNode]]
             ] = {}
             fusions_to_remove: OrderedSet[BaseSchedulerNode] = OrderedSet()
             for candidate in template_fusion_candidates:
@@ -8136,8 +8445,11 @@ class Scheduler:
                     f = pending_fusion.future.future
                     if f is None:
                         raise AssertionError("expected f to be set")
-                    template_futures.append(f)
-                    future_to_pending_fusion[f] = (pending_fusion, candidate)
+                    if f not in future_to_pending_fusions:
+                        template_futures.append(f)
+                    future_to_pending_fusions.setdefault(f, []).append(
+                        (pending_fusion, candidate)
+                    )
                 else:
                     # Non AsyncCompile path, perform fusion
                     if self._fusion_memory_state is not None:
@@ -8150,14 +8462,14 @@ class Scheduler:
 
             # Evaluate fusion candidates as async_compile completes
             for f in as_completed(template_futures):
-                pending_fusion, cand = future_to_pending_fusion[f]
-                if self.fuse_if_speedup(
-                    self.get_fused_node(pending_fusion.node1),
-                    self.get_fused_node(pending_fusion.node2),
-                    pending_fusion.callable_fn,
-                    fused_nodes,
-                ):
-                    fusions_to_remove.add(cand)
+                for pending_fusion, cand in future_to_pending_fusions[f]:
+                    if self.fuse_if_speedup(
+                        self.get_fused_node(pending_fusion.node1),
+                        self.get_fused_node(pending_fusion.node2),
+                        pending_fusion.callable_fn,
+                        fused_nodes,
+                    ):
+                        fusions_to_remove.add(cand)
 
             for f in fusions_to_remove:
                 template_fusion_candidates.pop(f)
@@ -10355,6 +10667,13 @@ class Scheduler:
             MemoryDepMatch(source, read)
             for source, read in plan.sub_parent_access_pairs()
         )
+        grouped_lane_matches = OrderedSet(
+            MemoryDepMatch(source.normalize(), relation.consumer_access.normalize())
+            for relation in (
+                () if plan.nested_stage is None else plan.nested_stage.lane_accesses
+            )
+            for source in relation.source_accesses
+        )
         nested_stage_reads = OrderedSet(
             dep
             for node in (
@@ -10394,6 +10713,15 @@ class Scheduler:
             if self.fusable_read_and_write(read, write):
                 continue
             match = MemoryDepMatch(write, read)
+            if (
+                is_nested_stage_read
+                and MemoryDepMatch(raw_write.normalize(), raw_read.normalize())
+                in grouped_lane_matches
+            ):
+                if not self._memory_dep_supports_index_equivalence(read, write):
+                    return None
+                matches.add(match)
+                continue
             if is_sub_parent_read:
                 raw_match = MemoryDepMatch(raw_write, raw_read)
                 if raw_match not in relation_matches or not (
@@ -10762,6 +11090,19 @@ class Scheduler:
         elif NestedReduction.is_candidate(node1, node2):
             # Path 2: initially form an outer + grouped reduction pipeline.
             plan = NestedReduction.plan(node1, node2)
+            if plan is None:
+                why("nested reduction plan declined")
+        elif (
+            NestedReduction._is_enabled_for(node1, node2)
+            and type(node2) is FusedStagedReduction
+            and not node1.is_reduction()
+        ):
+            # A persistent tile can absorb its pointwise input producer after
+            # the reduction and fixed-lane epilogue have already fused.
+            _, (numel, rnumel) = node2.group
+            plan = NestedReduction.sub_parent_epilogue_plan(
+                [*node1.get_nodes(), *node2.get_nodes()], numel, rnumel
+            )
         elif (
             NestedReduction._is_enabled_for(node1, node2)
             and node1.is_reduction()
@@ -10800,6 +11141,33 @@ class Scheduler:
             # authorize nodes classified elsewhere in the parent schedule.
         else:
             plan = None
+
+        if plan is not None and plan.requires_persistent:
+            # Only the backend knows whether it will emit the persistent kernel
+            # that serves the lane reads; otherwise prove the fusion ordinarily.
+            fused_nodes = [*node1.get_nodes(), *node2.get_nodes()]
+            if not self.get_backend(device).has_sub_parent_epilogue(fused_nodes):
+                why("backend declined the persistent lane plan")
+                plan = None
+        if plan is None or not plan.requires_persistent:
+            # A looped plan, or codegen's re-plan of an ordinary fusion such as a
+            # reduction pair, demotes a persistent group's lane readers to
+            # ordinary loads, which cannot read a lane of a value the kernel stores.
+            for node in (node1, node2):
+                if type(node) is not FusedStagedReduction:
+                    continue
+                _, (numel, rnumel) = node.group
+                existing = NestedReduction.sub_parent_epilogue_plan(
+                    node.get_nodes(), numel, rnumel
+                )
+                live_lanes = existing is not None and any(
+                    relation.requires_live_source and relation.parent_lane is not None
+                    for stage in existing.sub_parent_stages
+                    for relation in stage.access_relations
+                )
+                if existing is None or (existing.requires_persistent and live_lanes):
+                    why("persistent lane group cannot become a looped plan")
+                    return False
 
         # A plan authorizes fusion only after every cross-domain producer
         # dependency is proved.
@@ -11137,6 +11505,7 @@ class Scheduler:
             and (
                 write.normalize().is_contiguous()
                 or write.normalize_with_stride_order().is_contiguous()
+                or write.is_non_overlapping()
             )
         )
 
@@ -12036,13 +12405,45 @@ class Scheduler:
 
             return False
 
-        for partition, skip_cudagraph in zip(
-            reversed(partitions), reversed(skip_cudagraphs)
+        # cat inputs write the cat buffer in place through NonOwningLayout,
+        # possibly in partitions before the ConcatKernel node. The first
+        # partition that writes it defines it. Only ConcatKernel targets count:
+        # other NonOwningLayout aliases (e.g. TMADescriptor) only read the
+        # tensor, so they keep normal ownership.
+        def is_cat_buffer(name: str) -> bool:
+            buf = self.name_to_buf.get(name)
+            return buf is not None and isinstance(buf.node, ir.ConcatKernel)
+
+        cat_writes = [
+            OrderedSet(
+                alias
+                for node in partition
+                for buf in node.get_outputs()
+                for alias in buf.get_aliases()
+                if is_cat_buffer(alias)
+            )
+            for partition in partitions
+        ]
+        cat_owner: dict[str, int] = {}
+        for idx, names in enumerate(cat_writes):
+            for name in names:
+                cat_owner.setdefault(name, idx)
+
+        for idx, partition, skip_cudagraph in zip(
+            reversed(range(len(partitions))),
+            reversed(partitions),
+            reversed(skip_cudagraphs),
         ):
             output_names: OrderedSet[str] = OrderedSet()
 
             for node in partition:
                 output_names.update(node.outputs_by_name.keys())
+
+            output_names = OrderedSet(
+                name
+                for name in output_names | cat_writes[idx]
+                if cat_owner.get(name, idx) == idx
+            )
 
             returned_output_names = output_names.intersection(unmet_output_names)
 
@@ -12055,8 +12456,9 @@ class Scheduler:
             # WeakDep is fake dependency on unused buffer. It should not appear
             # in partition_input_names for inputs that are actually read or written.
             partition_input_names = (
-                _real_dep_names(read_writes.reads | read_writes.writes) - output_names
-            )
+                _real_dep_names(read_writes.reads | read_writes.writes)
+                | cat_writes[idx]
+            ) - output_names
 
             partition_input_names = OrderedSet(
                 self.mutation_real_name.get(name, name)
@@ -12630,10 +13032,10 @@ class Scheduler:
                 seen.add(key)
 
         self.current_device = self.default_device_context
-        if self.previous_node is not None:
-            raise AssertionError("expected previous_node to be None")
+        if self.previous_nodes is not None:
+            raise AssertionError("expected previous_nodes to be None")
         previous_nodes_by_stream: dict[
-            tuple[torch.device | None, int], BaseSchedulerNode
+            tuple[torch.device | None, int], list[BaseSchedulerNode]
         ] = {}
 
         # pyrefly: ignore [unbound-name]
@@ -12663,7 +13065,7 @@ class Scheduler:
 
         for node in nodes:
             stream_key = (node.get_device(), self.get_node_stream(node))
-            self.previous_node = previous_nodes_by_stream.get(stream_key)
+            self.previous_nodes = previous_nodes_by_stream.get(stream_key)
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
@@ -12758,6 +13160,7 @@ class Scheduler:
             self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)
 
+            kernel = None
             if node.is_template():
                 prologue, template_node, epilogue = node.get_prologue_template_epilogue(
                     list(node.get_nodes())
@@ -12792,7 +13195,7 @@ class Scheduler:
                 self.get_backend(device).codegen_mix_order_reduction(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 # pyrefly: ignore [unbound-name]
-                self.get_backend(device).codegen_node(node)
+                kernel = self.get_backend(device).codegen_node(node)
             else:
                 if not isinstance(node, NopKernelSchedulerNode):
                     raise AssertionError("expected node to be a NopKernelSchedulerNode")
@@ -12824,7 +13227,17 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
-                previous_nodes_by_stream[stream_key] = node
+                from .codegen.multi_kernel import MultiKernel
+                from .codegen.triton import TritonKernel
+
+                waited = isinstance(kernel, TritonKernel) and kernel._pdl_has_wait
+                if self.previous_nodes is None or waited:
+                    previous_nodes_by_stream[stream_key] = []
+                previous_nodes_by_stream[stream_key].append(node)
+                if isinstance(kernel, MultiKernel):
+                    kernel = kernel.kernels[0]
+                if isinstance(kernel, TritonKernel) and kernel.args.workspace_args:
+                    previous_nodes_by_stream.pop(stream_key, None)
             else:
                 previous_nodes_by_stream.pop(stream_key, None)
 
@@ -12839,7 +13252,7 @@ class Scheduler:
                 # important for nested indentation codegen-ing.
                 V.graph.wrapper_code.codegen_device_guard_exit()
 
-        self.previous_node = None
+        self.previous_nodes = None
         self.flush()
 
     def benchmark_combo_kernel(
@@ -13187,7 +13600,9 @@ class BaseScheduling:  # noqa: docstring_linter
         """
         raise NotImplementedError
 
-    def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
+    def codegen_node(
+        self, node: FusedSchedulerNode | SchedulerNode
+    ) -> Kernel[Any] | MultiKernel | None:
         """
         Generate a kernel given a list of pre-fused nodes.
         """
