@@ -2731,7 +2731,11 @@ class CachingAutotuner(KernelInterface):
             kernel_kwargs = dict(zip(arg_names, args))
             kernel_kwargs.update(kwargs)
             self._debug_call = debug_mode.record_triton_kernel(
-                kernel_name=self.fn.__name__, kwargs=kernel_kwargs
+                kernel_name=self.fn.__name__,
+                kwargs=kernel_kwargs,
+                stream=stream,
+                device_index=self.device_props.index,
+                device_interface=self.get_device_interface(),
             )
 
         if hasattr(triton, "set_allocator"):

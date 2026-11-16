@@ -35,6 +35,8 @@ _RECORD_TRITON_OUTPUTS: bool = False
 _TRITON_OUTPUT_HASH_FN: Callable | None = None
 # Annotates kernel input hashes, and stores them in call.pre_hashes
 _TRITON_INPUT_HASH_FN: Callable | None = None
+# Calls whose hash tensors are materialized when log_tensor_hashes exits.
+_TRITON_HASH_CALLS: list["_DebugCall"] | None = None
 
 # registered dispatch call hooks
 _DISPATCH_RECORD_HOOKS: list[Callable] = []
