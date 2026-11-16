@@ -32,6 +32,8 @@ _FLYDSL_DSL_NAME = "flydsl"
 # written against the FlyDSL 0.3.x flydsl.expr.gpu.shuffle_xor interface. Other
 # versions fall back to ATen unless a developer explicitly sets
 # TORCH_NATIVE_SKIP_VERSION_CHECK=1.
+# TODO: When adding FlyDSL 0.5, remove the TopK compatibility cache tag; see
+# Note [FlyDSL 0.3.x cache tag] in ops/topk/flydsl_kernels.py.
 _FLYDSL_SUPPORTED_RELEASES = ((0, 3),)
 
 
