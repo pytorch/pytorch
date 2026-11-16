@@ -30,9 +30,9 @@ from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
 
 class GraphBuilder:
-    def __init__(self, fake_mode=None) -> None:
+    def __init__(self) -> None:
         self.graph = torch.fx.Graph()
-        self.fake_mode = fake_mode
+        self.fake_mode = FakeTensorMode()
         self.nodes = {}
         self.values = {}
         self.nn_module_stack_key: dict[str, int] = {}
@@ -41,9 +41,7 @@ class GraphBuilder:
 
     def input(self, name: str, value: torch.Tensor, kind: InputKind):
         node = self.graph.placeholder(name)
-        node.meta["val"] = (
-            self.fake_mode.from_tensor(value) if self.fake_mode is not None else value
-        )
+        node.meta["val"] = self.fake_mode.from_tensor(value)
         self.nodes[name] = node
         self.values[name] = value
         self.input_to_kind[node] = kind
@@ -158,7 +156,7 @@ class TestLift(TestCase):
         load_torchbind_test_lib()
 
     def test_lift_basic(self):
-        builder = GraphBuilder(FakeTensorMode())
+        builder = GraphBuilder()
 
         builder.input("param", torch.rand(2, 3), InputKind.PARAMETER)
         builder.input("buffer", torch.rand(2, 3), InputKind.BUFFER)
@@ -243,7 +241,7 @@ class TestLift(TestCase):
         self.assertEqual(obj_constant_input_spec.arg.name, lifted_obj_placeholder.name)
 
     def test_lift_nested(self):
-        builder = GraphBuilder(FakeTensorMode())
+        builder = GraphBuilder()
         builder.input("x", torch.rand(2, 3), InputKind.USER_INPUT)
         builder.input("y", torch.rand(2, 3), InputKind.USER_INPUT)
         builder.input("z", torch.rand(2, 3), InputKind.USER_INPUT)
@@ -294,7 +292,7 @@ class TestLift(TestCase):
         const = torch.rand(2, 3)
         const_obj = torch.classes._TorchScriptTesting._Foo(10, 20)
 
-        builder = GraphBuilder(FakeTensorMode())
+        builder = GraphBuilder()
         builder.input("x", torch.rand(2, 3), InputKind.USER_INPUT)
         builder.constant("const_tensor", const, target="const_tensor")
         # loading the same target twice

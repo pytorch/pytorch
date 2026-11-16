@@ -99,6 +99,7 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     add_skip_condition,
     compare_equal_outs_and_grads,
+    expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
@@ -11727,13 +11728,14 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         self.assertExpectedInline(
             shape_env.format_guards(),
-            """\
- - Eq(s49, 20)
- - Eq(s70, 30)"""
-            if not torch._dynamo.config.use_cpp_fake_tensor
-            else """\
+            expectedIfCppFakeTensor(
+                """\
  - Eq(s49, 20)
  - Eq(30, s70)""",
+                """\
+ - Eq(s49, 20)
+ - Eq(s70, 30)""",
+            ),
         )
 
         if not torch.allclose(ref[0], res[0]):
@@ -11933,7 +11935,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         )
 
     def test_aot_module_simplified_fake_tensor_gm_raises(self):
-        fake_mode = FakeTensorMode()
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
         real_x = torch.randn(4, requires_grad=True)
         fake_x = fake_mode.from_tensor(real_x)
         real_z = torch.randn(4)
@@ -13815,7 +13817,6 @@ class TestAOTAutogradDeviceWithCache(
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
-instantiate_parametrized_tests(TestAOTExport)
 instantiate_device_type_tests(
     TestAOTAutogradDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
 )
