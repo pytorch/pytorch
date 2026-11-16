@@ -1108,13 +1108,14 @@ elseif(USE_CUDA)
   # Default value of `USE_NVSHMEM` is set in CMakeLists.txt under root, to ON.
   if(USE_NVSHMEM)
     message(STATUS "NVSHMEM_HOME set to:  '$ENV{NVSHMEM_HOME}'")
-    message(STATUS "NVSHMEM wheel installed at:  '${NVSHMEM_PY_DIR}'")
+    if(NOT NVSHMEM_PY_DIR)
+      set(NVSHMEM_PY_DIR "${Python_SITELIB}/nvidia/nvshmem")
+    endif()
+    message(STATUS "NVSHMEM wheel location:  '${NVSHMEM_PY_DIR}'")
     # Search order:
     # 1. If user has specified `NVSHMEM_HOME`, we use it;
-    # 2. If NVSHMEM wheel has been installed, we use it, see
-    # tools/setup_helpers/cmake.py, where we set `NVSHMEM_PY_DIR` to the wheel
-    # location, e.g.
-    # `/path/to/conda/lib/python3.10/site-packages/nvidia/nvshmem`,
+    # 2. If the NVSHMEM wheel has been installed, we use it; it lives in
+    # `nvidia/nvshmem` under the build interpreter's site-packages,
     # 3. Let CMake find it in the default system paths, e.g. /usr/local.
     find_library(NVSHMEM_HOST_LIB
       # In pip install case, the lib suffix is `.so.3` instead of `.so`
