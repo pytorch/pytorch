@@ -978,11 +978,12 @@ class TestTritonHeuristicsROCm(TestCase):
             self.assertEqual([c.kwargs["kpack"] for c in configs], [int8_kpack] * 2)
 
 
+@unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
 class TestROCmExhaustiveConfigs(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @runOnRocm
-    def test_rocm_exhaustive_configs_do_not_enumerate_num_stages(self, device):
+    def test_rocm_exhaustive_configs_do_not_enumerate_num_stages(self):
         """ROCmConfigHeuristic._filter_configs forces num_stages to
         default_num_stages, so enumerating num_stages in exhaustive_configs would
         only yield duplicates that get deduped again in _finalize_mm_configs.
@@ -2229,7 +2230,7 @@ with patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)):
         allow_xpu=True,
     )
     instantiate_device_type_tests(
-        TestArgumentCloneAndRestore, globals(), only_for=(GPU_TYPE,), allow_xpu=True
+        TestArgumentCloneAndRestore, globals(), allow_xpu=True
     )
     instantiate_device_type_tests(
         TestTritonHeuristicsROCm, globals(), only_for=("cuda",)
@@ -2251,9 +2252,6 @@ with patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)):
         allow_xpu=True,
     )
     instantiate_device_type_tests(TestCheckLauncherCallArgs, globals(), allow_xpu=True)
-    instantiate_device_type_tests(
-        TestROCmExhaustiveConfigs, globals(), only_for=("cuda",)
-    )
 
 
 if __name__ == "__main__":
