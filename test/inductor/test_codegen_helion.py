@@ -14,11 +14,8 @@ from torch._inductor.codegen.cuda_combined_scheduling import CUDACombinedSchedul
 from torch._inductor.codegen.helion import helion_scheduling
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    instantiate_parametrized_tests,
-    parametrize,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA_AND_TRITON,
@@ -34,14 +31,13 @@ DOT_RE = re.compile(r"torch\.b?addb?mm\(")
 BACKENDS = ["triton", "cute"]
 
 
-def randn(*shape, dtype=torch.bfloat16):
-    return torch.randn(shape, device=GPU_TYPE, dtype=dtype)
+def randn(device, *shape, dtype=torch.bfloat16):
+    return torch.randn(shape, device=device, dtype=dtype)
 
 
 @unittest.skipUnless(
     HAS_CUDA_AND_TRITON and HAS_HELION, "requires CUDA, Triton and Helion"
 )
-@instantiate_parametrized_tests
 class TestHelionNativeMatmul(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -76,12 +72,12 @@ class TestHelionNativeMatmul(TestCase):
             self.assertNotIn("tl.dot(", self.code)
         return sources
 
-    def test_mm_source(self):
+    def test_mm_source(self, device):
         (source,) = self.compile(
             lambda a, b, bias: torch.relu(a @ b + bias),
-            randn(40, 72),
-            randn(72, 136),
-            randn(136),
+            randn(device, 40, 72),
+            randn(device, 72, 136),
+            randn(device, 136),
         )
         self.assertExpectedInline(
             source,
@@ -114,12 +110,12 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         )
 
     @parametrize("backend", BACKENDS)
-    def test_bmm_epilogue(self, backend):
+    def test_bmm_epilogue(self, device, backend):
         (source,) = self.compile(
             lambda a, b, bias: torch.relu(torch.bmm(a, b)) + bias,
-            randn(3, 40, 72),
-            randn(3, 72, 136),
-            randn(136),
+            randn(device, 3, 40, 72),
+            randn(device, 3, 72, 136),
+            randn(device, 136),
             backend=backend,
         )
         self.assertIn("for tile_z, tile_y, tile_x in hl.tile([3, 40, 136]):", source)
@@ -128,40 +124,39 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         self.assertIn("acc = torch.baddbmm(acc, tmp0, tmp1)", source)
         self.assertIn("out0[tile_z, tile_y, tile_x] = ", source)
 
-    def test_computed_operand(self):
-        (source,) = self.compile(
-            lambda a, b: (a + 1) @ (b - 2), randn(40, 72), randn(72, 136)
-        )
+    def test_computed_operand(self, device):
+        a, b = randn(device, 40, 72), randn(device, 72, 136)
+        (source,) = self.compile(lambda a, b: (a + 1) @ (b - 2), a, b)
         self.assertIn("in0[tile_y, tile_r]", source)
         self.assertIn("in1[tile_r, tile_x]", source)
 
-    def test_operand_view_of_dynamic_input(self):
-        x = randn(4, 40, 72)
+    def test_operand_view_of_dynamic_input(self, device):
+        x = randn(device, 4, 40, 72)
         torch._dynamo.mark_dynamic(x, 0)
         # x[0] is a static [40, 72] view of the [s, 40, 72] input.
-        (source,) = self.compile(lambda x, w: x[0] @ w, x, randn(72, 136))
+        (source,) = self.compile(lambda x, w: x[0] @ w, x, randn(device, 72, 136))
         self.assertIn("in0[tile_y, tile_r]", source)
         self.assertRegex(
             self.code, r"reinterpret_tensor\(arg\d+_1, \(40, 72\), \(72, 1\), 0\)"
         )
 
     @config.patch(nan_asserts=True)
-    def test_nan_asserts_check_the_tensor(self):
-        base = randn(5, 9, 150)
+    def test_nan_asserts_check_the_tensor(self, device):
+        base = randn(device, 5, 9, 150)
         base[:, 8:] = float("nan")
         # bias holds no NaN, but its flat operand view spans base's NaN rows.
         bias = base[:, :8, :136]
         self.compile(
             lambda a, b, bias: (a @ b).reshape(5, 8, 136) + bias,
-            randn(40, 72),
-            randn(72, 136),
+            randn(device, 40, 72),
+            randn(device, 72, 136),
             bias,
         )
         self.assertIn("reinterpret_tensor(arg2_1, (6586, ), (1, ), 0)", self.code)
         self.assertIn("assert not arg2_1.isnan().any().item()", self.code)
 
     @parametrize("epilogue", [False, True])
-    def test_horizontal(self, epilogue):
+    def test_horizontal(self, device, epilogue):
         def fn(a, b, c):
             first, second = a @ b, a @ c
             return (
@@ -170,20 +165,21 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
                 else (first, second)
             )
 
-        (source,) = self.compile(fn, randn(40, 72), randn(72, 136), randn(72, 136))
+        args = randn(device, 40, 72), randn(device, 72, 136), randn(device, 72, 136)
+        (source,) = self.compile(fn, *args)
         self.assertIn("acc1 = hl.zeros(", source)
         self.assertIn("acc1 = torch.addmm(acc1, tmp0, ", source)
         self.assertEqual(source.count("in0[tile_y, tile_r]"), 1)
         self.assertIn("in2[tile_r, tile_x]", source)
         self.assertEqual("out1[" in source, not epilogue)
 
-    def test_masked_epilogue_load(self):
+    def test_masked_epilogue_load(self, device):
         (source,) = self.compile(
             lambda a, b, first, second: a @ b + torch.cat((first, second)),
-            randn(40, 72),
-            randn(72, 136),
-            randn(64),
-            randn(72),
+            randn(device, 40, 72),
+            randn(device, 72, 136),
+            randn(device, 64),
+            randn(device, 72),
         )
         self.assertIn("hl.load(in2, [tile_x.index], extra_mask=", source)
         self.assertIn("hl.load(in3, [(-64) + tile_x.index], extra_mask=", source)
@@ -199,20 +195,21 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             "native_matmul_off",
         ],
     )
-    def test_fallback(self, case):
-        a, b = randn(32, 64), randn(64, 48)
+    def test_fallback(self, device, case):
+        a, b = randn(device, 32, 64), randn(device, 64, 48)
         fn = lambda a, b: torch.relu(a @ b)  # noqa: E731
         args = [a, b]
         if case == "dynamic":
             torch._dynamo.mark_dynamic(a, 0)
         elif case == "broadcast_rhs":
-            fn, args = lambda a, v: a @ v.expand(64, 48), [a, randn(64, 1)]
+            fn, args = lambda a, v: a @ v.expand(64, 48), [a, randn(device, 64, 1)]
         elif case == "permuted_operand":
             fn = lambda a, b: a.permute(1, 0, 2).reshape(32, 64) @ b  # noqa: E731
-            args = [randn(8, 32, 8), b]
+            args = [randn(device, 8, 32, 8), b]
         elif case == "gathered_operand":
             fn = lambda a, i, b: a[i] @ b  # noqa: E731
-            args = [randn(80, 64), torch.randint(0, 80, (32,), device=GPU_TYPE), b]
+            i = torch.randint(0, 80, (32,), device=device)
+            args = [randn(device, 80, 64), i, b]
         elif case == "cpu_scalar":
             # The CPU scalar epilogue fuses into the matmul, so the kernel is Triton.
             fn = lambda a, b, c: a @ b + c  # noqa: E731
@@ -224,11 +221,11 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         if case == "native_matmul_off":
             self.assertIn("extern_kernels.mm(", self.code)
 
-    def test_cudagraph_tree(self):
+    def test_cudagraph_tree(self, device):
         def fn(a, b):
             return torch.relu((a + 1) @ b), a.sum(dim=-1)
 
-        args = [randn(32, 64), randn(64, 48)]
+        args = [randn(device, 32, 64), randn(device, 64, 48)]
         counters.clear()
         with config.patch({"triton.cudagraphs": True}):
             compiled = torch.compile(fn, fullgraph=True)
@@ -236,6 +233,9 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
                 torch.compiler.cudagraph_mark_step_begin()
                 self.assertEqual(compiled(*args), fn(*args))
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+
+instantiate_device_type_tests(TestHelionNativeMatmul, globals(), only_for=GPU_TYPE)
 
 
 @unittest.skipUnless(
@@ -247,13 +247,12 @@ class TestHelionDefaults(TestCase):
     def test_default_config(self):
         import helion
 
+        args = randn(GPU_TYPE, 32, 64), randn(GPU_TYPE, 64, 48)
         with (
             config.patch({"helion.enabled": True}),
             patch.object(helion.Kernel, "__call__", lambda self, *args: None),
         ):
-            _, (code,) = run_and_get_code(
-                torch.compile(lambda a, b: a @ b), randn(32, 64), randn(64, 48)
-            )
+            _, (code,) = run_and_get_code(torch.compile(lambda a, b: a @ b), *args)
         (source,) = [s for s in SOURCE_RE.findall(code) if DOT_RE.search(s)]
         self.assertIn('autotune_effort="quick"', source)
         self.assertNotRegex(code, r"extern_kernels\.\w*mm\w*\(")
@@ -270,7 +269,6 @@ class TestHelionDefaults(TestCase):
 @unittest.skipUnless(
     HAS_CUDA_AND_TRITON and HAS_HELION, "requires CUDA, Triton and Helion"
 )
-@instantiate_parametrized_tests
 class TestHelionReduction(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -288,11 +286,11 @@ class TestHelionReduction(TestCase):
         self.code = "\n".join(codes)
         return SOURCE_RE.findall(self.code)
 
-    def test_reduction_source(self):
+    def test_reduction_source(self, device):
         (source,) = self.compile(
             lambda x, b: (x * 2).sum(-1) + b,
-            torch.randn(64, 100, device=GPU_TYPE),
-            torch.randn(64, device=GPU_TYPE),
+            torch.randn(64, 100, device=device),
+            torch.randn(64, device=device),
             tol=1e-4,
         )
         self.assertExpectedInline(
@@ -317,21 +315,21 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
 """,
         )
 
-    def test_pointwise(self):
+    def test_pointwise(self, device):
         (source,) = self.compile(
-            lambda x: torch.relu(x) * 2 + 1, torch.randn(64, 100, device=GPU_TYPE)
+            lambda x: torch.relu(x) * 2 + 1, torch.randn(64, 100, device=device)
         )
         self.assertIn("for tile_x in hl.tile(6400):", source)
 
-    def test_inplace_reuse_chain(self):
+    def test_inplace_reuse_chain(self, device):
         def fn(x, w):
             y = torch.nn.functional.conv2d(x, w, padding=1)
             for i in range(32):
                 y = y * 0.999 + 0.001 * (i + 1)
             return y + y.cos()
 
-        x = torch.randn(1, 1, 64, 128, device=GPU_TYPE)
-        w = torch.randn(1, 1, 3, 3, device=GPU_TYPE)
+        x = torch.randn(1, 1, 64, 128, device=device)
+        w = torch.randn(1, 1, 3, 3, device=device)
         (source,) = self.compile(fn, x, w, tol=1e-4)
         # The conv output buf0 becomes buf1, which becomes buf2, so buf0 is passed as buf2.
         self.assertIn("buf2 = buf1; del buf1  # reuse", self.code)
@@ -350,8 +348,8 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
             "deterministic",
         ],
     )
-    def test_triton_fallback(self, case):
-        x = torch.randn(64, 100, device=GPU_TYPE)
+    def test_triton_fallback(self, device, case):
+        x = torch.randn(64, 100, device=device)
         fn = {
             "softmax": lambda x: torch.softmax(x, -1),
             "layer_norm": lambda x: torch.nn.functional.layer_norm(x, (100,)),
@@ -370,6 +368,9 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         with config.patch(modes.get(case, {})):
             self.assertEqual(self.compile(fn, x, tol=1e-4), [])
         self.assertEqual(metrics.generated_kernel_count, self.code.count("@triton.jit"))
+
+
+instantiate_device_type_tests(TestHelionReduction, globals(), only_for=GPU_TYPE)
 
 
 if __name__ == "__main__":
