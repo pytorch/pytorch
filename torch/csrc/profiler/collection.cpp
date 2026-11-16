@@ -64,11 +64,9 @@ RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
       t.strides().size());
 }
 
-RawTensorMetadata::RawTensorMetadata(const at::Tensor& t, bool with_weak_ref)
+RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
     : RawTensorMetadataBase(t),
-      weak_self_{
-          with_weak_ref ? std::optional<WeakTensor>(WeakTensor(t))
-                        : std::nullopt},
+      weak_self_{WeakTensor(t)},
       device_type_{t.device().type()},
       device_index_{t.device().index()} {}
 
@@ -81,7 +79,9 @@ TensorMetadata::TensorMetadata(
       weak_self_{r.weak_self_.value_or(WeakTensor(at::Tensor()))},
       device_{r.device_type_, r.device_index_},
       sizes_{std::move(sizes)},
-      strides_{std::move(strides)} {}
+      strides_{std::move(strides)} {
+  SOFT_ASSERT(r.weak_self_.has_value());
+}
 
 OpArgData parseArgData(const DecodedInputs& inputs) {
   const auto& input_shapes = inputs.shapes;
@@ -150,12 +150,10 @@ OpArgData parseArgData(const DecodedInputs& inputs) {
 // ----------------------------
 // |  Input / Output encoder  |
 // ----------------------------
-void InputOutputEncoder::push(
-    c10::ArrayRef<const c10::IValue> values,
-    bool with_weak_refs) {
+void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
   for (const auto& value : values) {
     if (value.isTensor()) {
-      push(value.toTensor(), with_weak_refs);
+      push(value.toTensor());
     } else if (value.isScalar()) {
       tags_.emplace_back(Tag::Scalar);
       // Scalars are small enough that they are stored in ivalues without an
@@ -166,7 +164,7 @@ void InputOutputEncoder::push(
     } else if (value.isTensorList()) {
       tags_.emplace_back(Tag::TensorListBegin);
       for (const auto& t : value.toTensorList()) {
-        push(t, with_weak_refs);
+        push(t);
       }
       tags_.emplace_back(Tag::TERMINATOR);
     } else if (isSupportedScalarList(value)) {
@@ -179,12 +177,12 @@ void InputOutputEncoder::push(
   tags_.emplace_back(Tag::TERMINATOR);
 }
 
-void InputOutputEncoder::push(const at::Tensor& t, bool with_weak_ref) {
+void InputOutputEncoder::push(const at::Tensor& t) {
   // TODO fix nested and symbolic sizes
   if (t.defined() && !t.is_nested() &&
       !t.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
     tags_.emplace_back(Tag::Tensor);
-    tensor_metadata_.emplace_back(t, with_weak_ref);
+    tensor_metadata_.emplace_back(t);
     tensor_sizes_strides_.copy(t.sizes());
     if (t.layout() == at::kStrided) {
       // Only Strided layout tensors have strides
@@ -374,7 +372,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           fn.name(),
           overload_name});
   if (config_.report_input_shapes) {
-    torch_ops_.inputs_outputs_.push(fn.inputs(), config_.profile_memory);
+    torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
   bool pushed_correlation_id = false;

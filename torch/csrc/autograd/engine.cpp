@@ -623,8 +623,6 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           GraphTaskGuard guard(local_graph_task);
           NodeGuard ndguard(task.fn_);
           {
-            // c10::str would build this name through an ostringstream on every
-            // backward node while profiling.
             RECORD_FUNCTION(
                 std::string("autograd::engine::evaluate_function: ") +
                     task.fn_.get()->name(),

@@ -59,12 +59,10 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   RawTensorMetadata& operator=(const RawTensorMetadata&) = default;
   RawTensorMetadata& operator=(RawTensorMetadata&&) noexcept = default;
   ~RawTensorMetadata() = default;
-  explicit RawTensorMetadata(const at::Tensor& t, bool with_weak_ref = true);
+  explicit RawTensorMetadata(const at::Tensor& t);
 
   // Wrap `weak_self_` in `std::optional` and split device into components to
   // keep struct default constructable. (which the std::array initializer needs)
-  // The weak ref keeps the TensorImpl allocated so its address stays unique,
-  // which only memory profiling needs.
   std::optional<WeakTensor> weak_self_;
   c10::DeviceType device_type_{c10::DeviceType::CPU};
   c10::DeviceIndex device_index_{-1};
@@ -497,7 +495,7 @@ constexpr int SCALAR_LIST_LENGTH_LIMIT = 30;
 // post-processing.
 class InputOutputEncoder final {
  public:
-  void push(c10::ArrayRef<const c10::IValue> values, bool with_weak_refs);
+  void push(c10::ArrayRef<const c10::IValue> values);
 
   // Used during post-processing to unpack the encoded data.
   // Returns a decoder lambda which takes no arguments; invoking the lambda once
@@ -521,7 +519,7 @@ class InputOutputEncoder final {
   };
 
  private:
-  void push(const at::Tensor& t, bool with_weak_ref);
+  void push(const at::Tensor& t);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
   AppendOnlyList<RawTensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
