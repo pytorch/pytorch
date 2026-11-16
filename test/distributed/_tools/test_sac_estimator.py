@@ -2,16 +2,10 @@
 import unittest
 
 import torch
-from torch._subclasses.fake_tensor import fake_mode_cls
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.sac_estimator import SACEstimator
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TEST_XPU,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -23,7 +17,6 @@ device_type = (
 )
 
 
-@instantiate_parametrized_tests
 class TestSACEstimator(TestCase):
     def _sac_estimation(
         self,
@@ -38,8 +31,7 @@ class TestSACEstimator(TestCase):
         sace.pwlf_sac_tradeoff_curve(n_segments=2, save_tradeoff_graphs=False)
 
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_transformer_sac_estimation(self, use_cpp_fake_tensor):
+    def test_transformer_sac_estimation(self):
         """Runs a basic GPT-2 model"""
         dev = torch.accelerator.current_device_index()
         vocab_size = 8192
@@ -52,10 +44,7 @@ class TestSACEstimator(TestCase):
             dim=768,
             dropout_p=0.1,
         )
-        with (
-            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor),
-            fake_mode_cls()(),
-        ):
+        with FakeTensorMode():
             with torch.device(dev):
                 model = Transformer(model_args)
             inp = torch.randint(
@@ -66,8 +55,7 @@ class TestSACEstimator(TestCase):
             self._sac_estimation("operator-level-cost-model", model, inp)
 
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_simple_model_sac_estimation(self, use_cpp_fake_tensor):
+    def test_simple_model_sac_estimation(self):
         """This test checks the correctness of view_ops, random_ops and inplace_ops"""
 
         class Foo(torch.nn.Module):
@@ -84,10 +72,7 @@ class TestSACEstimator(TestCase):
                 return x
 
         dev = torch.accelerator.current_device_index()
-        with (
-            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor),
-            fake_mode_cls()(),
-        ):
+        with FakeTensorMode():
             with torch.device(dev):
                 model = Foo()
             x = torch.rand((10, 5), device=dev)

@@ -63,7 +63,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import canonicalize_dim, is_integer_dtype
 from torch._subclasses.fake_tensor import (
-    fake_mode_cls,
+    FakeTensorMode,
     is_fake_tensor,
     maybe_clear_fake_constant,
     maybe_get_fake_constant,
@@ -3335,7 +3335,7 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[..., Any]:
         if "get_decomp_fn" in _fn_params:
             kwargs["get_decomp_fn"] = get_decomp_fn
 
-        with torch._guards.tracing(None), unset_fake_temporarily(), fake_mode_cls()():
+        with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
             result = fn(**kwargs)
 
         # clear view matches encountered during tracing

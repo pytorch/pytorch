@@ -1170,7 +1170,7 @@ def _fakeify_with_unbacked(
     the fake_mode (ShapeEnv) is threaded to the lowering via from_tracing_context.
     """
     import torch._functorch.config as functorch_config
-    from torch._subclasses.fake_tensor import fake_mode_cls
+    from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     shape_env = ShapeEnv()
@@ -1182,7 +1182,7 @@ def _fakeify_with_unbacked(
     # its real kernel run on zero-filled substitutes and whatever shape that produced
     # baked.
     with functorch_config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-        fake_mode = fake_mode_cls()(
+        fake_mode = FakeTensorMode(
             shape_env=shape_env,
             allow_non_fake_inputs=True,
             allow_fallback_kernels=False,
