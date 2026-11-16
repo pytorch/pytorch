@@ -163,7 +163,6 @@ DECOMPOSED_OPS: set[OpType] = {
     aten.new_full,
     aten.new_ones,
     aten.ones,
-    aten.ones_like,
     aten.permute_copy,
     aten.randn,
     aten.renorm,
