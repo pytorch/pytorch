@@ -72,8 +72,6 @@ class FineTuneTestBase(FSDPTestContinuous):
     than ports it (a ported classmethod cannot see the variant's device_type).
     """
 
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @classmethod
     def _resolved_device_type(cls) -> str:
         dt = cls.device_type
@@ -99,6 +97,8 @@ class FineTuneTestBase(FSDPTestContinuous):
 
 class TestFSDPFineTune(FineTuneTestBase):
     """Tests fine-tuning cases where some parameters are frozen."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     NUM_LINEARS = 6
 
@@ -138,6 +138,7 @@ class TestFSDPFineTune(FineTuneTestBase):
                 "unfreeze_params": [False, True],
             },
             self._test_backward_reshard_hooks,
+            device=device,
         )
 
     def _test_backward_reshard_hooks(
@@ -146,8 +147,9 @@ class TestFSDPFineTune(FineTuneTestBase):
         use_orig_params: bool,
         inp_requires_grad: bool,
         unfreeze_params: bool,
+        device,
     ):
-        device_type = torch.device(self._resolved_device_type())
+        device_type = torch.device(device).type
         seq = self._init_seq_module(device_type)
         policy = ModuleWrapPolicy({nn.Linear})
         fsdp_kwargs = {"device_id": device_type}
@@ -262,6 +264,7 @@ class TestFSDPFineTune(FineTuneTestBase):
                 "forward_prefetch": [False, True],
             },
             self._test_hooks_multi_traversal,
+            device=device,
         )
 
     def _test_hooks_multi_traversal(
@@ -270,9 +273,10 @@ class TestFSDPFineTune(FineTuneTestBase):
         use_orig_params: bool,
         inp_requires_grad: bool,
         forward_prefetch: bool,
+        device,
     ):
-        device_type = torch.device(self._resolved_device_type())
-        seq = self._init_multi_traversal_module(device_type.type)
+        device_type = torch.device(device).type
+        seq = self._init_multi_traversal_module(device_type)
         policy = ModuleWrapPolicy({nn.Linear})
         fsdp_kwargs = {"device_id": device_type}
         fsdp_seq = FSDP(
@@ -317,14 +321,16 @@ class TestFSDPFineTune(FineTuneTestBase):
                 "use_orig_params": [False, True],
             },
             self._test_parity_with_ddp,
+            device=device,
         )
 
     def _test_parity_with_ddp(
         self,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
+        device,
     ):
-        device_type = torch.device(self._resolved_device_type())
+        device_type = torch.device(device).type
         seq = self._init_seq_module(device_type)
         policy = ModuleWrapPolicy({nn.Linear})
         fsdp_kwargs = {"device_id": device_type}
@@ -341,14 +347,14 @@ class TestFSDPFineTune(FineTuneTestBase):
         torch.manual_seed(self.rank + 1)
         losses = []
         for _ in range(6):
-            inp = torch.randn((8, 5), device=device_type.type)
+            inp = torch.randn((8, 5), device=device_type)
             for seq, optim in ((fsdp_seq, fsdp_optim), (ddp_seq, ddp_optim)):
                 loss = seq(inp).sum()
                 losses.append(loss)
                 loss.backward()
                 optim.step()
                 optim.zero_grad()
-            if self._resolved_device_type() == "cuda":
+            if device_type == "cuda":
                 torch.testing.assert_close(losses[0], losses[1])
             else:
                 torch.testing.assert_close(losses[0], losses[1], atol=1e-03, rtol=1e-03)
@@ -383,6 +389,7 @@ class TestFSDPFineTune(FineTuneTestBase):
                 ],
             },
             self._test_parity_with_non_frozen_fsdp,
+            device=device,
         )
 
     def _test_parity_with_non_frozen_fsdp(
@@ -392,8 +399,9 @@ class TestFSDPFineTune(FineTuneTestBase):
         offload_params: bool,
         mixed_precision: MixedPrecision,
         backward_prefetch: BackwardPrefetch,
+        device,
     ):
-        device_type = torch.device(self._resolved_device_type())
+        device_type = torch.device(device).type
         torch.manual_seed(42)
         model = ModelUnusedInput(freeze=True).to(device_type)
         torch.manual_seed(42)
