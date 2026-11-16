@@ -130,7 +130,6 @@
   "test/distributed/fsdp/test_fsdp_pure_fp16.py",
   "test/distributed/fsdp/test_fsdp_sharded_grad_scaler.py",
   "test/distributed/fsdp/test_fsdp_state_dict.py",
-  "test/distributed/fsdp/test_fsdp_tp_integration.py",
   "test/distributed/fsdp/test_fsdp_traversal.py",
   "test/distributed/fsdp/test_fsdp_uneven.py",
   "test/distributed/fsdp/test_fsdp_unshard_params.py",

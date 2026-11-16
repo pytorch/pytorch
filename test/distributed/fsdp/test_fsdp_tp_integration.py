@@ -94,8 +94,6 @@ class TPFSDPIntegrationTestBase(FSDPTestContinuous):
     cannot see the variant's ``device_type``).
     """
 
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @classmethod
     def _resolved_device_type(cls) -> str:
         dt = cls.device_type
@@ -125,6 +123,8 @@ class TPFSDPIntegrationTestBase(FSDPTestContinuous):
 
 
 class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # The workers are reused for every test in this class, and each new mesh adds
     # NCCL communicators that hold /dev/shm until the workers exit, so build the
     # (dp, tp) mesh once and share it across tests.
@@ -298,10 +298,11 @@ class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
                 "use_orig_params": [False, True],
             },
             self._test_fsdp_tp_integration,
+            device=device,
         )
 
     def _test_fsdp_tp_integration(
-        self, cpu_offload, sharding_strategy, use_orig_params
+        self, cpu_offload, sharding_strategy, use_orig_params, device
     ):
         """
         Tests training for TP + FSDP integration by comparing an FSDP-only
@@ -329,7 +330,7 @@ class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
         inp = torch.rand(*inp_size).to(self.rank)
         self.assertEqual(model(inp), tp_fsdp_model(inp))  # sanity check
 
-        mesh_1d = init_device_mesh(self._resolved_device_type(), (self.world_size,))
+        mesh_1d = init_device_mesh(torch.device(device).type, (self.world_size,))
         fsdp_model = FSDP(
             model,
             cpu_offload=cpu_offload,
@@ -421,7 +422,7 @@ class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
         class TestModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.mlp = MLPModule(self._resolved_device_type())
+                self.mlp = MLPModule(torch.device(device).type)
                 self.mlp_norm = RMSNormPython(10)
 
             def forward(self, x):
