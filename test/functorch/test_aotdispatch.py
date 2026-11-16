@@ -36,7 +36,6 @@ import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
-
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
@@ -13107,7 +13106,6 @@ class TestPartitioningCUDA(_PartitioningHardwareTestBase):
 class TestPartitioningAutocast(AOTTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_autocast(self, device):
         mod = torchvision.models.resnet18().to(device)
@@ -13117,7 +13115,7 @@ class TestPartitioningAutocast(AOTTestCase):
         aot_mod = memory_efficient_fusion(mod)
 
         # Ensure that AOT Autograd works with AMP
-        with torch.cuda.amp.autocast(True):
+        with torch.amp.autocast(torch.device(device).type):
             res = aot_mod(x)
         res.sum().backward()
 
@@ -13750,7 +13748,9 @@ instantiate_device_type_tests(
 )
 
 
-instantiate_device_type_tests(TestPartitioningAutocast, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestPartitioningAutocast, globals(), except_for=("cpu",), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
