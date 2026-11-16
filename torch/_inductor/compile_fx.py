@@ -2949,7 +2949,10 @@ def create_compiler_config_extra(
 ) -> CompilerConfigExtra:
     """Compute state shared by the AOT forward and backward compilers."""
     dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
-    pre_aot_graph = gm if isinstance(gm, GraphModule) else gm.gm
+    pre_aot_graph = gm.gm if isinstance(gm, GmWrapper) else gm
+    if not isinstance(pre_aot_graph, GraphModule):
+        # inductor.compile also takes a bare nn.Module: no FX graph, so no regions.
+        pre_aot_graph = GraphModule(torch.nn.Module(), torch.fx.Graph())
     cudagraph_annotation = (
         dynamo_graph_metadata.get("cudagraph_annotation")
         if dynamo_graph_metadata is not None
