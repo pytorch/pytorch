@@ -1575,7 +1575,7 @@ class TestTransformersAccelerator(NNTestCase):
 
 
     @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
-    @skipXPUIf(True, msg="MHA fastpath is not available on XPU")
+    @skipXPUIf(True, "MHA fastpath is not available on XPU")
     @torch.no_grad()
     def test_disable_fastpath(self, device):
         def _test_te_fastpath_called(model, args, kwargs=None, return_value=None, is_called=True):
@@ -1720,7 +1720,7 @@ class TestSDPAFailureModes(NNTestCase):
                                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
 
     @onlyAccelerator
-    @skipXPUIf(True, msg="torch-xpu-ops/issues/4915")
+    @skipXPUIf(True, "torch-xpu-ops/issues/4915")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
         "kernel",
@@ -1911,7 +1911,7 @@ class TestSDPAFailureModes(NNTestCase):
         "kernel",
         PLATFORM_SPECIFIC_SDPA,
     )
-    @skipXPUIf(True, msg="https://github.com/intel/torch-xpu-ops/issues/3128")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3128")
     def test_invalid_fused_inputs_invalid_dtype(self, device, kernel: SDPBackend):
         with sdpa_kernel(backends=[kernel]):
             # Invalid dtype for both Flash Attention and Mem Efficient Attention
@@ -2146,7 +2146,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
-    @skipXPUIf(True, msg="https://github.com/intel/torch-xpu-ops/issues/6080")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6080")
     def test_flash_fail_fp32(self, device):
         dtype = torch.float
         size = SdpaShape(16, 16, 32, 32)
@@ -2239,7 +2239,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
-    @skipXPUIf(True, msg="https://github.com/intel/torch-xpu-ops/issues/3126")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3126")
     def test_nested_fails_on_padding_head_dim(self, device):
         dtype = torch.bfloat16
         seq_len_list = [2, 4, 5, 6, 7]
@@ -2309,7 +2309,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
-    @skipXPUIf(True, msg="https://github.com/intel/torch-xpu-ops/issues/3126")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3126")
     def test_fused_kernels_nested_broadcasting_requires_grad_failure(self, device):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float16, requires_grad=True)
         batch, num_heads, head_dim, head_dim_v = 32, 16, 64, 64
@@ -2336,7 +2336,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
-    @skipXPUIf(True, msg="https://github.com/intel/torch-xpu-ops/issues/6080")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6080")
     def test_flash_attention_fail_with_non_square_causal_attention(self, device):
         dtype = torch.bfloat16
         q_shape = SdpaShape(1, 1, 8, 16)
@@ -4131,7 +4131,7 @@ class TestSDPAAccelerator(NNTestCase):
 
     @tf32_off()
     @skipIfRocm
-    @skipXPUIf(True, msg="aten::_efficient_attention_forward not supported on XPU")
+    @skipXPUIf(True, "aten::_efficient_attention_forward not supported on XPU")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     @parametrize("num_query_heads,num_kv_heads,q_len,kv_len,head_dim,value_dim", [
         (6, 2, 17, 4096, 64, 40),
@@ -4352,7 +4352,7 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=5e-4)
 
-    @skipXPUIf(True, msg="NotImplementedError 'aten::_efficient_attention_forward'")
+    @skipXPUIf(True, "NotImplementedError 'aten::_efficient_attention_forward'")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Memory efficient attention is not supported on this system",
@@ -4494,7 +4494,7 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=1e-5, rtol=1e-5)
 
-    @skipXPUIf(True, msg="NotImplementedError 'aten::_efficient_attention_backward'")
+    @skipXPUIf(True, "NotImplementedError 'aten::_efficient_attention_backward'")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Memory efficient attention is not supported on this system",
@@ -4537,7 +4537,7 @@ class TestSDPAAccelerator(NNTestCase):
                 shared_storage_dqdkdv=True,
             )
 
-    @skipXPUIf(True, msg="NotImplementedError 'aten::_efficient_attention_forward'")
+    @skipXPUIf(True, "NotImplementedError 'aten::_efficient_attention_forward'")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     def test_mem_efficient_attention_zero_heads(self, device):
         """Zero-head low-level attention should return empty outputs and gradients."""
@@ -4589,7 +4589,7 @@ class TestSDPAAccelerator(NNTestCase):
             self.assertEqual(grad.numel(), 0)
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
-    @skipXPUIf(True, msg="torch-xpu-ops/issues/4813")
+    @skipXPUIf(True, "torch-xpu-ops/issues/4813")
     @parametrize(
         "fused_kernel",
         [SDPBackend.FLASH_ATTENTION, ] if TEST_XPU else [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
@@ -5536,7 +5536,7 @@ class TestSDPAAccelerator(NNTestCase):
         ):
             self.assertEqual(actual, expected)
 
-    @skipXPUIf(True, msg="Not target, torch-xpu-ops/issues/4117")
+    @skipXPUIf(True, "Not target, torch-xpu-ops/issues/4117")
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
     def test_singelton_head_dim_stride_ne_1(self, device):
@@ -5787,7 +5787,7 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=atol, rtol=rtol)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Platform does not support fused SDPA")
-    @skipXPUIf(True, msg="XPU backend choice / NestedTensorXPU dispatch not aligned; tracked in torch-xpu-ops")
+    @skipXPUIf(True, "XPU backend choice / NestedTensorXPU dispatch not aligned; tracked in torch-xpu-ops")
     @parametrize("type", ["dense", "nested"])
     def test_fused_sdp_choice(self, device, type: str):
         batch_size, seq_len, num_heads, head_dim = 2, 128, 8, 64
@@ -5837,7 +5837,7 @@ class TestSDPAAccelerator(NNTestCase):
             raise AssertionError("expected EFFICIENT_ATTENTION backend")
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
-    @skipXPUIf(True, msg="XPU backend selection priority differs; tracked in torch-xpu-ops")
+    @skipXPUIf(True, "XPU backend selection priority differs; tracked in torch-xpu-ops")
     @parametrize("warn_only", [True, False])
     def test_sdp_choice_with_determinism(self, device, warn_only):
         batch_size, seq_len, num_heads, head_dim = 1, 64, 8, 64
@@ -6963,7 +6963,7 @@ class TestSDPAAccelerator(NNTestCase):
                 fudge_factors=fudge_factors
             )
 
-    @skipXPUIf(True, msg="NotImplementedError 'aten::_efficient_attention_backward'")
+    @skipXPUIf(True, "NotImplementedError 'aten::_efficient_attention_backward'")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support mem efficient attention")
     def test_mem_eff_backward_outside_capture_after_graph_replay(self, device):
         # A forward captured in a CUDA graph returns its dropout seed/offset on
@@ -7000,7 +7000,7 @@ class TestSDPAAccelerator(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
                  PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
-    @skipXPUIf(True, msg="XPU SDPA dispatch rejects seq_len_1 nested inputs as non-contiguous; tracked in torch-xpu-ops")
+    @skipXPUIf(True, "XPU SDPA dispatch rejects seq_len_1 nested inputs as non-contiguous; tracked in torch-xpu-ops")
     def test_fused_kernels_seq_len_1_inputs(self, device, fused_kernel):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float16)
         batch, num_heads, head_dim = 32, 16, 64
@@ -7041,7 +7041,7 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("expand_q_num_heads", [True, False])
     @parametrize("expand_k_num_heads", [True, False])
     @parametrize("expand_v_num_heads", [True, False])
-    @skipXPUIf(True, msg="XPU SDPA dispatch lacks nested broadcasting kernels; tracked in torch-xpu-ops")
+    @skipXPUIf(True, "XPU SDPA dispatch lacks nested broadcasting kernels; tracked in torch-xpu-ops")
     def test_fused_kernels_nested_broadcasting(
         self,
         device,
@@ -7122,7 +7122,7 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1.5e-3, rtol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
-    @skipXPUIf(True, msg="XPU SDPA dispatch lacks nested broadcasting kernels; tracked in torch-xpu-ops")
+    @skipXPUIf(True, "XPU SDPA dispatch lacks nested broadcasting kernels; tracked in torch-xpu-ops")
     def test_fused_kernels_nested_broadcasting_query_dense(self, device):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float32)
         batch, num_heads, head_dim, head_dim_v = 32, 16, 64, 96
@@ -7166,7 +7166,7 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
     @parametrize("is_causal", [True, False])
-    @skipXPUIf(True, msg="Hardcoded CUDA padding-mask path on dropout>0 and CUDA-only flash NestedTensor; ported separately in torch-xpu-ops")
+    @skipXPUIf(True, "Hardcoded CUDA padding-mask path on dropout>0 and CUDA-only flash NestedTensor; ported separately in torch-xpu-ops")
     def test_flash_attention_vs_math_ref_grads_nestedtensor(self, device, batch_size: int, max_seq_len_q: int, max_seq_len_kv: int,
                                                             head_dim: int, dropout_p: float, dtype: torch.dtype,
                                                             scale: str, is_causal: bool):
