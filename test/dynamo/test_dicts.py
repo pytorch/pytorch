@@ -70,38 +70,6 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
-    @parametrize("raises", [False, True])
-    def test_display_hash_and_equality_callback_order(self, raises):
-        class Key:
-            def __init__(self, name, events):
-                self.name, self.events = name, events
-
-            def __hash__(self):
-                self.events.append("hash:" + self.name)
-                return 1
-
-            def __eq__(self, other):
-                self.events.append("eq:" + self.name + other.name)
-                if raises:
-                    raise ValueError("collision")
-                return False
-
-        def fn(x, a, b, c):
-            try:
-                mapping = {a: 1, b: 2, c: 3}
-                return x + len(mapping)
-            except ValueError:
-                return x - 1
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x, expected_events, actual_events = torch.ones(1), [], []
-        expected = fn(x, *(Key(name, expected_events) for name in "abc"))
-        actual = compiled(x, *(Key(name, actual_events) for name in "abc"))
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual_events, expected_events)
-        self.assertEqual(counter.frame_count, 1)
-
     def test_keyword_expansion_preserves_mapping_protocol(self):
         class Mapping(dict):
             def __iter__(self):
@@ -219,6 +187,92 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled(x, mapping), fn(x, mapping))
             mapping.move_to_end(next(iter(mapping)))
         self.assertEqual(counter.frame_count, 1)
+
+    def test_reordered_input_does_not_call_key_equality(self):
+        class Key:
+            calls = 0
+
+            def __hash__(self):
+                return 42
+
+            def __eq__(self, other):
+                self.calls += 1
+                return self is other
+
+        def fn(x, mapping, first, second):
+            return x + len(mapping) + (first.calls > second.calls)
+
+        first, second = Key(), Key()
+        mapping = OrderedDict([(first, 1), (second, 2)])
+        mapping.move_to_end(first)
+        first.calls = second.calls = 0
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(x, mapping, first, second), x + 2
+        )
+        self.assertEqual((first.calls, second.calls), (0, 0))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "Reordered OrderedDict input"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                x, mapping, first, second
+            )
+        self.assertEqual((first.calls, second.calls), (0, 0))
+
+    @parametrize("nested", [False, True])
+    def test_reordered_input_skips_key_metaclass_callbacks(self, nested):
+        events = []
+
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if name == "__dict__":
+                    events.append(name)
+                return super().__getattribute__(name)
+
+            def __hash__(cls):
+                events.append("hash")
+                return type.__hash__(cls)
+
+            def __eq__(cls, other):
+                events.append("eq")
+                return cls is other
+
+        class Key(metaclass=Meta):
+            pass
+
+        def fn(x, mapping):
+            return x + len(mapping)
+
+        key = (Key(),) if nested else Key()
+        mapping = OrderedDict([(key, 1), ("other", 2)])
+        mapping.move_to_end(key)
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager")
+        events.clear()
+        self.assertEqual(compiled(x, mapping), x + 2)
+        self.assertEqual(events, [])
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        events.clear()
+        with self.assertRaisesRegex(Unsupported, "Reordered OrderedDict input"):
+            compiled(x, mapping)
+        self.assertEqual(events, [])
+
+    def test_ordered_input_rechecks_linked_order_before_reuse(self):
+        class Key:
+            def __hash__(self):
+                return 42
+
+        def fn(x, mapping):
+            return x + len(mapping)
+
+        first, second = Key(), Key()
+        mapping = OrderedDict([(first, 1), (second, 2)])
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, mapping), x + 2)
+        mapping.move_to_end(first)
+        with self.assertRaisesRegex(Unsupported, "Reordered OrderedDict input"):
+            compiled(x, mapping)
 
     def test_ordered_dict_repr_guards_linked_order(self):
         def fn(x, mapping):
@@ -1634,22 +1688,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
-
-    def test_unused_tuple_key_with_spoofed_builtin_method_type(self):
-        class Key:
-            @property
-            def __class__(self):
-                return types.BuiltinMethodType
-
-        def fn(x, mapping):
-            return x + mapping["used"]
-
-        mapping = {"used": 2, (Key(),): 3}
-        x = torch.ones(1)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
-            fn(x, mapping),
-        )
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -4179,7 +4217,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     thetype = dict
-    base = dict
 
     # Methods:
     # + bool
@@ -4336,16 +4373,16 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.__or__
         d3, d4 = d1.copy(), d2.copy()
-        self.assertEqual(self.base.__ior__(d3, d2), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(dict.__ior__(d3, d2), {"a": 1, "b": 3, "c": 4})
         self.assertEqual(self.thetype.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
 
         # Test return value
         d3, d4 = d1.copy(), d2.copy()
         self.assertEqual(d3.__ior__(d2), {"a": 1, "b": 3, "c": 4})
-        self.assertEqual(self.base.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
+        self.assertEqual(dict.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
 
         # Test with non-dict types
-        self.assertRaises(TypeError, lambda: self.base.__ior__(d1, 1))
+        self.assertRaises(TypeError, lambda: dict.__ior__(d1, 1))
 
     @make_dynamo_test
     def test_binop_ior_iterable(self):
@@ -4371,7 +4408,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.clear
         d = self.thetype({"a": 1, "b": 2})
-        self.base.clear(d)
+        dict.clear(d)
         self.assertEqual(d, {})
 
         d = self.thetype({"a": 1, "b": 2})
@@ -4461,7 +4498,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.pop
         d = self.thetype({"a": 1, "b": 2})
-        self.assertEqual(self.base.pop(d, "b"), 2)
+        self.assertEqual(dict.pop(d, "b"), 2)
         self.assertEqual(self.thetype.pop(d, "a"), 1)
 
         # Test invalid usage
@@ -4483,7 +4520,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.popitem
         d = self.thetype({"a": 1})
-        key, value = self.base.popitem(d)
+        key, value = dict.popitem(d)
         self.assertEqual(key, "a")
         self.assertEqual(value, 1)
 
@@ -4506,7 +4543,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d, {"a": 1, "b": 2, "c": 3, "d": None})
 
         # Test Dict.setdefault
-        self.assertEqual(self.base.setdefault(d, "f", 5), 5)
+        self.assertEqual(dict.setdefault(d, "f", 5), 5)
         self.assertEqual(self.thetype.setdefault(d, "e", 5), 5)
 
         # Test invalid usage
@@ -4526,7 +4563,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.update
         d3 = self.thetype({"e": 6})
-        self.base.update(d, d3)
+        dict.update(d, d3)
         self.assertEqual(d, {"a": 1, "b": 3, "c": 4, "d": 5, "e": 6})
         d4 = self.thetype({"f": 7})
         self.thetype.update(d, d4)
@@ -4737,7 +4774,6 @@ class OrderedDictMethodsTests(DictMethodsTests):
     hw_classification = HardwareClassification.GENERIC
 
     thetype = OrderedDict
-    base = OrderedDict
 
     # Methods:
     # - popitem - Inherited from DictMethodsTest
@@ -4784,10 +4820,11 @@ class OrderedDictMethodsTests(DictMethodsTests):
         # Test return type
         d3, d4 = d1.copy(), d2.copy()
         self.assertIs(type(d3.__ior__(d2)), OrderedDict)
+        self.assertIs(type(dict.__ior__(d4, d2)), OrderedDict)
         self.assertIs(type(self.thetype.__ior__(d4, d2)), OrderedDict)
 
         d3, d4 = d1.copy(), d2.copy()
-        self.assertIs(type(self.thetype.__ior__(d3, dict(d2))), OrderedDict)
+        self.assertIs(type(dict.__ior__(d3, dict(d2))), OrderedDict)
         self.assertIs(type(dict.__ior__(dict(d3), d2)), dict)
         self.assertIs(type(dict(d4).__ior__(d2)), dict)
 

@@ -30,7 +30,6 @@ from torch._C._dynamo import (
     PySequenceSlots,
     PyTypeSlots,
 )
-from torch._guards import TracingContext
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
@@ -79,31 +78,12 @@ if TYPE_CHECKING:
 def vt_identity_compare(
     left: VariableTracker,
     right: VariableTracker,
-    *,
-    guard_identity: bool = True,
 ) -> "VariableTracker | None":
     """Try to determine Python identity (left is right) at trace time.
 
     Returns ConstantVariable(True/False) if determinable, else None.
     Mirrors the logic in BuiltinVariable's handle_is handler.
     """
-    # Binding equality permits fresh wrappers; identity observations do not.
-    if guard_identity:
-        left, right = left.unwrap(), right.unwrap()
-        if (
-            isinstance(left, variables.BoundBuiltinMethodVariable)
-            and isinstance(right, variables.BoundBuiltinMethodVariable)
-            and type(left.value) is types.BuiltinMethodType
-            and type(right.value) is types.BuiltinMethodType
-            and left.value == right.value
-        ):
-            from ..symbolic_convert import InstructionTranslator
-
-            tx = InstructionTranslator.current_tx()
-            for arg in (left, right):
-                if arg.source is not None:
-                    arg.get_id(tx)
-                    install_guard(arg.source.make_guard(GuardBuilder.ID_MATCH))
     if left is right:
         return ConstantVariable.create(True)
 
@@ -2063,7 +2043,7 @@ def generic_richcompare_bool(
     """
     if op not in ("__eq__", "__ne__"):
         raise AssertionError(f"generic_richcompare_bool only supports eq/ne, got {op}")
-    identity = vt_identity_compare(v, w, guard_identity=False)
+    identity = vt_identity_compare(v, w)
     if identity is not None and identity.as_python_constant():
         return ConstantVariable.create(op == "__eq__")
     return generic_richcompare(tx, v, w, op)
@@ -2330,27 +2310,6 @@ def mro_attr_source(
     Guards absence in every skipped class, including a complete MRO miss.
     Returns None on a complete miss; callers decide whether that is an error.
     """
-    mro = get_type_mro_no_user_code(klass)
-    memoize = (
-        not TracingContext.get().guards_context.skip_install
-        and not is_from_skip_guard_source(klass_source)
-    )
-    if (
-        memoize
-        and not type_is_immutable(klass)
-        and id(klass) not in tx.output.guarded_mro_type_ids
-    ):
-        # TYPE_MATCH pins the class, not its bases. Cached owner sources require both.
-        mro_source = TypeMROSource(klass_source)
-        install_guard(mro_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
-        # The builtin metaclass always puts the already guarded class first.
-        first = 1 if type(klass) is type else 0
-        # A custom ancestor MRO can replace even an object tail at constant length.
-        for index in range(first, len(mro)):
-            install_guard(
-                GetItemSource(mro_source, index).make_guard(GuardBuilder.ID_MATCH)
-            )
-        tx.output.guarded_mro_type_ids.add(id(klass))
     for idx, (base, namespace) in enumerate(iter_mro_static_dicts(klass)):
         if not is_constant_source(klass_source):
             direct = not idx and base is klass
@@ -2380,15 +2339,14 @@ def mro_attr_source(
         # the descriptor: a descriptor shared by unrelated classes needs a
         # source through each one.
         cache_key = (id(base), name)
-        cached = tx.output.mro_source_cache.get(cache_key) if memoize else None
+        cached = tx.output.mro_source_cache.get(cache_key)
         if cached is not None:
             return cached
 
         source = DictGetItemSource(
             TypeDictSource(_mro_entry_source(klass, klass_source, idx)), name
         )
-        if memoize:
-            tx.output.mro_source_cache[cache_key] = source
+        tx.output.mro_source_cache[cache_key] = source
         return source
 
     guard_mro_absent(

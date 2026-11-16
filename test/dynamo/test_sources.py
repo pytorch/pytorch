@@ -6,13 +6,10 @@ import torch._dynamo.test_case
 import torch.nn as nn
 from torch._dynamo.source import (
     AttrSource,
-    DictKeysSource,
     GlobalSource,
     is_from_local_source,
     LocalSource,
-    TypeDictSource,
 )
-from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -22,92 +19,6 @@ class CausalLMOutputWithPast:
 
 class SourceTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
-
-    def test_constant_source_property_setter_falls_back(self):
-        class Box:
-            def __init__(self):
-                self._value = 2
-
-            @property
-            def value(self):
-                return self._value
-
-            @value.setter
-            def value(self, value):
-                self._value = value
-
-        box = Box()
-
-        @torch._dynamo.assume_constant_result
-        def get_box():
-            return box
-
-        def fn(x):
-            target = get_box()
-            target.value = 3
-            return x + target.value
-
-        x = torch.ones(1)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Descriptor mutation on a constant-source object",
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(box.value, 2)
-        self.assertEqual(torch.compile(fn, backend="eager")(x), x + 3)
-        self.assertEqual(box.value, 3)
-
-    def test_property_setter_guards_replacement(self):
-        class Box:
-            @property
-            def value(self):
-                return self._value
-
-            @value.setter
-            def value(self, value):
-                self._value = value
-
-        def fn(x, box):
-            box.value = 3
-            return x + box.value
-
-        counter = CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x, box = torch.ones(1), Box()
-        self.assertEqual(compiled(x, box), x + 3)
-        self.assertEqual(box.value, 3)
-        self.assertEqual(counter.frame_count, 1)
-
-        def replacement(self, value):
-            self._value = value + 4
-
-        Box.value = Box.value.setter(replacement)
-        self.assertEqual(compiled(x, box), x + 7)
-        self.assertEqual(box.value, 7)
-        self.assertEqual(counter.frame_count, 2)
-
-    def test_dict_keys_snapshot_cannot_create_guards(self):
-        source = DictKeysSource(LocalSource("mapping"))
-        with self.assertRaisesRegex(NotImplementedError, "codegen-only"):
-            source.make_guard(lambda _: None)
-
-    def test_type_dict_source_bypasses_metaclass_getattribute(self):
-        class Meta(type):
-            def __getattribute__(cls, name):
-                if name == "__dict__":
-                    raise AssertionError("type dictionary lookup must bypass metaclass")
-                return type.__getattribute__(cls, name)
-
-        class Key(metaclass=Meta):
-            value = object()
-
-        source = TypeDictSource(LocalSource("cls"))
-        cache = {}
-        scope = {"L": {"cls": Key}}
-        namespace = source.get_value(scope, {}, cache)
-        self.assertIs(type(namespace), dict)
-        self.assertIs(namespace["value"], Key.value)
-        self.assertIs(source.get_value(scope, {}, cache), namespace)
 
     def test_is_local(self):
         x_src = LocalSource("x")

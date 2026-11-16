@@ -36,7 +36,6 @@ import os
 import re
 import struct
 import sys
-import sysconfig
 import textwrap
 import threading
 import time
@@ -1507,9 +1506,8 @@ def is_function_or_wrapper(
 def is_function(
     value: object,
 ) -> TypeIs[_FuncTypes]:
-    # Use actual types to ignore spoofed __class__ while retaining CPython subtypes.
-    return issubclass(
-        type(value),
+    return isinstance(
+        value,
         (
             types.FunctionType,
             types.BuiltinFunctionType,
@@ -3039,14 +3037,6 @@ if has_triton_package():
 
     common_constant_types.add(triton.language.dtype)
 
-
-def is_identity_singleton(value: object) -> bool:
-    """Constants whose process-wide identity does not depend on their source."""
-    return any(
-        value is item for item in (None, True, False, Ellipsis, NotImplemented)
-    ) or istype(value, (torch.dtype, torch.layout, torch.memory_format))
-
-
 """
     Difference between is_safe_constant and common_constant_types.
     * common_constant_types: Constants would be wrapped by VariableBuilder.wrap_literal
@@ -3146,7 +3136,7 @@ def specialize_symnode(arg: Any) -> Any:
         arg = arg.realize()
 
     if isinstance(arg, SymNodeVariable):
-        return ConstantVariable.create(arg.evaluate_expr(), source=arg.source)
+        return ConstantVariable.create(arg.evaluate_expr())
     return arg
 
 
@@ -3282,17 +3272,8 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
-_ORDERED_DICT_MUTATIONS_LOCKED = sys.version_info >= (3, 14, 1) or not bool(
-    sysconfig.get_config_var("Py_GIL_DISABLED")
-)
-
-
 class InvalidOrderedDict(ValueError):
     """An OrderedDict's storage and linked keys cannot form one snapshot."""
-
-
-class UnsupportedOrderedDictRuntime(InvalidOrderedDict):
-    """The runtime cannot safely snapshot this OrderedDict."""
 
 
 def enumerate_items_with_dict_position(
@@ -3307,21 +3288,6 @@ def enumerate_items_with_dict_position(
     with PyDict_Next / C++ DictGuardManager.
     """
     if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
-        if sys.version_info >= (3, 16):
-            raise UnsupportedOrderedDictRuntime(
-                "Native OrderedDict snapshots do not support Python 3.16+"
-            )
-        if not _ORDERED_DICT_MUTATIONS_LOCKED:
-            # Check both storage and linked emptiness without dereferencing any node.
-            if (
-                torch._C._dynamo.guards.ordered_dict_keys(obj, empty_only=True)
-                is not None
-            ):
-                return iter(())
-            # Older free-threaded deletion can free nodes outside the dictionary lock.
-            raise UnsupportedOrderedDictRuntime(
-                "Nonempty OrderedDict snapshots require Python 3.14.1+ on free-threaded builds"
-            )
         items = list(dict.items(obj))
         keys = torch._C._dynamo.guards.ordered_dict_keys(obj)
         positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
@@ -3410,6 +3376,14 @@ def to_subclass(t: Any, cls: type) -> Any:
 
 
 dict_getitem = dict.__getitem__
+
+
+@torch.fx.wrap
+def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
+    # Use dict.keys() to match the iteration order of PyDict_Next used by
+    # the C++ DictGuardManager and by ConstDictKeySource._name_template.
+    # pyrefly: ignore [bad-argument-type]
+    return next(itertools.islice(dict.keys(d), n, n + 1))
 
 
 def set_base_iter(s: Iterable[T]) -> Iterator[T]:
@@ -5710,10 +5684,8 @@ def has_custom_metaclass_accessor(klass: type, name: str) -> bool:
 
 
 def find_bound_builtin_method_descriptor(value: object) -> object | None:
-    if not issubclass(type(value), types.BuiltinMethodType):
+    if not isinstance(value, types.BuiltinMethodType):
         return None
-
-    value = cast(types.BuiltinMethodType, value)
 
     receiver = value.__self__
     receiver_is_type = issubclass(type(receiver), type)
