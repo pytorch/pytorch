@@ -73,6 +73,7 @@ from tools.testing.target_determination.heuristics.utils import (
     get_pr_number,
     td_enabled_default,
 )
+from tools.testing.target_determination.scorer import scorer_cut, TD_RESULTS_PATH
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
@@ -1691,6 +1692,7 @@ CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": run_test_with_subprocess,
     "test_cuda_nvml_based_avail": run_test_with_subprocess,
     "test_gpu_trace": run_test_with_subprocess,
+    "profiler/test_kineto_registration": run_test_with_subprocess,
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
@@ -2168,6 +2170,7 @@ def get_selected_tests(options) -> list[str]:
             "test_modules",
             "test_linalg",
             "test_scaled_matmul_cuda",
+            "test_stream",
             "nn/test_convolution",
             "nn/test_dropout",
             "nn/test_pooling",
@@ -2338,6 +2341,13 @@ def get_selected_tests(options) -> list[str]:
     return selected_tests
 
 
+def get_test_times_job_key() -> str | None:
+    job_name = os.environ.get("JOB_NAME")
+    if job_name is None or job_name == "":
+        return os.environ.get("BUILD_ENVIRONMENT")
+    return get_job_base_name(job_name)
+
+
 def load_test_times_from_file(file: str) -> dict[str, Any]:
     # Load previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
@@ -2351,12 +2361,7 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
         test_times_file = cast(dict[str, Any], json.load(f))
     raw_job_name = os.environ.get("JOB_NAME")
     build_env = os.environ.get("BUILD_ENVIRONMENT")
-    job_name = raw_job_name
-    if job_name is None or job_name == "":
-        # If job name isn't available, use build environment as a backup
-        job_name = build_env
-    else:
-        job_name = get_job_base_name(job_name)
+    job_name = get_test_times_job_key()
     test_config = os.environ.get("TEST_CONFIG")
     print_to_stderr(f"JOB_NAME={raw_job_name}")
     print_to_stderr(f"BUILD_ENVIRONMENT={build_env}")
@@ -2758,11 +2763,26 @@ def main():
         else "Running all tests"
     )
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
+    scorer_info = None
+    if options.enable_td:
+        include, exclude, scorer_info = scorer_cut(
+            TD_RESULTS_PATH,
+            include,
+            exclude,
+            test_file_times_dict,
+            get_test_times_job_key() or "",
+            TEST_CONFIG,
+        )
+        print_to_stderr(f"TD scorer cut: {json.dumps(scorer_info)}")
 
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
     if IS_CI:
-        gen_ci_artifact([x.to_json() for x in include], [x.to_json() for x in exclude])
+        gen_ci_artifact(
+            [x.to_json() for x in include],
+            [x.to_json() for x in exclude],
+            scorer_info,
+        )
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
