@@ -221,7 +221,7 @@ def precompile_flydsl_template(
 ) -> None:
     """Warm a generated FlyDSL template from its ordered tensor argument names."""
     import torch
-    from torch._subclasses.fake_tensor import fake_mode_cls
+    from torch._subclasses.fake_tensor import FakeTensorMode
 
     updates: dict[str, str | None] = {
         "COMPILE_ONLY": "1",
@@ -231,7 +231,7 @@ def precompile_flydsl_template(
         updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
 
     names = tuple(dict.fromkeys((*tensor_names, "output")))
-    with _compiled_cache_lock, temporary_env(updates), fake_mode_cls()():
+    with _compiled_cache_lock, temporary_env(updates), FakeTensorMode():
         tensors = {
             name: torch.empty_strided(
                 tuple(shapes[name]),
@@ -263,14 +263,14 @@ def precompile_flydsl(
 ) -> None:
     """Warm the disk cache without allocating tensors or launching a kernel."""
     import torch
-    from torch._subclasses.fake_tensor import fake_mode_cls
+    from torch._subclasses.fake_tensor import FakeTensorMode
 
     updates: dict[str, str | None] = {"COMPILE_ONLY": "1"}
     if flydsl_gpu_arch is not None:
         updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
     # Cold launches must not observe FlyDSL's process-global compile-only mode.
     # Warm launches call the cached dispatcher directly and do not read it.
-    with _compiled_cache_lock, temporary_env(updates), fake_mode_cls()():
+    with _compiled_cache_lock, temporary_env(updates), FakeTensorMode():
         tensors = {
             name: torch.empty_strided(
                 tuple(shape),
