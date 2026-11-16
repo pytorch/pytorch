@@ -196,7 +196,7 @@ def create_synthetic_base_metadata(
             else m.input_info[outer_indices[0]].mutates_metadata
         )
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
-        mutations_under_no_grad_or_inference_mode = all(
+        mutations_under_no_grad_or_inference_mode = mutates_data and all(
             m.input_info[x].mutations_under_no_grad_or_inference_mode
             for x in outer_indices
             if m.input_info[x].mutates_data
@@ -303,9 +303,9 @@ def create_synthetic_base_metadata(
             TangentAOTInput(InputMutationAOTOutput(x_desc)),
         )
         for inner_idx, (x, x_desc) in enumerate(zip(inner_args, inner_args_desc))
-        if input_infos[inner_idx].mutates_data
+        if input_infos[inner_idx].mutation_type == MutationType.MUTATED_OUT_GRAPH
+        and input_infos[inner_idx].mutates_data
         and input_infos[inner_idx].requires_grad
-        and not input_infos[inner_idx].mutations_under_no_grad_or_inference_mode
     ]
     inner_mutated_tangents = [
         x[0][0] for x in inner_mutated_tangents_and_memory_formats
@@ -326,7 +326,6 @@ def create_synthetic_base_metadata(
             if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
             and info.mutates_data
             and info.requires_grad
-            and not info.mutations_under_no_grad_or_inference_mode
         ]
     )
 

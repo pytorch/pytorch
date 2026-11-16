@@ -3482,7 +3482,6 @@ def forward(self, primals_1):
             f,
             partial(inp_callable, req_grad=True),
             test_mutation=True,
-            keep_inp_mutations=True,
         )
 
     def test_input_mutation_aliases_and_output_alias(self):
