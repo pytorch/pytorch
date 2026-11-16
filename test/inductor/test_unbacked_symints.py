@@ -92,38 +92,6 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(x)
         torch.testing.assert_close(actual, expected)
 
-    def test_remove_no_ops_unbacked_shape_dde(self, device):
-        # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
-        # which raises GuardOnDataDependentSymNode when the tuples contain
-        # two different unbacked SymInts (u0 vs u1).
-        from torch._inductor.fx_passes.joint_graph import remove_no_ops
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        shape_env = ShapeEnv()
-        with FakeTensorMode(shape_env=shape_env):
-            u0 = shape_env.create_unbacked_symint()
-            u1 = shape_env.create_unbacked_symint()
-            ones_val = torch.empty((u0, 128), device=device)
-            x_val = torch.empty((u1, 128), device=device)
-
-        graph = torch.fx.Graph()
-        ones_node = graph.placeholder("ones")
-        x_node = graph.placeholder("x")
-        ones_node.meta["val"] = ones_val
-        x_node.meta["val"] = x_val
-        mul = graph.call_function(torch.ops.aten.mul.Tensor, (ones_node, x_node))
-        mul.meta["val"] = ones_val
-        graph.output(mul)
-        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
-
-        # Must not raise. Shapes are not provably equal, so mul must stay.
-        remove_no_ops(gm, OrderedSet(), OrderedSet([ones_node]))
-        self.assertEqual(
-            sum(1 for n in gm.graph.nodes if n.target is torch.ops.aten.mul.Tensor),
-            1,
-        )
-
     @requires_accelerator_triton
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_autotuning(self, device):
@@ -1115,6 +1083,73 @@ class TestUnbackedSymints(InductorTestCase):
         result = compiled_fn(t)
         self.assertEqual(result, 8)
 
+    @requires_accelerator_triton
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    @inductor_config.patch(
+        {"max_complex_pointwise_cat_inputs": 1, "max_pointwise_cat_inputs": 1}
+    )
+    def test_cat_sympy_channels_last_contiguous(self, device):
+        """torch.cat with symbolic shapes in shapes / strides should not raise
+        GuardOnDataDependentSymNode when checking channels_last contiguity."""
+
+        def fn(x, y):
+            # nonzero produces an unbacked symint in dim 0
+            nz = torch.nonzero(x)  # (u0, 1)
+            u0 = nz.size(0)
+            # All inputs are unrealized Pointwise (new_zeros), so
+            # any_input_is_storage_and_layout is False, reaching the
+            # meta["val"] channels_last check. Lower both pointwise cat
+            # thresholds to force ConcatKernel path instead of pointwise_cat.
+            inputs = [
+                y.new_zeros(y.size(0), u0, y.size(2), y.size(3)),
+                y.new_zeros(y.size(0), u0 + 1, y.size(2), y.size(3)),
+            ]
+            return torch.cat(inputs, dim=1)
+
+        example_inputs = (
+            torch.tensor([1.0, 0.0, 1.0, 1.0], device=device),
+            torch.randn(2, 3, 4, 10, device=device),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+
+class TestUnbackedSymintsCompilerLogic(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_remove_no_ops_unbacked_shape_dde(self, device):
+        # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
+        # which raises GuardOnDataDependentSymNode when the tuples contain
+        # two different unbacked SymInts (u0 vs u1).
+        from torch._inductor.fx_passes.joint_graph import remove_no_ops
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+            ones_val = torch.empty((u0, 128), device=device)
+            x_val = torch.empty((u1, 128), device=device)
+
+        graph = torch.fx.Graph()
+        ones_node = graph.placeholder("ones")
+        x_node = graph.placeholder("x")
+        ones_node.meta["val"] = ones_val
+        x_node.meta["val"] = x_val
+        mul = graph.call_function(torch.ops.aten.mul.Tensor, (ones_node, x_node))
+        mul.meta["val"] = ones_val
+        graph.output(mul)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        # Must not raise. Shapes are not provably equal, so mul must stay.
+        remove_no_ops(gm, OrderedSet(), OrderedSet([ones_node]))
+        self.assertEqual(
+            sum(1 for n in gm.graph.nodes if n.target is torch.ops.aten.mul.Tensor),
+            1,
+        )
+
     def test_stride_ordered_uses_symbolic_divisibility(self, device):
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -1364,37 +1399,6 @@ class TestUnbackedSymints(InductorTestCase):
         self.assertEqual(negative_powers, [])
         self.assertIn("%", PythonPrinter().doprint(guard))
 
-    @requires_accelerator_triton
-    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
-    @inductor_config.patch(
-        {"max_complex_pointwise_cat_inputs": 1, "max_pointwise_cat_inputs": 1}
-    )
-    def test_cat_sympy_channels_last_contiguous(self, device):
-        """torch.cat with symbolic shapes in shapes / strides should not raise
-        GuardOnDataDependentSymNode when checking channels_last contiguity."""
-
-        def fn(x, y):
-            # nonzero produces an unbacked symint in dim 0
-            nz = torch.nonzero(x)  # (u0, 1)
-            u0 = nz.size(0)
-            # All inputs are unrealized Pointwise (new_zeros), so
-            # any_input_is_storage_and_layout is False, reaching the
-            # meta["val"] channels_last check. Lower both pointwise cat
-            # thresholds to force ConcatKernel path instead of pointwise_cat.
-            inputs = [
-                y.new_zeros(y.size(0), u0, y.size(2), y.size(3)),
-                y.new_zeros(y.size(0), u0 + 1, y.size(2), y.size(3)),
-            ]
-            return torch.cat(inputs, dim=1)
-
-        example_inputs = (
-            torch.tensor([1.0, 0.0, 1.0, 1.0], device=device),
-            torch.randn(2, 3, 4, 10, device=device),
-        )
-        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
-        expected = fn(*example_inputs)
-        torch.testing.assert_close(actual, expected)
-
 
 class TestUnbackedSymintsInputValidation(InductorTestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -1446,6 +1450,9 @@ class TestUnbackedSymintsHintLogic(InductorTestCase):
 
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestUnbackedSymintsCompilerLogic, globals(), allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
