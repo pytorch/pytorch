@@ -1601,7 +1601,7 @@ class DecompOneOffTests(TestCase):
 
     @onlyAccelerator
     @skipIfCrossRef
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @dtypes(torch.bfloat16, torch.float16)
     def test_native_dropout_backward_opmath(self, device, dtype):
         grad = torch.tensor([7 / 2048, -7 / 2048, 7 / 2048], device=device, dtype=dtype)
         mask = torch.tensor([True, True, False], device=device)
@@ -1612,7 +1612,7 @@ class DecompOneOffTests(TestCase):
         )
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfCrossRef
     def test_fused_dropout_decomposition_extreme_p(self, device):
         input_tensor = torch.randn(10, 10, dtype=torch.float32, device=device)
