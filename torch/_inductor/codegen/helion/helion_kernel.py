@@ -132,11 +132,10 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             TILE_NAMES[axis] if axis in present else 1 for axis in scope[start:]
         )
 
-    def index_tensor(self, axis: str, axes: Sequence[str] | None = None) -> str:
+    def index_tensor(self, axis: str) -> str:
         name = f"{TILE_NAMES[axis]}.index"
-        if axes is None:
-            scope = self.scope_axes
-            axes = scope[scope.index(axis) :]
+        scope = self.scope_axes
+        axes = scope[scope.index(axis) :]
         if len(axes) == 1:
             return name
         # reshape() rather than slicing: Helion's tcgen05 store path proves the
