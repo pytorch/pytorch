@@ -94,9 +94,6 @@
 // rather than pay for live lookups or propagate the snapshot through Python
 // handlers.
 //
-// TODO: an op in torch._dynamo.config._custom_ops_profile runs its Meta kernel
-// here, where Python runs the profile's generic fake kernel.
-//
 // TODO: in-place output conversion changes raw Meta tensors retained by a
 // kernel and bypasses the converter's memo. On later calls they are existing
 // fakes, so a changed common device or a prior device override can cause a
@@ -368,6 +365,10 @@ DEFINE_CACHED_PYTHON_IMPORT(
     py::module::import("torch._subclasses.fake_tensor")
         .attr("FakeTensorDeviceMismatchError"))
 
+DEFINE_CACHED_PYTHON_IMPORT(
+    get_dynamo_config,
+    py::module::import("torch._dynamo.config"))
+
 #undef DEFINE_CACHED_PYTHON_IMPORT
 
 // Note [C++ fake op_impl outputs]
@@ -599,6 +600,42 @@ bool try_fast_impl(
       },
       /*convert=*/{},
       "fast implementation");
+}
+
+bool try_custom_op_profile(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  py::gil_scoped_acquire gil;
+  py::object profiles = get_dynamo_config().attr("_custom_ops_profile");
+  if (profiles.is_none()) {
+    return false;
+  }
+  py::handle py_op = getTorchApiFunction(op);
+  py::object data = profiles.attr("data");
+  const int contains = PySequence_Contains(data.ptr(), py_op.ptr());
+  if (contains < 0) {
+    throw py::error_already_set();
+  }
+  if (contains == 0) {
+    return false;
+  }
+  py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
+  return run_fake_python_callback(
+      op,
+      stack,
+      [&](const py::object& args, const py::dict& kwargs) {
+        py::object out = profiles.attr("generic_fake_kernel")(
+            py_op, py_mode, *args, **kwargs);
+        TORCH_CHECK(
+            !out.is(py::handle(Py_NotImplemented)),
+            "custom-op profile for ",
+            op.operator_name(),
+            " returned NotImplemented");
+        return out;
+      },
+      /*convert=*/{},
+      "custom-op profile");
 }
 
 // Try a registered Python decomposition for op.
@@ -1478,7 +1515,10 @@ void fakeFallback(
       return;
     }
   }
-  // Match library_utils.is_builtin before probing custom kernel registrations.
+  if (try_custom_op_profile(op, stack, mode)) {
+    return;
+  }
+  // Match library_utils.is_builtin before inferring custom fake kernels.
   const auto op_namespace = op.operator_name().getNamespace();
   const bool is_builtin = op_namespace &&
       (*op_namespace == "aten" || *op_namespace == "prim" ||
