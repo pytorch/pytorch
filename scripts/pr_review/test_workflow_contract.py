@@ -1963,6 +1963,8 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         # wiring is the one change that schedules no run of the suite checking
         # the wiring.
         ".github/workflows/pr-review-scripts-test.yml",
+        # post_review.py's ghstack pattern is pinned to this file's by a test.
+        ".github/scripts/native_stack.py",
     )
 
     def setUp(self):

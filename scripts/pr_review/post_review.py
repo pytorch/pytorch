@@ -10,7 +10,8 @@ take no row: they mark the previous review in progress for RUN_ID, or put it
 back (see Invariants). `--too-large`, and a `skipped_too_large` row, post a
 notice that the PR is over the size limit instead of a verdict.
 `--withdraw-opted-out` takes no row either: it runs when the opt-out label is
-added.
+added. A verdict review gets a rebase note when the PR's merge base is over
+STALE_BASE_DAYS old, found with one more GET (`compare`); see stale_base_note.
 
 Invariants:
 - A `changes_requested` verdict is REQUEST_CHANGES; anything else is COMMENT,
@@ -67,6 +68,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from extract_verdict import (
@@ -384,6 +386,71 @@ def finding_blocks(
 # GitHub's limit is 65536; encoding and layout can exceed the sanitizer's caps.
 MAX_BODY = 60_000
 
+# A PR whose merge base is older than this gets a note asking for a rebase: its
+# CI ran against an old base, while the merge bot lands it on the current one.
+STALE_BASE_DAYS = 7
+STALE_BASE_SECONDS = 30
+# Kept in step with RE_GHSTACK_HEAD_REF in .github/scripts/native_stack.py.
+_GHSTACK_HEAD = re.compile(r"gh/[^/]+/[0-9]+/head")
+# The line before the note. fetch_pr_comments.py drops both from the review it
+# hands the next run, which cannot check the note and must not repeat it as a
+# finding. Model text cannot forge it (`<` escaped).
+STALE_BASE_TAG = "<!-- hardened-pr-review-stale-base -->"
+
+
+def stale_base_note(gh: GitHub, pull: dict, sha: str) -> str:
+    """A rebase request, or "" if none is due.
+
+    One is due when `sha`, the head of the PR `pull`, forked from the default
+    branch more than STALE_BASE_DAYS ago, the default branch has moved since,
+    and the merge bot would land the PR there: it targets the default branch, or
+    is a ghstack PR from this repo. Advisory: any failure gives "". Retries stop
+    after STALE_BASE_SECONDS, though a request already in flight still runs to
+    its own socket timeout. Like `backfill`, it sets the deadline and puts the
+    previous one back; `run()` calls it with none in force."""
+    outer = gh.deadline
+    gh.deadline = time.monotonic() + STALE_BASE_SECONDS
+    try:
+        base, head = pull["base"], pull["head"]
+        ref = base["repo"]["default_branch"]
+        # Only what the merge bot lands on the default branch: PRs into it, and
+        # ghstack PRs, whose gh/<user>/<N>/base is pushed with the head and so
+        # never looks stale. Release-branch PRs are not landed by the bot, and
+        # the upper PRs of a native stack share the bottom PR's merge base, so
+        # its note covers them.
+        ghstack = _GHSTACK_HEAD.fullmatch(head["ref"]) and (
+            (head["repo"] or {}).get("full_name") == gh.repo
+        )
+        if base["ref"] != ref and not ghstack:
+            return ""
+        # The branch, not `base.sha`: that is a snapshot GitHub does not move
+        # on a push, so `behind_by` against it undercounts. `per_page` pages
+        # only the commits; the response still lists the changed files, which
+        # for a ghstack PR include the stack below it. A slow answer runs out
+        # of time and gives no note.
+        path = f"/repos/{gh.repo}/compare/{urllib.parse.quote(ref)}...{sha}?per_page=1"
+        compare = gh.request("GET", path)
+        date = compare["merge_base_commit"]["commit"]["committer"]["date"]
+        behind = compare["behind_by"]
+        forked = datetime.fromisoformat(date.replace("Z", "+00:00"))
+        age = datetime.now(timezone.utc) - forked
+    except GitHubError as exc:  # OutOfTime included: the limit is this lookup's
+        warn(f"could not check the merge base's age: {exc!r}")
+        return ""
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        warn(f"could not read the merge base's age: {exc!r}")
+        return ""
+    finally:
+        gh.deadline = outer
+    if not _positive_int(behind) or age <= timedelta(days=STALE_BASE_DAYS):
+        return ""
+    shown = f"`{ref}`" if _PLAIN_LABEL.fullmatch(ref) else "the default branch"
+    return (
+        f"This PR's merge base is more than {age.days} days old and {count(behind, 'commit')} "
+        f"behind {shown}, so its CI ran against an outdated base. Please rebase "
+        "before merging."
+    )
+
 
 def review_body(
     verdict: str,
@@ -393,9 +460,10 @@ def review_body(
     repo: str,
     inline: bool,
     report: str = "",
+    note: str = "",
 ) -> str:
-    """Verdict, summary, and the findings not posted inline (non-blocking ones
-    folded). Over MAX_BODY, findings are dropped from the end and counted."""
+    """Verdict, summary, `note`, and the findings not posted inline (non-blocking
+    ones folded). Over MAX_BODY, findings are dropped from the end and counted."""
     blocking = blocking_findings(verdict, findings)
     in_body = [f for f in blocking if f.get("discussion")] if inline else blocking
     folded = [f for f in findings if f not in blocking]
@@ -411,6 +479,7 @@ def review_body(
             folded[:keep_folded],
             len(in_body) - keep_body + len(folded) - keep_folded,
             report,
+            note,
         )
         if len(body) <= MAX_BODY or keep_body + keep_folded == 0:
             return body
@@ -421,7 +490,7 @@ def review_body(
 
 
 def _compose(
-    verdict, summary, sha, repo, n_inline, in_body, folded, omitted, report=""
+    verdict, summary, sha, repo, n_inline, in_body, folded, omitted, report="", note=""
 ) -> str:
     lines = [
         MARKER,
@@ -430,6 +499,8 @@ def _compose(
         *contained(summary),
         "",
     ]
+    if note:
+        lines += [STALE_BASE_TAG, note, ""]
     if n_inline:
         lines += [
             f"{BLOCKING_MARK} {count(n_inline, 'blocking finding')} "
@@ -470,7 +541,14 @@ def _compose(
 
 
 def post(
-    gh: GitHub, pr: int, sha: str, verdict, summary, findings, run_link: str = ""
+    gh: GitHub,
+    pr: int,
+    sha: str,
+    verdict,
+    summary,
+    findings,
+    run_link: str = "",
+    note: str = "",
 ) -> dict:
     """Create the review. If GitHub refuses the inline comments (422), they go
     into the body; if it refuses REQUEST_CHANGES, the review is a COMMENT."""
@@ -490,7 +568,14 @@ def post(
     ]
     if comments:
         body = review_body(
-            verdict, summary, findings, sha, gh.repo, inline=True, report=report
+            verdict,
+            summary,
+            findings,
+            sha,
+            gh.repo,
+            inline=True,
+            report=report,
+            note=note,
         )
         try:
             return gh.request(
@@ -503,7 +588,7 @@ def post(
                 f"GitHub refused the inline comments ({exc}); posting them in the body"
             )
     body = review_body(
-        verdict, summary, findings, sha, gh.repo, inline=False, report=report
+        verdict, summary, findings, sha, gh.repo, inline=False, report=report, note=note
     )
     try:
         return gh.request("POST", path, {**base, "body": body})
@@ -1093,10 +1178,12 @@ def resolve_threads(gh: GitHub, pr: int, comment_ids: set[int]) -> bool:
     return ok and found == comment_ids
 
 
+def pull_request(gh: GitHub, pr: int) -> dict:
+    return gh.request("GET", f"/repos/{gh.repo}/pulls/{pr}") or {}
+
+
 def head_sha(gh: GitHub, pr: int):
-    return (
-        (gh.request("GET", f"/repos/{gh.repo}/pulls/{pr}") or {}).get("head") or {}
-    ).get("sha")
+    return (pull_request(gh, pr).get("head") or {}).get("sha")
 
 
 def standing_requests(gh: GitHub, pr: int, author: str) -> list[dict]:
@@ -1273,7 +1360,8 @@ def run(
     if row.get("status") == "skipped_too_large":
         return decline(gh, pr, sha, author, opt_out, limits)
     review = load_review(row)
-    current = head_sha(gh, pr)
+    pull = pull_request(gh, pr)
+    current = (pull.get("head") or {}).get("sha")
     if current != sha:
         # A run for the newer head will handle it.
         print(f"head moved {sha} -> {current}; not posting a stale review")
@@ -1287,8 +1375,9 @@ def run(
     verdict, summary, findings = review
     clean = verdict == "ready_for_human_review"
     try:
+        note = stale_base_note(gh, pull, sha)
         new_id = publish(
-            gh, pr, sha, author, verdict, summary, findings, run_url(gh.repo, row)
+            gh, pr, sha, author, verdict, summary, findings, run_url(gh.repo, row), note
         )
     except GitHubError as exc:
         if not clean:
@@ -1359,12 +1448,14 @@ def _clear_after_clean(gh, pr, sha, author, keep_commit, older_than) -> int:
 RETRACTED = object()
 
 
-def publish(gh, pr, sha, author, verdict, summary, findings, run_link: str = ""):
+def publish(
+    gh, pr, sha, author, verdict, summary, findings, run_link: str = "", note: str = ""
+):
     """Post the review and hide earlier ones. Returns the new id, None if GitHub
     gave none, or RETRACTED if the head moved while posting."""
     findings = with_removed(gh, pr, findings[:MAX_FINDINGS])
     findings = with_discussions(gh, pr, author, findings)
-    new = post(gh, pr, sha, verdict, summary, findings, run_link)
+    new = post(gh, pr, sha, verdict, summary, findings, run_link, note)
     print(f"posted automated review {new.get('id')}: {new.get('html_url')}")
     if not isinstance(new.get("id"), int):
         warn("GitHub returned no review id; leaving earlier reviews in place")
