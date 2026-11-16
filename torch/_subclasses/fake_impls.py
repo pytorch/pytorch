@@ -2531,10 +2531,15 @@ def make_fast_binary_impl(
     def fast_binary_impl(
         mode: FakeTensorMode | CppFakeTensorMode, *args: Any, **kwargs: Any
     ) -> FakeTensorLike:
-        def slow(msg: str) -> FakeTensor:
+        def slow(msg: str) -> FakeTensorLike:
             count_label(f"slow {msg}")
             with mode:
                 return slow_ref(*args, **kwargs)
+
+        # Native dispatch already tries the binary fast path. Its Python
+        # fallback should not repeat the same shape and layout checks.
+        if isinstance(mode, CppFakeTensorMode):
+            return slow("native fast path fallback")
 
         count_label("attempt fast")
 
@@ -2651,10 +2656,6 @@ def make_fast_binary_impl(
                 device="meta",
                 memory_format=torch.contiguous_format,
             )
-            if isinstance(mode, CppFakeTensorMode):
-                return mode.fake_tensor_converter.from_meta_and_device(
-                    mode, out, common_device
-                )
             return FakeTensor(mode, out, device=common_device)
         if definitely_channels_last:
             count_label("fast channels_last")
@@ -2665,10 +2666,6 @@ def make_fast_binary_impl(
                 device="meta",
                 memory_format=torch.channels_last,
             )
-            if isinstance(mode, CppFakeTensorMode):
-                return mode.fake_tensor_converter.from_meta_and_device(
-                    mode, out, common_device
-                )
             return FakeTensor(mode, out, device=common_device)
 
         return slow("no contiguity match")
