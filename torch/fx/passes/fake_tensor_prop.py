@@ -2,6 +2,8 @@ from typing import Any
 
 import torch.fx
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    fake_mode_cls,
     FakeTensorMode,
     is_fake_tensor,
     maybe_get_fake_device,
@@ -33,11 +35,13 @@ class FakeTensorProp(torch.fx.Interpreter):
     """
 
     def __init__(
-        self, module: torch.fx.GraphModule, mode: FakeTensorMode | None = None
+        self,
+        module: torch.fx.GraphModule,
+        mode: FakeTensorMode | CppFakeTensorMode | None = None,
     ) -> None:
         super().__init__(module)
         if mode is None:
-            mode = FakeTensorMode()
+            mode = fake_mode_cls()()
         self._mode = mode
         mode.epoch += 1
         mode.reset_nt_tensor_id_counter()

@@ -99,7 +99,7 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     add_skip_condition,
     compare_equal_outs_and_grads,
-    expectedIfCppFakeTensor,
+    fake_tensor_modes,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
@@ -4074,10 +4074,11 @@ def forward(self, tangents_1):
     # See Note: Dynamo recompilation guarding invalid grad for why this test exists
     @patch("torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count)
     @patch("torch._functorch.config.debug_assert", True)
-    def test_invalid_dupe_fake(self, counter):
-        self._test_invalid_dupe(counter, fake=True)
+    @fake_tensor_modes
+    def test_invalid_dupe_fake(self, counter, mode_cls):
+        self._test_invalid_dupe(counter, fake=True, mode_cls=mode_cls)
 
-    def _test_invalid_dupe(self, counter, fake):
+    def _test_invalid_dupe(self, counter, fake, mode_cls=FakeTensorMode):
         class F(torch.nn.Module):
             def forward(self, x, y):
                 x.unsqueeze_(0)
@@ -4089,7 +4090,7 @@ def forward(self, tangents_1):
 
         if fake:
             shape_env = ShapeEnv()
-            fake_mode = FakeTensorMode(shape_env=shape_env)
+            fake_mode = mode_cls(shape_env=shape_env)
 
             fake_x = fake_mode.from_tensor(x)
             fake_y = fake_mode.from_tensor(y)
@@ -4130,10 +4131,11 @@ def forward(self, tangents_1):
     # See Note: Dynamo recompilation guarding invalid grad for why this test exists
     @patch("torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count)
     @patch("torch._functorch.config.debug_assert", True)
-    def test_invalid_requires_grad_fake(self, counter):
-        self._test_invalid_requires_grad(counter, fake=True)
+    @fake_tensor_modes
+    def test_invalid_requires_grad_fake(self, counter, mode_cls):
+        self._test_invalid_requires_grad(counter, fake=True, mode_cls=mode_cls)
 
-    def _test_invalid_requires_grad(self, counter, fake):
+    def _test_invalid_requires_grad(self, counter, fake, mode_cls=FakeTensorMode):
         class F(torch.nn.Module):
             def forward(self, x, y):
                 return (x + y,)
@@ -4144,7 +4146,7 @@ def forward(self, tangents_1):
 
         if fake:
             shape_env = ShapeEnv()
-            fake_mode = FakeTensorMode(shape_env=shape_env)
+            fake_mode = mode_cls(shape_env=shape_env)
 
             fake_x = fake_mode.from_tensor(x)
             fake_y = fake_mode.from_tensor(y)
@@ -6266,7 +6268,8 @@ def forward(self, arg0_1):
     return (sum_1,)""",
         )
 
-    def test_aot_export_module_joint(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_aot_export_module_joint(self, use_cpp_fake_tensor):
         class ConvBatchnormRelu(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -6284,9 +6287,10 @@ def forward(self, arg0_1):
         mod.train()
         inp = torch.randn(1, 1, 3, 3)
         mod(inp)
-        fx_g, signature = aot_export_module(
-            mod, [inp], trace_joint=True, output_loss_index=0
-        )
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            fx_g, signature = aot_export_module(
+                mod, [inp], trace_joint=True, output_loss_index=0
+            )
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
         # 9 outputs: 3 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
@@ -6371,9 +6375,10 @@ class <lambda>(torch.nn.Module):
 
         # Also check the inference graph
         # Main important thing here is that there are 5 total outputs: 3 total mutated buffers (from batchnorm), 2 user outputs.
-        fx_g_inference, signature_inference = aot_export_module(
-            mod, [inp], trace_joint=False
-        )
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            fx_g_inference, signature_inference = aot_export_module(
+                mod, [inp], trace_joint=False
+            )
         for node in fx_g_inference.graph.nodes:
             node.meta.pop("stack_trace", None)
         self.assertExpectedInline(
@@ -6414,14 +6419,16 @@ class <lambda>(torch.nn.Module):
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
         # 9 outputs: 2 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
 
-    def test_aot_export_simplified_basic(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_aot_export_simplified_basic(self, use_cpp_fake_tensor):
         def f(x, y):
             return x * y, y * y.detach()
 
         x = torch.randn(2, requires_grad=True)
         y = torch.randn(2, requires_grad=True)
 
-        f_graph_fw = aot_export_joint_simple(f, [x, y], trace_joint=False)
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            f_graph_fw = aot_export_joint_simple(f, [x, y], trace_joint=False)
         out_ref = f(x, y)
         # No calling convention changes necessary to invoke the traced graph
         out_test = f_graph_fw(x, y)
@@ -6434,7 +6441,8 @@ class <lambda>(torch.nn.Module):
         y2 = y.detach().clone().requires_grad_(True)
         x3 = x.detach().clone().requires_grad_(True)
         y3 = y.detach().clone().requires_grad_(True)
-        f_graph_joint = aot_export_joint_simple(f, [x, y], trace_joint=True)
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            f_graph_joint = aot_export_joint_simple(f, [x, y], trace_joint=True)
         num_fw_outputs = 2
         fw_g, bw_g = default_partition(
             f_graph_joint, [x, y], num_fwd_outputs=num_fw_outputs
@@ -6805,16 +6813,18 @@ def forward(self, arg0_1):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
 
-    def test_aot_export_unbacked_arg(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_aot_export_unbacked_arg(self, use_cpp_fake_tensor):
         class M(torch.nn.Module):
             def forward(self):
                 full = torch.full((), 11)
                 i0 = full.item()
                 return (torch.full((i0,), 0),)
 
-        gm, _ = aot_export_module(
-            mod=M(), args=(), trace_joint=False, dynamic_shapes=True
-        )
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            gm, _ = aot_export_module(
+                mod=M(), args=(), trace_joint=False, dynamic_shapes=True
+            )
         self.assertExpectedInline(
             gm.code.strip(),
             """\
@@ -6825,7 +6835,8 @@ def forward(self):
     return (full_1,)""",
         )
 
-    def test_aot_export_input_mutation(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_aot_export_input_mutation(self, use_cpp_fake_tensor):
         def f(x, buf):
             buf.add_(1)
             return buf * x
@@ -6833,17 +6844,18 @@ def forward(self):
         x = torch.randn(2, requires_grad=True)
         buf = torch.zeros(2, requires_grad=False)
 
-        gm, _, _, _ = _aot_export_function(
-            f,
-            (x, buf),
-            decompositions={},
-            num_params_buffers=1,
-            no_tangents=False,
-            pre_dispatch=False,
-            dynamic_shapes=False,
-            keep_input_mutations=True,
-            kwargs={},
-        )
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            gm, _, _, _ = _aot_export_function(
+                f,
+                (x, buf),
+                decompositions={},
+                num_params_buffers=1,
+                no_tangents=False,
+                pre_dispatch=False,
+                dynamic_shapes=False,
+                keep_input_mutations=True,
+                kwargs={},
+            )
         self.assertExpectedInline(
             gm.code.strip(),
             """\
@@ -10062,7 +10074,10 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(inference_compile_calls[0], 1)
         self.assertIsNone(aot_config.inference_compiler)
 
-    def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(self):
+    @fake_tensor_modes
+    def test_collect_metadata_subclass_fw_outs_follow_input_mutation_type(
+        self, mode_cls
+    ):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
             run_functionalized_fw_and_collect_metadata,
         )
@@ -10073,7 +10088,7 @@ def forward(self, primals_1, tangents_1):
             x.add_(1)
             return [torch.sin(x)]
 
-        fake_mode = FakeTensorMode()
+        fake_mode = mode_cls()
         subclass_arg = TwoTensor(
             fake_mode.from_tensor(torch.ones(2)),
             fake_mode.from_tensor(torch.ones(2)),
@@ -10127,7 +10142,10 @@ def forward(self, primals_1, tangents_1):
             2,
         )
 
-    def test_collect_metadata_subclass_fw_outs_include_metadata_only_mutation(self):
+    @fake_tensor_modes
+    def test_collect_metadata_subclass_fw_outs_include_metadata_only_mutation(
+        self, mode_cls
+    ):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
             run_functionalized_fw_and_collect_metadata,
         )
@@ -10141,7 +10159,7 @@ def forward(self, primals_1, tangents_1):
             x.transpose_(0, 1)
             return [TwoTensor(torch.sin(x), torch.cos(x))]
 
-        fake_mode = FakeTensorMode()
+        fake_mode = mode_cls()
         arg = fake_mode.from_tensor(torch.ones(2, 3))
 
         metadata = run_functionalized_fw_and_collect_metadata(
@@ -10164,7 +10182,10 @@ def forward(self, primals_1, tangents_1):
             1,
         )
 
-    def test_collect_metadata_subclass_fw_outs_include_intermediate_bases(self):
+    @fake_tensor_modes
+    def test_collect_metadata_subclass_fw_outs_include_intermediate_bases(
+        self, mode_cls
+    ):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
             run_functionalized_fw_and_collect_metadata,
         )
@@ -10175,7 +10196,7 @@ def forward(self, primals_1, tangents_1):
             y = x.a + x.b
             return [y.view(-1), y.view(-1)]
 
-        fake_mode = FakeTensorMode()
+        fake_mode = mode_cls()
         subclass_arg = TwoTensor(
             fake_mode.from_tensor(torch.ones(2, 3, requires_grad=True)),
             fake_mode.from_tensor(torch.ones(2, 3, requires_grad=True)),
@@ -10204,7 +10225,8 @@ def forward(self, primals_1, tangents_1):
             [0, 1, 2],
         )
 
-    def test_collect_metadata_no_grad_no_op_view_of_user_output(self):
+    @fake_tensor_modes
+    def test_collect_metadata_no_grad_no_op_view_of_user_output(self, mode_cls):
         # https://github.com/pytorch/pytorch/issues/191449
         # Without gradients, a no-op view of another user output must still be
         # classified as an alias so the runtime wrapper regenerates a distinct
@@ -10220,7 +10242,7 @@ def forward(self, primals_1, tangents_1):
             base = x + 1
             return [base.view(-1), base]
 
-        fake_mode = FakeTensorMode()
+        fake_mode = mode_cls()
         arg = fake_mode.from_tensor(torch.ones(1))
 
         metadata = run_functionalized_fw_and_collect_metadata(
@@ -11698,7 +11720,8 @@ class TestAOTModuleSimplified(AOTTestCase):
                 "inputs[1].grad and cloned_inputs[1].grad not allclose"
             )
 
-    def test_aot_module_simplified_dynamic(self):
+    @fake_tensor_modes
+    def test_aot_module_simplified_dynamic(self, mode_cls):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -11710,7 +11733,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         mod = MockModule()
 
         shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(shape_env=shape_env)
+        fake_mode = mode_cls(shape_env=shape_env)
 
         x = torch.randn(128, 20, requires_grad=True)
         y = torch.randn(128, 30, requires_grad=True)
@@ -11728,14 +11751,13 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         self.assertExpectedInline(
             shape_env.format_guards(),
-            expectedIfCppFakeTensor(
-                """\
+            """\
+ - Eq(s49, 20)
+ - Eq(s70, 30)"""
+            if mode_cls is FakeTensorMode
+            else """\
  - Eq(s49, 20)
  - Eq(30, s70)""",
-                """\
- - Eq(s49, 20)
- - Eq(s70, 30)""",
-            ),
         )
 
         if not torch.allclose(ref[0], res[0]):
@@ -11750,7 +11772,8 @@ class TestAOTModuleSimplified(AOTTestCase):
             )
 
     # https://github.com/pytorch/pytorch/issues/105327
-    def test_lift_fresh_copy_in_graph(self):
+    @fake_tensor_modes
+    def test_lift_fresh_copy_in_graph(self, mode_cls):
         class MyMod(torch.nn.Module):
             def forward(self, x):
                 _tensor_constant0 = torch.tensor([1])
@@ -11762,7 +11785,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         mod = MyMod()
         shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(shape_env=shape_env)
+        fake_mode = mode_cls(shape_env=shape_env)
         x = torch.ones(4, requires_grad=True)
         inputs = [x]
         fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
@@ -11772,7 +11795,8 @@ class TestAOTModuleSimplified(AOTTestCase):
         out_test = compiled_f(x)
         self.assertEqual(out_ref[0].detach(), out_test[0].detach())
 
-    def test_inference_python_dispatcher(self):
+    @fake_tensor_modes
+    def test_inference_python_dispatcher(self, mode_cls):
         # Extracted from unet
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -11786,7 +11810,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         mod = MockModule()
         shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(shape_env=shape_env)
+        fake_mode = mode_cls(shape_env=shape_env)
         x = torch.randn(2, 512, 40, 59)  # NB: must not require grad
         inputs = [x]
         fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
@@ -11934,8 +11958,9 @@ class TestAOTModuleSimplified(AOTTestCase):
             keep_inference_input_mutations=True,
         )
 
-    def test_aot_module_simplified_fake_tensor_gm_raises(self):
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+    @fake_tensor_modes
+    def test_aot_module_simplified_fake_tensor_gm_raises(self, mode_cls):
+        fake_mode = mode_cls()
         real_x = torch.randn(4, requires_grad=True)
         fake_x = fake_mode.from_tensor(real_x)
         real_z = torch.randn(4)
@@ -13817,6 +13842,7 @@ class TestAOTAutogradDeviceWithCache(
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
+instantiate_parametrized_tests(TestAOTExport)
 instantiate_device_type_tests(
     TestAOTAutogradDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
 )

@@ -1671,7 +1671,10 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
             with BMode():
                 a + b
 
-    def test_mode_with_make_subclass(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_mode_with_make_subclass(self, use_cpp_fake_tensor):
+        from torch._subclasses.fake_tensor import fake_mode_cls
+
         class SubTensor(torch.Tensor):
             @staticmethod
             def __new__(cls, elem):
@@ -1682,9 +1685,21 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
                 return func(*args, **kwargs)
 
         x = torch.randn(3)
-        with BasicMode():
+        with (
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor),
+            fake_mode_cls()(),
+            BasicMode(),
+        ):
             y = SubTensor(x)
+            if use_cpp_fake_tensor:
+                with torch._C._ForceDispatchKeyGuard(
+                    torch._C._dispatch_tls_local_include_set().remove(DispatchKey.Fake),
+                    torch._C._dispatch_tls_local_exclude_set(),
+                ):
+                    z = SubTensor(x)
+                    self.assertEqual(z + x, 2 * x)
         self.assertIsInstance(y, SubTensor)
+        self.assertEqual(y, x)
 
     def test_torch_dispatch_mode_respects_no_dispatch(self) -> None:
         with capture_logs(is_mode=True) as logs1:

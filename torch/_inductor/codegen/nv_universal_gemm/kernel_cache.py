@@ -628,12 +628,12 @@ def get_kernel_by_name_via_args(
     if isinstance(kernel_output_dtype, str):
         kernel_output_dtype = getattr(torch, kernel_output_dtype)
     if kernel_output_dtype is not None and query_out.dtype != kernel_output_dtype:
-        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.fake_tensor import fake_mode_cls
 
         # A scheduler-fused epilogue may change D's dtype. Candidate generation
         # selected the base GEMM using its original output dtype, so recover
         # that metadata without allocating device memory.
-        with FakeTensorMode():
+        with fake_mode_cls()():
             query_out = torch.empty_strided(
                 tuple(query_out.shape),
                 tuple(query_out.stride),

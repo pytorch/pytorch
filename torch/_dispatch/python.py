@@ -120,16 +120,16 @@ def _fmt(a: object) -> object:
 def make_crossref_functionalize(
     op: torch._ops.OpOverload[_P, _T], final_key: DispatchKey
 ) -> Callable[_P, _T] | DispatchKey:
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import fake_mode_cls
 
     # This case is pretty weird, suppress it for now
     if op is torch.ops.aten.lift_fresh.default:
         return final_key
 
     def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        fake_mode = FakeTensorMode()
+        fake_mode = fake_mode_cls()()
 
-        def fakeify_defun(t: _R) -> _R | torch._subclasses.fake_tensor.FakeTensor:
+        def fakeify_defun(t: _R) -> _R | torch.Tensor:
             if isinstance(t, torch.Tensor):
                 if torch._is_functional_tensor(t):
                     r = torch._from_functional_tensor(t)

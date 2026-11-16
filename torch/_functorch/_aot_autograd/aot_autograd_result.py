@@ -716,14 +716,14 @@ def deserialize_bundled_cache_entry(
     # in case it needs to be serialized again
     serializable_copy = deepcopy(entry)
 
-    from torch._subclasses import FakeTensorMode
+    from torch._subclasses.fake_tensor import fake_mode_cls
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     context = torch._guards.TracingContext.try_get()
     if context is None:
         # Create a clean environment when running fx graph post compile
         # if one is not available
-        context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+        context = torch._guards.TracingContext(fake_mode_cls()(shape_env=ShapeEnv()))
     with torch._guards.tracing(context):
         compiled_fn = entry.wrap_post_compile(
             [],
