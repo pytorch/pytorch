@@ -252,7 +252,6 @@ inductor_skips["xpu"] = {
 }
 
 inductor_skips["xpu"]["nn.functional.linear"] = {f16}
-inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
@@ -646,7 +645,16 @@ inductor_override_kwargs["xpu"] = {
     ("linalg.vecdot", f16): {"atol": 1e-5, "rtol": 2e-2},
     "log_normal": {"reference_in_float": True},
     ("logsumexp", f16): {"atol": 1e-5, "rtol": 1e-2},
-    ("masked.cumprod", f16): {"reference_in_float": True, "atol": 1e-5, "rtol": 5e-2},
+    # The forward matches the fp32 reference exactly. The fp16 grads do not: the
+    # reversed cumsum in cumprod_backward cancels and amplifies the rounding of the
+    # fp16 forward output, so the grads need an absolute tolerance.
+    ("masked.cumprod", f16): {
+        "reference_in_float": True,
+        "atol": 1e-5,
+        "rtol": 2e-3,
+        "grad_atol": 1e-2,
+        "grad_rtol": 2.6e-3,
+    },
     ("masked.cumsum", f16): {"atol": 1e-5, "rtol": 5e-3},
     ("masked.softmin", f16): {"atol": 1e-4, "rtol": 0.01},
     ("masked.softmax", f16): {"atol": 2e-4, "rtol": 0.01},
