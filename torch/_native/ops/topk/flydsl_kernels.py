@@ -46,7 +46,7 @@ member, not a union member.
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from functools import partial
+from functools import cache, partial
 from typing import cast
 
 import flydsl.compiler as flyc
@@ -175,6 +175,7 @@ class TopKSpec:
         return val, bits
 
 
+@cache
 def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
     # torch dtype: flydsl dtype, same-width signed int, bit width,
     # NaN sentinel, positive-infinity bits.
