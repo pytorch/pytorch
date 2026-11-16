@@ -110,6 +110,7 @@ def _construct_format_dict():
         "AdaptiveAvgPool2d": "torch.nn.modules.pooling.AdaptiveAvgPool2d",
         "AdaptiveMaxPool2d": "torch.nn.modules.pooling.AdaptiveMaxPool2d",
         "Tensor": "torch._tensor.Tensor",
+        "TensorSubclass": "tensor_subclass.TensorSubclass",
         "Adagrad": "torch.optim.adagrad.Adagrad",
         "Adam": "torch.optim.adam.Adam",
     }
