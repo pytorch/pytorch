@@ -7498,6 +7498,8 @@ class AssociativeScanTestsDevice(TestCase):
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlowTraced(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
@@ -12478,6 +12480,8 @@ class TestControlFlowTracedDevice(TestCase):
 
 
 class TestAutoFunctionalizeControlFlow(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
     def test_switch_auto_functionalize_input_mutation(self, dynamic):
@@ -13650,6 +13654,8 @@ _hop_schema_test_schema_types = [
 
 @skipIfTorchDynamo("We don't expect users to torch.compile hop schema generation.")
 class TestHopSchema(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _get_example_val(self, ty: str):
         from torch.fx.experimental.sym_node import SymNode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
