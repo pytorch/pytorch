@@ -1,0 +1,79 @@
+diff --git a/test/cpython/v3_13/test_fstring.py b/test/cpython/v3_13/test_fstring.py
+index 1ad16937b2b5ba167f0a6efe67e12a46e694bbe1..83982fd592037ef334226ed7790027e2bcdebb07 100644
+--- a/test/cpython/v3_13/test_fstring.py
++++ b/test/cpython/v3_13/test_fstring.py
+@@ -1,3 +1,57 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_fstring.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # -*- coding: utf-8 -*-
+ # There are tests here with unicode string literals and
+ # identifiers. There's a code in ast.c that was added because of a
+@@ -29,7 +83,7 @@ a_global = 'global variable'
+ #  worthwhile tradeoff. When I switched to this method, I found many
+ #  examples where I wasn't testing what I thought I was.
+ 
+-class TestCase(unittest.TestCase):
++class TestCase(CPythonTestCase):
+     def assertAllRaise(self, exception_type, regex, error_strings):
+         for str in error_strings:
+             with self.subTest(str=str):
+@@ -1810,5 +1864,5 @@ print(f'''{{
+             compile(case, "<string>", "exec")
+ 
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    run_tests()
