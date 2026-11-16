@@ -28,6 +28,15 @@ def _as_int64(value: int) -> int:
     return ((value + 2**63) % 2**64) - 2**63
 
 
+def _wrap_scalar_as_float64(
+    value: float | torch.Tensor, device: torch.device
+) -> torch.Tensor:
+    # Wrap as float64 to match the scalar overloads.
+    if isinstance(value, torch.Tensor):
+        return value
+    return torch.tensor(value, dtype=torch.float64, device=device)
+
+
 def key(
     seed: int, *, device: torch.device | None = None, impl: str = "philox4x32-10"
 ) -> torch.Tensor:
@@ -186,13 +195,8 @@ def normal_(
     if not isinstance(mean, torch.Tensor) and not isinstance(std, torch.Tensor):
         return torch.ops.aten._philox_normal_(result, key, mean, std)
 
-    def wrap_scalar(param):
-        # float64 matches the scalar overload's double rounding.
-        if isinstance(param, torch.Tensor):
-            return param
-        return torch.tensor(param, dtype=torch.float64, device=result.device)
-
-    mean, std = wrap_scalar(mean), wrap_scalar(std)
+    mean = _wrap_scalar_as_float64(mean, result.device)
+    std = _wrap_scalar_as_float64(std, result.device)
     return torch.ops.aten._philox_normal_.Tensor(result, key, mean, std)
 
 
@@ -290,13 +294,8 @@ def uniform_(
     if not isinstance(low, torch.Tensor) and not isinstance(high, torch.Tensor):
         return torch.ops.aten._philox_uniform_(result, key, low, high)
 
-    def wrap_scalar(bound):
-        # float64 matches the scalar overload's double rounding.
-        if isinstance(bound, torch.Tensor):
-            return bound
-        return torch.tensor(bound, dtype=torch.float64, device=result.device)
-
-    low, high = wrap_scalar(low), wrap_scalar(high)
+    low = _wrap_scalar_as_float64(low, result.device)
+    high = _wrap_scalar_as_float64(high, result.device)
     return torch.ops.aten._philox_uniform_.Tensor(result, key, low, high)
 
 
