@@ -28,7 +28,7 @@ from torch._dynamo.utils import (
 )
 from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
-from torch._subclasses.fake_tensor import fake_mode_cls, maybe_get_fake_mode
+from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_mode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -167,7 +167,7 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OperatorBase, OpOverload
-    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 _P = ParamSpec("_P")
@@ -1896,7 +1896,7 @@ def aot_export_joint_simple(
         # Attempt to run the fw_module with the original user inputs
         fake_mode = detect_fake_mode(args)
         if fake_mode is None:
-            fake_mode = fake_mode_cls()()
+            fake_mode = FakeTensorMode()
         with fake_mode:
             fw_module(*args)
     return fx_g
