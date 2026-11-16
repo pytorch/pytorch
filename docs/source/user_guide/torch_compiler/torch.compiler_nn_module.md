@@ -43,13 +43,10 @@ currently trigger a graph-break so that the affected modules run outside of dyna
 introduce a significant performance regression, and additional work is required to improve this support.
 
 **skip_nnmodule_hook_guards**
-By default, `torch._dynamo.config.skip_nnmodule_hook_guards` is set to True, meaning no guards will be installed
-on each nn.Module hook dictionary, improving runtime by reducing guard execution time, at the cost of not noticing
-if any hook dict is changed after compilation.
-
-If you want to be able to remove or modify hooks after compilation and have `torch.compile` react appropriately
-(by recompiling), then you need to set `skip_nnmodule_hook_guards=False` and expect a runtime penalty for the added
-guards.
+By default, `torch._dynamo.config.skip_nnmodule_hook_guards=True` lets Dynamo skip checks on empty
+hook registries during module dispatch. Adding a hook to a registry that was empty at compile time
+can therefore go unnoticed. Dynamo still guards the callback values and flag membership it reads
+from populated registries. Set `skip_nnmodule_hook_guards=False` to check empty registries too.
 
 TODO: confirm if backward/pre_backward hooks are working or not and document accordingly
 

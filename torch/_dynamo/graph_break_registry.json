@@ -2454,6 +2454,16 @@
       ]
     }
   ],
+  "GB9374": [
+    {
+      "Gb_type": "Reordered OrderedDict input with callback-sensitive keys",
+      "Context": "OrderedDict input snapshot",
+      "Explanation": "Dynamo cannot restore an OrderedDict's storage order without potentially invoking user key hashing or equality.",
+      "Hints": [
+        "Construct the OrderedDict inside the compiled function."
+      ]
+    }
+  ],
   "GB0138": [
     {
       "Gb_type": "Unsupported autograd.Function context `save_for_backward`",
@@ -2619,17 +2629,9 @@
       "Context": "str(error)",
       "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
       "Hints": [
-        "Snapshots are not implemented on Python 3.16+. On older free-threaded ",
-        "Python, empty OrderedDicts remain supported; nonempty ones require ",
-        "Python 3.14.1+. Keep unsupported inputs outside fullgraph capture."
-      ]
-    },
-    {
-      "Gb_type": "Unsupported OrderedDict snapshot runtime",
-      "Context": "str(error)",
-      "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
-      "Hints": [
-        "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+."
+        "On Python versions before 3.16, use a GIL-enabled build or free-threaded ",
+        "Python 3.14.1+ for nonempty OrderedDicts. An unsupported snapshot runs ",
+        "the frame eagerly or raises with fullgraph=True."
       ]
     }
   ],
@@ -4699,7 +4701,7 @@
   "GB3039": [
     {
       "Gb_type": "OrderedDict subclass allocation",
-      "Context": "OrderedDict subclass",
+      "Context": "{obj.python_type_name()}.{name}",
       "Explanation": "Dynamo cannot trace allocating operations on OrderedDict subclasses.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."

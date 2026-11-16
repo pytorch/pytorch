@@ -362,14 +362,15 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 "and all values must be VariableTracker"
             )
 
-        keys: dict[int, HashableTracker] = {}
+        pending: list[HashableTracker] | None = [] if self.source is None else None
 
         def make_hashable(
             key: Union[VariableTracker, "HashableTracker"],
         ) -> "HashableTracker":
-            result = key if isinstance(key, Hashable) else Hashable(key)
-            keys[id(key)] = result
-            return result
+            wrapped = key if isinstance(key, Hashable) else Hashable(key)
+            if pending is not None:
+                pending.append(wrapped)
+            return wrapped
 
         items_cls = cast(type, self._cpython_type)
         storage_cls = dict if items_cls is collections.defaultdict else items_cls
@@ -382,9 +383,11 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 storage = cast(
                     dict[VariableTracker | HashableTracker, VariableTracker], items
                 )
-                self.items = collections.OrderedDict(
-                    (make_hashable(key), value) for key, value in dict.items(storage)
-                )
+                keys: dict[int, HashableTracker] = {}
+                self.items = collections.OrderedDict()
+                for key, value in dict.items(storage):
+                    keys[id(key)] = wrapped = make_hashable(key)
+                    self.items[wrapped] = value
                 for key in items:
                     self.items.move_to_end(keys[id(key)])
             else:
@@ -392,9 +395,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                     {make_hashable(x): v for x, v in items.items()}
                 )
         finally:
-            # A caught equality exception still depends on the participating method keys.
-            if keys and self.source is None:
-                guard_key_collisions(keys.values())
+            # An equality exception can be caught before the new dictionary exists.
+            if pending:
+                guard_key_collisions(pending)
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (
@@ -916,7 +919,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if descriptor.__objclass__ is dict:
             if issubclass(self.python_type(), collections.OrderedDict):
                 flags = _flags_from_ml_flags(dict, name)
-                _check_method_arity(self, tx, name, flags, args, kwargs)
+                _check_method_arity(tx, descriptor.__qualname__, flags, args, kwargs)
                 if name == "update":
                     check_positional(tx, name, len(args), 0, 1)
                 elif name in ("pop", "setdefault"):
@@ -937,7 +940,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         method = cls.tp_methods.get(name, ConstDictVariable.tp_methods.get(name))
         if method is not None:
             flags = _flags_from_ml_flags(owner, name)
-            _check_method_arity(self, tx, name, flags, args, kwargs)
+            _check_method_arity(tx, descriptor.__qualname__, flags, args, kwargs)
             return method.handler(self, tx, args, kwargs)
         return None
 
@@ -1207,6 +1210,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         container_name: str | None = None,
     ) -> None:
         # dict_merge copies dict_iter storage; other mappings dispatch keys/getitem.
+        # A direct method call can fall back here. DICT_MERGE instead skips the
+        # frame because it is partway through expanding call keyword arguments.
         if isinstance(other, (ConstDictVariable, FrozenDictVariable)):
             side_effects = tx.output.side_effects
             if any(
