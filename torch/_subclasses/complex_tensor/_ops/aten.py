@@ -679,6 +679,9 @@ LIKE_OPS_LIST = [
     aten.zeros_like,
     aten.randn_like,
     aten.new_zeros,
+    aten.new_empty,
+    aten.new_full,
+    aten.new_ones,
 ]
 
 for like_op in LIKE_OPS_LIST:
