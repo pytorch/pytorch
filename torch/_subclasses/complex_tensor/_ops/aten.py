@@ -745,6 +745,77 @@ def full_like_impl(
     return ComplexTensor(ret_r, ret_i)
 
 
+@register_complex(aten.new_full)
+def new_full_impl(
+    input: ComplexTensor,
+    size: tuple[int, ...],
+    fill_value: complex,
+    *args: Any,
+    dtype: torch.dtype | None = None,
+    **kwargs: Any,
+) -> torch.Tensor | ComplexTensor:
+    # Note: Cannot be merged with the case above due to the `size` argument
+    if dtype is None:
+        dtype = input.dtype
+    input_r, input_i = split_complex_tensor(input)
+
+    if dtype is not None and not dtype.is_complex:
+        return input_r.new_full(size, fill_value, *args, dtype=dtype, **kwargs)
+
+    real_dtype = COMPLEX_TO_REAL[dtype]
+
+    fv_r, fv_i = split_complex_arg(fill_value)
+    ret_r = input_r.new_full(size, fv_r, *args, dtype=real_dtype, **kwargs)
+    ret_i = input_i.new_full(size, fv_i, *args, dtype=real_dtype, **kwargs)
+
+    return ComplexTensor(ret_r, ret_i)
+
+
+@register_complex(aten.ones_like)
+def ones_like_impl(
+    input: ComplexTensor,
+    *args: Any,
+    dtype: torch.dtype | None = None,
+    **kwargs: Any,
+) -> torch.Tensor | ComplexTensor:
+    # Note: Cannot be merged with the cases below due to 1, 0 decomp
+    if dtype is None:
+        dtype = input.dtype
+    input_r, input_i = split_complex_tensor(input)
+    if dtype is not None and not dtype.is_complex:
+        return torch.ones_like(input_r, *args, dtype=dtype, **kwargs)
+
+    real_dtype = COMPLEX_TO_REAL[dtype]
+    ret_r = torch.ones_like(input_r, *args, dtype=real_dtype, **kwargs)
+    ret_i = torch.zeros_like(input_i, *args, dtype=real_dtype, **kwargs)
+
+    return ComplexTensor(ret_r, ret_i)
+
+
+@register_complex(aten.new_ones)
+def new_ones_impl(
+    input: ComplexTensor,
+    size: tuple[int, ...],
+    *args: Any,
+    dtype: torch.dtype | None = None,
+    **kwargs: Any,
+) -> torch.Tensor | ComplexTensor:
+    # Note: Cannot be merged with the case above due to the `size` argument
+    if dtype is None:
+        dtype = input.dtype
+    input_r, input_i = split_complex_tensor(input)
+
+    if dtype is not None and not dtype.is_complex:
+        return input_r.new_ones(size, *args, dtype=dtype, **kwargs)
+
+    real_dtype = COMPLEX_TO_REAL[dtype]
+
+    ret_r = input_r.new_ones(size, *args, dtype=real_dtype, **kwargs)
+    ret_i = input_i.new_zeros(size, *args, dtype=real_dtype, **kwargs)
+
+    return ComplexTensor(ret_r, ret_i)
+
+
 def register_like(op: OpType) -> Callable[..., Any]:
     def impl(
         self: ComplexTensor, *args: Any, dtype: torch.dtype | None = None, **kwargs: Any
@@ -772,12 +843,9 @@ def register_like(op: OpType) -> Callable[..., Any]:
 LIKE_OPS_LIST = [
     aten.empty_like,
     aten.zeros_like,
-    aten.ones_like,
     aten.randn_like,
     aten.new_zeros,
     aten.new_empty,
-    aten.new_full,
-    aten.new_ones,
 ]
 
 for like_op in LIKE_OPS_LIST:
