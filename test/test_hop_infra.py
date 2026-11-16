@@ -4,6 +4,7 @@ import importlib
 import pkgutil
 
 import torch
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -129,11 +130,7 @@ class TestHOPInfra(TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_functional,
         )
-        from torch._subclasses.fake_tensor import (
-            FakeTensorMode,
-            is_fake_tensor,
-            maybe_get_fake_mode,
-        )
+        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
 
         mode = FakeTensorMode()
         with mode:
@@ -160,7 +157,7 @@ class TestHOPInfra(TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_mutation,
         )
-        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
         mode = FakeTensorMode()
         with mode:
