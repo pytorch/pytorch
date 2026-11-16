@@ -543,7 +543,7 @@ class ShardingPropagator:
         from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
         with ShardingPropagator._fake_mode_lock:
-            fake_mode = detect_fake_mode() or FakeTensorMode()
+            fake_mode = detect_fake_mode() or FakeTensorMode(_force_python=True)
             with fake_mode, disable_proxy_modes_tracing():
                 fake_args = op_schema.gen_fake_args()
                 fake_kwargs = op_schema.gen_fake_kwargs()
