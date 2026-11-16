@@ -1103,9 +1103,11 @@ void fakeFallback(
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   const auto arguments_begin = stack->size() - num_arguments;
-  const bool metadata_copy = schema.overload_name().empty() &&
-      (schema.name() == "aten::detach" ||
-       schema.name() == "aten::shallow_copy_data_");
+  const bool is_detach =
+      schema.name() == "aten::detach" && schema.overload_name().empty();
+  const bool metadata_copy = is_detach ||
+      (schema.name() == "aten::shallow_copy_data_" &&
+       schema.overload_name().empty());
   const auto python_dispatcher =
       dispatchKeySet & c10::DispatchKeySet(c10::DispatchKey::PythonDispatcher);
 
@@ -1248,7 +1250,7 @@ void fakeFallback(
 
   bool all_constant = true;
   bool any_constant = false;
-  c10::SmallVector<std::pair<const c10::TensorImpl*, at::Tensor>, 4> constants;
+  c10::SmallVector<std::pair<at::Tensor, at::Tensor>, 4> constants;
   for_each_tensor(
       stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
         if (!t.defined() || !t.is_fake() ||
@@ -1259,11 +1261,12 @@ void fakeFallback(
         all_constant = all_constant && constant != nullptr;
         any_constant = any_constant || constant != nullptr;
         if (constant) {
-          constants.emplace_back(
-              t.unsafeGetTensorImpl(), at::Tensor(std::move(constant)));
+          constants.emplace_back(t, at::Tensor(std::move(constant)));
         }
       });
-  if (any_constant && all_constant && !symbolic_sizes &&
+  // Detach copies its constant and shadow real tensor in C++; generic
+  // propagation would attach a Python object before _make_subclass can wrap it.
+  if (!is_detach && any_constant && all_constant && !symbolic_sizes &&
       !op.hasTag(at::Tag::nondeterministic_seeded) &&
       (!op.hasTag(at::Tag::inplace_view) ||
        (schema.name() == "aten::detach_" && schema.overload_name().empty())) &&
@@ -1279,7 +1282,7 @@ void fakeFallback(
               t.unsafeGetTensorImpl()->fake_tensor_mode() == mode) {
             const auto it = std::find_if(
                 constants.begin(), constants.end(), [&](const auto& entry) {
-                  return entry.first == t.unsafeGetTensorImpl();
+                  return entry.first.is_same(t);
                 });
             TORCH_INTERNAL_ASSERT(it != constants.end());
             return it->second;
@@ -1309,6 +1312,13 @@ void fakeFallback(
             if (!t.defined()) {
               return std::nullopt;
             }
+            const auto it = std::find_if(
+                constants.begin(), constants.end(), [&](const auto& entry) {
+                  return entry.second.is_same(t);
+                });
+            if (it != constants.end()) {
+              return it->first;
+            }
             return at::Tensor(from_real_tensor(
                 mode, t.getIntrusivePtr(), FakeTensorConversion::Constant));
           });
@@ -1325,14 +1335,15 @@ void fakeFallback(
       }
     });
   }
-  if (any_constant) {
+  if (!is_detach && any_constant) {
     invalidate_written_to_constants(op, *stack, mode);
   }
 
   auto* interpreter = getPyInterpreter();
   c10::SafePyObject real(
-      mode->propagate_real_tensors_ ? fake_run_real_op(op, *stack, mode)
-                                    : nullptr,
+      mode->propagate_real_tensors_ && !is_detach
+          ? fake_run_real_op(op, *stack, mode)
+          : nullptr,
       interpreter);
   const auto maybe_propagate_real_tensors = [&] {
     if (real.ptr(interpreter)) {
@@ -1387,7 +1398,7 @@ void fakeFallback(
            c10::DispatchKey::PreDispatch,
            c10::DispatchKey::PythonTLSSnapshot}));
       auto self = (*stack)[arguments_begin].toTensor();
-      auto result = schema.name() == "aten::detach"
+      auto result = is_detach
           ? at::impl::fake_detach(self)
           : at::impl::fake_shallow_copy_data_(
                 self, (*stack)[arguments_begin + 1].toTensor());
