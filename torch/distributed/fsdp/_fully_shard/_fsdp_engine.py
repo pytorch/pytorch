@@ -27,6 +27,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.tensor import DTensor
 
+from .._flex_shard.all_gather_layout import DefaultAllGatherLayout
 from .._flex_shard.bucket_runtime import (
     _alloc_storage,
     _free_storage,
@@ -37,7 +38,6 @@ from .._flex_shard.bucket_runtime import (
     ParamOwnerRef,
     ParamRepresentation,
 )
-from .._flex_shard.all_gather_layout import DefaultAllGatherLayout
 from .._flex_shard.bucket_storage import ParamInfo, ShardedBucketStorage
 from .._flex_shard.placements.shard import Shard as EngineShard
 from .._flex_shard.placements.shard_all_gather import (
@@ -849,13 +849,18 @@ def set_keep_unsharded_storage(state: Any, keep: bool) -> None:
 def set_modules_to_prefetch(
     state: Any, target_states: list[Any], *, forward: bool
 ) -> None:
-    targets = [
-        target.storage
-        for target_state in target_states
-        for target in (
-            _buckets(target_state) if forward else reversed(_buckets(target_state))
-        )
-    ]
+    # As in FSDP2, an empty list keeps the default prefetch
+    targets = (
+        [
+            target.storage
+            for target_state in target_states
+            for target in (
+                _buckets(target_state) if forward else reversed(_buckets(target_state))
+            )
+        ]
+        if target_states
+        else None
+    )
     for bucket in _buckets(state):
         if forward:
             bucket.storage.set_buckets_to_forward_prefetch(targets)
