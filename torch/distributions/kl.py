@@ -272,8 +272,16 @@ def _kl_categorical_categorical(p, q):
     remainder_series = s.square() * (
         0.5
         + s * (
-            1 / 6
-            + s * (1 / 24 + s * (1 / 120 + s * (1 / 720 + s / 5040)))
+            0.16666666666666666
+            + s
+            * (
+                0.041666666666666664
+                + s
+                * (
+                    0.008333333333333333
+                    + s * (0.001388888888888889 + s * 0.0001984126984126984)
+                )
+            )
         )
     )
     remainder = torch.where(s.abs() < 0.125, remainder_series, torch.expm1(s) - s)
