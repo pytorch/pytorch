@@ -1,7 +1,5 @@
 #pragma once
 
-#include <exception>
-
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/Layout.h>
@@ -9,21 +7,16 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/FunctionRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
-#include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 
 // Forward declarations
 
 namespace c10 {
-struct FakeTensorMode;
 struct IValue;
 class OperatorHandle;
-struct SafePyObject;
 struct TensorImpl;
 namespace impl {
 struct PyObjectSlot;
@@ -127,18 +120,6 @@ struct C10_API PyInterpreter;
 // added by the PyInterpreter tag takes us to 24 words, which means that we
 // still fit inside three eight word cache lines.  If you need to penny pinch
 // another word consider doing this!
-
-// The Python exception types PyInterpreterVTable::raise_python_error
-// raises, for those the C++ fake fallback raises where FakeTensorMode does and
-// no c10 error type becomes
-enum class FakePythonError { AssertionError };
-
-enum class FakeTensorConversion {
-  Default,
-  Constant,
-  PlainTensor,
-  ClonedConstant,
-};
 
 struct C10_API PyInterpreterVTable {
   virtual ~PyInterpreterVTable() = default;
@@ -245,185 +226,6 @@ struct C10_API PyInterpreterVTable {
       uintptr_t event) const = 0;
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
-
-  // Runs step with mode entered through CppFakeTensorMode's __enter__/__exit__,
-  // including on exceptions. Keeps one Python thread state alive across both
-  // calls so threading.local entry records survive on native worker threads.
-  // Releases the GIL around step; entries inside step must be balanced.
-  virtual bool fake_run_with_mode_entered(
-      const std::shared_ptr<c10::FakeTensorMode>& mode,
-      c10::function_ref<bool()> step) const = 0;
-  // Acquires the GIL to raise FakeTensorDeviceMismatchError after native
-  // common-device resolution fails.
-  virtual void fake_raise_device_mismatch(
-      const c10::OperatorHandle& op,
-      c10::Device common_device,
-      c10::Device device) const = 0;
-  // Raises a Python exception of type kind with message msg, for errors the
-  // C++ fake fallback raises where FakeTensorMode raises them. Acquires the
-  // GIL.
-  virtual void raise_python_error(FakePythonError kind, const std::string& msg)
-      const = 0;
-  // Matches FakeTensorMode.invalidate_written_to_constants, including
-  // SchemaInfo's training-op mutability rules. Acquires the GIL.
-  virtual void invalidate_written_to_constants(
-      const c10::OperatorHandle& op,
-      const torch::jit::Stack& stack,
-      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
-
-  // Note [C++ FakeTensor dispatch]
-  // A fake tensor models a tensor on a logical device without allocating its
-  // data. Running an op on fake tensors must reproduce the outputs' sizes,
-  // strides, dtype, layout, logical device and aliasing; sizes that depend on
-  // tensor data become unbacked symbolic sizes. Fake tensors are backed by
-  // Meta tensors, but Meta alone is not enough: a Meta tensor's device is meta,
-  // not the device being modeled, and data-dependent sizes need fake-mode
-  // state such as the ShapeEnv.
-  //
-  // The C++ Fake fallback draws on several distinct Python implementations:
-  //  - Decompositions (fake_try_decomp) express an op in terms of other ops,
-  //    which then run on fake tensors. They come from the decomposition_table
-  //    and from Python CompositeImplicitAutograd overrides. A decomposition
-  //    suited to symbolic shapes is not always the right choice otherwise:
-  //    under static shapes only torch._decomp decompositions apply, and only
-  //    to non-sparse inputs. An op with a meta_table entry is not decomposed.
-  //  - Python Meta kernels (fake_try_meta) compute output metadata without
-  //    data. This runs the op's Python Meta registration only; C++ Meta kernels
-  //    are reached by redispatching to Meta, not through this callback.
-  //  - Fake-specific implementations cover what Meta can't, such as
-  //    logical-device rules and data-dependent output sizes. Built-in ops use
-  //    FakeTensorMode's op_implementations handlers (fake_try_op_impl), matched
-  //    either by exact op or by a predicate over a family of ops. Custom ops
-  //    use torch.library.register_fake kernels (run_fake_impl), which
-  //    reach the fake impl context through torch.library.get_ctx().
-  //  - Prims (prim_meta_impl) run the prim's prim_meta_impl.
-  //
-  // Real-tensor propagation (FakeTensorMode's propagate_real_tensors) is a
-  // separate concern. When every fake input has a real tensor behind it,
-  // fake_run_real_op runs the op on those reals before any fake kernel. The
-  // resulting RealOpResult holds the fake args, the real args and the real
-  // output. After fake execution, propagate_real_tensors checks the fake
-  // outputs against the real ones, attaches the reals and hints unbacked
-  // symbols; fake_infer_from_real_out uses it to build outputs for a custom op
-  // that has no fake kernel. Propagation is optional and reals may be missing,
-  // so fake execution must not depend on reading real data.
-  //
-  // Contracts shared by the callbacks below:
-  //  - Dispatch callbacks take the op's arguments in schema order on top of
-  //    stack. On true they have replaced them with the
-  //    op's outputs in schema order. On false (the implementation doesn't apply
-  //    or returned NotImplemented) or on an exception, stack is unchanged.
-  //    Exceptions propagate.
-  //  - Every callback acquires the GIL.
-  //  - Callbacks noted as needing an active mode error if no C++
-  //    FakeTensorMode is active.
-  //  - Dispatch callbacks other than fake_try_meta re-enable the Fake key, so
-  //    ops inside the Python implementation dispatch back to Fake.
-
-  // Looks up get_fast_op_impls()[op] and invokes it with the explicit mode
-  // uninstalled, as in FakeTensorMode._dispatch_impl. False means no entry;
-  // a selected implementation returning NotImplemented raises.
-  virtual bool fake_try_fast_impl(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
-  // Checks the live custom-op profile before registered fake and Meta kernels.
-  // The mode stays uninstalled; selected profiles finalize their own outputs.
-  virtual bool fake_try_custom_op_profile(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
-  // has_python_cia is set if op has a Python CIA override, even when this
-  // returns false.
-  virtual bool fake_try_decomp(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      bool has_symbolic_sizes,
-      bool* has_python_cia) const = 0;
-  // Runs under the caller's Meta dispatch and in-kernel state.
-  virtual bool fake_try_meta(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack) const = 0;
-  // Takes the fallback's uninstalled mode; run_fake_impl enters it.
-  // real (nullable, borrowed) is the fake_run_real_op
-  // result, used if a profile-generated fake kernel has no profile for these
-  // inputs.
-  virtual bool run_fake_impl(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<c10::FakeTensorMode>& mode,
-      PyObject* real) const = 0;
-  // Takes the fallback's mode, which is uninstalled while handlers run.
-  // Non-fake Meta outputs are converted to fakes on common_device, and are an
-  // error without one. Inputs with irreconcilable devices have no
-  // common_device. Constructors finalize their own output devices. See Note
-  // [C++ fake op_impl outputs] in torch/csrc/PyInterpreter.cpp.
-  virtual bool fake_try_op_impl(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<c10::FakeTensorMode>& mode,
-      std::optional<c10::Device> common_device) const = 0;
-  // Runs prim_meta_impl with the caller's mode entered. Returns false if
-  // absent; a selected implementation returning NotImplemented raises.
-  virtual bool prim_meta_impl(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack) const = 0;
-  // Takes the uninstalled mode. Returns false if op has a fake kernel. real
-  // (borrowed) is the fake_run_real_op result.
-  virtual bool fake_infer_from_real_out(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<c10::FakeTensorMode>& mode,
-      PyObject* real) const = 0;
-  // Runs Python's trivial fake or permitted real-kernel fallback on the
-  // restored arguments, with mode uninstalled and outside Meta invocation.
-  // A non-null error must be NotImplementedError (native or Python), otherwise
-  // it is rethrown. It is passed to run_fallback_kernel for alias/inplace-view
-  // failures. Replaces arguments with outputs on success, leaves them on error.
-  virtual void maybe_run_unsafe_fallback(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<c10::FakeTensorMode>& mode,
-      bool has_symbolic_sizes,
-      std::exception_ptr error) const = 0;
-  // Validates real input subclasses, then optionally tries initial constant
-  // computation or a plain lift while holding the GIL. Replaces the
-  // arguments with the converted output on success; otherwise leaves them
-  // intact.
-  virtual bool fake_try_initial_constant(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<c10::FakeTensorMode>& mode,
-      bool makes_constant,
-      bool is_lift) const = 0;
-  // Converts real through mode's converter under one GIL acquisition.
-  // PlainTensor and ClonedConstant return nullptr unless real has the exact
-  // Python Tensor type (or no Python object). ClonedConstant checks the type
-  // before constant eligibility and cloning with dispatch disabled; it also
-  // returns nullptr for ineligible constants. Constant preserves input aliases.
-  virtual c10::intrusive_ptr<TensorImpl> from_real_tensor(
-      const std::shared_ptr<c10::FakeTensorMode>& mode,
-      const c10::intrusive_ptr<TensorImpl>& real,
-      FakeTensorConversion conversion =
-          FakeTensorConversion::Default) const = 0;
-  // Whether real tensor inputs are allowed: fake_tensor_tls's override if set,
-  // else mode's allow_non_fake_inputs_.
-  virtual bool allow_non_fake_inputs(
-      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
-  // Takes the uninstalled mode. Runs op on the reals behind fake_args and
-  // returns the RealOpResult as a new reference, or nullptr if an arg has no
-  // real tensor or the real op raises ZeroDivisionError.
-  virtual PyObject* fake_run_real_op(
-      const c10::OperatorHandle& op,
-      const torch::jit::Stack& fake_args,
-      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
-  // Takes the uninstalled mode. Applies real (borrowed) to the fake outputs on
-  // top of stack, replacing them if the Python side returns new ones.
-  virtual void propagate_real_tensors(
-      const c10::OperatorHandle& op,
-      PyObject* real,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<c10::FakeTensorMode>& mode) const = 0;
 };
 
 struct C10_API PyInterpreter {
