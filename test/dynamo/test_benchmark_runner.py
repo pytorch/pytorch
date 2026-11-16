@@ -41,7 +41,8 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# Skips before setUp spawns workers. The inductor_huggingface_tp job runs these.
+# Skips before setUp spawns workers. The inductor_benchmark_runner CI config sets
+# PYTORCH_TEST_WITH_SLOW=1.
 launches_processes = unittest.skipIf(
     not TEST_WITH_SLOW, "launches processes; set PYTORCH_TEST_WITH_SLOW=1"
 )
@@ -229,6 +230,15 @@ class BenchmarkRunnerTests(TestCase):
         with self.assertRaisesRegex(ValueError, "requires the huggingface suite"):
             common.BenchmarkRunner().validate_args(args)
 
+    @skipIfTorchDynamo("parse_args is slow to trace")
+    @parametrize("rank, signposts", ((0, 1), (1, 0)))
+    def test_tp_signposts_come_from_rank_zero(self, rank, signposts):
+        args = common.parse_args(["--performance", "--inference", "--tp-size=2"])
+        args.rank = rank
+        with mock.patch.object(common, "open_source_signpost") as signpost:
+            common.output_signpost({"name": "model"}, args, "huggingface")
+        self.assertEqual(signpost.call_count, signposts)
+
     @skipIfTorchDynamo("speedup_experiment calls set_stance")
     @torch._dynamo.config.patch(repro_tolerance=1e-4)
     def test_tp_speedup_row_accounting(self):
@@ -251,6 +261,9 @@ class BenchmarkRunnerTests(TestCase):
         inputs = {"input_ids": torch.zeros(2, 3, dtype=torch.long)}
         with (
             mock.patch.object(common, "current_batch_size", 2),
+            mock.patch.object(
+                common, "current_settings", {"prompt_length": 3, "decode_length": 0}
+            ),
             mock.patch.object(common, "output_filename", "results.csv"),
             mock.patch.object(
                 common, "timed", side_effect=[(4.0, None), (2.0, None)]
@@ -700,9 +713,10 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
     )
     def test_invalid_options_rejected_before_launch(self, extra, message):
         runner = self.huggingface.HuggingfaceRunner()
+        launched = AssertionError("launched before validation")
         with (
-            mock.patch.object(common.mp, "spawn") as spawn,
-            mock.patch.object(common, "process_entry") as entry,
+            mock.patch.object(common.mp, "spawn", side_effect=launched),
+            mock.patch.object(common, "process_entry", side_effect=launched),
             self.assertRaisesRegex(ValueError, message),
         ):
             common.main(
@@ -714,8 +728,6 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
                     *extra,
                 ],
             )
-        spawn.assert_not_called()
-        entry.assert_not_called()
 
     @parametrize("mode", ("prefill", "decode"))
     def test_phase_requires_inference_backend(self, mode):
@@ -728,6 +740,10 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
         args.backend = None
         with self.assertRaisesRegex(ValueError, "requires --backend or --inductor"):
             runner.validate_args(args)
+        flags = ["--inference", "--inductor", f"--hf-inference-mode={mode}"]
+        args = common.parse_args(["--performance", *flags])
+        self.assertEqual(args.backend, "inductor")
+        runner.validate_args(args)
 
     @parametrize("mode", ("prefill", "decode"))
     @parametrize("name", ("Qwen/Qwen3-0.6B", "Qwen/Qwen3.5-0.8B"))
@@ -780,8 +796,9 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
         args = self._runner_args(f"--decode-length={decode_length}", mode="decode")
         with self.assertRaisesRegex(ValueError, "must be between 1 and 1999"):
             runner.validate_args(args)
-        args.decode_length = 1999
-        runner.validate_args(args)
+        for valid in (1, 1999):
+            args.decode_length = valid
+            runner.validate_args(args)
 
     @parametrize("mode", ("prefill", "decode"))
     @parametrize("prompt_length", (None, 7))
@@ -962,6 +979,7 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
             torch._dynamo.config.patch(base_dir=tmp),
             # run() rebinds module globals such as output_filename and current_name.
             mock.patch.dict(vars(common)),
+            mock.patch.object(common, "output_signpost") as signpost,
             self._record_cache_lengths(mode) as cache_lengths,
             self._mock_pretrained(),
         ):
@@ -977,6 +995,7 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
                 mode=mode,
             )
             common.run(runner, args)
+            signpost.assert_called_once_with(mock.ANY, args, "huggingface")
             trace = os.path.join(tmp, f"eager_{mode}_Qwen_Qwen3-0.6B.json")
             self.assertTrue(os.path.exists(trace))
             with open(os.path.join(tmp, f"speedup_eager_{mode}.csv")) as f:
@@ -1001,29 +1020,42 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
         tokens_per_second = 2 * 2 * tokens / (float(row["abs_latency"]) / 1000)
         self.assertEqual(float(row[column]), tokens_per_second, rtol=1e-3, atol=0)
 
-    def test_prefill_operator_logging_prepares_cache(self):
+    @parametrize("mode", ("prefill", "decode"))
+    def test_operator_logging_prepares_cache(self, mode):
+        from benchmarks.dynamo.microbenchmarks.operator_inp_utils import (
+            OperatorInputsMode,
+        )
+
         runner = self.huggingface.HuggingfaceRunner()
-        phase = self.huggingface.INFERENCE_PHASES["prefill"]
+        phase = self.huggingface.INFERENCE_PHASES[mode]
+
+        def setup_fn(model, example_inputs):
+            modes = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+            self.assertFalse(any(isinstance(m, OperatorInputsMode) for m in modes))
+            phase.setup_fn(model, example_inputs)
 
         def forward(model, example_inputs, collect_outputs=True):
             self.assertIsNotNone(model.cache)
             return phase.iter_fn(model, example_inputs, collect_outputs)
 
-        setup = mock.Mock(wraps=phase.setup_fn)
+        setup = mock.Mock(side_effect=setup_fn)
         run_forward = mock.Mock(side_effect=forward)
         with (
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.dict(vars(common)),
             mock.patch.dict(os.environ),
-            self._patch_phase("prefill", setup_fn=setup, iter_fn=run_forward),
+            self._patch_phase(mode, setup_fn=setup, iter_fn=run_forward),
             self._mock_pretrained(),
         ):
+            extra = ("--decode-length=3",) if mode == "decode" else ()
             args = self._runner_args(
                 "--only=Qwen/Qwen3-0.6B",
                 "--batch-size=2",
                 "--prompt-length=7",
                 "--log-operator-inputs",
                 f"--output={tmp}/results.csv",
+                *extra,
+                mode=mode,
             )
             common.run(runner, args)
             self.assertGreaterEqual(run_forward.call_count, 2)
@@ -1051,11 +1083,15 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
         "extra, message",
         [
             ("--tp-size=0", "--tp-size must be positive"),
-            ("--multiprocess", "does not support --multiprocess"),
             ("--device-index=0", "does not support --device-index"),
             ("--warm-start-latency", "does not support --warm-start-latency"),
+            ("--caching-precompile", "does not support --caching-precompile"),
+            ("--save-model-outputs-to=x", "does not support --save-model-outputs-to"),
+            ("--compare-model-outputs-with=x", "support --compare-model-outputs-with"),
+            ("--diff-branch=x", "does not support --diff-branch"),
+            ("--log-operator-inputs", "does not support --log-operator-inputs"),
             ("--minify", "does not support --minify"),
-            ("--ddp", "does not support --ddp"),
+            ("-dcuda", "does not support multiple --devices"),
         ],
     )
     def test_invalid_tp_options(self, extra, message):
@@ -1092,7 +1128,8 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
         with self.assertRaisesRegex(ValueError, "re-enable CUDA graphs"):
             runner.validate_args(args)
         args.inductor_compile_mode = "max-autotune-no-cudagraphs"
-        runner.validate_args(args)
+        with mock.patch.object(torch.cuda, "device_count", return_value=2):
+            runner.validate_args(args)
 
     @parametrize("use_inductor_flag", (False, True))
     @parametrize("enabled", ("True", "1"))
@@ -1106,7 +1143,8 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
         with self.assertRaisesRegex(ValueError, "re-enable CUDA graphs"):
             runner.validate_args(args)
         args.inductor_config.append("triton.cudagraphs=False")
-        runner.validate_args(args)
+        with mock.patch.object(torch.cuda, "device_count", return_value=2):
+            runner.validate_args(args)
 
     def test_cpu_tp_requires_no_accelerator(self):
         runner = self.huggingface.HuggingfaceRunner()
@@ -1133,15 +1171,39 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
         ):
             runner.validate_args(args)
         args.devices = ["cuda"]
-        runner.validate_args(args)
+        with mock.patch.object(torch.cuda, "device_count", return_value=2):
+            runner.validate_args(args)
+
+    def test_tp_rejects_unusable_devices(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._tp_args()
+        args.devices = ["cuda"]
+        with (
+            mock.patch.object(torch.cuda, "device_count", return_value=1),
+            self.assertRaisesRegex(ValueError, "needs 2 CUDA devices, found 1"),
+        ):
+            runner.validate_args(args)
+        args.devices = ["cuda:1"]
+        with self.assertRaisesRegex(ValueError, "supports only -dcuda or -dcpu"):
+            runner.validate_args(args)
 
     @parametrize("mode", ("prefill", "decode"))
-    def test_tp_resolves_result_identity(self, mode):
+    def test_tp_result_identity(self, mode):
         runner = self.huggingface.HuggingfaceRunner()
-        args = self._tp_args(mode=mode)
-        runner.validate_args(args)
-        expected = [mode, 2, 1000, 128 if mode == "decode" else 0]
-        self.assertEqual(common.tensor_parallel_identity(args)[1], expected)
+        runner.args = self._tp_args(mode=mode)
+        runner.validate_args(runner.args)
+        inputs = {"input_ids": torch.zeros(1, 7, dtype=torch.long)}
+        if mode == "decode":
+            inputs["decode_ids"] = torch.zeros(1, 3, dtype=torch.long)
+        with mock.patch.dict(vars(common)):
+            common.current_settings = None
+            # Rows written without a loaded model record the requested dimensions.
+            identity = common.tensor_parallel_identity(runner.args)[1]
+            self.assertEqual(identity, [mode, 2, None, None])
+            metadata = runner.get_model_metadata(inputs)
+            common.set_current_metadata(runner.args, model_metadata=metadata)
+            identity = common.tensor_parallel_identity(runner.args)[1]
+        self.assertEqual(identity, [mode, 2, 7, 3 if mode == "decode" else 0])
 
     def test_tp_requires_divisible_heads(self):
         from benchmarks.dynamo import huggingface_llm_models as llm
@@ -1348,6 +1410,8 @@ class TestHuggingFaceLLMPhasesDevice(HuggingFaceLLMPhaseTestCase):
         ):
             status = runner.check_accuracy("tiny", model, inputs, optimize, None, None)
         self.assertEqual(status, "pass")
+        # The fp64 reference ran, rather than falling back to cosine similarity.
+        self.assertFalse(runner.args.cosine)
         self.assertEqual(compiled_functions, ["forward"])
 
     @onlyCUDA
@@ -1592,19 +1656,15 @@ class TestHuggingFaceTensorParallel(MultiProcessTestCase):
             )
 
     @contextlib.contextmanager
-    def _count_eager_collectives(self):
+    def _count_eager_all_reduces(self):
         counts = collections.Counter()
+        all_reduce = torch.distributed.all_reduce
 
-        def counted(name):
-            collective = getattr(torch.distributed, name)
+        def counted(*args, **kwargs):
+            counts["all_reduce"] += 1
+            return all_reduce(*args, **kwargs)
 
-            def wrapper(*args, **kwargs):
-                counts[name] += 1
-                return collective(*args, **kwargs)
-
-            return mock.patch.object(torch.distributed, name, wrapper)
-
-        with counted("all_reduce"), counted("all_gather"):
+        with mock.patch.object(torch.distributed, "all_reduce", counted):
             yield counts
 
     def _check_sharding(self, model, reference):
@@ -1673,7 +1733,7 @@ class TestHuggingFaceTensorParallel(MultiProcessTestCase):
         self._check_sharding(model, reference)
 
         prompt = {"input_ids": inputs["input_ids"]}
-        with self._count_eager_collectives() as counts:
+        with self._count_eager_all_reduces() as counts:
             prefill = _run_phase("prefill", model, prompt)
         self.assertGreater(counts["all_reduce"], 0)
         self.assertEqual(prefill, _run_phase("prefill", reference, prompt), **tolerance)

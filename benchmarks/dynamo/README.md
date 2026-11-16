@@ -131,7 +131,9 @@ recompiles on every step.
 Each decode request prefills the prompt eagerly into the static cache outside
 the timed region, then times `--decode-length` (default 128, at most 1999)
 single-token compiled forwards. Decode feeds fixed random tokens rather than
-sampled ones and returns the last step's logits.
+sampled ones and returns the last step's logits. Profiler traces and the
+`eager_peak_mem`, `dynamo_peak_mem`, and `compression_ratio` columns include the
+eager prefill.
 
 Prefill and decode require `--inference` and a backend. They reject `--amp`,
 `--aot-precompile`, `--batch-invariant`, `--compare-backed-unbacked`, `--ddp`,
@@ -198,15 +200,17 @@ output names get a `_<phase>_tp<N>` suffix; profiler traces and memory
 snapshots get per-rank names.
 Accuracy runs agree on comparison outcomes across ranks. Exceptions during
 loading or execution, including the FP64 reference, terminate the worker
-immediately so torchrun can stop peers blocked in model collectives. These
-execution failures remain fatal even when an accuracy failure is expected.
+immediately so torchrun can stop peers blocked in model collectives, without
+writing a result row; the worker group exits non-zero. These execution failures
+remain fatal even when an accuracy failure is expected.
 The process-group timeout covers hangs that do not raise an exception.
 
 TP requires `--disable-cudagraphs` and rejects `--backend=cudagraphs` until CUDA
-graphs are validated with it.
+graphs are validated with it. It also rejects `--caching-precompile`,
+`--compare-model-outputs-with`, `--device-index`, `--diff-branch`,
+`--log-operator-inputs`, `--minify`, `--save-model-outputs-to`,
+`--warm-start-latency`, and multiple `--devices`.
 Multi-node runs, several TP groups, and other parallelism styles are
 unsupported. Inductor TP requires CUDA/NCCL. With a CPU-only PyTorch build,
 `-dcpu` supports TP diagnostics with `--backend=eager` or
-`--backend=aot_eager`. CPU Inductor TP is rejected because concurrent Gloo
-all-gathers can corrupt memory; this was reproduced without a model or
-compilation and is not specific to Qwen3.5.
+`--backend=aot_eager`.
