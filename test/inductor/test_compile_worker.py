@@ -15,6 +15,7 @@ from concurrent.futures.process import BrokenProcessPool
 from threading import Event
 from unittest.mock import patch
 
+import torch
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
     _recv_msg,
@@ -38,6 +39,8 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
+from torch.utils._triton import has_triton_package
+from torch.utils.cpp_extension import CUDA_HOME
 
 
 class TestCompileWorker(TestCase):
@@ -1315,6 +1318,7 @@ class TestSubprocessEnv(TestCase):
                 else:
                     os.environ[key] = value
 
+    @unittest.skipIf(not has_triton_package(), "triton not available")
     def test_worker_compile_triton_clears_libdevice_path(self):
         try:
             from triton import knobs
@@ -1390,21 +1394,29 @@ class TestSubprocessEnv(TestCase):
 
 
 class TestSetTritonLibdevicePath(TestCase):
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
     def test_emulate_precision_casts_sets_libdevice_path(self):
         """Test eager numerics mode sets libdevice path for CUDA libdevice calls."""
         self._test_libdevice_path_with_compilation()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch({"compile_threads": 1, "eager_numerics.use_pytorch_libdevice": True})
     def test_libdevice_path_no_subprocess(self):
         """Test libdevice path is set with compile_threads=1 (no subprocess)."""
         self._test_libdevice_path_with_compilation()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch("eager_numerics.use_pytorch_libdevice", True)
     def test_libdevice_path_default_threads(self):
         """Test libdevice path is set with default compile_threads (subprocess)."""
         self._test_libdevice_path_with_compilation()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch(
         {
             "eager_numerics.use_pytorch_libdevice": True,
@@ -1435,6 +1447,8 @@ class TestSetTritonLibdevicePath(TestCase):
         compiled_result = torch.compile(torch.pow)(base, exp)
         self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
     def test_erf_bitwise_precision_with_emulate_precision_casts(self):
         """Test that erf matches eager bitwise when eager numerics mode is active."""
