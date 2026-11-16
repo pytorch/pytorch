@@ -155,6 +155,7 @@ def _fits_int32_buffer_span(rows_m: int, n: int, itemsize: int) -> bool:
     return (
         0 < rows_m <= int32_max
         and 0 < n <= int32_max
+        and rows_m * n <= int32_max
         and rows_m * n * itemsize <= uint32_max
     )
 
