@@ -55,7 +55,11 @@ from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
 from torch._library.opaque_object import _OPAQUE_TYPES_BY_NAME
 from torch._subclasses import FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
+from torch._subclasses.fake_tensor import (
+    fake_mode_cls,
+    is_fake_tensor,
+    maybe_get_fake_mode,
+)
 from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._patches import register_lstm_while_loop_decomposition
 from torch.export._trace import (
@@ -87,10 +91,12 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfRocm,
@@ -588,6 +594,7 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
         return x + a
 
 
+@instantiate_parametrized_tests
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
@@ -3240,7 +3247,8 @@ graph():
         larger_input = (torch.tensor([[0.0, 3.0], [4.0, 0.0], [5.0, 6.0]]),)
         self.assertEqual(ep.module()(*larger_input), test_module(*larger_input))
 
-    def test_basic_non_strict_fake_tensor(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_basic_non_strict_fake_tensor(self, use_cpp_fake_tensor):
         class Basic(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -3249,15 +3257,16 @@ graph():
             def forward(self, x, y):
                 return x[0] + y - self.param
 
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))
         f = Basic()
-        with fake_mode:
-            args = ([torch.empty(3, 2)], torch.empty(3, 2))
-        ep = export(f, args, strict=False)
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            with fake_mode_cls()(shape_env=ShapeEnv(tracked_fakes=[])):
+                args = ([torch.empty(3, 2)], torch.empty(3, 2))
+            ep = export(f, args, strict=False)
         inputs = ([torch.randn(3, 2)], torch.randn(3, 2))
         self.assertEqual(ep.module()(*inputs), f(*inputs))
 
-    def test_non_strict_dynamic_shapes(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_non_strict_dynamic_shapes(self, use_cpp_fake_tensor):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -3289,9 +3298,10 @@ graph():
             None,
         )
 
-        ep_ns = torch.export.export(
-            foo, inp, dynamic_shapes=dynamic_shapes, strict=False
-        )
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            ep_ns = torch.export.export(
+                foo, inp, dynamic_shapes=dynamic_shapes, strict=False
+            )
 
         bad_runtime_inp1 = (
             torch.ones(6),
@@ -3337,9 +3347,10 @@ graph():
             torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
             "2 not in range.*3,",
         ):
-            ep_ns = torch.export.export(
-                foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
-            )
+            with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+                ep_ns = torch.export.export(
+                    foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
+                )
 
     def test_non_strict_dynamic_shapes_suggested_fixes(self):
         class Foo(torch.nn.Module):
@@ -6676,7 +6687,8 @@ def forward(self, x):
             with self.assertWarnsRegex(UserWarning, warn_re):
                 ep = export(lc, (torch.randn(4, 4), torch.randn(4, 4)), strict=False)
 
-    def test_export_for_training_run_decomp(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_export_for_training_run_decomp(self, use_cpp_fake_tensor):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -6688,11 +6700,12 @@ def forward(self, x):
                 return self.linear(x) + self.buffer.sum()
 
         eager_model = Foo()
-        ep_for_training = torch.export.export(
-            eager_model,
-            (torch.ones(2, 2),),
-        )
-        ep_for_inference = ep_for_training.run_decompositions()
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            ep_for_training = torch.export.export(
+                eager_model,
+                (torch.ones(2, 2),),
+            )
+            ep_for_inference = ep_for_training.run_decompositions()
         self.assertExpectedInline(
             str(ep_for_inference.graph_module.code).strip(),
             """\
@@ -11780,7 +11793,8 @@ def forward(self, b_a_buffer, x):
         with self.assertRaisesRegex(ValueError, "Trying to flatten user inputs"):
             exported_program.module()(torch.rand(2, 3), torch.rand(2, 3))
 
-    def test_export_decomps_simple(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_export_decomps_simple(self, use_cpp_fake_tensor):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -11791,12 +11805,14 @@ def forward(self, b_a_buffer, x):
 
         inp = (torch.randn(5, 10),)
         m = M()
-        ep = export(m, inp)
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            ep = export(m, inp)
         state_dict = ep.state_dict
 
         self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-        core_aten_ep = ep.run_decompositions()
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            core_aten_ep = ep.run_decompositions()
         FileCheck().check_count("torch.ops.aten.permute.default", 1, exactly=True).run(
             core_aten_ep.graph_module.code
         )
@@ -11911,7 +11927,8 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     return (add_tensor_1,)""",
         )
 
-    def test_export_decomps_dynamic(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_export_decomps_dynamic(self, use_cpp_fake_tensor):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -11922,9 +11939,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
 
         inp = (torch.randn(5, 10),)
         m = M()
-        ep = export(m, inp, dynamic_shapes={"x": {0: Dim("batch")}})
-
-        core_aten_ep = ep.run_decompositions()
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            ep = export(m, inp, dynamic_shapes={"x": {0: Dim("batch")}})
+            core_aten_ep = ep.run_decompositions()
 
         input_node = [
             node for node in core_aten_ep.graph.nodes if node.op == "placeholder"
@@ -12050,7 +12067,8 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             # expected 4, but got 7
             ep_v2.module()(*test_inp)
 
-    def test_constant_output(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_constant_output(self, use_cpp_fake_tensor):
         class ModuleConstant(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -12068,12 +12086,14 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
                 return {"prediction": (x + y, self.bff)}
 
         mod = ModuleConstant()
-        ep = export(mod, ())
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            ep = export(mod, ())
         self.assertEqual(ep.module()(), mod())
 
         args = (torch.randn(3, 2), torch.randn(3, 2))
         mod = ModuleNestedConstant()
-        ep = export(mod, args)
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            ep = export(mod, args)
         self.assertEqual(ep.module()(*args), mod(*args))
 
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
@@ -12395,9 +12415,8 @@ graph():
         inp = (torch.randn(2, 8),)
         ep = export(M(), inp)  # This errors because dynamo adds an extra input
 
-    def test_export_with_fake_tensor_inputs(self):
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_export_with_fake_tensor_inputs(self, use_cpp_fake_tensor):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -12408,7 +12427,11 @@ graph():
                 return out
 
         # Put the inputs on a device
-        with fake_mode, torch.device("meta"):
+        with (
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor),
+            fake_mode_cls()(),
+            torch.device("meta"),
+        ):
             x = torch.rand(5, 2, 2)
             model = Model()
 
@@ -12481,7 +12504,8 @@ graph():
 
         check_device_and_fake_mode()
 
-    def test_run_decomposition_supports_user_input_mutation(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_run_decomposition_supports_user_input_mutation(self, use_cpp_fake_tensor):
         class SingleOp(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -12525,20 +12549,21 @@ graph():
             input, weight, bias, running_mean, running_var, training, momentum, eps
         )
 
-        ep = torch.export.export(
-            model,
-            args=(
-                input,
-                weight,
-                bias,
-                running_mean,
-                running_var,
-                training,
-                momentum,
-                eps,
-            ),
-        )
-        ep.run_decompositions()
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            ep = torch.export.export(
+                model,
+                args=(
+                    input,
+                    weight,
+                    bias,
+                    running_mean,
+                    running_var,
+                    training,
+                    momentum,
+                    eps,
+                ),
+            )
+            ep.run_decompositions()
         self.assertEqual(
             ep.module()(
                 input, weight, bias, running_mean, running_var, training, momentum, eps
@@ -15785,7 +15810,8 @@ def forward(self, x, b_t, y):
         for n1, n2 in zip(list(ep.graph.nodes), list(ep2.graph.nodes)):
             self.assertEqual(n1.meta.get("stack_trace"), n2.meta.get("stack_trace"))
 
-    def test_fake_weights(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_fake_weights(self, use_cpp_fake_tensor):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -15796,16 +15822,15 @@ def forward(self, x, b_t, y):
             def forward(self, x):
                 return self.foo + x + self.bar + self.baz
 
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[])
-        )
-        with fake_mode:
-            m = MyModule()
-        inp = torch.randn(4, 4)
-        ep = export(m, (inp,))
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            with fake_mode_cls()(shape_env=ShapeEnv(tracked_fakes=[])):
+                m = MyModule()
+            inp = torch.randn(4, 4)
+            ep = export(m, (inp,))
         # Can't compare outputs because the module has fake weights.
 
-    def test_fake_inputs(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_fake_inputs(self, use_cpp_fake_tensor):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -15814,14 +15839,11 @@ def forward(self, x, b_t, y):
             def forward(self, x):
                 return self.foo + x
 
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[])
-        )
         m = MyModule()
-        with fake_mode:
-            inp = torch.randn(4, 4)
-
-        ep = export(m, (inp,))
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            with fake_mode_cls()(shape_env=ShapeEnv(tracked_fakes=[])):
+                inp = torch.randn(4, 4)
+            ep = export(m, (inp,))
         self.assertEqual(ep.module()(torch.ones(4, 4)), m(torch.ones(4, 4)))
 
     def test_double_lifted_constants(self):
@@ -15837,7 +15859,8 @@ def forward(self, x, b_t, y):
         for out, real_out in zip(ep.module()(), m()):
             self.assertTrue(torch.allclose(out, real_out))
 
-    def test_trace_under_fake(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_trace_under_fake(self, use_cpp_fake_tensor):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -15846,10 +15869,10 @@ def forward(self, x, b_t, y):
             def forward(self, x):
                 return self.foo + x
 
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[])
-        )
-        with fake_mode:
+        with (
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor),
+            fake_mode_cls()(shape_env=ShapeEnv(tracked_fakes=[])),
+        ):
             m = MyModule()
             inp = torch.randn(4, 4)
             # Can't use unqualified export() as it will attempt to deserialize

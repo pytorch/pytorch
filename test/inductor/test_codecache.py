@@ -80,7 +80,7 @@ from torch._inductor.triton_bundler import (
 from torch._inductor.utils import clear_caches, fresh_cache
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
-from torch._subclasses.fake_tensor import maybe_get_fake_mode
+from torch._subclasses.fake_tensor import fake_mode_cls, maybe_get_fake_mode
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -3558,54 +3558,56 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             x = torch.randn(5)
             (result,) = compiled_artifact(4, x)
 
-    def test_dynamic_shapes_from_example_inputs_fake_mode(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_dynamic_shapes_from_example_inputs_fake_mode(self, use_cpp_fake_tensor):
         def f(x):
             return x + 1
 
-        gm = torch.fx.symbolic_trace(f)
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        fake_x = fake_mode.from_tensor(torch.ones(4), static_shapes=True)
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            gm = torch.fx.symbolic_trace(f)
+            fake_mode = fake_mode_cls()(shape_env=ShapeEnv())
+            fake_x = fake_mode.from_tensor(torch.ones(4), static_shapes=True)
 
-        seen_fake_modes = []
-        seen_ignore_shape_env = []
+            seen_fake_modes = []
+            seen_ignore_shape_env = []
 
-        def fake_compile_fx(gm, example_inputs, **kwargs):
-            seen_fake_modes.append(torch._guards.TracingContext.get().fake_mode)
-            seen_ignore_shape_env.append(kwargs["ignore_shape_env"])
-            self.assertIs(example_inputs[0], fake_x)
-            return lambda *args: args
+            def fake_compile_fx(gm, example_inputs, **kwargs):
+                seen_fake_modes.append(torch._guards.TracingContext.get().fake_mode)
+                seen_ignore_shape_env.append(kwargs["ignore_shape_env"])
+                self.assertIs(example_inputs[0], fake_x)
+                return lambda *args: args
 
-        with mock.patch(
-            "torch._inductor.compile_fx.compile_fx", side_effect=fake_compile_fx
-        ):
-            torch._inductor.standalone_compile(
-                gm,
-                (fake_x,),
-                dynamic_shapes="from_example_inputs",
-                fake_mode=fake_mode,
+            with mock.patch(
+                "torch._inductor.compile_fx.compile_fx", side_effect=fake_compile_fx
+            ):
+                torch._inductor.standalone_compile(
+                    gm,
+                    (fake_x,),
+                    dynamic_shapes="from_example_inputs",
+                    fake_mode=fake_mode,
+                )
+
+            self.assertEqual(seen_ignore_shape_env, [True])
+            self.assertIs(seen_fake_modes[0], fake_mode)
+
+            seen_fake_modes.clear()
+            seen_ignore_shape_env.clear()
+            with mock.patch(
+                "torch._inductor.compile_fx.compile_fx", side_effect=fake_compile_fx
+            ):
+                torch._inductor.standalone_compile(
+                    gm,
+                    (fake_x,),
+                    dynamic_shapes="from_example_inputs",
+                )
+
+            self.assertEqual(seen_ignore_shape_env, [True])
+            self.assertIsNot(seen_fake_modes[0], fake_mode)
+            self.assertIs(
+                maybe_get_fake_mode(seen_fake_modes[0].from_tensor(torch.ones(1))),
+                seen_fake_modes[0],
             )
-
-        self.assertEqual(seen_ignore_shape_env, [True])
-        self.assertIs(seen_fake_modes[0], fake_mode)
-
-        seen_fake_modes.clear()
-        seen_ignore_shape_env.clear()
-        with mock.patch(
-            "torch._inductor.compile_fx.compile_fx", side_effect=fake_compile_fx
-        ):
-            torch._inductor.standalone_compile(
-                gm,
-                (fake_x,),
-                dynamic_shapes="from_example_inputs",
-            )
-
-        self.assertEqual(seen_ignore_shape_env, [True])
-        self.assertIsNot(seen_fake_modes[0], fake_mode)
-        self.assertIs(
-            maybe_get_fake_mode(seen_fake_modes[0].from_tensor(torch.ones(1))),
-            seen_fake_modes[0],
-        )
-        self.assertIsNotNone(seen_fake_modes[0].shape_env)
+            self.assertIsNotNone(seen_fake_modes[0].shape_env)
 
     def test_dynamic_shapes_from_graph_tensor_subclass_fake_mode(self):
         @torch._dynamo.allow_in_graph
@@ -3683,19 +3685,21 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("is_aot", (True, False))
     @parametrize("dynamic_shapes", ["from_graph", "from_example_inputs"])
-    def test_static_shapes(self, dynamic_shapes, is_aot):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_static_shapes(self, dynamic_shapes, is_aot, use_cpp_fake_tensor):
         def f(x):
             return x.shape[0] * x
 
         static_x = torch.randn(3)
-        with fresh_cache():
-            # static_gm is lambda x: x * 3
-            static_gm, args, kwargs = self.capture(f, dynamic=False)(static_x)
-            if kwargs:
-                raise AssertionError
-        compiled_artifact = torch._inductor.standalone_compile(
-            static_gm, [static_x], dynamic_shapes=dynamic_shapes, aot=is_aot
-        )
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            with fresh_cache():
+                # static_gm is lambda x: x * 3
+                static_gm, args, kwargs = self.capture(f, dynamic=False)(static_x)
+                if kwargs:
+                    raise AssertionError
+            compiled_artifact = torch._inductor.standalone_compile(
+                static_gm, [static_x], dynamic_shapes=dynamic_shapes, aot=is_aot
+            )
         x = torch.randn(3)
         (result,) = compiled_artifact(x)
         self.assertEqual(result, x * 3)
@@ -3708,7 +3712,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("is_aot", (True, False))
     @parametrize("dynamic_shapes", ["from_tracing_context", "from_graph"])
-    def test_backend(self, dynamic_shapes, is_aot):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_backend(self, dynamic_shapes, is_aot, use_cpp_fake_tensor):
         def f(x):
             return x.shape[0] * x
 
@@ -3725,7 +3730,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             return compiled_artifact
 
         torch._dynamo.reset()
-        _ = torch.compile(f, backend=backend)(x)
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            _ = torch.compile(f, backend=backend)(x)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -3880,6 +3886,7 @@ class _TestCustomPartitionerFn(CustomPartitionerFn):
         return self._uuid
 
 
+@instantiate_parametrized_tests
 class TestFxGraphCacheHashing(TestCase):
     def _fx_graph_cache_key(self, gm, example_inputs):
         details = FxGraphHashDetails(gm, example_inputs, cast(Any, {}), [])
@@ -4299,13 +4306,17 @@ class TestFxGraphCacheHashing(TestCase):
         data = pickler.dumps(large)
         self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
-    def test_hash_fake_tensors(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_hash_fake_tensors(self, use_cpp_fake_tensor):
         """
         Test hashing (pickling) FakeTensors with various characteristics.
         """
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
         pickler = FxGraphCachePickler(gm)
-        with torch._subclasses.FakeTensorMode():
+        with (
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor),
+            fake_mode_cls()(),
+        ):
             # Verify that FakeTensors get pickled into a TensorMetadata:
             with mock.patch.object(
                 pickler,
