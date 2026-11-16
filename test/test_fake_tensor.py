@@ -1536,8 +1536,12 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                 )
                 self.assertEqual(torch.ops.prim.device.default(result), expected.device)
 
-    def test_full(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_full(self, use_cpp_fake_tensor):
         # Test torch.full returns tensor with correct dtype
+        self.enterContext(
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor)
+        )
         with torch._subclasses.CrossRefFakeMode():
             y = torch.full((4, 4), 1)
 
@@ -3666,7 +3670,11 @@ class TestFakeTensorConstHandling(TestCase):
                 inputs = [a, b]
                 ref = fn(inputs)
 
-    def test_fake_tensor_batch_norm_cpu(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_fake_tensor_batch_norm_cpu(self, use_cpp_fake_tensor):
+        self.enterContext(
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor)
+        )
         with torch._subclasses.CrossRefFakeMode():
             m = torch.nn.Sequential(
                 torch.nn.BatchNorm2d(10),
