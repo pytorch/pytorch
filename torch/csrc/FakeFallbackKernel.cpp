@@ -355,7 +355,7 @@ DEFINE_CACHED_PYTHON_IMPORT(
 
 // Note [C++ fake op_impl outputs]
 // Under a C++ FakeTensorMode, Python op_implementations handlers may return raw
-// Meta tensors and leave it to fake_try_op_impl to finalize them:
+// Meta tensors and leave it to try_op_impl to finalize them:
 //  - A returned Meta tensor that is not yet fake is wrapped through the mode's
 //    converter on the op's common_device, or is an error without one.
 //  - An already-fake output is kept as is, including its device.
@@ -568,7 +568,7 @@ void invalidate_written_to_constants(
 // CompositeImplicitAutograd lookup. A caller must handle
 // the cpp_meta_supports_symint and _unbacked_special_fake_handling_ops
 // exclusions, and afterwards the native CompositeImplicitAutograd fallback.
-bool fake_try_decomp(
+bool try_decomp(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     bool has_symbolic_sizes,
@@ -655,7 +655,7 @@ bool fake_try_decomp(
       "decomposition");
 }
 
-bool fake_try_custom_op_impl(
+bool try_custom_op_impl(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     const std::shared_ptr<c10::FakeTensorMode>& mode,
@@ -679,7 +679,7 @@ bool fake_try_custom_op_impl(
 // (dispatch_to_op_implementations_dict) and the predicate-based checks
 // (constructors, like-ops, etc.); a handler returning NotImplemented passes to
 // the next one. Outputs are finalized per Note [C++ fake op_impl outputs].
-bool fake_try_op_impl(
+bool try_op_impl(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     const std::shared_ptr<c10::FakeTensorMode>& mode,
@@ -714,7 +714,7 @@ bool fake_try_op_impl(
 }
 
 // Try op's prim_meta_impl (prims meta rule) if it defines one.
-bool fake_try_prim_meta(
+bool try_prim_meta(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
   py::gil_scoped_acquire gil;
@@ -803,7 +803,7 @@ c10::intrusive_ptr<c10::TensorImpl> from_real_tensor(
   return fake_tensor.unsafeReleaseIntrusivePtr();
 }
 
-bool fake_try_initial_constant(
+bool try_initial_constant(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     const std::shared_ptr<c10::FakeTensorMode>& mode,
@@ -1011,7 +1011,7 @@ void fakeFallback(
   if (has_python_inputs || makes_constant) {
     // Validate input subclasses before any real execution. Share the GIL scope
     // with the initial constant attempt, output checks, and lift conversion.
-    if (fake_try_initial_constant(op, stack, mode, makes_constant, is_lift)) {
+    if (try_initial_constant(op, stack, mode, makes_constant, is_lift)) {
       return;
     }
   }
@@ -1275,13 +1275,13 @@ void fakeFallback(
         op.hasKernelForDispatchKey(c10::DispatchKey::CompositeImplicitAutograd);
     // Probe every native CIA op too: export writes py_kernels directly,
     // bypassing the registration hook that sets the PythonCIA bit.
-    const bool try_decomp =
+    const bool should_try_decomp =
         (has(FakeDispatchCategory::StaticShapeDecomp) && !has_sparse_inputs) ||
         has(FakeDispatchCategory::PythonCIA) || has_cia;
-    if (try_decomp) {
+    if (should_try_decomp) {
       auto decompose = [&] {
         bool has_python_cia = false;
-        if (fake_try_decomp(
+        if (try_decomp(
                 op, stack, /*has_symbolic_sizes=*/false, &has_python_cia)) {
           return true;
         }
@@ -1301,12 +1301,12 @@ void fakeFallback(
   }
   if (has(FakeDispatchCategory::PrimMeta)) {
     if (fake_run_with_mode_entered(
-            mode, [&] { return fake_try_prim_meta(op, stack); })) {
+            mode, [&] { return try_prim_meta(op, stack); })) {
       return;
     }
   }
   if (has(FakeDispatchCategory::CustomOpImpl) &&
-      fake_try_custom_op_impl(op, stack, mode, /*real=*/nullptr)) {
+      try_custom_op_impl(op, stack, mode, /*real=*/nullptr)) {
     return;
   }
   // Integer indexing works without unbacked sizes; bool indexing calls nonzero.
@@ -1331,7 +1331,7 @@ void fakeFallback(
       ? std::optional(c10::Device(c10::kCPU))
       : find_common_device(/*resolve=*/false);
   if (has(FakeDispatchCategory::OpImpl) || has_op_impl_predicate(op)) {
-    if (fake_try_op_impl(op, stack, mode, common_device)) {
+    if (try_op_impl(op, stack, mode, common_device)) {
       return;
     }
   }
