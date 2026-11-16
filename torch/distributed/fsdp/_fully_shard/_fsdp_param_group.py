@@ -311,6 +311,10 @@ class FSDPParamGroup:
         # Whether to unshard in backward: can be overridden by the user if the
         # parameters in this group are not needed for backward (e.g. embedding)
         self.unshard_in_backward: bool = True
+        # Whether this group's module is in FSDPModule.partial_backward: its
+        # parameters stay unsharded, its gradients accumulate, and its forwards
+        # and backwards leave the backward prefetch order alone
+        self._in_partial_backward: bool = False
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -674,7 +678,8 @@ class FSDPParamGroup:
             # it shouldn't change post_forward_order
             if not is_bw():
                 self.reshard()
-                self._record_post_forward()
+                if not self._in_partial_backward:
+                    self._record_post_forward()
             self._training_state = TrainingState.IDLE
             return output
 
@@ -697,7 +702,7 @@ class FSDPParamGroup:
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
-            if default_prefetch:
+            if default_prefetch and not self._in_partial_backward:
                 self._backward_prefetch()
 
     @_dynamo_disable
@@ -718,10 +723,10 @@ class FSDPParamGroup:
             )
             self._training_state = TrainingState.POST_BACKWARD
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
-                if not self.reduce_grads:
+                if not self.reduce_grads or self._in_partial_backward:
                     self._post_backward_pending = True
                     self._restore_unsharded_grad_dtypes()
-                    if self.reshard_after_backward:
+                    if self.reshard_after_backward and not self._in_partial_backward:
                         self.reshard()
                     return
                 self._post_backward_pending = False
@@ -947,7 +952,9 @@ class FSDPParamGroup:
             param = getattr(fsdp_param, "_unsharded_param", None)
             if param is None or not param.requires_grad:
                 continue
-            defer = self.reduce_grads or param.grad is not None
+            # The backwards of a partial backward accumulate across backwards
+            syncs = self.reduce_grads and not self._in_partial_backward
+            defer = syncs or param.grad is not None
             param.grad_dtype = None if defer else fsdp_param.unsharded_grad_dtype
 
     def _restore_unsharded_grad_dtypes(self) -> None:
@@ -1245,7 +1252,7 @@ class FSDPParamGroup:
     # Properties #
     @property
     def _reshard_after_forward(self) -> bool:
-        return self.post_forward_mesh_info is not None
+        return self.post_forward_mesh_info is not None and not self._in_partial_backward
 
     @property
     def _use_post_forward_mesh(self) -> bool:
