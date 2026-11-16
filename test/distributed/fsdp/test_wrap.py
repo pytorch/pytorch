@@ -231,6 +231,8 @@ class TestFSDPWrap(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @parametrize("use_or_policy", [True, False])
     def test_wrap_batchnorm_individually(self, device, use_or_policy):
+        device = torch.device(torch.device(device).type, self.rank)
+
         def never_wrap_policy(*args, **kwargs):
             return False
 
@@ -248,7 +250,7 @@ class TestFSDPWrap(FSDPTestContinuous):
             else wrap_batchnorm_individually
         )
         model = BatchNormNet()
-        fsdp = FSDP(model, auto_wrap_policy=policy)
+        fsdp = FSDP(model, auto_wrap_policy=policy, device_id=device)
         # Batchnorms should be wrapped
         for layer in [fsdp.bn1, fsdp.bn2, fsdp.bn3, fsdp.sync_bn]:
             self.assertTrue(isinstance(layer, FSDP))
@@ -262,6 +264,8 @@ class TestFSDPWrap(FSDPTestContinuous):
         if the other policy results in a module containing a BN unit being
         wrapped, the contained BN unit will still be individually wrapped.
         """
+
+        device = torch.device(torch.device(device).type, self.rank)
 
         class MyModule(nn.Module):
             def __init__(self) -> None:
@@ -284,7 +288,7 @@ class TestFSDPWrap(FSDPTestContinuous):
             _or_policy, policies=[wrap_bn_container, wrap_batchnorm_individually]
         )
         mod = MyModule()
-        fsdp = FSDP(mod, auto_wrap_policy=my_policy)
+        fsdp = FSDP(mod, auto_wrap_policy=my_policy, device_id=device)
 
         # Wrapping should be FSDP(FSDP(BatchNormNet(FSDP(BN))))
         # and not FSDP(FSDP(BatchNormNet(BN))) (in the latter the inner
@@ -301,7 +305,7 @@ class TestFSDPWrap(FSDPTestContinuous):
         # if we just wrapped BN container, individual batchnorms are not
         # wrapped.
         mod = MyModule()
-        fsdp = FSDP(mod, auto_wrap_policy=wrap_bn_container)
+        fsdp = FSDP(mod, auto_wrap_policy=wrap_bn_container, device_id=device)
         self.assertTrue(isinstance(mod.bn_container, FSDP))
         for bn in [
             fsdp.bn_container.bn1,
@@ -403,6 +407,8 @@ class TestFSDPWrap(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(1)
     def test_zero_argument(self, device):
+        device = torch.device(torch.device(device).type, self.rank)
+
         class ZeroArguModel(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -411,7 +417,7 @@ class TestFSDPWrap(FSDPTestContinuous):
             def forward(self):
                 return self.a
 
-        model = FSDP(ZeroArguModel())
+        model = FSDP(ZeroArguModel(), device_id=device)
         self.assertEqual(model(), torch.tensor([1.0]))
 
 
@@ -429,7 +435,9 @@ class TestAutoWrap(TestCase):
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_wrap(self, device, wrap_method):
         if wrap_method == WrapMethod.WRAP_API:
-            with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
+            with enable_wrap(
+                wrapper_cls=FSDP, process_group=self.process_group, device_id=device
+            ):
                 layer = wrap(nn.Linear(5, 5))
         else:
             if wrap_method != WrapMethod.FSDP_CTOR:
@@ -440,6 +448,7 @@ class TestAutoWrap(TestCase):
                 auto_wrap_policy=functools.partial(
                     size_based_auto_wrap_policy, min_num_params=1
                 ),
+                device_id=device,
             )
         self.assertTrue(isinstance(layer, FSDP))
         self.assertEqual(layer.rank, self.process_group.rank())
@@ -457,7 +466,7 @@ class TestAutoWrap(TestCase):
                 self.lin = wrap(nn.Linear(5, 5), process_group=pg)
 
         model = MyModel()
-        with enable_wrap(wrapper_cls=FSDP, process_group=pg):
+        with enable_wrap(wrapper_cls=FSDP, process_group=pg, device_id=device):
             model = wrap(model)
 
         self.assertTrue(isinstance(model, FSDP))
@@ -469,7 +478,9 @@ class TestAutoWrap(TestCase):
     )
     def test_wrap_override_defaults(self, device):
         new_process_group = DummyProcessGroup(rank=0, size=2)
-        with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
+        with enable_wrap(
+            wrapper_cls=FSDP, process_group=self.process_group, device_id=device
+        ):
             layer = wrap(nn.Linear(5, 5), process_group=new_process_group)
         self.assertTrue(isinstance(layer, FSDP))
         self.assertTrue(layer.process_group is new_process_group)
@@ -662,6 +673,7 @@ class TestAutoWrap(TestCase):
             sequential,
             process_group=self.process_group,
             auto_wrap_policy=my_auto_wrap_policy,
+            device_id=device,
         )
 
         NestedSequentialModel.verify_model(self, model)
@@ -683,6 +695,7 @@ class TestAutoWrap(TestCase):
             sequential,
             process_group=self.process_group,
             auto_wrap_policy=my_auto_wrap_policy,
+            device_id=device,
         )
 
         self.assertTrue(isinstance(model, FSDP))
@@ -705,6 +718,7 @@ class TestAutoWrap(TestCase):
             sequential,
             process_group=self.process_group,
             auto_wrap_policy=my_auto_wrap_policy,
+            device_id=device,
         )
 
         self.assertTrue(isinstance(model, FSDP))
@@ -726,6 +740,7 @@ class TestAutoWrap(TestCase):
             sequential,
             process_group=self.process_group,
             auto_wrap_policy=my_auto_wrap_policy,
+            device_id=device,
         )
         self.assertTrue(isinstance(model.module[0], FSDP))
         # Assert children of multihead attention are not wrapped
@@ -753,6 +768,7 @@ class TestAutoWrap(TestCase):
             sequential,
             process_group=self.process_group,
             auto_wrap_policy=my_auto_wrap_policy,
+            device_id=device,
         )
         # Model was wrapped in FSDP as no inner modules were wrapped.
         self.assertTrue(isinstance(model, FSDP))
@@ -779,12 +795,8 @@ class TestAutoWrap(TestCase):
             return
 
         device_type = torch.device(device).type
-        torch.accelerator.set_device_index(0)
-        device_id = (
-            torch.device(device_type, torch.accelerator.current_device_index())
-            if use_device_id
-            else None
-        )
+        torch.accelerator.set_device_index(device)
+        device_id = device if use_device_id else None
 
         # Random port in case the next test run quickly, same port would cause conflict.
         os.environ["MASTER_ADDR"] = "localhost"
@@ -804,7 +816,7 @@ class TestAutoWrap(TestCase):
         device_after_init = device_init_mode == DEVICEInitMode.DEVICE_AFTER
         try:
             sequential = NestedSequentialModel.get_model(
-                device=None if device_after_init else device_type
+                device=None if device_after_init else device
             )
             my_auto_wrap_policy = functools.partial(
                 size_based_auto_wrap_policy, min_num_params=40
@@ -817,8 +829,8 @@ class TestAutoWrap(TestCase):
             )
             NestedSequentialModel.verify_model(self, model)
             if device_after_init:
-                model = model.to(device=device_type)
-            input = torch.rand((1, 5), dtype=torch.float).to(device_type)
+                model = model.to(device=device)
+            input = torch.rand((1, 5), dtype=torch.float).to(device)
             output = model(input)
             loss = F.mse_loss(input, output)
             loss.backward()
@@ -839,6 +851,7 @@ class TestAutoWrap(TestCase):
         ignored_modules = [sequential[1], sequential[2][0]]
         fsdp_kwargs = {
             "process_group": self.process_group,
+            "device_id": device,
             "auto_wrap_policy": always_wrap_policy,
             "ignored_modules": ignored_modules,
         }
@@ -870,6 +883,7 @@ class TestAutoWrap(TestCase):
         )
         fsdp_kwargs = {
             "process_group": self.process_group,
+            "device_id": device,
             "auto_wrap_policy": my_auto_wrap_policy,
             "ignored_modules": ignored_modules,
         }
