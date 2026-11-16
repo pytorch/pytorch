@@ -79,7 +79,7 @@ class HelionCSEProxy(CSEProxy):
             # the same: bf16 values are exact in fp32 and tf32, and the dot
             # accumulates in fp32 either way.
             return x
-        if x not in kernel.dot_results:
+        if not (kernel.in_loop and x in kernel.dot_results):
             return self._default("to_dtype", (x, dtype), kwargs)
         # A bf16 matmul output saved for backward is rounded between the dot and
         # its reduction. Emitted in the K loop, the rounding reads the running sum
@@ -90,10 +90,14 @@ class HelionCSEProxy(CSEProxy):
         #         tmp5 = tmp4.to(torch.float32)
         #     out0[tile_y, tile_x] = tmp5.to(torch.bfloat16)
         # Helion: "Device value 'tmp5' cannot be carried between top-level loops".
-        # After the loop it rounds the final sum once, as eager does.
+        # After the loop it rounds the final sum once, as eager does. Only in the
+        # K loop: an epilogue's cast, as in (a @ b).to(torch.int32) + 1, is already
+        # after the loop, and in the stores it would follow the + 1 that reads it.
         with kernel.swap_buffers(kernel.stores, kernel.stores, kernel.stores):
             value = self._default("to_dtype", (x, dtype), kwargs)
+        # So that tmp5 = tmp4.to(torch.float32) follows tmp4 out of the loop.
         kernel.dot_results.add(value)
+        # The epilogue then reads value, not out0[tile_y, tile_x] from memory.
         kernel.outer_vars.add(value)
         return value
 

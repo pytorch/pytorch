@@ -162,6 +162,13 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
 """,
         )
 
+    def test_cast_epilogue(self, device):
+        # Integers, so that the int32 cast is exact.
+        a = torch.randint(-3, 4, (40, 72), device=device, dtype=torch.float32)
+        b = torch.randint(-3, 4, (72, 136), device=device, dtype=torch.float32)
+        (source,) = self.compile(lambda a, b: (a @ b).to(torch.int32) + 1, a, b)
+        self.assertIn("tmp2 = acc.to(torch.int32)", source)
+
     def test_operand_view_of_dynamic_input(self, device):
         x = randn(device, 4, 40, 72)
         torch._dynamo.mark_dynamic(x, 0)
