@@ -194,6 +194,21 @@ class TestTritonDotReduction(TestCase):
         self._check_equal(f, (x, y, z, w))
         self._check_code(f, (x, y, z, w), 1, 2)
 
+    def test_mm_bmm_not_fused(self):
+        # Both read x and have equal numel and K, but no tiling reads the bmm's
+        # y operand, y[b, k, n] with b = m // 20, by the mm's [40, 136] tiles.
+        def f(x, w, y):
+            return x @ w, torch.bmm(x.view(2, 20, 72), y)
+
+        x = torch.randn(40, 72, device=GPU_TYPE)
+        w = torch.randn(72, 136, device=GPU_TYPE)
+        y = torch.randn(2, 72, 136, device=GPU_TYPE)
+
+        self._check_equal(f, (x, w, y))
+        code = run_and_get_triton_code(torch.compile(f), x, w, y)
+        self.assertEqual(code.count("@triton.jit"), 2)
+        self.assertEqual(code.count("tl.dot("), 2)
+
     def test_bmm_fusion_complex1(self):
         # Out[O[b,i],j] += Input[I[b,i],r] * Weight[W[b],r,j] * Val[b,i]
         def f(inp, weight, val, I_idx, W_idx, O_idx, out):

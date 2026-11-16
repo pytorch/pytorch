@@ -3132,6 +3132,18 @@ class SIMDScheduling(BaseScheduling):
                     why("invalid loop order and tiling for native matmul")
                     return False
 
+                # The dots of a kernel share its (z, y, x) tiles, so they need equal
+                # [B, M, N] ranges. An mm [40, 136] and a bmm [2, 20, 136] have
+                # compatible loops, but the bmm's mat2 index then depends on y // 20.
+                dot_ranges = OrderedSet(
+                    tuple(map(tuple, n.get_ranges()))
+                    for n in (*node1.get_nodes(), *node2.get_nodes())
+                    if n.is_native_matmul()
+                )
+                if len(dot_ranges) > 1:
+                    why("native matmuls with different ranges")
+                    return False
+
             if reduction_can_fuse and any(
                 isinstance(node, scheduler.FusedStagedReduction)
                 and not isinstance(node, scheduler.FusedNestedReductions)
