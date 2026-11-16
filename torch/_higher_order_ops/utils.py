@@ -20,7 +20,6 @@ from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import (
     _validate_and_convert_non_fake_tensors,
     CppFakeTensorMode,
-    fake_mode_cls,
     FakeTensor,
     FakeTensorMode,
     is_fake_tensor,
@@ -75,7 +74,7 @@ def _find_or_create_fake_mode() -> FakeTensorMode | CppFakeTensorMode:
 
     fake_mode = detect_fake_mode()
     if fake_mode is None:
-        fake_mode = fake_mode_cls()(shape_env=ShapeEnv())
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
     return fake_mode
 
