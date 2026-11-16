@@ -720,7 +720,9 @@ def create_fw_bw_graph(
 
             fake_mode = detect_fake_mode(index_values)
             if fake_mode is None:
-                fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+                fake_mode = FakeTensorMode(
+                    _force_python=True, allow_non_fake_inputs=True
+                )
 
             with fake_mode:
                 unwrapped_score_mod_indexes = pytree.tree_map(_from_fun, index_values)
