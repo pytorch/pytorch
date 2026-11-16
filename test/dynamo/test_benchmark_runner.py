@@ -47,7 +47,8 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# Skips before setUp spawns workers. The inductor_huggingface_tp job runs these.
+# Skips before setUp spawns workers. The inductor_benchmark_runner and
+# inductor_huggingface_tp CI configs set PYTORCH_TEST_WITH_SLOW=1.
 launches_processes = unittest.skipIf(
     not TEST_WITH_SLOW, "launches processes; set PYTORCH_TEST_WITH_SLOW=1"
 )
@@ -235,6 +236,15 @@ class BenchmarkRunnerTests(TestCase):
         with self.assertRaisesRegex(ValueError, "requires the huggingface suite"):
             common.BenchmarkRunner().validate_args(args)
 
+    @skipIfTorchDynamo("parse_args is slow to trace")
+    @parametrize("rank, signposts", ((0, 1), (1, 0)))
+    def test_tp_signposts_come_from_rank_zero(self, rank, signposts):
+        args = common.parse_args(["--performance", "--inference", "--tp-size=2"])
+        args.rank = rank
+        with mock.patch.object(common, "open_source_signpost") as signpost:
+            common.output_signpost({"name": "model"}, args, "huggingface")
+        self.assertEqual(signpost.call_count, signposts)
+
     @skipIfTorchDynamo("speedup_experiment calls set_stance")
     @torch._dynamo.config.patch(repro_tolerance=1e-4)
     def test_tp_speedup_row_accounting(self):
@@ -257,6 +267,9 @@ class BenchmarkRunnerTests(TestCase):
         inputs = {"input_ids": torch.zeros(2, 3, dtype=torch.long)}
         with (
             mock.patch.object(common, "current_batch_size", 2),
+            mock.patch.object(
+                common, "current_settings", {"prompt_length": 3, "decode_length": 0}
+            ),
             mock.patch.object(common, "output_filename", "results.csv"),
             mock.patch.object(
                 common, "timed", side_effect=[(4.0, None), (2.0, None)]
@@ -706,9 +719,10 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
     )
     def test_invalid_options_rejected_before_launch(self, extra, message):
         runner = self.huggingface.HuggingfaceRunner()
+        launched = AssertionError("launched before validation")
         with (
-            mock.patch.object(common.mp, "spawn") as spawn,
-            mock.patch.object(common, "process_entry") as entry,
+            mock.patch.object(common.mp, "spawn", side_effect=launched),
+            mock.patch.object(common, "process_entry", side_effect=launched),
             self.assertRaisesRegex(ValueError, message),
         ):
             common.main(
@@ -720,8 +734,6 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
                     *extra,
                 ],
             )
-        spawn.assert_not_called()
-        entry.assert_not_called()
 
     @parametrize("mode", ("prefill", "decode"))
     def test_phase_requires_inference_backend(self, mode):
@@ -734,6 +746,10 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
         args.backend = None
         with self.assertRaisesRegex(ValueError, "requires --backend or --inductor"):
             runner.validate_args(args)
+        flags = ["--inference", "--inductor", f"--hf-inference-mode={mode}"]
+        args = common.parse_args(["--performance", *flags])
+        self.assertEqual(args.backend, "inductor")
+        runner.validate_args(args)
 
     @parametrize("mode", ("prefill", "decode"))
     @parametrize("name", ("Qwen/Qwen3-0.6B", "Qwen/Qwen3.5-0.8B"))
@@ -786,8 +802,9 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
         args = self._runner_args(f"--decode-length={decode_length}", mode="decode")
         with self.assertRaisesRegex(ValueError, "must be between 1 and 1999"):
             runner.validate_args(args)
-        args.decode_length = 1999
-        runner.validate_args(args)
+        for valid in (1, 1999):
+            args.decode_length = valid
+            runner.validate_args(args)
 
     @parametrize("mode", ("prefill", "decode"))
     @parametrize("prompt_length", (None, 7))
@@ -968,6 +985,7 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
             torch._dynamo.config.patch(base_dir=tmp),
             # run() rebinds module globals such as output_filename and current_name.
             mock.patch.dict(vars(common)),
+            mock.patch.object(common, "output_signpost") as signpost,
             self._record_cache_lengths(mode) as cache_lengths,
             self._mock_pretrained(),
         ):
@@ -983,6 +1001,7 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
                 mode=mode,
             )
             common.run(runner, args)
+            signpost.assert_called_once_with(mock.ANY, args, "huggingface")
             trace = os.path.join(tmp, f"eager_{mode}_Qwen_Qwen3-0.6B.json")
             self.assertTrue(os.path.exists(trace))
             with open(os.path.join(tmp, f"speedup_eager_{mode}.csv")) as f:
@@ -1007,29 +1026,42 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
         tokens_per_second = 2 * 2 * tokens / (float(row["abs_latency"]) / 1000)
         self.assertEqual(float(row[column]), tokens_per_second, rtol=1e-3, atol=0)
 
-    def test_prefill_operator_logging_prepares_cache(self):
+    @parametrize("mode", ("prefill", "decode"))
+    def test_operator_logging_prepares_cache(self, mode):
+        from benchmarks.dynamo.microbenchmarks.operator_inp_utils import (
+            OperatorInputsMode,
+        )
+
         runner = self.huggingface.HuggingfaceRunner()
-        phase = self.huggingface.INFERENCE_PHASES["prefill"]
+        phase = self.huggingface.INFERENCE_PHASES[mode]
+
+        def setup_fn(model, example_inputs):
+            modes = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+            self.assertFalse(any(isinstance(m, OperatorInputsMode) for m in modes))
+            phase.setup_fn(model, example_inputs)
 
         def forward(model, example_inputs, collect_outputs=True):
             self.assertIsNotNone(model.cache)
             return phase.iter_fn(model, example_inputs, collect_outputs)
 
-        setup = mock.Mock(wraps=phase.setup_fn)
+        setup = mock.Mock(side_effect=setup_fn)
         run_forward = mock.Mock(side_effect=forward)
         with (
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.dict(vars(common)),
             mock.patch.dict(os.environ),
-            self._patch_phase("prefill", setup_fn=setup, iter_fn=run_forward),
+            self._patch_phase(mode, setup_fn=setup, iter_fn=run_forward),
             self._mock_pretrained(),
         ):
+            extra = ("--decode-length=3",) if mode == "decode" else ()
             args = self._runner_args(
                 "--only=Qwen/Qwen3-0.6B",
                 "--batch-size=2",
                 "--prompt-length=7",
                 "--log-operator-inputs",
                 f"--output={tmp}/results.csv",
+                *extra,
+                mode=mode,
             )
             common.run(runner, args)
             self.assertGreaterEqual(run_forward.call_count, 2)
@@ -1057,11 +1089,15 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
         "extra, message",
         [
             ("--tp-size=0", "--tp-size must be positive"),
-            ("--multiprocess", "does not support --multiprocess"),
             ("--device-index=0", "does not support --device-index"),
             ("--warm-start-latency", "does not support --warm-start-latency"),
+            ("--caching-precompile", "does not support --caching-precompile"),
+            ("--save-model-outputs-to=x", "does not support --save-model-outputs-to"),
+            ("--compare-model-outputs-with=x", "support --compare-model-outputs-with"),
+            ("--diff-branch=x", "does not support --diff-branch"),
+            ("--log-operator-inputs", "does not support --log-operator-inputs"),
             ("--minify", "does not support --minify"),
-            ("--ddp", "does not support --ddp"),
+            ("-dcuda", "does not support multiple --devices"),
         ],
     )
     def test_invalid_tp_options(self, extra, message):
@@ -1086,17 +1122,23 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
             "--only=Qwen/Qwen3-0.6B",
             f"--{flag}",
         ]
-        with (
-            mock.patch.object(common, "is_torchrun_worker", return_value=False),
-            mock.patch.object(common.mp, "spawn") as spawn,
-            mock.patch.object(subprocess, "check_call") as launch,
-            mock.patch.object(common, "_run_compare_backed_unbacked") as compare,
-            self.assertRaisesRegex(ValueError, f"does not support --{flag}"),
-        ):
-            common.main(runner, args=args)
-        spawn.assert_not_called()
-        launch.assert_not_called()
-        compare.assert_not_called()
+        launched = AssertionError("launched before validation")
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                mock.patch.object(common, "is_torchrun_worker", return_value=False)
+            )
+            for target, name in (
+                (common, "process_entry"),
+                (common, "run_tp_worker_group"),
+                (common, "_run_compare_backed_unbacked"),
+                (common.mp, "spawn"),
+                (subprocess, "check_call"),
+            ):
+                stack.enter_context(
+                    mock.patch.object(target, name, side_effect=launched)
+                )
+            with self.assertRaisesRegex(ValueError, f"does not support --{flag}"):
+                common.main(runner, args=args)
 
     def test_tp_requires_prefill_or_decode(self):
         runner = self.huggingface.HuggingfaceRunner()
@@ -1127,7 +1169,8 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
         with self.assertRaisesRegex(ValueError, "re-enable CUDA graphs"):
             runner.validate_args(args)
         args.inductor_compile_mode = "max-autotune-no-cudagraphs"
-        runner.validate_args(args)
+        with mock.patch.object(torch.cuda, "device_count", return_value=2):
+            runner.validate_args(args)
 
     @parametrize("use_inductor_flag", (False, True))
     @parametrize("enabled", ("True", "1"))
@@ -1141,7 +1184,8 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
         with self.assertRaisesRegex(ValueError, "re-enable CUDA graphs"):
             runner.validate_args(args)
         args.inductor_config.append("triton.cudagraphs=False")
-        runner.validate_args(args)
+        with mock.patch.object(torch.cuda, "device_count", return_value=2):
+            runner.validate_args(args)
 
     def test_cpu_tp_requires_no_accelerator(self):
         runner = self.huggingface.HuggingfaceRunner()
@@ -1168,28 +1212,47 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
         ):
             runner.validate_args(args)
         args.devices = ["cuda"]
-        runner.validate_args(args)
+        with mock.patch.object(torch.cuda, "device_count", return_value=2):
+            runner.validate_args(args)
+
+    def test_tp_rejects_unusable_devices(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._tp_args()
+        args.devices = ["cuda"]
+        with (
+            mock.patch.object(torch.cuda, "device_count", return_value=1),
+            self.assertRaisesRegex(ValueError, "needs 2 CUDA devices, found 1"),
+        ):
+            runner.validate_args(args)
+        args.devices = ["cuda:1"]
+        with self.assertRaisesRegex(ValueError, "supports only -dcuda or -dcpu"):
+            runner.validate_args(args)
 
     @parametrize("mode", ("prefill", "decode"))
-    def test_tp_resolves_result_identity(self, mode):
+    def test_tp_result_identity(self, mode):
         runner = self.huggingface.HuggingfaceRunner()
-        args = self._tp_args(mode=mode)
-        runner.validate_args(args)
-        expected = [mode, 2, 1000, 128 if mode == "decode" else 0]
-        self.assertEqual(common.tensor_parallel_identity(args)[1], expected)
+        runner.args = self._tp_args(mode=mode)
+        runner.validate_args(runner.args)
+        inputs = {"input_ids": torch.zeros(1, 7, dtype=torch.long)}
+        if mode == "decode":
+            inputs["decode_ids"] = torch.zeros(1, 3, dtype=torch.long)
+        with mock.patch.dict(vars(common)):
+            common.current_settings = None
+            # Rows written without a loaded model record the requested dimensions.
+            identity = common.tensor_parallel_identity(runner.args)[1]
+            self.assertEqual(identity, [mode, 2, None, None])
+            metadata = runner.get_model_metadata(inputs)
+            common.set_current_metadata(runner.args, model_metadata=metadata)
+            identity = common.tensor_parallel_identity(runner.args)[1]
+        self.assertEqual(identity, [mode, 2, 7, 3 if mode == "decode" else 0])
 
     @parametrize("mode", ("prefill", "decode"))
     def test_tp_selection_matches_ci_expected_models(self, mode):
         runner = self.huggingface.HuggingfaceRunner()
-        args = self._tp_args("--no-skip", mode=mode)
+        args = self._tp_args(mode=mode)
         args.filter, args.exclude, args.exclude_exact = ["."], ["^$"], []
         runner.args = args
-        with mock.patch.dict(
-            self.huggingface.BATCH_SIZE_KNOWN_MODELS,
-            dict.fromkeys(self.huggingface.INFERENCE_PHASES["prefill"].models, 8),
-            clear=True,
-        ):
-            selected = set(runner.iter_model_names(args))
+        selected = set(runner.iter_model_names(args))
         expected_file = (
             REPO_ROOT
             / "benchmarks/dynamo/ci_expected_accuracy"
@@ -1225,7 +1288,6 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
         args = self._tp_args("--prompt-length=7", "--no-skip")
         if accuracy:
             args.performance, args.accuracy = False, True
-        # As in main(); validation resolves the default --decode-length.
         runner.validate_args(args)
         torchrun_env = ("RANK", "LOCAL_RANK", "WORLD_SIZE")
         env = {
@@ -1255,6 +1317,8 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
         with (
             tempfile.TemporaryDirectory() as tmp,
             torch._dynamo.config.patch(base_dir=tmp),
+            # Accuracy runs set fallback_random globally.
+            torch._inductor.config.patch(fallback_random=True),
             mock.patch.dict(vars(common)),
             mock.patch.dict(os.environ, env, clear=True),
             mock.patch.dict(
@@ -1294,8 +1358,13 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
         self.assertEqual(success["name"], "Qwen/Qwen3.5-0.8B")
         self.assertEqual([row["phase"], row["tp_size"]], ["decode", "2"])
         self.assertEqual([row["prompt_length"], row["decode_length"]], ["7", "128"])
+        self.assertEqual(row["batch_size"], "0")
         if accuracy:
             self.assertEqual(row["accuracy"], "timeout")
+            self.assertEqual(success["accuracy"], "pass")
+        else:
+            self.assertEqual(float(row["speedup"]), 0)
+            self.assertEqual(float(success["speedup"]), 1)
 
 
 class TestHuggingFaceLLMPhasesDevice(HuggingFaceLLMPhaseTestCase):
@@ -1487,6 +1556,8 @@ class TestHuggingFaceLLMPhasesDevice(HuggingFaceLLMPhaseTestCase):
         ):
             status = runner.check_accuracy("tiny", model, inputs, optimize, None, None)
         self.assertEqual(status, "pass")
+        # The fp64 reference ran, rather than falling back to cosine similarity.
+        self.assertFalse(runner.args.cosine)
         self.assertEqual(compiled_functions, ["forward"])
 
     @onlyCUDA
@@ -1731,19 +1802,15 @@ class TestHuggingFaceTensorParallel(MultiProcessTestCase):
             )
 
     @contextlib.contextmanager
-    def _count_eager_collectives(self):
+    def _count_eager_all_reduces(self):
         counts = collections.Counter()
+        all_reduce = torch.distributed.all_reduce
 
-        def counted(name):
-            collective = getattr(torch.distributed, name)
+        def counted(*args, **kwargs):
+            counts["all_reduce"] += 1
+            return all_reduce(*args, **kwargs)
 
-            def wrapper(*args, **kwargs):
-                counts[name] += 1
-                return collective(*args, **kwargs)
-
-            return mock.patch.object(torch.distributed, name, wrapper)
-
-        with counted("all_reduce"), counted("all_gather"):
+        with mock.patch.object(torch.distributed, "all_reduce", counted):
             yield counts
 
     def _check_sharding(self, model, reference):
@@ -1812,7 +1879,7 @@ class TestHuggingFaceTensorParallel(MultiProcessTestCase):
         self._check_sharding(model, reference)
 
         prompt = {"input_ids": inputs["input_ids"]}
-        with self._count_eager_collectives() as counts:
+        with self._count_eager_all_reduces() as counts:
             prefill = _run_phase("prefill", model, prompt)
         self.assertGreater(counts["all_reduce"], 0)
         self.assertEqual(prefill, _run_phase("prefill", reference, prompt), **tolerance)
@@ -1937,31 +2004,6 @@ class TestTensorParallelResults(TestCase):
         self.assertEqual(raised.exception.code, 1)
         exit_worker.assert_called_once_with(1)
 
-    @parametrize("status", ("pass", "fail_accuracy", "eager_two_runs_differ"))
-    def test_accuracy_result_is_judged_by_baseline(self, status):
-        import pandas as pd
-
-        from benchmarks.dynamo.check_accuracy import check_accuracy
-
-        runner = common.BenchmarkRunner()
-        runner.args = common.parse_args(["--accuracy", "--inference", "--tp-size=2"])
-        with (
-            mock.patch.object(runner, "check_accuracy", return_value=status),
-            mock.patch.object(common, "empty_gpu_cache"),
-        ):
-            runner.run_one_model("model", None, None, None, None)
-        actual = pd.DataFrame({"name": ["model"], "accuracy": [status]})
-        failed, _ = check_accuracy(
-            actual, actual, "expected.csv", require_complete=True
-        )
-        self.assertFalse(failed)
-        if status != "pass":
-            expected = actual.assign(accuracy="pass")
-            failed, _ = check_accuracy(
-                actual, expected, "expected.csv", require_complete=True
-            )
-            self.assertEqual(failed, ["model"])
-
     @parametrize("metric", ("speedup", "abs_latency"))
     @parametrize("value", (0, -1, "invalid", "", float("nan"), float("inf")))
     def test_successful_worker_with_invalid_performance(self, metric, value):
@@ -1984,9 +2026,15 @@ class TestTensorParallelResults(TestCase):
             ),
             mock.patch.object(common, "disable_output", False),
             mock.patch.object(common, "run_tp_worker_group", side_effect=worker),
-            mock.patch.object(common, "output_signpost"),
+            mock.patch.object(common, "output_signpost") as signpost,
         ):
-            self.assertFalse(common.run_tp_model("model", [], args, {}))
+            succeeded = common.run_tp_model("model", [], args, {}, "huggingface")
+            self.assertFalse(succeeded)
+            with open(common.output_filename) as f:
+                (row,) = csv.DictReader(f)
+        # The worker's row is kept, without an added failure row.
+        self.assertEqual(row["name"], "model")
+        self.assertEqual(signpost.call_args.kwargs["error"], "performance_failed")
 
     @parametrize("report_dir", ("test/test-reports", "test-reports"))
     def test_update_expected_reads_tp_artifacts(self, report_dir):
@@ -2053,16 +2101,20 @@ class TestTensorParallelResults(TestCase):
                 "-dcpu",
             ]
         )
-        headers, fields = common.tensor_parallel_identity(args)
         metrics = ["accuracy"] if accuracy else ["speedup", "abs_latency"]
         values = ["pass"] if accuracy else [1.0, 2.0]
+        requested = {"phase": "prefill", "prompt_length": 7, "decode_length": 0}
         with (
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.object(
                 common, "output_filename", os.path.join(tmp, "results.csv")
             ),
             mock.patch.object(common, "disable_output", False),
+            mock.patch.object(
+                common, "current_settings", collections.ChainMap(requested, vars(args))
+            ),
         ):
+            headers, fields = common.tensor_parallel_identity(args)
 
             def failure():
                 common.write_csv_when_exception(args, "failed", "timeout")
@@ -2193,6 +2245,9 @@ class TestTensorParallelResults(TestCase):
             ]
         )
 
+        # As the driver records from HuggingfaceRunner.get_requested_metadata().
+        requested = {"phase": "prefill", "prompt_length": 1000, "decode_length": 0}
+
         def worker(*unused):
             headers, fields = common.tensor_parallel_identity(args)
             if accuracy:
@@ -2225,12 +2280,15 @@ class TestTensorParallelResults(TestCase):
             ),
             mock.patch.object(common, "disable_output", False),
             mock.patch.object(common, "current_name", ""),
-            mock.patch.object(common, "current_settings", vars(args)),
+            mock.patch.object(
+                common, "current_settings", collections.ChainMap(requested, vars(args))
+            ),
             mock.patch.object(common, "output_signpost") as signpost,
             mock.patch.object(common, "run_tp_worker_group", side_effect=worker),
         ):
             expected = case == "pass" or (accuracy and case == "reported_failure")
-            self.assertEqual(common.run_tp_model("model", [], args, {}), expected)
+            succeeded = common.run_tp_model("model", [], args, {}, "huggingface")
+            self.assertEqual(succeeded, expected)
             if expected:
                 signpost.assert_not_called()
             else:
@@ -2331,7 +2389,10 @@ class TestTensorParallelPerfCli(TestCase):
 
     def test_periodic_baseline_matches_tp_hardware(self):
         perf = self.perf_cli
-        runs = [{"databaseId": i, "createdAt": "2026-10-15"} for i in (5, 4, 3, 2)]
+        runs = [
+            {"databaseId": i, "createdAt": "2026-10-15", "attempt": attempt}
+            for i, attempt in ((5, 1), (4, 1), (3, 1), (2, 2))
+        ]
         jobs = {
             5: [self._job()],
             4: [self._job(conclusion="failure")],
@@ -2349,7 +2410,8 @@ class TestTensorParallelPerfCli(TestCase):
             ) as gh,
             mock.patch.object(perf, "get_run_jobs", side_effect=jobs.__getitem__),
         ):
-            self.assertEqual(perf.resolve_baseline(5), 2)
+            # Run 2's latest attempt, whose jobs were checked, is the baseline.
+            self.assertEqual(perf.resolve_baseline(5), (2, 2))
         args = gh.call_args.args
         self.assertEqual(args[args.index("--workflow") + 1], "123")
         self.assertEqual(args[args.index("--status") + 1], "completed")
@@ -2370,6 +2432,35 @@ class TestTensorParallelPerfCli(TestCase):
             [2] if performance_status == "success" else [],
         )
 
+    def test_summary_fetches_baseline_attempt(self):
+        perf = self.perf_cli
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2"
+        content = "name,speedup,abs_latency\nmodel,1,2\n"
+        data = perf.parse_csvs([(config, content)], device="a10g-4")
+        args = types.SimpleNamespace(
+            attempt=1,
+            metric="speedup",
+            baseline="latest",
+            no_cache=False,
+            device=None,
+            top=5,
+            _run_ids=[5],
+        )
+        with (
+            mock.patch.object(perf, "_resolve_head_runs", return_value={"a10g-4": 5}),
+            mock.patch.object(perf, "resolve_baseline", return_value=(2, 3)),
+            mock.patch.object(perf, "fetch_run_perf", return_value=data) as fetch,
+            mock.patch.object(perf, "fetch_run_meta"),
+            mock.patch.object(
+                perf, "filter_perf", side_effect=lambda results, args: results
+            ),
+            mock.patch.object(perf, "print_run_header"),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            perf.cmd_summary(args)
+        fetched = [call.args[:2] for call in fetch.call_args_list]
+        self.assertEqual(fetched, [(5, 1), (2, 3)])
+
     def test_compare_keeps_nightly_baseline(self):
         perf = self.perf_cli
         with mock.patch.object(
@@ -2383,7 +2474,7 @@ class TestTensorParallelPerfCli(TestCase):
                 [{"databaseId": 2, "createdAt": "2026-10-15"}],
             ],
         ) as gh:
-            self.assertEqual(perf.resolve_baseline(5), 2)
+            self.assertEqual(perf.resolve_baseline(5), (2, 1))
         args = gh.call_args.args
         self.assertEqual(args[args.index("--workflow") + 1], "42513231")
         self.assertEqual(args[args.index("--status") + 1], "success")
@@ -2395,7 +2486,7 @@ class TestTensorParallelPerfCli(TestCase):
             self._job(shard=2, job_id=2),
             self._job(runner="h100", job_id=3),
         ]
-        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp2_decode"
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2"
 
         def download(run_id, selected, *args, **kwargs):
             return [
@@ -2422,7 +2513,7 @@ class TestTensorParallelPerfCli(TestCase):
     )
     def test_tp_comparison_identity(self, device, degree, matched):
         perf = self.perf_cli
-        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp{}_decode_performance.csv"
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp{}_performance.csv"
         content = "name,speedup,abs_latency\nmodel,1,2\n"
         head = perf.parse_csvs([(config.format(2), content)], device="a10g-4")
         base = perf.parse_csvs([(config.format(degree), content)], device=device)
@@ -2435,7 +2526,7 @@ class TestTensorParallelPerfCli(TestCase):
     )
     def test_tp_comparison_requires_same_workload(self, dimensions, matched):
         perf = self.perf_cli
-        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp2_decode"
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2"
         header = "name,speedup,abs_latency,batch_size,prompt_length,decode_length\n"
         head = perf.parse_csvs([(config, header + "model,2,1,2,64,8\n")])
         base = perf.parse_csvs([(config, header + f"model,1,2,{dimensions}\n")])
@@ -2463,7 +2554,7 @@ class TestTensorParallelPerfCli(TestCase):
     @parametrize("selected_model", (None, "model"))
     def test_tp_repro_preserves_workload(self, phase, selected_model):
         config = (
-            f"inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp2_{phase}"
+            f"inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_{phase}_tp2"
         )
         content = "name,speedup,abs_latency,batch_size,prompt_length,decode_length\nmodel,1,2,2,64,8\nother,1,2,4,32,5\n"
         output = self._repro(
@@ -2500,7 +2591,7 @@ class TestTensorParallelPerfCli(TestCase):
 
     @parametrize("model", ("name with spaces", "name; echo x", "name'$(id)`id`"))
     def test_tp_repro_quotes_model_name(self, model):
-        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp2_decode"
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2"
         content = f"name,speedup,abs_latency\n{model},1,2\n"
         output = self._repro(self.perf_cli.parse_csvs([(config, content)]))
         commands = [line for line in output.splitlines() if line.startswith("python")]
@@ -2510,7 +2601,7 @@ class TestTensorParallelPerfCli(TestCase):
         self.assertEqual(args[-2:], ["--output", f"{config}_performance.csv"])
 
     def test_tp_repro_omits_failure_batch_size(self):
-        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp2_decode"
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2"
         content = "name,speedup,abs_latency,batch_size,prompt_length,decode_length\nmodel,0.0,0.0,0,64,8\n"
         command = self._repro(self.perf_cli.parse_csvs([(config, content)]))
         self.assertIn("--only model", command)
@@ -2587,10 +2678,12 @@ class TestTensorParallelLaunch(TestCase):
                 time.sleep(600)
                 """,
             )
-            # Long enough for both workers to write their pids on a loaded runner.
-            env = {**os.environ, "TORCH_ELASTIC_SHUTDOWN_TIMEOUT": "90"}
+            # The 30 s timeout leaves time for both workers to write their pids on
+            # a loaded runner.
             with self.assertRaises(subprocess.TimeoutExpired):
-                common.run_tp_worker_group([sys.executable, script], 2, 30, env)
+                common.run_tp_worker_group(
+                    [sys.executable, script], 2, 30, os.environ.copy()
+                )
             for rank in range(2):
                 with open(os.path.join(tmp, f"pid{rank}")) as f:
                     self._wait_until_dead(int(f.read()))
@@ -2667,13 +2760,12 @@ class TestTensorParallelLaunch(TestCase):
                 time.sleep(600)
                 """,
             )
-            start = time.monotonic()
+            # Rank 0 cannot exit on a closed Gloo connection; unless torchrun stops
+            # it, the group times out instead of failing.
             with self.assertRaisesRegex(subprocess.CalledProcessError, "exit status"):
                 common.run_tp_worker_group(
                     [sys.executable, script], 2, 120, os.environ.copy()
                 )
-            # Rank 0 cannot exit on a closed Gloo connection; torchrun must stop it.
-            self.assertLess(time.monotonic() - start, 120)
             with open(os.path.join(tmp, "pid0")) as f:
                 self._wait_until_dead(int(f.read()))
 
