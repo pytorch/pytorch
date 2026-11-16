@@ -1911,6 +1911,17 @@ class TestTorchDeviceType(TestCase):
         cumsum = torch.cumsum(x, dim=1)
         self.assertEqual(cumsum.max().item(), 0., atol=0., rtol=0.)
 
+    @onlyCUDA
+    @largeTensorTest('5GB')
+    def test_cumsum_long_outer_dim_64bit_indexing(self, device):
+        # More than 2**32 elements, scanned in segments (cf. test_cumulative_ops_long_outer_dim).
+        n = 2**31 + 8
+        x = torch.ones(n, 2, dtype=torch.int8, device=device)
+        x.cumsum_(0)
+        rows = torch.tensor([0, 255, 2**31 - 1, n - 1])
+        expected = (rows + 1).to(torch.int8)[:, None].expand(-1, 2)
+        self.assertEqual(x[rows.to(device)], expected, atol=0, rtol=0)
+
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
@@ -2936,6 +2947,24 @@ class TestTorchDeviceType(TestCase):
                 RuntimeError,
                 'expected scalar_type Double but found Float'):
             torch.logcumsumexp(b, axis, out=inplace_out)
+
+    @onlyCUDA
+    @dtypes(torch.int32, torch.int64, torch.float16, torch.float32, torch.float64, torch.complex64)
+    def test_cumulative_ops_long_outer_dim(self, device, dtype):
+        # CUDA scans a long non-innermost dim with few other elements in segments, recursively.
+        # These shapes need one to three levels of segments.
+        for shape, dim in (((1000, 9), 0), ((3, 9000, 1), 1), ((8193, 1, 2), 0), ((33000, 4), 0), ((140000, 16), 0)):
+            # Sums of -1, 0, 1 and products of -1, 1 are exact in every dtype.
+            x = torch.randint(-1, 2, shape, device=device).to(dtype)
+            signs = (2 * torch.randint(0, 2, shape, device=device) - 1).to(dtype)
+            for name, t in (("cumsum", x), ("cumprod", signs)):
+                expected = getattr(t.cpu(), name)(dim, dtype=dtype)
+                self.assertEqual(getattr(t, name)(dim, dtype=dtype), expected, atol=0, rtol=0)
+                self.assertEqual(getattr(t.clone(), name + "_")(dim), expected, atol=0, rtol=0)
+
+            if dtype in (torch.float32, torch.float64, torch.complex64):
+                x = torch.randn(shape, device=device, dtype=dtype)
+                self.assertEqual(x.logcumsumexp(dim), x.cpu().logcumsumexp(dim))
 
     def _test_diff_numpy(self, t, dims=None):
         # Helper for test_diff to compare with NumPy reference implementation
