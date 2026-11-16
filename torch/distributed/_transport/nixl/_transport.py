@@ -8,11 +8,12 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
 from importlib import import_module
 from threading import Condition, current_thread, RLock, Thread
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, cast, Literal, TYPE_CHECKING
 
 import torch
 
 from .._api import (
+    _remaining,
     MemoryView,
     MutableMemoryView,
     Notification,
@@ -52,6 +53,9 @@ def _agent_name(name: str | bytes) -> str:
     return name.decode() if isinstance(name, bytes) else name
 
 
+_Pair = tuple[NIXLMemoryView, NIXLRemoteBuffer]
+
+
 class NIXLTransport(Transport):
     """One-sided tensor transport backed by a NIXL plugin.
 
@@ -70,6 +74,10 @@ class NIXLTransport(Transport):
     arriving notifications, so a thread polls transfers that carry a
     notification, and incoming notifications while a ``wait_notifications`` Work
     is pending.
+
+    ``write_batch`` and ``read_batch`` issue one NIXL request per remote agent
+    and pair of memory types, and load each remote registration's metadata once
+    per batch.
     """
 
     def __init__(
@@ -358,8 +366,9 @@ class NIXLTransport(Transport):
                     "memory is retained by CUDA stream transfers or graphs"
                 )
             if any(
-                work._buffers[0]._memory._registration is registration
+                view._memory._registration is registration
                 for work in self._pending.values()
+                for view in work._views
             ):
                 raise RuntimeError(
                     "memory has pending transfers; wait before unregistering"
@@ -431,11 +440,16 @@ class NIXLTransport(Transport):
                 raise ValueError("zero-byte transfers cannot carry notifications")
         local_buffer = cast(NIXLMemoryView, local_buffer)
         remote_buffer = cast(NIXLRemoteBuffer, remote_buffer)
-        registration = local_buffer._memory._registration
-        work = _NIXLWork(self, local_buffer, remote_buffer, timeout)
         if local_buffer.size() == 0:
+            work = _NIXLWork(self, [local_buffer], timeout)
             work._done = True
             return work
+        self._load_remote_agent(agent, remote_buffer)
+        work = self._prepare(agent, operation, [(local_buffer, remote_buffer)], timeout)
+        self._post(agent, work, notification)
+        return work
+
+    def _load_remote_agent(self, agent: Any, remote_buffer: NIXLRemoteBuffer) -> None:
         loaded_name = _agent_name(agent.add_remote_agent(remote_buffer.metadata))
         if loaded_name != remote_buffer.agent_name:
             # Keep agents loaded by other peers; they may have transfers in flight.
@@ -450,30 +464,34 @@ class NIXLTransport(Transport):
                     raise
                 self._remote_agents.remove(loaded_name)
             raise ValueError("remote buffer metadata names a different agent")
-        local_descs = agent.get_xfer_descs(
-            [
-                (
-                    registration.address + local_buffer._offset,
-                    local_buffer.size(),
-                    registration.device_id,
-                )
-            ],
-            mem_type=registration.memory_type,
-        )
-        remote_descs = agent.get_xfer_descs(
-            [(remote_buffer.address, local_buffer.size(), remote_buffer.device_id)],
-            mem_type=remote_buffer.memory_type,
-        )
+
+    def _prepare(
+        self, agent: Any, operation: str, pairs: list[_Pair], timeout: float
+    ) -> _NIXLWork:
+        """Create one request; all pairs share a remote agent and memory types."""
+        local_entries, remote_entries = [], []
+        for view, remote in pairs:
+            reg, size = view._memory._registration, view.size()
+            local_entries.append((reg.address + view._offset, size, reg.device_id))
+            remote_entries.append((remote.address, size, remote.device_id))
+        view, remote = pairs[0]
+        local_type = view._memory._registration.memory_type
+        local_descs = agent.get_xfer_descs(local_entries, mem_type=local_type)
+        remote_descs = agent.get_xfer_descs(remote_entries, mem_type=remote.memory_type)
+        work = _NIXLWork(self, [view for view, _ in pairs], timeout)
         # A request handle belongs to exactly one live Work. Reusing a handle
         # while its previous transfer is pending corrupts native request state.
         work._handle = agent.initialize_xfer(
             operation,
             local_descs,
             remote_descs,
-            remote_buffer.agent_name,
+            remote.agent_name,
             backends=[self._plugin],
         )
         work._descriptors = (local_descs, remote_descs)
+        return work
+
+    def _post(self, agent: Any, work: _NIXLWork, notification: bytes | None) -> None:
         self._transfers[id(work)] = work._handle
         self._pending[id(work)] = work
         _live_transports.add(self)
@@ -486,7 +504,6 @@ class NIXLTransport(Transport):
         if notification is not None:
             self._notifying.add(work)
             self._start_progress()
-        return work
 
     def _start(
         self,
@@ -555,6 +572,58 @@ class NIXLTransport(Transport):
             timeout=timeout,
             notification=notification,
         )
+
+    def _submit_batch(
+        self,
+        operation: Literal["WRITE", "READ"],
+        transfers: list[tuple[MemoryView, RemoteBuffer]],
+        deadline: float | None,
+    ) -> tuple[list[Work], Exception | None]:
+        with self._locked(_remaining(deadline)):
+            # Lock wait counts against the deadline, so children get what is left.
+            timeout = _remaining(deadline)
+            timeout = self._timeout if timeout is None else timeout
+            return self._submit_requests(operation, transfers, timeout)
+
+    def _submit_requests(
+        self,
+        operation: Literal["WRITE", "READ"],
+        transfers: list[tuple[MemoryView, RemoteBuffer]],
+        timeout: float,
+    ) -> tuple[list[Work], Exception | None]:
+        agent = self._ensure_open()
+        mutable = operation == "READ"
+        for local_buffer, remote_buffer in transfers:
+            self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
+        # A NIXL descriptor list has one memory type, and a request one peer.
+        groups: dict[tuple[str, str, str], list[_Pair]] = {}
+        loaded: set[tuple[str, bytes]] = set()
+        for local_buffer, remote_buffer in transfers:
+            view = cast(NIXLMemoryView, local_buffer)
+            remote = cast(NIXLRemoteBuffer, remote_buffer)
+            if view.size() == 0:
+                continue
+            # Each remote registration carries its own partial metadata.
+            if (remote.agent_name, remote.metadata) not in loaded:
+                self._load_remote_agent(agent, remote)
+                loaded.add((remote.agent_name, remote.metadata))
+            local_type = view._memory._registration.memory_type
+            key = (remote.agent_name, local_type, remote.memory_type)
+            groups.setdefault(key, []).append((view, remote))
+        # Requests start one at a time, without rollback: a request NIXL rejects
+        # stops dispatch and is reported after the started ones finish, per the
+        # backend-agnostic batch contract in Transport._transfer_batch.
+        works: list[Work] = []
+        for pairs in groups.values():
+            try:
+                work = self._prepare(agent, operation, pairs, timeout)
+            except Exception as error:
+                if not works:
+                    raise
+                return works, error
+            self._post(agent, work, None)
+            works.append(work)
+        return works, None
 
     async def _transfer_async(
         self,
