@@ -62,16 +62,40 @@ class OpenRegInterface(DeviceInterface):
 
     @staticmethod
     def set_device(device):
-        torch_openreg._C._set_device(device)
+        # set_device(-1) must be a no-op: the exchange cleanup hook restores
+        # the previous device, which can be -1 when the exchange was skipped.
+        if device >= 0:
+            torch_openreg._C._set_device(device)
 
     @staticmethod
     def exchange_device(device):
+        # Mirror torch.cuda: a negative index reports no exchange via the -1
+        # convention; an out-of-range index raises, like torch.cuda's
+        # cudaSetDevice does (and unlike the C++ ExchangeDevice, which would
+        # silently set the tracked device to the invalid index).
+        if device < 0:
+            return -1
+        count = torch_openreg._C._get_device_count()
+        if device >= count:
+            raise RuntimeError(
+                "The device index is out of range. It must be in [0, "
+                f"{count}), but got {device}."
+            )
         return torch_openreg._C._exchangeDevice(device)
 
     @staticmethod
     def maybe_exchange_device(device):
+        # Mirror torch.cuda's _maybe_exchange_device: a negative index reports
+        # no exchange via the -1 convention; an out-of-range index is treated
+        # as an unusable target and the current device is returned without
+        # switching (torch.cuda defers the switch when the target has no
+        # primary context). Unlike exchange_device, never raise here: the
+        # "maybe" contract treats an unusable target as "no exchange".
         if device < 0:
             return -1
+        count = torch_openreg._C._get_device_count()
+        if device >= count:
+            return torch_openreg._C._get_device()
         return torch_openreg._C._exchangeDevice(device)
 
     @staticmethod
