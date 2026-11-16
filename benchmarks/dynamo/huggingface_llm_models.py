@@ -1,5 +1,7 @@
+import dataclasses
 import subprocess
 import sys
+from collections.abc import Callable
 
 import torch
 
@@ -77,6 +79,8 @@ class TextGenerationBenchmark(Benchmark):
         inference_mode="generate",
         decode_length=DECODE_LENGTH,
     ):
+        if inference_mode not in ("generate", *INFERENCE_PHASES):
+            raise ValueError(f"unsupported inference mode: {inference_mode}")
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device)
         model.eval()
@@ -88,12 +92,12 @@ class TextGenerationBenchmark(Benchmark):
         model.generation_config.pad_token_id = tokenizer.eos_token_id
         model.generation_config.temperature = 0.0
 
-        if inference_mode in ("prefill", "decode"):
+        if inference_mode != "generate":
             total_length = prompt_length + TextGenerationBenchmark.OUTPUT_LENGTH
             # Match the static cache generate() allocates for this request, so prefill
             # and decode attend over the same KV length as generate.
             cache_capacity = total_length - 1
-            model = TextGenerationPrefillModel(
+            model = TextGenerationCacheModel(
                 model,
                 batch_size=batch_size,
                 prompt_length=prompt_length,
@@ -120,11 +124,11 @@ class TextGenerationBenchmark(Benchmark):
         return model, example_inputs
 
 
-# TextGenerationPrefillModel relies on StaticCache internals from this release.
-MIN_TRANSFORMERS_VERSION = "5.14.1"
+# TextGenerationCacheModel relies on StaticCache internals from this exact release.
+CACHE_TRANSFORMERS_VERSION = "5.14.1"
 
 
-class TextGenerationPrefillModel(torch.nn.Module):
+class TextGenerationCacheModel(torch.nn.Module):
     def __init__(self, model, batch_size, prompt_length, cache_capacity):
         super().__init__()
         self.model = model
@@ -139,7 +143,7 @@ class TextGenerationPrefillModel(torch.nn.Module):
         expected_shape = (self.batch_size, self.prompt_length)
         if tuple(input_ids.shape) != expected_shape:
             raise ValueError(
-                f"prefill input_ids must have shape {expected_shape}, got "
+                f"prompt input_ids must have shape {expected_shape}, got "
                 f"{tuple(input_ids.shape)}"
             )
 
@@ -162,7 +166,7 @@ class TextGenerationPrefillModel(torch.nn.Module):
                 dtype=self.model.dtype,
                 device=self.model.device,
             )
-            if config.model_type == "qwen3_5_text":
+            if any(self.cache.is_linear):
                 # KV early initialization skips the hybrid cache's linear layers.
                 # These tensors are shape templates: lazy_initialization allocates
                 # zeroed states for each layer.
@@ -215,7 +219,9 @@ class TextGenerationPrefillModel(torch.nn.Module):
 
     def forward(self, input_ids):
         if self.cache is None:
-            raise RuntimeError("prepare_for_prefill() must be called before forward()")
+            raise RuntimeError(
+                "prepare_for_prefill() or prepare_for_decode() must be called before forward()"
+            )
         outputs = self.model(
             input_ids=input_ids,
             past_key_values=self.cache,
@@ -238,18 +244,66 @@ HF_LLM_MODELS: dict[str, Benchmark] = {
 }
 
 
-PREFILL_MODELS = {
-    "meta-llama/Llama-3.2-1B",
-    "google/gemma-2-2b",
-    "Qwen/Qwen3-0.6B",
-    "Qwen/Qwen3.5-0.8B",
-}
+def setup_prefill(model, example_inputs):
+    torch.compiler.cudagraph_mark_step_begin()
+    model.prepare_for_prefill(example_inputs["input_ids"])
 
 
-# gemma-2-2b is excluded: its sliding-window cache layers track their length in a
-# Python int, so compiled decode recompiles every step.
-DECODE_MODELS = {
-    "meta-llama/Llama-3.2-1B",
-    "Qwen/Qwen3-0.6B",
-    "Qwen/Qwen3.5-0.8B",
+def prefill_forward(model, example_inputs, collect_outputs=True):
+    with torch.no_grad():
+        return model(example_inputs["input_ids"])
+
+
+def setup_decode(model, example_inputs):
+    torch.compiler.cudagraph_mark_step_begin()
+    model.prepare_for_decode(example_inputs["input_ids"])
+
+
+def decode_forward(model, example_inputs, collect_outputs=True):
+    decode_ids = example_inputs["decode_ids"]
+    with torch.no_grad():
+        for step in range(decode_ids.shape[1]):
+            torch.compiler.cudagraph_mark_step_begin()
+            logits = model(decode_ids[:, step : step + 1])
+    return logits
+
+
+@dataclasses.dataclass(frozen=True)
+class InferencePhase:
+    models: frozenset[str]
+    iter_fn: Callable
+    # Prepares the cache for each request, outside the timed region.
+    setup_fn: Callable
+    # Throughput column and the input whose tokens it counts.
+    tokens_column: str
+    tokens_input: str
+
+
+# Keyed by --hf-inference-mode; generate is the default and is not a phase.
+INFERENCE_PHASES = {
+    "prefill": InferencePhase(
+        models=frozenset(
+            {
+                "meta-llama/Llama-3.2-1B",
+                "google/gemma-2-2b",
+                "Qwen/Qwen3-0.6B",
+                "Qwen/Qwen3.5-0.8B",
+            }
+        ),
+        iter_fn=prefill_forward,
+        setup_fn=setup_prefill,
+        tokens_column="input_tokens_per_second",
+        tokens_input="input_ids",
+    ),
+    # gemma-2-2b is excluded: its sliding-window cache layers track their length
+    # in a Python int, so compiled decode recompiles every step.
+    "decode": InferencePhase(
+        models=frozenset(
+            {"meta-llama/Llama-3.2-1B", "Qwen/Qwen3-0.6B", "Qwen/Qwen3.5-0.8B"}
+        ),
+        iter_fn=decode_forward,
+        setup_fn=setup_decode,
+        tokens_column="output_tokens_per_second",
+        tokens_input="decode_ids",
+    ),
 }
