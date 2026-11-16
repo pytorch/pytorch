@@ -1183,6 +1183,7 @@ def _fakeify_with_unbacked(
     # baked.
     with functorch_config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
         fake_mode = FakeTensorMode(
+            _force_python=True,
             shape_env=shape_env,
             allow_non_fake_inputs=True,
             allow_fallback_kernels=False,
