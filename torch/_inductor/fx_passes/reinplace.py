@@ -637,13 +637,21 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return True
 
         if isinstance(mutated_arg, (list, tuple)):
-            # TODO Using _overlap here causes a several issues.
-            unique_storages = OrderedSet(get_node_storage(arg) for arg in mutated_arg)
-            if len(unique_storages) != len(mutated_arg):
-                # At least two Tensors in mutated_arg alias each other, so we can't reinplace it.
-                # We can probably do better (that is, reinplace one of them and clone the other)
-                # but that requires more work and mutable List[Tensor] are not that common.
-                return False
+            # Group by storage first. compute_overlapping_tensors does not check
+            # storage identity, so independent tensors with the same offset/numel
+            # are falsely reported as overlapping if passed in one flat list
+            # (that is why a previous attempt to call _overlap here was abandoned).
+            # Same-storage disjoint views (e.g. optimizer param blocks / #201861)
+            # do not overlap and are safe to reinplace together.
+            by_storage: dict[object, list[torch.fx.Node]] = defaultdict(list)
+            for arg in mutated_arg:
+                storage = get_node_storage(arg)
+                if storage is None:
+                    return False
+                by_storage[storage].append(arg)
+            for group in by_storage.values():
+                if len(group) > 1 and _overlap([a.meta["val"] for a in group]):
+                    return False
             return all(can_inplace(node, arg) for arg in mutated_arg)
 
         if get_node_storage(mutated_arg) is None:

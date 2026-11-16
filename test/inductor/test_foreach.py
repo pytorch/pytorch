@@ -1555,6 +1555,37 @@ class ForeachTests(TestCase):
         actual = torch.compile(fn)(*args_clone)
         self.assertEqual(actual, expected)
 
+    def test_foreach_add_reinplace_disjoint_aliased_views(self):
+        # Regression for #201861: reinplace used to refuse any List[Tensor] whose
+        # elements shared storage, even when the views were disjoint. That left
+        # outplace foreach + copy_ epilogues and made Scheduler compile time blow
+        # up on Shampoo-like optimizer updates. Overlapping views must still be
+        # refused; that is covered by the unique-storage/_overlap check.
+        def update(params, bufs):
+            torch._foreach_add_(params, bufs)
+
+        n = 8
+        block = 64
+        blocks_per_param = 4
+        full = [
+            torch.randn(blocks_per_param * block, device="cpu")
+            for _ in range(n // blocks_per_param)
+        ]
+        params = [block_t for p in full for block_t in p.split(block)]
+        bufs = list(torch.randn(n * block, device="cpu").split(block))
+
+        full_e = [p.clone() for p in full]
+        params_e = [block_t for p in full_e for block_t in p.split(block)]
+        bufs_e = [b.clone() for b in bufs]
+        update(params_e, bufs_e)
+
+        compiled = torch.compile(update, backend="inductor", fullgraph=True)
+        with torch.no_grad():
+            compiled(params, bufs)
+
+        for p, pe in zip(full, full_e):
+            self.assertEqual(p, pe)
+
     @requires_cuda_and_triton
     def test_foreach_pow_int_fallback(self):
         from torch._inductor import scheduler
