@@ -139,6 +139,16 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         self.assertIn("in0[tile_y, tile_r]", source)
         self.assertIn("in1[tile_r, tile_x]", source)
 
+    def test_operand_view_of_dynamic_input(self):
+        x = randn(4, 40, 72)
+        torch._dynamo.mark_dynamic(x, 0)
+        # x[0] is a static [40, 72] view of the [s, 40, 72] input.
+        (source,) = self.compile(lambda x, w: x[0] @ w, x, randn(72, 136))
+        self.assertIn("in0[tile_y, tile_r]", source)
+        self.assertRegex(
+            self.code, r"reinterpret_tensor\(arg\d+_1, \(40, 72\), \(72, 1\), 0\)"
+        )
+
     @parametrize("epilogue", [False, True])
     def test_horizontal(self, epilogue):
         def fn(a, b, c):

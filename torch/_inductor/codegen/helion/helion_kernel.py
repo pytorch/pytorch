@@ -207,15 +207,19 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         sizes = [self.numels[axis] for axis in axes]
         strides = [expanded.coeff(self.symbols[axis]) for axis in axes]
         offset = expanded.xreplace({self.symbols[axis]: 0 for axis in self.axes})
-        values = (*sizes, *strides, offset, layout.storage_size())
-        if not all(isinstance(value, (int, sympy.Integer)) for value in values):
+        if not all(
+            isinstance(value, (int, sympy.Integer))
+            for value in (*sizes, *strides, offset)
+        ):
             return None
         expected = offset + sum(self.symbols[a] * s for a, s in zip(axes, strides))
         end = offset + sum((size - 1) * stride for size, stride in zip(sizes, strides))
+        # The storage size can be symbolic, e.g. x[0] @ w with x [s, 40, 72] and a
+        # dynamic s: end = 2879 < 2880 * s holds since s >= 2.
         if (
             offset < 0
             or any(stride < 0 for stride in strides)
-            or end >= layout.storage_size()
+            or not V.graph.sizevars.statically_known_lt(end, layout.storage_size())
             or not V.graph.sizevars.statically_known_equals(index, expected)
         ):
             return None
