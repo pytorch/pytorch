@@ -107,7 +107,6 @@ from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     allow_non_fake_inputs_temporarily,
     CppFakeTensorMode,
-    fake_mode_cls,
     FakeTensorMode,
 )
 from torch._utils_internal import compile_time_strobelight_meta
@@ -967,7 +966,7 @@ def fake_tensor_prop(
     with enable_python_dispatcher():
         fake_mode = detect_fake_mode(example_inputs)
         if not fake_mode:
-            fake_mode = fake_mode_cls()(allow_non_fake_inputs=True)
+            fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
         else:
             ctx = (
@@ -3461,7 +3460,7 @@ def _compile_fx_main(
 
         bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
-        fake_mode = detect_fake_mode(example_inputs_) or fake_mode_cls()(
+        fake_mode = detect_fake_mode(example_inputs_) or FakeTensorMode(
             allow_non_fake_inputs=True
         )
         tracing_context = (
@@ -3797,7 +3796,7 @@ def autograd_cache_key(
     #       torch._guards.tracing, compiled_autograd._disable,
     #       functorch_config.patch
 
-    fake_mode = detect_fake_mode(example_inputs) or fake_mode_cls()(
+    fake_mode = detect_fake_mode(example_inputs) or FakeTensorMode(
         allow_non_fake_inputs=True
     )
     tracing_context = (

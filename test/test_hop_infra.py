@@ -4,10 +4,9 @@ import importlib
 import pkgutil
 
 import torch
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_utils import (
-    fake_tensor_modes,
     HardwareClassification,
-    instantiate_parametrized_tests,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -30,7 +29,6 @@ do_imports()
 
 
 @skipIfTorchDynamo("not applicable")
-@instantiate_parametrized_tests
 class TestHOPInfra(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -128,14 +126,13 @@ class TestHOPInfra(TestCase):
             )
             self.assertEqual(id(hop), id(copied_hop))
 
-    @fake_tensor_modes
-    def test_triton_kernel_wrapper_functional_fake_tensor_nested_kwargs(self, mode_cls):
+    def test_triton_kernel_wrapper_functional_fake_tensor_nested_kwargs(self):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_functional,
         )
         from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
 
-        mode = mode_cls()
+        mode = FakeTensorMode()
         with mode:
             fake_output = torch.empty_strided((2, 3), (3, 1))
 
@@ -156,14 +153,13 @@ class TestHOPInfra(TestCase):
         self.assertEqual(out["out_ptr"].size(), fake_output.size())
         self.assertEqual(out["out_ptr"].stride(), fake_output.stride())
 
-    @fake_tensor_modes
-    def test_triton_kernel_wrapper_mutation_fake_tensor_nested_kwargs(self, mode_cls):
+    def test_triton_kernel_wrapper_mutation_fake_tensor_nested_kwargs(self):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_mutation,
         )
         from torch._subclasses.fake_tensor import is_fake_tensor
 
-        mode = mode_cls()
+        mode = FakeTensorMode()
         with mode:
             fake_output = torch.empty_strided((2, 3), (3, 1))
 
