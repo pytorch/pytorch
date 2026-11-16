@@ -215,11 +215,14 @@ class OwnerRowsTransportBuffers:
         self.host_ranks = tuple(
             other for other, host in enumerate(hosts) if host == hosts[rank]
         )
-        self.group = dist.new_group(
+        group = dist.new_group(
             [self._global_ranks[other] for other in self.host_ranks],
             backend="gloo",
             use_local_synchronization=True,
         )
+        if not isinstance(group, dist.ProcessGroup):
+            raise AssertionError("Expected this rank in its host's group")
+        self.group = group
         self._buffers: dict[tuple[str, torch.dtype], SymmetricBuffer] = {}
 
     def get(
@@ -235,11 +238,9 @@ class OwnerRowsTransportBuffers:
             # Collectives on any stream may still read the old buffer.
             torch.cuda.synchronize(device)
         tensor = symm_mem.empty(numel, dtype=dtype, device=device)
-        # pyrefly: ignore [bad-argument-type]
         handle = symm_mem.rendezvous(tensor, self.group)
         peers = {
             other: handle.get_buffer(
-                # pyrefly: ignore [bad-argument-type]
                 dist.get_group_rank(self.group, self._global_ranks[other]),
                 (numel,),
                 dtype,

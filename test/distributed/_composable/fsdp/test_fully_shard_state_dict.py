@@ -409,11 +409,9 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
 
         # Enable storage retention recursively and verify the child parameters
         model.set_keep_unsharded_storage(keep=True, recurse=True)
-        param_group = model[0]._get_fsdp_state()._fsdp_param_group
+        param_group = model[0]._get_fsdp_state()._fsdp_param_groups[0]
         self.assertIsNotNone(param_group)
-        self.assertTrue(
-            all(param.keep_unsharded_storage for param in param_group.fsdp_params)
-        )
+        self.assertTrue(param_group.bucket.keep_persistent_storage)
 
         def get_data_ptrs() -> list[int]:
             return [
@@ -426,13 +424,40 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
 
         # State dict reshards without releasing the unsharded storage
         model.state_dict()
-        self.assertTrue(param_group.is_sharded)
+        self.assertFalse(param_group.bucket.is_unsharded)
+        self.assertIsNone(param_group.bucket.post_forward_storage)
         self.assertEqual(get_data_ptrs(), data_ptrs)
 
         # Forward triggers an unshard that should reuse the retained storage
         with torch.inference_mode():
             model(torch.randn(2, 8, device=device))
         self.assertEqual(get_data_ptrs(), data_ptrs)
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_load_state_dict_assign_after_forward(self):
+        # load_state_dict(assign=True) replaces the sharded parameters; forwards
+        # after it, also once training started, use the loaded values
+        torch.manual_seed(42)
+        model = MLP(8, device=device_type)
+        loaded = MLP(8, device=device_type)
+        fully_shard(model)
+        fully_shard(loaded)
+        reference = MLP(8, device=device_type)
+        reference.load_state_dict(
+            {k: v.full_tensor() for k, v in loaded.state_dict().items()}
+        )
+        inp = torch.randn(2, 8, device=device_type)
+        model(inp).sum().backward()
+        model.load_state_dict(
+            {k: v.detach().clone() for k, v in loaded.state_dict().items()},
+            assign=True,
+        )
+        for param in model.parameters():
+            self.assertIsInstance(param, DTensor)
+        self.assertEqual(model(inp), reference(inp))
+        model.zero_grad(set_to_none=True)
+        model(inp).sum().backward()
+        self.assertTrue(all(param.grad is not None for param in model.parameters()))
 
     @skip_if_lt_x_gpu(1)
     def test_rank0_offload_full_state_dict(self):

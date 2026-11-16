@@ -39,7 +39,6 @@ from .ctx_manager import (
     DualLevelContextManager,
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
-    FSDPParamGroupUseTrainingStateVariable,
     FxTracebackAnnotateVariable,
     GenericContextWrappingVariable,
     get_device_context_manager,
