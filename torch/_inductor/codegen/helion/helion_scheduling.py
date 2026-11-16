@@ -104,6 +104,13 @@ def is_helion_matmul(node: BaseSchedulerNode) -> bool:
 
 
 def helion_supports(node: SchedulerNode) -> bool:
+    # Triton kernels honor these modes and Helion kernels do not. With
+    # batch_invariant, each shape autotunes its own Helion tile_r: rows 0-7 of an
+    # autotuned x.sum(-1) over a [512, 4096] input differ in the last bits from
+    # the same rows at batch 8. With numerics="strict_reduction", Triton fixes
+    # the reduction order from strict_reduction_rblock, which HelionKernel ignores.
+    if config.strict_reduction or config.batch_invariant:
+        return False
     reduction_type = cast(ComputedBuffer, node.node).get_reduction_type()
     body = node._body
     return (

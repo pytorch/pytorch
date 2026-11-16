@@ -313,19 +313,34 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         self.assertIn("buf2 = buf1; del buf1  # reuse", self.code)
         self.assertRegex(self.code, r"helion_\w+\(reinterpret_tensor\(buf2, ")
 
-    @parametrize("case", ["softmax", "layer_norm", "argmax", "dynamic"])
+    @parametrize(
+        "case",
+        [
+            "softmax",
+            "layer_norm",
+            "argmax",
+            "dynamic",
+            "strict_reduction",
+            "batch_invariant",
+        ],
+    )
     def test_triton_fallback(self, case):
         x = torch.randn(64, 100, device=GPU_TYPE)
         fn = {
             "softmax": lambda x: torch.softmax(x, -1),
             "layer_norm": lambda x: torch.nn.functional.layer_norm(x, (100,)),
             "argmax": lambda x: x.argmax(-1),
-            "dynamic": lambda x: x.sum(-1),
-        }[case]
+        }.get(case, lambda x: x.sum(-1))
         if case == "dynamic":
             torch._dynamo.mark_dynamic(x, 0)
+        # Without these modes, x.sum(-1) is a Helion kernel.
+        modes = {
+            "strict_reduction": {"numerics": "strict_reduction"},
+            "batch_invariant": {"batch_invariant": True},
+        }
         metrics.reset()
-        self.assertEqual(self.compile(fn, x, tol=1e-4), [])
+        with config.patch(modes.get(case, {})):
+            self.assertEqual(self.compile(fn, x, tol=1e-4), [])
         self.assertEqual(metrics.generated_kernel_count, self.code.count("@triton.jit"))
 
 
