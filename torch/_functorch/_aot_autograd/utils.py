@@ -8,10 +8,11 @@ import logging
 import operator
 import sys
 import warnings
-from collections.abc import Callable, Sequence
-from contextlib import nullcontext
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from functools import partial, wraps
-from typing import Any, overload, TYPE_CHECKING
+from typing import Any, Literal, overload, Protocol, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar, TypeVarTuple
 
 import torch
@@ -25,7 +26,26 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 _T = TypeVar("_T")
+_MISSING = object()
+CompiledGraphRole = Literal["forward", "backward", "inference"]
+
+
+class CompiledGraphWrapper(Protocol):
+    def __call__(
+        self,
+        compiled: Callable[_P, _R],
+        graph_name: str,
+        *,
+        graph_role: CompiledGraphRole,
+    ) -> Callable[_P, _R]: ...
+
+
+_compiled_graph_wrapper_disabled: ContextVar[bool] = ContextVar(
+    "_compiled_graph_wrapper_disabled", default=False
+)
 if TYPE_CHECKING:
     from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
@@ -44,6 +64,8 @@ KNOWN_TYPES = [
     FakeScriptObject,
     torch.ScriptObject,
 ]
+
+log: logging.Logger = logging.getLogger(__name__)
 
 aot_graphs_effects_log = getArtifactLogger(__name__, "aot_graphs_effects")
 annotation_log = getArtifactLogger(__name__, "annotation")
@@ -110,6 +132,91 @@ def _get_autocast_states() -> list[Any]:
         torch.get_autocast_dtype("cpu"),
         torch.is_autocast_cache_enabled(),
     ]
+
+
+def _invalid_wrapper_reason(
+    replacement: object, compiled: Callable[..., Any]
+) -> str | None:
+    if not callable(replacement):
+        return "replacement is not callable"
+
+    if bool(getattr(replacement, "_boxed_call", False)) != bool(
+        getattr(compiled, "_boxed_call", False)
+    ):
+        return "replacement changed _boxed_call"
+
+    current = replacement
+    visited: set[int] = set()
+    while current is not compiled:
+        current_id = id(current)
+        if current_id in visited:
+            return "replacement has a cyclic __wrapped__ chain"
+        visited.add(current_id)
+        current = getattr(current, "__wrapped__", _MISSING)
+        if current is _MISSING:
+            return "replacement __wrapped__ chain does not reach the original"
+
+    original_attrs: dict[str, object] = getattr(compiled, "__dict__", {})
+    replacement_attrs: dict[str, object] = getattr(replacement, "__dict__", {})
+    for name, original in original_attrs.items():
+        if name == "__wrapped__":
+            continue
+        if name not in replacement_attrs or replacement_attrs[name] is not original:
+            return f"replacement did not preserve instance attribute {name}"
+
+    return None
+
+
+@contextmanager
+def disable_compiled_graph_wrapper() -> Iterator[None]:
+    token = _compiled_graph_wrapper_disabled.set(True)
+    try:
+        yield
+    finally:
+        _compiled_graph_wrapper_disabled.reset(token)
+
+
+def resolve_compiled_graph_wrapper() -> CompiledGraphWrapper | None:
+    if _compiled_graph_wrapper_disabled.get():
+        return None
+    from torch._functorch import config
+
+    if config.compiled_graph_wrapper is not None:
+        return config.compiled_graph_wrapper
+    return torch._utils_internal.get_compiled_graph_wrapper()
+
+
+def maybe_wrap_compiled_graph(
+    compiled: Callable[_P, _R],
+    graph_role: CompiledGraphRole,
+    *,
+    graph_name: str,
+) -> Callable[_P, _R]:
+    """Apply the compiled graph hook to a freshly compiled AOT graph.
+
+    The hook is `config.compiled_graph_wrapper`, or when that is unset,
+    `torch._utils_internal.get_compiled_graph_wrapper()`. The caller provides
+    the graph name captured before invoking the compiler. No-op when neither
+    supplies a hook or inside `disable_compiled_graph_wrapper()`.
+    """
+    wrapper = resolve_compiled_graph_wrapper()
+    if wrapper is None:
+        return compiled
+    replacement = wrapper(compiled, graph_name, graph_role=graph_role)
+    if replacement is compiled:
+        return compiled
+
+    reason = _invalid_wrapper_reason(replacement, compiled)
+    if reason is None:
+        return replacement
+
+    log.warning(
+        "compiled graph wrapper rejected for %s (%s): %s; using the original callable",
+        graph_name,
+        graph_role,
+        reason,
+    )
+    return compiled
 
 
 def make_boxed_func(f: Callable[..., Any]) -> Callable[[list[Any]], Any]:
