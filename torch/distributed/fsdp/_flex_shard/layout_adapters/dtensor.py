@@ -13,7 +13,7 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.placement_types import _StridedShard, Replicate, Shard
 
-from ..placement_contract import GlobalLayout, set_global_layout
+from ..placement_contract import GlobalLayout, set_global_layout, set_outer_shard_groups
 from ..utils import _set_param_on_module
 
 
@@ -23,8 +23,10 @@ def dtensor_to_global_layout(module: nn.Module) -> None:
     Call before ``flex_shard()`` on a model whose parameters are already
     DTensors, e.g. after expert or tensor parallelism. FlexShard then shards
     each local tensor, and the declared ``GlobalLayout`` records where it sits
-    in the full parameter. Raises ``NotImplementedError`` for placements other
-    than ``Shard`` and ``Replicate``.
+    in the full parameter, and the groups of the mesh dims that shard it
+    (``set_outer_shard_groups``) where its parts are. Raises
+    ``NotImplementedError`` for placements other than ``Shard`` and
+    ``Replicate``.
     """
     for fqn, param in list(module.named_parameters(remove_duplicate=False)):
         if not isinstance(param, DTensor):
@@ -42,6 +44,15 @@ def dtensor_to_global_layout(module: nn.Module) -> None:
         if param._has_grad_dtype_override:
             local_param.grad_dtype = param.grad_dtype
         set_global_layout(local_param, _dtensor_global_layout(param))
+        mesh = param.device_mesh
+        set_outer_shard_groups(
+            local_param,
+            [
+                mesh.get_group(dim)
+                for dim, placement in enumerate(param.placements)
+                if isinstance(placement, Shard)
+            ],
+        )
         _set_param_on_module(module, fqn, local_param)
 
 

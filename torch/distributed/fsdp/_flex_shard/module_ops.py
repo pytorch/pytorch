@@ -230,11 +230,14 @@ def set_keep_unsharded_storage(runtimes: Sequence[BucketRuntime], keep: bool) ->
 
 def set_prefetch(
     runtimes: Sequence[BucketRuntime],
-    targets: Sequence[BucketRuntime],
+    targets: Sequence[BucketRuntime] | None,
     *,
     forward: bool,
 ) -> None:
-    storages = [target.bucket_storage for target in targets]
+    """``None`` restores the default prefetch."""
+    storages = (
+        None if targets is None else [target.bucket_storage for target in targets]
+    )
     for runtime in runtimes:
         if forward:
             runtime.bucket_storage.set_buckets_to_forward_prefetch(storages)

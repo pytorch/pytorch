@@ -354,13 +354,18 @@ def set_reshard_after_forward(state: Any, reshard_after_forward: bool | int) -> 
 def set_modules_to_prefetch(
     state: Any, target_states: list[Any], *, forward: bool
 ) -> None:
-    targets = [
-        runtime
-        for target_state in target_states
-        for runtime in (
-            target_state.runtimes if forward else reversed(target_state.runtimes)
-        )
-    ]
+    # As in FSDP2, an empty list keeps the default prefetch
+    targets = (
+        [
+            runtime
+            for target_state in target_states
+            for runtime in (
+                target_state.runtimes if forward else reversed(target_state.runtimes)
+            )
+        ]
+        if target_states
+        else None
+    )
     module_ops.set_prefetch(state.runtimes, targets, forward=forward)
 
 
