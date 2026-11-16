@@ -30,11 +30,12 @@ under a guard on the function; any other Python function, method or
 ``nn.Module`` is compiled the first time compiled code calls it; and
 ``for i in range(k)`` with a small constant ``k`` is unrolled. Closures,
 ``try``/``except``/``finally``, ``with``, imports and class statements are
-compiled, and so are ``locals()``, ``vars()`` and ``dir()``, which get the
-variables from where compiled code keeps them. Generators, coroutines and
-functions that read their own frame some other way (``eval``, ``exec``,
-``super()`` without arguments) run in the interpreter, and so does what they
-call. A Python side effect does not split the function: it is
+compiled. A compiled function runs under a frame of the interpreter that has
+its variables, so what looks for them there finds them: ``locals()``,
+``eval``, ``exec``, ``super()`` without arguments, a traceback, a debugger.
+Generators and coroutines run in the interpreter, and so does what they
+call; so does what is called while a trace function (``sys.settrace``) is
+set. A Python side effect does not split the function: it is
 one more instruction of the graph, between the specialized ones. A whole
 training step can therefore be one compiled function, with the same results
 bit for bit as the interpreter::
@@ -283,9 +284,10 @@ def cfg_compile(
         keep_memory: give the function a workspace: the memory of the CPU
             tensors its calls make stays with it when they are freed, and
             the next call uses it again instead of having the system map and
-            fault in the same pages. It holds about as much as one call has
-            in use at its peak; what a few calls in a row did not ask for is
-            given back. ``torch.cfg_compile.memory(fn)`` reports it. On by
+            fault in the same pages. It holds what the tensors of a call
+            hold at their peak and up to half as much again, 256 MB at
+            most; what a few calls in a row did not ask for is given back.
+            ``torch.cfg_compile.memory(fn)`` reports it. On by
             default (``TORCH_CFG_COMPILE_KEEP_MEMORY=0`` turns it off).
         freeze: with ``backend="inductor"``, build the parameters and buffers
             of the modules a region reads into its graph when the call is

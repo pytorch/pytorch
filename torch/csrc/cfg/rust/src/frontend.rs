@@ -366,6 +366,7 @@ impl<'a> Builder<'a> {
                     }
                     if matches!(ins.op, Bc::LoadFastAndClear | Bc::DeleteFast) {
                         effect!(off, Op::StoreSlot(slot, UNDEF));
+                        effect!(off, Op::StoreLocal(arg, UNDEF));
                     }
                     if ins.op != Bc::DeleteFast {
                         stack.push(v);
@@ -374,6 +375,7 @@ impl<'a> Builder<'a> {
                 Bc::StoreFast if self.slots.contains_key(&arg) => {
                     let v = pop_value!();
                     effect!(off, Op::StoreSlot(self.slots[&arg], v));
+                    effect!(off, Op::StoreLocal(arg, v));
                 }
                 Bc::LoadFast | Bc::LoadFastCheck => {
                     let v = self.read_var(arg, b);
@@ -387,6 +389,7 @@ impl<'a> Builder<'a> {
                     let v = self.read_var(arg, b);
                     stack.push(v);
                     self.write_var(arg, b, UNDEF);
+                    effect!(off, Op::StoreLocal(arg, UNDEF));
                 }
                 Bc::StoreFast => {
                     let v = pop!();
@@ -403,12 +406,14 @@ impl<'a> Builder<'a> {
                         effect!(off, Op::Hold(vec![old]));
                     }
                     self.write_var(arg, b, v);
+                    effect!(off, Op::StoreLocal(arg, v));
                 }
                 Bc::DeleteFast => {
                     let v = self.read_var(arg, b);
                     let name = self.varname_const(arg)?;
                     effect!(off, Op::CheckBound(v, name));
                     self.write_var(arg, b, UNDEF);
+                    effect!(off, Op::StoreLocal(arg, UNDEF));
                 }
                 Bc::LoadGlobal => {
                     if arg & 1 != 0 {
@@ -494,6 +499,7 @@ impl<'a> Builder<'a> {
                     let v = self.read_var(arg, b);
                     let cell = emit!(off, Op::MakeCell(v));
                     self.write_var(arg, b, cell);
+                    effect!(off, Op::StoreLocal(arg, cell));
                 }
                 Bc::LoadDeref => {
                     let v = if arg < self.nfree_base {
@@ -1180,13 +1186,14 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     for n in names_tuple.iter() {
         consts.push(unsafe { PyObj::from_borrowed(n.as_ptr()) });
     }
-    // A compiled function keeps its locals in registers, not in its frame, so
-    // what reads them through the frame would not find them: `eval` and
-    // `exec` are not supported, and `locals`, `vars` and `dir` only where
-    // they are called on the spot (see `Op::Locals`). That is about the
-    // globals of these names; an attribute may be called what it likes.
-    // Where compiled functions have no frame at all, their globals and
-    // walking the stack are out of reach too.
+    // A compiled function runs under a frame of the interpreter that has its
+    // variables (see `Op::StoreLocal`), so what reads them there finds them:
+    // `eval`, `exec`, `locals`, `vars`, `dir` and `super()` are calls like
+    // any other. Where compiled functions have no frame (anything but
+    // CPython 3.12) those are out of reach, as are the function's globals
+    // and walking the stack; `locals`, `vars` and `dir` are then supported
+    // where they are called on the spot (see `Op::Locals`). That is about
+    // the globals of these names; an attribute may be called what it likes.
     let names: Vec<String> = names_tuple.extract()?;
     let global_loads: HashSet<u32> = instrs
         .iter()
@@ -1196,32 +1203,33 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         })
         .collect();
     let loads_global = |name: &str| names.iter().position(|n| n == name).filter(|i| global_loads.contains(&(*i as u32)));
-    for name in ["eval", "exec"] {
-        if loads_global(name).is_some() {
-            return unsupported(format!("{}() reads the local variables of the frame", name));
+    let framed = crate::capi::has_frames();
+    let mut reads_frame: HashSet<u32> = HashSet::new();
+    if !framed {
+        for name in ["eval", "exec"] {
+            if loads_global(name).is_some() {
+                return unsupported(format!("{}() reads the local variables of the frame", name));
+            }
         }
-    }
-    let reads_frame: HashSet<u32> =
-        ["locals", "vars", "dir"].iter().filter_map(|name| loads_global(name)).map(|i| i as u32).collect();
-    let cell_locals: HashSet<u32> =
-        instrs.iter().filter(|i| i.op == Bc::MakeCell).map(|i| i.arg).collect();
-    let freevars: Vec<String> = code.getattr("co_freevars")?.extract()?;
-    if !crate::capi::has_frames() {
+        reads_frame.extend(["locals", "vars", "dir"].iter().filter_map(|name| loads_global(name)).map(|i| i as u32));
         for name in ["globals", "_getframe", "currentframe"] {
             if names.iter().any(|n| n == name) {
                 return unsupported(format!("{}() needs a Python frame of its own", name));
             }
         }
-    }
-    // super() without arguments finds its class and instance in the frame;
-    // only the form the compiler turns into LOAD_SUPER_ATTR is supported.
-    if let Some(index) = names.iter().position(|n| n == "super") {
-        let loads = instrs.iter().filter(|i| i.op == Bc::LoadGlobal && (i.arg >> 1) as usize == index).count();
-        let attrs = instrs.iter().filter(|i| i.op == Bc::LoadSuperAttr).count();
-        if loads != attrs {
-            return unsupported("super() without arguments reads the local variables of the frame");
+        // super() without arguments finds its class and instance in the
+        // frame; the form the compiler turns into LOAD_SUPER_ATTR does not.
+        if let Some(index) = names.iter().position(|n| n == "super") {
+            let loads = instrs.iter().filter(|i| i.op == Bc::LoadGlobal && (i.arg >> 1) as usize == index).count();
+            let attrs = instrs.iter().filter(|i| i.op == Bc::LoadSuperAttr).count();
+            if loads != attrs {
+                return unsupported("super() without arguments reads the local variables of the frame");
+            }
         }
     }
+    let cell_locals: HashSet<u32> =
+        instrs.iter().filter(|i| i.op == Bc::MakeCell).map(|i| i.arg).collect();
+    let freevars: Vec<String> = code.getattr("co_freevars")?.extract()?;
     let varnames_tuple = code.getattr("co_varnames")?;
     let varnames_tuple = varnames_tuple.downcast::<PyTuple>()?;
     let mut varnames: Vec<String> = varnames_tuple.extract()?;
@@ -1449,6 +1457,11 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
 
     let globals = func.getattr("__globals__")?;
     globals.downcast::<PyDict>()?;
+    // The interpreter reads the globals of such a function through the
+    // mapping protocol (a `__missing__`, a `__getitem__` of its own).
+    if !globals.is_exact_instance_of::<PyDict>() {
+        return unsupported("the globals of the function are not a plain dict");
+    }
     let builtins = func.getattr("__builtins__")?;
     let builtins = if builtins.downcast::<PyDict>().is_ok() {
         builtins
@@ -1548,6 +1561,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::ImportFrom(a, _)
         | Op::StoreDeref(_, a)
         | Op::StoreSlot(_, a)
+        | Op::StoreLocal(_, a)
         | Op::PushExcInfo(a)
         | Op::PopExcInfo(a)
         | Op::LoadSpecial(a, _)

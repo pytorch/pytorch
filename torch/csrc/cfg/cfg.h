@@ -97,7 +97,7 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 7
+#define TCFG_API_VERSION 10
 
 struct TcfgApi {
   uint32_t version;
@@ -148,18 +148,32 @@ struct TcfgApi {
   // Pushes a frame for func, a Python function, and makes it the current
   // frame of the thread. *instr gets the address of the frame's instruction
   // pointer and *code that of the first instruction of the function's code,
-  // so the caller can keep the pointer on what it is executing. The frame
-  // counts as one Python call against the recursion limit. Returns null with
-  // a Python error set: RecursionError, or MemoryError.
-  void* (*frame_push)(PyObject* func, uint16_t*** instr, uint16_t** code);
+  // so the caller can keep the pointer on what it is executing. *locals gets
+  // the frame's variables, one owned reference or null each, in the order of
+  // the code's co_localsplusnames: the caller keeps them what the variables
+  // of the function are bound to, the cells of the closure excepted, which
+  // are there already. The frame counts as one Python call against the
+  // recursion limit. Returns null with a Python error set: RecursionError,
+  // or MemoryError.
+  void* (*frame_push)(
+      PyObject* func,
+      uint16_t*** instr,
+      uint16_t** code,
+      PyObject*** locals);
   // Pops the frame, which must be the current one. A frame object that
   // something still refers to (a traceback) takes the frame's contents over,
-  // and with them `kept` (a reference that is consumed; may be null): what
-  // the locals of the function were bound to, which lives as long as the
-  // frame object then, as the locals of an interpreted function do.
-  void (*frame_pop)(void* frame, PyObject* kept);
+  // its variables among them.
+  void (*frame_pop)(void* frame);
   // Whether something other than the stack refers to the frame.
   int32_t (*frame_held)(void* frame);
+  // Makes a frame that is on the stack of the thread the current one and
+  // returns the one that was, for the same call to put back: what runs in
+  // between finds itself called by the function of that frame, whatever
+  // frames were pushed since.
+  void* (*frame_swap)(void* frame);
+  // Whether the thread has a trace function (sys.settrace): the interpreter
+  // calls it for the frames it enters and the lines it runs in them.
+  int32_t (*frame_traced)();
 
   // Whether torch.jit.trace is recording on this thread: one of the things
   // nn.Module.__call__ looks at before it calls forward.

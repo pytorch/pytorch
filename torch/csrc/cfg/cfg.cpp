@@ -66,8 +66,11 @@ struct Record {
   bool threw;
   int32_t depth;
   int32_t parent;
-  // Only kept for top-level calls: the values pin the tensors they name, so
-  // their addresses stay meaningful until the trace is analyzed.
+  // Only kept for the top-level call of a capture that has one: the values
+  // pin the tensors they name, so their addresses stay meaningful until the
+  // trace is analyzed. A capture with a second top-level call is not made a
+  // site of (siteFromTrace) and may be of anything, a whole model included,
+  // whose tensors it must not keep alive.
   std::vector<c10::IValue> inputs;
   std::vector<c10::IValue> outputs;
 };
@@ -107,7 +110,13 @@ class Sink final : public c10::DispatchCaptureSink {
         {},
         {}};
     if (top) {
-      r.inputs.assign(inputs.begin(), inputs.end());
+      if (t.top_level == 0) {
+        r.inputs.assign(inputs.begin(), inputs.end());
+      } else if (t.top_level == 1) {
+        // The first record is the first top-level call.
+        t.records.front().inputs.clear();
+        t.records.front().outputs.clear();
+      }
       t.top_level++;
     }
     t.open.push_back(static_cast<int32_t>(t.records.size()));
@@ -122,7 +131,7 @@ class Sink final : public c10::DispatchCaptureSink {
     auto& r = t.records[t.open.back()];
     t.open.pop_back();
     r.threw = threw;
-    if (t.open.empty() && !threw) {
+    if (t.open.empty() && !threw && t.top_level == 1) {
       r.outputs.assign(outputs.begin(), outputs.end());
     }
   }
@@ -1730,7 +1739,11 @@ void THP_PyThreadState_PopFrame(
     _PyInterpreterFrame* frame);
 }
 
-void* framePush(PyObject* func, uint16_t*** instr, uint16_t** code_start) {
+void* framePush(
+    PyObject* func,
+    uint16_t*** instr,
+    uint16_t** code_start,
+    PyObject*** locals) {
   PyThreadState* tstate = PyThreadState_Get();
   // A compiled function is a Python call: it counts against the recursion
   // limit in the interpreter's own counter, as _Py_EnterRecursivePy does, so
@@ -1758,8 +1771,8 @@ void* framePush(PyObject* func, uint16_t*** instr, uint16_t** code_start) {
   }
   Py_INCREF(func);
   _PyFrame_Initialize(frame, function, nullptr, code, 0);
-  // What COPY_FREE_VARS does. The other locals stay empty: the VM keeps them
-  // in its registers.
+  // What COPY_FREE_VARS does. The other variables start out unbound: the VM
+  // fills them in as the function binds them.
   if (PyObject* closure = function->func_closure) {
     Py_ssize_t n = PyTuple_GET_SIZE(closure);
     Py_ssize_t first = code->co_nlocalsplus - n;
@@ -1774,6 +1787,7 @@ void* framePush(PyObject* func, uint16_t*** instr, uint16_t** code_start) {
   tstate->cframe->current_frame = frame;
   *instr = reinterpret_cast<uint16_t**>(&frame->prev_instr);
   *code_start = reinterpret_cast<uint16_t*>(_PyCode_CODE(code));
+  *locals = frame->localsplus;
   return frame;
 }
 
@@ -1783,25 +1797,27 @@ int32_t frameHeld(void* held) {
       Py_REFCNT(reinterpret_cast<PyObject*>(frame->frame_obj)) > 1;
 }
 
-void framePop(void* popped, PyObject* kept) {
+void framePop(void* popped) {
   auto* frame = static_cast<_PyInterpreterFrame*>(popped);
   PyThreadState* tstate = PyThreadState_Get();
-  if (kept != nullptr) {
-    // On the frame's own stack, which is empty: the frame object clears it
-    // with its locals, and f_locals does not show it.
-    PyCodeObject* code = frame->f_code;
-    if (frame->stacktop < code->co_nlocalsplus + code->co_stacksize) {
-      frame->localsplus[frame->stacktop++] = kept;
-    } else {
-      Py_DECREF(kept);
-    }
-  }
   // Unlinked before it is cleared, as in the interpreter: clearing can run
   // finalizers, which must not find a half-cleared frame on the stack.
   tstate->cframe->current_frame = frame->previous;
   THP_PyFrame_Clear(frame);
   THP_PyThreadState_PopFrame(tstate, frame);
   ++tstate->py_recursion_remaining;
+}
+
+void* frameSwap(void* frame) {
+  PyThreadState* tstate = PyThreadState_Get();
+  _PyInterpreterFrame* previous = tstate->cframe->current_frame;
+  tstate->cframe->current_frame = static_cast<_PyInterpreterFrame*>(frame);
+  return previous;
+}
+
+int32_t frameTraced() {
+  PyThreadState* tstate = PyThreadState_Get();
+  return tstate->c_tracefunc != nullptr;
 }
 #endif
 
@@ -1833,8 +1849,11 @@ const TcfgApi api_table = {
     &siteInfo,        &tensorInfo,        &tensorBox,         &tensorRetain,
     &tensorRelease,
 #ifdef TCFG_HAS_FRAMES
-    &framePush,       &framePop,          &frameHeld,
+    &framePush,       &framePop,          &frameHeld,         &frameSwap,
+    &frameTraced,
 #else
+    nullptr,
+    nullptr,
     nullptr,
     nullptr,
     nullptr,
