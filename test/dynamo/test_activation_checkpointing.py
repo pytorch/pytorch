@@ -39,6 +39,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
     skipIfHpu,
@@ -4154,7 +4155,8 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(len(recomputed), 1)
         self.assertEqual(gm(init, xs), train_step(init, xs))
 
-    def test_plain_checkpoint_in_scan_body_under_non_strict(self):
+    @parametrize("preserve", [True, False])
+    def test_plain_checkpoint_in_scan_body_under_non_strict(self, preserve):
         # Plain checkpoint in a scan body recomputes its whole region, as under
         # torch.compile, with or without an outer preserve_node_meta().
         import contextlib
@@ -4185,27 +4187,105 @@ def forward(self, arg0_1, arg1_1):
 
         init = torch.randn(2, 4, requires_grad=True)
         xs = torch.randn(3, 4, 4, requires_grad=True)
-        for preserve in (True, False):
-            fake_mode = FakeTensorMode()
-            with (
-                fake_mode,
-                tracing(TracingContext(fake_mode)),
-                torch.compiler._non_strict_tracing_context(),
-                torch.compiler._patch_autograd_grad(),
-                preserve_node_meta() if preserve else contextlib.nullcontext(),
-            ):
-                fake_args = [fake_mode.from_tensor(t) for t in (init, xs)]
-                gm = make_fx(train_step)(*fake_args)
-            fw = gm.scan_combine_graph_0
-            saved = {
-                source(n).target if source(n).op == "call_function" else "carry"
-                for n in fw.graph.output_node().args[0][2:]
-            }
-            # Nothing inside the checkpoint region (relu, mm, tanh) is saved.
-            self.assertEqual(
-                saved, {"carry", torch.ops.aten.sigmoid.default}, f"{preserve=}"
+        fake_mode = FakeTensorMode()
+        with (
+            fake_mode,
+            tracing(TracingContext(fake_mode)),
+            torch.compiler._non_strict_tracing_context(),
+            torch.compiler._patch_autograd_grad(),
+            preserve_node_meta() if preserve else contextlib.nullcontext(),
+        ):
+            fake_args = [fake_mode.from_tensor(t) for t in (init, xs)]
+            gm = make_fx(train_step)(*fake_args)
+        fw = gm.scan_combine_graph_0
+        saved = {
+            source(n).target if source(n).op == "call_function" else "carry"
+            for n in fw.graph.output_node().args[0][2:]
+        }
+        # Nothing inside the checkpoint region (relu, mm, tanh) is saved.
+        self.assertEqual(saved, {"carry", torch.ops.aten.sigmoid.default})
+        self.assertEqual(gm(init, xs), train_step(init, xs))
+
+    @parametrize("sac", [False, True])
+    def test_checkpoint_in_eager_scan_body(self, sac):
+        # Eager scan compiles its body; checkpoint's recompute tags reach
+        # min-cut, so only the policy's saves cross into the backward.
+        from unittest import mock
+
+        from torch._higher_order_ops.partitioner import (
+            _find_hop_subgraph_outputs,
+            HopGraphMinCutPartitioner,
+        )
+        from torch._higher_order_ops.scan import scan
+        from torch.utils.checkpoint import (
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        def policy(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.tanh.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        kwargs = {}
+        if sac:
+            kwargs["context_fn"] = functools.partial(
+                create_selective_checkpoint_contexts, policy
             )
-            self.assertEqual(gm(init, xs), train_step(init, xs))
+
+        def body(c, w):
+            y = checkpoint(
+                lambda c, w: torch.mm(c.relu(), w).tanh(),
+                c,
+                w,
+                use_reentrant=False,
+                **kwargs,
+            )
+            y = torch.mm(y, w).sigmoid()
+            return y, y.new_zeros(())
+
+        graphs = []
+        create = HopGraphMinCutPartitioner.create_partitioned_graph
+
+        def record(*args, **kw):
+            graphs.append(create(*args, **kw))
+            return graphs[-1]
+
+        init = torch.randn(2, 4, requires_grad=True)
+        xs = torch.randn(3, 4, 4, requires_grad=True)
+        with mock.patch.object(
+            HopGraphMinCutPartitioner, "create_partitioned_graph", record
+        ):
+            out = scan(body, init, xs)[0]
+            grads = torch.autograd.grad(out.sum(), (init, xs))
+
+        # Eager scan partitions its body more than once (same graph each time).
+        self.assertGreaterEqual(len(graphs), 1)
+        hop_graph = graphs[-1]
+        fw_outputs = _find_hop_subgraph_outputs(hop_graph.fw_gm)
+        outputs = fw_outputs[hop_graph.n_fw_outputs :]
+        copies = (torch.ops.aten.alias_copy.default, torch.ops.aten.clone.default)
+
+        def source(n):
+            # Look through copies to the node that made the value.
+            while n.op == "call_function" and n.target in copies:
+                n = n.args[0]
+            return n.target if n.op == "call_function" else "input"
+
+        saved = {source(n) for n in outputs}
+        expected = {"input", torch.ops.aten.sigmoid.default}
+        if sac:
+            expected.add(torch.ops.aten.tanh.default)
+        self.assertEqual(saved, expected)
+
+        # Same grads as running the body step by step.
+        c = init
+        for t in range(3):
+            c = torch.mm(torch.mm(c.relu(), xs[t]).tanh(), xs[t]).sigmoid()
+        self.assertEqual(grads, torch.autograd.grad(c.sum(), (init, xs)))
+
+
+instantiate_parametrized_tests(ActivationCheckpointingNonStrictTracerTests)
 
 
 class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase):
