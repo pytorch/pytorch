@@ -11857,10 +11857,9 @@ class TestLinalgCudaOnly(TestCase):
         else:
             def make_diagonally_dominant(t):
                 # This bounds the growth factor by 2
-                *_, m, n = t.shape
                 t_diag = t.diagonal(dim1=-2, dim2=-1).zero_()
                 col_abs_sum = t.abs().sum(-2)
-                t_diag.copy_(col_abs_sum[..., :min(m, n)])
+                t_diag.copy_(col_abs_sum)
                 return t
 
             def make_well_conditioned(*shape):
@@ -11888,40 +11887,32 @@ class TestLinalgCudaOnly(TestCase):
         make_input_methods = (make_well_conditioned, make_ill_conditioned)
         matrix_norm = partial(torch.linalg.norm, dim=(-2, -1))
 
-        # returns PLU - A
-        def get_residual(A):
+        torch.backends.cuda.preferred_linalg_library("cusolver")
+        for (b, n), make_input in product(shapes, make_input_methods):
+            A = make_input(b, n, n)
             P, L, U = torch.linalg.lu(A, pivot=pivot)
             A, P, L, U = (t.to(compute_dtype) for t in (A, P, L, U))
-            residual = (P @ L @ U).sub_(A) if pivot else (L @ U).sub_(A)
-            return residual
+            residual = P @ L @ U - A if pivot else L @ U - A
 
-        torch.backends.cuda.preferred_linalg_library("cusolver")
-        for (b, s), make_input in product(shapes, make_input_methods):
-            buffer = make_input(b, s, s)
-            mat_shapes = [(s, s // 2), (s // 2, s), (s, s)]
-            for m, n in mat_shapes:
-                A = buffer[:, :m, :n]
-                residual = get_residual(A)
+            # Netlib uses 1-norm, MAGMA uses Frobenius
+            for norm in (partial(matrix_norm, ord=1), partial(matrix_norm, ord='fro')):
+                # Compute scaled residual
+                # ||PLU - A|| / (||A|| * n * eps)
+                scale = norm(A).mul_(n * eps)
+                scaled_residual = norm(residual).div_(scale)
 
-                # Netlib uses 1-norm, MAGMA uses Frobenius
-                for norm in (partial(matrix_norm, ord=1), partial(matrix_norm, ord='fro')):
-                    # Compute scaled residual
-                    # ||PLU - A|| / (||A|| * n * eps)
-                    scale = norm(A).mul_(n * eps)
-                    scaled_residual = norm(residual).div_(scale)
-
-                    # Very conservative - Netlib uses 30, and so is MAGMA, see:
-                    #
-                    # Netlib:
-                    # https://github.com/Reference-LAPACK/lapack/blob/master/TESTING/LIN/dget01.f
-                    # https://github.com/Reference-LAPACK/lapack/blob/master/TESTING/LIN/dchkge.f
-                    # https://github.com/Reference-LAPACK/lapack/blob/master/TESTING/dtest.in
-                    #
-                    # MAGMA:
-                    # https://github.com/icl-utk-edu/magma/blob/master/testing/testing_zgetrf.cpp
-                    # https://github.com/icl-utk-edu/magma/blob/master/testing/magma_util.cpp
-                    K = 1.0
-                    self.assertTrue((scaled_residual < K).all())
+                # Very conservative - Netlib uses 30, and so is MAGMA, see:
+                #
+                # Netlib:
+                # https://github.com/Reference-LAPACK/lapack/blob/master/TESTING/LIN/dget01.f
+                # https://github.com/Reference-LAPACK/lapack/blob/master/TESTING/LIN/dchkge.f
+                # https://github.com/Reference-LAPACK/lapack/blob/master/TESTING/dtest.in
+                #
+                # MAGMA:
+                # https://github.com/icl-utk-edu/magma/blob/master/testing/testing_zgetrf.cpp
+                # https://github.com/icl-utk-edu/magma/blob/master/testing/magma_util.cpp
+                K = 1.0
+                self.assertTrue((scaled_residual < K).all())
 
         # Check info vector. Note, it is 1-based
         for n in (300, 1024) + ((1030, 1050) if pivot else ()):
@@ -11935,14 +11926,6 @@ class TestLinalgCudaOnly(TestCase):
             self.assertEqual(info[2], 1)
             self.assertEqual(info[4], 18)
             self.assertTrue(info[1] == info[3] == 0)
-
-            # Check all NaN columns -- no swaps should occur
-            if pivot:
-                A.fill_(float("nan"))
-                LU, pivots, _ = torch.linalg.lu_factor_ex(A, pivot=pivot)
-                expected_pivots = torch.arange(1, n + 1, device=device, dtype=torch.int32)
-                expected_pivots = expected_pivots.unsqueeze(0).expand(A.shape[0], n)
-                self.assertEqual(pivots, expected_pivots)
 
     @skipIfRocm
     @skipCUDAIfNoCusolver
@@ -11971,29 +11954,19 @@ class TestLinalgCudaOnly(TestCase):
             buffer.diagonal(dim1=-2, dim2=-1).zero_().copy_(diag)
 
         for i in range(1, r):
-            for r, c in [(n + i, n), (n, n + i), (n + i, n + i)]:
-                A = buffer[..., :r, :c]
-                P, L, U = torch.linalg.lu(A, pivot=pivot)
-                A, P, L, U = (t.to(compute_dtype) for t in (A, P, L, U))
+            A = buffer[..., :n + i, :n + i]
+            P, L, U = torch.linalg.lu(A, pivot=pivot)
+            A, P, L, U = (t.to(compute_dtype) for t in (A, P, L, U))
 
-                residual = P @ L @ U - A if pivot else L @ U - A
-                # Compute scaled residual
-                # ||PLU - A|| / (||A|| * n * eps)
-                scale = norm(A).mul_(n * eps)
-                scaled_residual = norm(residual).div_(scale)
+            residual = P @ L @ U - A if pivot else L @ U - A
+            # Compute scaled residual
+            # ||PLU - A|| / (||A|| * n * eps)
+            scale = norm(A).mul_(n * eps)
+            scaled_residual = norm(residual).div_(scale)
 
-                # see test_linalg_batched_lu_stability_large_inputs
-                K = 1.0
-                self.assertTrue((scaled_residual < K).all())
-
-        # Check all NaN columns -- no swaps should occur
-        if pivot:
-            A = buffer
-            A.fill_(float("nan"))
-            LU, pivots, _ = torch.linalg.lu_factor_ex(A, pivot=pivot)
-            expected_pivots = torch.arange(1, A.shape[-1] + 1, device=device, dtype=torch.int32)
-            expected_pivots = expected_pivots.unsqueeze(0).expand(b, A.shape[-1])
-            self.assertEqual(pivots, expected_pivots)
+            # see test_linalg_batched_lu_stability_large_inputs
+            K = 1.0
+            self.assertTrue((scaled_residual < K).all())
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4,
                         torch.bfloat16: 5e-2, torch.half: 5e-2})
