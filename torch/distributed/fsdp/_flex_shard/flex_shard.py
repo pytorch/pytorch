@@ -32,6 +32,7 @@ from .bucket_storage import (
 )
 from .module_state import BucketGroup, ShardedModuleState
 from .param_homing import build_bucket, ParamSource
+from .placement_contract import set_outer_shard_groups
 from .placements.shard import _engine_placements
 from .sharded_param import is_flex_shard_param, set_sharding_info
 from .utils import (
@@ -91,6 +92,8 @@ class FlexShardRepresentation(ParamRepresentation):
             mesh=self.mesh,
             outer_layout=info.outer_layout,
         )
+        if info.outer_shard_groups:
+            set_outer_shard_groups(param, info.outer_shard_groups)
 
 
 class FlexShardState(ShardedModuleState):

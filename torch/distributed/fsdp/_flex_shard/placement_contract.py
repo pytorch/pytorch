@@ -17,6 +17,8 @@ from torch.distributed.checkpoint.protocol import CheckpointableTensor
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import torch.nn as nn
     from torch.distributed.device_mesh import DeviceMesh
     from torch.distributed.tensor import Placement as DTensorPlacement
@@ -111,6 +113,31 @@ def set_partial_grad_group(tensor: torch.Tensor, group: dist.ProcessGroup) -> No
 def get_partial_grad_group(tensor: torch.Tensor) -> dist.ProcessGroup | None:
     """Return the group ``tensor`` declared its grad partial over, if any."""
     return getattr(tensor, _PARTIAL_GRAD_GROUP_ATTR, None)
+
+
+_OUTER_SHARD_GROUPS_ATTR = "_flex_shard_outer_shard_groups"
+
+
+def set_outer_shard_groups(
+    tensor: torch.Tensor, groups: Sequence[dist.ProcessGroup]
+) -> None:
+    """Declare the groups over which an outer (e.g. TP/EP) sharding splits ``tensor``.
+
+    Call before ``flex_shard()`` on a parameter whose ``set_global_layout``
+    covers part of the full parameter: one group per mesh dim that shards it,
+    whose ranks hold disjoint parts of the full parameter, and none for the
+    dims that replicate it. ``clip_grad_norm_`` combines the parameter's norm
+    over these groups and its bucket's mesh. ``dtensor_to_global_layout``
+    declares them for DTensor parameters.
+    """
+    setattr(tensor, _OUTER_SHARD_GROUPS_ATTR, tuple(groups))
+
+
+def get_outer_shard_groups(tensor: torch.Tensor) -> tuple[dist.ProcessGroup, ...]:
+    """Return the groups ``tensor`` declared its outer sharding over, if any.
+
+    ``flex_shard()`` keeps them on the parameters it installs."""
+    return getattr(tensor, _OUTER_SHARD_GROUPS_ATTR, ())
 
 
 def compose_global_layouts(outer: GlobalLayout, inner: GlobalLayout) -> GlobalLayout:
@@ -518,6 +545,7 @@ __all__ = [
     "BucketStorageLayout",
     "compose_global_layouts",
     "get_global_layout",
+    "get_outer_shard_groups",
     "get_partial_grad_group",
     "GlobalLayout",
     "GradientReduceOp",
@@ -529,5 +557,6 @@ __all__ = [
     "PlacementReduceGradResult",
     "PlacementUnshardResult",
     "set_global_layout",
+    "set_outer_shard_groups",
     "set_partial_grad_group",
 ]
