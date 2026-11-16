@@ -17,6 +17,7 @@ import torch.utils.hooks
 from torch.nn import Parameter
 from torch.testing._internal.common_cuda import IS_JETSON
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -33,7 +34,6 @@ from torch.testing._internal.common_utils import (
     set_warn_always_context,
     slowTest,
     subtest,
-    TEST_CUDA,
     TEST_MULTIACCELERATOR,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -224,8 +224,8 @@ def receive_and_send(queue, out_queue, event, count):
     event.wait()
 
 
-def sum_tensors(inq, outq):
-    with torch.accelerator.device_index(1):
+def sum_tensors(inq, outq, device):
+    with torch.accelerator.device_index(torch.device(device).index):
         tensors = inq.get()
         for tensor in tensors:
             outq.put(
@@ -330,11 +330,11 @@ def _event_handle_importer_consumer(event_cls, handle, p2c, c2p):
     p2c.get()  # wait for parent to finish before destructing child event
 
 
-def _event_handle_exporter_consumer(event_cls, handle, p2c, c2p):
+def _event_handle_exporter_consumer(event_cls, handle, p2c, c2p, device):
     stream = torch.Stream()
     with stream:
         e1 = event_cls.from_ipc_handle(torch.accelerator.current_device_index(), handle)
-        torch.get_device_module()._sleep(50000000)  # spin for about 50 ms
+        torch.get_device_module(device)._sleep(50000000)  # spin for about 50 ms
         e1.record()
         c2p.put(0)
         # wait for parent process finished synchronization before
@@ -885,9 +885,32 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
     TEST_WITH_TSAN,
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
 )
-@unittest.skipIf(TEST_CUDA and not TEST_CUDA_IPC, "CUDA IPC not available")
+@unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_cuda_ipc_deprecated_aliases(self):
+        storage = torch.ones(4, device="cuda").untyped_storage()
+        with set_warn_always_context(True):
+            with self.assertWarnsRegex(UserWarning, "_share_cuda_ is deprecated"):
+                handle = storage._share_cuda_()
+            with self.assertWarnsRegex(
+                UserWarning, "_release_ipc_counter_cuda is deprecated"
+            ):
+                torch.UntypedStorage._release_ipc_counter_cuda(handle[4], handle[5])
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
 class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        if self.device_type == "cuda" and not TEST_CUDA_IPC:
+            self.skipTest("CUDA IPC not available")
 
     def tearDown(self):
         if torch.accelerator.is_available():
@@ -922,17 +945,6 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
         p.join(5)
         self.assertEqual(p.exitcode, 0)
         del t_received
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_cuda_ipc_deprecated_aliases(self):
-        storage = torch.ones(4, device="cuda").untyped_storage()
-        with set_warn_always_context(True):
-            with self.assertWarnsRegex(UserWarning, "_share_cuda_ is deprecated"):
-                handle = storage._share_cuda_()
-            with self.assertWarnsRegex(
-                UserWarning, "_release_ipc_counter_cuda is deprecated"
-            ):
-                torch.UntypedStorage._release_ipc_counter_cuda(handle[4], handle[5])
 
     def test_device_ipc_deadlock(self, device):
         ctx = mp.get_context("spawn")
@@ -1004,20 +1016,19 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
         p2.join(1)
         p3.join(1)
 
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "found only 1 GPU")
-    def test_device_small_tensors(self):
+    @deviceCountAtLeast(2)
+    def test_device_small_tensors(self, devices):
         # Check multiple small tensors which will likely use the same
         # underlying cached allocation
         ctx = mp.get_context("spawn")
         tensors = []
         for i in range(5):
-            device = i % 2
-            tensors += [torch.arange(i * 5.0, (i + 1) * 5).to(device)]
+            tensors += [torch.arange(i * 5.0, (i + 1) * 5).to(devices[i % 2])]
 
         inq = ctx.Queue()
         outq = ctx.Queue()
         inq.put(tensors)
-        p = ctx.Process(target=sum_tensors, args=(inq, outq))
+        p = ctx.Process(target=sum_tensors, args=(inq, outq, devices[1]))
         p.start()
 
         results = []
@@ -1028,7 +1039,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
         for i, _tensor in enumerate(tensors):
             v, device, tensor_size, storage_size = results[i]
             self.assertEqual(v, torch.arange(i * 5.0, (i + 1) * 5).sum())
-            self.assertEqual(device, i % 2)
+            self.assertEqual(device, torch.device(devices[i % 2]).index)
             self.assertEqual(tensor_size, 5)
 
             # You might think this should be the case, but it's not!  After
@@ -1153,7 +1164,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
             subtest(torch.Event, name="generic_event"),
         ],
     )
-    def test_event_multiprocess(self, event_cls):
+    def test_event_multiprocess(self, device, event_cls):
         event = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(event.query())
 
@@ -1167,7 +1178,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
         p.start()
 
         c2p.get()  # wait for until child process is ready
-        torch.get_device_module()._sleep(50000000)  # spin for about 50 ms
+        torch.get_device_module(device)._sleep(50000000)  # spin for about 50 ms
         event.record()
         p2c.put(0)  # notify child event is recorded
 
@@ -1176,7 +1187,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
         self.assertTrue(event.query())
         p.join(30)
 
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "found only 1 GPU")
+    @deviceCountAtLeast(2)
     @parametrize(
         "event_cls",
         [
@@ -1184,21 +1195,22 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
             subtest(torch.Event, name="generic_event"),
         ],
     )
-    def test_event_handle_multi_gpu(self, event_cls):
-        with torch.accelerator.device_index(0):
+    def test_event_handle_multi_gpu(self, devices, event_cls):
+        d0, d1 = (torch.device(d).index for d in devices[:2])
+        with torch.accelerator.device_index(d0):
             e0 = event_cls(enable_timing=False, interprocess=True)
 
-        with torch.accelerator.device_index(1):
+        with torch.accelerator.device_index(d1):
             # create handle on different device from un-recorded event
             e0.ipc_handle()
 
-        with torch.accelerator.device_index(0):
+        with torch.accelerator.device_index(d0):
             e1 = event_cls(enable_timing=False, interprocess=True)
             stream = torch.Stream()
             torch.get_device_module()._sleep(50000000)  # spin for about 50 ms
             e1.record(stream)
 
-        with torch.accelerator.device_index(1):
+        with torch.accelerator.device_index(d1):
             # create handle on different device from recorded event
             e1.ipc_handle()
 
@@ -1209,7 +1221,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
             subtest(torch.Event, name="generic_event"),
         ],
     )
-    def test_event_handle_importer(self, event_cls):
+    def test_event_handle_importer(self, device, event_cls):
         e0 = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
 
@@ -1223,7 +1235,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
         p.start()
 
         c2p.get()  # wait for child to become ready
-        torch.get_device_module()._sleep(50000000)  # spin for about 50 ms
+        torch.get_device_module(device)._sleep(50000000)  # spin for about 50 ms
         e0.record()
         p2c.put(0)  # notify child event is recorded
 
@@ -1240,7 +1252,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
             subtest(torch.Event, name="generic_event"),
         ],
     )
-    def test_event_handle_exporter(self, event_cls):
+    def test_event_handle_exporter(self, device, event_cls):
         e0 = event_cls(enable_timing=False, interprocess=True)
 
         ctx = mp.get_context("spawn")
@@ -1248,7 +1260,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=_event_handle_exporter_consumer,
-            args=(event_cls, e0.ipc_handle(), p2c, c2p),
+            args=(event_cls, e0.ipc_handle(), p2c, c2p, device),
         )
         p.start()
         # wait for event in child process is recorded
