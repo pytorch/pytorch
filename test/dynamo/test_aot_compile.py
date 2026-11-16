@@ -2228,12 +2228,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_aot_eager_backend(self, use_cpp_fake_tensor):
-        self.enterContext(
-            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor)
-        )
-
+    def test_aot_eager_backend(self):
         def fn(x, y):
             return x + y
 

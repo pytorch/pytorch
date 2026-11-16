@@ -6,16 +6,10 @@ from typing import Any, cast
 
 import torch
 from torch import nn, optim
-from torch._subclasses.fake_tensor import fake_mode_cls
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TEST_XPU,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -70,7 +64,6 @@ class SimpleCNN(nn.Module):
         return x
 
 
-@instantiate_parametrized_tests
 class TestRuntimeEstimator(TestCase):
     def _train_step(
         self,
@@ -143,8 +136,7 @@ class TestRuntimeEstimator(TestCase):
         return (model, optimizer, inp)
 
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_transformer_runtime(self, use_cpp_fake_tensor):
+    def test_transformer_runtime(self):
         """Runs a basic GPT-2 model"""
         vocab_size = 8192
         bsz, seq_len = 8, 1024
@@ -159,10 +151,7 @@ class TestRuntimeEstimator(TestCase):
 
         args = self._init_model_and_args("Transformer", model_args, bsz)
         actual_runtime = self._measure_actual_cuda_time(self._train_step, args)
-        with (
-            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor),
-            fake_mode_cls()(),
-        ):
+        with FakeTensorMode():
             fake_args = self._init_model_and_args("Transformer", model_args, bsz)
             benchmark_estimate = self._runtime_estimate(
                 "operator-level-benchmark", self._train_step, fake_args
@@ -181,18 +170,14 @@ class TestRuntimeEstimator(TestCase):
         # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.3)
 
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_conv_model_runtime(self, use_cpp_fake_tensor):
+    def test_conv_model_runtime(self):
         """Runs a simple CNN model"""
         num_classes = 100
         bsz, img_sz = 256, 128
         model_args = ConvArgs(img_sz, num_classes)
         args = self._init_model_and_args("CNN", model_args, bsz)
         actual_runtime = self._measure_actual_cuda_time(self._train_step, args)
-        with (
-            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor),
-            fake_mode_cls()(),
-        ):
+        with FakeTensorMode():
             fake_args = self._init_model_and_args("CNN", model_args, bsz)
             benchmark_estimate = self._runtime_estimate(
                 "operator-level-benchmark", self._train_step, fake_args

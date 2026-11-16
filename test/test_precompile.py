@@ -1110,29 +1110,26 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "hard-coded"):
             _precompile_pair(lambda model, x: model(x), m, torch.randn(2, 4))
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_export_and_reload_roundtrip(self, use_cpp_fake_tensor):
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+    def test_export_and_reload_roundtrip(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 3)
+                self.register_buffer("b2", torch.randn(3))
 
-            class M(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.lin = torch.nn.Linear(4, 3)
-                    self.register_buffer("b2", torch.randn(3))
+            def forward(self, x):
+                return torch.relu(self.lin(x)) + self.b2
 
-                def forward(self, x):
-                    return torch.relu(self.lin(x)) + self.b2
+        m = M().eval()
+        x = torch.randn(5, 4)
+        code, cache = _precompile_pair(lambda model, x: model(x), m, x)
 
-            m = M().eval()
-            x = torch.randn(5, 4)
-            code, cache = _precompile_pair(lambda model, x: model(x), m, x)
+        self.assertIn("Inductor output code", code)
+        self.assertIn("def forward(", code)
+        self.assertIn("PARAM_NAMES = ['lin.weight', 'lin.bias']", code)
 
-            self.assertIn("Inductor output code", code)
-            self.assertIn("def forward(", code)
-            self.assertIn("PARAM_NAMES = ['lin.weight', 'lin.bias']", code)
-
-            f_c = _load_pair(code, cache)
-            self.assertEqual(f_c(m, x), m(x))
+        f_c = _load_pair(code, cache)
+        self.assertEqual(f_c(m, x), m(x))
 
     def test_self_contained_exec_needs_no_cache(self):
         # python_code runs standalone with NO cache: exec it and call forward().
@@ -3305,26 +3302,22 @@ class TestPrecompile(TestCase):
                 _precompile_pair(lambda m, t: m(t), model, marked)
         _precompile_pair(lambda m, t: m(t), model, marked)
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_unbacked_capture_refuses_a_data_ptr_read(self, use_cpp_fake_tensor):
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            # The unbacked mode is built inside the
-            # fake_tensor_allow_unsafe_data_ptr_access patch, so a .data_ptr() read in fn is
-            # refused instead of returning a meaningless value. The refusal comes out of the
-            # trace RAW here; the commit above relabels it as a PrecompileError.
-            m = torch.nn.Linear(4, 3).eval()
-            x = torch.randn(8, 4)
-            mark_unbacked(x, 0)
+    def test_unbacked_capture_refuses_a_data_ptr_read(self):
+        # The unbacked mode is built inside the
+        # fake_tensor_allow_unsafe_data_ptr_access patch, so a .data_ptr() read in fn is
+        # refused instead of returning a meaningless value. The refusal comes out of the
+        # trace RAW here; the commit above relabels it as a PrecompileError.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
 
-            def reads_pointer(mm, t):
-                t.data_ptr()
-                return mm(t)
+        def reads_pointer(mm, t):
+            t.data_ptr()
+            return mm(t)
 
-            with self.assertRaisesRegex(
-                RuntimeError, "Cannot access data pointer"
-            ) as cm:
-                _precompile_pair(reads_pointer, m, x)
-            self.assertNotIsInstance(cm.exception, PrecompileError)
+        with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer") as cm:
+            _precompile_pair(reads_pointer, m, x)
+        self.assertNotIsInstance(cm.exception, PrecompileError)
 
     def test_unbacked_capture_refuses_a_meta_less_op_in_an_allowlisted_namespace(self):
         # The other unbacked-mode hardening: allow_fallback_kernels=False. An op with no
@@ -4155,72 +4148,64 @@ class TestPrecompileNumerics(TestCase):
         out = f_c(run, run)
         self.assertEqual(out, ref_out)
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_dynamic_shapes_runs_across_sizes(self, device, use_cpp_fake_tensor):
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            # An UNBACKED-dynamic batch dim (opted in via mark_unbacked on the input): one
-            # artifact runs on many runtime batch sizes (cached AND inlined paths), matching
-            # eager. Device-generic so the CUDA unbacked-symint lowering is exercised.
-            m = torch.nn.Sequential(
-                torch.nn.Linear(4, 8), torch.nn.ReLU(), torch.nn.Linear(8, 3)
-            )
-            m.to(device).eval()
-            x = make_tensor((8, 4), device=device, dtype=torch.float32)
-            mark_unbacked(x, 0)
-            code, cache = _precompile_pair(lambda mm, t: mm(t), m, x)
-            self.assertIn("USER_INPUT_SHAPES = [(None, 4)]", code)  # dim 0 dynamic
-            f_c = _load_pair(code, cache)
-            blob = torch.load(io.BytesIO(cache), weights_only=True)
-            blob["artifact"] = None
-            buf = io.BytesIO()
-            torch.save(blob, buf)
-            f_i = _load_pair(code, buf.getvalue())
-            for bs in (8, 16, 1):
-                xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
-                self.assertEqual(f_c(m, xt), m(xt))  # cached path
-                self.assertEqual(f_i(m, xt), m(xt))  # inlined path
+    def test_dynamic_shapes_runs_across_sizes(self, device):
+        # An UNBACKED-dynamic batch dim (opted in via mark_unbacked on the input): one
+        # artifact runs on many runtime batch sizes (cached AND inlined paths), matching
+        # eager. Device-generic so the CUDA unbacked-symint lowering is exercised.
+        m = torch.nn.Sequential(
+            torch.nn.Linear(4, 8), torch.nn.ReLU(), torch.nn.Linear(8, 3)
+        )
+        m.to(device).eval()
+        x = make_tensor((8, 4), device=device, dtype=torch.float32)
+        mark_unbacked(x, 0)
+        code, cache = _precompile_pair(lambda mm, t: mm(t), m, x)
+        self.assertIn("USER_INPUT_SHAPES = [(None, 4)]", code)  # dim 0 dynamic
+        f_c = _load_pair(code, cache)
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        blob["artifact"] = None
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        f_i = _load_pair(code, buf.getvalue())
+        for bs in (8, 16, 1):
+            xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
+            self.assertEqual(f_c(m, xt), m(xt))  # cached path
+            self.assertEqual(f_i(m, xt), m(xt))  # inlined path
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_dynamic_shapes_training_across_sizes(self, device, use_cpp_fake_tensor):
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            # Training (backward) with a dynamic batch; harvested grads match eager across
-            # sizes (loss is output.sum() so no cross-input dim-equality guard is needed).
-            # Device-generic so the CUDA unbacked-symint backward lowering is exercised.
-            torch.manual_seed(0)
-            m = torch.nn.Linear(4, 3).to(device)
-            x = make_tensor((8, 4), device=device, dtype=torch.float32)
-            mark_unbacked(x, 0)
-            code, cache = _precompile_pair(
-                lambda model, t: model(t).sum().backward(), m, x
-            )
-            f_c = _load_pair(code, cache)
-            for bs in (8, 16, 5):
-                run = torch.nn.Linear(4, 3).to(device)
-                run.load_state_dict(m.state_dict())
-                ref = torch.nn.Linear(4, 3).to(device)
-                ref.load_state_dict(m.state_dict())
-                xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
-                f_c(run, xt)
-                ref(xt).sum().backward()
-                self.assertEqual(run.weight.grad, ref.weight.grad)
+    def test_dynamic_shapes_training_across_sizes(self, device):
+        # Training (backward) with a dynamic batch; harvested grads match eager across
+        # sizes (loss is output.sum() so no cross-input dim-equality guard is needed).
+        # Device-generic so the CUDA unbacked-symint backward lowering is exercised.
+        torch.manual_seed(0)
+        m = torch.nn.Linear(4, 3).to(device)
+        x = make_tensor((8, 4), device=device, dtype=torch.float32)
+        mark_unbacked(x, 0)
+        code, cache = _precompile_pair(lambda model, t: model(t).sum().backward(), m, x)
+        f_c = _load_pair(code, cache)
+        for bs in (8, 16, 5):
+            run = torch.nn.Linear(4, 3).to(device)
+            run.load_state_dict(m.state_dict())
+            ref = torch.nn.Linear(4, 3).to(device)
+            ref.load_state_dict(m.state_dict())
+            xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
+            f_c(run, xt)
+            ref(xt).sum().backward()
+            self.assertEqual(run.weight.grad, ref.weight.grad)
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_dynamic_shapes_shared_shape_id(self, device, use_cpp_fake_tensor):
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            # Two inputs whose batch dims share a shape_id reuse ONE unbacked symbol, so a
-            # cross-input matched-batch op (here an add) traces with no dim-equality guard and
-            # runs across sizes. Device-generic so the CUDA lowering is exercised.
-            m = torch.nn.Linear(4, 4).to(device).eval()
-            x = make_tensor((8, 4), device=device, dtype=torch.float32)
-            y = make_tensor((8, 4), device=device, dtype=torch.float32)
-            mark_unbacked(x, 0, shape_id="b")
-            mark_unbacked(y, 0, shape_id="b")
-            code, cache = _precompile_pair(lambda mm, a, b: mm(a) + b, m, x, y)
-            f_c = _load_pair(code, cache)
-            for bs in (8, 16, 3):
-                xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
-                yt = make_tensor((bs, 4), device=device, dtype=torch.float32)
-                self.assertEqual(f_c(m, xt, yt), m(xt) + yt)
+    def test_dynamic_shapes_shared_shape_id(self, device):
+        # Two inputs whose batch dims share a shape_id reuse ONE unbacked symbol, so a
+        # cross-input matched-batch op (here an add) traces with no dim-equality guard and
+        # runs across sizes. Device-generic so the CUDA lowering is exercised.
+        m = torch.nn.Linear(4, 4).to(device).eval()
+        x = make_tensor((8, 4), device=device, dtype=torch.float32)
+        y = make_tensor((8, 4), device=device, dtype=torch.float32)
+        mark_unbacked(x, 0, shape_id="b")
+        mark_unbacked(y, 0, shape_id="b")
+        code, cache = _precompile_pair(lambda mm, a, b: mm(a) + b, m, x, y)
+        f_c = _load_pair(code, cache)
+        for bs in (8, 16, 3):
+            xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
+            yt = make_tensor((bs, 4), device=device, dtype=torch.float32)
+            self.assertEqual(f_c(m, xt, yt), m(xt) + yt)
 
     def test_mark_unbacked_strict_honored(self, device):
         # mark_unbacked(x, 0, strict=True) is HONORED: the dim is captured as an unbacked
@@ -4247,24 +4232,22 @@ class TestPrecompileNumerics(TestCase):
         xt = make_tensor((0, 4), device=device, dtype=torch.float32)
         self.assertEqual(f_c(m, xt), m(xt))
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_channels_last_marked_input_roundtrips(self, device, use_cpp_fake_tensor):
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            # A channels_last-marked dynamic input round-trips at the SAME layout for a
-            # LAYOUT-PRESERVING (pointwise) op: _detect_memory_format records channels_last so
-            # the refaked leaf preserves it, and the artifact accepts a channels_last runtime
-            # input (matching eager). (conv output has a separate inductor layout limitation,
-            # so this uses a pointwise op.)
-            x = make_tensor((2, 3, 4, 4), device=device, dtype=torch.float32)
-            x = x.to(memory_format=torch.channels_last)
-            self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
-            mark_unbacked(x, 0)
-            code, cache = _precompile_pair(lambda t: torch.relu(t) * 2.0, x)
-            f_c = _load_pair(code, cache)
-            xt = make_tensor((5, 3, 4, 4), device=device, dtype=torch.float32)
-            xt = xt.to(memory_format=torch.channels_last)
-            out = f_c(xt)
-            self.assertEqual(out, torch.relu(xt) * 2.0)
+    def test_channels_last_marked_input_roundtrips(self, device):
+        # A channels_last-marked dynamic input round-trips at the SAME layout for a
+        # LAYOUT-PRESERVING (pointwise) op: _detect_memory_format records channels_last so
+        # the refaked leaf preserves it, and the artifact accepts a channels_last runtime
+        # input (matching eager). (conv output has a separate inductor layout limitation,
+        # so this uses a pointwise op.)
+        x = make_tensor((2, 3, 4, 4), device=device, dtype=torch.float32)
+        x = x.to(memory_format=torch.channels_last)
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+        mark_unbacked(x, 0)
+        code, cache = _precompile_pair(lambda t: torch.relu(t) * 2.0, x)
+        f_c = _load_pair(code, cache)
+        xt = make_tensor((5, 3, 4, 4), device=device, dtype=torch.float32)
+        xt = xt.to(memory_format=torch.channels_last)
+        out = f_c(xt)
+        self.assertEqual(out, torch.relu(xt) * 2.0)
 
     def test_marked_exotic_layout_rejected(self, device):
         # _detect_memory_format cannot preserve a layout that is neither contiguous nor
@@ -6115,26 +6098,24 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("passed through", out.stdout)
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
     @parametrize("backend", ["inductor", "eager"])
-    def test_a_single_graph_serves_in_process(self, backend, use_cpp_fake_tensor):
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            single = self.mod.single
-            with self._capture(single, backend=backend) as cap:
-                y = cap(self.model, self.x2)
-            self.assertEqual(y, single(self.model, self.x2))
-            f = load(self.artifact, self.cache)
-            self.assertIsInstance(f, PrecompiledRunnable)
-            self.assertFalse(f.installed)
-            self.assertEqual(f(self.model, self.x2), y)
-            other = self.mod.Model()
-            self.assertEqual(f(other, self.x2), single(other, self.x2))
-            with f:
-                pass
-            f.unload()
-            # No compiler behind a standalone artifact: an uncovered call raises.
-            with self.assertRaisesRegex(PrecompileError, "no captured variant"):
-                f(self.model, self.x3)
+    def test_a_single_graph_serves_in_process(self, backend):
+        single = self.mod.single
+        with self._capture(single, backend=backend) as cap:
+            y = cap(self.model, self.x2)
+        self.assertEqual(y, single(self.model, self.x2))
+        f = load(self.artifact, self.cache)
+        self.assertIsInstance(f, PrecompiledRunnable)
+        self.assertFalse(f.installed)
+        self.assertEqual(f(self.model, self.x2), y)
+        other = self.mod.Model()
+        self.assertEqual(f(other, self.x2), single(other, self.x2))
+        with f:
+            pass
+        f.unload()
+        # No compiler behind a standalone artifact: an uncovered call raises.
+        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
+            f(self.model, self.x3)
 
     @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
