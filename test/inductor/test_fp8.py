@@ -1764,15 +1764,16 @@ class TestFP8Lowering(TestCase):
     @parametrize(
         "shape,path",
         (
-            # >= NUM_SMS // 2 output tiles of 128x128 and >= 32 K128 steps per
-            # CTA: native block-scaled MMA
+            # native block-scaled MMA, which reads the packed scales directly
             ((1536, 1280, 4096), "native"),
             ((1282, 1153, 4208), "native"),
             ((2048, 1024, 4096), "native"),
+            # partial 128-row tiles and a single K block
+            ((16, 256, 256), "native"),
+            ((65, 321, 4208), "native"),
             # BLOCK_K=256 over 33 K blocks: the last scale tile is half out of bounds
             ((1282, 1153, 4208), "native_bk256"),
-            # underfilled 128x128 grid or too few K steps to amortize the native
-            # path's fixed cost: small-tile fp8 dot with register scaling
+            # small-tile fp8 dot with register scaling
             ((256, 320, 384), "software"),
             ((258, 321, 400), "software"),
             ((256, 320, 640), "software"),
@@ -1797,19 +1798,74 @@ class TestFP8Lowering(TestCase):
     )
     @onlyCUDA
     @parametrize(
+        "shape,path",
+        (
+            ((1536, 1280, 4096), "aten"),
+            ((1536, 1280, 4096), "native"),
+            ((1536, 1280, 4096), "software"),
+            ((1536, 1280, 4096), "autotune"),
+            ((16, 256, 256), "aten"),
+            ((16, 256, 256), "autotune"),
+            # eager rejects N % 16 != 0 with a ValueError, so no ATen choice
+            ((258, 321, 400), "software"),
+            ((258, 321, 400), "autotune"),
+        ),
+    )
+    def test_k128_ue8m0_blockwise_scaling_sm100_default_backends(
+        self, shape, path, device
+    ):
+        # With ATen and Triton configured, the eager cuBLASLt op and both
+        # templates are candidates in one autotuning pass over the same inputs.
+        # "autotune" benchmarks them all; the other paths keep one candidate.
+        if path in ("aten", "autotune"):
+            self._skip_without_eager_mnk4(device)
+        names = self._check_k128_ue8m0_blockwise_scaling(
+            device, shape, path, backends="ATEN,TRITON"
+        )
+        _, N, K = shape
+        self.assertEqual("_scaled_mm_v2" in names, N % 16 == 0 and K % 16 == 0, names)
+        self.assertTrue(any("main_loop_sw_scaled_mm_" in name for name in names), names)
+
+    def _skip_without_eager_mnk4(self, device):
+        # Eager packed MN x K4 scaling needs SM10.x/11.x and cuBLASLt >= 13.8.1.
+        a = torch.zeros((16, 128), device=device, dtype=torch.float8_e4m3fn)
+        b = torch.zeros((16, 128), device=device, dtype=torch.float8_e4m3fn).t()
+        scale = to_mnk4(torch.ones((16, 1), device=device))
+        try:
+            scaled_mm(
+                a,
+                b,
+                scale,
+                ScalingType.BlockWise1x128,
+                scale,
+                ScalingType.BlockWise1x128,
+                swizzle_a=SwizzleType.SWIZZLE_MN_K4,
+                swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+                output_dtype=torch.bfloat16,
+            )
+        except NotImplementedError as e:
+            self.skipTest(f"eager packed MN x K4 scaled_mm is unavailable: {e}")
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize(
         "path,variant",
         (
             # the layout constraint copies A and B to row-major A, column-major B
             ("native", "nt_mats"),
             ("native", "float16"),
             ("software", "float32"),
-            # a native-sized problem, but the native template needs persistent TMA
+            # the native template needs persistent TMA; the software one does not
             ("software", "no_persistent_tma"),
         ),
     )
     def test_k128_ue8m0_blockwise_scaling_sm100_variants(self, path, variant, device):
         native_sized = path == "native" or variant == "no_persistent_tma"
-        self._check_k128_ue8m0_blockwise_scaling(
+        names = self._check_k128_ue8m0_blockwise_scaling(
             device,
             (1536, 1280, 4096) if native_sized else (258, 321, 400),
             path,
@@ -1819,6 +1875,15 @@ class TestFP8Lowering(TestCase):
             nt_mats=variant == "nt_mats",
             persistent_tma=variant != "no_persistent_tma",
         )
+        if native_sized:
+            self.assertEqual(
+                any(
+                    "blackwell_ws_persistent_tma_main_loop_scaling_" in name
+                    for name in names
+                ),
+                variant != "no_persistent_tma",
+                names,
+            )
 
     def _check_k128_ue8m0_blockwise_scaling(
         self,
@@ -1826,11 +1891,15 @@ class TestFP8Lowering(TestCase):
         shape,
         path,
         *,
+        backends="TRITON",
         host_side_tma=False,
         output_dtype=torch.bfloat16,
         nt_mats=False,
         persistent_tma=True,
     ):
+        """Compile the K128 UE8M0 scaled_mm, keep only the candidates for
+        ``path`` (``"autotune"`` keeps all of them), check the result against an
+        fp32 reference, and return the names of all candidates offered."""
         from torch._inductor.select_algorithm import (
             add_preprocessing_fn,
             clear_preprocessing_fns,
@@ -1897,7 +1966,8 @@ class TestFP8Lowering(TestCase):
                 use_fast_accum=False,
             )
 
-        native = path != "software"
+        native = path.startswith("native")
+        forced_config = ()
         if native:
             template_name = "blackwell_ws_persistent_tma_main_loop_scaling_"
             forced_config = {
@@ -1912,18 +1982,28 @@ class TestFP8Lowering(TestCase):
                     "num_stages=3, num_warps=4",
                 ),
             }[path]
-        else:
+        elif path == "software":
             template_name = "main_loop_sw_scaled_mm_"
-            forced_config = ()
+        elif path == "aten":
+            template_name = "_scaled_mm_v2"
+        else:
+            self.assertEqual(path, "autotune")
+            template_name = ""
         choice_records = []
 
         def record_and_keep_k128_ue8m0(choices):
             choice_records.extend(
                 (choice.name, choice.description) for choice in choices
             )
-            matching = [choice for choice in choices if template_name in choice.name]
+            if path == "aten":
+                matching = [
+                    choice for choice in choices if choice.name == "_scaled_mm_v2"
+                ]
+            else:
+                matching = [
+                    choice for choice in choices if template_name in choice.name
+                ]
             self.assertTrue(matching, choice_records)
-            self.assertEqual(len(matching), len(choices), choice_records)
             if not forced_config:
                 return matching
             forced = [
@@ -1941,7 +2021,7 @@ class TestFP8Lowering(TestCase):
                 {
                     "fx_graph_cache": False,
                     "max_autotune": True,
-                    "max_autotune_gemm_backends": "TRITON",
+                    "max_autotune_gemm_backends": backends,
                     "triton.enable_persistent_tma_matmul": persistent_tma,
                     "triton.enable_host_side_tma": host_side_tma,
                     "test_configs.autotune_choice_name_regex": None,
@@ -1960,26 +2040,29 @@ class TestFP8Lowering(TestCase):
 
         self.assertEqual(actual, expected)
         if native:
-            # one scale re-layout kernel per operand, then TMA-loaded 32x4x4
-            # scale blocks feeding the native block-scaled MMA
-            FileCheck().check("def triton_poi_fused").check(
-                "def triton_poi_fused"
-            ).check("disallow_acc_multi_buffer=True").check(
-                "scale_a = a_scale_desc.load("
-            ).check(".trans(0, 3, 2, 1, 4)").check("accumulator = tl.dot_scaled(").run(
-                code
-            )
+            # the native block-scaled MMA reads the packed scales itself, so no
+            # scale re-layout kernel runs first
+            FileCheck().check("disallow_acc_multi_buffer=True").check(
+                "scale_a = tl.load("
+            ).check("accumulator = tl.dot_scaled(").run(code)
             self.assertNotIn("_e8m0_to_fp32", code)
+            if not nt_mats:
+                self.assertNotIn("def triton_poi_fused", code)
             # host-side descriptors arrive as tensordesc kernel args; device-side
             # ones are built in the kernel from the same shapes and strides
             self.assertEqual("tl.make_tensor_descriptor(" in code, not host_side_tma)
-        else:
+        elif path == "software":
             # Module-level kernels suffix template helpers with the kernel name.
             FileCheck().check("scale_block = (k_idx * BLOCK_K) // 128").check(
                 "_e8m0_to_fp32"
             ).check("partial = tl.dot(").run(code)
             self.assertNotIn("tl.dot_scaled(", code)
             self.assertNotIn("def triton_poi_fused", code)
+        elif path == "aten":
+            FileCheck().check("aten._scaled_mm_v2.default(").run(code)
+            self.assertNotIn("tl.dot_scaled(", code)
+            self.assertNotIn("_e8m0_to_fp32", code)
+        return [name for name, _ in choice_records]
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
@@ -1992,6 +2075,8 @@ class TestFP8Lowering(TestCase):
         (
             "fp8_output",
             "no_max_autotune",
+            # max-autotune without the Triton backend: eager is the only candidate
+            "aten_backend_only",
             "no_swizzle",
             "blockwise_128x128",
             "wrong_numel",
@@ -2042,7 +2127,9 @@ class TestFP8Lowering(TestCase):
                 {
                     "fx_graph_cache": False,
                     "max_autotune": case != "no_max_autotune",
-                    "max_autotune_gemm_backends": "TRITON",
+                    "max_autotune_gemm_backends": (
+                        "ATEN" if case == "aten_backend_only" else "TRITON"
+                    ),
                     "triton.enable_persistent_tma_matmul": True,
                 }
             ),

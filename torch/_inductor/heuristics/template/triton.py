@@ -3989,8 +3989,9 @@ class CUDAScaledBlackwellTMAMainLoopScalingTemplateConfigHeuristic(
     def __init__(self) -> None:
         super().__init__()
         self.should_scale_configs = False
-        # Native block-scaled MMAv5 fixes BLOCK_M=128; BLOCK_N and BLOCK_K must be
-        # multiples of 128 so the TMA-loaded scale tiles are whole 32x4x4 blocks.
+        # Native block-scaled MMAv5 fixes BLOCK_M=128. BLOCK_K is a multiple of
+        # 128 so every K tile covers whole K128 scale blocks; BLOCK_N stays a
+        # multiple of 128 like BLOCK_M.
         self.mm_configs = [
             BlackwellGPUGemmConfig(
                 block_m=c.block_m,

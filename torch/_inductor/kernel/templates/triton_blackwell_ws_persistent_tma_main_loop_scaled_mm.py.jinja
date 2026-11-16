@@ -8,13 +8,19 @@
     tl.static_assert(BLOCK_K % 128 == 0, "K128 block scaling requires BLOCK_K % 128 == 0")
     tl.static_assert(BLOCK_M == 128, "Block-scaled MMAv5 requires BLOCK_M == 128")
     tl.static_assert(BLOCK_N % 128 == 0, "BLOCK_N must be divisible by 128")
-    SCALE_N_TILES: tl.constexpr = BLOCK_N // 128
     SCALE_K_TILES: tl.constexpr = BLOCK_K // 128
     start_pid = tl.program_id(0)
     grid_m = tl.cdiv(M, BLOCK_M)
     grid_n = tl.cdiv(N, BLOCK_N)
     k_tiles = tl.cdiv(K, BLOCK_K)
     num_tiles = grid_m * grid_n
+    # Packed MN x K4 UE8M0 scales, as eager cuBLASLt takes them: rows padded to
+    # a multiple of 4, one 4-byte word per (row, group of four K128 blocks),
+    # rows fastest within a group. Reading them in the kernel keeps the inputs
+    # the same as the other scaled_mm choices, so autotuning times all the work.
+    scale_group_stride_a = (M + 3) // 4 * 16
+    scale_group_stride_b = (N + 3) // 4 * 16
+    k_blocks = tl.cdiv(K, 128)
 
     {{tma_descriptor("a_desc", "A",
         [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
@@ -24,13 +30,6 @@
         [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
         [0, 1] if B_ROW_MAJOR else [1, 0]
     )}}
-    # The scales are the K32-replicated 32x4x4 swizzled layout expected by
-    # tcgen05.cp, viewed as [1, MN / 128, K / 128, 2, 256] bytes. Loading them
-    # through TMA and exposing the 32x4x4 blocks with the reshape/trans chain
-    # below lets Triton copy them shared memory -> scale TMEM asynchronously
-    # instead of staging them through registers inside the MMA loop.
-    {{tma_descriptor("a_scale_desc", "A_inverse_scale", [1, 1, BLOCK_K // 128, 2, 256])}}
-    {{tma_descriptor("b_scale_desc", "B_inverse_scale", [1, BLOCK_N // 128, BLOCK_K // 128, 2, 256])}}
     # tile_id_c is used in the epilogue to break the dependency between
     # the prologue and the epilogue
     tile_id_c = start_pid - NUM_SMS
@@ -62,8 +61,8 @@
         offs_bn = pid_n * BLOCK_N
         offs_am_desc = offs_am.to(tl.int32)
         offs_bn_desc = offs_bn.to(tl.int32)
-        offs_scale_m = pid_m.to(tl.int32)
-        offs_scale_n = (pid_n * SCALE_N_TILES).to(tl.int32)
+        scale_rows_a = offs_am + tl.arange(0, BLOCK_M)
+        scale_rows_b = offs_bn + tl.arange(0, BLOCK_N)
 
         accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
         for ki in tl.range(
@@ -71,7 +70,6 @@
         ):
             offs_k = ki * BLOCK_K
             offs_k_desc = offs_k.to(tl.int32)
-            offs_scale_k = (ki * SCALE_K_TILES).to(tl.int32)
             a = a_desc.load(
                 [offs_am_desc, offs_k_desc]
                 if A_ROW_MAJOR
@@ -82,17 +80,35 @@
                 if B_ROW_MAJOR
                 else [offs_bn_desc, offs_k_desc],
             )
-            scale_a = a_scale_desc.load([0, offs_scale_m, offs_scale_k, 0, 0])
-            scale_b = b_scale_desc.load([0, offs_scale_n, offs_scale_k, 0, 0])
-            scale_a = (
-                scale_a.reshape(1, SCALE_K_TILES, 32, 4, 4)
-                .trans(0, 3, 2, 1, 4)
-                .reshape(BLOCK_M, BLOCK_K // 32)
+            # One UE8M0 per (row, K128 block). Block-scaled MMA takes one per
+            # K32, so each is repeated over its four K32 chunks. Rows past M/N
+            # and K blocks past K read as 127 (1.0): the packing's padding could
+            # be NaN, and it would scale TMA's zero fill.
+            scale_kb = ki * SCALE_K_TILES + tl.arange(0, SCALE_K_TILES)
+            scale_kb_ok = scale_kb < k_blocks
+            scale_a = tl.load(
+                A_inverse_scale
+                + (scale_kb // 4)[None, :] * scale_group_stride_a
+                + scale_rows_a[:, None] * 4
+                + (scale_kb % 4)[None, :],
+                mask=(scale_rows_a[:, None] < M) & scale_kb_ok[None, :],
+                other=127,
             )
-            scale_b = (
-                scale_b.reshape(SCALE_N_TILES, SCALE_K_TILES, 32, 4, 4)
-                .trans(0, 3, 2, 1, 4)
-                .reshape(BLOCK_N, BLOCK_K // 32)
+            scale_b = tl.load(
+                B_inverse_scale
+                + (scale_kb // 4)[None, :] * scale_group_stride_b
+                + scale_rows_b[:, None] * 4
+                + (scale_kb % 4)[None, :],
+                mask=(scale_rows_b[:, None] < N) & scale_kb_ok[None, :],
+                other=127,
+            )
+            scale_a = tl.reshape(
+                tl.broadcast_to(scale_a[:, :, None], (BLOCK_M, SCALE_K_TILES, 4)),
+                (BLOCK_M, BLOCK_K // 32),
+            )
+            scale_b = tl.reshape(
+                tl.broadcast_to(scale_b[:, :, None], (BLOCK_N, SCALE_K_TILES, 4)),
+                (BLOCK_N, BLOCK_K // 32),
             )
             accumulator = tl.dot_scaled(
                 a if A_ROW_MAJOR else a.T,
