@@ -815,6 +815,7 @@ class TestTritonHeuristicsBackendConfig(TestCase):
             self.assertEqual(len(configs), expected_count)
 
 
+@instantiate_parametrized_tests
 class TestTritonHeuristicsROCm(TestCase):
     hw_classification = HardwareClassification.CUDA
 
