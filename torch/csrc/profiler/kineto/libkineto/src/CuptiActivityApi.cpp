@@ -12,6 +12,7 @@
 #include <mutex>
 #include <thread>
 
+#include "CuptiCbidRegistry.h"
 #include "DeviceUtil.h"
 #include "Logger.h"
 
@@ -414,19 +415,27 @@ void CuptiActivityApi::enableCuptiActivities(
     if (activity == CUDA_RUNTIME) {
       CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_RUNTIME));
 #if (CUDART_VERSION >= 12050)
-      CUPTI_CALL(cuptiActivityEnableRuntimeApi(
-          CUPTI_RUNTIME_TRACE_CBID_cudaGetDevice_v3020, 0));
+      // Traces drop runtime records only for blocklisted APIs.
+      for (uint32_t cbid = 1; cbid < CUPTI_RUNTIME_TRACE_CBID_SIZE; cbid++) {
+        if (CuptiCbidRegistry::instance().isBlocklisted(
+                CallbackDomain::RUNTIME, cbid)) {
+          CUPTI_CALL(cuptiActivityEnableRuntimeApi(cbid, 0));
+        }
+      }
 #endif
     }
     if (activity == CUDA_DRIVER) {
       CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_DRIVER));
 #if (CUDART_VERSION >= 12050)
-      CUPTI_CALL(cuptiActivityEnableDriverApi(
-          CUPTI_DRIVER_TRACE_CBID_cuKernelGetAttribute, 0));
-      CUPTI_CALL(cuptiActivityEnableDriverApi(
-          CUPTI_DRIVER_TRACE_CBID_cuDevicePrimaryCtxGetState, 0));
-      CUPTI_CALL(cuptiActivityEnableDriverApi(
-          CUPTI_DRIVER_TRACE_CBID_cuCtxGetCurrent, 0));
+      // Traces drop driver records for all unregistered APIs. If the libcupti
+      // version and the CUDA header version don't match, some of these IDs
+      // may not exist, so use CUPTI_CALL_NOWARN to avoid spamming warnings.
+      for (uint32_t cbid = 1; cbid < CUPTI_DRIVER_TRACE_CBID_SIZE; cbid++) {
+        if (!CuptiCbidRegistry::instance().isRegistered(
+                CallbackDomain::DRIVER, cbid)) {
+          CUPTI_CALL_NOWARN(cuptiActivityEnableDriverApi(cbid, 0));
+        }
+      }
 #endif
     }
     if (activity == OVERHEAD) {
