@@ -28,8 +28,9 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
+from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
 from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.traceback import NodeSource
@@ -376,7 +377,7 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
 _CURRENT_DESERIALIZER: Optional["GraphModuleDeserializer"] = None
 
 
-def _reduce_fake_tensor(fake_tensor: FakeTensor):
+def _reduce_fake_tensor(fake_tensor: torch.Tensor):
     is_parameter = isinstance(fake_tensor, torch.nn.Parameter)
     tensor_meta = serialize_tensor_meta(fake_tensor)
     tensor_meta_bytes = json.dumps(
@@ -409,8 +410,17 @@ def serialize_torch_artifact(
 
     if FakeTensor in copyreg.dispatch_table:
         raise AssertionError("Refusing to stomp on existing FakeTensor reducer")
+    if torch.Tensor in copyreg.dispatch_table:
+        raise AssertionError("Refusing to stomp on existing Tensor reducer")
+
+    def reduce_tensor(t: torch.Tensor):
+        if is_fake_tensor(t):
+            return _reduce_fake_tensor(t)
+        return t.__reduce_ex__(pickle_protocol)
+
     try:
         copyreg.pickle(FakeTensor, _reduce_fake_tensor)
+        copyreg.pickle(torch.Tensor, reduce_tensor)
         buffer = io.BytesIO()
         # This is a workaround for backend's tensor deserialization problem:
         # unpickleTensor() always create a tensor on the device where it was originally saved
@@ -422,6 +432,7 @@ def serialize_torch_artifact(
         return buffer.getvalue()
     finally:
         del copyreg.dispatch_table[FakeTensor]
+        del copyreg.dispatch_table[torch.Tensor]
 
 
 def deserialize_torch_artifact(
@@ -831,6 +842,13 @@ class GraphModuleSerializer(metaclass=Final):
                 # HOP schema is not always available, so we look at node.meta["val"]
                 meta_val = node.meta.get("val", None)
                 return meta_val is not None and isinstance(meta_val, torch.Tensor)
+
+            user_kernel_hop = get_user_kernel_hop_info(node.target)
+            if user_kernel_hop is not None and not user_kernel_hop.serializable:
+                raise SerializeError(
+                    f"Serializing {node.target.__name__} nodes ({user_kernel_hop.dsl} "
+                    "user kernels) is not supported"
+                )
 
             # Special handle serialization for aoti_call_delegate
             if node.target is torch._higher_order_ops.aoti_call_delegate:
@@ -2397,7 +2415,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 # str(expr) is key for self.symbol_name_to_range
                 expr_str = str(sym)
                 for arg in sym.args:
-                    self._parse_sym_expr(arg)
+                    _process_sym_expr(arg)
                 # symbol caching
                 if expr_str in self.symbol_name_to_symbol:
                     sym = self.symbol_name_to_symbol[expr_str]
@@ -4240,7 +4258,11 @@ def canonicalize(
     sorted_outs = sorted(
         enumerate(zip(graph.outputs, signature.output_specs)), key=rank_output
     )
-    sorted_outputs, output_specs = zip(*(i for idx, i in sorted_outs))  # type: ignore[assignment]
+    if len(sorted_outs) > 0:
+        sorted_outputs, output_specs = zip(*(i for idx, i in sorted_outs))  # type: ignore[assignment]
+    else:
+        sorted_outputs = ()
+        output_specs = ()
 
     sorted_graph, replace_table = _canonicalize_graph(
         sorted_inputs, sorted_outputs, graph, constants

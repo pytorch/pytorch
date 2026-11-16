@@ -4,7 +4,6 @@
 
 set -ex
 
-export TH_BINARY_BUILD=1
 export USE_CUDA=0
 
 # Keep an array of cmake variables to add to
@@ -14,6 +13,12 @@ fi
 
 ARCH=$(uname -m)
 echo "Building CPU wheel for architecture: $ARCH"
+
+if [[ "$ARCH" == "s390x" ]]; then
+    # Build for z15 to enable full ZVECTOR support
+    export CFLAGS="$CFLAGS -march=z15"
+    export CXXFLAGS="$CXXFLAGS -march=z15"
+fi
 
 WHEELHOUSE_DIR="wheelhousecpu"
 LIBTORCH_HOUSE_DIR="libtorch_housecpu"

@@ -11,7 +11,6 @@ from torch.cuda._graph_annotations import (
     _get_node_type,
     _get_stream_id,
     _is_tools_id_unavailable,
-    _rekey_annotations,
     _reset_kernel_annotations,
     mark_stream,
     resolve_and_remap,
@@ -21,7 +20,9 @@ from torch.cuda._graph_annotations import (
 from torch.cuda._utils import _check_cuda_bindings, _check_cuda_bindings_driver
 from torch.cuda.graph_annotations import (
     clear_kernel_annotations,
+    dump_kernel_py_stacks,
     get_kernel_annotations,
+    get_kernel_py_stacks,
     is_available,
     mark_kernels,
 )
@@ -32,6 +33,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda_python_bindings,
     run_tests,
     skipIfRocm,
+    TemporaryFileName,
     TestCase,
 )
 
@@ -352,6 +354,24 @@ class TestMarkKernels(TestCase):
             clear_kernel_annotations()
         self.assertEqual(len(get_kernel_annotations()), 0)
 
+    @parametrize("keep_graph", [False, True])
+    @parametrize("cleanup", ["reset", "gc"])
+    def test_annotations_follow_graph_lifetime(self, keep_graph, cleanup):
+        import gc
+
+        x = torch.ones(8, device="cuda")
+        graph = torch.cuda.CUDAGraph(keep_graph=keep_graph)
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("region"):
+                _ = x + 1
+        self.assertTrue(get_kernel_annotations())
+        if cleanup == "reset":
+            graph.reset()
+        else:
+            del graph
+            gc.collect()
+        self.assertEqual(dict(get_kernel_annotations()), {})
+
     def test_failed_capture_end_discards_annotations(self):
         """A completed scope plus a failing capture_end used to strand entries keyed by
         the capture graph id. Nothing remaps them (that happens in instantiate) and
@@ -659,6 +679,7 @@ class TestMarkKernels(TestCase):
             # keep_graph=False capture_end already instantiated and remapped.
             graph_a.instantiate()
             graph_b.instantiate()
+            graph_a.instantiate()
 
         exec_a = self._exec_graph_id(graph_a)
         exec_b = self._exec_graph_id(graph_b)
@@ -675,6 +696,14 @@ class TestMarkKernels(TestCase):
         # both -- not just the last -- were remapped correctly.
         self.assertEqual(graph_ids_by_name["graph_a"], {exec_a})
         self.assertEqual(graph_ids_by_name["graph_b"], {exec_b})
+
+        remaining = {
+            tools_id: anns
+            for tools_id, anns in get_kernel_annotations().items()
+            if tools_id >> 32 == exec_b
+        }
+        graph_a.reset()
+        self.assertEqual(dict(get_kernel_annotations()), remaining)
 
     def _assert_keyed_to(self, exec_graph_id):
         annotations = get_kernel_annotations()
@@ -737,19 +766,24 @@ class TestMarkKernels(TestCase):
         self.assertNotEqual(exec1, exec2)
         self._assert_keyed_to(exec2)
 
-    def test_resolve_and_remap_sequence(self):
-        """resolve_and_remap over a sequence keys each graph to its exec id.
+    @parametrize("key_by", ["exec", "source"])
+    def test_resolve_and_remap_sequence(self, key_by):
+        """Repeated resolution preserves each graph's selected key space.
 
         Uses default (keep_graph=False) graphs to show the capture id is
         recovered from the graph itself, not the (destroyed) graph template.
         The context manager already resolves and remaps on exit, so calling
         resolve_and_remap once per graph afterwards must be idempotent.
         """
+        if key_by == "source" and not source_node_ids_available():
+            self.skipTest("source keying requires a CUDA driver >= 13.4")
         graphs = [torch.cuda.CUDAGraph() for _ in range(3)]
         x = torch.randn(8, device="cuda")
 
         for i, graph in enumerate(graphs):
-            with torch.cuda.graph(graph, enable_annotations=True):
+            with torch.cuda.graph(
+                graph, enable_annotations=True, annotation_config={"key_by": key_by}
+            ):
                 with mark_kernels(f"graph_{i}"):
                     _ = x + i
 
@@ -762,8 +796,12 @@ class TestMarkKernels(TestCase):
             graph_ids_by_name.setdefault(anns[0]["name"], set()).add(tools_id >> 32)
 
         for i, graph in enumerate(graphs):
-            exec_id = self._exec_graph_id(graph)
-            self.assertEqual(graph_ids_by_name[f"graph_{i}"], {exec_id})
+            graph_id = (
+                graph._capture_graph_id
+                if key_by == "source"
+                else self._exec_graph_id(graph)
+            )
+            self.assertEqual(graph_ids_by_name[f"graph_{i}"], {graph_id})
 
     def test_mark_kernels_skips_preexisting_dependents_on_entry_frontier(self):
         graph = torch.cuda.CUDAGraph()
@@ -1585,41 +1623,98 @@ class TestGetGraphData(TestCase):
             g.get_graph_data()
 
 
-# Pure keying logic, exercised without a live capture so it runs on all of CI
-# (TestMarkKernels skips unless cuda-bindings/driver >= 13.1). A toolsId packs
-# the graph id in the upper 32 bits and the node id in the lower 32.
-class TestRekeyAnnotations(TestCase):
-    @staticmethod
-    def _tools_id(graph_id, node_id):
-        return (graph_id << 32) | node_id
+@instantiate_parametrized_tests
+class TestGraphPythonStacks(TestCase):
+    def test_python_c_stack(self):
+        import subprocess
+        import sys
 
-    def test_rekeys_matching_graph(self):
-        annotations = {self._tools_id(1, 10): ["a"], self._tools_id(1, 20): ["b"]}
-        remapped = _rekey_annotations(annotations, capture_graph_id=1, exec_graph_id=2)
-        self.assertEqual(
-            remapped,
-            {self._tools_id(2, 10): ["a"], self._tools_id(2, 20): ["b"]},
+        code = (
+            "from torch.cuda._graph_node_callbacks import _capture_py_stack\n"
+            "def launch():\n"
+            "    return _capture_py_stack()\n"
+            "print(launch())"
+        )
+        stack = subprocess.check_output([sys.executable, "-c", code], text=True)
+        self.assertExpectedInline(
+            stack.strip(),
+            """\
+<string>:3:launch
+<string>:4:<module>""",
         )
 
-    def test_leaves_other_graphs_untouched(self):
-        other = self._tools_id(9, 10)
-        annotations = {self._tools_id(1, 10): ["a"], other: ["x"]}
-        remapped = _rekey_annotations(annotations, capture_graph_id=1, exec_graph_id=2)
-        self.assertEqual(
-            remapped,
-            {self._tools_id(2, 10): ["a"], other: ["x"]},
-        )
+    @parametrize(
+        "filename",
+        ["/tmp/torch/train.py", "/tmp/importlib/train.py", "/venvs/torch/train.py"],
+    )
+    def test_stack_filter_uses_package_roots(self, filename):
+        import os
 
-    def test_empty(self):
-        self.assertEqual(
-            _rekey_annotations({}, capture_graph_id=1, exec_graph_id=2), {}
-        )
+        from torch.cuda import _graph_node_callbacks as cb
 
-    def test_does_not_mutate_input_lists(self):
-        original = ["a"]
-        annotations = {self._tools_id(1, 10): original}
-        _rekey_annotations(annotations, capture_graph_id=1, exec_graph_id=2)
-        self.assertEqual(original, ["a"])
+        def launch():
+            return cb._capture_py_stack()
+
+        with (
+            unittest.mock.patch.dict(
+                os.environ, {"TORCHINDUCTOR_CACHE_DIR": "/generated"}
+            ),
+            unittest.mock.patch.object(cb, "_STACK_ROOTS", cb._stack_filter_roots()),
+            unittest.mock.patch.dict(cb._NOISE_CACHE, clear=True),
+            unittest.mock.patch.dict(cb._STACK_CACHE, clear=True),
+        ):
+            launch.__code__ = launch.__code__.replace(
+                co_filename=filename, co_firstlineno=1
+            )
+            self.assertEqual(launch().splitlines()[0], f"{filename}:2:launch")
+            for internal in (*cb._STACK_ROOTS, "<frozen importlib._bootstrap>"):
+                launch.__code__ = launch.__code__.replace(
+                    co_filename=internal + "wrapper.py"
+                )
+                self.assertNotIn(internal, launch())
+
+    def test_stack_filter_without_optional_packages(self):
+        from torch.cuda import _graph_node_callbacks as cb
+
+        with (
+            unittest.mock.patch.dict("sys.modules", {"cuda.bindings": None}),
+            unittest.mock.patch(
+                "importlib.util.find_spec", side_effect=ModuleNotFoundError
+            ),
+        ):
+            self.assertTrue(cb._stack_filter_roots())
+
+    @parametrize("paths", ["wrappers", 1, [1], [""]])
+    def test_invalid_py_stack_filter_paths(self, paths):
+        from torch.cuda.graphs import _parse_annotation_config
+
+        with self.assertRaisesRegex(ValueError, "py_stack_filter_paths"):
+            _parse_annotation_config({"py_stack_filter_paths": paths})
+
+    def test_dump_survives_graph_cleanup(self):
+        import gzip
+        import json
+
+        import torch.cuda._graph_annotations as ga
+
+        ga._reset_kernel_annotations()
+        self.addCleanup(ga._reset_kernel_annotations)
+        node_id = (1 << 32) | 7
+        ga.record_node_py_stack(node_id, "train.py:2:launch")
+        open_gzip = gzip.open
+
+        def open_after_cleanup(*args, **kwargs):
+            ga.remove_kernel_annotations({1})
+            return open_gzip(*args, **kwargs)
+
+        with TemporaryFileName() as path:
+            with unittest.mock.patch.object(
+                gzip, "open", side_effect=open_after_cleanup
+            ):
+                dump_kernel_py_stacks(path)
+            with gzip.open(path, "rt") as f:
+                self.assertEqual(json.load(f), {str(node_id): "train.py:2:launch"})
+        self.assertEqual(dict(get_kernel_py_stacks()), {})
 
 
 # Runs everywhere (no capture): the public probe must agree with the private
@@ -1756,7 +1851,7 @@ class TestGraphInstantiateHooks(TestCase):
 
 
 # Host-side test of the graph-destroy hook registry: consumers register per-resolver
-# cleanup hooks that a CUDAGraph invokes (gated on _graph_destroy_hooks_active) via
+# cleanup hooks that a CUDAGraph invokes via
 # _run_graph_destroy_hooks when a CUDA graph is destroyed. No CUDA needed.
 class TestGraphDestroyHooks(TestCase):
     def tearDown(self):
@@ -1769,13 +1864,10 @@ class TestGraphDestroyHooks(TestCase):
         import torch.cuda.graphs as cg
 
         seen = []
-        self.assertFalse(cg._graph_destroy_hooks_active())
         handle = cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
-        self.assertTrue(cg._graph_destroy_hooks_active())
         cg._run_graph_destroy_hooks({7})
         self.assertEqual(seen, [{7}])
         handle.remove()
-        self.assertFalse(cg._graph_destroy_hooks_active())
         cg._run_graph_destroy_hooks({8})  # unregistered: not called again
         self.assertEqual(seen, [{7}])
 
@@ -1812,9 +1904,7 @@ class TestGraphDestroyHooks(TestCase):
         inst = cg.register_graph_instantiate_hook(
             lambda gr: gr._recorded_exec_ids.add(exec_id)
         )
-        dh = cg.register_graph_destroy_hook(lambda ids: seen.append(set(ids)))
         self.addCleanup(inst.remove)
-        self.addCleanup(dh.remove)
 
         x = torch.zeros(4, device="cuda")
         g = torch.cuda.CUDAGraph()
@@ -1824,11 +1914,26 @@ class TestGraphDestroyHooks(TestCase):
             g.replay()
         torch.cuda.synchronize()
 
+        from torch.cuda._graph_annotations import annotation_for, record_node_annotation
+
+        node_id = (exec_id << 32) | 1
+        record_node_annotation(node_id, "region")
+        seen_annotations = []
+
+        def on_destroy(ids):
+            seen.append(set(ids))
+            seen_annotations.append(annotation_for(node_id))
+
+        dh = cg.register_graph_destroy_hook(on_destroy)
+        self.addCleanup(dh.remove)
         self.assertEqual(seen, [])  # not torn down yet
         # reset() tears down this capture cycle and fires the armed destroy callback,
         # handing the destroy hook the exec ids recorded on the graph.
         g.reset()
         self.assertEqual(seen, [{exec_id}])
+        self.assertEqual(seen_annotations, [None])
+        g.reset()
+        self.assertEqual(seen, [{exec_id}, set()])
 
 
 # Pure registry-lifecycle logic, no CUDA needed. Seeds the module-level kernel
@@ -2083,6 +2188,7 @@ def _cupti_backend_available():
     _is_tools_id_unavailable(),
     "cudaGraphNodeGetToolsId not available (needs cuda-compat >= 13.1)",
 )
+@instantiate_parametrized_tests
 @unittest.skipIf(not _cupti_backend_available(), "requires Cuspy able to subscribe")
 class TestCuptiAnnotationBackend(TestCase):
     """``annotation_config={"backend": "cupti"}``: nodes are attributed as CUPTI reports their creation
@@ -2116,6 +2222,240 @@ class TestCuptiAnnotationBackend(TestCase):
 
     def _annotations(self):
         return dict(get_kernel_annotations())
+
+    @parametrize("key_by", ["exec", "source", "auto"])
+    def test_py_stacks(self, key_by):
+        import gzip
+        import json
+
+        from cuda.bindings import runtime
+
+        from torch.cuda import _graph_node_callbacks
+
+        if key_by == "source" and not source_node_ids_available():
+            self.skipTest("source ids require CUPTI and driver >= 13.4")
+        x = self._warm(torch.randn(64, device="cuda"))
+        dst = torch.empty_like(x)
+        stacks = get_kernel_py_stacks()
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+
+        def launch():
+            x.add_(1)
+
+        with torch.cuda.graph(
+            g,
+            enable_annotations=True,
+            annotation_config={"record_py_stacks": True, "key_by": key_by},
+        ):
+            with mark_kernels("phase"):
+                for _ in range(3):
+                    launch()
+            launch()
+            _check_cuda_bindings(
+                runtime.cudaMemcpyAsync(
+                    dst.data_ptr(),
+                    x.data_ptr(),
+                    x.nbytes,
+                    runtime.cudaMemcpyKind.cudaMemcpyDeviceToDevice,
+                    torch.cuda.current_stream().cuda_stream,
+                )
+            )
+
+        self.assertIsNone(_graph_node_callbacks._HANDLER)
+        self.assertEqual(_graph_node_callbacks._STACK_CACHE, {})
+        self.assertEqual(len(stacks), 5)
+        self.assertEqual({key >> 32 for key in stacks}, {g._capture_graph_id})
+        for stack in stacks.values():
+            self.assertIn(":test_py_stacks", stack)
+            self.assertNotIn("/torch/cuda/", stack)
+            self.assertNotIn("/torch/profiler/", stack)
+        repeated = [stacks[key] for key in get_kernel_annotations()]
+        self.assertEqual(len(repeated), 3)
+        self.assertTrue(all(stack is repeated[0] for stack in repeated))
+        self.assertIn(":launch", repeated[0])
+        self.assertEqual(
+            list(get_kernel_annotations().values()), [[{"name": "phase"}]] * 3
+        )
+        captured = dict(stacks)
+        previous_exec = None
+        for _ in range(2):
+            g.instantiate()
+            data = g.get_graph_data()
+            exec_id = data["exec_graph_id"]
+            nodes = data["nodes"]
+            self.assertEqual(
+                {key & 0xFFFFFFFF for key in captured}, {n["node_id"] for n in nodes}
+            )
+            self.assertNotEqual(exec_id, previous_exec)
+            if g._annotation_key_by == "exec":
+                expected = {
+                    (exec_id << 32) | (key & 0xFFFFFFFF): value
+                    for key, value in captured.items()
+                }
+            else:
+                expected = dict(captured)
+                memcpy = next(n for n in nodes if n["node_type"] == "memcpy")
+                src_id = (g._capture_graph_id << 32) | memcpy["node_id"]
+                expected[memcpy["tools_id"]] = captured[src_id]
+            self.assertEqual(dict(stacks), expected)
+            previous_exec = exec_id
+        with TemporaryFileName() as path:
+            dump_kernel_py_stacks(path)
+            with gzip.open(path, "rt", encoding="utf-8") as f:
+                saved = {int(key): value for key, value in json.load(f).items()}
+        self.assertEqual(saved, dict(stacks))
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(dict(stacks), saved)
+        g.reset()
+        self.assertEqual(dict(stacks), {})
+        with torch.cuda.graph(g, enable_annotations=True):
+            launch()
+        self.assertEqual(dict(stacks), {})
+
+    @parametrize("paths", [None, [], ["wrappers"], ("wrappers",)])
+    def test_py_stack_filter_paths(self, paths):
+        x = torch.ones(8, device="cuda")
+
+        def wrapped():
+            x.add_(1)
+
+        def launch():
+            wrapped()
+
+        wrapped.__code__ = wrapped.__code__.replace(co_filename="wrappers/launch.py")
+        launch.__code__ = launch.__code__.replace(
+            co_filename="wrappers_extra/launch.py"
+        )
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            graph,
+            enable_annotations=True,
+            annotation_config={
+                "record_py_stacks": True,
+                "py_stack_filter_paths": paths,
+            },
+        ):
+            launch()
+        (stack,) = get_kernel_py_stacks().values()
+        self.assertEqual("wrappers/launch.py:" in stack, not bool(paths))
+        self.assertIn("wrappers_extra/launch.py:", stack)
+        self.assertEqual("_graph_node_callbacks.py:" in stack, paths is not None)
+
+        graph.reset()
+        with torch.cuda.graph(
+            graph, enable_annotations=True, annotation_config={"record_py_stacks": True}
+        ):
+            launch()
+        (stack,) = get_kernel_py_stacks().values()
+        self.assertIn("wrappers/launch.py:", stack)
+        self.assertNotIn("_graph_node_callbacks.py:", stack)
+
+    def test_py_stacks_custom_backward(self):
+        class Custom(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+        x = torch.randn(64, device="cuda", requires_grad=True)
+        grad = torch.ones_like(x)
+        torch.autograd.grad(Custom.apply(x), x, grad)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g,
+            enable_annotations=True,
+            annotation_config={"backend": "cupti", "record_py_stacks": True},
+        ):
+            torch.autograd.grad(Custom.apply(x), x, grad)
+        stacks = list(get_kernel_py_stacks().values())
+        self.assertTrue(any(":forward" in stack for stack in stacks))
+        self.assertTrue(any(":backward" in stack for stack in stacks))
+        self.assertEqual(self._annotations(), {})
+
+    @parametrize("finish", ["reset", "destroy", "capture_end_error"])
+    @unittest.mock.patch.dict("torch.cuda.graphs._global_destroy_hooks", clear=True)
+    def test_py_stacks_cleanup_without_profiler_hooks(self, finish):
+        import gc
+
+        x = self._warm(torch.randn(64, device="cuda"))
+        live = torch.cuda.CUDAGraph()
+        config = {"record_py_stacks": True}
+        with torch.cuda.graph(live, enable_annotations=True, annotation_config=config):
+            with mark_kernels("live"):
+                x.add_(1)
+        annotations = dict(get_kernel_annotations())
+        stacks = dict(get_kernel_py_stacks())
+        self.assertTrue(annotations)
+        self.assertTrue(stacks)
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        if finish == "capture_end_error":
+
+            def fail(graph):
+                raise RuntimeError("capture end failed")
+
+            g.register_capture_end_hook(fail)
+            with self.assertRaisesRegex(RuntimeError, "capture end failed"):
+                with torch.cuda.graph(
+                    g, enable_annotations=True, annotation_config=config
+                ):
+                    with mark_kernels("temporary"):
+                        x.add_(1)
+        else:
+            with torch.cuda.graph(g, enable_annotations=True, annotation_config=config):
+                with mark_kernels("temporary"):
+                    x.add_(1)
+            self.assertGreater(len(get_kernel_annotations()), len(annotations))
+            if finish == "reset":
+                g.reset()
+            else:
+                del g
+                gc.collect()
+        self.assertEqual(dict(get_kernel_annotations()), annotations)
+        self.assertEqual(dict(get_kernel_py_stacks()), stacks)
+
+    @parametrize("failure", ["edge_walk", "subscription", "autograd", "arm"])
+    def test_py_stacks_require_cupti(self, failure):
+        from contextlib import ExitStack
+
+        from torch.cuda import _graph_node_callbacks
+
+        config = {"record_py_stacks": True}
+        with ExitStack() as ctx:
+            if failure == "edge_walk":
+                config["backend"] = "edge_walk"
+                error, message = ValueError, "requires the CUPTI"
+            elif failure == "subscription":
+                ctx.enter_context(
+                    unittest.mock.patch.object(
+                        _graph_node_callbacks, "register", return_value=False
+                    )
+                )
+                error, message = RuntimeError, "could not register CUPTI"
+            elif failure == "autograd":
+                ctx.enter_context(
+                    torch.autograd.grad_mode.set_multithreading_enabled(True)
+                )
+                error, message = RuntimeError, "single-threaded autograd"
+            else:
+                ctx.enter_context(
+                    unittest.mock.patch.object(
+                        _graph_node_callbacks, "arm", return_value=False
+                    )
+                )
+                error, message = RuntimeError, "could not arm CUPTI"
+            with self.assertRaisesRegex(error, message):
+                with torch.cuda.graph(
+                    torch.cuda.CUDAGraph(),
+                    enable_annotations=True,
+                    annotation_config=config,
+                ):
+                    self.fail("capture should have been rejected")
+        self.assertIsNone(_graph_node_callbacks._HANDLER)
+        self.assertFalse(torch.cuda.is_current_stream_capturing())
 
     def test_parity_with_edge_walk(self):
         # Both backends must attribute the same nodes the same way, and key them the same
@@ -2239,7 +2579,8 @@ class TestCuptiAnnotationBackend(TestCase):
         ]
         self.assertEqual(names, ["outer", "inner", "outer"])
 
-    def test_conditional_body_work_warns_and_is_not_annotated(self):
+    @parametrize("record_py_stacks", [False, True])
+    def test_conditional_body_work_warns_and_is_not_annotated(self, record_py_stacks):
         # Parity with the edge walk's conditional-body warning, but reported on the drop
         # rather than at scope entry: the handler cannot key body nodes to anything a trace
         # would match, so it counts them and disarm() says how many were lost. That covers
@@ -2251,7 +2592,12 @@ class TestCuptiAnnotationBackend(TestCase):
         g = torch.cuda.CUDAGraph(keep_graph=True)
         with self.assertWarnsRegex(UserWarning, "were not annotated"):
             with torch.cuda.graph(
-                g, enable_annotations=True, annotation_config={"backend": "cupti"}
+                g,
+                enable_annotations=True,
+                annotation_config={
+                    "backend": "cupti",
+                    "record_py_stacks": record_py_stacks,
+                },
             ):
                 with mark_kernels("region"):
                     z = x + 1
@@ -2267,12 +2613,17 @@ class TestCuptiAnnotationBackend(TestCase):
         exec_graph_id = g.get_graph_data()["exec_graph_id"]
         for tools_id in annotations:
             self.assertEqual(tools_id >> 32, exec_graph_id)
+        if record_py_stacks:
+            stacks = get_kernel_py_stacks()
+            self.assertTrue(stacks)
+            self.assertEqual({key >> 32 for key in stacks}, {exec_graph_id})
 
     @unittest.skipIf(
         not source_node_ids_available(),
         "annotation_config={'key_by': 'source'} needs a CUDA driver >= 13.4",
     )
-    def test_conditional_body_annotated_under_source_keying(self):
+    @parametrize("record_py_stacks", [False, True])
+    def test_conditional_body_annotated_under_source_keying(self, record_py_stacks):
         # Body nodes are dropped only because their ids cannot be rekeyed to the exec
         # graph. Under key_by="source" nothing is rekeyed and CUPTI reports the body work
         # with a sourceGraphNodeId equal to the body node as built, so the handler keeps
@@ -2290,7 +2641,11 @@ class TestCuptiAnnotationBackend(TestCase):
             with torch.cuda.graph(
                 g,
                 enable_annotations=True,
-                annotation_config={"backend": "cupti", "key_by": "source"},
+                annotation_config={
+                    "backend": "cupti",
+                    "key_by": "source",
+                    "record_py_stacks": record_py_stacks,
+                },
             ):
                 with mark_kernels("region"):
                     z = x + 1
@@ -2305,10 +2660,35 @@ class TestCuptiAnnotationBackend(TestCase):
         self.assertIn(capture_id, graph_ids)
         body_ids = graph_ids - {capture_id}
         self.assertTrue(body_ids, "the conditional body's nodes were not annotated")
-        self.assertEqual(g._annotated_body_graph_ids, body_ids)
+        self.assertEqual(g._recorded_exec_ids, graph_ids)
+        if record_py_stacks:
+            self.assertEqual({key >> 32 for key in get_kernel_py_stacks()}, graph_ids)
+        g.reset()
+        self.assertEqual(self._annotations(), {})
+        self.assertEqual(dict(get_kernel_py_stacks()), {})
 
-        g.instantiate()
-        self.assertTrue(body_ids <= g._recorded_exec_ids)
+    def test_py_stacks_without_annotation_omit_exec_body_silently(self):
+        import warnings
+
+        from torch._higher_order_ops.cudagraph_conditional_nodes import _if_body
+
+        x = torch.ones(8, device="cuda")
+        pred = torch.tensor(True, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            with torch.cuda.graph(
+                graph,
+                enable_annotations=True,
+                annotation_config={"record_py_stacks": True},
+            ):
+                x.add_(1)
+                with _if_body(pred):
+                    x.add_(2)
+        self.assertEqual(self._annotations(), {})
+        self.assertEqual(
+            {key >> 32 for key in get_kernel_py_stacks()}, {graph._remapped_exec_id}
+        )
 
     def test_no_warning_without_body_work(self):
         # The counter must not leak across captures: a plain capture right after one that
@@ -2390,7 +2770,7 @@ class TestCuptiAnnotationBackend(TestCase):
         ):
             with mark_kernels("phase"):
                 x = x + 1
-        self.assertIsNone(_graph_node_callbacks._handler)
+        self.assertIsNone(_graph_node_callbacks._HANDLER)
         before = len(self._annotations())
         for _ in range(5):
             g.replay()
@@ -2441,8 +2821,9 @@ class TestCuptiAnnotationBackend(TestCase):
                     pass
 
         seen = []
+        graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(
-            torch.cuda.CUDAGraph(),
+            graph,
             enable_annotations=True,
             annotation_config={"backend": "cupti"},
         ):
