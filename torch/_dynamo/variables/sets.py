@@ -366,6 +366,7 @@ class BaseSetVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker | None":
+        seen: set[int] = set()
         pending = [*args, *kwargs.values()]
         while pending:
             value = pending.pop()
@@ -385,9 +386,15 @@ class BaseSetVariable(VariableTracker):
                 ),
             ):
                 return None
-            if isinstance(value, variables.BaseListVariable):
+            if isinstance(value, variables.BaseListVariable) and id(value) not in seen:
+                seen.add(id(value))
                 pending.extend(value.items)
-        # Only literal operands can materialize without copying a method receiver.
+        # is_python_constant() rejects cycles but allows shared subcontainers.
+        # Constant, exact-builtin fast path: materialize and call the real
+        # method. Set/dict operands take the slow VT path below so their keys
+        # are not re-hashed (CPython's do-not-rehash-dict-keys fast path);
+        # OrderedSet is excluded because its methods are pure Python, so there
+        # is no C fast path to mirror.
         if (
             not any(key.has_builtin_method for key in self.items)
             and check_constant_args([self, *args], kwargs)
@@ -445,8 +452,7 @@ class BaseSetVariable(VariableTracker):
             return fast
         out_items = dict(self.items)
         for other in args:
-            keys = self._operand_keys(tx, other)
-            for key in keys:
+            for key in self._operand_keys(tx, other):
                 store_item(out_items, key, BaseSetVariable._default_value())
         return self._new_set(out_items)
 
