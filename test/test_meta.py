@@ -1618,7 +1618,6 @@ class TestMetaCudaRef(_TestMetaBase):
         skip('normal'),
         xfail('take_along_dim'),
         xfail('kron'),
-        xfail('nn.functional.channel_shuffle'),
         xfail('_foreach_sub'),
         xfail('_foreach_clamp_min', dtypes=complex_types_and(b8)),
         xfail('_foreach_clamp_max', dtypes=complex_types_and(b8)),
