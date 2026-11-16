@@ -672,6 +672,22 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(result.placements, (Partial(reduce_op),))
 
     @with_comms
+    @parametrize("op,reduce_fn", [(torch.fmax, torch.amax), (torch.fmin, torch.amin)])
+    def test_fmax_fmin_partial_nan(self, op, reduce_fn):
+        # fmax/fmin ignore nan but amax/amin propagate it, so Partial(max/min)
+        # inputs must be reduced before applying fmax/fmin.
+        device_mesh = self.build_device_mesh()
+        a = torch.arange(2 * self.world_size, dtype=torch.float32).reshape(-1, 2)
+        a[0, 0] = float("nan")
+        b = torch.full((self.world_size, 2), float(self.world_size))
+        da = reduce_fn(distribute_tensor(a, device_mesh, [Shard(0)]), dim=0)
+        db = reduce_fn(distribute_tensor(b, device_mesh, [Shard(0)]), dim=0)
+        dr = distribute_tensor(b[0], device_mesh, [Replicate()])
+        a_reduced = reduce_fn(a, dim=0)
+        self.assertEqual(op(da, db).full_tensor(), op(a_reduced, reduce_fn(b, dim=0)))
+        self.assertEqual(op(da, dr).full_tensor(), op(a_reduced, b[0]))
+
+    @with_comms
     def test_neg_partial(self):
         # test that neg preserves Partial placement without communication
         # math: -(A1 + A2) = -A1 + -A2

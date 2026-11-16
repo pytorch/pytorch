@@ -436,14 +436,13 @@ for op in monotonic_binary_ops:
     _register_single_dim_pointwise(op, _MONOTONE_BINARY_BASE_RULES)
 
 # Binary ops monotonically increasing in both arguments.
+# fmax/fmin are deliberately excluded: they ignore nan while Partial(max/min)
+# reductions propagate it, e.g. fmax(max(nan, 5), 2) = 2 != max(fmax(nan, 2), fmax(5, 2)).
 # max-preserving: P(max)+P(max)->P(max) because max(max(a),max(b)) = max(a,b)
 monotonic_max_preserving_binary_ops = [
     aten.clamp_min.Tensor,
-    aten.fmax.default,
-    aten.fmax.out,
     aten.maximum.default,
     aten.maximum.out,
-    prims.fmax.default,
     # foreach variants
     aten._foreach_maximum_.List,
 ]
@@ -459,11 +458,8 @@ for op in monotonic_max_preserving_binary_ops:
 # min-preserving: P(min)+P(min)->P(min) because min(min(a),min(b)) = min(a,b)
 monotonic_min_preserving_binary_ops = [
     aten.clamp_max.Tensor,
-    aten.fmin.default,
-    aten.fmin.out,
     aten.minimum.default,
     aten.minimum.out,
-    prims.fmin.default,
 ]
 
 _MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES: list[list[Placement]] = [
@@ -550,6 +546,9 @@ _extra_pointwise_ops: list[OpOverload] = [
     aten._fused_adamw.default,
     aten._fused_adamw.tensor_lr,
     aten._fused_adamw_.tensor_lr,
+    # prims
+    prims.fmax.default,
+    prims.fmin.default,
 ]
 
 
