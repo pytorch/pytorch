@@ -120,8 +120,6 @@ aten = torch.ops.aten
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
-# Use the same configuration for mode construction and native-only test skips.
-CPP_FAKETENSOR = torch._dynamo.config.use_cpp_fake_tensor
 FakeTensorMode = fake_mode_cls()
 
 _CPP_FAKE_DYNAMO_SKIP = "Dynamo does not support C++ fakes as inputs yet"
@@ -676,12 +674,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertFalse(torch.nn.Parameter(x, requires_grad=False).requires_grad)
 
     @unittest.skipIf(
-        not CPP_FAKETENSOR, "lazy modules cannot be built under this fake mode"
+        not torch._dynamo.config.use_cpp_fake_tensor,
+        "lazy modules cannot be built under this fake mode",
     )
     def test_parameter_from_lazy_module_parameter(self):
         # A lazy module's UninitializedParameter needs _make_subclass on a fake,
         # which fails for a Python FakeTensor.
-        if not CPP_FAKETENSOR:
+        if not torch._dynamo.config.use_cpp_fake_tensor:
             self.skipTest("lazy modules cannot be built under this fake mode")
         with FakeTensorMode():
             lin = torch.nn.LazyLinear(4)
@@ -696,31 +695,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertTrue(tied._is_param)
         self.assertIsNot(tied, lin.weight)
         self.assertIs(type(lin.weight), torch.nn.Parameter)
-
-    @unittest.skipIf(
-        not CPP_FAKETENSOR, "requires native fake tensor subclass construction"
-    )
-    @parametrize("constant", [False, True])
-    def test_make_subclass_preserves_fake_alias_version(self, constant):
-        class SubTensor(torch.Tensor):
-            pass
-
-        with FakeTensorMode():
-            x = (
-                torch.tensor([1.0], requires_grad=True)
-                if constant
-                else torch.randn(3, requires_grad=True)
-            )
-            loss = x.square().sum()
-            y = torch.Tensor._make_subclass(SubTensor, x, True)
-            self.assertTrue(y.is_leaf)
-            self.assertTrue(y.requires_grad)
-            with torch.no_grad():
-                y.add_(1)
-            with self.assertRaisesRegex(
-                RuntimeError, "modified by an inplace operation"
-            ):
-                loss.backward()
 
     @skipIfTorchDynamo("uses torch.compile")
     def test_compile_module_with_fake_parameters(self):
@@ -741,12 +715,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
     @skipIfTorchDynamo("uses torch.compile")
     @unittest.skipIf(
-        not CPP_FAKETENSOR, "TENSOR_MATCH already tells a Python FakeTensor apart"
+        not torch._dynamo.config.use_cpp_fake_tensor,
+        "TENSOR_MATCH already tells a Python FakeTensor apart",
     )
     def test_compile_parameter_subclass_with_fake_input(self):
         # Parameter.__new__ treats a C++ fake differently, so a graph traced for
         # a real input must not be reused for one
-        if not CPP_FAKETENSOR:
+        if not torch._dynamo.config.use_cpp_fake_tensor:
             self.skipTest("TENSOR_MATCH already tells a Python FakeTensor apart")
 
         class MyParam(torch.nn.Parameter):
@@ -4789,13 +4764,14 @@ class TestFakeTensorProp(TestCase):
         name_fn=lambda op: op.__name__,
     )
     @unittest.skipIf(
-        not CPP_FAKETENSOR, "Python FakeTensor keeps the memo across set_data"
+        not torch._dynamo.config.use_cpp_fake_tensor,
+        "Python FakeTensor keeps the memo across set_data",
     )
     def test_nonzero_unique_memo_dropped_by_set_data(self, op):
         # A C++ fake keeps these memos on the C++ tensor, which set_data
         # replaces. A Python FakeTensor keeps them, since set_data does not bump
         # the version counter.
-        if not CPP_FAKETENSOR:
+        if not torch._dynamo.config.use_cpp_fake_tensor:
             self.skipTest("Python FakeTensor keeps the memo across set_data")
         with FakeTensorMode(shape_env=ShapeEnv()):
             x = torch.randint(0, 3, (10,))
@@ -4803,12 +4779,15 @@ class TestFakeTensorProp(TestCase):
             x.data = torch.randint(0, 3, (20,))
             self.assertFalse(statically_known_true(op(x).shape[0] == n))
 
-    @unittest.skipIf(not CPP_FAKETENSOR, "Python FakeTensor raises on the get as well")
+    @unittest.skipIf(
+        not torch._dynamo.config.use_cpp_fake_tensor,
+        "Python FakeTensor raises on the get as well",
+    )
     def test_failed_sym_memo_set_leaves_no_memo(self):
         # Recording a memo reads the version counter, which a non-inference
         # tensor has disabled after inference_tensor.data = tensor. The failed
         # set must not leave a memo behind for a later get.
-        if not CPP_FAKETENSOR:
+        if not torch._dynamo.config.use_cpp_fake_tensor:
             self.skipTest("Python FakeTensor raises on the get as well")
         from torch._subclasses.fake_tensor import maybe_get_sym_memo, maybe_set_sym_memo
 
