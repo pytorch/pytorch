@@ -60,7 +60,6 @@ from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     CppFakeTensorMode,
-    fake_mode_cls,
     FakeTensor,
     FakeTensorMode,
     get_plain_tensors,
@@ -3131,9 +3130,8 @@ class _MakefxTracer:
                 if fake_tensor_mode is None:
                     import torch._functorch.config as _config
 
-                    mode_cls = fake_mode_cls()
                     with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = mode_cls(
+                        fake_tensor_mode = FakeTensorMode(
                             allow_fallback_kernels=True,
                             allow_non_fake_inputs=self._allow_non_fake_inputs,
                             shape_env=ShapeEnv(),
@@ -3161,9 +3159,8 @@ class _MakefxTracer:
                     shape_env = ShapeEnv()
                     import torch._functorch.config as _config
 
-                    mode_cls = fake_mode_cls()
                     with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = mode_cls(
+                        fake_tensor_mode = FakeTensorMode(
                             allow_fallback_kernels=False,
                             allow_non_fake_inputs=self._allow_non_fake_inputs,
                             shape_env=shape_env,

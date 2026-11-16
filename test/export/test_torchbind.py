@@ -13,11 +13,11 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._higher_order_ops.wrap import wrap
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    fake_tensor_modes,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_MACOS,
@@ -212,17 +212,16 @@ def forward(self, token, obj_attr, x, n):
     return (getitem, add)""",
         )
 
-    @fake_tensor_modes
     @parametrize("propagate_real_tensors", [False, True])
     @parametrize("active", [False, True])
-    def test_method_schema(self, mode_cls, propagate_real_tensors, active):
-        if not active and mode_cls is torch._subclasses.fake_tensor.FakeTensorMode:
+    def test_method_schema(self, propagate_real_tensors, active):
+        if not active and not torch._dynamo.config.use_cpp_fake_tensor:
             self.skipTest("Python TorchBind dispatch requires an active fake mode")
         tq = _empty_tensor_queue()
         with torch._functorch.config.patch(
             fake_tensor_propagate_real_tensors=propagate_real_tensors
         ):
-            fake_mode = mode_cls()
+            fake_mode = FakeTensorMode()
         fake_obj = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, tq)
         self.assertExpectedInline(
             str(fake_obj.push.schema),

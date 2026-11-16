@@ -1167,8 +1167,7 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
         self.assertFalse(is_concrete_int(loaded_constant.shape[0]))
         self.assertEqual(loaded_constant.shape[1], 3)
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_optional_tuple(self, use_cpp_fake_tensor):
+    def test_optional_tuple(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo",
@@ -1189,8 +1188,7 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
                 def forward(self, a, b, c):
                     return torch.ops.mylib.foo(a, b, c)
 
-            with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-                self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
+            self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
 
     def test_list_of_int_and_float_lists_custom_op(self):
         # Example program: a custom op that takes List[List[int]] and
@@ -1435,8 +1433,7 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
         )
         self.check_graph(MyModule(), inputs)
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_basic(self, use_cpp_fake_tensor) -> None:
+    def test_basic(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1448,11 +1445,9 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
                 return x, x.clone()
 
         inputs = (torch.ones([512], requires_grad=True),)
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            self.check_graph(MyModule(), inputs)
+        self.check_graph(MyModule(), inputs)
 
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_dynamic(self, use_cpp_fake_tensor) -> None:
+    def test_dynamic(self) -> None:
         class DynamicShapeSimpleModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1468,8 +1463,7 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
         inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
         dim0_ac = torch.export.Dim("dim0_ac")
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
+        self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
     def test_sym_bool(self):
         class Module(torch.nn.Module):
