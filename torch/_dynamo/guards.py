@@ -6050,7 +6050,7 @@ def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
         return None
 
 
-_PORTABLE_FUNCTION_GUARD_TYPES = ("CLOSURE_MATCH", "ID_MATCH")
+_PORTABLE_FUNCTION_GUARD_TYPES = ("BUILTIN_MATCH", "CLOSURE_MATCH", "ID_MATCH")
 
 
 def _portable_function_metadata(
