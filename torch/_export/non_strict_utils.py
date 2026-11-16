@@ -26,7 +26,7 @@ from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
@@ -198,7 +198,7 @@ def _is_constant_argument(t: object) -> bool:
 
 
 def fakify(
-    mode: FakeTensorMode,
+    mode: FakeTensorMode | CppFakeTensorMode,
     kp: KeyPath,
     t: Any,
     t_constraints: dict[int, dict[int, Constraint]],
@@ -259,7 +259,7 @@ def _create_symbolic_context_for_tensor(
     source: Source,
     t_constraints: dict[int, dict[int, Constraint]],
     sources: dict[tuple[int, int], list[Source]],
-    mode: FakeTensorMode,
+    mode: FakeTensorMode | CppFakeTensorMode,
 ) -> "SymbolicContext":
     """Helper function to create symbolic context for a tensor."""
     from torch._dynamo.decorators import _dim_range_to_value_ranges, _get_dim_range
@@ -459,14 +459,21 @@ def _override_builtin_ops() -> Generator[None, None, None]:
 
 
 def _make_fake_inputs_with_spec(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     nn_module: Any,
     args: Any,
     kwargs: Any,
     sourced_prefixes: Any,
     dynamic_shapes: Any,
     original_signature: inspect.Signature,
-) -> tuple[FakeTensorMode, Any, Any, EqualityConstraint, inspect.Signature, Any]:
+) -> tuple[
+    FakeTensorMode | CppFakeTensorMode,
+    Any,
+    Any,
+    EqualityConstraint,
+    inspect.Signature,
+    Any,
+]:
     from torch.fx.experimental._spec_binding import _bind_spec_to_args
     from torch.fx.experimental.dynamic_spec import (
         _coerce_to_shapes_spec,
@@ -561,7 +568,7 @@ def make_fake_inputs(
     dynamic_shapes: "dict[str, Any] | tuple[Any, ...] | list[Any] | ShapesSpec | ParamsSpec | None",
     prefer_deferred_runtime_asserts_over_guards: bool = False,
 ) -> tuple[
-    FakeTensorMode,
+    FakeTensorMode | CppFakeTensorMode,
     tuple[Any, ...],
     dict[str, Any],
     EqualityConstraint,
@@ -633,7 +640,6 @@ def make_fake_inputs(
         }
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
             fake_mode = FakeTensorMode(
-                _force_python=True,
                 shape_env=ShapeEnv(
                     tracked_fakes=[],
                     co_fields=co_fields,
@@ -741,7 +747,7 @@ def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
 
 
 def produce_guards_and_solve_constraints(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     gm: torch.fx.GraphModule,
     dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
     equalities_inputs: EqualityConstraint,
@@ -892,7 +898,7 @@ def _constrain_user_specified_dimhint_range(
 
 
 def make_constraints(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     gm: torch.fx.GraphModule,
     combined_args: dict[str, Any],
     dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
@@ -1111,7 +1117,7 @@ def _enable_graph_inputs_of_type_nn_module(
 def _fakify_module_inputs(
     args: tuple[Any],
     kwargs: dict[Any, Any],
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
 ) -> Generator[None, None, None]:
     # This context manager is used to fakify module inputs.
     # Inputs:
@@ -1142,7 +1148,7 @@ def _fakify_script_objects(
     mod: _ModuleT,
     args: Sequence[Any],
     kwargs: dict[Any, Any],
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode | None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None,
 ) -> Generator[tuple[_ModuleT, Any, Any, ConstantAttrMap, dict[Any, Any]], None, None]:
     # This context manager is used to fakify script objects into FakeScriptObject.
     # Inputs:
