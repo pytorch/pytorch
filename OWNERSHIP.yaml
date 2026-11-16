@@ -1203,6 +1203,7 @@ ownership:
       - /torch/csrc/Exceptions.cpp
       - /torch/csrc/Exceptions.h
       - /torch/csrc/Export.h
+      - /torch/csrc/FakeFallbackKernel.cpp
       - /torch/csrc/FakeTensorMode.cpp
       - /torch/csrc/FakeTensorMode.h
       - /torch/csrc/Generator.cpp
