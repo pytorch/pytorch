@@ -783,8 +783,17 @@ test_lazy_tensor_meta_reference_disabled() {
 test_faketensor() {
   export CPP_FAKETENSOR="${TEST_CONFIG##*_}"
   export NO_TD=1
+  local selection=(--exclude-distributed-tests)
+  install_torchvision
+  install_spmd_types
+  if [[ "${TEST_CONFIG}" == cpp_faketensor_distributed_* ]]; then
+    selection=(--distributed-tests)
+  else
+    pip_install onnxruntime==1.28.0 transformers==4.36.2
+  fi
   time python test/run_test.py \
     --include-faketensor-tests \
+    "${selection[@]}" \
     --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" \
     --verbose \
     --upload-artifacts-while-running
@@ -2685,7 +2694,7 @@ fi
 if [[ "${TEST_CONFIG}" == "onnx" ]]; then
   install_torchvision
   "$(dirname "${BASH_SOURCE[0]}")/../../scripts/onnx/test.sh"
-elif [[ "${TEST_CONFIG}" == cpp_faketensor_0 || "${TEST_CONFIG}" == cpp_faketensor_1 ]]; then
+elif [[ "${TEST_CONFIG}" == cpp_faketensor_* ]]; then
   test_faketensor
 elif [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
   # Install numpy-2.0.2 and compatible scipy & numba versions
