@@ -58,6 +58,7 @@ from torch._inductor.utils import (
     set_tracing_context_output_strides,
 )
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
+from torch.fx.graph_module import _get_attr
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
@@ -505,8 +506,17 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
             name: getattr(self.gm, orig_name)
             for name, orig_name in g.frozen_param_names.items()
         }
+        pinned_constants = {
+            name: _get_attr(self.gm, orig_name)
+            for name, orig_name in g.pinned_constant_names.items()
+        }
         constants = g.constants or {}
-        return {**constants, **frozen_params, **g.opaque_value_type_classes}
+        return {
+            **constants,
+            **frozen_params,
+            **pinned_constants,
+            **g.opaque_value_type_classes,
+        }
 
 
 @dataclasses.dataclass
@@ -534,6 +544,7 @@ class CompiledFxGraph(OutputCode):
     mutated_input_idxs: OrderedSet[int]
     constants: dict[str, torch.Tensor] | None
     frozen_param_names: dict[str, str]
+    pinned_constant_names: dict[str, str]
     torchbind_constants: dict[str, torch._C.ScriptObject | FakeScriptObject]
     opaque_value_type_classes: dict[str, type]
     output_strides: list[tuple[_StrideExprStr, ...] | None] | None
@@ -640,6 +651,16 @@ class CompiledFxGraph(OutputCode):
                     self.frozen_param_names[k] = graph.allocated_constant_name[k]
                 else:
                     self.constants[k] = v
+
+        # Constants the parent reported as pinned (allocated name -> module
+        # attribute name). CompiledFxGraphConstantsWithGm rebinds these to the
+        # parent's own tensors, so the compiled graph keeps pinned storage
+        # without re-pinning. Names pruned from constants (e.g. by the CPP
+        # GEMM template) are dropped, else unwrap would look up a deleted
+        # attribute.
+        self.pinned_constant_names = {
+            k: v for k, v in graph.pinned_constant_names.items() if k in graph.constants
+        }
 
         self.torchbind_constants = graph.torchbind_constants
         self.opaque_value_type_classes = graph.opaque_value_type_classes
