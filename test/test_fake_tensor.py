@@ -224,7 +224,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
     def test_like_out_overload_meta_out(self):
         # An out overload returns its out argument, a fake already
-        with FakeTensorMode():
+        with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.empty(2, device="meta")
             out = torch.empty(2, device="meta")
             self.assertIs(torch.ops.aten.ones_like.out(x, out=out), out)
@@ -1611,7 +1611,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
     def check_function_with_fake(self, fn):
         out = fn()
-        with FakeTensorMode():
+        with torch._subclasses.FakeTensorMode():
             out_fake = fn()
 
         for a, b in zip(pytree.tree_leaves(out), pytree.tree_leaves(out_fake)):
@@ -2315,7 +2315,7 @@ def forward(self, x_1):
         def f(x):
             return 4312491 * x
 
-        with FakeTensorMode():
+        with torch._subclasses.fake_tensor.FakeTensorMode():
             with fwAD.dual_level():
                 x = torch.randn(3, device="cpu")
                 y = torch.ones_like(x)
@@ -2330,7 +2330,7 @@ def forward(self, x_1):
         def add(x, y):
             return x + y, x + y
 
-        with FakeTensorMode():
+        with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.randn((3, 5, 7), device="cpu")
             init = torch.randn((3, 7), device="cpu")
             r = scan(add, init, x, dim=1, reverse=reverse)
@@ -2363,12 +2363,17 @@ def forward(self, x_1):
             elif shape_case == "channels_last":
                 x = x.contiguous(memory_format=torch.channels_last)
                 y = y.contiguous(memory_format=torch.channels_last)
-        from torch._subclasses.fake_impls import get_fast_op_impls
+        from torch._subclasses.fake_impls import get_fast_op_impls, infer_size
 
         z = get_fast_op_impls()[op](mode, x, y)
         self.assertEqual(z.dtype, torch.float32 if op == aten.div.Tensor else x.dtype)
         self.assertIs(maybe_get_fake_mode(z), mode)
-        dispatched = op(x, y)
+        with patch(
+            "torch._subclasses.fake_impls.infer_size", wraps=infer_size
+        ) as python_shape_probe:
+            dispatched = op(x, y)
+        if isinstance(mode, CppFakeTensorMode):
+            python_shape_probe.assert_not_called()
         prims.utils.compare_tensor_meta(z, dispatched, check_strides=True)
         self.assertIs(maybe_get_fake_mode(dispatched), mode)
 
@@ -2393,7 +2398,7 @@ def forward(self, x_1):
 
     def test_nanmean_out(self):
         # Regression test to ensure we don't error out.
-        with FakeTensorMode() as mode:
+        with torch._subclasses.fake_tensor.FakeTensorMode() as mode:
             x = torch.randn(10)
             out = torch.empty(())
             torch.nanmean(x, out=out)
@@ -2402,7 +2407,7 @@ def forward(self, x_1):
 
     def test_unbind_copy_out(self):
         # Regression test to ensure we don't error out.
-        with FakeTensorMode() as mode:
+        with torch._subclasses.fake_tensor.FakeTensorMode() as mode:
             eye = torch.eye(3)
             out = (torch.zeros(3), torch.zeros(3), torch.zeros(3))
             torch.unbind_copy(eye, out=out)
@@ -3672,7 +3677,7 @@ class TestFakeTensorConstHandling(TestCase):
         with self.assertRaises(
             torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            with FakeTensorMode():
+            with torch._subclasses.fake_tensor.FakeTensorMode():
                 a = torch.randn(3, 800, 1199)
                 b = torch.randn(3, 800, 800)
                 inputs = [a, b]
@@ -3805,7 +3810,11 @@ class TestFakeTensorConverter(TestCase):
     def test_memoized_conversion_from_meta(self, pytype):
         if torch._dynamo.config.use_cpp_fake_tensor and pytype is torch.nn.Parameter:
             self.skipTest("C++ fake tensors do not support Parameter pytype")
-        if TEST_WITH_TORCHDYNAMO and not torch._dynamo.config.use_cpp_fake_tensor and pytype is not None:
+        if (
+            TEST_WITH_TORCHDYNAMO
+            and not torch._dynamo.config.use_cpp_fake_tensor
+            and pytype is not None
+        ):
             self.skipTest(
                 "Dynamo guards on pytype, which differs from the actual FakeTensor type"
             )
@@ -4750,7 +4759,8 @@ class TestFakeTensorProp(TestCase):
         name_fn=lambda op: op.__name__,
     )
     @unittest.skipIf(
-        not torch._dynamo.config.use_cpp_fake_tensor, "Python FakeTensor keeps the memo across set_data"
+        not torch._dynamo.config.use_cpp_fake_tensor,
+        "Python FakeTensor keeps the memo across set_data",
     )
     def test_nonzero_unique_memo_dropped_by_set_data(self, op):
         # A C++ fake keeps these memos on the C++ tensor, which set_data
@@ -4764,7 +4774,10 @@ class TestFakeTensorProp(TestCase):
             x.data = torch.randint(0, 3, (20,))
             self.assertFalse(statically_known_true(op(x).shape[0] == n))
 
-    @unittest.skipIf(not torch._dynamo.config.use_cpp_fake_tensor, "Python FakeTensor raises on the get as well")
+    @unittest.skipIf(
+        not torch._dynamo.config.use_cpp_fake_tensor,
+        "Python FakeTensor raises on the get as well",
+    )
     def test_failed_sym_memo_set_leaves_no_memo(self):
         # Recording a memo reads the version counter, which a non-inference
         # tensor has disabled after inference_tensor.data = tensor. The failed
