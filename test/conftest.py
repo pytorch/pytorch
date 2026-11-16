@@ -1,6 +1,5 @@
 import copy
 import functools
-import inspect
 import json
 import os
 import re
@@ -8,7 +7,6 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from collections.abc import Iterator
-from pathlib import Path
 from types import MethodType
 from typing import Any, TYPE_CHECKING, TypeGuard
 
@@ -181,27 +179,6 @@ class NodeidFilePlugin:
         items[:] = selected
 
 
-class FakeTensorSelectionPlugin:
-    def __init__(self, path: str) -> None:
-        with open(path) as f:
-            self.tests = json.load(f)
-        self.test_root = Path(__file__).resolve().parent
-
-    @pytest.hookimpl(tryfirst=True)
-    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
-        selected, deselected = [], []
-        for item in items:
-            test_file = item.path.relative_to(self.test_root).with_suffix("").as_posix()
-            # Parametrized tests preserve the original method's qualified name.
-            test_name = inspect.unwrap(item.obj).__qualname__
-            if test_name in self.tests.get(test_file, ()):
-                selected.append(item)
-            else:
-                deselected.append(item)
-        config.hook.pytest_deselected(items=deselected)
-        items[:] = selected
-
-
 class SerialReportPlugin:
     """Counts the @serialTest tests of this shard that `-m "not serial"` left out
     (see --serial-report-file). run_test.py runs a file's serial pass only when its
@@ -292,10 +269,6 @@ def pytest_configure(config: Config) -> None:
     if config.getoption("nodeid_file"):
         config.pluginmanager.register(
             NodeidFilePlugin(config.getoption("nodeid_file")), "nodeid_file_plugin"
-        )
-    if selection := os.environ.get("PYTORCH_TEST_FAKETENSOR_SELECTION"):
-        config.pluginmanager.register(
-            FakeTensorSelectionPlugin(selection), "faketensor_selection_plugin"
         )
     if config.getoption("hw_classification") or HW_CLASSIFICATION_EXCLUDE:
         config.pluginmanager.register(
