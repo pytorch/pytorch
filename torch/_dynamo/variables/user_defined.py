@@ -1608,6 +1608,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return CurrentDeviceVariable.create(device_arg.value)
 
         if self.can_constant_fold_through() and constant_args:
+            # Constant-folded constructors can consume mapping insertion order.
+            for arg in [*args, *kwargs.values()]:
+                if isinstance(arg, variables.ConstDictVariable):
+                    arg.install_dict_order_guard(tx)
             # constant fold
             return VariableTracker.build(
                 tx,

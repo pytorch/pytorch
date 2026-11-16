@@ -8053,6 +8053,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
+        if (
+            config.triton.sm100_outer_reduction_r0_block_8
+            and self._get_heuristic() == "reduction"
+        ):
+            device = V.graph.get_current_device_or_throw()
+            if triton_meta_device_props(device).cc == 100:
+                out["sm100_outer_reduction_r0_block_8"] = True
         if config.deterministic or config.test_configs.force_filter_reduction_configs:
             out["has_loadstore_with_contiguous_rdim"] = (
                 self.has_load_with_contiguous_rdim
@@ -8653,14 +8660,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         _, call_args, arg_signatures, _ = self.args.python_argdefs()
         for arg, arg_signature in zip(call_args, arg_signatures):
             if isinstance(arg_signature, TensorArg):
+                tensor_name = f"{self.kernel_name}: {arg}"
                 if V.graph.cpp_wrapper:
                     wrapper.writeline(
-                        f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
+                        f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{tensor_name}", {arg}));'
                     )
                 else:
-                    line = f"assert not {arg}.isnan().any().item()"
+                    line = f"assert not {arg}.isnan().any().item(), {f'{tensor_name} contains NaN'!r}"
                     wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
+                    line = f"assert not {arg}.isinf().any().item(), {f'{tensor_name} contains Inf'!r}"
                     wrapper.writeline(line)
 
     def create_cse_var(self, *args, **kwargs) -> TritonCSEVariable:

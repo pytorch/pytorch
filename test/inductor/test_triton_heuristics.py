@@ -81,7 +81,7 @@ from torch._inductor.runtime.triton_heuristics import (
     triton_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fresh_cache, get_code
 
 
 class _FindNamesProbe:
@@ -543,6 +543,66 @@ class TestTritonHeuristics(TestCase):
                 {"x": 256, "y": 256, "r0_": 4096},
                 {"min_xblock": 16},
             )
+
+    @parametrize(
+        "knob,num_load,expected",
+        [
+            (True, 3, (64, 8, 2)),
+            (False, 3, (64, 1, 2)),
+            (True, 2, (64, 1, 2)),
+        ],
+    )
+    def test_sm100_outer_reduction_r0_block_8(self, knob, num_load, expected):
+        inductor_meta = {"reduction_hint": ReductionHint.OUTER, "num_load": num_load}
+        if knob:
+            inductor_meta["sm100_outer_reduction_r0_block_8"] = True
+
+        configs = _reduction_configs(
+            size_hints={"x": 65536, "r0_": 128},
+            inductor_meta=inductor_meta,
+            triton_meta={"device": self._fake_cuda_device_properties()},
+            num_dynamic=1,
+        )
+
+        outer = configs[-1]
+        self.assertEqual(
+            (outer.kwargs["XBLOCK"], outer.kwargs["R0_BLOCK"], outer.num_warps),
+            expected,
+        )
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @parametrize(
+        "knob,cc,persistent,expected",
+        [
+            (True, 100, False, True),
+            (False, 100, False, False),
+            (True, 90, False, False),
+            (True, 100, True, False),
+        ],
+    )
+    def test_sm100_outer_reduction_r0_block_8_in_inductor_meta(
+        self, knob, cc, persistent, expected
+    ):
+        from torch._inductor.codegen import triton as triton_codegen
+
+        real_props = triton_codegen.triton_meta_device_props
+        x = torch.randn(64 if persistent else 256, 64, device=GPU_TYPE)
+        with (
+            config.patch(
+                {"triton.sm100_outer_reduction_r0_block_8": knob, "compile_threads": 1}
+            ),
+            patch.object(
+                triton_codegen,
+                "triton_meta_device_props",
+                lambda device: real_props(device)._replace(cc=cc),
+            ),
+            fresh_cache(),
+        ):
+            code = "\n".join(get_code(torch.compile(lambda t: t.sum(0)), x))
+
+        heuristic = "persistent_reduction" if persistent else "reduction"
+        self.assertIn(f"@triton_heuristics.{heuristic}(", code)
+        self.assertEqual("'sm100_outer_reduction_r0_block_8': True" in code, expected)
 
     @parametrize(
         "major,cc,expected_baseline_configs,expected_scalar_configs",
