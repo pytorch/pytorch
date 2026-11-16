@@ -9066,6 +9066,24 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @parametrize(
+        "get_cls",
+        [
+            subtest(lambda p: type(p), name="type"),
+            subtest(lambda p: p.__class__, name="dunder_class"),
+        ],
+    )
+    @parametrize("fullgraph", [False, True])
+    def test_torch_nn_parameter_ctor_type(self, get_cls, fullgraph):
+        # https://github.com/pytorch/pytorch/issues/204945
+        def fn(w):
+            p = torch.nn.Parameter(w)
+            return w + 1 if get_cls(p) is torch.nn.Parameter else w
+
+        w = torch.zeros(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=fullgraph)
+        self.assertEqual(opt_fn(w), fn(w))
+
     def _optimize_then_check_exp(
         self, foo, args, cnt, exp_out, exp_frame_count, exp_n_cached_backend
     ):

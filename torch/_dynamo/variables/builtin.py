@@ -3166,7 +3166,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                 case_name="unknown_python_type",
             ) from None
 
-        source = obj.source and TypeSource(obj.source)
+        source: Source | None = None
+        if obj.source and obj.source.subguards_allowed():
+            source = TypeSource(obj.source)
         if (
             source is None
             and isinstance(obj, variables.UserDefinedObjectVariable)
