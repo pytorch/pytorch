@@ -1,0 +1,722 @@
+import copy
+import functools
+import json
+import os
+import re
+import sys
+import xml.etree.ElementTree as ET
+from collections import Counter, defaultdict
+from collections.abc import Iterator
+from types import MethodType
+from typing import Any, TYPE_CHECKING, TypeGuard
+
+import pytest
+from _pytest.config import Config, filename_arg
+from _pytest.config.argparsing import Parser
+from _pytest.junitxml import _NodeReporter, bin_xml_escape, LogXML
+from _pytest.python import Module
+from _pytest.reports import TestReport
+from _pytest.stash import StashKey
+from _pytest.terminal import _get_raw_skip_reason
+
+from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
+
+
+try:
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+except ImportError:
+    # Temporary workaround needed until parse_cmd_line_args makes it into a nightlye because
+    # main / PR's tests are sometimes run against the previous day's nightly which won't
+    # have this function.
+    def parse_cmd_line_args():
+        pass
+
+
+try:
+    from torch.testing._internal.common_utils import HW_CLASSIFICATION_EXCLUDE
+except ImportError:
+    # Same workaround as above, for nightlies without this setting.
+    HW_CLASSIFICATION_EXCLUDE = frozenset()
+    if os.environ.get("PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION"):
+        print(
+            "PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION is ignored: this torch predates it"
+        )
+
+
+try:
+    # Absent when torch is not importable (the tools tests load this conftest)
+    # or when tests run against an older nightly; pruning is then simply off.
+    from torch.testing._internal.common_utils import skip_reason_at_collection
+except ImportError:
+    skip_reason_at_collection = None
+
+
+if TYPE_CHECKING:
+    from _pytest._code.code import ReprFileLocation
+
+    from torch.testing._internal.common_distributed import (
+        MultiProcContinuousTest,
+        MultiProcessTestCase,
+    )
+
+# a lot of this file is copied from _pytest.junitxml and modified to get rerun info
+
+xml_key = StashKey["LogXMLReruns"]()
+# Under pytest's cache (<cache_dir>/v/). run_test.py reads these files, and the
+# torchci report writer publishes next to them (StepcurrentPlugin.directory).
+STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
+_RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
+
+
+def pytest_addoption(parser: Parser) -> None:
+    group = parser.getgroup("general")
+    group.addoption("--scs", action="store", default=None, dest="stepcurrent_skip")
+    group.addoption("--sc", action="store", default=None, dest="stepcurrent")
+    group.addoption("--rs", action="store", default=None, dest="run_single")
+
+    parser.addoption("--use-main-module", action="store_true")
+    group = parser.getgroup("terminal reporting")
+    group.addoption(
+        "--junit-xml-reruns",
+        action="store",
+        dest="xmlpath_reruns",
+        metavar="path",
+        type=functools.partial(filename_arg, optname="--junit-xml-reruns"),
+        default=None,
+        help="create junit-xml style report file at given path.",
+    )
+    group.addoption(
+        "--junit-prefix-reruns",
+        action="store",
+        metavar="str",
+        default=None,
+        help="prepend prefix to classnames in junit-xml output",
+    )
+    parser.addini(
+        "junit_suite_name_reruns", "Test suite name for JUnit report", default="pytest"
+    )
+    parser.addini(
+        "junit_logging_reruns",
+        "Write captured log messages to JUnit report: "
+        "one of no|log|system-out|system-err|out-err|all",
+        default="no",
+    )
+    parser.addini(
+        "junit_log_passing_tests_reruns",
+        "Capture log information for passing tests to JUnit report: ",
+        type="bool",
+        default=True,
+    )
+    parser.addini(
+        "junit_duration_report_reruns",
+        "Duration time to report: one of total|call",
+        default="total",
+    )
+    parser.addini(
+        "junit_family_reruns",
+        "Emit XML for schema: one of legacy|xunit1|xunit2",
+        default="xunit2",
+    )
+    parser.addoption(
+        "--hw-classification",
+        nargs="+",
+        default=None,
+        metavar="SCOPE",
+        dest="hw_classification",
+        type=str.upper,
+        help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
+    )
+    parser.addoption(
+        "--multigpu-min-gpus",
+        action="store",
+        type=int,
+        default=0,
+        dest="multigpu_min_gpus",
+        metavar="N",
+        help="Among the auto-applied `multigpu` tests (see pytest_itemcollected), "
+        "keep only those declaring an accelerator requirement of at least N GPUs "
+        "via skip_if_lt_x_gpu/requires_world_size; deselect the rest. "
+        "0 (default) disables the filter, so runs "
+        "without it are unaffected. Layered on top of `-m multigpu` so a "
+        "larger-runner config can run just the >2-GPU distributed tests.",
+    )
+    parser.addoption(
+        "--nodeid-file",
+        action="store",
+        default=None,
+        dest="nodeid_file",
+        metavar="path",
+        help="run only the tests whose node ids are listed, one per line, in this file",
+    )
+    parser.addoption(
+        "--serial-report-file",
+        action="store",
+        default=None,
+        dest="serial_report_file",
+        metavar="path",
+        help="append the number of @serialTest tests that -m deselected from this "
+        "shard to this file",
+    )
+    shard_addoptions(parser)
+
+
+class NodeidFilePlugin:
+    """Selects a fixed set of tests by node id (see --nodeid-file). run_test.py
+    uses it to rerun the failures of an xdist pass through its retries."""
+
+    def __init__(self, path: str) -> None:
+        with open(path) as f:
+            self.nodeids = {line.strip() for line in f if line.strip()}
+
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        selected = [item for item in items if item.nodeid in self.nodeids]
+        if not selected:
+            # An empty selection would exit 5, which run_test.py treats as success.
+            raise pytest.UsageError("--nodeid-file selected no tests")
+        config.hook.pytest_deselected(
+            items=[item for item in items if item.nodeid not in self.nodeids]
+        )
+        items[:] = selected
+
+
+class SerialReportPlugin:
+    """Counts the @serialTest tests of this shard that `-m "not serial"` left out
+    (see --serial-report-file). run_test.py runs a file's serial pass only when its
+    parallel pass reports some. Tests left out by other filters count too, which
+    can only add a serial pass that runs nothing."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.serial: list[Any] = []
+
+    def pytest_deselected(self, items: list[Any]) -> None:
+        self.serial += [item for item in items if item.get_closest_marker("serial")]
+
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        config = session.config
+        serial = self.serial
+        # -m may deselect before PytestShardPlugin keeps this shard's tests.
+        if shard := config.pluginmanager.get_plugin("pytestshardplugin"):
+            shard_args = config.getoption("shard_id"), config.getoption("num_shards")
+            serial = shard.filter_items_by_shard(serial, *shard_args)
+        with open(self.path, "a") as f:
+            f.write(f"{len(serial)}\n")
+
+
+class HardwareClassificationPytestPlugin:
+    """Pytest plugin to filter collected tests by hw_classification."""
+
+    def __init__(
+        self, hw_classification: list[str] | None, *, exclude: frozenset = frozenset()
+    ) -> None:
+        self.hw_classification = self._resolve_hw_classification(hw_classification)
+        self.exclude = exclude
+
+    @staticmethod
+    def _resolve_hw_classification(hw_classification):
+        if hw_classification is None:
+            return None
+        from torch.testing._internal.common_utils import HardwareClassification
+
+        return {HardwareClassification[name] for name in hw_classification}
+
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        if self.hw_classification is None and not self.exclude:
+            return
+        import torch.testing._internal.common_utils as _cu
+
+        selected = []
+        # Older nightlies (see the HW_CLASSIFICATION_EXCLUDE import fallback) lack `exclude`.
+        exclude_kwargs = {"exclude": self.exclude} if self.exclude else {}
+        _cu.filter_by_hw_classification(
+            items,
+            self.hw_classification,
+            get_class=lambda item: getattr(item, "cls", None),
+            on_match=selected.append,
+            **exclude_kwargs,
+        )
+        if len(selected) < len(items):
+            kept = set(selected)
+            config.hook.pytest_deselected(items=[i for i in items if i not in kept])
+            items[:] = selected
+
+
+def pytest_configure(config: Config) -> None:
+    parse_cmd_line_args()
+
+    xmlpath = config.option.xmlpath_reruns
+    # Prevent opening xmllog on worker nodes (xdist).
+    if xmlpath and not hasattr(config, "workerinput"):
+        junit_family = config.getini("junit_family_reruns")
+        config.stash[xml_key] = LogXMLReruns(
+            xmlpath,
+            config.option.junitprefix,
+            config.getini("junit_suite_name_reruns"),
+            config.getini("junit_logging_reruns"),
+            config.getini("junit_duration_report_reruns"),
+            junit_family,
+            config.getini("junit_log_passing_tests_reruns"),
+        )
+        config.pluginmanager.register(config.stash[xml_key])
+    if config.getoption("stepcurrent_skip"):
+        config.option.stepcurrent = config.getoption("stepcurrent_skip")
+    if config.getoption("run_single"):
+        config.option.stepcurrent = config.getoption("run_single")
+    if config.getoption("stepcurrent"):
+        config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
+    if config.getoption("num_shards"):
+        config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
+    if config.getoption("nodeid_file"):
+        config.pluginmanager.register(
+            NodeidFilePlugin(config.getoption("nodeid_file")), "nodeid_file_plugin"
+        )
+    if config.getoption("hw_classification") or HW_CLASSIFICATION_EXCLUDE:
+        config.pluginmanager.register(
+            HardwareClassificationPytestPlugin(
+                config.getoption("hw_classification"), exclude=HW_CLASSIFICATION_EXCLUDE
+            ),
+            "hw_classification_plugin",
+        )
+    if config.getoption("serial_report_file"):
+        config.pluginmanager.register(
+            SerialReportPlugin(config.getoption("serial_report_file")),
+            "serial_report_plugin",
+        )
+    if config.getoption("multigpu_min_gpus"):
+        config.pluginmanager.register(
+            MultiGpuMinFilterPlugin(config.getoption("multigpu_min_gpus")),
+            "multigpu_min_filter_plugin",
+        )
+    if skip_reason_at_collection is not None and not _RERUN_DISABLED_TESTS:
+        config.pluginmanager.register(PruneSkipsPlugin(), "prune_skips_plugin")
+
+
+def pytest_unconfigure(config: Config) -> None:
+    xml = config.stash.get(xml_key, None)
+    if xml:
+        del config.stash[xml_key]
+        config.pluginmanager.unregister(xml)
+
+
+class _NodeReporterReruns(_NodeReporter):
+    """Writes captured output without pytest's per-stream header and omits it
+    when empty, so tests that print nothing don't each get <system-out> and
+    <system-err> elements (pytest.ini sets junit_logging_reruns = all). Also
+    escapes skip reasons, which pytest<8 leaves unescaped.
+
+    pytest constructs these reporters and LogXMLReruns.node_reporter only
+    reassigns __class__, so this class may override methods but must not add
+    state or change how instance data is represented.
+    """
+
+    def _prepare_content(self, content: str, header: str) -> str:
+        return content
+
+    def _write_content(self, report: TestReport, content: str, jheader: str) -> None:
+        if content == "":
+            return
+        tag = ET.Element(jheader)
+        tag.text = bin_xml_escape(content)
+        self.append(tag)
+
+    def append_skipped(self, report: TestReport) -> None:
+        # Referenced from the below
+        # https://github.com/pytest-dev/pytest/blob/2178ee86d7c1ee93748cfb46540a6e40b4761f2d/src/_pytest/junitxml.py#L236C6-L236C6
+        # Modified to escape characters not supported by xml in the skip reason.  Everything else should be the same.
+        if hasattr(report, "wasxfail"):
+            # Super here instead of the actual code so we can reduce possible divergence
+            super().append_skipped(report)
+        else:
+            if not isinstance(report.longrepr, tuple):
+                raise AssertionError(
+                    f"Expected report.longrepr to be tuple, got {type(report.longrepr)}"
+                )
+            filename, lineno, skipreason = report.longrepr
+            skipreason = skipreason.removeprefix("Skipped: ")
+            details = f"{filename}:{lineno}: {skipreason}"
+
+            skipped = ET.Element(
+                "skipped", type="pytest.skip", message=bin_xml_escape(skipreason)
+            )
+            skipped.text = bin_xml_escape(details)
+            self.append(skipped)
+            self.write_captured_output(report)
+
+
+class LogXMLReruns(LogXML):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def append_rerun(self, reporter: _NodeReporter, report: TestReport) -> None:
+        if hasattr(report, "wasxfail"):
+            reporter._add_simple("skipped", "xfail-marked test passes unexpectedly")
+        else:
+            if report.longrepr is None:
+                raise AssertionError("Expected report.longrepr to not be None")
+            reprcrash: ReprFileLocation | None = getattr(
+                report.longrepr, "reprcrash", None
+            )
+            if reprcrash is not None:
+                message = reprcrash.message
+            else:
+                message = str(report.longrepr)
+            message = bin_xml_escape(message)
+            reporter._add_simple("rerun", message, str(report.longrepr))
+
+    def pytest_runtest_logreport(self, report: TestReport) -> None:
+        super().pytest_runtest_logreport(report)
+        if report.outcome == "rerun":
+            reporter = self._opentestcase(report)
+            self.append_rerun(reporter, report)
+        if report.outcome == "skipped":
+            if isinstance(report.longrepr, tuple):
+                fspath, lineno, reason = report.longrepr
+                reason = f"{report.nodeid}: {_get_raw_skip_reason(report)}"
+                report.longrepr = (fspath, lineno, reason)
+
+    def node_reporter(self, report: TestReport | str) -> _NodeReporterReruns:
+        # The reporter key type varies across pytest versions, so let pytest build it.
+        reporter = super().node_reporter(report)
+        if not issubclass(_NodeReporterReruns, type(reporter)):
+            raise AssertionError(f"unexpected node reporter type {type(reporter)}")
+        reporter.__class__ = _NodeReporterReruns
+        return reporter
+
+
+# pytest-rerunfailures only lists reruns, so print why each attempt failed, like
+# pytest's FAILURES section. hookwrapper and tryfirst so this runs before pytest's.
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    reports = terminalreporter.getreports("rerun")
+    if reports and config.option.tbstyle != "no":
+        terminalreporter.write_sep("=", "RERUNS")
+        for rep in reports:
+            if config.option.tbstyle == "line":
+                # As in pytest's own --tb=line: an xdist worker crash's rerun report has a
+                # plain-string longrepr, and pytest 7.3.2 leaves reprcrash None for pytrace=False.
+                crash = getattr(rep.longrepr, "reprcrash", None)
+                terminalreporter.write_line(
+                    str(crash) if crash is not None else str(rep.longrepr)[:50]
+                )
+                continue
+            title = rep.head_line or rep.nodeid
+            terminalreporter.write_sep("_", title, red=True, bold=True)
+            rep.toterminal(config.get_terminal_writer())
+            for name, content in rep.sections:
+                if config.option.showcapture in ("all", *name.split()):
+                    terminalreporter.write_sep("-", name)
+                    terminalreporter.write_line(content.removesuffix("\n"))
+    yield
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pycollect_makemodule(module_path, parent) -> Module:
+    if parent.config.getoption("--use-main-module"):
+        mod = Module.from_parent(parent, path=module_path)
+        mod._getobj = MethodType(lambda x: sys.modules["__main__"], mod)
+        return mod
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_report_teststatus(report, config):
+    # Add the test time to the verbose output, unfortunately I don't think this
+    # includes setup or teardown
+    pluggy_result = yield
+    if not isinstance(report, pytest.TestReport):
+        return
+    outcome, letter, verbose = pluggy_result.get_result()
+    if verbose:
+        pluggy_result.force_result(
+            (outcome, letter, f"{verbose} [{report.duration:.4f}s]")
+        )
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(items: list[Any]) -> None:
+    """
+    This hook is used when rerunning disabled tests to get rid of all skipped tests
+    instead of running and skipping them N times. This avoids flooding the console
+    and XML outputs with junk. So we want this to run last when collecting tests.
+    """
+    if not _RERUN_DISABLED_TESTS:
+        return
+
+    disabled_regex = re.compile(r"(?P<test_name>.+)\s+\([^\.]+\.(?P<test_class>.+)\)")
+    disabled_tests = defaultdict(set)
+
+    # This environment has already been set by run_test before it calls pytest
+    disabled_tests_file = os.getenv("DISABLED_TESTS_FILE", "")
+    if not disabled_tests_file or not os.path.exists(disabled_tests_file):
+        return
+
+    with open(disabled_tests_file) as fp:
+        for disabled_test in json.load(fp):
+            m = disabled_regex.match(disabled_test)
+            if m:
+                test_name = m["test_name"]
+                test_class = m["test_class"]
+                disabled_tests[test_class].add(test_name)
+
+    # When rerunning disabled test, ignore all test cases that are not disabled
+    filtered_items = []
+
+    for item in items:
+        test_name = item.name
+        test_class = item.parent.name
+
+        if (
+            test_class not in disabled_tests
+            or test_name not in disabled_tests[test_class]
+        ):
+            continue
+
+        cpy = copy.copy(item)
+        cpy._initrequest()
+
+        filtered_items.append(cpy)
+
+    items.clear()
+    # NB: Need to edit items directly here to have the list reflected back to pytest
+    items.extend(filtered_items)
+
+
+def _spawns_multiple_processes(
+    cls: type | None,
+) -> TypeGuard["type[MultiProcessTestCase | MultiProcContinuousTest] | None"]:
+    """
+    A distributed test needs multiple GPUs iff its class spawns multiple
+    processes. This is encoded by the base class: MultiProcessTestCase and
+    MultiProcContinuousTest fork `world_size` subprocesses, one per GPU. Plain
+    TestCase and MultiThreadedTestCase run in a single process (one GPU).
+
+    Returns True (needs multiple GPUs) on any ambiguity, so we never route a
+    process-spawning test to a single-GPU runner.
+    """
+    if cls is None:
+        return True
+    import torch.distributed as dist
+
+    if not dist.is_available():
+        # Distributed wasn't built: no test can spawn processes, so nothing is
+        # multigpu and the single-GPU config runs everything.
+        return False
+    from torch.testing._internal.common_distributed import (
+        MultiProcContinuousTest,
+        MultiProcessTestCase,
+    )
+
+    return issubclass(cls, (MultiProcessTestCase, MultiProcContinuousTest))
+
+
+def _safe_obj(item: Any) -> object | None:
+    # item.obj imports the test module, so any exception is possible here.
+    try:
+        return item.obj
+    except Exception:
+        return None
+
+
+def _decorator_gpu_requirement(func: object | None) -> int:
+    """Highest accelerator requirement stamped on ``func`` (or anything in its
+    ``__wrapped__`` chain) by ``skip_if_lt_x_gpu`` (``_min_gpus_required``) or
+    ``requires_world_size`` (``_required_world_size``). 0 when unstamped."""
+    best = 0
+    while func is not None:
+        for attr in ("_min_gpus_required", "_required_world_size"):
+            try:
+                best = max(best, int(getattr(func, attr)))  # type: ignore[arg-type]
+            except (AttributeError, TypeError, ValueError):
+                pass
+        func = getattr(func, "__wrapped__", None)
+    return best
+
+
+def _resolve_gpu_requirement(item: Any) -> int:
+    """Accelerators a distributed test declares it needs, read at collection from
+    its decorator stamps (see _decorator_gpu_requirement). 0 when undeclared.
+
+    Class world_size is not consulted. On a 4-GPU runner a literal 4 is
+    indistinguishable from capacity-scaled NUM_DEVICES/DEVICE_COUNT values that
+    still run on 2 GPUs.
+    """
+    return _decorator_gpu_requirement(_safe_obj(item))
+
+
+def pytest_itemcollected(item: Any) -> None:
+    """
+    Auto-apply the `multigpu` marker based on the resolved test class. Runs
+    per-item during collection, before pytest applies `-m` deselection, so the
+    distributed CI configs can partition a file into multigpu and `not
+    multigpu` halves without touching the test source.
+    """
+    if _spawns_multiple_processes(getattr(item, "cls", None)):
+        item.add_marker("multigpu")
+
+
+class MultiGpuMinFilterPlugin:
+    """Deselect auto-`multigpu`-marked tests whose resolved accelerator
+    requirement is below ``--multigpu-min-gpus`` (see _resolve_gpu_requirement),
+    so a larger-runner config can run just the >N-GPU distributed tests on top of
+    the existing `-m multigpu` selection. Only `multigpu`-marked items are
+    considered, and the plugin is registered only when the option is set, so runs
+    without it (e.g. every CUDA distributed job) are untouched."""
+
+    def __init__(self, min_gpus: int) -> None:
+        self.min_gpus = min_gpus
+
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        selected, deselected = [], []
+        for item in items:
+            is_multigpu = any(m.name == "multigpu" for m in item.iter_markers())
+            if is_multigpu and _resolve_gpu_requirement(item) < self.min_gpus:
+                deselected.append(item)
+            else:
+                selected.append(item)
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
+            items[:] = selected
+
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        selected = len(session.items)
+        if session.config.getoption("verbose") >= 0:
+            print(
+                f"multigpu-min-gpus={self.min_gpus}: final selected {selected}",
+                flush=True,
+            )
+        count_file = os.getenv("PYTORCH_MULTIGPU_SELECTION_COUNT_FILE")
+        if count_file:
+            with open(count_file, "a") as fp:
+                fp.write(f"{selected}\n")
+
+
+def _pytest_mark_skip_reason(item: Any) -> tuple[str | None, bool]:
+    for mark in item.iter_markers(name="skipif"):
+        conditions = mark.args
+        if "condition" in mark.kwargs:
+            conditions = (mark.kwargs["condition"],)
+        # Strings and objects with __bool__ can depend on earlier tests or setup.
+        if any(not isinstance(condition, bool) for condition in conditions):
+            return None, False
+    try:
+        from _pytest.skipping import evaluate_skip_marks
+
+        skipped = evaluate_skip_marks(item)
+    except (Exception, pytest.fail.Exception):
+        return None, False
+    if skipped:
+        return skipped.reason, True
+    return None, item.get_closest_marker("xfail") is None
+
+
+class PruneSkipsPlugin:
+    r"""Deselect tests whose skip is decided before the body runs: pytest skip
+    marks, static unittest marks, conditions that decorators can record with
+    common_utils.add_skip_condition, the slow-tests list and
+    PYTORCH_TEST_SKIP_FAST. They then cost nothing per test and never reach
+    TestCase.run, which under PYTORCH_TEST_WITH_DYNAMO wraps every test in
+    Dynamo. The decision is common_utils.skip_reason_at_collection, which
+    keeps anything it cannot decide. Enabled by default except in rerun-disabled
+    mode or when that helper cannot be imported. A run that needs skipped tests
+    reported, such as the junit and torchci report harnesses, opts out with
+    ``-p no:prune_skips_plugin``. Runs after ordinary filters and mark additions,
+    before the sharding wrapper assigns the remaining tests to shards."""
+
+    def __init__(self) -> None:
+        self.reasons: Counter[str] = Counter()
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        kept, pruned = [], []
+        for item in items:
+            cls, fn = getattr(item, "cls", None), _safe_obj(item)
+            if fn is None:
+                kept.append(item)
+                continue
+            reason, check_test_conditions = _pytest_mark_skip_reason(item)
+            if reason is None and check_test_conditions:
+                reason = skip_reason_at_collection(cls, fn, item.name)
+            if reason is None:
+                kept.append(item)
+            else:
+                pruned.append(item)
+                self.reasons[reason] += 1
+        if pruned:
+            config.hook.pytest_deselected(items=pruned)
+            items[:] = kept
+
+    def pytest_report_collectionfinish(self, config: Config) -> str | None:
+        if not self.reasons:
+            return None
+        total = sum(self.reasons.values())
+        top = "; ".join(f"{n} x {r[:70]}" for r, n in self.reasons.most_common(3))
+        return f"Pruned {total} tests whose skip was decided at collection: {top}"
+
+
+class StepcurrentPlugin:
+    # Modified fromo _pytest/stepwise.py in order to save the currently running
+    # test instead of the last failed test
+    def __init__(self, config: Config) -> None:
+        self.config = config
+        self.report_status = ""
+        if config.cache is None:
+            raise AssertionError("Expected config.cache to not be None")
+        self.cache: pytest.Cache = config.cache
+        self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
+        self.lastrun_location = f"{self.directory}/lastrun"
+        self.lastrun: str | None = self.cache.get(self.lastrun_location, None)
+        self.initial_val = self.lastrun
+        self.skip: bool = config.getoption("stepcurrent_skip")
+        self.run_single: bool = config.getoption("run_single")
+
+        self.made_failing_xml_location = f"{self.directory}/made_failing_xml"
+        self.cache.set(self.made_failing_xml_location, False)
+
+    @pytest.hookimpl(hookwrapper=True, tryfirst=True)
+    def pytest_collection_modifyitems(
+        self, config: Config, items: list[Any]
+    ) -> Iterator[None]:
+        # Resume within the selected shard after pruning and shard assignment.
+        outcome = yield
+        if outcome.excinfo is not None:
+            return
+        if not self.lastrun:
+            self.report_status = "Cannot find last run test, not skipping"
+            return
+
+        # check all item nodes until we find a match on last run
+        failed_index = None
+        for index, item in enumerate(items):
+            if item.nodeid == self.lastrun:
+                failed_index = index
+                if self.skip:
+                    failed_index += 1
+                break
+
+        # If the previously failed test was not found among the test items,
+        # do not skip any tests.
+        if failed_index is None:
+            self.report_status = "previously run test not found, not skipping."
+        else:
+            self.report_status = f"skipping {failed_index} already run items."
+            deselected = items[:failed_index]
+            del items[:failed_index]
+            if self.run_single:
+                self.report_status += f" Running only {items[0].nodeid}"
+                deselected += items[1:]
+                del items[1:]
+            config.hook.pytest_deselected(items=deselected)
+
+    def pytest_report_collectionfinish(self) -> str | None:
+        if self.config.getoption("verbose") >= 0 and self.report_status:
+            return f"stepcurrent: {self.report_status}"
+        return None
+
+    def pytest_runtest_protocol(self, item, nextitem) -> None:
+        self.lastrun = item.nodeid
+        self.cache.set(self.lastrun_location, self.lastrun)
+
+    def pytest_sessionfinish(self, session, exitstatus):
+        if exitstatus == 0:
+            self.cache.set(self.lastrun_location, self.initial_val)
+        if exitstatus != 0:
+            self.cache.set(self.made_failing_xml_location, True)

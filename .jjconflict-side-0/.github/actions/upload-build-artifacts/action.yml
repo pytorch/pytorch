@@ -1,0 +1,37 @@
+name: Upload PyTorch Build Artifacts
+
+description: Upload build artifacts to S3 or GHA.
+
+inputs:
+  name:
+    description: Name of the artifact
+    required: true
+  use-gha:
+    description: If set to any value, use GHA to upload the artifact. Otherwise use S3.
+    required: false
+  s3-bucket:
+    description: S3 bucket to upload builds
+    required: false
+    default: "gha-artifacts"
+
+runs:
+  using: composite
+  steps:
+    - name: Upload PyTorch Build Artifacts to S3
+      if: inputs.use-gha == '' || inputs.use-gha == 'false'
+      uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+      with:
+        name: ${{ inputs.name }}
+        retention-days: 14
+        if-no-files-found: error
+        path: artifacts.zip
+        s3-bucket: ${{ inputs.s3-bucket }}
+
+    - name: Upload PyTorch Build Artifacts to GHA
+      if: inputs.use-gha != '' && inputs.use-gha != 'false'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ inputs.name }}
+        retention-days: 14
+        if-no-files-found: error
+        path: artifacts.zip

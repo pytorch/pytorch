@@ -1,0 +1,13 @@
+# Build System requirements
+# 1.1.1 is the lower bound; see pyproject.toml for the rationale.
+scikit-build-core>=1.1.1
+setuptools>=77.0.0,<82  # 77.0 is the first release with PEP 639 license-files support
+spin
+cmake>=3.27
+ninja
+numpy
+packaging>=24.2  # required by setuptools>=77 to validate PEP 639 license expressions
+pyyaml
+requests
+typing-extensions>=4.15.0
+pip  # not technically needed, but this makes setup.py invocation work
