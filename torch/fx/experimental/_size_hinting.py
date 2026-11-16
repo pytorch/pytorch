@@ -166,8 +166,7 @@ def _guarding_hint_or_throw_base(
     if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
         expr = _sympy_subs(expr, precomputed_replacements)
 
-    # TODO do we need sympy_subs, or just xreplace
-    expr = _sympy_subs(expr, shape_env.backed_var_to_val)
+    expr = expr.xreplace(shape_env.backed_var_to_val)
     if isinstance(expr, sympy.Expr):
         expr = expr.expand(identity=True)
 
