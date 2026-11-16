@@ -4899,6 +4899,72 @@ if HAS_CUDA_AND_TRITON:
             self.assertIsNotNone(self.get_manager())
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
+        @parametrize("bwd", (True, False))
+        @torch._inductor.config.patch(
+            {"triton.cudagraphs": False, "graph_partition": True}
+        )
+        def test_cudagraph_annotation_enable_with_compile_options(self, bwd):
+            """override_cudagraphs(fwd=True) still enables cudagraphs, and graph
+            partition still splits off the CPU op, when torch.compile is given
+            options={"triton.cudagraphs": False}. bwd=False keeps backward out."""
+
+            @torch._dynamo.override_cudagraphs(fwd=True, bwd=bwd)
+            def helper(x, y):
+                return (x * x).sin(), y * 2
+
+            def fn(x, y):
+                return helper(x, y)
+
+            fn_compiled = torch.compile(fn, options={"triton.cudagraphs": False})
+
+            for _ in range(3):
+                x = torch.randn(4, 4, device="cuda", requires_grad=True)
+                y = torch.randn(4)
+                torch.compiler.cudagraph_mark_step_begin()
+                out = fn_compiled(x, y)
+                out[0].sum().backward()
+
+            self.assertEqual(out, (x.detach().pow(2).sin(), y * 2))
+            # bwd=False only adds the bwd-disable skip
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0 if bwd else 1)
+            self.assertIsNotNone(self.get_manager())
+            # Forward, plus backward when bwd=True
+            self.assertEqual(self.get_manager().new_graph_id().id, 2 if bwd else 1)
+
+        @torch._inductor.config.patch(
+            {"triton.cudagraphs": False, "graph_partition": True, "freezing": True}
+        )
+        def test_cudagraph_annotation_enable_freezing(self):
+            """override_cudagraphs(fwd=True) enables cudagraphs, and graph
+            partition splits off the CPU op, on the freezing inference path."""
+
+            @torch._dynamo.override_cudagraphs(fwd=True)
+            def helper(x, w, y):
+                return (x @ w).sin(), y * 2
+
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.param = torch.nn.Parameter(torch.randn(4, 4, device="cuda"))
+
+                def forward(self, x, y):
+                    return helper(x, self.param, y)
+
+            mod = Mod()
+            mod_compiled = torch.compile(mod)
+
+            with torch.no_grad():
+                for _ in range(3):
+                    x = torch.randn(4, 4, device="cuda")
+                    y = torch.randn(4)
+                    torch.compiler.cudagraph_mark_step_begin()
+                    out = mod_compiled(x, y)
+
+                self.assertEqual(out, ((x @ mod.param).sin(), y * 2))
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            self.assertIsNotNone(self.get_manager())
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_cudagraph_annotation_enable_fwd_bwd(self):
             """override_cudagraphs(fwd=True, bwd=True) force-enables cudagraphs
@@ -5394,6 +5460,19 @@ if HAS_CUDA_AND_TRITON:
             eager_result = f(example_input)
             self.assertEqual(compiled_result, eager_result)
 
+        # cpp_wrapper skips cudagraphs with graph partitioning on.
+        @torch._inductor.config.patch({"cpp_wrapper": True, "graph_partition": False})
+        def test_cpp_wrapper_cpu_constant(self):
+            # The CPU constant is folded into a CUDA constant, so nothing runs
+            # on the CPU and the graph is still captured.
+            def f(x):
+                return x + torch.arange(16.0).view(4, 4).to(x.device)
+
+            compiled = torch.compile(f, mode="reduce-overhead")
+            x = torch.randn(4, 4, device="cuda")
+            self.assertEqual(self.run_twc(compiled, x), f(x))
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition(self):
             def f(x, y):
@@ -5415,6 +5494,65 @@ if HAS_CUDA_AND_TRITON:
 
             # 2 graph partitions lead to 2 cudagraph
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @parametrize("split", (False, True))
+        def test_graph_partition_input_asserts(self, split):
+            def f(x, y, c):
+                a = x.sin()
+                if split:
+                    a = (a.cpu() + c).cuda()
+                return (a * y,)
+
+            inps = [
+                torch.randn(8, 8, device="cuda"),
+                torch.randn(8, 8, device="cuda"),
+                torch.randn(8, 8),
+            ]
+            out, (code,) = run_and_get_code(
+                torch.compile(f, mode="reduce-overhead"), *inps
+            )
+            self.assertEqual(out, f(*inps))
+
+            # Each partition checks the inputs it reads before its first kernel;
+            # call() checks only the cpu input its own kernel reads.
+            if split:
+                checks = [
+                    "def partition_0(",
+                    "assert_size_stride(",
+                    ".run(",
+                    "def partition_1(",
+                    "assert_size_stride(",
+                    ".run(",
+                    "def call(self, args)",
+                    "assert_size_stride(",
+                    "cpp_fused",
+                ]
+            else:
+                checks = [
+                    "def partition_0(",
+                    "assert_size_stride",
+                    ".run(",
+                    "def call(self, args)",
+                ]
+            asserts = re.findall(r"assert_size_stride(?:_grouped)?\(", code)
+            self.assertEqual(len(asserts), 3 if split else 1)
+            file_check = FileCheck()
+            for check in checks:
+                file_check.check(check)
+            file_check.check_not("assert_size_stride").run(code)
+
+            # standalone_compile output has no Dynamo guards, so an input with
+            # unexpected strides reaches the compiled code and its input asserts.
+            gm = torch.fx.symbolic_trace(f)
+            compiled = torch._inductor.standalone_compile(
+                gm, inps, dynamic_shapes="from_example_inputs"
+            )
+            for i in range(3 if split else 2):
+                bad = list(inps)
+                bad[i] = bad[i].t().contiguous().t()
+                with self.assertRaisesRegex(AssertionError, "expected size"):
+                    compiled(*bad)
 
         @torch._inductor.config.patch("graph_partition", True)
         @lowering.force_fallback(torch.ops.prims.device_put.default)
