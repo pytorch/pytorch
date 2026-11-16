@@ -1707,6 +1707,9 @@ def _run_tests(argv=None):
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
         if TEST_SAVE_TORCHCI_REPORTS:
             prefix = os.path.join(TEST_SAVE_TORCHCI_REPORTS, sanitize_test_filename(argv[0]))
+            cpp_fake = os.environ.get("CPP_FAKETENSOR")
+            if cpp_fake is not None:
+                prefix += f"-cpp-faketensor-{cpp_fake}"
             pytest_args += ['-p', 'torch.testing._internal.torchci.plugin', f'--torchci-report-prefix={prefix}']
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]

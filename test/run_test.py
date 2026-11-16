@@ -505,55 +505,46 @@ FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
 CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
+# Run these files under both fake modes when their existing CI job selects them.
 FAKETENSOR_TESTS = {
+    *DYNAMO_CORE_TESTS,
+    *INDUCTOR_TESTS,
+    *TORCH_EXPORT_TESTS,
+    *FUNCTORCH_TESTS,
+    "test_fake_tensor",
+    "test_python_dispatch",
+    "test_custom_ops",
+    "test_ops",
+    "test_proxy_tensor",
+    "test_fx",
+    "test_fx_experimental",
+    "test_fx_const_fold",
+    "test_fx_reinplace_pass",
+    "test_functionalization",
+    "test_decomp",
+    "test_dynamic_shapes",
+    "test_symbolic_shapes",
+    "test_precompile",
+    "test_serialization",
+    "onnx/test_fx_type_promotion",
+    "distributed/test_c10d_functional_native",
+    "distributed/test_aten_comm_compute_reordering",
+    "distributed/test_compute_comm_reordering",
+    "distributed/tensor/parallel/test_micro_pipeline_tp",
+    "distributed/_composable/fsdp/test_fully_shard_comm",
+    "distributed/_composable/fsdp/test_fully_shard_training",
+    "distributed/_composable/fsdp/test_fully_shard_state_dict",
+    "distributed/_composable/fsdp/test_fully_shard_frozen",
+    "distributed/_composable/fsdp/test_fully_shard_mixed_precision",
+    "distributed/_composable/fsdp/test_fully_shard_clip_grad_norm_",
+    "distributed/fsdp/test_fsdp_tp_integration",
+} | {
     test
     for test in TESTS
-    if test.startswith(
-        (
-            "dynamo/",
-            "inductor/",
-            "export/",
-            "functorch/",
-            "higher_order_ops/",
-            "onnx/exporter/",
-        )
-    )
-    or test
-    in {
-        "test_fake_tensor",
-        "test_python_dispatch",
-        "test_custom_ops",
-        "test_ops",
-        "test_proxy_tensor",
-        "test_fx",
-        "test_fx_experimental",
-        "test_fx_const_fold",
-        "test_fx_reinplace_pass",
-        "test_functionalization",
-        "test_decomp",
-        "test_dynamic_shapes",
-        "test_symbolic_shapes",
-        "test_precompile",
-        "test_serialization",
-        "onnx/test_fx_type_promotion",
-        "distributed/test_c10d_functional_native",
-        "distributed/test_aten_comm_compute_reordering",
-        "distributed/test_compute_comm_reordering",
-        "distributed/tensor/parallel/test_micro_pipeline_tp",
-        "distributed/_composable/fsdp/test_fully_shard_comm",
-        "distributed/_composable/fsdp/test_fully_shard_training",
-        "distributed/_composable/fsdp/test_fully_shard_state_dict",
-        "distributed/_composable/fsdp/test_fully_shard_frozen",
-        "distributed/_composable/fsdp/test_fully_shard_mixed_precision",
-        "distributed/_composable/fsdp/test_fully_shard_clip_grad_norm_",
-        "distributed/fsdp/test_fsdp_tp_integration",
-    }
+    if test.startswith(("higher_order_ops/", "onnx/exporter/", "distributed/_tools/"))
     or (
         test.startswith("distributed/")
-        and (
-            any(part in test for part in ("compile", "dynamo", "inductor"))
-            or test.startswith("distributed/_tools/")
-        )
+        and any(part in test for part in ("compile", "dynamo", "inductor"))
     )
 }
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
@@ -665,6 +656,48 @@ def run_test(
     env=None,
     print_log=True,
 ) -> int:
+    env = os.environ.copy() if env is None else env.copy()
+    flags = (
+        ("0", "1")
+        if IS_CI
+        and "CPP_FAKETENSOR" not in env
+        and (test_module.name in FAKETENSOR_TESTS or options.dynamo)
+        else (env.get("CPP_FAKETENSOR"),)
+    )
+    result = 0
+    for flag in flags:
+        test_env = env.copy()
+        if flag is not None:
+            test_env["CPP_FAKETENSOR"] = flag
+            report_source = env.get("TEST_REPORT_SOURCE_OVERRIDE", "python-unittest")
+            test_env["TEST_REPORT_SOURCE_OVERRIDE"] = (
+                f"{report_source}-cpp-faketensor-{flag}"
+            )
+        return_code = _run_test(
+            test_module,
+            test_directory,
+            options,
+            launcher_cmd,
+            extra_unittest_args,
+            test_env,
+            print_log,
+        )
+        if return_code:
+            result = return_code
+            if not options.continue_through_error:
+                return result
+    return result
+
+
+def _run_test(
+    test_module: ShardedTest,
+    test_directory,
+    options,
+    launcher_cmd=None,
+    extra_unittest_args=None,
+    env=None,
+    print_log=True,
+) -> int:
     scribe_token = os.getenv("SCRIBE_GRAPHQL_ACCESS_TOKEN", "")
     if scribe_token:
         print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is set")
@@ -680,6 +713,9 @@ def run_test(
     # filter for partial runs ("test_ops, not (TestA or TestB) 3/8") and would
     # fragment the log classifier's grouping key.
     test_label = f"{test_file} {test_module.shard}/{test_module.num_shards}"
+    cpp_fake = env.get("CPP_FAKETENSOR")
+    if cpp_fake is not None:
+        test_label += f" CPP_FAKETENSOR={cpp_fake}"
     stepcurrent_key = test_file
 
     is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
@@ -831,7 +867,7 @@ def run_test(
         if options.pytest_xdist_workers is not None and test_file in XDIST_SERIAL_FILES
         else None
     )
-    print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
+    print_to_stderr(f"Executing {command} ({test_label}) ... [{datetime.now()}]")
 
     with ExitStack() as stack:
         output = None
@@ -925,7 +961,7 @@ def run_test(
             f.write("\n".join(failed))
         rerun_options.additional_args.append(f"--nodeid-file={nodeid_path}")
         try:
-            return run_test(
+            return _run_test(
                 test_module,
                 test_directory,
                 rerun_options,
@@ -1832,11 +1868,6 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--include-faketensor-tests",
-        action="store_true",
-        help="Run FakeTensor, tracing, and compiler integration tests.",
-    )
-    parser.add_argument(
         "--include-inductor-core-tests",
         "--include-inductor-core-tests",
         action="store_true",
@@ -2160,10 +2191,6 @@ def can_run_in_pytest(test):
 def get_selected_tests(options) -> list[str]:
     selected_tests = options.include
 
-    if options.include_faketensor_tests:
-        selected_tests = [test for test in selected_tests if test in FAKETENSOR_TESTS]
-        options.enable_td = False
-
     # filter if there's JIT only and distributed only test options
     if options.jit:
         selected_tests = list(
@@ -2257,7 +2284,7 @@ def get_selected_tests(options) -> list[str]:
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
     if options.onnx:
         selected_tests = onnx_tests
-    elif not options.include_faketensor_tests:
+    else:
         # Exclude all onnx tests otherwise
         options.exclude.extend(onnx_tests)
 
