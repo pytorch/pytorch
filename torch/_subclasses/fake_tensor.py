@@ -2563,6 +2563,21 @@ class FakeTensorMode(TorchDispatchMode):
         )
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 
+    @functools.wraps(__init__, assigned=(), updated=())
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        import torch._dynamo.config
+
+        if torch._dynamo.config.use_cpp_fake_tensor:
+            if cls is not FakeTensorMode:
+                raise NotImplementedError(
+                    "FakeTensorMode subclasses are not supported with "
+                    "use_cpp_fake_tensor=True"
+                )
+            # Returning an unrelated type skips FakeTensorMode.__init__.
+            # pyrefly: ignore [bad-return]
+            return CppFakeTensorMode(*args, **kwargs)
+        return super().__new__(cls)
+
     def reset_nt_tensor_id_counter(self) -> None:
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 
