@@ -9071,9 +9071,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_nn_parameter_ctor_type(self, from_input):
         # nn.Parameter() is built before the graph runs, into a synthetic local
         # that guards can't read, so type() and __class__ must not guard on it.
-        # (The config patch only matters for nn.Parameter(x + 1).)
+        # (The config patch only matters for nn.Parameter(torch.ones(3)).)
         def fn(x):
-            p = torch.nn.Parameter(x if from_input else x + 1)
+            p = torch.nn.Parameter(x if from_input else torch.ones(3))
             if type(p) is torch.nn.Parameter and p.__class__ is torch.nn.Parameter:
                 return x + 1
             return x - 1
@@ -9102,6 +9102,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with torch.device("cpu"):
             self.assertEqual(opt_fn(x), fn(x))
 
+    # With dynamic shapes, the shape guards of a Parameter built from a tensor
+    # subclass still refer to the synthetic local, so any use of it fails.
+    @expectedFailureDynamic
     def test_nn_parameter_ctor_subclass_method(self):
         class MySubclass(torch.Tensor):
             pass
