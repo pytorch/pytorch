@@ -1,4 +1,0 @@
-from .cutedsl_impl import register_linear_cross_entropy_overrides
-
-
-register_linear_cross_entropy_overrides()
