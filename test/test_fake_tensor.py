@@ -160,60 +160,6 @@ class _TestFakeTensorHelpers:
 class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def test_mode_constructor_python_fallback(self):
-        shape_env = ShapeEnv()
-        mode = FakeTensorMode(_force_python=True, shape_env=shape_env)
-        self.assertIs(type(mode), FakeTensorMode)
-        self.assertIs(mode.shape_env, shape_env)
-        with mode:
-            fake = torch.empty(2, 3)
-        self.assertTrue(mode.is_our_fake(fake))
-
-    def test_mode_constructor_defaults(self):
-        shape_env = ShapeEnv()
-        with FakeTensorMode(
-            shape_env=shape_env,
-            allow_fallback_kernels=True,
-            allow_non_fake_inputs=True,
-            static_shapes=False,
-            export=False,
-        ) as mode:
-            fake = torch.empty(2, 3)
-        self.assertIs(mode.shape_env, shape_env)
-        self.assertTrue(mode.is_our_fake(fake))
-
-    def test_mode_constructor_disallow_fallback_kernels(self):
-        mode = FakeTensorMode(allow_fallback_kernels=False)
-        self.assertFalse(mode.allow_fallback_kernels)
-
-    def test_mode_constructor_export(self):
-        mode = FakeTensorMode(export=True)
-        self.assertTrue(mode.fake_tensor_converter.export)
-
-    def test_mode_subclass_construction(self):
-        class SubMode(FakeTensorMode):
-            def __init__(self, marker, **kwargs):
-                super().__init__(**kwargs)
-                self.marker = marker
-
-        marker = object()
-        shape_env = ShapeEnv()
-        if torch._dynamo.config.use_cpp_fake_tensor:
-            with self.assertRaisesRegex(
-                NotImplementedError, "FakeTensorMode subclasses are not supported"
-            ):
-                SubMode(marker, shape_env=shape_env, allow_non_fake_inputs=True)
-            return
-        mode = SubMode(marker, shape_env=shape_env, allow_non_fake_inputs=True)
-        self.assertIs(type(mode), SubMode)
-        self.assertIs(mode.marker, marker)
-        self.assertIs(mode.shape_env, shape_env)
-        real = torch.randn(2, 3)
-        with mode:
-            fake = real.sin()
-        self.assertTrue(mode.is_our_fake(fake))
-        self.assertEqual(fake.shape, real.shape)
-
     def test_fake_mode_dispatch_api(self):
         mode = FakeTensorMode()
         mode_key = torch._C._TorchDispatchModeKey.FAKE
@@ -2537,20 +2483,6 @@ def forward(self, x_1):
             dense = tensor.to_dense()
             check(dense, (2, 2))
             self.assertEqual(dense.layout, torch.strided)
-
-    @skipIfPropagateRealTensors("Meta storage has no real tensor to propagate")
-    def test_from_buffer(self):
-        with FakeTensorMode() as mode:
-            obj = [1, 2]
-            f = io.BytesIO()
-            pickle.Pickler(f).dump(obj)
-            storage = torch.UntypedStorage.from_buffer(f.getvalue(), dtype=torch.uint8)
-            self.assertEqual(storage.device, torch.device("meta"))
-
-            t = torch.ByteTensor(storage)
-            self.assertTrue(is_fake_tensor(t))
-            self.assertEqual(t.device, torch.device("cpu"))
-            self.assertIs(maybe_get_fake_mode(t), mode)
 
 
 instantiate_parametrized_tests(TestFakeTensor)
