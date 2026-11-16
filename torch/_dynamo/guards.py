@@ -128,8 +128,8 @@ from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant
 from torch._logging import structured
 from torch._subclasses.fake_tensor import (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
-    fake_mode_cls,
     FakeTensor,
+    FakeTensorMode,
     is_fake_tensor,
     maybe_get_fake_dispatch_keys,
     maybe_get_fake_pytype,
@@ -4939,7 +4939,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         dispatch_keys_raw: int,
         grad: torch.Tensor,
     ) -> torch.Tensor:
-        fake_mode = fake_mode_cls()()
+        fake_mode = FakeTensorMode()
         ret = fake_mode.fake_tensor_converter.from_meta_and_device(
             fake_mode,
             meta_tensor,

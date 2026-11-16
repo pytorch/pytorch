@@ -79,11 +79,7 @@ from torch._dynamo.types import (
 )
 from torch._export.utils import _compiling_state_context
 from torch._library.opaque_object import is_custom_class
-from torch._subclasses.fake_tensor import (
-    fake_mode_cls,
-    FakeTensorMode,
-    unset_fake_temporarily,
-)
+from torch._subclasses.fake_tensor import FakeTensorMode, unset_fake_temporarily
 from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
     _combine_args,
@@ -2784,7 +2780,7 @@ def export(
             example_inputs = []
             graph_captured_input = ()
             graph_captured_result = ()
-            fake_mode = fake_mode_cls()(shape_env=ShapeEnv(), export=True)
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
             if out_guards is None:
                 out_guards = _guards.GuardsSet()
             if out_guards is None:  # suppress mypy error
