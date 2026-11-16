@@ -991,6 +991,36 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_program = self.export(Model(), (x,))
         onnx_testing.assert_onnx_program(onnx_program)
 
+    @common_utils.parametrize(
+        "output_size",
+        [
+            common_utils.subtest((2, 3), name="divisible"),
+            common_utils.subtest((7, 7), name="not_divisible"),
+            common_utils.subtest((2, None), name="none"),
+        ],
+    )
+    def test_adaptive_avg_pool2d_dynamic_spatial_shape(self, output_size):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.adaptive_avg_pool2d(x, output_size)
+
+        model = Model()
+        h, w = torch.export.Dim("h", min=7), torch.export.Dim("w", min=7)
+        onnx_program = self.export(
+            model,
+            (torch.randn(2, 3, 12, 12),),
+            dynamic_shapes=({2: h, 3: w},),
+        )
+        input_shape = onnx_program.model.graph.inputs[0].shape
+        self.assertEqual(input_shape[2].value, "h")
+        self.assertEqual(input_shape[3].value, "w")
+        # Compare with eager: the exported program is decomposed the same way
+        # as the ONNX model, so assert_onnx_program would not catch a kernel
+        # specialized to the example size.
+        for shape in [(2, 3, 12, 12), (2, 3, 8, 9), (2, 3, 24, 24), (2, 3, 13, 17)]:
+            x = torch.randn(shape)
+            torch.testing.assert_close(onnx_program(x)[0], model(x))
+
     def test_quantized_decomposed_quantize_per_tensor_int32(self):
         # QuantizeLinear cannot output int32; the export lowers it to primitive ops.
         class Model(torch.nn.Module):

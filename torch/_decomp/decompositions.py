@@ -2893,6 +2893,11 @@ def cudnn_batch_norm_backward(
 @out_wrapper()
 @pw_cast_for_opmath
 def adaptive_avg_pool2d(input: Tensor, output_size: tuple[int, int]):
+    from torch.fx.experimental.symbolic_shapes import (
+        is_concrete_int,
+        statically_known_true,
+    )
+
     # Preconditions
     device = input.device
     shape = input.shape
@@ -2908,13 +2913,22 @@ def adaptive_avg_pool2d(input: Tensor, output_size: tuple[int, int]):
             f"non-batch dimensions, but input has shape {tuple(shape)}.",
         )
 
+    # The branches on the sizes below must not guard on symbolic sizes: a guard
+    # would bake the example input's kernel into the graph (e.g. torch.export
+    # with dynamic H/W). When a branch cannot be decided statically, we take
+    # the general path, which is correct for any size.
+
     # Optimisation (we should also do this in the kernel implementation)
-    if shape[-2] % output_size[-2] == 0 and shape[-1] % output_size[-1] == 0:
+    if statically_known_true(
+        shape[-2] % output_size[-2] == 0
+    ) and statically_known_true(shape[-1] % output_size[-1] == 0):
         stride = tuple(i // o for i, o in zip(shape[-2:], output_size))
         kernel = tuple(
             i - (o - 1) * s for i, o, s in zip(shape[-2:], output_size, stride)
         )
-        return torch.nn.functional.avg_pool2d(input, kernel, stride)
+        # avg_pool2d takes int sizes, so it would specialize a symbolic kernel
+        if all(is_concrete_int(k) for k in kernel + stride):
+            return torch.nn.functional.avg_pool2d(input, kernel, stride)
 
     def start_index(a, b, c):
         return torch.div(a * c, b, rounding_mode="trunc")
@@ -2929,12 +2943,18 @@ def adaptive_avg_pool2d(input: Tensor, output_size: tuple[int, int]):
         # length.max() can be computed analytically as follows:
         maxlength = in_size // out_size + 1
         in_size_mod = in_size % out_size
-        # adaptive = True iff there are kernels with different lengths
-        adaptive = not (in_size_mod == 0 or out_size % in_size_mod == 0)
-        if adaptive:
-            maxlength += 1
-        elif in_size_mod == 0:
+        # adaptive = True iff there are kernels with different lengths. If that
+        # is not known statically, assume it: the masked path is correct either way.
+        if statically_known_true(in_size_mod == 0):
+            adaptive = False
             maxlength -= 1
+        else:
+            adaptive = not (
+                is_concrete_int(in_size_mod)
+                and statically_known_true(out_size % in_size_mod == 0)
+            )
+            if adaptive:
+                maxlength += 1
 
         range_max = torch.arange(maxlength, device=device, dtype=torch.int64)
         idx = i0.unsqueeze(-1) + range_max
@@ -2984,6 +3004,10 @@ def adaptive_avg_pool2d(input: Tensor, output_size: tuple[int, int]):
     vals, length_w = maybe_mask(
         vals, length_w, range_max_w, adaptive=adaptive_w, dim=-1
     )
+
+    # With symbolic sizes the kernel length is symbolic too, so it cannot be unrolled
+    if not (is_concrete_int(vals.shape[-3]) and is_concrete_int(vals.shape[-1])):
+        return vals.sum(dim=(-3, -1)) / (length_h * length_w)
 
     # We unroll the sum as we assume that the kernels are going to be small
     ret = None

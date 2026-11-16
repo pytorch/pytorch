@@ -1423,6 +1423,29 @@ class DecompOneOffTests(TestCase):
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
+    @parametrize("output_size", [(2, 3), (4, 5), (1, 1)])
+    def test_adaptive_avg_pool2d_symbolic_sizes_not_specialized(
+        self, device, output_size
+    ):
+        # The decomposition must not guard on symbolic input sizes. The traced
+        # graph does not check guards, so a guard shows up as a graph that is
+        # only correct for the example size.
+        from torch._decomp.decompositions import adaptive_avg_pool2d
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x):
+            return torch.ops.aten._adaptive_avg_pool2d(x, output_size)
+
+        table = {torch.ops.aten._adaptive_avg_pool2d.default: adaptive_avg_pool2d}
+        gm = make_fx(fn, decomposition_table=table, tracing_mode="symbolic")(
+            torch.randn(2, 3, 12, 12, device=device)
+        )
+        for shape in [(2, 3, 12, 12), (3, 2, 8, 9), (2, 3, 13, 17), (1, 1, 24, 30)]:
+            x = torch.randn(shape, device=device)
+            self.assertEqual(gm(x), fn(x))
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
     @dtypes(torch.float32, torch.bfloat16)
     def test_softshrink_matches_kernel_bitwise(self, device, dtype):
         # NaN and signed zeros differ between backends. The input is long and
