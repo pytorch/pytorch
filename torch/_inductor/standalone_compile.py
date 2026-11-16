@@ -21,8 +21,12 @@ from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
 from torch._inductor.utils import BoxedBool, InputType
-from torch._subclasses import FakeTensorMode
-from torch._subclasses.fake_tensor import maybe_get_fake_mode
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    fake_mode_cls,
+    FakeTensorMode,
+    maybe_get_fake_mode,
+)
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 
@@ -280,7 +284,9 @@ class CacheCompiledArtifact(CompiledArtifact):
                 boxed_forward_device_index=BoxedDeviceIndex(0),
             )
 
-            context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+            context = torch._guards.TracingContext(
+                fake_mode_cls()(shape_env=ShapeEnv())
+            )
             with torch._guards.tracing(context):
                 compiled_fn = entry.wrap_post_compile(
                     [], entry.sanitized_aot_config, fx_config
@@ -447,8 +453,8 @@ def _resolve_ignore_shape_env(dynamic_shapes: DynamicShapesType):
 def _resolve_fake_mode(
     gm: GraphModule,
     dynamic_shapes: DynamicShapesType,
-    fake_mode: FakeTensorMode | None = None,
-) -> FakeTensorMode:
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
+) -> FakeTensorMode | CppFakeTensorMode:
     if dynamic_shapes == "from_example_inputs":
         if fake_mode is not None:
             if fake_mode.shape_env is None:
@@ -457,7 +463,7 @@ def _resolve_fake_mode(
                     'when `dynamic_shapes="from_example_inputs"`.'
                 )
             return fake_mode
-        return FakeTensorMode(shape_env=ShapeEnv())
+        return fake_mode_cls()(shape_env=ShapeEnv())
     elif fake_mode is not None:
         raise ValueError(
             "standalone_compile only supports passing `fake_mode` when "
@@ -469,7 +475,7 @@ def _resolve_fake_mode(
         context = torch._guards.TracingContext.get()
         if context.fake_mode is None:
             raise AssertionError("expected TracingContext.fake_mode to not be None")
-        return torch._guards.require_python_fake_mode(context.fake_mode)
+        return context.fake_mode
     elif dynamic_shapes == "from_graph":
         # Strategy: find a FakeTensor in the graph output, grab its FakeTensorMode.
         # The graph passed to standalone_compile must be an Inductor-approved graph,
@@ -509,13 +515,11 @@ def _resolve_fake_mode(
         output_nodes = [n for n in nodes if isinstance(n, torch.fx.Node)]
         for node in itertools.chain(output_nodes, gm.graph.nodes):
             for key in ("example_value", "val"):
-                maybe_fake_mode = torch._guards.require_python_fake_mode(
-                    maybe_get_fake_mode(node.meta.get(key))
-                )
+                maybe_fake_mode = maybe_get_fake_mode(node.meta.get(key))
                 if maybe_fake_mode is not None:
                     return maybe_fake_mode
 
-        return FakeTensorMode(shape_env=ShapeEnv())
+        return fake_mode_cls()(shape_env=ShapeEnv())
     else:
         raise ValueError(
             f"standalone_compile got unsupported `dynamic_shapes` value: dynamic_shapes={dynamic_shapes}."
@@ -539,7 +543,7 @@ def _standalone_context(
     gm: GraphModule,
     dynamic_shapes: DynamicShapesType,
     aot: bool,
-    fake_mode: FakeTensorMode | None = None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
 ):
     from torch.compiler._cache import CacheArtifactManager
 
@@ -571,7 +575,7 @@ def standalone_compile(
     options: Any,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
     donate_graph_module: bool = False,
-    fake_mode: FakeTensorMode | None = None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
 ) -> CompiledArtifact:
     """
     Implementation of torch.inductor.standalone_compile
@@ -827,12 +831,7 @@ def compile_to_python(
     # ``_acceleration_cache_bytes`` returns. (If ``gm`` is NOT decomposed against the
     # inductor table, inductor lowering asserts "both a fallback and a decomp for same op"
     # -- the precondition is load-bearing, not defensive.)
-    from torch._guards import (
-        detect_fake_mode,
-        require_python_fake_mode,
-        tracing,
-        TracingContext,
-    )
+    from torch._guards import detect_fake_mode, tracing, TracingContext
     from torch.compiler._cache import CacheArtifactManager
 
     from .compile_fx import compile_fx_inner
@@ -854,7 +853,7 @@ def compile_to_python(
     # dims. A post-AOTAutograd graph's shapes are already baked into this metadata, so
     # there is no separate dynamic-shapes knob.
     fake_inputs = _placeholder_fake_inputs(gm)
-    fake_mode = require_python_fake_mode(detect_fake_mode(fake_inputs))
+    fake_mode = detect_fake_mode(fake_inputs)
     if fake_mode is None:
         raise RuntimeError(
             "compile_to_python could not detect a FakeTensorMode on the graph's "
@@ -890,7 +889,7 @@ def autograd_cache_key(
     example_inputs,
     dynamic_shapes: DynamicShapesType,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
-    fake_mode: FakeTensorMode | None = None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
 ):
     from . import compile_fx
 

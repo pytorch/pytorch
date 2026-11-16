@@ -26,7 +26,11 @@ from torch._inductor.output_code import (
     OutputCode,
 )
 from torch._inductor.utils import patch_subprocess_env
-from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    fake_mode_cls,
+    FakeTensorMode,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -184,13 +188,17 @@ class _LoweringSerializerContextManager(contextlib.ExitStack):
 @dataclass
 class _FakeTensorModeSerializer:
     allow_non_fake_inputs: bool
+    use_cpp_fake_tensor: bool
 
-    def __init__(self, fake_mode: FakeTensorMode) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
         self.allow_non_fake_inputs = fake_mode.allow_non_fake_inputs
         self.shape_env = fake_mode.shape_env
+        self.use_cpp_fake_tensor = isinstance(fake_mode, CppFakeTensorMode)
 
     @contextlib.contextmanager
-    def patch(self, fake_mode: FakeTensorMode) -> Generator[None, None, None]:
+    def patch(
+        self, fake_mode: FakeTensorMode | CppFakeTensorMode
+    ) -> Generator[None, None, None]:
         saved_allow_non_fake_inputs = fake_mode.allow_non_fake_inputs
         fake_mode.allow_non_fake_inputs = self.allow_non_fake_inputs
 
@@ -231,23 +239,26 @@ class _WireProtocolInput:
         """
         from torch.fx._graph_pickler import GraphPickler
 
-        return _WireProtocolPickledInput(GraphPickler.dumps(self))
+        return _WireProtocolPickledInput(
+            GraphPickler.dumps(self), self.fake_tensor_mode.use_cpp_fake_tensor
+        )
 
 
-def _current_fake_mode() -> FakeTensorMode:
+def _current_fake_mode() -> FakeTensorMode | CppFakeTensorMode:
     fake_mode = None
     if context := torch._guards.TracingContext.try_get():
         fake_mode = context.fake_mode
     if fake_mode is not None:
-        return torch._guards.require_python_fake_mode(fake_mode)
+        return fake_mode
 
     shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
-    return FakeTensorMode(shape_env=shape_env)
+    return fake_mode_cls()(shape_env=shape_env)
 
 
 @dataclass
 class _WireProtocolPickledInput:
     value: bytes
+    use_cpp_fake_tensor: bool
 
     def deserialize(self) -> _WireProtocolInput:
         """
@@ -563,6 +574,13 @@ class _SerializedFxCompile(FxCompile):
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch_subprocess_env(extra_env))
+            # The caller's config patch is not inherited by subprocess workers.
+            # Restore it before unpickling tensors and creating any fake modes.
+            stack.enter_context(
+                torch._dynamo.config.patch(
+                    use_cpp_fake_tensor=pickled_input.use_cpp_fake_tensor
+                )
+            )
 
             # Save warnings to "replay" in the parent
             warning_replay = stack.enter_context(warnings.catch_warnings(record=True))
