@@ -45,8 +45,8 @@ member, not a union member.
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from functools import cache, partial
+from dataclasses import dataclass
+from functools import cache
 from typing import cast
 
 import flydsl.compiler as flyc
@@ -85,6 +85,25 @@ def _u32_to_i32(x: int) -> int:
     return x - (1 << 32) if x >= (1 << 31) else x
 
 
+def _int_to_narrow_ord(bits, _width, _int_ty):
+    # Identity is its own inverse: applying it twice returns `bits`.
+    return bits
+
+
+def _float_to_narrow_ord(bits, width, int_ty):
+    # S sign, E exponent, F fraction.
+    # [S | E | F] -> [0 |  E |  F]  when S = 0
+    #             -> [1 | ~E | ~F]  when S = 1
+    # S is unchanged, so applying the transform twice uses the same mask
+    # and returns the original bits.
+    # Constants use the field's integer type, so a 16-bit value stays 16-bit.
+    # `(1 << (width - 1)) - 1` is the bits under the sign at any width.
+    low_mask = (1 << (width - 1)) - 1
+    sign = (bits >> int_ty(width - 1)) & int_ty(1)
+    mask = (int_ty(0) - sign) & int_ty(low_mask)
+    return bits ^ mask
+
+
 @dataclass(frozen=True)
 class TopKSpec:
     """Encode a value as a signed int32 ordinal and decode it.
@@ -105,8 +124,8 @@ class TopKSpec:
     largest: bool
     # Involutive transform between same-width value bits and narrow ordinal.
     # A negative float flips every bit below its sign; an integer is the
-    # identity. The dtype spec is already bound in. Not part of equality.
-    val_to_narrow_ord: Callable = field(compare=False, hash=False)
+    # identity.
+    val_to_narrow_ord: Callable
     nan_sentinel: int | None = None
     positive_inf_bits: int | None = None
 
@@ -145,7 +164,7 @@ class TopKSpec:
             is_nan = (raw & self.int_ty(low_mask)) > positive_inf_bits
             raw = is_nan.select(nan_sentinel, raw)
         # 1. Apply the dtype's same-width transform.
-        narrow = self.val_to_narrow_ord(raw)
+        narrow = self.val_to_narrow_ord(raw, self.width, self.int_ty)
         # 2. Complement the narrow field when largest=False.
         if not self.largest:
             narrow = ~narrow
@@ -168,7 +187,7 @@ class TopKSpec:
         # 1 undone. Apply the same transform, then bitcast
         # back to the value type. An integer bitcast to its own type is
         # removed by canonicalize.
-        bits = self.val_to_narrow_ord(narrow)
+        bits = self.val_to_narrow_ord(narrow, self.width, self.int_ty)
         val = bits.bitcast(self.elem_ty)
         # 0 cannot be undone: NaN collapse is not injective. The caller
         # detects `nan_sentinel` in `narrow` and reloads the original value.
@@ -180,25 +199,6 @@ def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
     # torch dtype: flydsl dtype, same-width signed int, bit width,
     # NaN sentinel, positive-infinity bits.
     # None for the NaN fields means the dtype has no NaN.
-    def int_to_narrow_ord(bits, spec):
-        # Identity is its own inverse: applying it twice returns `bits`.
-        return bits
-
-    def float_to_narrow_ord(bits, spec):
-        # S sign, E exponent, F fraction.
-        # [S | E | F] -> [0 |  E |  F]  when S = 0
-        #             -> [1 | ~E | ~F]  when S = 1
-        # S is unchanged, so applying the transform twice uses the same mask
-        # and returns the original bits.
-        # Constants use the field's integer type, so a 16-bit value stays 16-bit.
-        # `(1 << (width - 1)) - 1` is the bits under the sign at any width.
-        width = spec["width"]
-        int_ty = spec["int_ty"]
-        low_mask = (1 << (width - 1)) - 1
-        sign = (bits >> int_ty(width - 1)) & int_ty(1)
-        mask = (int_ty(0) - sign) & int_ty(low_mask)
-        return bits ^ mask
-
     specs = {
         torch.float32: dict(
             elem_ty=Float32,
@@ -206,7 +206,7 @@ def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
             width=32,
             nan_sentinel=0x7FFFFFFF,
             positive_inf_bits=0x7F800000,
-            to_narrow_ord=float_to_narrow_ord,
+            to_narrow_ord=_float_to_narrow_ord,
         ),
         torch.float16: dict(
             elem_ty=Float16,
@@ -214,7 +214,7 @@ def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
             width=16,
             nan_sentinel=0x7FFF,
             positive_inf_bits=0x7C00,
-            to_narrow_ord=float_to_narrow_ord,
+            to_narrow_ord=_float_to_narrow_ord,
         ),
         torch.bfloat16: dict(
             elem_ty=BFloat16,
@@ -222,25 +222,25 @@ def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
             width=16,
             nan_sentinel=0x7FFF,
             positive_inf_bits=0x7F80,
-            to_narrow_ord=float_to_narrow_ord,
+            to_narrow_ord=_float_to_narrow_ord,
         ),
         torch.int32: dict(
             elem_ty=Int32,
             int_ty=Int32,
             width=32,
-            to_narrow_ord=int_to_narrow_ord,
+            to_narrow_ord=_int_to_narrow_ord,
         ),
         torch.int16: dict(
             elem_ty=Int16,
             int_ty=Int16,
             width=16,
-            to_narrow_ord=int_to_narrow_ord,
+            to_narrow_ord=_int_to_narrow_ord,
         ),
         torch.int8: dict(
             elem_ty=Int8,
             int_ty=Int8,
             width=8,
-            to_narrow_ord=int_to_narrow_ord,
+            to_narrow_ord=_int_to_narrow_ord,
         ),
     }
     if dtype not in specs:
@@ -249,7 +249,7 @@ def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
     spec = TopKSpec(
         dtype=dtype,
         largest=largest,
-        val_to_narrow_ord=partial(dtype_spec["to_narrow_ord"], spec=dtype_spec),
+        val_to_narrow_ord=dtype_spec["to_narrow_ord"],
         **{key: value for key, value in dtype_spec.items() if key != "to_narrow_ord"},
     )
     if spec.width > _ORD_BITS or spec.width % _RADIX_BITS:
