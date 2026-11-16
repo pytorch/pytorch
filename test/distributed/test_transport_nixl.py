@@ -168,6 +168,66 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         _Agent.agents.clear()
         _Agent.transfer_state = "DONE"
 
+    def test_manual_progress_without_local_work(self):
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            transport = new_transport("nixl", enable_prog_thread=False)
+        self.addCleanup(transport.close)
+        self.assertFalse(transport._agent.config.enable_prog_thread)
+        self.assertEqual(transport._pending, {})
+        with patch.object(transport._agent, "update_notifs", create=True) as update:
+            self.assertIsNone(transport.progress())
+        update.assert_called_once_with(backends=["UCX"])
+        self.assertEqual(transport._pending, {})
+
+    @parametrize("plugin", ["LIBFABRIC", "UCCL"])
+    def test_manual_progress_unsupported_plugin(self, plugin):
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            transport = new_transport("nixl", plugin=plugin)
+        self.addCleanup(transport.close)
+        with self.assertRaisesRegex(NotImplementedError, "UCX"):
+            transport.progress()
+
+    def test_manual_progress_errors_and_lifecycle(self):
+        first, _ = self.make_transport_pair()
+        with patch.object(
+            first._agent,
+            "update_notifs",
+            create=True,
+            side_effect=RuntimeError("native progress failed"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "native progress failed"):
+                first.progress()
+        # A different thread must acquire the RLock after a failed native poll.
+        with patch.object(first._agent, "update_notifs", create=True):
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(first.progress, timeout=0).result(timeout=5)
+            first._closing = True
+            with self.assertRaisesRegex(RuntimeError, "closed"):
+                first.progress()
+        first.close()
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            first.progress()
+
+    def test_manual_progress_lock_timeout(self):
+        first, _ = self.make_transport_pair()
+        locked, release = threading.Event(), threading.Event()
+
+        def hold_lock():
+            with first._operation_lock:
+                locked.set()
+                release.wait(5)
+
+        thread = threading.Thread(target=hold_lock)
+        thread.start()
+        try:
+            self.assertTrue(locked.wait(5))
+            with self.assertRaisesRegex(TimeoutError, "lock wait"):
+                first.progress(timeout=0)
+        finally:
+            release.set()
+            thread.join(5)
+        self.assertFalse(thread.is_alive())
+
     @staticmethod
     def backend():
         return SimpleNamespace(nixl_agent=_Agent, nixl_agent_config=_AgentConfig)

@@ -154,6 +154,26 @@ class NIXLTransport(Transport):
             self._ensure_open()
             return operation()
 
+    def progress(self, *, timeout: float | None = None) -> None:
+        """Service UCX work, including incoming transfers on a passive endpoint.
+
+        With enable_prog_thread=False, every endpoint must regularly progress
+        UCX while peers may access it, even if it has no pending local Work.
+        This call does not wait for a particular transfer or publish Work
+        completion. Native progress drains currently available work and is not
+        interruptible; timeout only bounds operation-lock acquisition.
+        """
+
+        def poll() -> None:
+            if self._plugin != "UCX":
+                raise NotImplementedError(
+                    "manual NIXL progress requires the UCX plugin"
+                )
+            # update_notifs drives UCX while retaining received notifications.
+            self._agent.update_notifs(backends=[self._plugin])
+
+        self._call(poll, timeout)
+
     def bind(self, *, timeout: float | None = None) -> bytes:
         return self._call(lambda: self._ensure_open().get_agent_metadata(), timeout)
 
