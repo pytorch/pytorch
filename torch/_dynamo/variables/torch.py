@@ -2367,39 +2367,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         # binding before taking the symbolic fallback.
                         items.append(normalize_concrete_item(item.as_python_constant()))
                     elif isinstance(item, TensorVariable):
-                        if (
-                            item.dtype is None
-                            or item.dtype.is_floating_point
-                            or item.dtype.is_complex
-                            or not item.valid_size()
-                            or not torch.fx.experimental.symbolic_shapes.guard_or_false(
-                                product(item.size) == 1
-                            )
-                        ):
-                            raise_observed_exception(
-                                TypeError,
-                                tx,
-                                args=[
-                                    "torch.Size() takes an iterable of 'int' "
-                                    f"(item {len(items)} is 'Tensor')"
-                                ],
-                            )
-                        if item.dtype is torch.uint64:
-                            unimplemented(
-                                gb_type="Data-dependent uint64 torch.Size element in torch._C._infer_size",
-                                context="torch.uint64 tensor-backed size",
-                                explanation="Dynamo cannot safely validate that a data-dependent "
-                                "torch.uint64 value fits in torch.Size's signed int64 range.",
-                                hints=[*graph_break_hints.SUPPORTABLE],
-                            )
-                        if item.dtype is torch.bool:
-                            item = item.call_method(
-                                tx,
-                                "to",
-                                [ConstantVariable.create(torch.int64)],
-                                {},
-                            )
-                        items.append(item.nb_index_impl(tx))
+                        items.append(item.torch_size_item(tx, len(items)))
                     elif isinstance(item, SymNodeVariable):
                         node = item.sym_num.node
                         expr = node.expr
@@ -2410,7 +2378,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                             and source.prop is TensorProperty.SIZE
                             for source in node.shape_env.var_to_sources.get(expr, ())
                         )
-                        if is_tensor_size:
+                        # torch.Size(tensor) items were converted with
+                        # TensorVariable.torch_size_item, i.e. sym_int(t.item())
+                        # of a non-uint64 tensor, which also fits in int64.
+                        fx_node = item.as_proxy().node
+                        item_node = fx_node.args[0] if fx_node.args else None
+                        is_tensor_item = (
+                            fx_node.target is torch.sym_int
+                            and isinstance(item_node, torch.fx.Node)
+                            and item_node.target == "item"
+                            and item_node.args[0].meta["example_value"].dtype
+                            is not torch.uint64
+                        )
+                        if is_tensor_size or is_tensor_item:
                             items.append(item)
                         elif torch.fx.experimental.symbolic_shapes.has_guarding_hint(
                             item.sym_num

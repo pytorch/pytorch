@@ -41,6 +41,7 @@ from torch._library.opaque_object import (
 )
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
     guard_scalar,
     GuardOnDataDependentSymNode,
     has_free_symbols,
@@ -1924,6 +1925,44 @@ class TensorVariable(VariableTracker):
         raise_type_error(
             tx, "only integer tensors of a single element can be converted to an index"
         )
+
+    def torch_size_item(
+        self,
+        tx: "InstructionTranslatorBase",
+        item_index: int,
+    ) -> VariableTracker:
+        # Converts a tensor item of torch.Size(...) like THPSize_pynew, which
+        # rejects tensors that are not single-element integer tensors with its
+        # own message before calling __index__.
+        if (
+            self.dtype is None
+            or self.dtype.is_floating_point
+            or self.dtype.is_complex
+            or not self.valid_size()
+            or not guard_or_false(product(self.size) == 1)
+        ):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    "torch.Size() takes an iterable of 'int' "
+                    f"(item {item_index} is 'Tensor')"
+                ],
+            )
+        if self.dtype is torch.uint64:
+            unimplemented(
+                gb_type="Data-dependent uint64 torch.Size element in torch._C._infer_size",
+                context="torch.uint64 tensor-backed size",
+                explanation="Dynamo cannot safely validate that a data-dependent "
+                "torch.uint64 value fits in torch.Size's signed int64 range.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        item: VariableTracker = self
+        if self.dtype is torch.bool:
+            item = self.call_method(
+                tx, "to", [ConstantVariable.create(torch.int64)], {}
+            )
+        return item.nb_index_impl(tx)
 
     def nb_int_impl(
         self,

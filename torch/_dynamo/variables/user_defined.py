@@ -1942,13 +1942,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .lists import SizeVariable
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
-            # THPSize_pynew converts items that are not ints or SymInts with
-            # __index__, e.g. the 0-d tensors produced by torch.Size(tensor).
+            # Tensor items, e.g. the 0-d tensors produced by torch.Size(tensor),
+            # are converted with __index__ as THPSize_pynew does. Unspecialized
+            # Python scalars are also TensorVariables but are ints in eager.
             items = [
-                item.nb_index_impl(tx)
+                item.torch_size_item(tx, i)
                 if isinstance(item, variables.TensorVariable)
+                and not isinstance(
+                    item,
+                    (variables.UnspecializedPythonVariable, variables.FakeItemVariable),
+                )
                 else item
-                for item in tup.items  # type: ignore[missing-attribute]
+                for i, item in enumerate(tup.items)  # type: ignore[missing-attribute]
             ]
             return SizeVariable(items)
         elif is_pydantic_dataclass_cls(self.value):

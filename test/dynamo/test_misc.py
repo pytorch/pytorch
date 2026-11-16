@@ -7077,35 +7077,40 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x.reshape(torch.Size(shape))
 
         x = torch.randn(256)
-        shape = torch.tensor([4, 64])
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
-        self.assertEqual(opt_fn(x, shape), fn(x, shape))
+        for shape in (torch.tensor([4, 64]), torch.tensor([8, 32])):
+            self.assertEqual(opt_fn(x, shape), fn(x, shape))
         self.assertEqual(cnts.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=False)
     def test_torch_size_from_tensor_graph_break(self):
         def fn(x, shape):
             return x.reshape(torch.Size(shape)) + 1
 
         x = torch.randn(256)
         shape = torch.tensor([4, 64])
+        counters.clear()
         opt_fn = torch.compile(fn, backend="eager")
 
         self.assertEqual(opt_fn(x, shape), fn(x, shape))
+        self.assertGreater(len(counters["graph_break"]), 0)
 
-    def test_torch_size_from_float_tensor(self):
+    @parametrize(
+        "shape",
+        [torch.tensor([4.0, 64.0]), torch.tensor([[4, 64]]), torch.tensor([True])],
+    )
+    def test_torch_size_from_tensor_matches_eager(self, shape):
         def fn(shape):
             try:
                 return torch.Size(shape)
-            except TypeError:
-                return None
+            except TypeError as e:
+                return str(e)
 
-        shape = torch.tensor([4.0, 64.0])
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="eager")
 
-        self.assertIsNone(fn(shape))
-        self.assertIsNone(opt_fn(shape))
+        self.assertEqual(opt_fn(shape), fn(shape))
 
     def test_stride_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
