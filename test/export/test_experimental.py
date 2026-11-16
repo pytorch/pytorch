@@ -313,7 +313,6 @@ def forward(self, args_0):
         for i in [0, 1]:
             with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
                 ep = export(Foo(i), inputs, strict=True)
-            with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
                 ep_joint = _export_forward_backward(ep, joint_loss_index=i)
             for j, spec in enumerate(ep_joint.graph_signature.output_specs):
                 if i == j:
@@ -342,7 +341,6 @@ def forward(self, args_0):
         )
         with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             ep = export(Foo(), inputs)
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             ep_joint = _export_forward_backward(ep)
         self.assertEqual(len(ep_joint.graph_signature.output_specs), 5)
         self.assertEqual(

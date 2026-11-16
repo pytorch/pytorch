@@ -6705,7 +6705,6 @@ def forward(self, x):
                 eager_model,
                 (torch.ones(2, 2),),
             )
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             ep_for_inference = ep_for_training.run_decompositions()
         self.assertExpectedInline(
             str(ep_for_inference.graph_module.code).strip(),
@@ -11942,8 +11941,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         m = M()
         with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             ep = export(m, inp, dynamic_shapes={"x": {0: Dim("batch")}})
-
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             core_aten_ep = ep.run_decompositions()
 
         input_node = [
@@ -12566,7 +12563,6 @@ graph():
                     eps,
                 ),
             )
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             ep.run_decompositions()
         self.assertEqual(
             ep.module()(
