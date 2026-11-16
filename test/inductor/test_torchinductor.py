@@ -23844,7 +23844,7 @@ if RUN_CPU:
                 )
 
     class TestFull(TestCase):
-        hw_classification = HardwareClassification.ACCELERATOR
+        hw_classification = HardwareClassification.GENERIC
 
         def test_full_dtype(self, device):
             pytypes = (
