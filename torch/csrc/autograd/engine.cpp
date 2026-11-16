@@ -624,9 +624,8 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           NodeGuard ndguard(task.fn_);
           {
             RECORD_FUNCTION(
-                c10::str(
-                    "autograd::engine::evaluate_function: ",
-                    task.fn_.get()->name()),
+                std::string("autograd::engine::evaluate_function: ") +
+                    task.fn_.get()->name(),
                 c10::ArrayRef<const c10::IValue>());
             evaluate_function(
                 local_graph_task,
