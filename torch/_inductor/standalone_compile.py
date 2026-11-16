@@ -471,7 +471,7 @@ def _resolve_fake_mode(
         context = torch._guards.TracingContext.get()
         if context.fake_mode is None:
             raise AssertionError("expected TracingContext.fake_mode to not be None")
-        return context.fake_mode
+        return torch._guards.require_python_fake_mode(context.fake_mode)
     elif dynamic_shapes == "from_graph":
         # Strategy: find a FakeTensor in the graph output, grab its FakeTensorMode.
         # The graph passed to standalone_compile must be an Inductor-approved graph,

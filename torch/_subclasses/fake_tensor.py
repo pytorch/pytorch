@@ -1045,16 +1045,11 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         static_shapes: bool | None = None,
         export: bool = False,
     ) -> None:
-        if export:
-            raise NotImplementedError(
-                "CppFakeTensorMode does not support export=True yet"
-            )
-
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         super().__init__(
-            FakeTensorConverter(copy_data=copy_data, cpp_fakes=True),
+            FakeTensorConverter(copy_data=copy_data, export=export, cpp_fakes=True),
             shape_env,
             creation_traceback=CapturedTraceback.extract(),
         )
@@ -1075,6 +1070,10 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     ) -> None:
         # HOP backward caches reuse metadata hashing without the Python dispatch cache.
         FakeTensorMode._prep_args_for_hash(self, result, args, state, id_hashed_objects)
+
+    def reset_nt_tensor_id_counter(self) -> None:
+        # C++ fake modes do not maintain a NestedTensor id counter.
+        pass
 
     def can_run_unsafe_fallback(self, func: OpOverload) -> bool:
         return self.allow_fallback_kernels and (
@@ -2750,8 +2749,6 @@ class FakeTensorMode(TorchDispatchMode):
                     "use_cpp_fake_tensor=True"
                 )
             if kwargs.pop("_force_python", False):
-                return super().__new__(cls)
-            if kwargs.get("export", False):
                 return super().__new__(cls)
             # Returning an unrelated type skips FakeTensorMode.__init__.
             # pyrefly: ignore [bad-return]
@@ -4454,7 +4451,7 @@ def _set_cache_key(
 # Just for use to allow copying a module to fake tensors,
 # does not apply elsewhere
 class FakeCopyMode(TorchFunctionMode):
-    def __init__(self, fake_mode: FakeTensorMode) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
         self.fake_mode = fake_mode
 
     def __torch_function__(
@@ -4463,7 +4460,7 @@ class FakeCopyMode(TorchFunctionMode):
         types: Sequence[type],
         args: Sequence[object] = (),
         kwargs: Mapping[str, object] | None = None,
-    ) -> FakeTensor:
+    ) -> Tensor:
         kwargs = kwargs if kwargs else {}
 
         # clone will get called in Parameter deepcopy
@@ -4479,7 +4476,7 @@ class FakeCopyMode(TorchFunctionMode):
                     f"Expected 2 args and 0 kwargs for __deepcopy__, got {len(args)} args and {len(kwargs)} kwargs"
                 )
             tensor = cast(Tensor, args[0])
-            memo = cast(dict[int, FakeTensor], args[1])
+            memo = cast(dict[int, Tensor], args[1])
 
             if id(tensor) in memo:
                 return memo[id(tensor)]
