@@ -404,16 +404,11 @@ def output_json(filename, headers, row):
     model_name = current_name
     is_tp = extra_info.get("tp_size", 1) > 1
     if is_tp:
+        # The driver also writes rows for workers that failed, so the row
+        # supplies the model, device, and batch size.
         extra_info["world_size"] = extra_info["tp_size"]
         extra_info["device"] = mapping_headers.get("dev", current_device)
         extra_info["batch_size"] = mapping_headers.get("batch_size", current_batch_size)
-        extra_info.update(
-            {
-                key: mapping_headers[key]
-                for key in TP_IDENTITY_HEADERS
-                if key in mapping_headers
-            }
-        )
         model_name = mapping_headers.get("name", current_name)
         extra_info["only"] = model_name
     else:
@@ -462,16 +457,6 @@ def output_json(filename, headers, row):
                 }
 
             print(json.dumps(record, default=str), file=f)
-
-
-def get_suite_from_model_iter_fn(model_iter_fn):
-    # TODO: This is a bit of a hack
-    suite = None
-    if (runner := getattr(model_iter_fn, "__self__", None)) and hasattr(
-        runner, "suite_name"
-    ):
-        suite = runner.suite_name
-    return suite
 
 
 def output_signpost(data, args, suite, error=None):
@@ -550,6 +535,9 @@ def output_signpost(data, args, suite, error=None):
     from torch._dynamo.utils import calculate_time_spent, compilation_time_metrics
 
     wall_time_by_phase = calculate_time_spent()
+    if args.tp_size > 1 and getattr(args, "rank", 0) != 0:
+        # Rank 0 reports for the tensor-parallel group.
+        return wall_time_by_phase["total_wall_time"]
 
     open_source_signpost(
         subsystem="dynamo_benchmark",
@@ -617,13 +605,6 @@ def artifact_safe_name(name):
     return name.replace("/", "_").replace("\\", "_")
 
 
-def max_across_ranks(values, group):
-    device = "cuda" if torch.distributed.get_backend(group) == "nccl" else "cpu"
-    tensor = torch.tensor(values, dtype=torch.float64, device=device)
-    torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MAX, group=group)
-    return tensor.tolist()
-
-
 def hf_inference_suffix(args):
     suffix = f"_{args.hf_inference_mode}"
     if args.tp_size > 1:
@@ -652,14 +633,16 @@ def exit_on_tensor_parallel_error(args):
 def tensor_parallel_identity(args):
     if args.tp_size == 1:
         return [], []
-    headers = list(TP_IDENTITY_HEADERS)
+    # Model metadata has the loaded workload's dimensions; rows written without a
+    # loaded model record the requested ones.
+    settings = current_settings or vars(args)
     fields = [
         args.hf_inference_mode,
         args.tp_size,
-        args.prompt_length,
-        args.decode_length or 0,
+        settings["prompt_length"],
+        settings["decode_length"],
     ]
-    return headers, fields
+    return list(TP_IDENTITY_HEADERS), fields
 
 
 def summarize_graph_break(filename):
@@ -835,7 +818,8 @@ def timed(
         request_times.append(t_iter_end - t_iter_begin)
 
     if group is not None:
-        request_times = max_across_ranks(request_times, group)
+        # Each request takes as long as its slowest rank.
+        request_times = list(map(max, *gather_across_ranks(request_times, group)))
     time_total = sum(request_times)
     if not sync_each_request:
         t_0 = time.perf_counter()
@@ -1363,11 +1347,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_fields + c_data,
     )
 
-    output_signpost(
-        dict(zip(headers, row)),
-        args,
-        get_suite_from_model_iter_fn(model_iter_fn),
-    )
+    output_signpost(dict(zip(headers, row)), args, kwargs.get("suite"))
 
     return msg
 
@@ -1942,11 +1922,16 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
 
 @dataclasses.dataclass(frozen=True)
 class BenchmarkWorkload:
+    # iter_fn(model, inputs, collect_outputs=True) runs one request.
     iter_fn: Callable
-    # Per-request setup stays outside the compiled and timed iteration.
+    # setup_fn(model, inputs) prepares each request outside the compiled and
+    # timed iteration.
     setup_fn: Callable | None = None
+    # Compile model.forward instead of iter_fn.
     compile_forward: bool = False
     report_eager_latency: bool = False
+    # CSV throughput columns mapped to tokens per request; the reported rate
+    # covers all --iterations-per-run requests.
     request_tokens: dict[str, int] | None = None
     # Performance warmup; measured iterations determine compilation latency.
     measure_iters: int = 5
@@ -2199,6 +2184,10 @@ class BenchmarkRunner:
 
     def get_model_metadata(self, example_inputs):
         # Override raw CLI settings with effective per-model values in result metadata.
+        return {}
+
+    def get_requested_metadata(self):
+        # Like get_model_metadata, for rows written without a loaded model.
         return {}
 
     def iter_models(self, args):
@@ -3242,6 +3231,7 @@ class BenchmarkRunner:
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
             experiment_kwargs["batch_size"] = batch_size
+            experiment_kwargs["suite"] = self.suite_name
             if tag is not None:
                 experiment_kwargs["tag"] = tag
             results = []
@@ -4251,6 +4241,26 @@ def process_entry(rank, runner, original_dir, args):
         return result
 
 
+def tensor_parallel_backend(args):
+    """Returns the process-group backend for a TP run, rejecting unusable devices."""
+    devices = args.devices or (["cuda"] if torch.cuda.is_available() else ["cpu"])
+    if devices == ["cuda"]:
+        if torch.cuda.device_count() < args.tp_size:
+            raise ValueError(
+                f"--tp-size={args.tp_size} needs {args.tp_size} CUDA devices, "
+                f"found {torch.cuda.device_count()}"
+            )
+        return "nccl"
+    if devices == ["cpu"]:
+        if torch.accelerator.current_accelerator() is not None:
+            raise ValueError(
+                "CPU tensor parallelism requires a PyTorch build without accelerator "
+                "support, since Hugging Face places TP shards on the accelerator"
+            )
+        return "gloo"
+    raise ValueError(f"--tp-size supports only -dcuda or -dcpu, got {devices}")
+
+
 def is_torchrun_worker():
     return all(key in os.environ for key in ("RANK", "LOCAL_RANK", "WORLD_SIZE"))
 
@@ -4272,20 +4282,11 @@ def tensor_parallel_entry(runner, original_dir, args):
             "torchrun workers require --only; omit torchrun to launch one worker "
             "group per selected model"
         )
-    devices = args.devices or (["cuda"] if torch.cuda.is_available() else ["cpu"])
-    if devices == ["cuda"]:
-        if local_rank >= torch.cuda.device_count():
-            raise ValueError(
-                f"LOCAL_RANK={local_rank} needs more than the "
-                f"{torch.cuda.device_count()} visible CUDA devices"
-            )
+    backend = tensor_parallel_backend(args)
+    device_id = None
+    if backend == "nccl":
         torch.cuda.set_device(local_rank)
-        backend, device_id = "nccl", torch.device("cuda", local_rank)
-    elif devices == ["cpu"] and torch.accelerator.current_accelerator() is None:
-        # Hugging Face places TP shards on the accelerator whenever there is one.
-        backend, device_id = "gloo", None
-    else:
-        raise ValueError(f"--tp-size does not support --devices={devices} here")
+        device_id = torch.device("cuda", local_rank)
 
     args.rank = rank
     args.world_size = world_size
@@ -4300,15 +4301,35 @@ def tensor_parallel_entry(runner, original_dir, args):
     return result
 
 
+def parse_inductor_config(options):
+    """Parses --inductor-config KEY=VALUE options into typed config values."""
+    values = {}
+    for option in options or ():
+        key, value = option.split("=")
+        typ = type(inductor_config.__getattr__(key))
+        if issubclass(typ, bool):
+            if value not in ("0", "1", "True", "False"):
+                raise AssertionError(f"expected bool value for {key}, got {value}")
+            value = value in ("1", "True")
+        elif issubclass(typ, (str, int, float)):
+            value = typ(value)
+        else:
+            raise NotImplementedError(typ)
+        values[key] = value
+    return values
+
+
 def run_tp_worker_group(cmd, tp_size, timeout, env):
-    """Like subprocess.check_call(cmd), but as one torchrun worker per TP rank."""
+    """Like subprocess.check_call(cmd) for a Python command, but runs cmd's script
+    as one torchrun worker per TP rank."""
+    shutdown_timeout = 30
     cmd = [
         sys.executable,
         "-P",
         "-m",
         "torch.distributed.run",
         "--standalone",
-        "--shutdown-timeout=30",
+        f"--shutdown-timeout={shutdown_timeout}",
         f"--nproc-per-node={tp_size}",
         *cmd[1:],
     ]
@@ -4321,7 +4342,7 @@ def run_tp_worker_group(cmd, tp_size, timeout, env):
         # outright would orphan workers blocked in collectives.
         proc.terminate()
         try:
-            proc.wait(timeout=60)
+            proc.wait(timeout=2 * shutdown_timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
@@ -4330,7 +4351,7 @@ def run_tp_worker_group(cmd, tp_size, timeout, env):
         raise subprocess.CalledProcessError(returncode, cmd)
 
 
-def run_tp_model(name, cmd, args, env):
+def run_tp_model(name, cmd, args, env, suite):
     """Launch a model, preserving its result and reporting missing worker output."""
     check_output = output_filename is not None and not disable_output
 
@@ -4357,8 +4378,8 @@ def run_tp_model(name, cmd, args, env):
         elif len(rows) != 1 or rows[0].get("name") != name:
             status = status or "invalid_results"
         elif args.accuracy:
-            # The baseline checker judges completed accuracy results, including
-            # expected failures. Missing results and worker crashes still fail.
+            # Reported statuses, including fail_accuracy, are results for
+            # check_accuracy.py to judge against a baseline.
             if not rows[0].get("accuracy"):
                 status = status or "invalid_results"
         elif args.performance:
@@ -4373,7 +4394,7 @@ def run_tp_model(name, cmd, args, env):
             write_csv_when_exception(args, name, status)
 
     if status is not None:
-        output_signpost({"name": name}, args, "huggingface", error=status)
+        output_signpost({"name": name}, args, suite, error=status)
         log.error("TP benchmark failed for %s: %s", name, status)
     return status is None
 
@@ -5085,21 +5106,8 @@ def run(runner, args, original_dir=None):
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
         if args.inference:
             inductor_config.freezing = args.freezing
-        if args.inductor_config:
-            for config in args.inductor_config:
-                key, value = config.split("=")
-                typ = type(inductor_config.__getattr__(key))
-                if issubclass(typ, bool):
-                    if value not in ("0", "1", "True", "False"):
-                        raise AssertionError(
-                            f"expected bool value for {key}, got {value}"
-                        )
-                    value = value in ("1", "True")
-                elif issubclass(typ, (str, int, float)):
-                    value = typ(value)
-                else:
-                    raise NotImplementedError(typ)
-                inductor_config.__setattr__(key, value)
+        for key, value in parse_inductor_config(args.inductor_config).items():
+            inductor_config.__setattr__(key, value)
 
     runner.setup_amp()
 
@@ -5163,7 +5171,7 @@ def run(runner, args, original_dir=None):
     # Outside torchrun, a TP run only launches worker groups.
     launch_tp_workers = args.tp_size > 1 and not is_torchrun_worker()
     if launch_tp_workers:
-        set_current_metadata(args)
+        set_current_metadata(args, model_metadata=runner.get_requested_metadata())
 
     if args.only and should_diff_branch(args):
         import git
@@ -5405,7 +5413,7 @@ def run(runner, args, original_dir=None):
                     env["TORCH_COMPILE_DEBUG"] = "1"
                 cmd = [sys.executable] + sys.argv + [f"--only={name}"]
                 if launch_tp_workers:
-                    if not run_tp_model(name, cmd, args, env):
+                    if not run_tp_model(name, cmd, args, env, runner.suite_name):
                         failed_tp_models.append(name)
                 else:
                     subprocess.check_call(cmd, timeout=timeout, env=env)
@@ -5451,17 +5459,18 @@ def log_operator_inputs(
         model_fake = copy.deepcopy(model)
         example_inputs_fake = copy.deepcopy(example_inputs)
     try:
-        with fake_tensor_mode, operator_mode:
+        with fake_tensor_mode:
             if setup_fn is not None:
                 setup_fn(model_fake, example_inputs_fake)
-            model_iter_fn(model_fake, example_inputs_fake, collect_outputs=False)
+            with operator_mode:
+                model_iter_fn(model_fake, example_inputs_fake, collect_outputs=False)
     except Exception as e:
         print(f"{name} failed to run with fake tensors, trying real. Exception: {e}")
         operator_mode = OperatorInputsMode()
         try:
+            if setup_fn is not None:
+                setup_fn(model, example_inputs)
             with operator_mode:
-                if setup_fn is not None:
-                    setup_fn(model, example_inputs)
                 model_iter_fn(model, example_inputs, collect_outputs=False)
         except Exception as e2:
             print(f"{name} failed to run with real. Exception: {e2}")

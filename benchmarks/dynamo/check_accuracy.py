@@ -171,7 +171,8 @@ def main():
     parser.add_argument(
         "--require-complete",
         action="store_true",
-        help="Require exactly one result for every expected model (unsharded suites).",
+        help="Fail unless each expected model has exactly one result and no other "
+        "models have results (unsharded suites).",
     )
     args = parser.parse_args()
 
