@@ -180,8 +180,10 @@ def _rebuild_device_tensor(
         storage = storage_from_cache(storage_cls, cache_key)
         if storage is None:
             # _new_shared_device does not trigger device lazy init, and this may
-            # be the consumer's first device use.
-            torch.get_device_module()._lazy_init()
+            # be the consumer's first device use. torch._C._accelerator_init
+            # initializes the accelerator if it supports _lazy_init, and is a
+            # no-op otherwise.
+            torch._C._accelerator_init()
             storage = storage_cls._new_shared_device(
                 storage_device,
                 storage_handle,
