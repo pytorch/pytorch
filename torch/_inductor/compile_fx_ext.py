@@ -242,7 +242,7 @@ def _current_fake_mode() -> FakeTensorMode:
         return torch._guards.require_python_fake_mode(fake_mode)
 
     shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
-    return FakeTensorMode(shape_env=shape_env)
+    return FakeTensorMode(_force_python=True, shape_env=shape_env)
 
 
 @dataclass
