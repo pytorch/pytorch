@@ -5024,6 +5024,63 @@ def forward(self, tangents_1):
 class TestAOTAutogradDevice(_TestAOTAutogradBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @parametrize("case", ["hidden_base", "returned_base", "symbolic_view_replay"])
+    @torch._dynamo.config.patch(suppress_errors=False)
+    def test_output_aliases_intermediate_layout_optimization(self, device, case):
+        def f(conv, a, b, n):
+            params = torch.cat((a, b), 1)
+            s = conv(params)
+            y, r = params[:, :n], params[:, n:]
+            outputs = (y, s, r, params) if case == "returned_base" else (y, s, r)
+            torch._dynamo.graph_break()
+            return outputs
+
+        dtype = torch.float32
+        conv = nn.Conv2d(16, 16, 3, padding=1, device=device, dtype=dtype)
+        a = torch.randn(2, 8, 16, 16, device=device, dtype=dtype, requires_grad=True)
+        b = torch.randn_like(a, requires_grad=False)
+        conv_ref = copy.deepcopy(conv).cpu().double()
+        ref_a = a.detach().cpu().double().requires_grad_()
+        ref = f(conv_ref, ref_a, b.cpu().double(), 8)
+        ref_grads = torch.autograd.grad(
+            sum(c * x.square().mean() for c, x in zip((1.0, 0.37, 0.13), ref[:3])),
+            (ref_a, *conv_ref.parameters()),
+        )
+        dynamic = case == "symbolic_view_replay"
+        with (
+            torch._functorch.config.patch(view_replay_for_aliased_outputs=dynamic),
+            torch._inductor.config.patch(
+                layout_optimization=True,
+                keep_output_stride=case != "returned_base",
+            ),
+            torch.backends.cudnn.flags(allow_tf32=False),
+        ):
+            for fn in (f, torch.compile(f, backend="inductor", dynamic=dynamic)):
+                outputs = fn(conv, a, b, 8)
+                grads = torch.autograd.grad(
+                    sum(
+                        c * x.cpu().double().square().mean()
+                        for c, x in zip((1.0, 0.37, 0.13), outputs[:3])
+                    ),
+                    (a, *conv.parameters()),
+                )
+                for idx in (0, 2):
+                    actual, expected = outputs[idx], ref[idx]
+                    self.assertEqual(actual.cpu().double(), expected, atol=0, rtol=0)
+                    self.assertEqual(actual.stride(), expected.stride())
+                    self.assertEqual(actual.storage_offset(), expected.storage_offset())
+                    self.assertEqual(actual.requires_grad, expected.requires_grad)
+                self.assertEqual(
+                    outputs[1].cpu().double(), ref[1], atol=2e-6, rtol=1e-5
+                )
+                for actual, expected in zip(grads, ref_grads):
+                    actual = actual.cpu().double()
+                    self.assertEqual(actual, expected, atol=2e-6, rtol=1e-4)
+                self.assertIsNotNone(outputs[0]._base)
+                self.assertIs(outputs[0]._base, outputs[2]._base)
+                if case == "returned_base":
+                    self.assertIs(outputs[0]._base, outputs[3])
+
     def _compile_autocast(self, device, *, forward_autocast):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             m.define("foo(Tensor x) -> Tensor")
