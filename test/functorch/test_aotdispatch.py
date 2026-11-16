@@ -13673,19 +13673,15 @@ class TestAOTModuleSimplifiedAccelerator(_AOTModuleSimplifiedHardwareTestBase):
 
 instantiate_parametrized_tests(TestAOTAutograd)
 instantiate_parametrized_tests(TestPartitioning)
-instantiate_device_type_tests(
-    TestAOTAutogradDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
-)
+instantiate_device_type_tests(TestAOTAutogradDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(
     TestAOTAutogradDeviceWithDynamo,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestAOTAutogradDeviceWithCache,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
 instantiate_parametrized_tests(TestAOTModuleSimplified)
