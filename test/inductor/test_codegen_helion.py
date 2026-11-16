@@ -408,6 +408,27 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         )
         self.assertIn("for tile_x in hl.tile(6400):", source)
 
+    @parametrize("case", ["float_to_uint8", "int_to_fp8", "bool_to_fp8"])
+    def test_cast(self, device, case):
+        x = torch.randn(64, 100, device=device) * 100
+        fn, line = {
+            # eager wraps a negative value: (-5.3).to(torch.uint8) is 251.
+            "float_to_uint8": (
+                lambda x: (x * 2 - 1).to(torch.uint8),
+                ".to(torch.int16).to(torch.uint8)",
+            ),
+            "int_to_fp8": (
+                lambda x: (x.int() + 1).to(torch.float8_e4m3fn).float(),
+                ".to(torch.float32).to(torch.float8_e4m3fn)",
+            ),
+            "bool_to_fp8": (
+                lambda x: (x > 0).to(torch.float8_e5m2).float(),
+                ".to(torch.float32).to(torch.float8_e5m2)",
+            ),
+        }[case]
+        (source,) = self.compile(fn, x)
+        self.assertIn(line, source)
+
     def test_inplace_reuse_chain(self, device):
         def fn(x, w):
             y = torch.nn.functional.conv2d(x, w, padding=1)

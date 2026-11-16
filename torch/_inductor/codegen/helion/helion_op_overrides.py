@@ -4,7 +4,7 @@ from typing import cast, TYPE_CHECKING
 
 import torch
 
-from ...utils import upcast_compute_type
+from ...utils import TRITON_FLOAT8_DTYPES, upcast_compute_type
 from ...virtualized import V
 from ..common import CSEVariable, OpOverrides, PythonPrinter
 from ..simd import constant_repr
@@ -63,6 +63,14 @@ class HelionOverrides(OpOverrides):
             dtype = upcast_compute_type(dtype)
         if x.dtype == dtype:
             return x
+        is_float = x.dtype is not None and x.dtype.is_floating_point
+        # The casts TritonOverrides.to_dtype also splits. A direct cast turns a
+        # negative float into 0 in uint8, where eager wraps it: (-5.3).to(uint8)
+        # is 251. Triton cannot cast an integer or bool to fp8.
+        if dtype == torch.uint8 and is_float:
+            return f"{x}.to(torch.int16).to(torch.uint8)"
+        if dtype in TRITON_FLOAT8_DTYPES and not is_float:
+            return f"{x}.to(torch.float32).to({dtype})"
         return f"{x}.to({dtype})"
 
     @staticmethod
