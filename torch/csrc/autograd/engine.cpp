@@ -1315,11 +1315,12 @@ void Engine::evaluate_function(
   std::string grad_outputs_description;
   const bool check_nan =
       AnomalyMode::is_enabled() && AnomalyMode::should_check_nan();
+  const bool describe_grad_outputs = check_nan && func->num_outputs() > 0;
   auto outputs = call_function(
       graph_task,
       func,
       inputs,
-      check_nan ? &grad_outputs_description : nullptr);
+      describe_grad_outputs ? &grad_outputs_description : nullptr);
 
   auto& fn = *func;
   if (!graph_task->keep_graph_) {
