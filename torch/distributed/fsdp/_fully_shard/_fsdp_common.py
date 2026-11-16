@@ -13,6 +13,7 @@ import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
 from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor.placement_types import BlockShard
 
 from .._flex_shard.utils import _cast_fp_tensor, TrainingState  # noqa: F401
 from ._fsdp_api import DataParallelMeshDims
@@ -149,11 +150,11 @@ def is_bw() -> bool:
 
 @dataclass
 class ShardPlacementResult:
-    placement: Shard | None
+    placement: Shard | BlockShard | None
     mesh_info: FSDPMeshInfo
 
 
-ShardPlacementFnResult = Shard | ShardPlacementResult | None
+ShardPlacementFnResult = Shard | BlockShard | ShardPlacementResult | None
 
 
 def resolve_shard_placement(
@@ -164,7 +165,7 @@ def resolve_shard_placement(
 
     Handles different input types and applies defaults:
     - None: Use default sharding (Shard(0)) on default mesh
-    - Shard: Use specified shard dimension on default mesh
+    - Shard / BlockShard: Use specified placement on default mesh
     - ShardPlacementResult: Use as-is
 
     Args:
@@ -176,7 +177,7 @@ def resolve_shard_placement(
     """
     if result is None:
         return ShardPlacementResult(placement=None, mesh_info=default_mesh_info)
-    if isinstance(result, Shard):
+    if isinstance(result, Shard | BlockShard):
         return ShardPlacementResult(placement=result, mesh_info=default_mesh_info)
     if isinstance(result, ShardPlacementResult):
         return result
