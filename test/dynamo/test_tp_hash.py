@@ -1007,9 +1007,6 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 0)
 
 
-instantiate_parametrized_tests(TpHashTests)
-
-
 if __name__ == "__main__":
     from torch.testing._internal.common_utils import run_tests
 
