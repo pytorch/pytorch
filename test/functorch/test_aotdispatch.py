@@ -13118,17 +13118,16 @@ class TestPartitioningHardware(_PartitioningHardwareTestBase):
 class TestPartitioningAutocast(AOTTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_autocast(self):
-        mod = torchvision.models.resnet18().cuda()
+    def test_autocast(self, device):
+        mod = torchvision.models.resnet18().to(device)
         mod.train()
 
-        x = torch.randn(16, 3, 32, 32, device="cuda")
+        x = torch.randn(16, 3, 32, 32, device=device)
         aot_mod = memory_efficient_fusion(mod)
 
         # Ensure that AOT Autograd works with AMP
-        with torch.cuda.amp.autocast(True):
+        with torch.amp.autocast(torch.device(device).type):
             res = aot_mod(x)
         res.sum().backward()
 
@@ -13595,7 +13594,9 @@ instantiate_parametrized_tests(TestPartitioningHardware)
 instantiate_parametrized_tests(TestAOTModuleSimplifiedHardware)
 
 
-instantiate_device_type_tests(TestPartitioningAutocast, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestPartitioningAutocast, globals(), except_for=("cpu",), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
