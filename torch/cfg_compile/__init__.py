@@ -31,10 +31,12 @@ under a guard on the function; any other Python function, method or
 ``for i in range(k)`` with a small constant ``k`` is unrolled. Closures,
 ``try``/``except``/``finally``, ``with``, imports and class statements are
 compiled, and so are ``locals()``, ``vars()`` and ``dir()``, which get the
-variables from where compiled code keeps them. Generators, coroutines and
-functions that read their own frame some other way (``eval``, ``exec``,
-``super()`` without arguments) run in the interpreter, and so does what they
-call. A Python side effect does not split the function: it is
+variables from where compiled code keeps them; a callee that looks at the
+frame of its caller, a traceback and a debugger find them in the frame.
+Generators, coroutines and functions that read their own frame some other
+way (``eval``, ``exec``, ``super()`` without arguments) run in the
+interpreter, and so does what they call. A Python side effect does not split
+the function: it is
 one more instruction of the graph, between the specialized ones. A whole
 training step can therefore be one compiled function, with the same results
 bit for bit as the interpreter::
