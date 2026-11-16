@@ -73,7 +73,6 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     instantiate_device_type_tests,
     onlyAccelerator,
-    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -83,6 +82,8 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfNoLapack,
     skipIfWindows,
+    TEST_XPU,
+    xfailIf,
     xfailIfS390X,
 )
 from torch.testing._internal.common_xpu import Xe2_Or_Later
@@ -9976,10 +9977,9 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mem_after = torch.accelerator.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
-    @skipXPUIf(
-        not Xe2_Or_Later,
-        "https://github.com/pytorch/pytorch/issues/203902",
-    )
+    @xfailIf(
+        TEST_XPU and not Xe2_Or_Later
+    )  # https://github.com/pytorch/pytorch/issues/203902
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)
