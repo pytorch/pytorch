@@ -36,7 +36,6 @@ import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
-
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
@@ -12733,6 +12732,7 @@ class _PartitioningHardwareTestBase(AOTTestCase):
     _build_backward_extract_graph = TestPartitioning._build_backward_extract_graph
 
 
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
 class TestPartitioningHardware(_PartitioningHardwareTestBase):
     hw_classification = HardwareClassification.CUDA
 
@@ -13589,12 +13589,10 @@ instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
 
 
-instantiate_device_type_tests(TestPartitioningHardware, globals(), only_for=("cuda",))
+instantiate_parametrized_tests(TestPartitioningHardware)
 
 
-instantiate_device_type_tests(
-    TestAOTModuleSimplifiedHardware, globals(), only_for=("cuda",)
-)
+instantiate_parametrized_tests(TestAOTModuleSimplifiedHardware)
 
 
 instantiate_device_type_tests(TestPartitioningAutocast, globals(), only_for=("cuda",))
