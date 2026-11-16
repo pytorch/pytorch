@@ -79,7 +79,6 @@ from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import (
     allow_non_fake_inputs_temporarily,
     CppFakeTensorMode,
-    fake_mode_cls,
     FakeTensorMode,
     is_fake_tensor,
 )
@@ -361,9 +360,9 @@ def _extract_fake_inputs(gm, args, kwargs):
                 )
         fake_mode = detected_fake_mode
     elif detected_shape_env:
-        fake_mode = fake_mode_cls()(shape_env=detected_shape_env, export=True)
+        fake_mode = FakeTensorMode(shape_env=detected_shape_env, export=True)
     else:
-        fake_mode = fake_mode_cls()(shape_env=ShapeEnv(), export=True)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
     count = 0
 

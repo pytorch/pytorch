@@ -43,7 +43,7 @@ from torch._dynamo.utils import (
 from torch._guards import compile_context, CompileContext, CompileId, Source
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
-from torch._subclasses.fake_tensor import fake_mode_cls
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import (
@@ -342,7 +342,7 @@ class AutogradCompilerInstance:
         self.stack = contextlib.ExitStack()
         self.close = self.stack.close
         self.shape_env = ShapeEnv()
-        self.fake_tensor_mode = fake_mode_cls()(
+        self.fake_tensor_mode = FakeTensorMode(
             allow_fallback_kernels=True,
             allow_non_fake_inputs=True,
             shape_env=self.shape_env,
