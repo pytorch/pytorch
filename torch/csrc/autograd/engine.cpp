@@ -1126,7 +1126,8 @@ std::string describe_grads(const variable_list& grads) {
     const auto& grad = grads[i];
     if (!grad.defined()) {
       ss << "undefined";
-    } else if (grad.is_nested()) {
+    } else if (
+        grad.is_nested() && !grad.unsafeGetTensorImpl()->is_python_dispatch()) {
       ss << "(nested tensor, dtype=" << grad.scalar_type()
          << ", device=" << grad.device() << ")";
     } else {
@@ -1312,13 +1313,13 @@ void Engine::evaluate_function(
   }
 
   std::string grad_outputs_description;
-  const bool describe_grad_outputs =
+  const bool check_nan =
       AnomalyMode::is_enabled() && AnomalyMode::should_check_nan();
   auto outputs = call_function(
       graph_task,
       func,
       inputs,
-      describe_grad_outputs ? &grad_outputs_description : nullptr);
+      check_nan ? &grad_outputs_description : nullptr);
 
   auto& fn = *func;
   if (!graph_task->keep_graph_) {
@@ -1336,7 +1337,7 @@ void Engine::evaluate_function(
     return;
   }
 
-  if (AnomalyMode::is_enabled() && AnomalyMode::should_check_nan()) {
+  if (check_nan) {
     AutoGradMode grad_mode(false);
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
@@ -1348,8 +1349,7 @@ void Engine::evaluate_function(
           "' returned nan values in its ",
           i,
           "th output.\n  grad_outputs (inputs of the backward function): ",
-          grad_outputs_description.empty() ? "unavailable"
-                                           : grad_outputs_description,
+          grad_outputs_description,
           "\n  grad_inputs (outputs of the backward function): ",
           describe_grads(outputs));
     }

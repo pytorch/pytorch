@@ -6358,11 +6358,11 @@ Done""",
             with detect_anomaly():
                 (out1.sum() + out2.sum()).backward()
 
-        # Undefined gradients are reported without dereferencing them
+        # An output that does not contribute to the loss has an undefined
+        # gradient when the node runs, before the Function materializes it
         class MyFuncUndefined(Function):
             @staticmethod
             def forward(ctx, inp):
-                ctx.set_materialize_grads(False)
                 return inp.sum(0, keepdim=True), inp.sum(0, keepdim=True)
 
             @staticmethod
