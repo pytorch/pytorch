@@ -71,7 +71,6 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
   TORCH_CHECK(self.dim() > 2,
               "channel_shuffle expects input with > 2 dims, but got input with sizes ",
               self.sizes());
-  int64_t b = self.size(0);
   int64_t c = self.size(1);
   TORCH_CHECK(groups > 0,
               "Number of groups to divide channels in must be positive.",
@@ -79,26 +78,27 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
   TORCH_CHECK((c % groups) == 0,
               "Number of channels must be divisible by groups. Got ",
               c, " channels and ", groups, " groups.");
-  int64_t oc = c / groups;
+  if (self.numel() == 0) {
+    return self.alias();
+  }
 
-  auto input_reshaped = self.view({b, groups, oc, -1});
-  // TODO: contiguous can be made to preserve the memory format
-  // of the input. However since the above reshape clobbers h and w
-  // it may not be safe to do that, since channels_last contiguous
-  // may think oc and the last dim correspond to h,w?
-  // It is not clear, however from initial looking around it feels that
-  // this may not be correct.
-  // In this case channels last will likely require custom implementation
-  // if we want to preserve the memory order.
-  // XNNPACK has channel shuffle op for NHWC. For mobile usecase this is good.
-  // For server we will have to do a custom implementation.
-  // For ChannelsFirst, a.k.a Contiguous, memory format we will also need
-  // a fast custom implementation perhaps.
-  Tensor output_tensor =
-      input_reshaped.permute({0 /* b */, 2 /* oc */, 1 /* groups */, 3})
-      .contiguous()
-      .reshape(self.sizes());
-  return output_tensor;
+  const auto format = self.suggest_memory_format();
+  if (format != MemoryFormat::ChannelsLast &&
+      format != MemoryFormat::ChannelsLast3d) {
+    // Match the CPU allocation for nonempty identity shuffles too.
+    return self.view({self.size(0), groups, c / groups, -1})
+        .transpose(1, 2)
+        .clone(MemoryFormat::Contiguous)
+        .reshape(self.sizes());
+  }
+
+  // Put channels last before copying so the shuffle writes the desired layout.
+  const auto input = self.movedim(1, -1);
+  return input.unflatten(-1, {groups, c / groups})
+      .transpose(-1, -2)
+      .clone(MemoryFormat::Contiguous)
+      .view(input.sizes())
+      .movedim(-1, 1);
 }
 
 DEFINE_DISPATCH(channel_shuffle_kernel);

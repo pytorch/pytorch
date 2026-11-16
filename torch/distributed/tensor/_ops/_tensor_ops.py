@@ -46,6 +46,19 @@ prims = torch.ops.prims
 _PARTIAL_PASS_THROUGH_REDUCE_OPS = ("sum", "avg", "min", "max")
 
 
+@register_single_dim_strategy(aten.channel_shuffle.default)
+def channel_shuffle_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = cast(TensorMeta, args_schema[0])
+    # The local shuffle needs all channels, so channel shards must redistribute.
+    return [
+        [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)]
+        for dim in range(len(input_meta.shape))
+        if dim != 1
+    ]
+
+
 @register_single_dim_strategy(
     [
         aten.clone.default,
