@@ -368,7 +368,6 @@
   "test/inductor/test_codecache.py",
   "test/inductor/test_codegen_heuristics_registry_lazy_imports.py",
   "test/inductor/test_codegen_triton.py",
-  "test/inductor/test_collective_autotuning.py",
   "test/inductor/test_combo_kernels.py",
   "test/inductor/test_comm_analysis.py",
   "test/inductor/test_compile.py",
