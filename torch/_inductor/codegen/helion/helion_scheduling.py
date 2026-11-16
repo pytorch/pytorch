@@ -11,7 +11,7 @@ from ... import config
 from ...ir import ComputedBuffer, Reduction
 from ...loop_body import MemoryUsageType
 from ...scheduler import SchedulerNode
-from ...utils import get_fused_kernel_name, is_bf16x9_matmul
+from ...utils import get_fused_kernel_name
 from ...virtualized import V
 from ..triton import TritonScheduling
 from .helion_kernel import HelionKernel, REDUCTIONS
@@ -78,23 +78,16 @@ def reads_dot_operands_by_tile(node: SchedulerNode) -> bool:
 def is_helion_matmul(node: BaseSchedulerNode) -> bool:
     """Whether `node` holds a native matmul (from triton.native_matmul) that a
     Helion kernel emits."""
-    if not config.helion.native_matmul or node.is_template():
+    if not config.helion.native_matmul or node.is_template() or not python_wrapper():
         return False
     for snode in node.get_nodes():
         if snode.is_native_matmul():
-            buffer = cast(ComputedBuffer, snode.node)
-            device = buffer.get_device()
-            dtype = cast(Reduction, buffer.data).src_dtype
-            sizes = [*buffer.get_size(), *buffer.get_reduction_size()]
-            return (
-                python_wrapper()
-                and device is not None
-                and device.type == "cuda"
-                and dtype in MATMUL_DTYPES
-                and not is_bf16x9_matmul(device.type, dtype)
-                and all(isinstance(size, (int, sympy.Integer)) for size in sizes)
-                and reads_dot_operands_by_tile(cast(SchedulerNode, snode))
-            )
+            dtype = cast(Reduction, cast(ComputedBuffer, snode.node).data).src_dtype
+            if dtype not in MATMUL_DTYPES:
+                return False
+            # Dot operands have no flat fallback: without this check,
+            # x @ v.expand(K, N) fails with "Cannot read a Helion dot operand at r0_index".
+            return reads_dot_operands_by_tile(cast(SchedulerNode, snode))
     return False
 
 
