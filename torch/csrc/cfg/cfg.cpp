@@ -66,8 +66,11 @@ struct Record {
   bool threw;
   int32_t depth;
   int32_t parent;
-  // Only kept for top-level calls: the values pin the tensors they name, so
-  // their addresses stay meaningful until the trace is analyzed.
+  // Only kept for the top-level call of a capture that has one: the values
+  // pin the tensors they name, so their addresses stay meaningful until the
+  // trace is analyzed. A capture with a second top-level call is not made a
+  // site of (siteFromTrace) and may be of anything, a whole model included,
+  // whose tensors it must not keep alive.
   std::vector<c10::IValue> inputs;
   std::vector<c10::IValue> outputs;
 };
@@ -107,7 +110,13 @@ class Sink final : public c10::DispatchCaptureSink {
         {},
         {}};
     if (top) {
-      r.inputs.assign(inputs.begin(), inputs.end());
+      if (t.top_level == 0) {
+        r.inputs.assign(inputs.begin(), inputs.end());
+      } else if (t.top_level == 1) {
+        // The first record is the first top-level call.
+        t.records.front().inputs.clear();
+        t.records.front().outputs.clear();
+      }
       t.top_level++;
     }
     t.open.push_back(static_cast<int32_t>(t.records.size()));
@@ -122,7 +131,7 @@ class Sink final : public c10::DispatchCaptureSink {
     auto& r = t.records[t.open.back()];
     t.open.pop_back();
     r.threw = threw;
-    if (t.open.empty() && !threw) {
+    if (t.open.empty() && !threw && t.top_level == 1) {
       r.outputs.assign(outputs.begin(), outputs.end());
     }
   }
