@@ -3283,9 +3283,15 @@ class halide:
 
 class helion:
     # Emit the kernels codegen/helion supports as Helion, the rest as Triton.
-    enabled: bool = os.getenv("TORCHINDUCTOR_HELION", "0") == "1"
-    # Also emit triton.native_matmul kernels as Helion.
-    native_matmul: bool = os.getenv("TORCHINDUCTOR_HELION_NATIVE_MATMUL", "1") == "1"
+    enabled: bool = Config(
+        default=os.getenv("TORCHINDUCTOR_HELION", "0") == "1",
+        implies={False: {"helion.native_matmul": False}},
+    )
+    # With enabled, turn on triton.native_matmul and emit its matmul kernels as Helion.
+    native_matmul: bool = Config(
+        default=os.getenv("TORCHINDUCTOR_HELION_NATIVE_MATMUL", "1") == "1",
+        implies={True: {"triton.native_matmul": True}},
+    )
     backend: Literal["triton", "cute"] = "triton"
     autotune_effort: Literal["none", "quick", "full"] = "quick"
 

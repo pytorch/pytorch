@@ -48,13 +48,7 @@ class TestHelionNativeMatmul(TestCase):
     def setUp(self):
         super().setUp()
         self.enterContext(
-            config.patch(
-                {
-                    "helion.enabled": True,
-                    "triton.native_matmul": True,
-                    "helion.autotune_effort": "none",
-                }
-            )
+            config.patch({"helion.enabled": True, "helion.autotune_effort": "none"})
         )
 
     def compile(
@@ -202,6 +196,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             "permuted_operand",
             "gathered_operand",
             "cpu_scalar",
+            "native_matmul_off",
         ],
     )
     def test_fallback(self, case):
@@ -218,12 +213,16 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         elif case == "gathered_operand":
             fn = lambda a, i, b: a[i] @ b  # noqa: E731
             args = [randn(80, 64), torch.randint(0, 80, (32,), device=GPU_TYPE), b]
-        else:
+        elif case == "cpu_scalar":
             # The CPU scalar epilogue fuses into the matmul, so the kernel is Triton.
             fn = lambda a, b, c: a @ b + c  # noqa: E731
             args = [a, b, torch.tensor(2.0, device="cpu")]
+        else:
+            self.enterContext(config.patch({"helion.native_matmul": False}))
         sources = self.compile(fn, *args, expected=fn(*args), tol=2e-2, helion=False)
         self.assertEqual(sources, [])
+        if case == "native_matmul_off":
+            self.assertIn("extern_kernels.mm(", self.code)
 
     def test_cudagraph_tree(self):
         def fn(a, b):
@@ -249,7 +248,7 @@ class TestHelionDefaults(TestCase):
         import helion
 
         with (
-            config.patch({"helion.enabled": True, "triton.native_matmul": True}),
+            config.patch({"helion.enabled": True}),
             patch.object(helion.Kernel, "__call__", lambda self, *args: None),
         ):
             _, (code,) = run_and_get_code(
