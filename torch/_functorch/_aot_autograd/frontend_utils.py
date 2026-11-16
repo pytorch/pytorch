@@ -10,7 +10,7 @@ from torch._custom_class_base import CustomClassBase
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_custom_class
 from torch._subclasses.fake_tensor import (
-    fake_mode_cls,
+    FakeTensorMode,
     is_fake_tensor,
     maybe_get_fake_mode,
 )
@@ -27,7 +27,7 @@ from .utils import get_loaded_async_collective_tensor_type
 if TYPE_CHECKING:
     from collections.abc import Generator, KeysView
 
-    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
     from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 
@@ -233,7 +233,7 @@ def construct_fake_mode(
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
-        fake_mode = fake_mode_cls()(shape_env=shape_env)
+        fake_mode = FakeTensorMode(shape_env=shape_env)
     else:
         shape_env = fake_mode.shape_env
     return (fake_mode, shape_env)
