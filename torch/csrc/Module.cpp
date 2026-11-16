@@ -2781,11 +2781,21 @@ PyObject* initModule() {
         "_fake_dispatch_register_python_cia",
         add_for(FakeDispatchCategory::PythonCIA));
     py_module.def(
+        "_fake_dispatch_deregister_python_cia",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::PythonCIA,
+              c10::OperatorName(name, overload));
+        });
+    py_module.def(
         "_fake_dispatch_register_custom_op_impl",
         add_for(FakeDispatchCategory::CustomOpImpl));
     py_module.def(
         "_fake_dispatch_register_static_shape_decomp",
         add_for(FakeDispatchCategory::StaticShapeDecomp));
+    py_module.def(
+        "_fake_dispatch_register_cpp_meta_supports_symint",
+        add_for(FakeDispatchCategory::CppMetaSupportsSymint));
     py_module.def(
         "_fake_dispatch_deregister_decomp",
         [](const std::string& name, const std::string& overload) {
@@ -2807,15 +2817,6 @@ PyObject* initModule() {
           return at::impl::fakeDispatchTableContains(
               FakeDispatchCategory::StaticShapeDecomp,
               c10::OperatorName(name, overload));
-        });
-    py_module.def(
-        "_cpp_fake_not_implemented",
-        [](const std::string& name, const std::string& overload) {
-          const c10::OperatorName op_name(name, overload);
-          const auto op = c10::Dispatcher::singleton().findSchema(op_name);
-          TORCH_CHECK_VALUE(
-              op.has_value(), "operator ", op_name, " does not exist");
-          return at::impl::cppFakeNotImplemented(*op);
         });
     py_module.def(
         "_fake_dispatch_deregister_op_impl",
@@ -3112,8 +3113,12 @@ Call this whenever a new thread is created in order to propagate values from
         // _make_subclass: a new detached fake sharing meta's storage (or, for a
         // sparse meta, its indices and values). meta keeps its own device and
         // autograd state. As in Python, the shared storage is marked as a
-        // fake's; a sparse meta has no storage to mark, and the indices and
-        // values it shares stay non-fake.
+        // fake's; a sparse meta has no storage to mark. This call marks only
+        // the outer sparse TensorImpl fake. The C++ fake fallback later marks
+        // retained COO _indices/_values outputs fake in place. The
+        // caller's shared components then acquire that mode/device too; reusing
+        // the outer meta tensor with another mode/device can fail on access.
+        // See Note [In-place conversion of Meta outputs].
         c10::intrusive_ptr<c10::TensorImpl> out_impl;
         {
           // As in no_dispatch(). Otherwise an active dispatch mode would run
