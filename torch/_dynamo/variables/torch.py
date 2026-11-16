@@ -2378,17 +2378,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                             and source.prop is TensorProperty.SIZE
                             for source in node.shape_env.var_to_sources.get(expr, ())
                         )
-                        # torch.Size(tensor) items were converted with
-                        # TensorVariable.torch_size_item, i.e. sym_int(t.item())
-                        # of a non-uint64 tensor, which also fits in int64.
+                        # torch.Size(tensor) items are converted with
+                        # TensorVariable.torch_size_item to sym_int(t.item()).
+                        # When t has an integer dtype other than uint64, the
+                        # value fits in int64. int() of a float tensor has the
+                        # same node shape but no such bound.
                         fx_node = item.as_proxy().node
                         item_node = fx_node.args[0] if fx_node.args else None
+                        source_dtype = (
+                            item_node.args[0].meta["example_value"].dtype
+                            if isinstance(item_node, torch.fx.Node)
+                            and item_node.target == "item"
+                            else None
+                        )
                         is_tensor_item = (
                             fx_node.target is torch.sym_int
-                            and isinstance(item_node, torch.fx.Node)
-                            and item_node.target == "item"
-                            and item_node.args[0].meta["example_value"].dtype
-                            is not torch.uint64
+                            and source_dtype is not None
+                            and not source_dtype.is_floating_point
+                            and not source_dtype.is_complex
+                            and source_dtype is not torch.uint64
                         )
                         if is_tensor_size or is_tensor_item:
                             items.append(item)

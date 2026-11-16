@@ -7095,11 +7095,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager")
 
         self.assertEqual(opt_fn(x, shape), fn(x, shape))
-        self.assertGreater(len(counters["graph_break"]), 0)
+        self.assertTrue(
+            any("Tensor.item()" in reason for reason in counters["graph_break"])
+        )
 
+    def test_torch_size_from_constant_tensor(self):
+        def fn(x):
+            return x.reshape(torch.Size([torch.tensor(4), 64]))
+
+        x = torch.randn(256)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @parametrize(
         "shape",
-        [torch.tensor([4.0, 64.0]), torch.tensor([[4, 64]]), torch.tensor([True])],
+        [
+            subtest(torch.tensor([4.0, 64.0]), name="float"),
+            subtest(torch.tensor([[4, 64]]), name="rows"),
+            subtest(torch.tensor([True]), name="bool"),
+            subtest([torch.nn.Parameter(torch.tensor(1.0))], name="parameter"),
+        ],
     )
     def test_torch_size_from_tensor_matches_eager(self, shape):
         def fn(shape):
@@ -7108,9 +7125,22 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             except TypeError as e:
                 return str(e)
 
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
 
         self.assertEqual(opt_fn(shape), fn(shape))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_infer_size_int_of_float_tensor_overflow(self):
+        def fn(t):
+            try:
+                return torch._C._infer_size(torch.Size([int(t)]), torch.Size([1]))
+            except ValueError as e:
+                return str(e)
+
+        t = torch.tensor(1e30)
+        opt_fn = torch.compile(fn, backend="eager")
+
+        self.assertEqual(opt_fn(t), fn(t))
 
     def test_stride_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()

@@ -39,6 +39,7 @@ from torch._library.opaque_object import (
     is_opaque_constant_type,
     is_opaque_symbolic_type,
 )
+from torch._subclasses.fake_tensor import maybe_get_fake_constant
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
@@ -1932,8 +1933,8 @@ class TensorVariable(VariableTracker):
         item_index: int,
     ) -> VariableTracker:
         # Converts a tensor item of torch.Size(...) like THPSize_pynew, which
-        # rejects tensors that are not single-element integer tensors with its
-        # own message before calling __index__.
+        # calls __index__ on it and replaces any error with its own message
+        # naming the item's type.
         if (
             self.dtype is None
             or self.dtype.is_floating_point
@@ -1946,17 +1947,20 @@ class TensorVariable(VariableTracker):
                 tx,
                 args=[
                     "torch.Size() takes an iterable of 'int' "
-                    f"(item {item_index} is 'Tensor')"
+                    f"(item {item_index} is '{self.python_type_name()}')"
                 ],
             )
         if self.dtype is torch.uint64:
             unimplemented(
-                gb_type="Data-dependent uint64 torch.Size element in torch._C._infer_size",
+                gb_type="Data-dependent uint64 tensor element in torch.Size",
                 context="torch.uint64 tensor-backed size",
                 explanation="Dynamo cannot safely validate that a data-dependent "
                 "torch.uint64 value fits in torch.Size's signed int64 range.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
+        constant = maybe_get_fake_constant(self.proxy.node.meta.get("example_value"))
+        if isinstance(constant, torch.Tensor):
+            return ConstantVariable.create(int(constant.item()))
         item: VariableTracker = self
         if self.dtype is torch.bool:
             item = self.call_method(
