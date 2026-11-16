@@ -71,9 +71,7 @@ class HelionTensorArg:
 
 class HelionCSEProxy(CSEProxy):
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        kernel = cast(HelionKernel, self.kernel)
-        if kernel.in_dot_loop:
-            args = kernel.align_args(args)
+        args = cast(HelionKernel, self.kernel).align_args(args)
         return super()._default(name, args, kwargs)
 
     def dot(self, a: CSEVariable, b: CSEVariable) -> CSEVariable:
@@ -171,24 +169,6 @@ class HelionKernel(SIMDKernel[CSEVariable]):
     def in_loop(self) -> bool:
         return self.inside_reduction and self.features.is_reduction()
 
-    @property
-    def in_dot_loop(self) -> bool:
-        return self.in_loop and self.is_matmul
-
-    @property
-    def scope_axes(self) -> tuple[str, ...]:
-        return self.axes if self.in_loop else self.outer_axes
-
-    def value_scope(self, axes: Iterable[str]) -> tuple[str, ...]:
-        """The tiles that a value over `axes` broadcasts against."""
-        if self.in_dot_loop:
-            # A value in a matmul's K loop is part of a [z, y, r0_] or a [z, r0_, x]
-            # dot operand, so it spans only its own tiles: an r0_-only mask is
-            # [tile_r] next to [tile_y, tile_r] but [tile_r, 1] next to
-            # [tile_r, tile_x]. align_args() reshapes values as ops combine them.
-            return tuple(axis for axis in self.axes if axis in axes)
-        return self.scope_axes
-
     def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable:
         var = super().create_cse_var(*args, **kwargs)
         if not (hasattr(self, "features") and self.in_loop):
@@ -201,12 +181,13 @@ class HelionKernel(SIMDKernel[CSEVariable]):
     def index_axes(self, index: sympy.Expr) -> list[str]:
         return [axis for axis in self.axes if self.symbols[axis] in index.free_symbols]
 
-    def value_shape(self, axes: Sequence[str] | None = None) -> TileShape:
-        """Shape of a value over `axes` that broadcasts against the tiles in scope,
-        e.g. (tile_y, 1) for {y} in a loop over (y, x)."""
-        if axes is None:
-            return scope_shape(self.scope_axes, self.scope_axes)
-        return scope_shape(axes, self.value_scope(axes))
+    def value_shape(self, axes: Iterable[str]) -> TileShape:
+        """Shape of a value over `axes`: their tiles in the kernel's axis order,
+        (z, y, r0_, x) with a dot and (z, y, x, r0_) without. A value holds only
+        its own tiles, since an r0_-only value in a matmul's K loop is [tile_r]
+        next to [tile_y, tile_r] but [tile_r, 1] next to [tile_r, tile_x];
+        align_args() reshapes values as ops combine them."""
+        return tuple(TILE_NAMES[axis] for axis in self.axes if axis in axes)
 
     def index_tensor(self, axis: str, scope: Sequence[str]) -> str:
         name = f"{TILE_NAMES[axis]}.index"
@@ -234,14 +215,6 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         if aligned == shape:
             return str(value)
         return f"{value}.reshape([{', '.join(map(str, aligned))}])"
-
-    def in_scope(self, value: CSEVariable) -> CSEVariable:
-        axes = [TILE_AXES[str(dim)] for dim in value.shape or () if dim != 1]
-        target = self.value_shape(axes)
-        if target == tuple(value.shape or ()):
-            return value
-        line = self.align(value, self.value_shape())
-        return self.cse.generate(self.compute, line, dtype=value.dtype, shape=target)
 
     def align_args(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
         """The values among an op's `args`, reshaped to broadcast against each
@@ -412,7 +385,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             with outside:
                 yield
             # Back in a reduction loop: values stored outside it are read
-            # through in_scope() instead of the CSE store cache.
+            # from outer_stores instead of the CSE store cache.
             for name, value in [*self.cse.store_cache.items()]:
                 if value in self.outer_vars:
                     self.outer_stores[name] = value
@@ -533,7 +506,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         if name in self.outer_stores:
-            return self.in_scope(self.outer_stores[name])
+            return self.outer_stores[name]
         buffer = V.graph.get_buffer(name)
         index = self.tile_index(index)
         axes = self.index_axes(index)
@@ -561,16 +534,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             mask = self.align(mask, shape)
             index = "" if coordinates == ["()"] else subscript
             line = f"hl.load({arg.ref}, [{index}], extra_mask={mask}){cast_suffix}"
-        value = self.cse.generate(self.loads, line, dtype=dtype, shape=shape)
-        aligned = self.value_shape(axes)
-        if aligned == shape:
-            return value
-        return self.cse.generate(
-            self.loads,
-            self.align(value, self.value_shape()),
-            dtype=dtype,
-            shape=aligned,
-        )
+        return self.cse.generate(self.loads, line, dtype=dtype, shape=shape)
 
     def store(
         self,
@@ -621,11 +585,9 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         )
 
     def index_tensor_expr(self, index: sympy.Expr, axes: Sequence[str]) -> str:
-        scope = self.value_scope(axes)
-        if not OrderedSet(axes) <= OrderedSet(scope) or (
-            index.free_symbols - OrderedSet(self.symbols[axis] for axis in axes)
-        ):
+        if index.free_symbols - OrderedSet(self.symbols[axis] for axis in axes):
             raise NotImplementedError(f"Unsupported Helion index: {index}")
+        scope = [axis for axis in self.axes if axis in axes]
         # tile.index is int32; widen it if any subexpression could overflow.
         ranges = {
             self.symbols[axis]: ValueRanges(0, self.numels[axis] - 1) for axis in axes
@@ -721,7 +683,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
     ) -> CSEVariable | tuple[CSEVariable, ...]:
         if reduction_type == "dot":
             return value
-        if self.is_matmul or reduction_type not in REDUCTIONS:
+        if reduction_type not in REDUCTIONS:
             raise AssertionError(f"Helion kernels do not support {reduction_type}")
         if not isinstance(value, CSEVariable):
             raise AssertionError(f"expected one value to reduce, got {value}")
@@ -730,7 +692,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             axes = [TILE_AXES[str(dim)] for dim in value.shape or () if dim != 1]
             shape = self.value_shape([*axes, "r0_"])
             zeros = f"hl.zeros([{', '.join(map(str, shape))}], dtype={value.dtype})"
-            line = f"{self.align(value, self.value_shape())} + {zeros}"
+            line = f"{self.align(value, shape)} + {zeros}"
             value = self.cse.generate(
                 self.compute, line, dtype=value.dtype, shape=shape
             )
@@ -740,11 +702,27 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         if not isinstance(init, (bool, float, int)):
             raise AssertionError(f"expected one initial value, got {init}")
         acc = self.accumulator(init, upcast_compute_type(dtype))
+        # Reduce tile_r wherever the axis order puts it: last without a dot, before
+        # tile_x in a matmul's K loop, as in (a @ b, (a[:, :, None] * b[None]).sum(1)):
+        #     acc = torch.addmm(acc, tmp0, tmp1)
+        #     tmp3 = tmp2 * tmp1                     # [tile_y, tile_r, tile_x]
+        #     acc1 = acc1 + torch.sum(tmp3, -2)
+        # A sum over -1 there reduces tile_x: "Shape mismatch between [u0, u1] and
+        # [u0, u2]". The result is aligned to the accumulator, e.g. (tile_y, 1).
+        dims = [str(dim) for dim in value.shape or ()]
+        kept = [TILE_AXES[dim] for dim in dims if dim not in ("tile_r", "1")]
+        fn = {"sum": "sum", "prod": "prod", "max": "amax", "min": "amin"}[
+            reduction_type
+        ]
+        part = f"torch.{fn}({value}, {dims.index('tile_r') - len(dims)})"
+        aligned = scope_shape(kept, self.outer_axes)
+        if aligned != self.value_shape(kept):
+            part = f"{part}.reshape([{', '.join(map(str, aligned))}])"
         block = {
-            "sum": f"{acc} + torch.sum({value}, -1)",
-            "prod": f"{acc} * torch.prod({value}, -1)",
-            "max": f"torch.maximum({acc}, torch.amax({value}, -1))",
-            "min": f"torch.minimum({acc}, torch.amin({value}, -1))",
+            "sum": f"{acc} + {part}",
+            "prod": f"{acc} * {part}",
+            "max": f"torch.maximum({acc}, {part})",
+            "min": f"torch.minimum({acc}, {part})",
         }[reduction_type]
         self.compute.writeline(f"{acc} = {block}")
         return acc

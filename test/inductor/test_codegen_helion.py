@@ -236,6 +236,32 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
         self.assertIn("hl.load(in2, [tile_x.index], extra_mask=", source)
         self.assertIn("hl.load(in3, [(-64) + tile_x.index], extra_mask=", source)
 
+    @parametrize("case", ["horizontal", "vertical", "y_only", "x_only"])
+    def test_reduction_over_dot_loop(self, device, case):
+        def horizontal(a, b):
+            return a @ b, (a[:, :, None] * b[None]).sum(1)
+
+        def vertical(a, b):
+            # The sum reads the matmul output in a second K loop.
+            c = a @ b
+            return c, (c[:, :, None] * b[:, 0]).sum(-1)
+
+        def y_only(a, b):
+            return a @ b, a[:, :, None].expand(40, 72, 136).sum(1)
+
+        def x_only(a, b):
+            return a @ b, b[None].expand(40, 72, 136).sum(1)
+
+        # A sum over the dot's ranges reduces tile_r where the axis order puts it.
+        fn, line = {
+            "horizontal": (horizontal, r"acc1 = acc1 \+ torch\.sum\(tmp\d+, -2\)\n"),
+            "vertical": (vertical, r"acc1 = acc1 \+ torch\.sum\(tmp\d+, -2\)\n"),
+            "y_only": (y_only, r"torch\.sum\(tmp\d+, -1\)\.reshape\(\[tile_y, 1\]\)"),
+            "x_only": (x_only, r"acc1 = acc1 \+ torch\.sum\(tmp\d+, -2\)\n"),
+        }[case]
+        (source,) = self.compile(fn, randn(device, 40, 72), randn(device, 72, 136))
+        self.assertRegex(source, line)
+
     @parametrize("case", ["pad", "tril", "constant", "vector", "permuted"])
     def test_operand(self, device, case):
         b = randn(device, 72, 136)
