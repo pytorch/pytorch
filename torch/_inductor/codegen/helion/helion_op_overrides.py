@@ -48,7 +48,8 @@ class HelionPrinter(PythonPrinter):
 
 
 class HelionOverrides(OpOverrides):
-    """Inductor ops as Helion device code, i.e. torch ops on tiles."""
+    """Inductor ops as Helion device code, i.e. torch ops on tiles. The ops that
+    are a single torch function are added from TORCH_FUNCTIONS below."""
 
     @staticmethod
     def constant(value: bool | float | int, dtype: torch.dtype) -> str:
@@ -70,6 +71,18 @@ class HelionOverrides(OpOverrides):
         return f"{x}.to({dtype})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
+    def to_dtype_bitcast(
+        x: CSEVariable, dtype: torch.dtype, src_dtype: torch.dtype
+    ) -> str:
+        # A bf16 value is computed in FP32 (see to_dtype): cast it back before
+        # reinterpreting its 16 bits.
+        value = f"{x}" if x.dtype == src_dtype else f"{x}.to({src_dtype})"
+        result = f"{value}.view({dtype})"
+        compute_dtype = upcast_compute_type(dtype)
+        return result if compute_dtype == dtype else f"{result}.to({compute_dtype})"
+
+    @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> CSEVariable:
         return cast("HelionKernel", V.kernel).index_expr(expr, dtype)
 
@@ -86,8 +99,8 @@ class HelionOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def where(cond: str, a: str, b: str) -> str:
-        return f"torch.where({cond}, {a}, {b})"
+    def identity(x: CSEVariable) -> CSEVariable:
+        return x
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -96,114 +109,41 @@ class HelionOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def minimum(a: str, b: str) -> str:
-        return f"torch.minimum({a}, {b})"
+    def truncdiv(a: str, b: str) -> str:
+        return f'torch.div({a}, {b}, rounding_mode="trunc")'
 
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def maximum(a: str, b: str) -> str:
-        return f"torch.maximum({a}, {b})"
+    def floordiv(a: str, b: str) -> str:
+        return f'torch.div({a}, {b}, rounding_mode="floor")'
 
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def logical_and(a: str, b: str) -> str:
-        return f"torch.logical_and({a}, {b})"
 
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def logical_or(a: str, b: str) -> str:
-        return f"torch.logical_or({a}, {b})"
+# Inductor ops that are one torch function of the same arguments, e.g.
+# ops.sinh(x) -> torch.sinh(x) and ops.atan2(y, x) -> torch.atan2(y, x).
+# fmt: off
+TORCH_FUNCTIONS = {
+    **{name: f"torch.{name}" for name in [
+        "where", "minimum", "maximum", "logical_and", "logical_or", "logical_not",
+        "logical_xor", "relu", "abs", "sign", "signbit", "isinf", "isnan", "reciprocal",
+        "sqrt", "rsqrt", "exp", "exp2", "expm1", "log", "log1p", "log2", "log10",
+        "sigmoid", "erf", "erfc", "erfinv", "lgamma", "i0", "sin", "cos", "tan", "sinh",
+        "cosh", "tanh", "asin", "acos", "atan", "asinh", "acosh", "atanh", "atan2",
+        "floor", "ceil", "trunc", "round", "copysign", "hypot", "nextafter", "fmod",
+        "remainder", "bitwise_left_shift", "bitwise_right_shift",
+    ]},
+    **{name: f"torch.special.{name}" for name in [
+        "bessel_j0", "bessel_j1", "bessel_y0", "bessel_y1", "erfcx", "i1",
+        "modified_bessel_i0", "modified_bessel_i1",
+    ]},
+    # C-style, with the sign of a; a % b on torch tensors takes the sign of b.
+    "mod": "torch.fmod",
+}
+# fmt: on
 
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def logical_not(x: str) -> str:
-        return f"torch.logical_not({x})"
 
-    @staticmethod
-    def relu(x: str) -> str:
-        return f"torch.relu({x})"
+def _torch_call(function: str) -> Callable[..., str]:
+    return lambda *args: f"{function}({', '.join(map(str, args))})"
 
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def abs(x: str) -> str:
-        return f"torch.abs({x})"
 
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def exp(x: str) -> str:
-        return f"torch.exp({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def exp2(x: str) -> str:
-        return f"torch.exp2({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def expm1(x: str) -> str:
-        return f"torch.expm1({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def log(x: str) -> str:
-        return f"torch.log({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def log1p(x: str) -> str:
-        return f"torch.log1p({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def log2(x: str) -> str:
-        return f"torch.log2({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def sqrt(x: str) -> str:
-        return f"torch.sqrt({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def rsqrt(x: str) -> str:
-        return f"torch.rsqrt({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def sin(x: str) -> str:
-        return f"torch.sin({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def cos(x: str) -> str:
-        return f"torch.cos({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def tanh(x: str) -> str:
-        return f"torch.tanh({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def erf(x: str) -> str:
-        return f"torch.erf({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def sigmoid(x: str) -> str:
-        return f"torch.sigmoid({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def floor(x: str) -> str:
-        return f"torch.floor({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def ceil(x: str) -> str:
-        return f"torch.ceil({x})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def reciprocal(x: str) -> str:
-        return f"torch.reciprocal({x})"
+for _name, _function in TORCH_FUNCTIONS.items():
+    setattr(HelionOverrides, _name, staticmethod(_torch_call(_function)))
