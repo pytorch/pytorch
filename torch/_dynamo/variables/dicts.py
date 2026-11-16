@@ -203,14 +203,15 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 "and all values must be VariableTracker"
             )
 
-        keys: dict[int, HashableTracker] = {}
+        pending: list[HashableTracker] | None = [] if self.source is None else None
 
         def make_hashable(
             key: Union[VariableTracker, "HashableTracker"],
         ) -> "HashableTracker":
-            result = key if isinstance(key, Hashable) else Hashable(key)
-            keys[id(key)] = result
-            return result
+            wrapped = key if isinstance(key, Hashable) else Hashable(key)
+            if pending is not None:
+                pending.append(wrapped)
+            return wrapped
 
         items_cls = cast(type, self._cpython_type)
         storage_cls = dict if items_cls is collections.defaultdict else items_cls
@@ -223,9 +224,11 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 storage = cast(
                     dict[VariableTracker | HashableTracker, VariableTracker], items
                 )
-                self.items = collections.OrderedDict(
-                    (make_hashable(key), value) for key, value in dict.items(storage)
-                )
+                keys: dict[int, HashableTracker] = {}
+                self.items = collections.OrderedDict()
+                for key, value in dict.items(storage):
+                    keys[id(key)] = wrapped = make_hashable(key)
+                    self.items[wrapped] = value
                 for key in items:
                     self.items.move_to_end(keys[id(key)])
             else:
@@ -233,9 +236,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                     {make_hashable(x): v for x, v in items.items()}
                 )
         finally:
-            # A caught equality exception still depends on the participating method keys.
-            if keys and self.source is None:
-                guard_key_collisions(keys.values())
+            # An equality exception can be caught before the new dictionary exists.
+            if pending:
+                guard_key_collisions(pending)
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (

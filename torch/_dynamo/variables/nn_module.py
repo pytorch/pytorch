@@ -87,6 +87,29 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
+def _build_hooks_dict(
+    hooks: dict[Any, Any],
+    items: dict[HashableTracker, VariableTracker],
+    source: Source | None,
+    *,
+    lazy_ids: bool,
+    flags: bool,
+) -> VariableTracker:
+    if lazy_ids:
+        if isinstance(hooks, collections.OrderedDict):
+            if flags:
+                return variables.NNModuleHookFlagsOrderedDictVariable(
+                    items, source=source
+                )  # noqa: RVT001
+            return variables.NNModuleHooksOrderedDictVariable(items, source=source)  # noqa: RVT001
+        if flags:
+            return variables.NNModuleHookFlagsDictVariable(items, source=source)  # noqa: RVT001
+        return variables.NNModuleHooksDictVariable(items, source=source)  # noqa: RVT001
+    if isinstance(hooks, collections.OrderedDict):
+        return variables.OrderedDictVariable(items, source=source)
+    return variables.ConstDictVariable(items, source=source)
+
+
 def initialize_lazy_module(
     tx: "InstructionTranslatorBase",
     mod: torch.nn.Module,
@@ -1657,28 +1680,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    hooks_vt_cls = (
-                        variables.OrderedDictVariable
-                        if isinstance(hooks_dict, collections.OrderedDict)
-                        else variables.ConstDictVariable
+                    lazy_ids = hooks_source is not None and name.startswith("_forward_")
+                    if lazy_ids and not torch._dynamo.config.skip_nnmodule_hook_guards:
+                        install_guard(hooks_source.make_guard(GuardBuilder.TYPE_MATCH))
+                    result = _build_hooks_dict(
+                        hooks_dict,
+                        {},
+                        hooks_source,
+                        lazy_ids=lazy_ids,
+                        flags=name.endswith(("with_kwargs", "always_called")),
                     )
-                    if hooks_source and name.startswith("_forward_"):
-                        if not torch._dynamo.config.skip_nnmodule_hook_guards:
-                            install_guard(
-                                hooks_source.make_guard(GuardBuilder.TYPE_MATCH)
-                            )
-                        hooks_vt_cls = (
-                            variables.NNModuleHookFlagsOrderedDictVariable
-                            if name.endswith(("with_kwargs", "always_called"))
-                            else variables.NNModuleHooksOrderedDictVariable
-                        )
-                        if not isinstance(hooks_dict, collections.OrderedDict):
-                            hooks_vt_cls = (
-                                variables.NNModuleHookFlagsDictVariable
-                                if name.endswith(("with_kwargs", "always_called"))
-                                else variables.NNModuleHooksDictVariable
-                            )
-                    result = hooks_vt_cls({}, source=hooks_source)
                     # The private length probe cannot expose or mutate this tracker.
                     if hooks_source is not None and (
                         _track_empty_hooks
@@ -1731,21 +1742,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(hooks_dict)
             )
 
-            if isinstance(hooks_dict, collections.OrderedDict):
-                hooks_vt_cls = (
-                    variables.NNModuleHookFlagsOrderedDictVariable
-                    if name.endswith(("with_kwargs", "always_called"))
-                    else variables.NNModuleHooksOrderedDictVariable
-                )
-            else:
-                hooks_vt_cls = (
-                    variables.NNModuleHookFlagsDictVariable
-                    if name.endswith(("with_kwargs", "always_called"))
-                    else variables.NNModuleHooksDictVariable
-                )
-            return tx.output.side_effects.track_mutable(
-                hooks_dict, hooks_vt_cls(result, source=hooks_dict_source)
+            result_vt = _build_hooks_dict(
+                hooks_dict,
+                result,
+                hooks_dict_source,
+                lazy_ids=True,
+                flags=name.endswith(("with_kwargs", "always_called")),
             )
+            return tx.output.side_effects.track_mutable(hooks_dict, result_vt)
         return super().tp_getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(
