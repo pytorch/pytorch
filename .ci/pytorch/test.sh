@@ -1373,6 +1373,12 @@ test_inductor_pallas() {
   assert_git_not_dirty
 }
 
+test_inductor_benchmark_runner() {
+  # Also runs the multi-process tensor-parallel tests.
+  PYTORCH_TEST_WITH_SLOW=1 python test/run_test.py --include dynamo/test_benchmark_runner --verbose
+  assert_git_not_dirty
+}
+
 test_inductor_flydsl() {
   install_flydsl
   (
@@ -1484,10 +1490,12 @@ test_huggingface_tp_benchmark() {
       --tp-size="$tp_size" --batch-size=1 --hf-inference-mode="$phase"
     )
     if [[ "$mode" == "performance" ]]; then
-      # Keep performance success independent of accuracy baselines and unit tests.
+      local csv="$TEST_REPORTS_DIR/inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_${phase}_tp${tp_size}_performance.csv"
+      # As in the other perf jobs, a failing model leaves a CSV row without failing
+      # the job; perf_cli ignores every result of a failed job.
       python benchmarks/dynamo/huggingface.py --performance "${tp_args[@]}" \
-        --output "$TEST_REPORTS_DIR/inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp${tp_size}_${phase}_performance.csv" \
-        || validation_status=$?
+        --output "$csv" || true
+      [[ -s "$csv" ]] || validation_status=1
       continue
     fi
     python benchmarks/dynamo/huggingface.py --accuracy --timing --explain \
@@ -2725,7 +2733,7 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == "inductor_benchmark_runner" ]]; then
-  python test/run_test.py --include dynamo/test_benchmark_runner --verbose
+  test_inductor_benchmark_runner
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   setup_torch_trace
   test_inductor_distributed

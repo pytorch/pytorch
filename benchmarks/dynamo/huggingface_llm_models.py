@@ -393,7 +393,8 @@ INFERENCE_PHASES = {
 }
 
 
-# gemma-3-1b-it is excluded: its single KV head cannot be sharded.
+# Models benchmarked with tensor parallelism in both phases. The Gemma models
+# have no decode benchmark; gemma-3-1b-it's single KV head cannot be sharded either.
 TP_MODELS = {
     "meta-llama/Llama-3.2-1B",
     "Qwen/Qwen2.5-0.5B-Instruct",
