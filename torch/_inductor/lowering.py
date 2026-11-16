@@ -1549,8 +1549,8 @@ def expand(x, sizes, *, implicit=False, graph_fanout=False):
         return x
 
     if not free_unbacked_symbols(x.get_size()):
-        x_size_product = V.graph.sizevars.guarding_hint_or_throw(
-            sympy_product(x.get_size())
+        x_size_product = int(
+            V.graph.sizevars.guarding_hint_or_throw(sympy_product(x.get_size()))
         )
         # TODO: It would be better to realize the input if any of its sizes
         # are unbacked, because typically the size will be non-zero.  However,
@@ -1566,7 +1566,7 @@ def expand(x, sizes, *, implicit=False, graph_fanout=False):
             # In deterministic modes, preserve the old materialization boundary
             # since fusing through expanded inputs can change reduction numerics.
             x.mark_reuse(
-                V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
+                int(V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes)))
                 // x_size_product,
                 graph_reuse=graph_fanout
                 or config.deterministic
@@ -1868,6 +1868,31 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     )
 
 
+def _record_input_as_strided(
+    data: ir.IRNode, layout: ir.FixedLayout, needed: sympy.Expr
+) -> None:
+    """For aot_inductor.cudagraphs, records the first as_strided view of a
+    graph input that may read outside the input's own elements (`needed` is
+    the view's storage size), which AOTI's CUDA graphs copy alone."""
+    if not (
+        V.graph.aot_mode
+        and config.aot_inductor.cudagraphs
+        and V.graph.input_as_strided_node is None
+        and isinstance(data, ir.InputBuffer)
+        and data.get_name() in V.graph.graph_inputs
+    ):
+        return
+    input_layout = data.get_layout()
+    numel = sympy_product(input_layout.size)
+    sizevars = V.graph.sizevars
+    if not (
+        sizevars.statically_known_equals(input_layout.storage_size(), numel)
+        and sizevars.statically_known_geq(layout.offset, 0)
+        and sizevars.statically_known_leq(needed, numel)
+    ):
+        V.graph.input_as_strided_node = V.graph.current_node
+
+
 @register_lowering(aten.as_strided, type_promotion_kind=None)
 def as_strided(
     x,
@@ -1926,6 +1951,7 @@ def as_strided(
     # are exempt -- their real storage may legitimately extend past the layout, and
     # the adjustment above has already rebased the offset onto the incoming pointer.
     needed = new_layout.storage_size()
+    _record_input_as_strided(storage_data, new_layout, needed)
     buffer = storage_data if isinstance(storage_data, ir.Buffer) else None
     if buffer is not None and not isinstance(buffer, ir.InputBuffer):
         allocated = V.graph.get_allocation_storage_size(buffer)
@@ -2928,9 +2954,14 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         def wrap_tensors(x):
             return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
 
-        return pytree.tree_map(
-            wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
-        )
+        out = ir.FallbackKernel.create(kernel, *args, **kwargs)
+        # The reinplace pass replaces the out-of-place overload with its
+        # in-place equivalent, which returns () but retains the original
+        # operator.getitem users. Return the mutated input list to preserve
+        # the expected outputs for these reinplaced foreach ops.
+        if kernel in inplace_foreach_ops:
+            return list(args[0])
+        return pytree.tree_map(wrap_tensors, out)
 
     # This lets us detect that a lowering is a fallback handler.
     handler._is_fallback_handler = True  # type: ignore[attr-defined]
@@ -4012,9 +4043,6 @@ if torch.mtia._is_compiled():
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
-
-# 2) Medium
-make_fallback(aten._trilinear)
 
 
 # 3) Difficult
@@ -9449,6 +9477,13 @@ def resize(x, size, *, memory_format=None):
     if not (isinstance(size, (list, tuple))):
         raise AssertionError("expected: isinstance(size, (list, tuple))")
 
+    # Functional resize clones first; a same-shape resize preserves that clone's
+    # logical values and dimension order.
+    if memory_format is None and V.graph.sizevars.statically_known_list_equals(
+        x.get_size(), size
+    ):
+        return clone(x)
+
     if memory_format is None:
         memory_format = torch.contiguous_format
     if memory_format == torch.preserve_format:
@@ -9486,14 +9521,12 @@ def resize(x, size, *, memory_format=None):
     has_overlapping = strides is not None and any(
         V.graph.sizevars.statically_known_equals(s, 0) for s in strides
     )
-    if has_overlapping:
-        # overlapping: provide a contiguous logical view
-        x_flat = view(x, [old_numel])
-    else:
-        # non-overlapping: keep storage order
-        if isinstance(x.data, ir.BaseView):
-            x.data = x.data.unwrap_view()
-        x_flat = as_strided(x, [old_numel], [1])
+    if strides is not None and not has_overlapping:
+        # The preserve-format clone removes storage gaps but retains dimension
+        # order. Flatten logical elements in that order, preserving view offsets.
+        fill_order = ir.stride_order2fill_order(ir.get_stride_order(strides))
+        x = permute(x, list(reversed(fill_order)))
+    x_flat = view(x, [old_numel])
     flat_loader = x_flat.make_loader()
     out_stride = ir.FlexibleLayout.stride_ordered_for_memory_format(size, memory_format)
     out_indexer = ir.FixedLayout(device, dtype, size, out_stride).make_indexer()
