@@ -1605,10 +1605,10 @@ class TestMeta(_TestMetaBase):
 
 
 @unMarkDynamoStrictTest
-class TestMetaCudaRef(_TestMetaBase):
+class TestMetaDeviceType(_TestMetaBase):
     # Tests whose reference stride/output comes from the CUDA kernel, so the
     # whole class is restricted to CUDA via only_for='cuda'.
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfCrossRef
     @suppress_warnings
@@ -3017,7 +3017,7 @@ class TestMetaKernelRegistrations(TestCase):
 
 
 instantiate_device_type_tests(TestMeta, globals())
-instantiate_device_type_tests(TestMetaCudaRef, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestMetaDeviceType, globals(), except_for=("cpu",), allow_xpu=True)
 
 
 def print_op_str_if_not_supported(op_str):

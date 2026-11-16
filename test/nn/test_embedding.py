@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfXPU,
     expectedFailureXLA,
+    expectedFailureXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -2020,8 +2021,8 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
     # https://github.com/pytorch/pytorch/issues/192445
     @onlyAccelerator
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6075")
     @largeTensorTest("5GB")
+    @expectedFailureXPU  # "https://github.com/intel/torch-xpu-ops/issues/6075"
     def test_embedding_bag_per_sample_weights_large_index(self, device):
         large_index = 2**31
         weight = torch.empty((large_index + 1, 1), device=device, dtype=torch.float16)

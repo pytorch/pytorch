@@ -1971,8 +1971,8 @@ class TestUnaryUfuncsCpuOnly(TestCase):
         self.assertEqual(got, ref)
 
 
-class TestUnaryUfuncsCUDADevice(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestUnaryUfuncsDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_nonzero_static_large(self, device):
         # large enough to have multiple iters per SM even on H100
@@ -2035,7 +2035,7 @@ class TestUnaryUfuncsCUDADevice(TestCase):
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals(), allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu")
-instantiate_device_type_tests(TestUnaryUfuncsCUDADevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestUnaryUfuncsDeviceType, globals(), except_for=("cpu",), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
