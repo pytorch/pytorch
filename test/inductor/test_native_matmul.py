@@ -272,6 +272,33 @@ class TestTritonDotReduction(TestCase):
             "tl.arange(0, R0_BLOCK)[None, None, None, :]"
         ).run(code)
 
+    def test_zero_alpha_beta(self):
+        M, K, N = 40, 72, 136
+        cases = {
+            "addmm_alpha0": (
+                lambda c, x, y: torch.addmm(c, x, y, alpha=0),
+                [(N,), (M, K), (K, N)],
+            ),
+            "addmm_beta0": (
+                lambda c, x, y: torch.addmm(c, x, y, beta=0),
+                [(N,), (M, K), (K, N)],
+            ),
+            "baddbmm_alpha0": (
+                lambda c, x, y: torch.baddbmm(c, x, y, alpha=0),
+                [(N,), (3, M, K), (3, K, N)],
+            ),
+            "baddbmm_alpha0_beta0": (
+                lambda c, x, y: torch.baddbmm(c, x, y, alpha=0, beta=0),
+                [(3, M, N), (3, M, K), (3, K, N)],
+            ),
+        }
+        for name, (f, shapes) in cases.items():
+            with self.subTest(name):
+                args = [torch.randn(shape, device=GPU_TYPE) for shape in shapes]
+                torch._dynamo.reset()
+                actual = torch.compile(f)(*args)
+                self.assertEqual(actual, f(*args), atol=1e-4, rtol=1e-4)
+
 
 @inductor_config.patch({"triton.native_matmul": True})
 @instantiate_parametrized_tests
