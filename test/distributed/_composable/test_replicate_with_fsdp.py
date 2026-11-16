@@ -80,6 +80,7 @@ class ReplicateTest(MultiProcContinuousForInstantiateTest):
                 "sharding_strategy": ["replicate", "fully_shard"],
             },
             self._test_replicate_transformer,
+            device=device,
         )
 
     def _composable_api_module_check(self, module, sharding_strategy):
@@ -88,10 +89,10 @@ class ReplicateTest(MultiProcContinuousForInstantiateTest):
         else:
             self.assertTrue("fully_shard" in _get_registry(module))
 
-    def _test_replicate_transformer(self, sharding_strategy):
+    def _test_replicate_transformer(self, sharding_strategy, *, device: str):
         model_args = ModelArgs()
 
-        model = Transformer(model_args)
+        model = Transformer(model_args).to(torch.device(device).type)
         replicate_model = deepcopy(model)
 
         for i, layer in enumerate(replicate_model.layers):
@@ -157,7 +158,7 @@ class ReplicateTest(MultiProcContinuousForInstantiateTest):
         model_args = ModelArgs()
         model_args.n_layers = 3
 
-        model = Transformer(model_args)
+        model = Transformer(model_args).to(torch.device(device).type)
         replicate_model = deepcopy(model)
 
         self.assertEqual(
