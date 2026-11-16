@@ -965,25 +965,68 @@
 # label: module: ci, module: docker
 # owner: @atalman @huydhn
 /.ci/docker/ @atalman @huydhn
-# label: module: ci, module: rocm
-# owner: @jeffdaily
-/.ci/docker/ubuntu-rocm/ @jeffdaily
-/.ci/docker/common/install_roc*.sh @jeffdaily
-/.ci/docker/common/install_amdsmi.sh @jeffdaily
-/.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
-/.ci/pytorch/rocm_preflight.py @jeffdaily
-/.ci/pytorch/rocm_utils.sh @jeffdaily
 # label: module: ci, module: inductor
 # owner: @Chillee @desertfire @eellison @jataylo @jeffdaily @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
-# label: module: ci, module: xpu
-# owner: @EikanWang @gujinghui
-/.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 #
 # [infra_github_automation]
 # label: module: ci, module: github automation
-# owner: @pytorch/pytorch-dev-infra
-/.github/ @pytorch/pytorch-dev-infra
+# owner: @atalman @drisspg @huydhn @izaitsevfb @jeanschmidt
+/.github/ @huydhn @atalman
+/.github/actions/ @huydhn @jeanschmidt @atalman
+/.github/actions/auto-pr-triage/ @drisspg @izaitsevfb
+/.github/auto-pr-triage/ @drisspg @izaitsevfb
+/.github/workflows/auto-pr-triage.yml @drisspg @izaitsevfb
+/.github/ISSUE_TEMPLATE/ @huydhn
+/.github/ISSUE_TEMPLATE/disable-autorevert.md @jeanschmidt @izaitsevfb
+/.github/ISSUE_TEMPLATE/release-feature-request.yml @atalman
+/.github/auto_request_review.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/label_to_label.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/labeler.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/pytorch-probot.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/cherry_pick.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/delete_old_branches.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/export_pytorch_labels.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/gitutils.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/gql_mocks.json.gz @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/greenlight_* @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/label_utils.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/mergebot_status.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/native_stack.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_cherry_pick.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_delete_old_branches.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_gitutils.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_greenlight_* @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_label_utils.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_mergebot_status.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_native_stack.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_trymerge.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_tryrebase.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/trymerge.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/trymerge_explainer.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/tryrebase.py @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/auto_request_review.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/check_mergeability_ghstack.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/cherry-pick.yml @izaitsevfb @jeanschmidt @huydhn @atalman
+/.github/workflows/delete_old_branches.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/revert.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/stale.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/trunk-tagging.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/trymerge.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/tryrebase.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/update-viablestrict.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/update_pytorch_labels.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/hardened-pr-review-run.yml @izaitsevfb
+/.github/workflows/hardened-pr-review.yml @izaitsevfb
+/.github/workflows/pr-review-scripts-test.yml @izaitsevfb
+# label: module: ci, module: infra
+# owner: @atalman @huydhn
+/.github/arc.yaml @huydhn @atalman
+/.github/scripts/runner_determinator.py @huydhn @atalman
+/.github/scripts/test_runner_determinator.py @huydhn @atalman
+/.github/workflows/_runner-determinator.yml @huydhn @atalman
+/.github/workflows/_select-release-runner.yml @huydhn @atalman
+/.github/workflows/release-runner-groups-refresh.yml @huydhn @atalman
 #
 # [infra_build_packaging]
 # label: module: ci, module: binaries
@@ -1021,6 +1064,42 @@
 /.github/workflows/generated-* @atalman @huydhn
 /.github/workflows/nightly-s3-uploads.yml @atalman @huydhn
 /.github/workflows/test-check-binary.yml @atalman @huydhn
+# label: module: ci, module: rocm
+# owner: @jeffdaily
+/.ci/docker/ubuntu-rocm/ @jeffdaily
+/.ci/docker/common/install_roc*.sh @jeffdaily
+/.ci/docker/common/install_amdsmi.sh @jeffdaily
+/.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
+/.ci/pytorch/rocm_preflight.py @jeffdaily
+/.ci/pytorch/rocm_utils.sh @jeffdaily
+/.github/actions/setup-rocm/ @jeffdaily
+/.github/actions/teardown-rocm/ @jeffdaily
+/.github/ci_commit_pins/fbgemm_rocm.txt @jeffdaily
+/.github/scripts/amd/ @jeffdaily
+/.github/workflows/_binary-test-rocm-linux.yml @jeffdaily
+/.github/workflows/_rocm-test-no-dind.yml @jeffdaily
+/.github/workflows/_rocm-test.yml @jeffdaily
+/.github/workflows/docker-cache-rocm.yml @jeffdaily
+/.github/workflows/inductor-perf-test-nightly-rocm-* @jeffdaily
+/.github/workflows/inductor-rocm-* @jeffdaily
+/.github/workflows/periodic-rocm-* @jeffdaily
+/.github/workflows/rocm-* @jeffdaily
+/.github/workflows/slow-rocm-mi200.yml @jeffdaily
+/.github/workflows/trunk-rocm-sandbox.yml @jeffdaily
+# label: module: ci, module: xpu
+# owner: @EikanWang @gujinghui
+/.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
+/.ci/docker/common/install_xpu.sh @EikanWang @gujinghui
+/.ci/docker/triton_xpu_version.txt @EikanWang @gujinghui
+/.ci/docker/ubuntu-xpu/ @EikanWang @gujinghui
+/.ci/pytorch/windows/internal/xpu_install.bat @EikanWang @gujinghui
+/.github/actions/setup-xpu/ @EikanWang @gujinghui
+/.github/actions/teardown-xpu/ @EikanWang @gujinghui
+/.github/ci_commit_pins/sycl-tla.txt @EikanWang @gujinghui
+/.github/workflows/_binary-test-xpu-linux.yml @EikanWang @gujinghui
+/.github/workflows/_xpu-test.yml @EikanWang @gujinghui
+/.github/workflows/inductor-perf-test-nightly-xpu.yml @EikanWang @gujinghui
+/.github/workflows/xpu.yml @EikanWang @gujinghui
 # label: module: build
 # owner: @atalman @huydhn @malfet @zklaus
 # /.coveragerc
@@ -1374,6 +1453,8 @@
 # /AGENTS.md
 # /AI_POLICY.md
 # /CLAUDE.md
+/scripts/auto_pr_triage/ @drisspg @izaitsevfb
+/scripts/pr_review/ @izaitsevfb
 # /torch/_dynamo/CLAUDE.md
 /torch/REVIEW.md @albanD
 #
