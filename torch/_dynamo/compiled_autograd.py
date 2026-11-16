@@ -40,10 +40,6 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
     set_locals_to_steal,
 )
-from torch._functorch._aot_autograd.runtime_wrappers import (
-    AutogradLazyBackwardCompileInfo,
-    CachedAutogradLazyBackwardCompileInfo,
-)
 from torch._guards import compile_context, CompileContext, CompileId, Source
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
@@ -68,6 +64,10 @@ from torch.utils._traceback import CapturedTraceback
 
 
 if TYPE_CHECKING:
+    from torch._functorch._aot_autograd.runtime_wrappers import (
+        AutogradLazyBackwardCompileInfo,
+        CachedAutogradLazyBackwardCompileInfo,
+    )
     from torch._functorch._aot_autograd.schemas import SubclassMeta, ViewAndMutationMeta
     from torch.fx.proxy import Proxy
 
@@ -116,7 +116,7 @@ class _AOTCompiledFunction(Protocol):
     """
 
     _lazy_backward_info: (
-        AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
+        "AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None"
     )
     metadata: "ViewAndMutationMeta"
     maybe_subclass_metadata: "SubclassMeta | None"
@@ -126,6 +126,12 @@ class _AOTCompiledFunction(Protocol):
 
 
 def extract_bw_module(CompiledFunction: _AOTCompiledFunction) -> GraphModule:
+    # runtime_wrappers imports Dynamo, so defer this dependency until runtime.
+    from torch._functorch._aot_autograd.runtime_wrappers import (
+        AutogradLazyBackwardCompileInfo,
+        CachedAutogradLazyBackwardCompileInfo,
+    )
+
     if isinstance(
         CompiledFunction._lazy_backward_info, AutogradLazyBackwardCompileInfo
     ):
