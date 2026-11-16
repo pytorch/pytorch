@@ -51,6 +51,10 @@ def _subrange(
     return offset, length
 
 
+def _remaining(deadline: float | None) -> float | None:
+    return None if deadline is None else max(0.0, deadline - time.monotonic())
+
+
 PeerId = str
 
 
@@ -479,7 +483,7 @@ class Transport(ABC):
     ) -> int | Work:
         """Write each local view to its remote buffer as one batch."""
         return self._transfer_batch(
-            self.write, transfers, mutable=False, async_op=async_op, timeout=timeout
+            "WRITE", transfers, async_op=async_op, timeout=timeout
         )
 
     def read_batch(
@@ -491,48 +495,56 @@ class Transport(ABC):
     ) -> int | Work:
         """Read each remote buffer into its local view as one batch."""
         return self._transfer_batch(
-            self.read, transfers, mutable=True, async_op=async_op, timeout=timeout
+            "READ", transfers, async_op=async_op, timeout=timeout
         )
 
     def _transfer_batch(
         self,
-        transfer: Callable[..., int | Work],
+        operation: Literal["WRITE", "READ"],
         transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
         *,
-        mutable: bool,
         async_op: bool,
         timeout: float | None,
     ) -> int | Work:
         _validate_timeout(timeout)
         timeout = self._default_timeout if timeout is None else timeout
         deadline = None if timeout is None else time.monotonic() + timeout
-
-        def remaining() -> float | None:
-            return None if deadline is None else max(0.0, deadline - time.monotonic())
-
-        transfers = list(transfers)
-        for local_buffer, remote_buffer in transfers:
-            self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
-        works: list[Work] = []
-        dispatch_error: Exception | None = None
-        for local_buffer, remote_buffer in transfers:
-            if local_buffer.size() == 0:
-                continue
-            try:
-                work = transfer(
-                    local_buffer, remote_buffer, async_op=True, timeout=remaining()
-                )
-            except Exception as error:
-                if not works:
-                    raise
-                dispatch_error = error
-                break
-            works.append(cast(Work, work))
-        batch = _BatchWork(works, dispatch_error, timeout if async_op else remaining())
+        works, dispatch_error = self._submit_batch(operation, list(transfers), deadline)
+        remaining = _remaining(deadline)
+        batch = _BatchWork(works, dispatch_error, timeout if async_op else remaining)
         if async_op:
             return batch
         batch.wait()
         return 0
+
+    def _submit_batch(
+        self,
+        operation: Literal["WRITE", "READ"],
+        transfers: list[tuple[MemoryView, RemoteBuffer]],
+        deadline: float | None,
+    ) -> tuple[list[Work], Exception | None]:
+        """Validate every pair, then start each non-empty one.
+
+        Backends with native batches override this. Returns the started Works
+        and the error that stopped dispatch; raises if nothing started.
+        """
+        mutable = operation == "READ"
+        transfer: Callable[..., int | Work] = self.read if mutable else self.write
+        for local, remote in transfers:
+            self._check_transfer(local, remote, mutable=mutable)
+        works: list[Work] = []
+        for local, remote in transfers:
+            if local.size() == 0:
+                continue
+            timeout = _remaining(deadline)
+            try:
+                work = transfer(local, remote, async_op=True, timeout=timeout)
+            except Exception as error:
+                if not works:
+                    raise
+                return works, error
+            works.append(cast(Work, work))
+        return works, None
 
     def write_stream(
         self,
